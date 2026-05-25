@@ -13,6 +13,7 @@ from urllib.parse import unquote
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_relation_query_context import InvoiceRelationQueryContext
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
@@ -342,20 +343,17 @@ class OutputInvoiceCollectionQueryService:
         page_limit = _parse_positive_int(page_size, "page_size", maximum=200)
         parsed_filters = self._parse_filters(filters)
         normalized_sort_field, normalized_sort_direction = self._parse_sort(sort_field, sort_direction)
+        context = self._query_context()
 
-        rows = self._build_rows(month=month)
-        rows = [
-            row
-            for row in rows
-            if self._row_matches_date(row, date_from=invoice_date_from, date_to=invoice_date_to, month=month)
-        ]
-        if keyword:
-            needle = str(keyword).strip().lower()
-            rows = [row for row in rows if needle in json.dumps(row, ensure_ascii=False).lower()]
-        rows = [row for row in rows if self._row_matches_filters(row, parsed_filters)]
-        rows.sort(
-            key=lambda row: self._sort_value(row, normalized_sort_field),
-            reverse=normalized_sort_direction == "desc",
+        rows = self._filtered_sorted_rows(
+            context=context,
+            month=month,
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            filters=parsed_filters,
+            sort_field=normalized_sort_field,
+            sort_direction=normalized_sort_direction,
         )
 
         total = len(rows)
@@ -382,15 +380,17 @@ class OutputInvoiceCollectionQueryService:
         filters: str | list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         parsed_filters = self._parse_filters(filters)
-        rows = self.list_rows(
-            page=1,
-            page_size=200,
+        context = self._query_context()
+        rows = self._filtered_sorted_rows(
+            context=context,
             keyword=keyword,
             invoice_date_from=invoice_date_from,
             invoice_date_to=invoice_date_to,
             month=month,
             filters=parsed_filters,
-        )["rows"]
+            sort_field="invoice_date",
+            sort_direction="desc",
+        )
         fields = []
         for field, config in FILTER_CONFIG.items():
             fields.append(
@@ -417,8 +417,81 @@ class OutputInvoiceCollectionQueryService:
             "sourceVersion": SOURCE_VERSION,
         }
 
+    def filter_options_for_rows(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        month: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        parsed_filters = self._parse_filters(filters)
+        typed_rows = [row for row in list(rows or []) if isinstance(row, dict)]
+        fields = []
+        for field, config in FILTER_CONFIG.items():
+            fields.append(
+                {
+                    "field": field,
+                    "label": config["label"],
+                    "mode": config["mode"],
+                    "operators": sorted(config["operators"]),
+                    "sortable": bool(config["sortable"]),
+                    "options": self._options_for_field(typed_rows, field),
+                }
+            )
+        return {
+            "fields": fields,
+            "context": {
+                "keyword": keyword or "",
+                "invoiceDateFrom": invoice_date_from,
+                "invoiceDateTo": invoice_date_to,
+                "month": month,
+                "filters": parsed_filters,
+            },
+            "readModelStatus": READ_MODEL_STATUS,
+            "generatedAt": _now_iso(),
+            "sourceVersion": SOURCE_VERSION,
+        }
+
+    def _query_context(self) -> InvoiceRelationQueryContext:
+        return InvoiceRelationQueryContext(
+            import_service=self._import_service,
+            pair_relation_service=self._pair_relation_service,
+        )
+
+    def _filtered_sorted_rows(
+        self,
+        *,
+        context: InvoiceRelationQueryContext,
+        keyword: str | None,
+        invoice_date_from: str | None,
+        invoice_date_to: str | None,
+        month: str | None,
+        filters: list[dict[str, Any]],
+        sort_field: str,
+        sort_direction: str,
+    ) -> list[dict[str, Any]]:
+        rows = self._build_rows(month=month, context=context)
+        rows = [
+            row
+            for row in rows
+            if self._row_matches_date(row, date_from=invoice_date_from, date_to=invoice_date_to, month=month)
+        ]
+        if keyword:
+            needle = str(keyword).strip().lower()
+            rows = [row for row in rows if needle in json.dumps(row, ensure_ascii=False).lower()]
+        rows = [row for row in rows if self._row_matches_filters(row, filters)]
+        rows.sort(
+            key=lambda row: self._sort_value(row, sort_field),
+            reverse=sort_direction == "desc",
+        )
+        return rows
+
     def invoice_detail(self, invoice_id: str) -> dict[str, Any]:
-        group = self._invoice_group_for_invoice_id(invoice_id)
+        context = self._query_context()
+        group = self._invoice_group_for_invoice_id(invoice_id, context=context)
         if group is None:
             raise OutputInvoiceCollectionError(
                 "invoice_not_found",
@@ -458,7 +531,8 @@ class OutputInvoiceCollectionQueryService:
         }
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
-        transaction = self._bank_transactions_by_id().get(str(bank_transaction_id))
+        context = self._query_context()
+        transaction = context.bank_transactions_by_id().get(str(bank_transaction_id))
         if transaction is None:
             raise OutputInvoiceCollectionError(
                 "bank_transaction_not_found",
@@ -481,14 +555,15 @@ class OutputInvoiceCollectionQueryService:
             "remark": transaction.remark or "",
             "currency": transaction.currency or "CNY",
             "bankTextFields": deepcopy(transaction.bank_text_fields),
-            "relations": self._relation_summaries_for_row(transaction.id),
+            "relations": context.relation_summaries_for_row(transaction.id),
         }
 
     def row_relation_details(self, row_id: str, *, kind: str) -> dict[str, Any]:
         normalized_kind = str(kind or "").strip()
         if normalized_kind not in {"bank", "red_invoice", "receipt"}:
             raise OutputInvoiceCollectionError("invalid_relation_kind", "kind must be bank, red_invoice or receipt.")
-        row = self._row_by_id(row_id)
+        context = self._query_context()
+        row = self._row_by_id(row_id, context=context)
         if row is None:
             raise OutputInvoiceCollectionError(
                 "row_not_found",
@@ -513,7 +588,7 @@ class OutputInvoiceCollectionQueryService:
             "hasMultiple": relation_payload.get("hasMultiple", False),
             "summaries": summaries,
             "sourceAvailable": bool(relation_payload.get("sourceAvailable", normalized_kind != "receipt")),
-            "relations": self._relation_summaries_for_row(row["invoiceId"]),
+            "relations": context.relation_summaries_for_row(row["invoiceId"]),
         }
 
     def status_rules(self) -> dict[str, Any]:
@@ -523,7 +598,8 @@ class OutputInvoiceCollectionQueryService:
         payload = dict(request or {})
         row_id = str(payload.get("rowId") or payload.get("row_id") or "").strip()
         invoice_id = str(payload.get("invoiceId") or payload.get("invoice_id") or "").strip()
-        row = self._row_by_id(row_id) if row_id else self._row_by_invoice_id(invoice_id)
+        context = self._query_context()
+        row = self._row_by_id(row_id, context=context) if row_id else self._row_by_invoice_id(invoice_id, context=context)
         if row is None:
             raise OutputInvoiceCollectionError(
                 "row_not_found",
@@ -539,7 +615,8 @@ class OutputInvoiceCollectionQueryService:
         )
 
     def receipt_history(self, *, invoice_id: str) -> dict[str, Any]:
-        if self._invoice_group_for_invoice_id(invoice_id) is None:
+        context = self._query_context()
+        if self._invoice_group_for_invoice_id(invoice_id, context=context) is None:
             raise OutputInvoiceCollectionError(
                 "invoice_not_found",
                 f"Invoice not found for receipt history: {invoice_id}",
@@ -566,15 +643,20 @@ class OutputInvoiceCollectionQueryService:
             for field, config in FILTER_CONFIG.items()
         ]
 
-    def _build_rows(self, *, month: str | None) -> list[dict[str, Any]]:
-        groups = self._invoice_groups(month=month)
-        return [self._row_payload(group, groups) for group in groups]
+    def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext) -> list[dict[str, Any]]:
+        groups = self._invoice_groups(month=month, context=context)
+        return [self._row_payload(group, groups, context=context) for group in groups]
 
-    def _invoice_groups(self, *, month: str | None = None) -> list[dict[str, Any]]:
+    def _invoice_groups(
+        self,
+        *,
+        month: str | None = None,
+        context: InvoiceRelationQueryContext,
+    ) -> list[dict[str, Any]]:
         source_month = str(month).strip() if month not in (None, "") else "all"
         invoices = [
             invoice
-            for invoice in self._import_service.list_invoices(month=source_month, invoice_type=InvoiceType.OUTPUT)
+            for invoice in context.list_invoices(month=source_month, invoice_type=InvoiceType.OUTPUT)
         ]
         grouped: dict[str, list[Invoice]] = {}
         for invoice in invoices:
@@ -586,34 +668,50 @@ class OutputInvoiceCollectionQueryService:
         groups.sort(key=lambda group: (str(group["primary"].invoice_date or ""), str(group["identity_key"])))
         return groups
 
-    def _invoice_group_for_invoice_id(self, invoice_id: str) -> dict[str, Any] | None:
+    def _invoice_group_for_invoice_id(
+        self,
+        invoice_id: str,
+        *,
+        context: InvoiceRelationQueryContext,
+    ) -> dict[str, Any] | None:
         normalized_id = str(invoice_id)
-        for group in self._invoice_groups(month=None):
+        for group in self._invoice_groups(month=None, context=context):
             if normalized_id in {line.id for line in group["line_items"]}:
                 return group
         return None
 
-    def _row_by_id(self, row_id: str) -> dict[str, Any] | None:
+    def _row_by_id(self, row_id: str, *, context: InvoiceRelationQueryContext) -> dict[str, Any] | None:
         normalized_id = str(row_id)
-        for row in self._build_rows(month=None):
+        for row in self._build_rows(month=None, context=context):
             if row["id"] == normalized_id:
                 return row
         return None
 
-    def _row_by_invoice_id(self, invoice_id: str) -> dict[str, Any] | None:
+    def _row_by_invoice_id(
+        self,
+        invoice_id: str,
+        *,
+        context: InvoiceRelationQueryContext,
+    ) -> dict[str, Any] | None:
         normalized_id = str(invoice_id)
-        for row in self._build_rows(month=None):
+        for row in self._build_rows(month=None, context=context):
             if row["invoiceId"] == normalized_id:
                 return row
         return None
 
-    def _row_payload(self, group: dict[str, Any], all_groups: list[dict[str, Any]]) -> dict[str, Any]:
+    def _row_payload(
+        self,
+        group: dict[str, Any],
+        all_groups: list[dict[str, Any]],
+        *,
+        context: InvoiceRelationQueryContext,
+    ) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
         invoice_ids = [line.id for line in line_items]
-        relations = self._pair_relation_service.active_relations_for_row_ids(invoice_ids)
-        bank_payload = self._bank_relation_payload(primary, line_items, relations)
-        red_payload = self._red_invoice_relation_payload(group, all_groups)
+        relations = context.active_relations_for_row_ids(invoice_ids)
+        bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
+        red_payload = self._red_invoice_relation_payload(group, all_groups, context=context)
         related_groups = [
             related_group
             for related_group in all_groups
@@ -623,12 +721,13 @@ class OutputInvoiceCollectionQueryService:
         related_bank_summaries = []
         for related_group in related_groups:
             related_ids = [line.id for line in related_group["line_items"]]
-            related_relations = self._pair_relation_service.active_relations_for_row_ids(related_ids)
+            related_relations = context.active_relations_for_row_ids(related_ids)
             related_bank_summaries.extend(
                 self._bank_relation_payload(
                     related_group["primary"],
                     related_group["line_items"],
                     related_relations,
+                    context=context,
                 )["summaries"]
             )
         related_inflow_total = self._bank_total(related_bank_summaries + bank_payload["summaries"], direction="inflow")
@@ -639,7 +738,7 @@ class OutputInvoiceCollectionQueryService:
             related_inflow_total=related_inflow_total,
             related_outflow_total=related_outflow_total,
             has_red_relation=red_payload["relationCount"] > 0,
-            fully_matched=self._has_fully_matched_invoice_bank_relation(line_items, relations),
+            fully_matched=self._has_fully_matched_invoice_bank_relation(line_items, relations, context=context),
         )
         row_id = "output_invoice_collection_row_" + sha1(str(group["identity_key"]).encode("utf-8")).hexdigest()[:16]
         receipt_payload = self._receipt_payload(collection_status, bank_payload)
@@ -690,8 +789,10 @@ class OutputInvoiceCollectionQueryService:
         primary_invoice: Invoice,
         line_items: list[Invoice],
         relations: list[dict[str, Any]],
+        *,
+        context: InvoiceRelationQueryContext,
     ) -> dict[str, Any]:
-        bank_map = self._bank_transactions_by_id()
+        bank_map = context.bank_transactions_by_id()
         summaries = []
         seen: set[str] = set()
         for relation in relations:
@@ -748,7 +849,13 @@ class OutputInvoiceCollectionQueryService:
             "_sort": (direction_rank, completeness, diff, -timestamp, bank.id),
         }
 
-    def _red_invoice_relation_payload(self, group: dict[str, Any], all_groups: list[dict[str, Any]]) -> dict[str, Any]:
+    def _red_invoice_relation_payload(
+        self,
+        group: dict[str, Any],
+        all_groups: list[dict[str, Any]],
+        *,
+        context: InvoiceRelationQueryContext,
+    ) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
         current_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
@@ -762,7 +869,7 @@ class OutputInvoiceCollectionQueryService:
             candidate_total = sum((_invoice_total(line) for line in candidate["line_items"]), start=ZERO)
             if _invoice_sign(candidate_primary, candidate_total) == current_sign:
                 continue
-            if not self._is_selected_red_pair(group, candidate, all_groups):
+            if not self._is_selected_red_pair(group, candidate, all_groups, context=context):
                 continue
             if candidate_primary.id in seen:
                 continue
@@ -793,6 +900,8 @@ class OutputInvoiceCollectionQueryService:
         current_group: dict[str, Any],
         candidate_group: dict[str, Any],
         all_groups: list[dict[str, Any]],
+        *,
+        context: InvoiceRelationQueryContext,
     ) -> bool:
         current_primary: Invoice = current_group["primary"]
         candidate_primary: Invoice = candidate_group["primary"]
@@ -808,13 +917,15 @@ class OutputInvoiceCollectionQueryService:
         else:
             positive_group = candidate_group
             negative_group = current_group
-        selected_positive = self._best_positive_group_for_negative(negative_group, all_groups)
+        selected_positive = self._best_positive_group_for_negative(negative_group, all_groups, context=context)
         return bool(selected_positive and selected_positive["identity_key"] == positive_group["identity_key"])
 
     def _best_positive_group_for_negative(
         self,
         negative_group: dict[str, Any],
         all_groups: list[dict[str, Any]],
+        *,
+        context: InvoiceRelationQueryContext,
     ) -> dict[str, Any] | None:
         negative_primary: Invoice = negative_group["primary"]
         negative_total = sum((_invoice_total(line) for line in negative_group["line_items"]), start=ZERO)
@@ -828,7 +939,7 @@ class OutputInvoiceCollectionQueryService:
                 continue
             if not _within_cent(abs(total), abs(negative_total)):
                 continue
-            rank = self._red_pair_rank(group, negative_group)
+            rank = self._red_pair_rank(group, negative_group, context=context)
             if rank[0] >= 3:
                 continue
             candidates.append((rank, group))
@@ -837,10 +948,16 @@ class OutputInvoiceCollectionQueryService:
         candidates.sort(key=lambda item: item[0])
         return candidates[0][1]
 
-    def _red_pair_rank(self, positive_group: dict[str, Any], negative_group: dict[str, Any]) -> tuple[int, float, str]:
+    def _red_pair_rank(
+        self,
+        positive_group: dict[str, Any],
+        negative_group: dict[str, Any],
+        *,
+        context: InvoiceRelationQueryContext,
+    ) -> tuple[int, float, str]:
         positive_total = abs(sum((_invoice_total(line) for line in positive_group["line_items"]), start=ZERO))
-        positive_banks = self._group_bank_summaries(positive_group)
-        negative_banks = self._group_bank_summaries(negative_group)
+        positive_banks = self._group_bank_summaries(positive_group, context=context)
+        negative_banks = self._group_bank_summaries(negative_group, context=context)
         positive_inflow = self._bank_total(positive_banks, direction="inflow")
         negative_outflow = self._bank_total(negative_banks, direction="outflow")
         positive_full_inflow = _within_cent(positive_inflow, positive_total)
@@ -856,11 +973,11 @@ class OutputInvoiceCollectionQueryService:
         negative_date = _sortable_time(negative_group["primary"].invoice_date)
         return (priority, abs(negative_date - positive_date), str(positive_group["identity_key"]))
 
-    def _group_bank_summaries(self, group: dict[str, Any]) -> list[dict[str, Any]]:
+    def _group_bank_summaries(self, group: dict[str, Any], *, context: InvoiceRelationQueryContext) -> list[dict[str, Any]]:
         line_items = group["line_items"]
         invoice_ids = [line.id for line in line_items]
-        relations = self._pair_relation_service.active_relations_for_row_ids(invoice_ids)
-        return self._bank_relation_payload(group["primary"], line_items, relations)["summaries"]
+        relations = context.active_relations_for_row_ids(invoice_ids)
+        return self._bank_relation_payload(group["primary"], line_items, relations, context=context)["summaries"]
 
     @staticmethod
     def _receipt_payload(collection_status: dict[str, Any], bank_payload: dict[str, Any]) -> dict[str, Any]:
@@ -902,9 +1019,15 @@ class OutputInvoiceCollectionQueryService:
             "detailMode": "none",
         }
 
-    def _has_fully_matched_invoice_bank_relation(self, line_items: list[Invoice], relations: list[dict[str, Any]]) -> bool:
+    def _has_fully_matched_invoice_bank_relation(
+        self,
+        line_items: list[Invoice],
+        relations: list[dict[str, Any]],
+        *,
+        context: InvoiceRelationQueryContext,
+    ) -> bool:
         invoice_total = abs(sum((_invoice_total(line) for line in line_items), start=ZERO))
-        bank_map = self._bank_transactions_by_id()
+        bank_map = context.bank_transactions_by_id()
         invoice_ids = {line.id for line in line_items}
         for relation in relations:
             if not self._relation_amount_check_is_matched(relation):

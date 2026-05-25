@@ -31,9 +31,11 @@ class StaticOAProjection:
 
 
 class RepositoryOnlyInvoiceFacts:
-    def __init__(self, invoices: list[Invoice]) -> None:
+    def __init__(self, invoices: list[Invoice], transactions: list[BankTransaction] | None = None) -> None:
         self.invoices = invoices
+        self.transactions = list(transactions or [])
         self.invoice_page_calls: list[dict[str, object]] = []
+        self.transaction_page_calls: list[dict[str, object]] = []
 
     def list_invoices_page(
         self,
@@ -64,7 +66,8 @@ class RepositoryOnlyInvoiceFacts:
         page_size: int = 100,
         **_: object,
     ) -> tuple[list[BankTransaction], int]:
-        return [], 0
+        self.transaction_page_calls.append({"page": page, "page_size": page_size})
+        return list(self.transactions), len(self.transactions)
 
 
 class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
@@ -84,6 +87,49 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["invoice"]["sellerName"], "生产库供应商")
         self.assertEqual(repository.invoice_page_calls[0]["month"], None)
         self.assertEqual(repository.invoice_page_calls[0]["invoice_type"], InvoiceType.INPUT.value)
+
+    def test_list_rows_batches_repository_bank_reads_across_all_invoice_rows(self) -> None:
+        vendor = self._counterparty("vendor", "生产库供应商")
+        invoices = [
+            self._invoice(f"inv-postgres-{index}", f"PG-{index:03d}", vendor, total_with_tax="118.00")
+            for index in range(1, 6)
+        ]
+        bank = self._bank_transaction("bank-postgres-1", "118.00")
+        repository = RepositoryOnlyInvoiceFacts(invoices, transactions=[bank])
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-postgres-1", [invoices[0].id, bank.id], amount_matched=True)
+        service = InputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService(fact_repository=repository),
+            pair_relation_service=pair_service,
+        )
+
+        payload = service.list_rows(page_size=20)
+
+        self.assertEqual(payload["pagination"]["total"], 5)
+        self.assertEqual(repository.invoice_page_calls[0]["invoice_type"], InvoiceType.INPUT.value)
+        self.assertEqual(len(repository.transaction_page_calls), 1)
+
+    def test_filter_options_are_built_from_all_matching_rows_not_first_page_only(self) -> None:
+        vendor = self._counterparty("vendor", "生产库供应商")
+        invoices = [
+            self._invoice(f"inv-postgres-{index}", f"PG-{index:03d}", vendor, total_with_tax="1.00")
+            for index in range(1, 202)
+        ]
+        repository = RepositoryOnlyInvoiceFacts(invoices)
+        service = InputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService(fact_repository=repository),
+            pair_relation_service=WorkbenchPairRelationService(),
+        )
+
+        payload = service.filter_options()
+
+        seller_options = {
+            option["value"]: option["count"]
+            for field in payload["fields"]
+            if field["field"] == "seller_name"
+            for option in field["options"]
+        }
+        self.assertEqual(seller_options["生产库供应商"], 201)
 
     def test_import_invoices_are_aggregated_one_row_per_digital_invoice_and_detail_preserves_line_items(self) -> None:
         vendor = self._counterparty("vendor", "云南中招招标有限公司")

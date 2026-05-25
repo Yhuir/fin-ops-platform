@@ -59,6 +59,10 @@ function invoiceNumber(row: NonNullable<PendingInvoiceRow["inputInvoices"]["prim
   return row.digitalInvoiceNo || [row.invoiceCode, row.invoiceNo].filter(Boolean).join(" ") || row.invoiceNo || "-";
 }
 
+function bankAccountLabel(row: PendingInvoiceRow["bankTransaction"]) {
+  return [row.bankShortName || row.bankName, row.accountLast4].filter(Boolean).join(" ") || "-";
+}
+
 function overflowText(expanded: boolean): SxProps<Theme> {
   return expanded ? {
     whiteSpace: "normal",
@@ -354,10 +358,7 @@ function renderRow({
           {formatMoney(row.bankTransaction.debitAmount)}
         </Typography>
         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
-          {[row.bankTransaction.bankName, row.bankTransaction.accountLast4].filter(Boolean).join(" ") || "-"}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" component="div">
-          {row.bankTransaction.currency || "-"}
+          {bankAccountLabel(row.bankTransaction)}
         </Typography>
       </TableCell>
       <TableCell sx={dataCellSx()}>

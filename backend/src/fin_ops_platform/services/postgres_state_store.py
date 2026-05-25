@@ -640,6 +640,14 @@ class PostgresStateStore:
     def pending_invoice_sql_read_repository(self) -> PostgresReadModelRepository:
         return self._sql_read_model_repository
 
+    @property
+    def input_invoice_usage_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._sql_read_model_repository
+
+    @property
+    def output_invoice_collection_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._sql_read_model_repository
+
     def list_invoices_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_invoices_page(**kwargs)
 

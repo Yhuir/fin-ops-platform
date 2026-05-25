@@ -15,6 +15,63 @@ from fin_ops_platform.services.pending_invoice_service import (
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
+class RepositoryOnlyPendingInvoiceFacts:
+    def __init__(
+        self,
+        *,
+        transactions: list[BankTransaction] | None = None,
+        invoices: list[Invoice] | None = None,
+    ) -> None:
+        self.transactions = list(transactions or [])
+        self.invoices = list(invoices or [])
+        self.transaction_page_calls: list[dict[str, object]] = []
+        self.invoice_page_calls: list[dict[str, object]] = []
+
+    def list_bank_transactions_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        **_: object,
+    ) -> tuple[list[BankTransaction], int]:
+        self.transaction_page_calls.append({"page": page, "page_size": page_size, "date_from": date_from, "date_to": date_to})
+        rows = [
+            transaction
+            for transaction in self.transactions
+            if (not date_from or str(transaction.txn_date or "") >= date_from)
+            and (not date_to or str(transaction.txn_date or "") <= date_to)
+        ]
+        start = (page - 1) * page_size
+        return rows[start : start + page_size], len(rows)
+
+    def list_invoices_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        month: str | None = None,
+        invoice_type: str | None = None,
+        **_: object,
+    ) -> tuple[list[Invoice], int]:
+        self.invoice_page_calls.append({"page": page, "page_size": page_size, "month": month, "invoice_type": invoice_type})
+        rows = [
+            invoice
+            for invoice in self.invoices
+            if (not month or str(invoice.invoice_date or "").startswith(str(month)[:7]))
+            and (not invoice_type or invoice.invoice_type.value == invoice_type)
+        ]
+        start = (page - 1) * page_size
+        return rows[start : start + page_size], len(rows)
+
+    def get_transaction(self, transaction_id: str) -> BankTransaction | None:
+        return next((transaction for transaction in self.transactions if transaction.id == transaction_id), None)
+
+    def get_invoice(self, invoice_id: str) -> Invoice | None:
+        return next((invoice for invoice in self.invoices if invoice.id == invoice_id), None)
+
+
 class PendingInvoiceQueryServiceTests(unittest.TestCase):
     def test_expense_rows_use_input_invoices_and_keep_multiple_invoices_in_one_bank_row(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
@@ -228,6 +285,78 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertFalse(payload["rows"][0]["can_create_invoice"])
         self.assertEqual(payload["rows"][0]["bank_transaction"]["effective_tag_code"], "tax_payment")
 
+    def test_bank_account_label_uses_bank_mapping_not_company_account_name(self) -> None:
+        txn = BankTransaction(
+            id="txn_bank_mapping",
+            account_no="6222000011118106",
+            account_name="云南溯源科技有限公司",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Vendor Mapping",
+            amount=Decimal("1.00"),
+            signed_amount=Decimal("-1.00"),
+            txn_date="2026-04-19",
+            trade_time="2026-04-19T10:52:02+08:00",
+        )
+        service = self._query_service(
+            transactions=[txn],
+            bank_account_mappings=[{"id": "mapping-8106", "bank_name": "建设银行", "short_name": "建行", "last4": "8106"}],
+        )
+
+        row = service.list_rows(direction="expense", filter="all")["rows"][0]["bank_transaction"]
+
+        self.assertEqual(row["bank_name"], "建设银行")
+        self.assertEqual(row["bank_short_name"], "建行")
+        self.assertEqual(row["account_name"], "云南溯源科技有限公司")
+        self.assertEqual(row["account_last4"], "8106")
+
+    def test_list_rows_reads_repository_transactions_without_snapshot_imports(self) -> None:
+        txn = self._bank_transaction("txn_repository", TransactionDirection.OUTFLOW, "Repository Vendor", "10.00")
+        repository = RepositoryOnlyPendingInvoiceFacts(transactions=[txn])
+        service = self._query_service(
+            transactions=[],
+            import_service=ImportNormalizationService(fact_repository=repository),
+        )
+
+        payload = service.list_rows(direction="expense", filter="all")
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["rows"][0]["id"], "txn_repository")
+        self.assertEqual(repository.transaction_page_calls[0]["page"], 1)
+
+    def test_relation_detail_looks_up_transaction_directly_beyond_first_page(self) -> None:
+        transactions = [
+            self._bank_transaction(f"txn_page_{index:03d}", TransactionDirection.OUTFLOW, f"Vendor {index:03d}", "1.00")
+            for index in range(1, 202)
+        ]
+        service = self._query_service(transactions=transactions)
+
+        detail = service.relation_detail(transaction_id="txn_page_201")
+
+        self.assertEqual(detail["transaction_summary"]["id"], "txn_page_201")
+        self.assertEqual(detail["transaction_summary"]["counterparty_name"], "Vendor 201")
+
+    def test_invoice_candidates_load_repository_transaction_without_snapshot_imports(self) -> None:
+        vendor = self._counterparty("cp_repo", "Repository Vendor")
+        txn = self._bank_transaction("txn_repository_candidate", TransactionDirection.OUTFLOW, "Repository Vendor", "100.00")
+        invoice = self._invoice(
+            "inv_repository_candidate",
+            InvoiceType.INPUT,
+            "REPO-INV",
+            vendor,
+            seller_name="Repository Vendor",
+            total_with_tax="100.00",
+        )
+        repository = RepositoryOnlyPendingInvoiceFacts(transactions=[txn], invoices=[invoice])
+        service = self._query_service(
+            transactions=[],
+            import_service=ImportNormalizationService(fact_repository=repository),
+        )
+
+        payload = service.invoice_candidates(transaction_id=txn.id)
+
+        self.assertEqual(payload["rows"][0]["invoice_id"], invoice.id)
+        self.assertEqual(payload["rows"][0]["amount_difference_abs"], "0.00")
+
     def test_filter_json_and_sort_use_four_zone_fields(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
         txn_a = self._bank_transaction("txn_a", TransactionDirection.OUTFLOW, "Vendor A", "300.00")
@@ -384,17 +513,20 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
     def _query_service(
         *,
         transactions: list[BankTransaction],
+        import_service: ImportNormalizationService | None = None,
         invoices: list[Invoice] | None = None,
         pair_service: WorkbenchPairRelationService | None = None,
         category_service: BankTransactionCategoryService | None = None,
         effective_category_provider: object | None = None,
         tag_groups: dict[str, list[str]] | None = None,
+        bank_account_mappings: list[dict[str, str]] | None = None,
     ) -> PendingInvoiceQueryService:
-        import_service = ImportNormalizationService(
+        resolved_import_service = import_service or ImportNormalizationService(
             existing_transactions=transactions,
             existing_invoices=invoices or [],
         )
         settings_payload = {
+            "bank_account_mappings": list(bank_account_mappings or []),
             "bank_transaction_tags": category_service.tag_dictionary_payload()
             if category_service is not None
             else BankTransactionCategoryService().tag_dictionary_payload(),
@@ -410,7 +542,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             },
         }
         return PendingInvoiceQueryService(
-            import_service=import_service,
+            import_service=resolved_import_service,
             pair_relation_service=pair_service or WorkbenchPairRelationService(),
             category_service=category_service or BankTransactionCategoryService(),
             app_settings_provider=lambda: settings_payload,

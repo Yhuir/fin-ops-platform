@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 import json
 import re
 from typing import Any
+from urllib.parse import unquote
 
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
@@ -59,6 +60,57 @@ PENDING_INVOICE_SORT_EXPRESSIONS = {
     "invoice_total": "invoice_total",
     "oa_applicant": "oa_applicant",
     "project_name": "project_name",
+}
+INPUT_INVOICE_USAGE_FILTER_FIELDS = {
+    "invoice_no": ("invoice_no", "text", {"contains", "equals"}),
+    "invoice_date": ("invoice_date", "date", {"between", "equals"}),
+    "seller_name": ("seller_name", "text", {"contains", "in"}),
+    "seller_tax_no": ("seller_tax_no", "text", {"contains", "equals"}),
+    "total_with_tax": ("total_with_tax", "money", {"between", "equals"}),
+    "amount": ("amount", "money", {"between", "equals"}),
+    "tax_rate": ("tax_rate", "text", {"in"}),
+    "tax_amount": ("tax_amount", "money", {"between", "equals"}),
+    "specific_business_type": ("specific_business_type", "text", {"in"}),
+    "taxable_item_name": ("taxable_item_name", "text", {"contains", "in"}),
+    "payment_status": ("payment_status", "text", {"in"}),
+    "oa_applicant": ("oa_applicant", "text", {"contains", "in"}),
+    "oa_application_type": ("oa_application_type", "text", {"equals", "in"}),
+    "oa_project_name": ("oa_project_name", "text", {"contains", "in"}),
+    "bank_counterparty_name": ("bank_counterparty_name", "text", {"contains", "in"}),
+    "bank_trade_time": ("bank_trade_time", "date", {"between", "equals"}),
+    "bank_amount": ("bank_amount", "money", {"between", "equals"}),
+    "bank_name": ("bank_name", "text", {"in"}),
+    "bank_summary": ("bank_summary", "text", {"contains"}),
+}
+INPUT_INVOICE_USAGE_SORT_EXPRESSIONS = {
+    field: expression
+    for field, (expression, _mode, _operators) in INPUT_INVOICE_USAGE_FILTER_FIELDS.items()
+    if field != "specific_business_type"
+}
+OUTPUT_INVOICE_COLLECTION_FILTER_FIELDS = {
+    "invoice_no": ("invoice_no", "text", {"contains", "equals"}),
+    "invoice_date": ("invoice_date", "date", {"between", "equals"}),
+    "buyer_name": ("buyer_name", "text", {"contains", "in"}),
+    "buyer_tax_no": ("buyer_tax_no", "text", {"contains", "equals"}),
+    "seller_name": ("seller_name", "text", {"contains", "in"}),
+    "total_with_tax": ("total_with_tax", "money", {"between", "equals"}),
+    "tax_amount": ("tax_amount", "money", {"between", "equals"}),
+    "tax_rate": ("tax_rate", "text", {"in"}),
+    "specific_business_type": ("specific_business_type", "text", {"in"}),
+    "taxable_item_name": ("taxable_item_name", "text", {"contains", "in"}),
+    "collection_status": ("collection_status", "text", {"in"}),
+    "pending_amount": ("pending_amount", "money", {"between", "equals"}),
+    "bank_counterparty_name": ("bank_counterparty_name", "text", {"contains", "in"}),
+    "bank_trade_time": ("bank_trade_time", "date", {"between", "equals"}),
+    "bank_amount": ("bank_amount", "money", {"between", "equals"}),
+    "bank_name": ("bank_name", "text", {"in"}),
+    "bank_summary": ("bank_summary", "text", {"contains"}),
+    "receipt_status": ("receipt_status", "text", {"in"}),
+}
+OUTPUT_INVOICE_COLLECTION_SORT_EXPRESSIONS = {
+    field: expression
+    for field, (expression, _mode, _operators) in OUTPUT_INVOICE_COLLECTION_FILTER_FIELDS.items()
+    if field != "specific_business_type"
 }
 
 
@@ -189,6 +241,355 @@ class PostgresReadModelRepository:
                 )
 
         run_in_transaction(self._connection, write)
+
+    def list_input_invoice_usage_rows(
+        self,
+        *,
+        month: str | None = None,
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = None,
+        sort_direction: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+    ) -> dict[str, Any] | None:
+        return self._list_invoice_relation_rows(
+            table_name="read_model.input_invoice_usage_rows",
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_type="input_invoice_usage",
+            month=month,
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            filters=filters,
+            filter_fields=INPUT_INVOICE_USAGE_FILTER_FIELDS,
+            sort_expressions=INPUT_INVOICE_USAGE_SORT_EXPRESSIONS,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            page=page,
+            page_size=page_size,
+            summary_kind="input",
+        )
+
+    def save_input_invoice_usage_rows(self, *, scope_key: str, rows: list[dict[str, Any]]) -> None:
+        self._save_invoice_relation_rows(
+            table_name="read_model.input_invoice_usage_rows",
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_type="input_invoice_usage",
+            scope_key=scope_key,
+            rows=rows,
+            row_builder=_input_invoice_usage_read_model_record,
+        )
+
+    def mark_input_invoice_usage_scope(self, *, scope_key: str, row_count: int = 0) -> None:
+        self._mark_invoice_relation_scope(
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_key=scope_key,
+            row_count=row_count,
+        )
+
+    def list_output_invoice_collection_rows(
+        self,
+        *,
+        month: str | None = None,
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = None,
+        sort_direction: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+    ) -> dict[str, Any] | None:
+        return self._list_invoice_relation_rows(
+            table_name="read_model.output_invoice_collection_rows",
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            scope_type="output_invoice_collection",
+            month=month,
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            filters=filters,
+            filter_fields=OUTPUT_INVOICE_COLLECTION_FILTER_FIELDS,
+            sort_expressions=OUTPUT_INVOICE_COLLECTION_SORT_EXPRESSIONS,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            page=page,
+            page_size=page_size,
+            summary_kind="output",
+        )
+
+    def save_output_invoice_collection_rows(self, *, scope_key: str, rows: list[dict[str, Any]]) -> None:
+        self._save_invoice_relation_rows(
+            table_name="read_model.output_invoice_collection_rows",
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            scope_type="output_invoice_collection",
+            scope_key=scope_key,
+            rows=rows,
+            row_builder=_output_invoice_collection_read_model_record,
+        )
+
+    def mark_output_invoice_collection_scope(self, *, scope_key: str, row_count: int = 0) -> None:
+        self._mark_invoice_relation_scope(
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            scope_key=scope_key,
+            row_count=row_count,
+        )
+
+    def _list_invoice_relation_rows(
+        self,
+        *,
+        table_name: str,
+        scope_table_name: str,
+        scope_type: str,
+        month: str | None,
+        keyword: str | None,
+        invoice_date_from: str | None,
+        invoice_date_to: str | None,
+        filters: str | list[dict[str, Any]] | None,
+        filter_fields: dict[str, tuple[str, str, set[str]]],
+        sort_expressions: dict[str, str],
+        sort_field: str | None,
+        sort_direction: str | None,
+        page: int | str | None,
+        page_size: int | str | None,
+        summary_kind: str,
+    ) -> dict[str, Any] | None:
+        scope_key = _invoice_relation_scope_key(month)
+        page_number = max(int_value(page, 1), 1)
+        page_limit = min(max(int_value(page_size, 50), 1), 200)
+        where: list[str] = []
+        params: list[Any] = []
+        if scope_key != "all":
+            where.append("scope_key = %s")
+            params.append(scope_key)
+        if invoice_date_from:
+            where.append("invoice_date >= %s::date")
+            params.append(invoice_date_from)
+        if invoice_date_to:
+            where.append("invoice_date <= %s::date")
+            params.append(invoice_date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _invoice_relation_filter_clauses(filters, filter_fields):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        summary_row = self._connection.fetch_one(
+            _invoice_relation_summary_sql(table_name=table_name, where_sql=where_sql, summary_kind=summary_kind),
+            tuple(params),
+        )
+        total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
+        refresh_status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key=scope_key)
+        if total == 0:
+            if not self._invoice_relation_scope_exists(scope_table_name=scope_table_name, scope_key=scope_key):
+                return None
+            return {
+                "rows": [],
+                "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
+                "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=0),
+                "refresh_status": refresh_status,
+            }
+        order_sql = _invoice_relation_order_sql(
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            sort_expressions=sort_expressions,
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            select payload, raw_payload
+            from {table_name}
+            where {where_sql}
+            order by {order_sql}
+            limit %s offset %s
+            """,
+            tuple([*params, page_limit, (page_number - 1) * page_limit]),
+        )
+        payload_rows = [_read_model_payload(row) for row in rows]
+        return {
+            "rows": [row for row in payload_rows if isinstance(row, dict)],
+            "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
+            "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=total),
+            "refresh_status": refresh_status,
+        }
+
+    def _save_invoice_relation_rows(
+        self,
+        *,
+        table_name: str,
+        scope_table_name: str,
+        scope_type: str,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        row_builder: Any,
+    ) -> None:
+        normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        rows_to_save = list(rows or [])
+
+        def write(connection: Any) -> None:
+            if normalized_scope_key == "all":
+                connection.execute(f"delete from {table_name}")
+            else:
+                connection.execute(f"delete from {table_name} where scope_key = %s", (normalized_scope_key,))
+            for row in rows_to_save:
+                record = row_builder(row, normalized_scope_key)
+                connection.execute(
+                    f"""
+                    insert into {table_name}(
+                        row_id, scope_key, scope_month, invoice_id, invoice_identity_key, invoice_no, invoice_date,
+                        seller_name, seller_tax_no, buyer_name, buyer_tax_no, total_with_tax, amount, tax_amount, tax_rate,
+                        specific_business_type, taxable_item_name, payment_status, payment_status_label,
+                        collection_status, collection_status_label, collected_amount, pending_amount,
+                        oa_applicant, oa_application_type, oa_project_name, bank_counterparty_name, bank_trade_time,
+                        bank_amount, bank_name, bank_summary, receipt_status, receipt_status_label,
+                        oa_relation_count, bank_relation_count, red_invoice_relation_count, searchable_text,
+                        source_versions, generated_at, cache_status, payload, raw_payload
+                    )
+                    values (
+                        %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(invoice_id)s, %(invoice_identity_key)s,
+                        %(invoice_no)s, %(invoice_date)s::date, %(seller_name)s, %(seller_tax_no)s, %(buyer_name)s,
+                        %(buyer_tax_no)s, %(total_with_tax)s, %(amount)s, %(tax_amount)s, %(tax_rate)s,
+                        %(specific_business_type)s, %(taxable_item_name)s, %(payment_status)s, %(payment_status_label)s,
+                        %(collection_status)s, %(collection_status_label)s, %(collected_amount)s, %(pending_amount)s,
+                        %(oa_applicant)s, %(oa_application_type)s, %(oa_project_name)s, %(bank_counterparty_name)s,
+                        %(bank_trade_time)s::timestamptz, %(bank_amount)s, %(bank_name)s, %(bank_summary)s,
+                        %(receipt_status)s, %(receipt_status_label)s, %(oa_relation_count)s, %(bank_relation_count)s,
+                        %(red_invoice_relation_count)s, %(searchable_text)s, %(source_versions)s,
+                        coalesce(%(generated_at)s::timestamptz, now()), %(cache_status)s, %(payload)s, %(raw_payload)s
+                    )
+                    on conflict (row_id, scope_key) do update set
+                        scope_month = excluded.scope_month,
+                        invoice_id = excluded.invoice_id,
+                        invoice_identity_key = excluded.invoice_identity_key,
+                        invoice_no = excluded.invoice_no,
+                        invoice_date = excluded.invoice_date,
+                        seller_name = excluded.seller_name,
+                        seller_tax_no = excluded.seller_tax_no,
+                        buyer_name = excluded.buyer_name,
+                        buyer_tax_no = excluded.buyer_tax_no,
+                        total_with_tax = excluded.total_with_tax,
+                        amount = excluded.amount,
+                        tax_amount = excluded.tax_amount,
+                        tax_rate = excluded.tax_rate,
+                        specific_business_type = excluded.specific_business_type,
+                        taxable_item_name = excluded.taxable_item_name,
+                        payment_status = excluded.payment_status,
+                        payment_status_label = excluded.payment_status_label,
+                        collection_status = excluded.collection_status,
+                        collection_status_label = excluded.collection_status_label,
+                        collected_amount = excluded.collected_amount,
+                        pending_amount = excluded.pending_amount,
+                        oa_applicant = excluded.oa_applicant,
+                        oa_application_type = excluded.oa_application_type,
+                        oa_project_name = excluded.oa_project_name,
+                        bank_counterparty_name = excluded.bank_counterparty_name,
+                        bank_trade_time = excluded.bank_trade_time,
+                        bank_amount = excluded.bank_amount,
+                        bank_name = excluded.bank_name,
+                        bank_summary = excluded.bank_summary,
+                        receipt_status = excluded.receipt_status,
+                        receipt_status_label = excluded.receipt_status_label,
+                        oa_relation_count = excluded.oa_relation_count,
+                        bank_relation_count = excluded.bank_relation_count,
+                        red_invoice_relation_count = excluded.red_invoice_relation_count,
+                        searchable_text = excluded.searchable_text,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    record,
+                )
+            self._upsert_invoice_relation_scope(
+                connection,
+                scope_table_name=scope_table_name,
+                scope_key=normalized_scope_key,
+                row_count=len(rows_to_save),
+                scope_type=scope_type,
+            )
+
+        run_in_transaction(self._connection, write)
+
+    def _mark_invoice_relation_scope(self, *, scope_table_name: str, scope_key: str, row_count: int) -> None:
+        normalized_scope_key = _invoice_relation_scope_key(scope_key)
+
+        def write(connection: Any) -> None:
+            self._upsert_invoice_relation_scope(
+                connection,
+                scope_table_name=scope_table_name,
+                scope_key=normalized_scope_key,
+                row_count=max(int_value(row_count, 0), 0),
+                scope_type="",
+            )
+
+        run_in_transaction(self._connection, write)
+
+    @staticmethod
+    def _upsert_invoice_relation_scope(
+        connection: Any,
+        *,
+        scope_table_name: str,
+        scope_key: str,
+        row_count: int,
+        scope_type: str,
+    ) -> None:
+        connection.execute(
+            f"""
+            insert into {scope_table_name}(
+                scope_key, scope_month, row_count, generated_at, cache_status, source_versions, raw_payload
+            )
+            values (%s, %s::date, %s, now(), 'fresh', %s, %s)
+            on conflict (scope_key) do update set
+                scope_month = excluded.scope_month,
+                row_count = excluded.row_count,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                source_versions = excluded.source_versions,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                scope_key,
+                month_start(scope_key) if MONTH_SCOPE_RE.match(scope_key) else None,
+                row_count,
+                jsonb({"source_version": row_count}),
+                jsonb({"scope_type": scope_type, "scope_key": scope_key, "row_count": row_count}),
+            ),
+        )
+
+    def _invoice_relation_scope_exists(self, *, scope_table_name: str, scope_key: str) -> bool:
+        if scope_key == "all":
+            row = self._connection.fetch_one(f"select scope_key from {scope_table_name} limit 1")
+            return row is not None
+        row = self._connection.fetch_one(
+            f"select scope_key from {scope_table_name} where scope_key = %s limit 1",
+            (scope_key,),
+        )
+        return row is not None
+
+    def _invoice_relation_refresh_status(self, *, scope_type: str, scope_key: str) -> str:
+        if scope_key != "all":
+            return self._refresh_status(scope_type=scope_type, scope_key=scope_key)
+        dirty_row = self._connection.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = %s
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """,
+            (scope_type,),
+        )
+        if dirty_row is None:
+            return "fresh"
+        return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
 
     def list_pending_invoice_rows(
         self,
@@ -2785,6 +3186,241 @@ def _pending_invoice_row_scope_key(*, direction: str, filter_group: str, scope_m
     if scope_month:
         return f"{direction}:{filter_group}:{scope_month[:7]}"
     return f"{direction}:{filter_group}"
+
+
+def _invoice_relation_scope_key(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw == "all":
+        return "all"
+    if MONTH_SCOPE_RE.match(raw[:7]):
+        return raw[:7]
+    return "all"
+
+
+def _invoice_relation_filter_clauses(
+    filters: str | list[dict[str, Any]] | None,
+    field_specs: dict[str, tuple[str, str, set[str]]],
+) -> list[tuple[str, list[Any]]]:
+    if filters in (None, ""):
+        return []
+    if isinstance(filters, str):
+        parsed = json.loads(unquote(filters))
+    else:
+        parsed = filters
+    if not isinstance(parsed, list):
+        raise ValueError("invoice relation filters must be a list")
+    clauses: list[tuple[str, list[Any]]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("invoice relation filter must be an object")
+        field = text(item.get("field")) or ""
+        operator = text(item.get("operator")) or ""
+        if field not in field_specs or operator not in field_specs[field][2]:
+            raise ValueError(f"unsupported invoice relation filter: {field}/{operator}")
+        expression, mode, _operators = field_specs[field]
+        if operator == "contains":
+            clauses.append((f"{expression} ilike %s", [f"%{text(item.get('value')) or ''}%"]))
+        elif operator == "equals":
+            if mode == "money":
+                clauses.append((f"{expression} = %s", [decimal_text(item.get("value"))]))
+            elif mode == "date":
+                clauses.append((f"{expression} = %s::date", [text(item.get("value"))]))
+            else:
+                clauses.append((f"{expression} = %s", [text(item.get("value")) or ""]))
+        elif operator == "in":
+            values = [str(value).strip() for value in list(item.get("values") or []) if str(value).strip()]
+            if values:
+                clauses.append((f"{expression} = any(%s)", [values]))
+        elif operator == "between":
+            bounds = item.get("value") if isinstance(item.get("value"), dict) else {}
+            if mode == "money":
+                minimum = decimal_text(bounds.get("min"))
+                maximum = decimal_text(bounds.get("max"))
+                if minimum is not None:
+                    clauses.append((f"{expression} >= %s", [minimum]))
+                if maximum is not None:
+                    clauses.append((f"{expression} <= %s", [maximum]))
+            else:
+                start = text(bounds.get("min") or bounds.get("from"))
+                end = text(bounds.get("max") or bounds.get("to"))
+                if start:
+                    clauses.append((f"{expression} >= %s::date", [start]))
+                if end:
+                    clauses.append((f"{expression} <= %s::date", [end]))
+    return clauses
+
+
+def _invoice_relation_order_sql(
+    *,
+    sort_field: str | None,
+    sort_direction: str | None,
+    sort_expressions: dict[str, str],
+) -> str:
+    field = text(sort_field) or "invoice_date"
+    if field not in sort_expressions:
+        raise ValueError(f"unsupported invoice relation sort field: {field}")
+    direction = (text(sort_direction) or "desc").lower()
+    if direction not in {"asc", "desc"}:
+        raise ValueError("invoice relation sort direction must be asc or desc")
+    return f"{sort_expressions[field]} {direction} nulls last, row_id"
+
+
+def _invoice_relation_summary_sql(*, table_name: str, where_sql: str, summary_kind: str) -> str:
+    if summary_kind == "input":
+        return f"""
+        select
+            count(*) as count,
+            coalesce(sum(total_with_tax), 0) as total_with_tax,
+            coalesce(sum(case when oa_relation_count > 0 then 1 else 0 end), 0) as matched_oa_count,
+            coalesce(sum(case when bank_relation_count > 0 then 1 else 0 end), 0) as matched_bank_transaction_count,
+            coalesce(sum(case when payment_status = 'pending' then 1 else 0 end), 0) as pending_count
+        from {table_name}
+        where {where_sql}
+        """
+    return f"""
+    select
+        count(*) as count,
+        coalesce(sum(total_with_tax), 0) as total_with_tax,
+        coalesce(sum(collected_amount), 0) as collected_amount,
+        coalesce(sum(pending_amount), 0) as pending_amount,
+        coalesce(sum(case when collection_status = 'pending_collection' then 1 else 0 end), 0) as pending_collection_count,
+        coalesce(sum(case when collection_status = 'partial_collected' then 1 else 0 end), 0) as partial_collection_count,
+        coalesce(sum(case when receipt_status = 'pending' then 1 else 0 end), 0) as receipt_pending_count
+    from {table_name}
+    where {where_sql}
+    """
+
+
+def _invoice_relation_summary_payload(row: dict[str, Any], *, summary_kind: str, total: int) -> dict[str, Any]:
+    if summary_kind == "input":
+        return {
+            "invoiceCount": total,
+            "totalWithTax": decimal_text(row.get("total_with_tax")) or "0.00",
+            "matchedOaCount": int_value(row.get("matched_oa_count"), 0),
+            "matchedBankTransactionCount": int_value(row.get("matched_bank_transaction_count"), 0),
+            "pendingCount": int_value(row.get("pending_count"), 0),
+        }
+    return {
+        "invoiceCount": total,
+        "totalWithTax": decimal_text(row.get("total_with_tax")) or "0.00",
+        "collectedAmount": decimal_text(row.get("collected_amount")) or "0.00",
+        "pendingAmount": decimal_text(row.get("pending_amount")) or "0.00",
+        "pendingCollectionCount": int_value(row.get("pending_collection_count"), 0),
+        "partialCollectionCount": int_value(row.get("partial_collection_count"), 0),
+        "receiptPendingCount": int_value(row.get("receipt_pending_count"), 0),
+    }
+
+
+def _input_invoice_usage_read_model_record(row: dict[str, Any], scope_key: str) -> dict[str, Any]:
+    payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
+    invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
+    payment = payload.get("paymentStatus") if isinstance(payload.get("paymentStatus"), dict) else {}
+    oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+    bank = payload.get("bankTransactions") if isinstance(payload.get("bankTransactions"), dict) else {}
+    record = _base_invoice_relation_record(payload, scope_key)
+    record.update(
+        {
+            "seller_name": text(invoice.get("sellerName")),
+            "seller_tax_no": text(invoice.get("sellerTaxNo")),
+            "amount": decimal_text(invoice.get("amount")),
+            "payment_status": text(payment.get("code")),
+            "payment_status_label": text(payment.get("label")),
+            "oa_applicant": text(oa.get("applicantName")),
+            "oa_application_type": text(oa.get("applicationType")),
+            "oa_project_name": text(oa.get("projectName")),
+            "bank_counterparty_name": text(bank.get("counterpartyName")),
+            "bank_trade_time": text(bank.get("tradeTime")),
+            "bank_amount": decimal_text(bank.get("amount")),
+            "bank_name": text(bank.get("bankName")),
+            "bank_summary": text(bank.get("summary")),
+            "oa_relation_count": int_value(oa.get("relationCount"), 0),
+            "bank_relation_count": int_value(bank.get("relationCount"), 0),
+        }
+    )
+    return record
+
+
+def _output_invoice_collection_read_model_record(row: dict[str, Any], scope_key: str) -> dict[str, Any]:
+    payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
+    invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
+    collection = payload.get("collectionStatus") if isinstance(payload.get("collectionStatus"), dict) else {}
+    bank = payload.get("bankTransactions") if isinstance(payload.get("bankTransactions"), dict) else {}
+    receipt = payload.get("receipt") if isinstance(payload.get("receipt"), dict) else {}
+    red_invoice = payload.get("redInvoiceRelation") if isinstance(payload.get("redInvoiceRelation"), dict) else {}
+    record = _base_invoice_relation_record(payload, scope_key)
+    record.update(
+        {
+            "buyer_name": text(invoice.get("buyerName")),
+            "buyer_tax_no": text(invoice.get("buyerTaxNo")),
+            "seller_name": text(invoice.get("sellerName")),
+            "seller_tax_no": text(invoice.get("sellerTaxNo")),
+            "amount": decimal_text(invoice.get("amount") or invoice.get("amountWithoutTax")),
+            "collection_status": text(collection.get("code")),
+            "collection_status_label": text(collection.get("label")),
+            "collected_amount": decimal_text(collection.get("collectedAmount")),
+            "pending_amount": decimal_text(collection.get("pendingAmount")),
+            "bank_counterparty_name": text(bank.get("counterpartyName")),
+            "bank_trade_time": text(bank.get("tradeTime")),
+            "bank_amount": decimal_text(bank.get("amount")),
+            "bank_name": text(bank.get("bankName")),
+            "bank_summary": text(bank.get("summary")),
+            "receipt_status": text(receipt.get("status")),
+            "receipt_status_label": text(receipt.get("label")),
+            "bank_relation_count": int_value(bank.get("relationCount"), 0),
+            "red_invoice_relation_count": int_value(red_invoice.get("relationCount"), 0),
+        }
+    )
+    return record
+
+
+def _base_invoice_relation_record(payload: dict[str, Any], scope_key: str) -> dict[str, Any]:
+    invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
+    invoice_date = text(invoice.get("invoiceDate") or invoice.get("issueDate"))
+    scope_month = month_start(scope_key) or month_start(invoice_date) or month_start("1970-01")
+    return {
+        "row_id": text(payload.get("id")),
+        "scope_key": scope_key,
+        "scope_month": scope_month,
+        "invoice_id": text(payload.get("invoiceId") or invoice.get("id")),
+        "invoice_identity_key": text(payload.get("invoiceIdentityKey")),
+        "invoice_no": text(invoice.get("displayNo") or invoice.get("invoiceNo")),
+        "invoice_date": invoice_date[:10] if invoice_date else None,
+        "buyer_name": None,
+        "buyer_tax_no": None,
+        "seller_name": None,
+        "seller_tax_no": None,
+        "total_with_tax": decimal_text(invoice.get("totalWithTax")),
+        "amount": None,
+        "tax_amount": decimal_text(invoice.get("taxAmount")),
+        "tax_rate": text(invoice.get("taxRate")),
+        "specific_business_type": text(invoice.get("specificBusinessType")),
+        "taxable_item_name": text(invoice.get("taxableItemName")),
+        "payment_status": None,
+        "payment_status_label": None,
+        "collection_status": None,
+        "collection_status_label": None,
+        "collected_amount": None,
+        "pending_amount": None,
+        "oa_applicant": None,
+        "oa_application_type": None,
+        "oa_project_name": None,
+        "bank_counterparty_name": None,
+        "bank_trade_time": None,
+        "bank_amount": None,
+        "bank_name": None,
+        "bank_summary": None,
+        "receipt_status": None,
+        "receipt_status_label": None,
+        "oa_relation_count": 0,
+        "bank_relation_count": 0,
+        "red_invoice_relation_count": 0,
+        "searchable_text": json.dumps(payload, ensure_ascii=False, sort_keys=True)[:12000],
+        "source_versions": jsonb(payload.get("sourceVersions") if isinstance(payload.get("sourceVersions"), dict) else {}),
+        "generated_at": text(payload.get("generatedAt")),
+        "cache_status": "fresh",
+        "payload": jsonb(payload),
+        "raw_payload": jsonb({"normalized_payload": payload}),
+    }
 
 
 def _pending_invoice_filter_clauses(filters: str | list[dict[str, Any]] | None) -> list[tuple[str, list[Any]]]:

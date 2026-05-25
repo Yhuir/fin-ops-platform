@@ -38,6 +38,8 @@ EXPECTED_MIGRATIONS = [
     "0023_workbench_group_rows_filters.sql",
     "0024_pending_invoice_query_fields.sql",
     "0025_pending_invoice_runtime_grants.sql",
+    "0026_invoice_usage_collection_read_models.sql",
+    "0027_invoice_usage_collection_runtime_grants.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -102,6 +104,10 @@ EXPECTED_TABLES = [
     "read_model.search_index_rows",
     "read_model.pending_invoice_rows",
     "read_model.pending_invoice_scopes",
+    "read_model.input_invoice_usage_rows",
+    "read_model.input_invoice_usage_scopes",
+    "read_model.output_invoice_collection_rows",
+    "read_model.output_invoice_collection_scopes",
     "read_model.cost_statistics_read_models",
     "read_model.cost_statistics_rows",
     "read_model.tax_offset_read_models",
@@ -124,7 +130,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 26)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 28)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -329,6 +335,8 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on read_model.workbench_groups to fin_ops_migrator",
             "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_worker",
             "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_migrator",
+            "grant select, insert, update, delete on read_model.input_invoice_usage_rows to fin_ops_app_runtime",
+            "grant select, insert, update, delete on read_model.output_invoice_collection_rows to fin_ops_app_runtime",
             "create extension if not exists pg_stat_statements",
             "create table if not exists read_model.workbench_summary",
             "workbench_summary_scope_key_uidx",

@@ -13,6 +13,8 @@ DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES = (
     "workbench.read_model.refresh",
     "search.read_model.refresh",
     "pending_invoice.read_model.refresh",
+    "input_invoice_usage.read_model.refresh",
+    "output_invoice_collection.read_model.refresh",
     "cost_statistics.read_model.refresh",
     "tax_offset.read_model.refresh",
     "oa.sync",

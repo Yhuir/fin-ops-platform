@@ -14,9 +14,11 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 
 
 class RepositoryOnlyOutputInvoiceFacts:
-    def __init__(self, invoices: list[Invoice]) -> None:
+    def __init__(self, invoices: list[Invoice], transactions: list[BankTransaction] | None = None) -> None:
         self.invoices = invoices
+        self.transactions = list(transactions or [])
         self.invoice_page_calls: list[dict[str, object]] = []
+        self.transaction_page_calls: list[dict[str, object]] = []
 
     def list_invoices_page(
         self,
@@ -47,7 +49,8 @@ class RepositoryOnlyOutputInvoiceFacts:
         page_size: int = 100,
         **_: object,
     ) -> tuple[list[BankTransaction], int]:
-        return [], 0
+        self.transaction_page_calls.append({"page": page, "page_size": page_size})
+        return list(self.transactions), len(self.transactions)
 
 
 class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
@@ -67,6 +70,49 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["invoice"]["buyerName"], "生产库客户")
         self.assertEqual(repository.invoice_page_calls[0]["month"], None)
         self.assertEqual(repository.invoice_page_calls[0]["invoice_type"], InvoiceType.OUTPUT.value)
+
+    def test_list_rows_batches_repository_bank_reads_across_all_invoice_rows(self) -> None:
+        buyer = self._counterparty("buyer", "生产库客户")
+        invoices = [
+            self._invoice(f"out-postgres-{index}", f"PG-OUT-{index:03d}", buyer, total_with_tax="218.00")
+            for index in range(1, 6)
+        ]
+        bank = self._bank("bank-postgres-1", "218.00", TransactionDirection.INFLOW)
+        repository = RepositoryOnlyOutputInvoiceFacts(invoices, transactions=[bank])
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-output-postgres-1", [invoices[0].id, bank.id], amount_matched=True)
+        service = OutputInvoiceCollectionQueryService(
+            import_service=ImportNormalizationService(fact_repository=repository),
+            pair_relation_service=pair_service,
+        )
+
+        payload = service.list_rows(page_size=20)
+
+        self.assertEqual(payload["pagination"]["total"], 5)
+        self.assertEqual(repository.invoice_page_calls[0]["invoice_type"], InvoiceType.OUTPUT.value)
+        self.assertEqual(len(repository.transaction_page_calls), 1)
+
+    def test_filter_options_are_built_from_all_matching_rows_not_first_page_only(self) -> None:
+        buyer = self._counterparty("buyer", "生产库客户")
+        invoices = [
+            self._invoice(f"out-postgres-{index}", f"PG-OUT-{index:03d}", buyer, total_with_tax="1.00")
+            for index in range(1, 202)
+        ]
+        repository = RepositoryOnlyOutputInvoiceFacts(invoices)
+        service = OutputInvoiceCollectionQueryService(
+            import_service=ImportNormalizationService(fact_repository=repository),
+            pair_relation_service=WorkbenchPairRelationService(),
+        )
+
+        payload = service.filter_options()
+
+        buyer_options = {
+            option["value"]: option["count"]
+            for field in payload["fields"]
+            if field["field"] == "buyer_name"
+            for option in field["options"]
+        }
+        self.assertEqual(buyer_options["生产库客户"], 201)
 
     def test_rows_are_one_formal_output_invoice_with_read_model_shape(self) -> None:
         buyer = self._counterparty("buyer", "昆明客户有限公司", tax_no="91530000BUYER")

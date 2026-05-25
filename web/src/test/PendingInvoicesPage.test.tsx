@@ -14,15 +14,16 @@ function upgradedRows() {
         counterparty_name: "云南开票供应商",
         counterparty_account_no: "6222000011112222",
         counterparty_bank_name: "工行昆明分行",
-        trade_time: "2026-05-02 10:00:00",
+        trade_time: "2026-04-19T10:52:02+08:00",
         booked_date: "2026-05-02",
         debit_amount: "1200.00",
         credit_amount: "0.00",
         balance: "9800.00",
         currency: "人民币元",
-        bank_name: "工商银行",
+        bank_name: "建设银行",
+        bank_short_name: "建行",
         account_name: "云南溯源科技有限公司",
-        account_last4: "6386",
+        account_last4: "8106",
         summary: "电子转账",
         remark: "维护费",
         statement_serial_no: "stmt-paid-pending",
@@ -333,6 +334,10 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "项目 / 详情" })).toBeInTheDocument();
 
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
+    expect(within(page).getByText("2026-04-19 10:52:02")).toBeInTheDocument();
+    expect(within(page).getByText("建行 8106")).toBeInTheDocument();
+    expect(within(page).queryByText("2026-04-19T10:52:02+08:00")).not.toBeInTheDocument();
+    expect(within(page).queryByText("人民币元")).not.toBeInTheDocument();
     expect(within(page).getByText("已支付待开票")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /云南开票供应商 选择发票/ })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /云南开票供应商 补票/ })).toBeInTheDocument();

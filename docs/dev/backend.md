@@ -159,7 +159,24 @@ python3 -m fin_ops_platform.app.worker \
   --statement-timeout-seconds 30
 ```
 
-`/api/search` 从 `read_model.search_index_rows` 查询，`/api/pending-invoices/rows` 从 `read_model.pending_invoice_rows` 分页查询。SQL miss/stale 时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh；API 请求路径不得同步扫描全量发票、流水、OA 或关系数据。
+`/api/search` 从 `read_model.search_index_rows` 查询，`/api/pending-invoices/rows` 从 `read_model.pending_invoice_rows` 分页查询。`/api/input-invoice-usage/rows` 从 `read_model.input_invoice_usage_rows` 查询，`/api/output-invoice-collections/rows` 从 `read_model.output_invoice_collection_rows` 查询；对应 filter-options 必须基于 SQL read model 行集生成。SQL miss/stale/schema-stale 时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh；API 请求路径不得同步扫描全量发票、流水、OA 或关系数据。
+
+进项发票使用/销项发票收款 read model worker：
+
+```bash
+FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
+PYTHONPATH=backend/src \
+python3 -m fin_ops_platform.app.worker \
+  --enable-input-invoice-usage-read-model-refresh \
+  --enable-output-invoice-collection-read-model-refresh \
+  --event-type input_invoice_usage.read_model.refresh \
+  --event-type output_invoice_collection.read_model.refresh \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 300 \
+  --statement-timeout-seconds 60
+```
+
+这两个 read model 的 scope type 分别是 `input_invoice_usage` 和 `output_invoice_collection`，月份 shard 使用 `YYYY-MM`，`all` 只展开为月份 shard。上线前用 `scripts/backfill-runtime-read-models.py --enqueue-invoice-usage-collection --invoice-expand-all` 预热历史月份，完整 runbook 见 `../operations/invoice-usage-collection-read-model-backfill.md`。RabbitMQ 只承载 outbox envelope，不携带页面 payload。Redis 若接入，只能放在 SQL read model 之后做短 TTL page cache；key 必须包含 schema/source version、scope 和标准化查询 hash，Redis miss/error 必须回 PostgreSQL read model。
 
 OA projection sync worker：
 

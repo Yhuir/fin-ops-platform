@@ -40,6 +40,7 @@ set +a
 /opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
   --backfill-oa-children \
   --enqueue-missing \
+  --invoice-expand-all \
   --json
 
 /opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
@@ -66,6 +67,7 @@ set +a
 - `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`
 - `worker-search`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
 - `worker-pending-invoice`：`--enable-pending-invoice-read-model-refresh --worker-kind pending-invoice-read-model --event-type pending_invoice.read_model.refresh`。Legacy `expense:all` / `income:all` 事件只做 fan-out，实际 rebuild scope 必须是 `direction:filter:YYYY-MM`。
+- `worker-invoice-usage-collection`：`--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --worker-kind invoice-usage-collection-read-model --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh`。
 - `worker-cost-tax`：`--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --worker-kind runtime --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh`
 - `worker-oa-sync`：`--enable-oa-sync --worker-kind oa-sync --event-type oa.sync`
 
@@ -116,6 +118,8 @@ PYTHONPATH=backend/src /opt/miniconda3/bin/python3 -m pytest \
   tests/test_tax_offset_sql_runtime.py \
   tests/test_workbench_sql_runtime.py \
   tests/test_search_pending_sql_runtime.py \
+  tests/test_invoice_usage_collection_backfill.py \
+  tests/test_invoice_usage_collection_sql_runtime.py \
   tests/test_app_postgres_mode.py \
   tests/test_runtime_bootstrap.py \
   tests/test_oa_projection_sql_runtime.py \

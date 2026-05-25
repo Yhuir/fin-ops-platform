@@ -78,6 +78,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 - `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`
 - `worker-search`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
 - `worker-pending-invoice`：`--enable-pending-invoice-read-model-refresh --worker-kind pending-invoice-read-model --event-type pending_invoice.read_model.refresh`
+- `worker-invoice-usage-collection`：`--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --worker-kind invoice-usage-collection-read-model --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh`
 - `worker-cost-tax`：`--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh`
 - `worker-file-migration`：`--enable-file-object-migration --event-type file_object.gridfs_migration`
 
@@ -129,7 +130,14 @@ set +a
 
 /opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
   --backfill-oa-children \
+  --invoice-expand-all \
   --enqueue-missing \
+  --json
+
+/opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
+  --enqueue-invoice-usage-collection \
+  --invoice-expand-all \
+  --reason invoice_usage_collection_release_warmup \
   --json
 
 /opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
@@ -142,6 +150,7 @@ set +a
 ```
 
 read model refresh worker 不构造完整 `Application`，不调用 `StateStore.load()`；`all` scope 会展开成 month/entity shard 后再处理。
+发票使用/收款页面的生产补数和验证细节见 `../docs/operations/invoice-usage-collection-read-model-backfill.md`。
 
 ## 相关文档
 

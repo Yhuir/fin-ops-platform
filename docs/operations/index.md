@@ -6,6 +6,7 @@
 - `backup-and-recovery.md`：备份、恢复和回滚要求。
 - `object-storage-minio.md`：MinIO/S3 文件对象存储、GridFS backfill、校验和短期回滚。
 - `runtime-read-model-hardening.md`：SQL-native read model reconciliation、EXPLAIN 和 source-version guard 验证。
+- `invoice-usage-collection-read-model-backfill.md`：进项发票使用/销项发票收款 SQL read model backfill、worker drain、RabbitMQ 回滚和验证。
 - `read-model-production-audit-2026-05-24.md`：当前生产 read model 分片、SQL-native、Redis/RabbitMQ 边界和下一步收口顺序。
 - `monitoring.md`：健康状态、后台任务和告警。
 - `local-vs-server-runtime-parity.md`：本地开发、服务器运行、SSH tunnel、AppHealth 指标和性能验收边界。

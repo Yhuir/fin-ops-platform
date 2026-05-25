@@ -400,6 +400,8 @@ class Application:
         self._tax_offset_sql_read_repository = getattr(self._state_store, "tax_offset_sql_read_repository", None)
         self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
+        self._input_invoice_usage_sql_read_repository = getattr(self._state_store, "input_invoice_usage_sql_read_repository", None)
+        self._output_invoice_collection_sql_read_repository = getattr(self._state_store, "output_invoice_collection_sql_read_repository", None)
         self._import_service = ImportNormalizationService.from_snapshot(
             persisted_state.get("imports"),
             id_registry=self._state_store,
@@ -6265,6 +6267,10 @@ class Application:
 
     def _handle_api_input_invoice_usage_rows(self, query: dict[str, list[str]]) -> Response:
         try:
+            sql_payload = self._get_input_invoice_usage_rows_from_sql_read_model(query)
+            if sql_payload is not None:
+                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status_code, sql_payload)
             payload = self._input_invoice_usage_service().list_rows(
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [50])[0],
@@ -6282,13 +6288,28 @@ class Application:
 
     def _handle_api_input_invoice_usage_filter_options(self, query: dict[str, list[str]]) -> Response:
         try:
-            payload = self._input_invoice_usage_service().filter_options(
-                keyword=query.get("keyword", [None])[0],
-                invoice_date_from=query.get("invoice_date_from", [None])[0],
-                invoice_date_to=query.get("invoice_date_to", [None])[0],
-                month=query.get("month", [None])[0],
-                filters=query.get("filters", [None])[0],
-            )
+            sql_rows_payload = self._get_input_invoice_usage_all_rows_from_sql_read_model(query)
+            if isinstance(sql_rows_payload, Response):
+                return sql_rows_payload
+            if isinstance(sql_rows_payload, dict):
+                payload = self._input_invoice_usage_service().filter_options_for_rows(
+                    rows=list(sql_rows_payload.get("rows") or []),
+                    keyword=query.get("keyword", [None])[0],
+                    invoice_date_from=query.get("invoice_date_from", [None])[0],
+                    invoice_date_to=query.get("invoice_date_to", [None])[0],
+                    month=query.get("month", [None])[0],
+                    filters=query.get("filters", [None])[0],
+                )
+                payload["read_model_status"] = "fresh"
+                payload["read_model_scope_key"] = sql_rows_payload.get("read_model_scope_key")
+            else:
+                payload = self._input_invoice_usage_service().filter_options(
+                    keyword=query.get("keyword", [None])[0],
+                    invoice_date_from=query.get("invoice_date_from", [None])[0],
+                    invoice_date_to=query.get("invoice_date_to", [None])[0],
+                    month=query.get("month", [None])[0],
+                    filters=query.get("filters", [None])[0],
+                )
         except InputInvoiceUsageError as exc:
             return self._input_invoice_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -6360,6 +6381,10 @@ class Application:
 
     def _handle_api_output_invoice_collections_rows(self, query: dict[str, list[str]]) -> Response:
         try:
+            sql_payload = self._get_output_invoice_collection_rows_from_sql_read_model(query)
+            if sql_payload is not None:
+                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status_code, sql_payload)
             payload = self._output_invoice_collection_service().list_rows(
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [50])[0],
@@ -6377,13 +6402,29 @@ class Application:
 
     def _handle_api_output_invoice_collections_filter_options(self, query: dict[str, list[str]]) -> Response:
         try:
-            payload = self._output_invoice_collection_service().filter_options(
-                keyword=query.get("keyword", [None])[0],
-                invoice_date_from=query.get("invoice_date_from", [None])[0],
-                invoice_date_to=query.get("invoice_date_to", [None])[0],
-                month=query.get("month", [None])[0],
-                filters=query.get("filters", [None])[0],
-            )
+            sql_rows_payload = self._get_output_invoice_collection_all_rows_from_sql_read_model(query)
+            if isinstance(sql_rows_payload, Response):
+                return sql_rows_payload
+            if isinstance(sql_rows_payload, dict):
+                payload = self._output_invoice_collection_service().filter_options_for_rows(
+                    rows=list(sql_rows_payload.get("rows") or []),
+                    keyword=query.get("keyword", [None])[0],
+                    invoice_date_from=query.get("invoice_date_from", [None])[0],
+                    invoice_date_to=query.get("invoice_date_to", [None])[0],
+                    month=query.get("month", [None])[0],
+                    filters=query.get("filters", [None])[0],
+                )
+                payload["read_model_status"] = "fresh"
+                payload["read_model_scope_key"] = sql_rows_payload.get("read_model_scope_key")
+                payload["readModelStatus"] = "fresh"
+            else:
+                payload = self._output_invoice_collection_service().filter_options(
+                    keyword=query.get("keyword", [None])[0],
+                    invoice_date_from=query.get("invoice_date_from", [None])[0],
+                    invoice_date_to=query.get("invoice_date_to", [None])[0],
+                    month=query.get("month", [None])[0],
+                    filters=query.get("filters", [None])[0],
+                )
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -6443,6 +6484,229 @@ class Application:
             }
         }
         return self._json_response(exc.status_code, payload)
+
+    def _get_input_invoice_usage_all_rows_from_sql_read_model(
+        self,
+        query: dict[str, list[str]],
+    ) -> dict[str, object] | Response | None:
+        return self._get_invoice_relation_all_rows_from_sql_read_model(
+            query,
+            row_getter=self._get_input_invoice_usage_rows_from_sql_read_model,
+        )
+
+    def _get_output_invoice_collection_all_rows_from_sql_read_model(
+        self,
+        query: dict[str, list[str]],
+    ) -> dict[str, object] | Response | None:
+        return self._get_invoice_relation_all_rows_from_sql_read_model(
+            query,
+            row_getter=self._get_output_invoice_collection_rows_from_sql_read_model,
+        )
+
+    def _get_invoice_relation_all_rows_from_sql_read_model(
+        self,
+        query: dict[str, list[str]],
+        *,
+        row_getter: object,
+    ) -> dict[str, object] | Response | None:
+        if not callable(row_getter):
+            return None
+        page_size = 200
+        first_query = {key: list(values) for key, values in query.items()}
+        first_query["page"] = ["1"]
+        first_query["page_size"] = [str(page_size)]
+        first_payload = row_getter(first_query)
+        if first_payload is None:
+            return None
+        if first_payload.get("read_model_status") != "fresh":
+            return self._json_response(HTTPStatus.ACCEPTED, first_payload)
+        rows = list(first_payload.get("rows") or [])
+        pagination = first_payload.get("pagination") if isinstance(first_payload.get("pagination"), dict) else {}
+        total = int(pagination.get("total") or len(rows))
+        page = 2
+        while len(rows) < total:
+            page_query = {key: list(values) for key, values in query.items()}
+            page_query["page"] = [str(page)]
+            page_query["page_size"] = [str(page_size)]
+            page_payload = row_getter(page_query)
+            if not isinstance(page_payload, dict):
+                return None
+            if page_payload.get("read_model_status") != "fresh":
+                return self._json_response(HTTPStatus.ACCEPTED, page_payload)
+            page_rows = list(page_payload.get("rows") or [])
+            if not page_rows:
+                break
+            rows.extend(page_rows)
+            page += 1
+        return {
+            "rows": rows,
+            "pagination": {"page": 1, "pageSize": page_size, "total": total},
+            "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
+            "read_model_status": "fresh",
+            "read_model_scope_key": first_payload.get("read_model_scope_key"),
+        }
+
+    def _get_input_invoice_usage_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
+        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
+        list_rows = getattr(repository, "list_input_invoice_usage_rows", None)
+        if not callable(list_rows):
+            return None
+        scope_key = self._invoice_relation_scope_key_from_query(query)
+        try:
+            payload = list_rows(
+                month=query.get("month", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", ["invoice_date"])[0],
+                sort_direction=query.get("sort_direction", ["desc"])[0],
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+            )
+        except ValueError as exc:
+            raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
+        if not isinstance(payload, dict):
+            self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_miss")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
+        if self._input_invoice_usage_sql_payload_requires_schema_refresh(payload):
+            self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_schema_stale")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
+        refresh_status = str(payload.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_stale")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
+        parsed_filters = self._input_invoice_usage_service()._parse_filters(query.get("filters", [None])[0])
+        sort_field, sort_direction = self._input_invoice_usage_service()._parse_sort(
+            query.get("sort_field", ["invoice_date"])[0],
+            query.get("sort_direction", ["desc"])[0],
+        )
+        result = dict(payload)
+        result["filterConfig"] = self._input_invoice_usage_service()._filter_config()
+        result["appliedFilters"] = {"filters": parsed_filters}
+        result["sort"] = {"field": sort_field, "direction": sort_direction}
+        result["read_model_status"] = "fresh"
+        result["read_model_scope_key"] = scope_key
+        result.pop("refresh_status", None)
+        return result
+
+    def _get_output_invoice_collection_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
+        repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
+        list_rows = getattr(repository, "list_output_invoice_collection_rows", None)
+        if not callable(list_rows):
+            return None
+        scope_key = self._invoice_relation_scope_key_from_query(query)
+        try:
+            payload = list_rows(
+                month=query.get("month", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", ["invoice_date"])[0],
+                sort_direction=query.get("sort_direction", ["desc"])[0],
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+            )
+        except ValueError as exc:
+            raise OutputInvoiceCollectionError("invalid_output_invoice_collection_query", str(exc)) from exc
+        if not isinstance(payload, dict):
+            self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_miss")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
+        if self._output_invoice_collection_sql_payload_requires_schema_refresh(payload):
+            self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_schema_stale")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
+        refresh_status = str(payload.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_stale")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
+        parsed_filters = self._output_invoice_collection_service()._parse_filters(query.get("filters", [None])[0])
+        sort_field, sort_direction = self._output_invoice_collection_service()._parse_sort(
+            query.get("sort_field", ["invoice_date"])[0],
+            query.get("sort_direction", ["desc"])[0],
+        )
+        result = dict(payload)
+        result["filterConfig"] = self._output_invoice_collection_service()._filter_config()
+        result["appliedFilters"] = {"filters": parsed_filters}
+        result["sort"] = {"field": sort_field, "direction": sort_direction}
+        result["read_model_status"] = "fresh"
+        result["readModelStatus"] = "fresh"
+        result["read_model_scope_key"] = scope_key
+        result.pop("refresh_status", None)
+        return result
+
+    @staticmethod
+    def _input_invoice_usage_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:
+        for row in list(payload.get("rows") or []):
+            if not isinstance(row, dict):
+                return True
+            if not isinstance(row.get("invoice"), dict):
+                return True
+            if not isinstance(row.get("paymentStatus"), dict):
+                return True
+            if not isinstance(row.get("oa"), dict):
+                return True
+            if not isinstance(row.get("bankTransactions"), dict):
+                return True
+        return False
+
+    @staticmethod
+    def _output_invoice_collection_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:
+        for row in list(payload.get("rows") or []):
+            if not isinstance(row, dict):
+                return True
+            if not isinstance(row.get("invoice"), dict):
+                return True
+            if not isinstance(row.get("collectionStatus"), dict):
+                return True
+            if not isinstance(row.get("bankTransactions"), dict):
+                return True
+            if not isinstance(row.get("redInvoiceRelation"), dict):
+                return True
+            if not isinstance(row.get("receipt"), dict):
+                return True
+        return False
+
+    @staticmethod
+    def _invoice_relation_scope_key_from_query(query: dict[str, list[str]]) -> str:
+        month = str(query.get("month", [""])[0] or "").strip()
+        if len(month) >= 7 and month[4] == "-":
+            return month[:7]
+        return "all"
+
+    @staticmethod
+    def _invoice_relation_refreshing_payload(
+        *,
+        scope_key: str,
+        include_output_metadata: bool = False,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "rows": [],
+            "pagination": {"page": 1, "pageSize": 50, "total": 0},
+            "summary": {},
+            "filterConfig": [],
+            "read_model_status": "refreshing",
+            "read_model_scope_key": scope_key,
+        }
+        if include_output_metadata:
+            payload["readModelStatus"] = "refreshing"
+        return payload
+
+    def _enqueue_input_invoice_usage_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueue(scope_type="input_invoice_usage", scope_key=scope_key, reason=reason)
+        return True
+
+    def _enqueue_output_invoice_collection_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueue(scope_type="output_invoice_collection", scope_key=scope_key, reason=reason)
+        return True
 
     def _handle_api_pending_invoice_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
         _session, auth_error = self._resolve_pending_invoice_read_session(headers)
@@ -6959,6 +7223,11 @@ class Application:
                 "read_model_scope_key": scope_key,
             }
         result = dict(payload)
+        rows = result.get("rows")
+        pending_invoice_query_service = getattr(self, "_pending_invoice_query_service", None)
+        normalizer = getattr(pending_invoice_query_service, "normalize_row_payloads", None)
+        if isinstance(rows, list) and callable(normalizer):
+            result["rows"] = normalizer([row for row in rows if isinstance(row, dict)])
         settings_service = getattr(self, "_app_settings_service", None)
         get_settings_payload = getattr(settings_service, "get_settings_payload", None)
         if callable(get_settings_payload):
@@ -13363,6 +13632,10 @@ class Application:
         self._invalidate_workbench_read_models(invalidate_cost_statistics=False)
         self._invalidate_search_read_model_scopes(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._invalidate_pending_invoice_read_model_scopes(reason="import_state_changed")
+        self._invalidate_invoice_usage_collection_read_model_scopes(
+            cost_statistics_scope_keys or ["all"],
+            reason="import_state_changed",
+        )
         if invalidate_cost_statistics:
             if cost_statistics_scope_keys is None:
                 self._invalidate_cost_statistics_read_models()
@@ -15669,6 +15942,10 @@ class Application:
                 changed_scope_keys=deleted_scope_keys,
                 operation="derived_lifecycle_workbench_read_model",
             )
+        self._invalidate_invoice_usage_collection_read_model_scopes(
+            scope_keys or deleted_scope_keys or ["all"],
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_read_model"),
+        )
         return {
             "deleted_counts": {"workbench_read_models": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,
@@ -15849,6 +16126,10 @@ class Application:
                 reason="workbench_scope_invalidated",
             )
             self._invalidate_pending_invoice_read_model_scopes(reason="workbench_scope_invalidated")
+            self._invalidate_invoice_usage_collection_read_model_scopes(
+                list(normalized_scope_keys),
+                reason="workbench_scope_invalidated",
+            )
         return expanded_scope_keys
 
     def _invalidate_search_read_model_scopes(self, scope_keys: list[str], *, reason: str) -> None:
@@ -15877,6 +16158,17 @@ class Application:
         for scope_key in scope_keys:
             self._enqueue_pending_invoice_read_model_refresh(scope_key, reason=reason)
         return scope_keys
+
+    def _invalidate_invoice_usage_collection_read_model_scopes(self, scope_keys: list[str], *, reason: str) -> list[str]:
+        months = self._months_from_lifecycle_scope_keys(scope_keys)
+        target_scope_keys = months or (["all"] if any(str(scope_key).strip() == "all" for scope_key in scope_keys) else ["all"])
+        invalidated: list[str] = []
+        for scope_key in target_scope_keys:
+            if self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason):
+                invalidated.append(f"input_invoice_usage:{scope_key}")
+            if self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason=reason):
+                invalidated.append(f"output_invoice_collection:{scope_key}")
+        return invalidated
 
     def _invalidate_cost_statistics_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
         read_model_service = self._cost_statistics_read_model_service

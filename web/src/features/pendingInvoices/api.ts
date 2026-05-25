@@ -71,6 +71,7 @@ type ApiPendingInvoiceRow = {
   id?: string | null;
   bank_transaction?: Partial<{
     id: string | null;
+    account_no: string | null;
     counterparty_name: string | null;
     counterparty_account_no: string | null;
     counterparty_bank_name: string | null;
@@ -82,6 +83,7 @@ type ApiPendingInvoiceRow = {
     balance: string | null;
     currency: string | null;
     bank_name: string | null;
+    bank_short_name: string | null;
     account_name: string | null;
     account_last4: string | null;
     summary: string | null;
@@ -300,6 +302,15 @@ function stringValue(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
+function displayDateTime(value: unknown, fallback = "") {
+  const text = stringValue(value, fallback);
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/);
+  if (match) {
+    return `${match[1]} ${match[2]}`;
+  }
+  return text;
+}
+
 function numberValue(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -337,10 +348,11 @@ function mapBankTransaction(value: ApiPendingInvoiceRow["bank_transaction"], fal
   const debitAmount = stringValue(value?.debit_amount, stringValue(value?.amount));
   return {
     id: stringValue(value?.id, fallbackId),
+    accountNo: stringValue(value?.account_no),
     counterpartyName: stringValue(value?.counterparty_name, "—"),
     counterpartyAccountNo: stringValue(value?.counterparty_account_no),
     counterpartyBankName: stringValue(value?.counterparty_bank_name),
-    tradeTime: stringValue(value?.trade_time),
+    tradeTime: displayDateTime(value?.trade_time),
     bookedDate: stringValue(value?.booked_date),
     debitAmount,
     creditAmount: stringValue(value?.credit_amount),
@@ -348,6 +360,7 @@ function mapBankTransaction(value: ApiPendingInvoiceRow["bank_transaction"], fal
     balance: stringValue(value?.balance),
     currency: stringValue(value?.currency),
     bankName: stringValue(value?.bank_name),
+    bankShortName: stringValue(value?.bank_short_name),
     accountName: stringValue(value?.account_name),
     accountLast4: stringValue(value?.account_last4),
     summary: stringValue(value?.summary),
@@ -642,13 +655,13 @@ function mapRelationDetail(payload: ApiRelationDetail): PendingInvoiceRelationDe
     transactionSummary: {
       id: stringValue(payload.transaction_summary?.id),
       counterpartyName: stringValue(payload.transaction_summary?.counterparty_name),
-      tradeTime: stringValue(payload.transaction_summary?.trade_time),
+      tradeTime: displayDateTime(payload.transaction_summary?.trade_time),
       debitAmount: stringValue(payload.transaction_summary?.debit_amount, stringValue(payload.transaction_summary?.amount)),
     },
     relatedInvoices: (payload.related_invoices ?? []).map(mapInvoice).filter(hasInvoiceIdentity),
     paymentRows: (payload.payment_rows ?? []).map((row) => ({
       id: stringValue(row.id),
-      tradeTime: stringValue(row.trade_time),
+      tradeTime: displayDateTime(row.trade_time),
       counterpartyName: stringValue(row.counterparty_name),
       debitAmount: stringValue(row.debit_amount, stringValue(row.amount)),
       relationCaseId: stringValue(row.relation_case_id),
@@ -907,7 +920,7 @@ export async function previewManualPendingInvoice(request: ManualPendingInvoiceR
       id: stringValue(payload.bank_transaction_summary?.id),
       direction: stringValue(payload.bank_transaction_summary?.direction) as ManualPendingInvoicePreview["bankTransactionSummary"]["direction"],
       counterpartyName: stringValue(payload.bank_transaction_summary?.counterparty_name),
-      tradeTime: stringValue(payload.bank_transaction_summary?.trade_time),
+      tradeTime: displayDateTime(payload.bank_transaction_summary?.trade_time),
       amount: stringValue(payload.bank_transaction_summary?.amount),
     },
     invoiceIdentity: {

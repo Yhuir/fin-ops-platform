@@ -104,6 +104,7 @@ export type PendingInvoiceRulesPayload = {
 
 export type PendingInvoiceBankTransaction = {
   id: string;
+  accountNo: string;
   counterpartyName: string;
   counterpartyAccountNo: string;
   counterpartyBankName: string;
@@ -115,6 +116,7 @@ export type PendingInvoiceBankTransaction = {
   balance: string;
   currency: string;
   bankName: string;
+  bankShortName: string;
   accountName: string;
   accountLast4: string;
   summary: string;

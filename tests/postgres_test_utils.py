@@ -37,6 +37,8 @@ EXPECTED_MIGRATION_FILES = [
     "0023_workbench_group_rows_filters.sql",
     "0024_pending_invoice_query_fields.sql",
     "0025_pending_invoice_runtime_grants.sql",
+    "0026_invoice_usage_collection_read_models.sql",
+    "0027_invoice_usage_collection_runtime_grants.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -57,6 +59,10 @@ TEST_TABLES = (
     "read_model.search_index_rows",
     "read_model.pending_invoice_rows",
     "read_model.pending_invoice_scopes",
+    "read_model.input_invoice_usage_rows",
+    "read_model.input_invoice_usage_scopes",
+    "read_model.output_invoice_collection_rows",
+    "read_model.output_invoice_collection_scopes",
     "read_model.cost_statistics_read_models",
     "read_model.cost_statistics_rows",
     "read_model.tax_offset_read_models",

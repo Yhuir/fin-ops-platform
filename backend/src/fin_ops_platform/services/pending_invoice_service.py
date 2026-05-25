@@ -117,7 +117,7 @@ class PendingInvoiceQueryService:
 
         transactions = [
             transaction
-            for transaction in self._import_service.list_transactions()
+            for transaction in self._import_service.list_transactions(month="all")
             if self._transaction_matches_direction(transaction, normalized_direction)
             and self._matches_date_range(transaction, date_from=date_from, date_to=date_to)
         ]
@@ -181,15 +181,41 @@ class PendingInvoiceQueryService:
         return self._category_service.bulk_get([transaction.id for transaction in transactions])
 
     def row_for_transaction(self, transaction_id: str, *, direction: str) -> dict[str, Any]:
-        payload = self.list_rows(direction=direction, filter="all", page=1, page_size=200)
-        for row in payload["rows"]:
-            if row.get("id") == transaction_id:
-                return row
-        raise PendingInvoiceError(
-            "bank_transaction_not_found",
-            f"Bank transaction not found in pending invoice rows: {transaction_id}",
-            status_code=HTTPStatus.NOT_FOUND,
+        normalized_direction = self._normalize_direction(direction)
+        transaction = self._get_transaction(transaction_id)
+        if not self._transaction_matches_direction(transaction, normalized_direction):
+            raise PendingInvoiceError(
+                "bank_transaction_not_found",
+                f"Bank transaction not found in pending invoice rows: {transaction_id}",
+                status_code=HTTPStatus.NOT_FOUND,
+            )
+        category = self._effective_categories([transaction]).get(transaction.id, {})
+        return self._row_payload(
+            transaction,
+            direction=normalized_direction,
+            category=category,
+            tag_groups=self._pending_invoice_tag_groups(),
         )
+
+    def normalize_row_payloads(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [self._normalize_row_payload(row) for row in rows]
+
+    def _normalize_row_payload(self, row: dict[str, Any]) -> dict[str, Any]:
+        payload = deepcopy(row)
+        bank = payload.get("bank_transaction")
+        if isinstance(bank, dict):
+            self._apply_bank_identity(bank)
+        return payload
+
+    def _get_transaction(self, transaction_id: str) -> BankTransaction:
+        try:
+            return self._import_service.get_transaction(str(transaction_id or "").strip())
+        except KeyError as exc:
+            raise PendingInvoiceError(
+                "bank_transaction_not_found",
+                f"Bank transaction not found: {transaction_id}",
+                status_code=HTTPStatus.NOT_FOUND,
+            ) from exc
 
     @staticmethod
     def _normalize_direction(direction: str) -> str:
@@ -259,6 +285,39 @@ class PendingInvoiceQueryService:
         group = self._group_for_category(category.get("category_code"), tag_groups)
         return group == filter_name
 
+    def _bank_account_mappings_by_last4(self) -> dict[str, dict[str, str]]:
+        settings = self._app_settings_provider()
+        mappings: dict[str, dict[str, str]] = {}
+        for item in list(settings.get("bank_account_mappings") or []):
+            if not isinstance(item, dict):
+                continue
+            last4 = self._account_last4(item.get("last4"))
+            bank_name = str(item.get("bank_name") or "").strip()
+            if not last4 or not bank_name:
+                continue
+            mappings[last4] = {
+                "bank_name": bank_name,
+                "short_name": str(item.get("short_name") or "").strip(),
+            }
+        return mappings
+
+    @staticmethod
+    def _account_last4(value: Any) -> str:
+        digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+        return digits[-4:] if len(digits) >= 4 else digits
+
+    def _apply_bank_identity(self, bank: dict[str, Any]) -> None:
+        last4 = self._account_last4(bank.get("account_last4")) or self._account_last4(bank.get("account_no"))
+        mapping = self._bank_account_mappings_by_last4().get(last4)
+        raw_bank_name = str(bank.get("bank_name") or "").strip()
+        if mapping is not None:
+            bank["bank_name"] = mapping["bank_name"]
+            bank["bank_short_name"] = mapping["short_name"] or mapping["bank_name"]
+        else:
+            bank["bank_name"] = raw_bank_name
+            bank["bank_short_name"] = str(bank.get("bank_short_name") or "").strip()
+        bank["account_last4"] = last4
+
     def _row_payload(
         self,
         transaction: BankTransaction,
@@ -268,7 +327,10 @@ class PendingInvoiceQueryService:
         tag_groups: dict[str, set[str]],
     ) -> dict[str, Any]:
         target_invoice_type = InvoiceType.INPUT if direction == "expense" else InvoiceType.OUTPUT
-        invoice_map = {invoice.id: invoice for invoice in self._import_service.list_invoices()}
+        invoice_map = {
+            invoice.id: invoice
+            for invoice in self._import_service.list_invoices(month="all", invoice_type=target_invoice_type)
+        }
         relations = self._pair_relation_service.active_relations_for_row_ids([transaction.id])
         invoice_relations: list[tuple[dict[str, Any], Invoice]] = []
         for relation in relations:
@@ -300,10 +362,18 @@ class PendingInvoiceQueryService:
         trade_date = str(transaction.txn_date or transaction.trade_time or "")[:10]
         debit_amount = transaction.amount if transaction.txn_direction == TransactionDirection.OUTFLOW else Decimal("0.00")
         credit_amount = transaction.amount if transaction.txn_direction == TransactionDirection.INFLOW else Decimal("0.00")
+        bank_identity = {
+            "account_no": transaction.account_no,
+            "bank_name": transaction.imported_bank_name or "",
+            "account_name": transaction.account_name or "",
+            "account_last4": transaction.imported_bank_last4 or self._account_last4(transaction.account_no),
+        }
+        self._apply_bank_identity(bank_identity)
         return {
             "id": transaction.id,
             "bank_transaction": {
                 "id": transaction.id,
+                "account_no": transaction.account_no,
                 "counterparty_name": transaction.counterparty_name_raw,
                 "counterparty_account_no": transaction.counterparty_account_no or "",
                 "counterparty_bank_name": transaction.counterparty_bank_name or "",
@@ -315,9 +385,10 @@ class PendingInvoiceQueryService:
                 "credit_amount": _decimal_to_str(credit_amount),
                 "balance": _decimal_to_str(transaction.balance) if transaction.balance is not None else "",
                 "currency": transaction.currency or "CNY",
-                "bank_name": transaction.imported_bank_name or "",
+                "bank_name": bank_identity["bank_name"],
+                "bank_short_name": bank_identity["bank_short_name"],
                 "account_name": transaction.account_name or "",
-                "account_last4": transaction.imported_bank_last4 or str(transaction.account_no or "")[-4:],
+                "account_last4": bank_identity["account_last4"],
                 "summary": transaction.summary or "",
                 "remark": transaction.remark or "",
                 "statement_serial_no": transaction.bank_serial_no or "",
@@ -1042,12 +1113,6 @@ class PendingInvoiceQueryService:
         if sort_field in {"total_with_tax", "amount_difference_abs"}:
             return sorted(rows, key=lambda row: _decimal_from_text(row.get(sort_field)), reverse=reverse)
         return sorted(rows, key=lambda row: str(row.get(sort_field) or ""), reverse=reverse)
-
-    def _get_transaction(self, transaction_id: str) -> BankTransaction:
-        try:
-            return self._import_service.get_transaction(str(transaction_id or "").strip())
-        except KeyError as exc:
-            raise PendingInvoiceError("bank_transaction_not_found", f"Bank transaction not found: {transaction_id}", status_code=HTTPStatus.NOT_FOUND) from exc
 
     @staticmethod
     def _oa_applicant_from_relations(relations: list[dict[str, Any]]) -> str:

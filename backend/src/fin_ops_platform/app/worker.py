@@ -18,6 +18,10 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
 from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJobRepository, ImportJobWorker
+from fin_ops_platform.services.invoice_usage_collection_read_model_refresh import (
+    InvoiceUsageCollectionReadModelRefreshService,
+)
+from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
 from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
@@ -58,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-tax-offset-read-model-refresh", action="store_true", help="Register tax offset SQL read model refresh handler.")
     parser.add_argument("--enable-search-read-model-refresh", action="store_true", help="Register search SQL read model refresh handler.")
     parser.add_argument("--enable-pending-invoice-read-model-refresh", action="store_true", help="Register pending invoice SQL read model refresh handler.")
+    parser.add_argument("--enable-input-invoice-usage-read-model-refresh", action="store_true", help="Register input invoice usage SQL read model refresh handler.")
+    parser.add_argument("--enable-output-invoice-collection-read-model-refresh", action="store_true", help="Register output invoice collection SQL read model refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
     parser.add_argument("--check", action="store_true", help="Print worker configuration and exit without polling.")
@@ -152,6 +158,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             handlers["pending_invoice.read_model.refresh"] = refresh_service.handle_runtime_event
             if "pending_invoice.read_model.refresh" not in config.event_types:
                 config.event_types.append("pending_invoice.read_model.refresh")
+    if args.enable_input_invoice_usage_read_model_refresh or args.enable_output_invoice_collection_read_model_refresh:
+        projection_builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=connection)
+        refresh_service = InvoiceUsageCollectionReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue,
+        )
+        if args.enable_input_invoice_usage_read_model_refresh:
+            handlers["input_invoice_usage.read_model.refresh"] = refresh_service.handle_runtime_event
+            if "input_invoice_usage.read_model.refresh" not in config.event_types:
+                config.event_types.append("input_invoice_usage.read_model.refresh")
+        if args.enable_output_invoice_collection_read_model_refresh:
+            handlers["output_invoice_collection.read_model.refresh"] = refresh_service.handle_runtime_event
+            if "output_invoice_collection.read_model.refresh" not in config.event_types:
+                config.event_types.append("output_invoice_collection.read_model.refresh")
     if args.enable_import_job_processing:
         from fin_ops_platform.app.server import Application
 
@@ -229,6 +249,8 @@ def _infer_worker_kind(args: argparse.Namespace) -> str:
             ("tax-offset-read-model", args.enable_tax_offset_read_model_refresh),
             ("search-read-model", args.enable_search_read_model_refresh),
             ("pending-invoice-read-model", args.enable_pending_invoice_read_model_refresh),
+            ("input-invoice-usage-read-model", args.enable_input_invoice_usage_read_model_refresh),
+            ("output-invoice-collection-read-model", args.enable_output_invoice_collection_read_model_refresh),
             ("oa-sync", args.enable_oa_sync),
             ("import-job", args.enable_import_job_processing),
         )

@@ -298,7 +298,14 @@ class ImportNormalizationService:
         return invoices
 
     def get_invoice(self, invoice_id: str) -> Invoice:
-        return self._invoices_by_id[invoice_id]
+        if invoice_id in self._invoices_by_id:
+            return self._invoices_by_id[invoice_id]
+        getter = getattr(self._fact_repository, "get_invoice", None)
+        if callable(getter):
+            invoice = getter(invoice_id)
+            if isinstance(invoice, Invoice):
+                return invoice
+        raise KeyError(invoice_id)
 
     def list_counterparties(self) -> list[Counterparty]:
         return list(self._counterparties_by_normalized_name.values())
@@ -330,7 +337,16 @@ class ImportNormalizationService:
         return list(self._transactions_by_id.values())
 
     def get_transaction(self, transaction_id: str) -> BankTransaction:
-        return self._transactions_by_id[transaction_id]
+        if transaction_id in self._transactions_by_id:
+            return self._transactions_by_id[transaction_id]
+        for method_name in ("get_transaction", "get_bank_transaction"):
+            getter = getattr(self._fact_repository, method_name, None)
+            if not callable(getter):
+                continue
+            transaction = getter(transaction_id)
+            if isinstance(transaction, BankTransaction):
+                return transaction
+        raise KeyError(transaction_id)
 
     def _list_repository_invoices(
         self,
