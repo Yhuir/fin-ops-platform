@@ -533,6 +533,10 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         content = env_path.read_text(encoding="utf-8")
 
+        self.assertIn("FIN_OPS_APP_STORAGE_BACKEND=postgres", content)
+        self.assertIn("FIN_OPS_APP_READ_BACKEND=postgres", content)
+        self.assertIn("FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary", content)
+        self.assertIn("FIN_OPS_STORAGE_MODE=postgres", content)
         self.assertIn("FIN_OPS_QUEUE_BACKEND=postgres", content)
         self.assertIn("FIN_OPS_WORKER_KIND=workbench-matching", content)
         self.assertIn("--enable-workbench-matching", content)
