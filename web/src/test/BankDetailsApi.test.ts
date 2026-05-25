@@ -14,7 +14,7 @@ describe("bank details API", () => {
         rows: [
           {
             id: "bank-detail-linked",
-            trade_time: "2026-05-01 10:30:00",
+            trade_time: "2026-05-01 10:30:00+08:00",
             counterparty_name: "云南溯源科技有限公司",
             direction: "income",
             direction_label: "收",
@@ -56,6 +56,7 @@ describe("bank details API", () => {
       invoiceRelationTag: "有发票",
       relationTags: ["有oa", "有发票"],
       relationCaseId: "CASE-202605-001",
+      tradeTime: "2026-05-01 10:30:00",
       purposeText: "交易用途",
       summaryText: "项目回款摘要",
       noteText: "客户附言",

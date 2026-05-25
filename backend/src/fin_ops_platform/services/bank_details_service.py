@@ -467,16 +467,13 @@ class BankDetailsService:
     @classmethod
     def _bank_text_display_fields(cls, row: dict[str, Any]) -> dict[str, str]:
         fields_by_label = cls._bank_text_fields_by_label(row.get("bank_text_fields"))
-        summary_text = cls._first_field_value(fields_by_label, SUMMARY_TEXT_LABELS) or str(row.get("summary") or "")
+        summary_text = cls._first_field_value(fields_by_label, SUMMARY_TEXT_LABELS)
         purpose_text = cls._first_field_value(fields_by_label, PURPOSE_TEXT_LABELS)
         note_text = cls._first_field_value(fields_by_label, NOTE_TEXT_LABELS)
-        if not purpose_text and not note_text:
+        if not fields_by_label:
+            summary_text = str(row.get("summary") or "")
             purpose_text = str(row.get("purpose") or "")
             note_text = str(row.get("remark") or "")
-        elif not purpose_text:
-            purpose_text = str(row.get("purpose") or "")
-        elif not note_text:
-            note_text = str(row.get("note") or "")
         return {
             "purpose_text": purpose_text.strip(),
             "summary_text": summary_text.strip(),

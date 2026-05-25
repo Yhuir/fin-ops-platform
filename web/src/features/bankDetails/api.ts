@@ -142,6 +142,17 @@ function normalizeInvoiceRelationTag(value: unknown): InvoiceRelationTag {
   return value === "有发票" ? "有发票" : "无发票";
 }
 
+function formatBankDetailTradeTime(value: string) {
+  const normalized = String(value ?? "").trim().replace("T", " ");
+  if (normalized.length >= 25 && ["+", "-"].includes(normalized[19]) && /^\d{2}:\d{2}$/.test(normalized.slice(20, 25))) {
+    return normalized.slice(0, 19);
+  }
+  if (normalized.endsWith("Z") && normalized.length >= 20) {
+    return normalized.slice(0, 19);
+  }
+  return normalized;
+}
+
 function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
   const relationTags = Array.isArray(row.relation_tags)
     ? row.relation_tags.map(String).map((tag) => tag.trim()).filter(Boolean)
@@ -150,7 +161,7 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
   const invoiceRelationTag = normalizeInvoiceRelationTag(row.invoice_relation_tag ?? relationTags[1]);
   return {
     id: row.id,
-    tradeTime: row.trade_time,
+    tradeTime: formatBankDetailTradeTime(row.trade_time),
     counterpartyName: row.counterparty_name,
     direction: row.direction,
     directionLabel: row.direction_label,

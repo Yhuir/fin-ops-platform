@@ -5182,7 +5182,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
       const visibleRow = {
         id: `bank-detail-${String(page).padStart(3, "0")}`,
-        trade_time: "2026-05-01 10:30:00",
+        trade_time: "2026-05-01 10:30:00+08:00",
         counterparty_name: "云南溯源科技有限公司",
         direction: "income",
         direction_label: "收",

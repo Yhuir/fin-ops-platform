@@ -358,11 +358,13 @@ def _bank_text_display_fields(
     note: str,
 ) -> dict[str, str]:
     fields_by_label = _bank_text_fields_by_label(bank_text_fields)
-    summary_text = _first_field_value(fields_by_label, SUMMARY_TEXT_LABELS) or summary
-    purpose_text = _first_field_value(fields_by_label, PURPOSE_TEXT_LABELS) or purpose
-    note_text = _first_field_value(fields_by_label, NOTE_TEXT_LABELS) or note
-    if not purpose_text and not note_text:
-        note_text = remark
+    summary_text = _first_field_value(fields_by_label, SUMMARY_TEXT_LABELS)
+    purpose_text = _first_field_value(fields_by_label, PURPOSE_TEXT_LABELS)
+    note_text = _first_field_value(fields_by_label, NOTE_TEXT_LABELS)
+    if not fields_by_label:
+        summary_text = summary
+        purpose_text = purpose
+        note_text = note or remark
     return {
         "purpose_text": purpose_text.strip(),
         "summary_text": summary_text.strip(),

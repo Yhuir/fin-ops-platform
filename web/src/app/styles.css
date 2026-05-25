@@ -7438,6 +7438,12 @@ body.column-layout-dragging {
   text-overflow: clip;
 }
 
+.bank-relation-time-row {
+  flex-wrap: wrap;
+  gap: 4px;
+  align-content: flex-start;
+}
+
 .bank-relation-chip-row {
   flex-wrap: wrap;
   gap: 4px;
