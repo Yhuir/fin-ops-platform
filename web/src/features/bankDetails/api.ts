@@ -9,8 +9,6 @@ import type {
   BankTransactionCategoryCounts,
   InvoiceRelationTag,
   OaRelationTag,
-  SaveBankTransactionCategoriesRequest,
-  SaveBankTransactionCategoriesResponse,
 } from "./types";
 import { ApiClientError, apiRequestJson } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
@@ -45,6 +43,9 @@ type ApiBankDetailTransaction = {
   balance: string | null;
   summary: string;
   purpose: string;
+  purpose_text?: string | null;
+  summary_text?: string | null;
+  note_text?: string | null;
   bank_name: string;
   account_last4: string;
   category_code?: BankTransactionCategoryCode | null;
@@ -83,21 +84,6 @@ type ApiBankDetailTransactionsResponse = {
   bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
   read_model_status?: "fresh" | "refreshing";
   cache_status?: string | null;
-};
-
-type ApiSavedBankTransactionCategory = {
-  transaction_id: string;
-  category_code: BankTransactionCategoryCode | null;
-  category_label: string | null;
-  category_path?: string[];
-  version: number | null;
-};
-
-type ApiSaveBankTransactionCategoriesResponse = {
-  updated_transaction_ids?: string[];
-  updated_categories?: ApiSavedBankTransactionCategory[];
-  affected_months?: string[];
-  workbench_rebuild_queued?: boolean;
 };
 
 const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
@@ -172,6 +158,9 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     balance: row.balance,
     summary: row.summary,
     purpose: row.purpose,
+    purposeText: row.purpose_text ?? row.purpose ?? "",
+    summaryText: row.summary_text ?? row.summary ?? "",
+    noteText: row.note_text ?? "",
     bankName: row.bank_name,
     accountLast4: row.account_last4,
     categoryCode: row.category_code ?? null,
@@ -284,40 +273,5 @@ export async function fetchBankDetailTransactions({
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
     readModelStatus: payload.read_model_status,
     cacheStatus: payload.cache_status ?? null,
-  };
-}
-
-export async function saveBankTransactionCategories({
-  updates,
-  signal,
-}: SaveBankTransactionCategoriesRequest): Promise<SaveBankTransactionCategoriesResponse> {
-  const payload = await requestJson<ApiSaveBankTransactionCategoriesResponse>(
-    "/api/bank-details/transactions/categories",
-    {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        updates: updates.map((update) => ({
-          transaction_id: update.transactionId,
-          category_code: update.categoryCode,
-          expected_version: update.expectedVersion,
-        })),
-      }),
-      signal,
-    },
-  );
-  return {
-    updatedTransactionIds: payload.updated_transaction_ids ?? [],
-    updatedCategories: (payload.updated_categories ?? []).map((category) => ({
-      transactionId: category.transaction_id,
-      categoryCode: category.category_code,
-      categoryLabel: category.category_label,
-      categoryPath: Array.isArray(category.category_path) ? category.category_path.map(String).filter(Boolean) : [],
-      version: category.version,
-    })),
-    affectedMonths: payload.affected_months ?? [],
-    workbenchRebuildQueued: payload.workbench_rebuild_queued ?? false,
   };
 }

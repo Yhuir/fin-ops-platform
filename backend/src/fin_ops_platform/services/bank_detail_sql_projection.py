@@ -13,6 +13,10 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, text, text_list
 from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, PostgresReadModelRepository
 
+PURPOSE_TEXT_LABELS = ("用途", "交易用途")
+SUMMARY_TEXT_LABELS = ("摘要",)
+NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
+
 
 class BankDetailSqlProjectionBuilder:
     def __init__(
@@ -199,6 +203,13 @@ class BankDetailSqlProjectionBuilder:
         direction = _direction(row.get("txn_direction"), row.get("signed_amount"))
         amount = decimal_text(row.get("amount")) or "0"
         signed_amount = decimal_text(row.get("signed_amount")) or ("-" + amount if direction == "expense" else amount)
+        text_fields = _bank_text_display_fields(
+            row.get("bank_text_fields"),
+            summary=text(row.get("summary")) or "",
+            remark=text(row.get("remark")) or "",
+            purpose="",
+            note="",
+        )
         return {
             "id": text(row.get("id")) or "",
             "transaction_id": text(row.get("transaction_id")) or text(row.get("id")) or "",
@@ -209,9 +220,9 @@ class BankDetailSqlProjectionBuilder:
             "account_last4": account_last4 or "unknown",
             "account_no": text(row.get("account_no")),
             "account_name": text(row.get("account_name")),
-            "trade_time": text(row.get("trade_time")),
+            "trade_time": _trade_time_text(row.get("trade_time")),
             "trade_date": text(row.get("txn_date") or row.get("trade_time")),
-            "trade_time_sort": text(row.get("trade_time_sort") or row.get("trade_time") or row.get("txn_date")),
+            "trade_time_sort": _trade_time_text(row.get("trade_time_sort") or row.get("trade_time") or row.get("txn_date")),
             "direction": direction,
             "direction_label": "收" if direction == "income" else "支",
             "amount": amount,
@@ -219,9 +230,13 @@ class BankDetailSqlProjectionBuilder:
             "balance": decimal_text(row.get("balance")),
             "currency": text(row.get("currency")) or "CNY",
             "counterparty_name": text(row.get("counterparty_name_raw") or row.get("normalized_counterparty_name")) or "",
-            "summary": text(row.get("summary")) or "",
+            "summary": text_fields["summary_text"],
             "remark": text(row.get("remark")) or "",
-            "purpose": text(row.get("remark")) or "",
+            "purpose": text_fields["purpose_text"] or text_fields["note_text"],
+            "purpose_text": text_fields["purpose_text"],
+            "summary_text": text_fields["summary_text"],
+            "note_text": text_fields["note_text"],
+            "bank_text_fields": row.get("bank_text_fields") if isinstance(row.get("bank_text_fields"), list) else [],
             "raw_payload": raw_payload,
         }
 
@@ -258,8 +273,11 @@ class BankDetailSqlProjectionBuilder:
             "direction_label": row["direction_label"],
             "amount": row["amount"],
             "balance": row.get("balance"),
-            "summary": row.get("summary") or "",
-            "purpose": row.get("purpose") or "",
+            "summary": row.get("summary_text") or row.get("summary") or "",
+            "purpose": row.get("purpose_text") or row.get("purpose") or row.get("note_text") or "",
+            "purpose_text": row.get("purpose_text") or "",
+            "summary_text": row.get("summary_text") or row.get("summary") or "",
+            "note_text": row.get("note_text") or "",
             "bank_name": row["bank_name"],
             "account_last4": row["account_last4"],
             "category_code": effective.get("effective_category_code"),
@@ -331,6 +349,63 @@ def _account_key(bank_name: str, account_last4: str) -> str:
     return f"{bank_name.lower().replace(' ', '-')}:{account_last4 or 'unknown'}"
 
 
+def _bank_text_display_fields(
+    bank_text_fields: Any,
+    *,
+    summary: str,
+    remark: str,
+    purpose: str,
+    note: str,
+) -> dict[str, str]:
+    fields_by_label = _bank_text_fields_by_label(bank_text_fields)
+    summary_text = _first_field_value(fields_by_label, SUMMARY_TEXT_LABELS) or summary
+    purpose_text = _first_field_value(fields_by_label, PURPOSE_TEXT_LABELS) or purpose
+    note_text = _first_field_value(fields_by_label, NOTE_TEXT_LABELS) or note
+    if not purpose_text and not note_text:
+        note_text = remark
+    return {
+        "purpose_text": purpose_text.strip(),
+        "summary_text": summary_text.strip(),
+        "note_text": note_text.strip(),
+    }
+
+
+def _bank_text_fields_by_label(value: Any) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    if isinstance(value, dict):
+        iterable = [{"label": label, "value": field_value} for label, field_value in value.items()]
+    else:
+        iterable = list(value or []) if isinstance(value, list) else []
+    for item in iterable:
+        if not isinstance(item, dict):
+            continue
+        label = text(item.get("label"))
+        field_value = text(item.get("value"))
+        if label and field_value and label not in fields:
+            fields[label] = field_value
+    return fields
+
+
+def _first_field_value(fields_by_label: dict[str, str], labels: tuple[str, ...]) -> str:
+    for label in labels:
+        value = fields_by_label.get(label)
+        if value:
+            return value
+    return ""
+
+
+def _trade_time_text(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None).isoformat(sep=" ")
+    value_text = text(value) or ""
+    normalized = value_text.replace("T", " ")
+    if len(normalized) >= 25 and normalized[19] in {"+", "-"} and normalized[20:22].isdigit() and normalized[23:25].isdigit():
+        return normalized[:19]
+    if normalized.endswith("Z") and len(normalized) >= 20:
+        return normalized[:19]
+    return normalized
+
+
 def _looks_like_oa_row(row_id: str) -> bool:
     return str(row_id).startswith(("oa-", "oa_", "OA"))
 
@@ -350,6 +425,9 @@ def _search_text(payload: dict[str, Any]) -> str:
         "balance",
         "summary",
         "purpose",
+        "purpose_text",
+        "summary_text",
+        "note_text",
         "bank_name",
         "account_last4",
         "category_label",

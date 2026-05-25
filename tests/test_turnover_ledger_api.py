@@ -83,28 +83,47 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         *,
         headers: dict[str, str] | None = None,
     ) -> None:
-        response = app.handle_request(
-            "PATCH",
-            "/api/bank-details/transactions/categories",
-            body=json.dumps(
+        _ = headers
+        app._bank_transaction_category_service.apply_updates(
+            [
                 {
-                    "updates": [
-                        {
-                            "transaction_id": transaction_ids[0],
-                            "category_code": "borrow_in_company_pending_repayment",
-                            "expected_version": 0,
-                        },
-                        {
-                            "transaction_id": transaction_ids[1],
-                            "category_code": "borrow_in_company_repaid",
-                            "expected_version": 0,
-                        },
-                    ]
-                }
-            ),
-            headers=headers,
+                    "transaction_id": transaction_ids[0],
+                    "category_code": "borrow_in_company_pending_repayment",
+                    "expected_version": 0,
+                },
+                {
+                    "transaction_id": transaction_ids[1],
+                    "category_code": "borrow_in_company_repaid",
+                    "expected_version": 0,
+                },
+            ],
+            actor="test",
         )
-        self.assertEqual(response.status_code, 200)
+        app._turnover_ledger_service._category_provider = None
+        app._state_store.save_bank_transaction_categories(app._bank_transaction_category_service.snapshot())
+        app._turnover_ledger_service.list_ledger()
+        app._state_store.save_turnover_relations(app._turnover_relation_service.snapshot())
+
+    def _seed_turnover_rows(self, app: Application, category_by_transaction_id: dict[str, str]) -> None:
+        rows: list[dict[str, object]] = []
+        for transaction in app._import_service.list_transactions(month="all"):
+            payload = app._serialize_value(transaction)
+            if not isinstance(payload, dict):
+                continue
+            transaction_id = str(payload.get("id") or "").strip()
+            category_code = category_by_transaction_id.get(transaction_id)
+            if not category_code:
+                continue
+            row = dict(payload)
+            row["category_code"] = category_code
+            amount = row.get("amount") or "0.00"
+            direction = str(row.get("txn_direction") or "").strip().lower()
+            row["debit_amount"] = amount if direction == "outflow" else "0.00"
+            row["credit_amount"] = amount if direction == "inflow" else "0.00"
+            row["counterparty_name"] = str(row.get("counterparty_name_raw") or row.get("counterparty_name") or "")
+            rows.append(row)
+        app._turnover_relation_service.rebuild_from_bank_rows(rows)
+        app._state_store.save_turnover_relations(app._turnover_relation_service.snapshot())
 
     def _import_and_tag_business_row(self, app: Application) -> str:
         preview = app._import_service.preview_import(
@@ -130,22 +149,20 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
         app._import_service.confirm_import(preview.id)
         transaction_id = app._import_service.list_transactions()[-1].id
-        response = app.handle_request(
-            "PATCH",
-            "/api/bank-details/transactions/categories",
-            body=json.dumps(
+        app._bank_transaction_category_service.apply_updates(
+            [
                 {
-                    "updates": [
-                        {
-                            "transaction_id": transaction_id,
-                            "category_code": "business_warranty_pending_collection",
-                            "expected_version": 0,
-                        }
-                    ]
+                    "transaction_id": transaction_id,
+                    "category_code": "business_warranty_pending_collection",
+                    "expected_version": 0,
                 }
-            ),
+            ],
+            actor="test",
         )
-        self.assertEqual(response.status_code, 200)
+        app._turnover_ledger_service._category_provider = None
+        app._state_store.save_bank_transaction_categories(app._bank_transaction_category_service.snapshot())
+        app._turnover_ledger_service.list_ledger()
+        app._state_store.save_turnover_relations(app._turnover_relation_service.snapshot())
         return transaction_id
 
     def test_get_turnover_ledger_returns_summary_rows_and_filters(self) -> None:
@@ -380,6 +397,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             restored_response = app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
             restored_payload = json.loads(restored_response.body)
             reloaded_app = build_application(data_dir=Path(temp_dir), bootstrap_mode="legacy")
+            reloaded_app._turnover_ledger_service._category_provider = None
             reloaded_response = reloaded_app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
             reloaded_payload = json.loads(reloaded_response.body)
 
@@ -596,7 +614,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["error"], "system_relation_cannot_withdraw")
 
-    def test_category_save_invalidates_turnover_relations_and_workbench_state(self) -> None:
+    def test_disabled_category_save_leaves_turnover_relations_unchanged(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -630,12 +648,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 if item["relation_id"] == relation["relation_id"]
             )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(payload["workbench_rebuild_queued"])
-        self.assertTrue(payload["turnover_relations_updated"])
-        self.assertTrue(payload["turnover_ledger_invalidated"])
-        self.assertEqual(restored_relation["status"], "conflict")
-        self.assertFalse(restored_relation["sync_to_workbench"])
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(payload["error"], "manual_bank_transaction_category_disabled")
+        self.assertEqual(restored_relation["status"], relation["status"])
+        self.assertEqual(restored_relation.get("sync_to_workbench"), relation.get("sync_to_workbench"))
 
     def test_state_store_round_trips_turnover_relations_locally(self) -> None:
         snapshot = {

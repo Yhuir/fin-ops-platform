@@ -146,7 +146,7 @@ export default function SettingsPendingInvoiceTagsSection({
           </Stack>
           <Stack spacing={1}>
             {activeDefinitions.length === 0 ? (
-              <Typography color="text.secondary" variant="body2">请先在银行明细标签管理中新增标签。</Typography>
+              <Typography color="text.secondary" variant="body2">当前分组未选择自动标签。</Typography>
             ) : activeDefinitions.map((tag) => (
               <Stack key={tag.code} direction="row" spacing={1} alignItems="center">
                 <Chip color={tag.issueLabel ? "error" : "default"} label={tag.label} variant={tag.issueLabel ? "outlined" : "filled"} />

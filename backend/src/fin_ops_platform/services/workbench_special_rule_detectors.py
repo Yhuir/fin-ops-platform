@@ -22,6 +22,7 @@ CASH_TURNOVER_TAG = "现金往来"
 EXTERNAL_TURNOVER_TAG = "外部往来款"
 MANUAL_TURNOVER_CATEGORY_CODES = {*BANK_TRANSACTION_CATEGORY_DEFINITIONS.keys(), "external_turnover"}
 OFFSET_TAG = "冲"
+OA_INVOICE_OFFSET_ALLOWED_APPLICANTS = {"周洁莹"}
 CASH_COUNTERPARTY_KEYWORDS = ("陈秀云", "太宏", "韦代连")
 CASH_FULL_TEXT_KEYWORDS = ("张双文公积金", "陈秀云社保")
 
@@ -41,12 +42,7 @@ class WorkbenchSpecialRuleDetector:
         invoices = [self._with_type(row, "invoice") for row in invoice_rows]
 
         evaluations: list[dict[str, Any]] = []
-        evaluations.extend(self._internal_transfer_pair(bank))
-        evaluations.extend(self._salary_personal_auto_match(bank))
         evaluations.extend(self._oa_invoice_offset_auto_match(oa, invoices, resolved_settings))
-        evaluations.extend(self._offset_category_evidence(bank))
-        evaluations.extend(self._cash_turnover_detected(bank))
-        evaluations.extend(self._external_turnover_evidence(bank))
         return self._dedupe_evaluations(evaluations)
 
     def _salary_personal_auto_match(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -153,6 +149,7 @@ class WorkbenchSpecialRuleDetector:
             for name in list(settings.get("offset_applicant_names") or settings.get("offset_applicants") or [])
             if str(name).strip()
         }
+        applicant_names &= OA_INVOICE_OFFSET_ALLOWED_APPLICANTS
         if not applicant_names:
             return []
         evaluations: list[dict[str, Any]] = []

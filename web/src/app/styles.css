@@ -6838,7 +6838,7 @@ body.column-layout-dragging {
 
 .bank-details-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+  grid-template-columns: minmax(196px, 224px) minmax(0, 1fr);
   gap: 16px;
   align-items: stretch;
   flex: 1 1 auto;
@@ -7198,28 +7198,25 @@ body.column-layout-dragging {
   background: var(--bank-surface);
 }
 
-.bank-transaction-grid .MuiDataGrid-root {
+.bank-transaction-table-container {
   flex: 1 1 auto;
-  height: 100%;
   width: 100%;
-  border: 0;
-  border-radius: 0;
-  background: var(--bank-surface);
-  color: var(--bank-text);
-  font-size: 13px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.bank-transaction-grid .MuiDataGrid-toolbarContainer {
-  align-items: stretch;
-  height: auto;
-  min-height: 104px;
-  overflow: visible;
-  padding: 8px 10px 12px;
-  border-bottom: 1px solid var(--bank-border-subtle);
+.bank-transaction-table {
+  table-layout: fixed;
+  width: 100%;
+  background: var(--bank-surface);
+  color: var(--bank-text);
 }
 
 .bank-grid-toolbar {
   display: block;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--bank-border-subtle);
 }
 
 .bank-grid-toolbar-content {
@@ -7268,42 +7265,32 @@ body.column-layout-dragging {
   max-width: min(440px, 100%);
 }
 
-.bank-transaction-grid .MuiDataGrid-main {
-  min-height: 0;
-}
-
-.bank-transaction-grid .MuiDataGrid-columnHeaders {
+.bank-transaction-table .MuiTableCell-head {
   border-bottom: 1px solid var(--bank-border);
   background: #e8eef6;
   color: var(--bank-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-.bank-transaction-grid .MuiDataGrid-columnHeader {
+.bank-transaction-table .MuiTableCell-root {
+  padding: 8px 7px;
+  border-bottom-color: var(--bank-border-subtle);
+  color: var(--bank-text);
+  font-size: 12.5px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+  white-space: normal;
+}
+
+.bank-transaction-table .MuiTableCell-stickyHeader {
   background: #e8eef6;
 }
 
-.bank-transaction-grid .MuiDataGrid-cell {
-  border-bottom-color: var(--bank-border-subtle);
-  color: var(--bank-text);
-  line-height: 1.25;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.bank-transaction-grid-readable .MuiDataGrid-cell {
-  padding-top: 10px;
-  padding-bottom: 10px;
-}
-
-.bank-transaction-grid .MuiDataGrid-cell,
-.bank-transaction-grid .MuiDataGrid-columnHeaderTitle {
-  font-size: 13px;
-}
-
 .bank-counterparty-cell,
-.bank-amount-cell,
-.bank-summary-purpose-cell {
+.bank-amount-cell {
   height: 100%;
   min-height: 100%;
 }
@@ -7330,43 +7317,65 @@ body.column-layout-dragging {
   line-height: 1.1;
 }
 
-.bank-summary-purpose-cell .MuiTypography-root {
+.bank-table-text-cell {
+  display: block;
   overflow-wrap: anywhere;
   line-height: 1.2;
   white-space: normal;
 }
 
-.bank-transaction-grid .MuiDataGrid-columnHeaderTitle {
-  font-weight: 600;
-}
-
 .bank-transaction-grid .bank-grid-row-even,
-.bank-transaction-grid .MuiDataGrid-row:nth-of-type(even) {
+.bank-transaction-table .MuiTableBody-root .MuiTableRow-root:nth-of-type(odd) {
   background: #ffffff;
 }
 
 .bank-transaction-grid .bank-grid-row-odd,
-.bank-transaction-grid .MuiDataGrid-row:nth-of-type(odd) {
+.bank-transaction-table .MuiTableBody-root .MuiTableRow-root:nth-of-type(even) {
   background: #f7f8fa;
 }
 
-.bank-transaction-grid .MuiDataGrid-row:hover,
 .bank-transaction-grid .bank-grid-row-even:hover,
-.bank-transaction-grid .bank-grid-row-odd:hover {
+.bank-transaction-grid .bank-grid-row-odd:hover,
+.bank-transaction-table .MuiTableBody-root .MuiTableRow-hover:hover {
   background: var(--bank-hover);
 }
 
-.bank-transaction-grid .MuiDataGrid-row.Mui-selected,
-.bank-transaction-grid .MuiDataGrid-row.Mui-selected:hover {
-  background: var(--bank-selected);
+.bank-col-counterparty {
+  width: 24%;
 }
 
-.bank-transaction-grid .MuiDataGrid-cell:focus,
-.bank-transaction-grid .MuiDataGrid-cell:focus-within,
-.bank-transaction-grid .MuiDataGrid-columnHeader:focus,
-.bank-transaction-grid .MuiDataGrid-columnHeader:focus-within {
-  outline: 2px solid var(--bank-blue);
-  outline-offset: -2px;
+.bank-col-type {
+  width: 66px;
+}
+
+.bank-col-amount {
+  width: 120px;
+}
+
+.bank-col-balance {
+  width: 98px;
+}
+
+.bank-col-purpose {
+  width: 14%;
+}
+
+.bank-col-summary {
+  width: 15%;
+}
+
+.bank-col-note {
+  width: 16%;
+}
+
+.bank-auto-type-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  color: var(--bank-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .bank-details-page .direction-tag {

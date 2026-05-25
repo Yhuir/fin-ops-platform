@@ -1,13 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type MouseEvent } from "react";
-import Alert from "@mui/material/Alert";
+import { Fragment, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type MouseEvent } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogContentText from "@mui/material/DialogContentText";
-import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
 import Popover from "@mui/material/Popover";
 import Paper from "@mui/material/Paper";
@@ -15,23 +9,18 @@ import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemText from "@mui/material/ListItemText";
-import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TablePagination from "@mui/material/TablePagination";
+import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
-import {
-  DataGrid,
-  GridToolbarColumnsButton,
-  GridToolbarContainer,
-  GridToolbarExport,
-  GridToolbarFilterButton,
-  type GridColDef,
-  type GridLocaleText,
-  type GridPaginationModel,
-} from "@mui/x-data-grid";
-import { zhCN } from "@mui/x-data-grid/locales";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
@@ -39,11 +28,9 @@ import dayjs from "dayjs";
 import StatePanel from "../components/common/StatePanel";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
-import BankCategoryPicker from "../features/bankDetails/BankCategoryPicker";
-import { fetchBankDetailAccounts, fetchBankDetailTransactions, saveBankTransactionCategories } from "../features/bankDetails/api";
+import { fetchBankDetailAccounts, fetchBankDetailTransactions } from "../features/bankDetails/api";
 import {
   FINANCE_DOMAIN_EVENTS,
-  emitFinanceDomainEvent,
   eventAffectedMonths,
   subscribeFinanceDomainEvent,
 } from "../features/domainEvents";
@@ -64,58 +51,20 @@ const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 const FEATURED_CATEGORY_CODES: BankTransactionCategoryCode[] = [
   "fee",
   "salary",
-  "internal_transfer",
 ];
 const EMPTY_CATEGORY_COUNTS: BankTransactionCategoryCounts = { uncategorized: 0 };
-
-const DATA_GRID_LOCALE_TEXT: Partial<GridLocaleText> = {
-  ...zhCN.components.MuiDataGrid.defaultProps.localeText,
-  toolbarQuickFilterPlaceholder: "搜索流水",
-  filterPanelOperator: "条件",
-  filterPanelInputLabel: "值",
-  filterPanelInputPlaceholder: "输入筛选值",
-  paginationRowsPerPage: "每页行数",
-  paginationDisplayedRows: ({ from, to, count }) => `${from}-${to} / ${count === -1 ? `超过 ${to}` : count}`,
-};
-
-type SavedCategoryState = {
-  categoryCode: BankTransactionCategoryCode | null;
-  categoryLabel: string | null;
-  categoryPath: string[];
-  categorySource: string;
-  categoryVersion: number | null;
-  effectiveCategoryCode: BankTransactionCategoryCode | null;
-  effectiveCategoryLabel: string | null;
-  effectiveCategoryPath: string[];
-  effectiveCategorySource: string;
-};
-
-type PendingNavigation = {
-  run: () => void;
-};
 
 type CategorySummaryItem = {
   code: BankTransactionCategoryCode;
   label: string;
 };
 
-type BankDetailsGridToolbarProps = {
+type BankDetailsTableToolbarProps = {
   effectiveCategoryCounts: BankTransactionCategoryCounts;
-  dirtyCount: number;
   visibleCategorySummary: CategorySummaryItem[];
   searchKeyword: string;
   onSearchKeywordChange: (value: string) => void;
 };
-
-declare module "@mui/x-data-grid" {
-  interface ToolbarPropsOverrides {
-    effectiveCategoryCounts?: BankTransactionCategoryCounts;
-    dirtyCount?: number;
-    visibleCategorySummary?: CategorySummaryItem[];
-    searchKeyword?: string;
-    onSearchKeywordChange?: (value: string) => void;
-  }
-}
 
 function formatDate(date: Date) {
   const year = date.getFullYear();
@@ -263,25 +212,23 @@ function isBankDateFilter(value: unknown): value is BankDateFilter {
 
 function EmptyTransactionOverlay() {
   return (
-    <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", px: 2, textAlign: "center" }}>
+    <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 240, px: 2, textAlign: "center" }}>
       <Typography color="text.secondary">当前时间范围内没有流水。</Typography>
     </Stack>
   );
 }
 
-function BankDetailsGridToolbar({
+function BankDetailsTableToolbar({
   effectiveCategoryCounts = EMPTY_CATEGORY_COUNTS,
-  dirtyCount = 0,
   visibleCategorySummary = [],
   searchKeyword = "",
   onSearchKeywordChange = () => undefined,
-}: Partial<BankDetailsGridToolbarProps>) {
+}: Partial<BankDetailsTableToolbarProps>) {
   return (
-    <GridToolbarContainer className="bank-grid-toolbar">
+    <Box className="bank-grid-toolbar">
       <Stack className="bank-grid-toolbar-content" spacing={1}>
         <Stack className="bank-grid-category-summary" direction="row" gap={0.4}>
           <BankCategoryTag categoryCode={null} compact label="未分类" count={effectiveCategoryCounts.uncategorized} />
-          <Chip className="bank-dirty-count-chip bank-chip-auto-size" label={`未保存 ${dirtyCount}`} size="small" color={dirtyCount > 0 ? "warning" : "default"} variant="outlined" />
           {visibleCategorySummary.map((option) => (
             <BankCategoryTag
               key={option.code}
@@ -293,9 +240,6 @@ function BankDetailsGridToolbar({
           ))}
         </Stack>
         <Stack className="bank-grid-toolbar-actions" direction="row" spacing={0.5} alignItems="center">
-          <GridToolbarColumnsButton />
-          <GridToolbarFilterButton />
-          <GridToolbarExport printOptions={{ disableToolbarButton: true }} />
           <TextField
             className="bank-grid-search-field"
             size="small"
@@ -306,58 +250,8 @@ function BankDetailsGridToolbar({
           />
         </Stack>
       </Stack>
-    </GridToolbarContainer>
+    </Box>
   );
-}
-
-function hasOwnDraft(
-  drafts: Partial<Record<string, BankTransactionCategoryCode | null>>,
-  rowId: string,
-) {
-  return Object.prototype.hasOwnProperty.call(drafts, rowId);
-}
-
-function categoryCountKey(categoryCode: BankTransactionCategoryCode | null) {
-  return categoryCode ?? "uncategorized";
-}
-
-function baseCategoryCodeForCounts(savedCategory: SavedCategoryState | undefined) {
-  if (!savedCategory) {
-    return null;
-  }
-  return savedCategory.categorySource === "manual"
-    ? savedCategory.categoryCode
-    : savedCategory.effectiveCategoryCode;
-}
-
-function applyDirtyCategoryCounts(
-  counts: BankTransactionCategoryCounts,
-  savedCategoryByRowId: Record<string, SavedCategoryState>,
-  draftCategoryByRowId: Partial<Record<string, BankTransactionCategoryCode | null>>,
-): BankTransactionCategoryCounts {
-  const next = { ...counts };
-  Object.entries(draftCategoryByRowId).forEach(([rowId, draftCategoryCode]) => {
-    const savedCategoryCode = baseCategoryCodeForCounts(savedCategoryByRowId[rowId]);
-    if (savedCategoryCode === draftCategoryCode) {
-      return;
-    }
-    const savedKey = categoryCountKey(savedCategoryCode);
-    const draftKey = categoryCountKey(draftCategoryCode ?? null);
-    next[savedKey] = Math.max(0, (next[savedKey] ?? 0) - 1);
-    next[draftKey] = (next[draftKey] ?? 0) + 1;
-  });
-  return next;
-}
-
-function categoryLabelForCode(
-  categoryCode: BankTransactionCategoryCode | null,
-  categoryOptions: BankTransactionTagDefinition[],
-  fallback?: string | null,
-) {
-  if (!categoryCode) {
-    return null;
-  }
-  return fallback?.trim() || categoryOptions.find((option) => option.code === categoryCode)?.label || categoryCode;
 }
 
 function counterpartyNameDensity(name: string) {
@@ -371,105 +265,26 @@ function counterpartyNameDensity(name: string) {
   return "regular";
 }
 
-const baseTransactionColumns: GridColDef<BankDetailTransaction>[] = [
-  {
-    field: "counterpartyName",
-    headerName: "对方户名",
-    width: 260,
-    minWidth: 230,
-    renderCell: ({ row }) => (
-      <Stack className="bank-counterparty-cell" justifyContent="center" spacing={0.5} sx={{ minWidth: 0, width: "100%" }}>
-        <Typography
-          className={`bank-counterparty-name ${counterpartyNameDensity(row.counterpartyName)}`}
-          component="span"
-          variant="body2"
-          fontWeight={750}
-        >
-          {row.counterpartyName}
-        </Typography>
-        <Stack className="bank-relation-chip-row" direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
-          <Chip className="bank-trade-time-chip bank-trade-time-chip-full bank-chip-auto-size" label={row.tradeTime} size="small" variant="outlined" />
-          {row.relationTags.map((tag) => (
-            <Chip
-              key={`${row.id}-${tag}`}
-              className={`bank-relation-tag bank-relation-tag-${relationTagTone(tag)} bank-chip-auto-size`}
-              label={tag}
-              size="small"
-              variant="outlined"
-            />
-          ))}
-        </Stack>
-      </Stack>
-    ),
-  },
-  {
-    field: "amount",
-    headerName: "金额",
-    width: 148,
-    minWidth: 140,
-    align: "right",
-    headerAlign: "right",
-    renderCell: ({ row }) => (
-      <Stack className="bank-amount-cell" alignItems="stretch" justifyContent="center" spacing={0.5} sx={{ width: "100%" }}>
-        <Stack className="bank-amount-line" direction="row" alignItems="center" spacing={0.75}>
-          <Chip
-            className={`direction-tag bank-direction-tag-centered bank-chip-auto-size ${row.direction}`}
-            label={row.directionLabel}
-            size="small"
-            variant="filled"
-          />
-          <Typography component="span" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
-            {formatMoney(row.amount)}
-          </Typography>
-        </Stack>
-        <Chip className="bank-source-chip bank-chip-auto-size" label={`${row.bankName} ${row.accountLast4}`} size="small" variant="outlined" />
-      </Stack>
-    ),
-  },
-  {
-    field: "balance",
-    headerName: "余额",
-    width: 112,
-    minWidth: 96,
-    align: "right",
-    headerAlign: "right",
-    valueFormatter: (value) => formatMoney(value as string | null),
-  },
-  {
-    field: "summaryPurpose",
-    headerName: "摘要/用途",
-    minWidth: 210,
-    flex: 1,
-    valueGetter: (_value, row) => [row.summary, row.purpose].map((value) => value.trim()).filter(Boolean).join(" "),
-    renderCell: ({ row }) => (
-      <Stack className="bank-summary-purpose-cell" justifyContent="center" spacing={0.5} sx={{ minWidth: 0, width: "100%" }}>
-        {row.summary.trim() ? (
-          <Typography component="span" variant="body2">
-            {row.summary}
-          </Typography>
-        ) : null}
-        {row.purpose.trim() ? (
-          <Typography component="span" variant="caption" color="text.secondary">
-            {row.purpose}
-          </Typography>
-        ) : null}
-      </Stack>
-    ),
-  },
-  {
-    field: "actions",
-    headerName: "操作",
-    width: 68,
-    minWidth: 64,
-    sortable: false,
-    filterable: false,
-    align: "center",
-    headerAlign: "center",
-    renderCell: () => (
-      <Button size="small" variant="text">详情</Button>
-    ),
-  },
-];
+function TypeCell({ row }: { row: BankDetailTransaction }) {
+  if (!row.autoCategoryCode || !row.autoCategoryLabel) {
+    return <Typography className="bank-auto-type-empty" component="span">-</Typography>;
+  }
+  return (
+    <BankCategoryTag
+      categoryCode={row.autoCategoryCode}
+      compact
+      label={row.autoCategoryLabel}
+    />
+  );
+}
+
+function BankTextCell({ value }: { value: string }) {
+  return (
+    <Typography className="bank-table-text-cell" component="span" variant="body2">
+      {value.trim() || "-"}
+    </Typography>
+  );
+}
 
 export default function BankDetailsPage() {
   const selectedAccountSession = usePageSessionState<string | null>({
@@ -512,7 +327,7 @@ export default function BankDetailsPage() {
   const setMonthValue = monthValueSession.setValue;
   const [rows, setRows] = useState<BankDetailTransaction[]>([]);
   const [rowCount, setRowCount] = useState(0);
-  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({
+  const [paginationModel, setPaginationModel] = useState({
     page: 0,
     pageSize: DEFAULT_PAGE_SIZE,
   });
@@ -524,19 +339,9 @@ export default function BankDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [categoryCounts, setCategoryCounts] = useState<BankTransactionCategoryCounts>(EMPTY_CATEGORY_COUNTS);
   const [categoryOptions, setCategoryOptions] = useState<BankTransactionTagDefinition[]>([]);
-  const [savedCategoryByRowId, setSavedCategoryByRowId] = useState<Record<string, SavedCategoryState>>({});
-  const [draftCategoryByRowId, setDraftCategoryByRowId] = useState<Partial<Record<string, BankTransactionCategoryCode | null>>>({});
-  const draftCategoryByRowIdRef = useRef(draftCategoryByRowId);
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
-  const [savingCategories, setSavingCategories] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
-  const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
   const [dateFilterAnchorEl, setDateFilterAnchorEl] = useState<HTMLElement | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
-
-  useEffect(() => {
-    draftCategoryByRowIdRef.current = draftCategoryByRowId;
-  }, [draftCategoryByRowId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -614,25 +419,6 @@ export default function BankDetailsPage() {
           tagVersionRef.current = payload.tagDictionary.version;
           persistTagVersion(payload.tagDictionary.version);
         }
-        setSavedCategoryByRowId((current) => {
-          const next = { ...current };
-          payload.rows.forEach((row) => {
-            if (!hasOwnDraft(draftCategoryByRowIdRef.current, row.id)) {
-              next[row.id] = {
-                categoryCode: row.categoryCode,
-                categoryLabel: row.categoryLabel,
-                categoryPath: row.categoryPath,
-                categorySource: row.categorySource,
-                categoryVersion: row.categoryVersion,
-                effectiveCategoryCode: row.effectiveCategoryCode,
-                effectiveCategoryLabel: row.effectiveCategoryLabel,
-                effectiveCategoryPath: row.effectiveCategoryPath,
-                effectiveCategorySource: row.effectiveCategorySource,
-              };
-            }
-          });
-          return next;
-        });
       })
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
@@ -696,15 +482,7 @@ export default function BankDetailsPage() {
     };
   }, []);
 
-  const dirtyEntries = useMemo(
-    () => Object.entries(draftCategoryByRowId).filter((entry): entry is [string, BankTransactionCategoryCode | null] => entry[1] !== undefined),
-    [draftCategoryByRowId],
-  );
-  const dirtyCount = dirtyEntries.length;
-  const effectiveCategoryCounts = useMemo(
-    () => applyDirtyCategoryCounts(categoryCounts, savedCategoryByRowId, draftCategoryByRowId),
-    [categoryCounts, draftCategoryByRowId, savedCategoryByRowId],
-  );
+  const effectiveCategoryCounts = categoryCounts;
   const visibleCategorySummary = useMemo<CategorySummaryItem[]>(() => {
     const labelByCode = new Map(categoryOptions.map((option) => [option.code, option.label]));
     const featured = FEATURED_CATEGORY_CODES.map((code) => ({
@@ -723,18 +501,6 @@ export default function BankDetailsPage() {
     return [...featured, ...active];
   }, [categoryOptions, effectiveCategoryCounts]);
 
-  useEffect(() => {
-    if (dirtyCount === 0) {
-      return undefined;
-    }
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [dirtyCount]);
-
   const selectedAccount = useMemo(
     () => accountsData.accounts.find((account) => account.accountKey === selectedAccountKey) ?? null,
     [accountsData.accounts, selectedAccountKey],
@@ -747,37 +513,23 @@ export default function BankDetailsPage() {
   const currentViewTitle = isAllAccountsSelected ? "全部流水" : selectedAccount?.displayName ?? "账户流水";
   const dateFilterOpen = Boolean(dateFilterAnchorEl);
 
-  const totalPages = Math.max(1, Math.ceil(rowCount / paginationModel.pageSize));
-
   const resetToFirstPage = () => {
     setPaginationModel((current) => (
       current.page === 0 ? current : { ...current, page: 0 }
     ));
   };
 
-  const guardDirtyNavigation = (run: () => void) => {
-    if (dirtyCount > 0) {
-      setPendingNavigation({ run });
-      return;
-    }
-    run();
-  };
-
   const applyDateFilter = (nextFilter: BankDateFilter | ((current: BankDateFilter) => BankDateFilter)) => {
-    guardDirtyNavigation(() => {
-      resetToFirstPage();
-      setDateFilter(nextFilter);
-    });
+    resetToFirstPage();
+    setDateFilter(nextFilter);
   };
 
   const handleAccountSelect = (accountKey: string) => {
     if (accountKey === selectedAccountKey) {
       return;
     }
-    guardDirtyNavigation(() => {
-      resetToFirstPage();
-      setSelectedAccountKey(accountKey);
-    });
+    resetToFirstPage();
+    setSelectedAccountKey(accountKey);
   };
 
   const handleSearchKeywordChange = (value: string) => {
@@ -808,11 +560,9 @@ export default function BankDetailsPage() {
       setMonthValue(value);
       return;
     }
-    guardDirtyNavigation(() => {
-      setMonthValue(value);
-      resetToFirstPage();
-      setDateFilter(createDateFilter("month", value));
-    });
+    setMonthValue(value);
+    resetToFirstPage();
+    setDateFilter(createDateFilter("month", value));
   };
 
   const handleCustomDateChange = (key: "dateFrom" | "dateTo", value: string) => {
@@ -827,147 +577,6 @@ export default function BankDetailsPage() {
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
       handleCustomDateChange(key, value);
     }
-  };
-
-  const displayCategoryForRow = useCallback((row: BankDetailTransaction) => {
-    if (hasOwnDraft(draftCategoryByRowId, row.id)) {
-      const categoryCode = draftCategoryByRowId[row.id] ?? null;
-      return {
-        categoryCode,
-        categoryLabel: categoryLabelForCode(categoryCode, categoryOptions),
-        categorySource: "draft",
-      };
-    }
-    const savedCategory = savedCategoryByRowId[row.id];
-    if (savedCategory?.categorySource === "manual") {
-      return {
-        categoryCode: savedCategory.categoryCode,
-        categoryLabel: categoryLabelForCode(savedCategory.categoryCode, categoryOptions, savedCategory.categoryLabel),
-        categorySource: savedCategory.categorySource,
-      };
-    }
-    return {
-      categoryCode: savedCategory?.effectiveCategoryCode ?? row.effectiveCategoryCode ?? null,
-      categoryLabel: categoryLabelForCode(
-        savedCategory?.effectiveCategoryCode ?? row.effectiveCategoryCode ?? null,
-        categoryOptions,
-        savedCategory?.effectiveCategoryLabel ?? row.effectiveCategoryLabel,
-      ),
-      categorySource: savedCategory?.effectiveCategorySource ?? row.effectiveCategorySource,
-    };
-  }, [categoryOptions, draftCategoryByRowId, savedCategoryByRowId]);
-
-  const handleCategoryChange = useCallback((row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode | null) => {
-    const savedCategory = savedCategoryByRowId[row.id];
-    const savedCategoryCode = savedCategory?.categorySource === "manual"
-      ? savedCategory.categoryCode
-      : savedCategory?.effectiveCategoryCode ?? row.effectiveCategoryCode ?? null;
-    setDraftCategoryByRowId((current) => {
-      const next = { ...current };
-      if (categoryCode === savedCategoryCode) {
-        delete next[row.id];
-      } else {
-        next[row.id] = categoryCode;
-      }
-      return next;
-    });
-  }, [savedCategoryByRowId]);
-
-  const transactionColumns = useMemo<GridColDef<BankDetailTransaction>[]>(() => {
-    const [counterpartyColumn, ...remainingColumns] = baseTransactionColumns;
-    return [
-      counterpartyColumn,
-      {
-        field: "categoryCode",
-        headerName: "类型",
-        width: 176,
-        minWidth: 156,
-        sortable: false,
-        filterable: false,
-        renderCell: ({ row }) => {
-          const currentCategory = displayCategoryForRow(row);
-          return (
-            <BankCategoryPicker
-              rowId={row.id}
-              categoryCode={currentCategory.categoryCode}
-              categoryLabel={currentCategory.categoryLabel}
-              categorySource={currentCategory.categorySource}
-              categoryOptions={categoryOptions}
-              onChange={(nextCategoryCode) => handleCategoryChange(row, nextCategoryCode)}
-            />
-          );
-        },
-      },
-      ...remainingColumns,
-    ];
-  }, [categoryOptions, displayCategoryForRow, handleCategoryChange]);
-
-  const saveCategoryChanges = useCallback(async () => {
-    if (dirtyEntries.length === 0) {
-      return true;
-    }
-    setSavingCategories(true);
-    try {
-      const response = await saveBankTransactionCategories({
-        updates: dirtyEntries.map(([transactionId, categoryCode]) => ({
-          transactionId,
-          categoryCode,
-          expectedVersion: savedCategoryByRowId[transactionId]?.categoryVersion ?? null,
-        })),
-      });
-      const nextCounts = effectiveCategoryCounts;
-      setSavedCategoryByRowId((current) => {
-        const next = { ...current };
-        response.updatedCategories.forEach((category) => {
-          next[category.transactionId] = {
-            categoryCode: category.categoryCode,
-            categoryLabel: category.categoryLabel,
-            categoryPath: category.categoryPath,
-            categorySource: "manual",
-            categoryVersion: category.version,
-            effectiveCategoryCode: category.categoryCode,
-            effectiveCategoryLabel: category.categoryLabel,
-            effectiveCategoryPath: category.categoryPath,
-            effectiveCategorySource: category.categoryCode ? "manual" : "",
-          };
-        });
-        return next;
-      });
-      setCategoryCounts(nextCounts);
-      setDraftCategoryByRowId({});
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
-        affectedMonths: response.affectedMonths,
-        source: "bank_details_category_save",
-      });
-      setSnackbar({ severity: "success", message: "分类已保存" });
-      return true;
-    } catch (caught) {
-      setSnackbar({
-        severity: "error",
-        message: caught instanceof Error ? caught.message : "分类保存失败",
-      });
-      return false;
-    } finally {
-      setSavingCategories(false);
-    }
-  }, [dirtyEntries, effectiveCategoryCounts, savedCategoryByRowId]);
-
-  const continuePendingNavigation = () => {
-    const navigation = pendingNavigation;
-    setPendingNavigation(null);
-    navigation?.run();
-  };
-
-  const handleSaveAndContinue = async () => {
-    const saved = await saveCategoryChanges();
-    if (saved) {
-      continuePendingNavigation();
-    }
-  };
-
-  const handleDiscardAndContinue = () => {
-    setDraftCategoryByRowId({});
-    continuePendingNavigation();
   };
 
   return (
@@ -1107,25 +716,6 @@ export default function BankDetailsPage() {
                       {dateFilter.dateFrom} - {dateFilter.dateTo}
                     </Button>
                   </Stack>
-                  <Stack className="bank-category-actions" direction="row" flexWrap="wrap" gap={0.75}>
-                    <Button
-                      loading={savingCategories}
-                      disabled={dirtyCount === 0 || savingCategories}
-                      size="small"
-                      variant="contained"
-                      onClick={() => void saveCategoryChanges()}
-                    >
-                      保存分类
-                    </Button>
-                    <Button
-                      disabled={dirtyCount === 0 || savingCategories}
-                      size="small"
-                      variant="outlined"
-                      onClick={() => setDraftCategoryByRowId({})}
-                    >
-                      撤销更改
-                    </Button>
-                  </Stack>
                 </Stack>
               </Stack>
             </Stack>
@@ -1133,45 +723,116 @@ export default function BankDetailsPage() {
             <Divider />
 
             <Box className="bank-transaction-grid bank-transaction-grid-readable">
-              <DataGrid
-                aria-label="交易流水"
-                columns={transactionColumns}
-                rows={rows}
-                loading={rowLoading}
-                disableRowSelectionOnClick
-                rowHeight={80}
-                columnHeaderHeight={44}
-                columnBufferPx={360}
-                paginationMode="server"
-                rowCount={rowCount}
-                paginationModel={paginationModel}
-                onPaginationModelChange={setPaginationModel}
-                pageSizeOptions={[25, 50, 100]}
-                showToolbar
-                getRowClassName={(params) => (params.indexRelativeToCurrentPage % 2 === 0 ? "bank-grid-row-even" : "bank-grid-row-odd")}
-                localeText={DATA_GRID_LOCALE_TEXT}
-                slots={{
-                  toolbar: BankDetailsGridToolbar,
-                  noRowsOverlay: EmptyTransactionOverlay,
+              <BankDetailsTableToolbar
+                effectiveCategoryCounts={effectiveCategoryCounts}
+                visibleCategorySummary={visibleCategorySummary}
+                searchKeyword={searchInput}
+                onSearchKeywordChange={handleSearchKeywordChange}
+              />
+              <TableContainer className="bank-transaction-table-container">
+                <Table aria-label="交易流水" className="bank-transaction-table" size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell className="bank-col-counterparty">对方户名</TableCell>
+                      <TableCell align="center" className="bank-col-type">类型</TableCell>
+                      <TableCell align="right" className="bank-col-amount">金额</TableCell>
+                      <TableCell align="right" className="bank-col-balance">余额</TableCell>
+                      <TableCell className="bank-col-purpose">用途/交易用途</TableCell>
+                      <TableCell className="bank-col-summary">摘要</TableCell>
+                      <TableCell className="bank-col-note">备注/附言/客户附言</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {rowLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={7}>
+                          <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 220 }}>
+                            <Typography color="text.secondary">正在加载流水。</Typography>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                    {!rowLoading && rows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7}>
+                          <EmptyTransactionOverlay />
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                    {!rowLoading && rows.map((row, index) => (
+                      <TableRow
+                        className={index % 2 === 0 ? "bank-grid-row-even" : "bank-grid-row-odd"}
+                        hover
+                        key={row.id}
+                      >
+                        <TableCell className="bank-col-counterparty">
+                          <Stack className="bank-counterparty-cell" justifyContent="center" spacing={0.5} sx={{ minWidth: 0, width: "100%" }}>
+                            <Typography
+                              className={`bank-counterparty-name ${counterpartyNameDensity(row.counterpartyName)}`}
+                              component="span"
+                              variant="body2"
+                              fontWeight={750}
+                            >
+                              {row.counterpartyName}
+                            </Typography>
+                            <Stack className="bank-relation-chip-row" direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
+                              <Chip className="bank-trade-time-chip bank-trade-time-chip-full bank-chip-auto-size" label={row.tradeTime} size="small" variant="outlined" />
+                              {row.relationTags.map((tag) => (
+                                <Chip
+                                  key={`${row.id}-${tag}`}
+                                  className={`bank-relation-tag bank-relation-tag-${relationTagTone(tag)} bank-chip-auto-size`}
+                                  label={tag}
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              ))}
+                            </Stack>
+                          </Stack>
+                        </TableCell>
+                        <TableCell align="center" className="bank-col-type">
+                          <TypeCell row={row} />
+                        </TableCell>
+                        <TableCell align="right" className="bank-col-amount">
+                          <Stack className="bank-amount-cell" alignItems="stretch" justifyContent="center" spacing={0.5} sx={{ width: "100%" }}>
+                            <Stack className="bank-amount-line" direction="row" alignItems="center" justifyContent="flex-end" spacing={0.75}>
+                              <Chip
+                                className={`direction-tag bank-direction-tag-centered bank-chip-auto-size ${row.direction}`}
+                                label={row.directionLabel}
+                                size="small"
+                                variant="filled"
+                              />
+                              <Typography component="span" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
+                                {formatMoney(row.amount)}
+                              </Typography>
+                            </Stack>
+                            <Chip className="bank-source-chip bank-chip-auto-size" label={`${row.bankName} ${row.accountLast4}`} size="small" variant="outlined" />
+                          </Stack>
+                        </TableCell>
+                        <TableCell align="right" className="bank-col-balance">
+                          <Typography component="span" variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                            {formatMoney(row.balance)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell className="bank-col-purpose"><BankTextCell value={row.purposeText} /></TableCell>
+                        <TableCell className="bank-col-summary"><BankTextCell value={row.summaryText} /></TableCell>
+                        <TableCell className="bank-col-note"><BankTextCell value={row.noteText} /></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <TablePagination
+                component="div"
+                count={rowCount}
+                labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count === -1 ? `超过 ${to}` : count}`}
+                labelRowsPerPage="每页行数"
+                onPageChange={(_event, page) => setPaginationModel((current) => ({ ...current, page }))}
+                onRowsPerPageChange={(event) => {
+                  setPaginationModel({ page: 0, pageSize: Number(event.target.value) });
                 }}
-                slotProps={{
-                  toolbar: {
-                    effectiveCategoryCounts,
-                    dirtyCount,
-                    visibleCategorySummary,
-                    searchKeyword: searchInput,
-                    onSearchKeywordChange: handleSearchKeywordChange,
-                  },
-                }}
-                sx={{
-                  height: "100%",
-                  borderColor: "#c6c6c6",
-                  borderRadius: 0,
-                  "--DataGrid-overlayHeight": "320px",
-                  "& .MuiDataGrid-columnHeaders": {
-                    backgroundColor: "#f4f4f4",
-                  },
-                }}
+                page={paginationModel.page}
+                rowsPerPage={paginationModel.pageSize}
+                rowsPerPageOptions={[25, 50, 100]}
               />
             </Box>
           </Paper>
@@ -1258,45 +919,6 @@ export default function BankDetailsPage() {
           />
         </Stack>
       </Popover>
-      <Dialog
-        aria-labelledby="bank-category-dirty-dialog-title"
-        open={pendingNavigation !== null}
-        onClose={() => setPendingNavigation(null)}
-      >
-        <DialogTitle id="bank-category-dirty-dialog-title">有未保存的分类变动</DialogTitle>
-        <DialogContent>
-          <DialogContentText>当前有 {dirtyCount} 条未保存分类变动。</DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPendingNavigation(null)}>取消</Button>
-          <Button color="warning" onClick={handleDiscardAndContinue}>放弃变动</Button>
-          <Button
-            loading={savingCategories}
-            disabled={savingCategories}
-            variant="contained"
-            onClick={() => void handleSaveAndContinue()}
-          >
-            保存并继续
-          </Button>
-        </DialogActions>
-      </Dialog>
-      <Snackbar
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-        autoHideDuration={4000}
-        open={snackbar !== null}
-        onClose={() => setSnackbar(null)}
-      >
-        {snackbar ? (
-          <Alert
-            severity={snackbar.severity}
-            variant="filled"
-            onClose={() => setSnackbar(null)}
-            sx={{ width: "100%" }}
-          >
-            {snackbar.message}
-          </Alert>
-        ) : undefined}
-      </Snackbar>
     </Box>
   );
 }

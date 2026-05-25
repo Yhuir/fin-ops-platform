@@ -313,32 +313,11 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             {"schema_version": CANDIDATE_MATCH_SCHEMA_VERSION, "candidates": {}, "scope_runs": {}},
         )
 
-    def test_patch_bank_transaction_categories_persists_and_invalidates_workbench_state(self) -> None:
+    def test_patch_bank_transaction_categories_is_disabled_and_does_not_mutate_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            preview = app._import_service.preview_import(
-                batch_type=BatchType.BANK_TRANSACTION,
-                source_name="bank.xlsx",
-                imported_by="YNSYLP005",
-                rows=[
-                    {
-                        "account_no": "6222000011116386",
-                        "account_name": "云南溯源科技有限公司基本户",
-                        "txn_date": "2026-04-03",
-                        "trade_time": "2026-04-03 09:00:00",
-                        "pay_receive_time": "2026-04-03 09:00:00",
-                        "counterparty_name": "供应商A",
-                        "debit_amount": "100.00",
-                        "credit_amount": "",
-                        "summary": "付款",
-                        "remark": "货款",
-                    }
-                ],
-            )
-            app._import_service.confirm_import(preview.id)
-            transaction_id = app._import_service.list_transactions()[0].id
+            transaction_id = self._create_imported_bank_transaction(app)
             app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
-            app._workbench_read_model_service.upsert_read_model(scope_key="2026-04", payload={"month": "2026-04"})
             app._workbench_candidate_match_service.upsert_candidate(
                 {
                     "scope_month": "2026-04",
@@ -358,7 +337,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "source_versions": {},
                 }
             )
-            app._search_service.search(q="供应商", scope="bank", month="2026-04")
 
             response = app.handle_request(
                 "PATCH",
@@ -377,25 +355,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             )
             payload = json.loads(response.body)
 
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(payload["updated_transaction_ids"], [transaction_id])
-            self.assertEqual(payload["updated_categories"][0]["category_label"], "公司暂借款：待还款")
-            self.assertEqual(payload["affected_months"], ["2026-04"])
-            self.assertTrue(payload["workbench_rebuild_queued"])
-            self.assertIsNone(app._workbench_read_model_service.get_read_model("all"))
-            self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-04"))
-            self.assertEqual(app._workbench_candidate_match_service.list_candidates_by_month("2026-04"), [])
-            self.assertEqual(
-                app._state_store.load_bank_transaction_categories()["categories"][transaction_id]["category_code"],
-                "borrow_in_company_pending_repayment",
-            )
-            self.assertEqual(
-                [
-                    entry["scope_month"]
-                    for entry in app._workbench_matching_dirty_scope_service.list_dirty_scopes()
-                ],
-                ["2026-04"],
-            )
+            self.assertEqual(response.status_code, 410)
+            self.assertEqual(payload["error"], "manual_bank_transaction_category_disabled")
+            self.assertEqual(app._bank_transaction_category_service.snapshot()["categories"], {})
+            self.assertEqual(app._state_store.load_bank_transaction_categories().get("categories", {}), {})
+            self.assertEqual(app._workbench_read_model_service.get_read_model("all")["payload"], {"month": "all"})
+            self.assertEqual(len(app._workbench_candidate_match_service.list_candidates_by_month("2026-04")), 1)
 
     def test_http_server_dispatches_patch_bank_transaction_categories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -430,169 +395,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
-        self.assertEqual(response.status, 200)
+        self.assertEqual(response.status, 410)
         self.assertEqual(response.getheader("Content-Type"), "application/json; charset=utf-8")
         payload = json.loads(response_body)
-        self.assertEqual(payload["updated_transaction_ids"], [transaction_id])
-        self.assertEqual(payload["updated_categories"][0]["category_label"], "公司暂借款：待还款")
-
-    def test_patch_bank_transaction_categories_uses_targeted_persistence_only(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            transaction_id = self._create_imported_bank_transaction(app)
-            app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
-            app._workbench_read_model_service.upsert_read_model(scope_key="2026-04", payload={"month": "2026-04"})
-            spy_store = _BankCategoryPersistenceSpyStateStore()
-            app._state_store = spy_store
-
-            response = app.handle_request(
-                "PATCH",
-                "/api/bank-details/transactions/categories",
-                body=json.dumps(
-                    {
-                        "updates": [
-                            {
-                                "transaction_id": transaction_id,
-                                "category_code": "borrow_in_company_pending_repayment",
-                                "expected_version": 0,
-                            }
-                        ]
-                    }
-                ),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["updated_transaction_ids"], [transaction_id])
-        self.assertEqual(spy_store.full_save_calls, 0)
-        self.assertEqual(spy_store.category_save_calls, 1)
-        self.assertEqual(spy_store.candidate_save_calls, 1)
-        self.assertEqual(spy_store.candidate_changed_scope_months, ["2026-04"])
-        self.assertEqual(spy_store.read_model_save_calls, 1)
-        self.assertEqual(spy_store.dirty_scope_save_calls, 1)
-        self.assertEqual(spy_store.turnover_relation_save_calls, 1)
-
-    def test_patch_bank_transaction_categories_rejects_readonly_export_user(self) -> None:
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
-            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
-                user_id="101",
-                username="READONLY001",
-                nickname="只读用户",
-                display_name="只读用户",
-                dept_id="01",
-                dept_name="财务部",
-                roles=["finance"],
-                permissions=[],
-            )
-
-            response = app.handle_request(
-                "PATCH",
-                "/api/bank-details/transactions/categories",
-                body=json.dumps({"updates": []}),
-                headers={"Authorization": "Bearer readonly-token"},
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "permission_denied")
-
-    def test_patch_bank_transaction_categories_rejects_invalid_code(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            transaction_id = self._create_imported_bank_transaction(app)
-
-            response = app.handle_request(
-                "PATCH",
-                "/api/bank-details/transactions/categories",
-                body=json.dumps(
-                    {
-                        "updates": [
-                            {
-                                "transaction_id": transaction_id,
-                                "category_code": "unsupported",
-                                "expected_version": 0,
-                            }
-                        ]
-                    }
-                ),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_category_code")
-        self.assertEqual(app._bank_transaction_category_service.snapshot()["categories"], {})
-
-    def test_patch_bank_transaction_categories_rejects_unknown_transaction(self) -> None:
-        app = build_application()
-
-        response = app.handle_request(
-            "PATCH",
-            "/api/bank-details/transactions/categories",
-            body=json.dumps(
-                {
-                    "updates": [
-                        {
-                            "transaction_id": "missing-txn",
-                            "category_code": "business_warranty_pending_collection",
-                            "expected_version": 0,
-                        }
-                    ]
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(payload["error"], "unknown_transaction_id")
-
-    def test_patch_bank_transaction_categories_rejects_expected_version_conflict(self) -> None:
-        app = build_application()
-        transaction_id = self._create_imported_bank_transaction(app)
-        first_response = app.handle_request(
-            "PATCH",
-            "/api/bank-details/transactions/categories",
-            body=json.dumps(
-                {
-                    "updates": [
-                        {
-                            "transaction_id": transaction_id,
-                            "category_code": "business_bid_bond_pending_collection",
-                            "expected_version": 0,
-                        }
-                    ]
-                }
-            ),
-        )
-        self.assertEqual(first_response.status_code, 200)
-
-        response = app.handle_request(
-            "PATCH",
-            "/api/bank-details/transactions/categories",
-            body=json.dumps(
-                {
-                    "updates": [
-                        {
-                            "transaction_id": transaction_id,
-                            "category_code": "borrow_out_personal_pending_collection",
-                            "expected_version": 0,
-                        }
-                    ]
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(payload["error"], "category_version_conflict")
-        self.assertEqual(payload["actual_version"], 1)
+        self.assertEqual(payload["error"], "manual_bank_transaction_category_disabled")
 
     def test_bank_details_api_returns_auto_and_effective_category_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -838,7 +644,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(row["relation_tags"], ["有oa", "无发票"])
         self.assertEqual(row["relation_case_id"], candidate_case_id)
 
-    def test_patch_manual_clear_immediately_suppresses_auto_in_bank_details_api(self) -> None:
+    def test_disabled_manual_clear_does_not_suppress_auto_in_bank_details_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_imported_bank_transaction(
@@ -869,39 +675,31 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             )
             list_payload = json.loads(list_response.body)
 
-        self.assertEqual(save_response.status_code, 200)
-        self.assertEqual(save_payload["updated_categories"][0]["category_code"], None)
-        self.assertEqual(save_payload["updated_categories"][0]["version"], 1)
+        self.assertEqual(save_response.status_code, 410)
+        self.assertEqual(save_payload["error"], "manual_bank_transaction_category_disabled")
         self.assertEqual(list_response.status_code, 200)
         row = next(row for row in list_payload["rows"] if row["id"] == transaction_id)
-        self.assertEqual(row["manual_category_source"], "manual")
         self.assertEqual(row["auto_category_code"], "fee")
-        self.assertEqual(row["effective_category_code"], None)
-        self.assertEqual(row["category_code"], None)
-        self.assertEqual(row["category_version"], 1)
-        self.assertEqual(list_payload["category_counts"]["fee"], 0)
-        self.assertEqual(list_payload["category_counts"]["uncategorized"], 1)
+        self.assertEqual(row["effective_category_code"], "fee")
+        self.assertEqual(row["category_code"], "fee")
+        self.assertEqual(row["category_source"], "auto")
+        self.assertEqual(list_payload["category_counts"]["fee"], 1)
+        self.assertEqual(list_payload["category_counts"]["uncategorized"], 0)
 
-    def test_workbench_bank_rows_include_saved_manual_category_from_application_service(self) -> None:
+    def test_workbench_bank_rows_ignore_saved_manual_category_history(self) -> None:
         app = build_application()
         transaction_id = self._create_imported_bank_transaction(app, trade_time="2026-04-03 09:00:00")
 
-        save_response = app.handle_request(
-            "PATCH",
-            "/api/bank-details/transactions/categories",
-            body=json.dumps(
+        app._bank_transaction_category_service.apply_updates(
+            [
                 {
-                    "updates": [
-                        {
-                            "transaction_id": transaction_id,
-                            "category_code": "borrow_in_company_pending_repayment",
-                            "expected_version": 0,
-                        }
-                    ]
+                    "transaction_id": transaction_id,
+                    "category_code": "borrow_in_company_pending_repayment",
+                    "expected_version": 0,
                 }
-            ),
+            ],
+            actor="test",
         )
-        self.assertEqual(save_response.status_code, 200)
 
         response = app.handle_request("GET", "/api/workbench?month=2026-04")
         payload = json.loads(response.body)
@@ -912,11 +710,11 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         bank_row = next(row for row in bank_rows if row["id"] == transaction_id)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(bank_row["category_code"], "borrow_in_company_pending_repayment")
-        self.assertEqual(bank_row["category_label"], "公司暂借款：待还款")
-        self.assertEqual(bank_row["category_source"], "manual")
-        self.assertEqual(bank_row["category_path"], ["借入", "公司往来款", "待还款"])
-        self.assertIn("公司暂借款：待还款", bank_row["tags"])
+        self.assertIsNone(bank_row["category_code"])
+        self.assertIsNone(bank_row["category_label"])
+        self.assertIsNone(bank_row["category_source"])
+        self.assertEqual(bank_row["category_path"], [])
+        self.assertNotIn("公司暂借款：待还款", bank_row["tags"])
         self.assertIn({"label": "摘要", "value": "付款"}, bank_row["bank_text_fields"])
         self.assertIn({"label": "备注", "value": "货款"}, bank_row["bank_text_fields"])
 

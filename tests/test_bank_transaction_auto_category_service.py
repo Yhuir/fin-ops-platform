@@ -8,10 +8,6 @@ from fin_ops_platform.services.bank_transaction_auto_category_service import (
     resolve_effective_category,
 )
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.workbench_special_rule_detectors import (
-    INTERNAL_TRANSFER_PAIR,
-    SALARY_PERSONAL_AUTO_MATCH,
-)
 
 
 class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
@@ -82,7 +78,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestions["txn-sms-service-fee"]["rule_code"], "fee_text_keyword")
         self.assertNotIn("txn-plain-service-fee", suggestions)
 
-    def test_detects_salary_by_reusing_workbench_special_rule_detector(self) -> None:
+    def test_detects_salary_from_text_keyword_without_workbench_detector(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [
                 {
@@ -99,8 +95,9 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         suggestion = suggestions["txn-salary"]
         self.assertEqual(suggestion["category_code"], "salary")
         self.assertEqual(suggestion["category_label"], "工资")
-        self.assertEqual(suggestion["rule_code"], SALARY_PERSONAL_AUTO_MATCH)
-        self.assertIn("workbench_special_rule_detector", suggestion["reason"])
+        self.assertEqual(suggestion["rule_code"], "salary_text_keyword")
+        self.assertEqual(suggestion["source"], "auto")
+        self.assertNotIn("workbench_special_rule_detector", suggestion["reason"])
 
     def test_detects_holiday_bonus_from_keywords(self) -> None:
         suggestions = self.service.suggest_for_rows(
@@ -154,7 +151,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
 
         self.assertEqual(suggestions, {})
 
-    def test_detects_internal_transfer_pair_by_reusing_detector_semantics(self) -> None:
+    def test_internal_transfer_pair_no_longer_creates_bank_auto_category(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [
                 {
@@ -178,15 +175,9 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
             ]
         )
 
-        self.assertCountEqual(list(suggestions), ["txn-transfer-out", "txn-transfer-in"])
-        for suggestion in suggestions.values():
-            self.assertEqual(suggestion["category_code"], "internal_transfer")
-            self.assertEqual(suggestion["category_label"], "内部往来款")
-            self.assertEqual(suggestion["category_path"], ["自动识别", "内部往来款"])
-            self.assertEqual(suggestion["rule_code"], INTERNAL_TRANSFER_PAIR)
-            self.assertIn("workbench_special_rule_detector", suggestion["reason"])
+        self.assertEqual(suggestions, {})
 
-    def test_internal_transfer_detector_takes_priority_over_text_labels(self) -> None:
+    def test_text_labels_still_apply_to_internal_transfer_like_rows(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [
                 {
@@ -212,10 +203,10 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(suggestions["txn-transfer-out-fee-text"]["category_code"], "internal_transfer")
-        self.assertEqual(suggestions["txn-transfer-in-fee-text"]["category_code"], "internal_transfer")
+        self.assertEqual(suggestions["txn-transfer-out-fee-text"]["category_code"], "fee")
+        self.assertEqual(suggestions["txn-transfer-in-fee-text"]["category_code"], "fee")
 
-    def test_effective_category_uses_manual_before_auto(self) -> None:
+    def test_effective_category_ignores_manual_history_when_auto_exists(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(
             None,
             transaction_exists=lambda transaction_id: transaction_id == "txn-fee",
@@ -228,11 +219,11 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
 
         effective = resolve_effective_category(category_service.get("txn-fee"), auto)
 
-        self.assertEqual(effective["effective_category_code"], "bonus")
-        self.assertEqual(effective["effective_category_label"], "奖金")
-        self.assertEqual(effective["effective_category_source"], "manual")
+        self.assertEqual(effective["effective_category_code"], "fee")
+        self.assertEqual(effective["effective_category_label"], "手续费")
+        self.assertEqual(effective["effective_category_source"], "auto")
 
-    def test_effective_category_respects_manual_clear_before_auto(self) -> None:
+    def test_effective_category_ignores_manual_clear_when_auto_exists(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(
             None,
             transaction_exists=lambda transaction_id: transaction_id == "txn-fee",
@@ -245,10 +236,10 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
 
         effective = resolve_effective_category(category_service.get("txn-fee"), auto)
 
-        self.assertEqual(effective["effective_category_code"], None)
-        self.assertEqual(effective["effective_category_label"], None)
-        self.assertEqual(effective["effective_category_path"], [])
-        self.assertEqual(effective["effective_category_source"], "")
+        self.assertEqual(effective["effective_category_code"], "fee")
+        self.assertEqual(effective["effective_category_label"], "手续费")
+        self.assertEqual(effective["effective_category_path"], ["自动识别", "手续费"])
+        self.assertEqual(effective["effective_category_source"], "auto")
 
 
 if __name__ == "__main__":

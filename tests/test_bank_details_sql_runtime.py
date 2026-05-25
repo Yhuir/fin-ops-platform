@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
+from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
@@ -140,6 +141,44 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertIn("from read_model.bank_detail_rows", sql_text)
         self.assertNotIn("from app.bank_transactions", sql_text)
+
+
+class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
+    def test_normalized_row_splits_bank_text_fields_for_bank_detail_table(self) -> None:
+        builder = BankDetailSqlProjectionBuilder(connection=FakeConnection())
+
+        row = builder._normalize_transaction_row(  # noqa: SLF001
+            {
+                "id": "txn-sql-text",
+                "transaction_id": "uuid-sql-text",
+                "account_no": "6222000011116386",
+                "txn_direction": "expense",
+                "counterparty_name_raw": "供应商",
+                "amount": "100.00",
+                "signed_amount": "-100.00",
+                "balance": "900.00",
+                "txn_date": "2026-04-23",
+                "trade_time": "2026-04-23 17:33:58+08:00",
+                "summary": "旧摘要",
+                "remark": "旧备注",
+                "bank_text_fields": [
+                    {"label": "交易用途", "value": "平安交易用途"},
+                    {"label": "摘要", "value": "平安摘要"},
+                    {"label": "客户附言", "value": "客户附言内容"},
+                ],
+                "raw_payload": {
+                    "normalized_payload": {
+                        "imported_bank_name": "平安银行",
+                        "imported_bank_last4": "6386",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(row["trade_time"], "2026-04-23 17:33:58")
+        self.assertEqual(row["purpose_text"], "平安交易用途")
+        self.assertEqual(row["summary_text"], "平安摘要")
+        self.assertEqual(row["note_text"], "客户附言内容")
 
 
 class FakeProjectionBuilder:

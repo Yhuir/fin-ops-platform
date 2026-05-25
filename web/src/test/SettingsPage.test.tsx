@@ -1,9 +1,8 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
-import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderAppAt } from "./renderHelpers";
 
 function installSettingsTagFetch() {
@@ -181,17 +180,15 @@ describe("Settings page", () => {
     );
   });
 
-  test("manages pending invoice tag mappings and broadcasts saved tag version", async () => {
+  test("manages pending invoice tag mappings with read-only automatic tag dictionary", async () => {
     const user = userEvent.setup();
     const fetchMock = installSettingsTagFetch();
-    const listener = vi.fn();
-    window.addEventListener("finops:bank-transaction-tags-updated", listener);
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
     const tree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    expect(within(tree).getByRole("treeitem", { name: /银行明细标签管理/ })).toBeInTheDocument();
-    expect(within(tree).getByText("全 app 银行明细标签字典")).toBeInTheDocument();
+    expect(within(tree).queryByRole("treeitem", { name: /银行明细标签管理/ })).not.toBeInTheDocument();
+    expect(within(tree).queryByText("全 app 银行明细标签字典")).not.toBeInTheDocument();
     expect(within(tree).queryByRole("treeitem", { name: /银行流水标签/ })).not.toBeInTheDocument();
     await user.click(within(tree).getByRole("treeitem", { name: /待找发票筛选/ }));
 
@@ -202,7 +199,7 @@ describe("Settings page", () => {
     expect(within(region).queryByRole("textbox", { name: "新标签" })).not.toBeInTheDocument();
     expect(within(region).queryByRole("button", { name: /新建并加入/ })).not.toBeInTheDocument();
     await user.click(within(region).getByText("流水代替发票"));
-    expect(within(region).getByText(/请先在银行明细标签管理中新增标签/)).toBeInTheDocument();
+    expect(within(region).getByText("当前分组未选择自动标签。")).toBeInTheDocument();
     await user.click(within(region).getByRole("button", { name: "选择现有标签" }));
     await user.click(await screen.findByRole("menuitem", { name: "内部往来款" }));
     await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
@@ -212,10 +209,7 @@ describe("Settings page", () => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
         return url.pathname === "/api/workbench/settings" && (init?.method ?? "GET").toUpperCase() === "POST";
       })).toBe(true);
-      expectCustomEventDetailContaining(listener, { version: 5 });
     });
-
-    window.removeEventListener("finops:bank-transaction-tags-updated", listener);
   });
 
   test("keeps invalid historical pending invoice mappings visible and blocks save until removed", async () => {
@@ -247,25 +241,4 @@ describe("Settings page", () => {
     await waitFor(() => expect(getPostCount()).toBe(1));
   });
 
-  test("blocks stale settings saves after another page updates bank detail tags", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installSettingsTagFetch();
-    renderAppAt("/settings");
-
-    const settingsPage = await screen.findByTestId("settings-page");
-    act(() => {
-      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 5 } }));
-    });
-    expect(await within(settingsPage).findByText("银行明细标签已在其他页面更新，请刷新后再保存。")).toBeInTheDocument();
-    expect(within(settingsPage).getByRole("button", { name: "刷新设置" })).toBeInTheDocument();
-
-    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
-
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([input, init]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/workbench/settings" && (init?.method ?? "GET").toUpperCase() === "POST";
-      })).toBe(false);
-    });
-  });
 });

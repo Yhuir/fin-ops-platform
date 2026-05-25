@@ -5190,6 +5190,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         balance: "130500.50",
         summary: "项目回款",
         purpose: "货款",
+        purpose_text: "货款",
+        summary_text: "项目回款",
+        note_text: "",
         bank_name: "工商银行",
         account_last4: "6386",
         category_code: null,
@@ -5219,6 +5222,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         counterparty_name: "跨页目标供应商",
         summary: "网银手续费",
         purpose: "跨页目标用途",
+        purpose_text: "跨页目标用途",
+        summary_text: "网银手续费",
+        note_text: "",
         auto_category_code: "fee",
         auto_category_label: "手续费",
         auto_category_path: ["自动识别", "手续费"],
@@ -5236,6 +5242,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           counterparty_name: "普通供应商",
           summary: "普通付款",
           purpose: "普通用途",
+          purpose_text: "普通用途",
+          summary_text: "普通付款",
+          note_text: "",
           auto_category_code: null,
           auto_category_label: null,
           auto_category_path: [],
@@ -5301,27 +5310,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/bank-details/transactions/categories": ({ jsonBody }) => ({
-      body: {
-        updated_transaction_ids: Array.isArray(jsonBody?.updates)
-          ? jsonBody.updates.map((update) => (update as Record<string, unknown>).transaction_id)
-          : [],
-        updated_categories: Array.isArray(jsonBody?.updates)
-          ? jsonBody.updates.map((update) => {
-            const categoryCode = (update as Record<string, unknown>).category_code;
-            return {
-              transaction_id: (update as Record<string, unknown>).transaction_id,
-              category_code: categoryCode,
-              category_label: categoryCode === "borrow_in_company_pending_repayment" ? "公司暂借款：待还款" : null,
-              category_path: categoryCode === "borrow_in_company_pending_repayment" ? ["借入", "公司往来款", "待还款"] : [],
-              version: 2,
-            };
-          })
-          : [],
-        affected_months: ["2026-05"],
-        workbench_rebuild_queued: true,
-      },
-    }),
     "/api/turnover-ledger": ({ url }) => {
       const view = url.searchParams.get("view") ?? "";
       const family = url.searchParams.get("family") ?? "all";

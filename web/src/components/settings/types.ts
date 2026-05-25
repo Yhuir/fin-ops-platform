@@ -17,7 +17,6 @@ export type ManagedAccessAccount = {
 export type SettingsSectionId =
   | "projects"
   | "bank_accounts"
-  | "bank_transaction_tags"
   | "pending_invoice_tags"
   | "oa_retention"
   | "oa_invoice_offset"
@@ -79,18 +78,6 @@ export type SettingsBankAccountsSectionProps = {
   onAddMapping: () => void;
   onUpdateMapping: (mappingId: string, updater: (mapping: BankAccountMapping) => BankAccountMapping) => void;
   onDeleteMapping: (mappingId: string) => void;
-};
-
-export type SettingsBankTransactionTagsSectionProps = {
-  controlsDisabled: boolean;
-  tags: WorkbenchSettings["bankTransactionTags"]["tags"];
-  labelDraft: string;
-  pathDraft: string;
-  onChangeLabelDraft: (value: string) => void;
-  onChangePathDraft: (value: string) => void;
-  onAddTag: () => void;
-  onRenameTag: (code: string, label: string) => void;
-  onArchiveTag: (code: string) => void;
 };
 
 export type SettingsPendingInvoiceTagsSectionProps = {

@@ -26,7 +26,6 @@ import type {
 } from "../../features/workbench/types";
 import SettingsAccessAccountsSection from "./SettingsAccessAccountsSection";
 import SettingsBankAccountsSection from "./SettingsBankAccountsSection";
-import SettingsBankTransactionTagsSection from "./SettingsBankTransactionTagsSection";
 import SettingsDataResetSection from "./SettingsDataResetSection";
 import SettingsOaInvoiceOffsetSection from "./SettingsOaInvoiceOffsetSection";
 import SettingsOaRetentionSection from "./SettingsOaRetentionSection";
@@ -92,8 +91,6 @@ type SettingsDraftSession = {
   projectNameDraft: string;
   accessUsernameDraft: string;
   accessRoleDraft: WorkbenchAccessRole;
-  bankTagLabelDraft: string;
-  bankTagPathDraft: string;
 };
 
 type DataResetDialogState =
@@ -117,8 +114,15 @@ function isSettingsDraftSession(value: unknown): value is SettingsDraftSession {
     && typeof session.projectNameDraft === "string"
     && typeof session.accessUsernameDraft === "string"
     && typeof session.accessRoleDraft === "string"
-    && typeof session.bankTagLabelDraft === "string"
-    && typeof session.bankTagPathDraft === "string"
+    && (
+      session.activeSectionId === "projects"
+      || session.activeSectionId === "bank_accounts"
+      || session.activeSectionId === "pending_invoice_tags"
+      || session.activeSectionId === "oa_retention"
+      || session.activeSectionId === "oa_invoice_offset"
+      || session.activeSectionId === "access_accounts"
+      || session.activeSectionId === "data_reset"
+    )
   );
 }
 
@@ -267,8 +271,6 @@ export default function SettingsPageContent({
       projectNameDraft: "",
       accessUsernameDraft: "",
       accessRoleDraft: "full_access",
-      bankTagLabelDraft: "",
-      bankTagPathDraft: "",
     },
     ttlMs: 2 * 60 * 60 * 1000,
     storage: "session",
@@ -291,7 +293,6 @@ export default function SettingsPageContent({
   const [oaInvoiceOffsetApplicantsText, setOaInvoiceOffsetApplicantsText] = useState(
     settings.oaInvoiceOffset.applicantNames.join("、"),
   );
-  const [bankTransactionTags, setBankTransactionTags] = useState(settings.bankTransactionTags);
   const [pendingInvoiceTagGroups, setPendingInvoiceTagGroups] = useState(settings.pendingInvoiceTagGroups);
   const [activePendingInvoiceGroup, setActivePendingInvoiceGroup] = useState<keyof WorkbenchSettings["pendingInvoiceTagGroups"]>("requiresInvoice");
   const bankNameDraft = draftSession.value.bankNameDraft;
@@ -310,10 +311,6 @@ export default function SettingsPageContent({
   const setAccessUsernameDraft = (value: string) => setDraftField("accessUsernameDraft", value);
   const accessRoleDraft = draftSession.value.accessRoleDraft;
   const setAccessRoleDraft = (value: WorkbenchAccessRole) => setDraftField("accessRoleDraft", value);
-  const bankTagLabelDraft = draftSession.value.bankTagLabelDraft;
-  const setBankTagLabelDraft = (value: string) => setDraftField("bankTagLabelDraft", value);
-  const bankTagPathDraft = draftSession.value.bankTagPathDraft;
-  const setBankTagPathDraft = (value: string) => setDraftField("bankTagPathDraft", value);
   const activeSectionId = draftSession.value.activeSectionId;
   const setActiveSectionId = (value: SettingsSectionId) => setDraftField("activeSectionId", value);
   const [dataResetDialog, setDataResetDialog] = useState<DataResetDialogState>(null);
@@ -380,13 +377,6 @@ export default function SettingsPageContent({
         visible: true,
       },
       {
-        id: "bank_transaction_tags" as const,
-        label: "银行明细标签管理",
-        description: "全 app 银行明细标签字典",
-        count: bankTransactionTags.tags.filter((tag) => tag.status === "active").length,
-        visible: true,
-      },
-      {
         id: "pending_invoice_tags" as const,
         label: "待找发票筛选",
         description: "支出筛选标签映射",
@@ -430,7 +420,6 @@ export default function SettingsPageContent({
     activeProjects.length,
     completedProjects.length,
     mappings.length,
-    bankTransactionTags.tags,
     pendingInvoiceTagGroups,
     oaImportFormTypes.length,
     oaImportStatuses.length,
@@ -571,63 +560,6 @@ export default function SettingsPageContent({
     setAccessRoleDraft("full_access");
   }
 
-  function normalizeCustomTagCode(label: string) {
-    const normalized = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-    const base = normalized || `custom_${Date.now()}`;
-    let code = base.startsWith("custom_") ? base : `custom_${base}`;
-    let suffix = 1;
-    const existingCodes = new Set(bankTransactionTags.tags.map((tag) => tag.code));
-    while (existingCodes.has(code)) {
-      suffix += 1;
-      code = `${base}_${suffix}`;
-    }
-    return code;
-  }
-
-  function createCustomTag(label: string) {
-    const trimmedLabel = label.trim();
-    if (!trimmedLabel) {
-      return null;
-    }
-    const tag = {
-      code: normalizeCustomTagCode(trimmedLabel),
-      label: trimmedLabel,
-      path: bankTagPathDraft.split("/").map((item) => item.trim()).filter(Boolean).length > 0
-        ? bankTagPathDraft.split("/").map((item) => item.trim()).filter(Boolean)
-        : ["自定义", trimmedLabel],
-      status: "active" as const,
-      source: "custom" as const,
-    };
-    setBankTransactionTags((current) => ({
-      version: current.version,
-      tags: [...current.tags, tag],
-    }));
-    return tag;
-  }
-
-  function handleAddBankTag() {
-    const tag = createCustomTag(bankTagLabelDraft);
-    if (!tag) {
-      return;
-    }
-    setBankTagLabelDraft("");
-    setBankTagPathDraft("");
-  }
-
-  function handleRenameBankTag(code: string, label: string) {
-    setBankTransactionTags((current) => ({
-      ...current,
-      tags: current.tags.map((tag) => (tag.code === code ? { ...tag, label } : tag)),
-    }));
-  }
-
-  function handleArchiveBankTag(code: string) {
-    setBankTransactionTags((current) => ({
-      ...current,
-      tags: current.tags.map((tag) => (tag.code === code ? { ...tag, status: "archived" } : tag)),
-    }));
-  }
-
   function addTagToPendingInvoiceGroup(code: string) {
     setPendingInvoiceTagGroups((current) => {
       const withoutCode = {
@@ -644,7 +576,7 @@ export default function SettingsPageContent({
 
   function handleSave() {
     setSettingsActionStatus(null);
-    const pendingInvoiceIssue = pendingInvoiceTagGroupIssue(bankTransactionTags, pendingInvoiceTagGroups);
+    const pendingInvoiceIssue = pendingInvoiceTagGroupIssue(settings.bankTransactionTags, pendingInvoiceTagGroups);
     if (pendingInvoiceIssue) {
       setSettingsActionStatus({ tone: "error", message: pendingInvoiceIssue });
       return;
@@ -670,7 +602,7 @@ export default function SettingsPageContent({
       oaInvoiceOffset: {
         applicantNames: parseApplicantNames(oaInvoiceOffsetApplicantsText),
       },
-      bankTransactionTags,
+      bankTransactionTags: settings.bankTransactionTags,
       pendingInvoiceTagGroups,
     });
   }
@@ -834,24 +766,10 @@ export default function SettingsPageContent({
                 />
               ) : null}
 
-              {activeSectionId === "bank_transaction_tags" ? (
-                <SettingsBankTransactionTagsSection
-                  controlsDisabled={controlsDisabled}
-                  tags={bankTransactionTags.tags}
-                  labelDraft={bankTagLabelDraft}
-                  pathDraft={bankTagPathDraft}
-                  onChangeLabelDraft={setBankTagLabelDraft}
-                  onChangePathDraft={setBankTagPathDraft}
-                  onAddTag={handleAddBankTag}
-                  onRenameTag={handleRenameBankTag}
-                  onArchiveTag={handleArchiveBankTag}
-                />
-              ) : null}
-
               {activeSectionId === "pending_invoice_tags" ? (
                 <SettingsPendingInvoiceTagsSection
                   controlsDisabled={controlsDisabled}
-                  tags={bankTransactionTags.tags}
+                  tags={settings.bankTransactionTags.tags}
                   groups={pendingInvoiceTagGroups}
                   activeGroup={activePendingInvoiceGroup}
                   onSelectGroup={setActivePendingInvoiceGroup}
