@@ -775,8 +775,10 @@ export default function BankDetailsPage() {
                             >
                               {row.counterpartyName}
                             </Typography>
-                            <Stack className="bank-relation-chip-row" direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
+                            <Stack className="bank-relation-time-row" direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
                               <Chip className="bank-trade-time-chip bank-trade-time-chip-full bank-chip-auto-size" label={row.tradeTime} size="small" variant="outlined" />
+                            </Stack>
+                            <Stack className="bank-relation-chip-row" direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
                               {row.relationTags.map((tag) => (
                                 <Chip
                                   key={`${row.id}-${tag}`}

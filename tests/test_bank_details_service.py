@@ -818,6 +818,54 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["summary_text"], "工行摘要")
         self.assertEqual(row["note_text"], "工行附言")
 
+    def test_bank_text_field_split_uses_real_bank_columns_without_cross_fallback(self) -> None:
+        transactions = [
+            self._transaction(
+                transaction_id="txn-icbc",
+                trade_time="2026-04-16 11:09:14+08:00",
+                summary="旧摘要",
+                remark="旧备注",
+                bank_text_fields=[
+                    {"label": "用途", "value": "工行用途"},
+                    {"label": "摘要", "value": "工行摘要"},
+                    {"label": "附言", "value": "工行附言"},
+                ],
+            ),
+            self._transaction(
+                transaction_id="txn-ccb",
+                trade_time="2026-04-16 11:09:15+08:00",
+                summary="旧摘要",
+                remark="旧备注",
+                bank_text_fields=[
+                    {"label": "摘要", "value": "建行摘要"},
+                    {"label": "备注", "value": "建行备注"},
+                ],
+            ),
+            self._transaction(
+                transaction_id="txn-cmbc",
+                trade_time="2026-04-16 11:09:16+08:00",
+                summary="不应进入摘要列",
+                remark="民生客户附言",
+                bank_text_fields=[
+                    {"label": "客户附言", "value": "民生客户附言"},
+                ],
+            ),
+        ]
+        service = BankDetailsService(_ImportServiceStub(transactions))
+
+        rows = {row["id"]: row for row in service.list_transactions(account_key="工商银行:6386")["rows"]}
+
+        self.assertEqual(rows["txn-icbc"]["trade_time"], "2026-04-16 11:09:14")
+        self.assertEqual(rows["txn-icbc"]["purpose_text"], "工行用途")
+        self.assertEqual(rows["txn-icbc"]["summary_text"], "工行摘要")
+        self.assertEqual(rows["txn-icbc"]["note_text"], "工行附言")
+        self.assertEqual(rows["txn-ccb"]["purpose_text"], "")
+        self.assertEqual(rows["txn-ccb"]["summary_text"], "建行摘要")
+        self.assertEqual(rows["txn-ccb"]["note_text"], "建行备注")
+        self.assertEqual(rows["txn-cmbc"]["purpose_text"], "")
+        self.assertEqual(rows["txn-cmbc"]["summary_text"], "")
+        self.assertEqual(rows["txn-cmbc"]["note_text"], "民生客户附言")
+
     def test_saved_manual_category_does_not_override_auto_category(self) -> None:
         transactions = [
             self._transaction(

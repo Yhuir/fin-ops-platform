@@ -180,6 +180,40 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(row["summary_text"], "平安摘要")
         self.assertEqual(row["note_text"], "客户附言内容")
 
+    def test_normalized_row_does_not_copy_missing_bank_columns_from_summary_or_remark(self) -> None:
+        builder = BankDetailSqlProjectionBuilder(connection=FakeConnection())
+
+        row = builder._normalize_transaction_row(  # noqa: SLF001
+            {
+                "id": "txn-sql-cmbc",
+                "transaction_id": "uuid-sql-cmbc",
+                "account_no": "641979486",
+                "txn_direction": "expense",
+                "counterparty_name_raw": "供应商",
+                "amount": "100.00",
+                "signed_amount": "-100.00",
+                "balance": "900.00",
+                "txn_date": "2026-04-16",
+                "trade_time": "2026-04-16 11:09:14+08:00",
+                "summary": "旧摘要",
+                "remark": "民生客户附言",
+                "bank_text_fields": [
+                    {"label": "客户附言", "value": "民生客户附言"},
+                ],
+                "raw_payload": {
+                    "normalized_payload": {
+                        "imported_bank_name": "民生银行",
+                        "imported_bank_last4": "9486",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(row["trade_time"], "2026-04-16 11:09:14")
+        self.assertEqual(row["purpose_text"], "")
+        self.assertEqual(row["summary_text"], "")
+        self.assertEqual(row["note_text"], "民生客户附言")
+
 
 class FakeProjectionBuilder:
     def __init__(self) -> None:

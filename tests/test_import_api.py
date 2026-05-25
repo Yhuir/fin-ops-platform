@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.import_file_service import parse_pingan_rows
+from fin_ops_platform.services.import_file_service import parse_ccb_rows, parse_cmbc_rows, parse_icbc_rows, parse_pingan_rows
 from fin_ops_platform.services.imports import ImportNormalizationService
 
 
@@ -52,6 +52,47 @@ class ImportApiTests(unittest.TestCase):
                 {"label": "交易用途", "value": "代付服务费"},
             ],
         )
+
+    def test_bank_file_parsers_preserve_real_excel_text_field_contracts(self) -> None:
+        icbc_rows = [
+            ["[HISTORYDETAIL]"],
+            ["凭证号", "交易时间", "对方单位", "对方账号", "转入金额", "转出金额", "余额", "用途", "摘要", "附言"],
+            ["ICBC-001", "2026-04-16 11:09:16", "供应商A", "1001", "", "4000.00", "7907.36", "本公司税户", "本公司税户", "18841483"],
+        ]
+        ccb_rows = [
+            ["账号", "账户名称", "交易时间", "借方发生额（支取）", "贷方发生额（收入）", "余额", "币种", "对方户名", "对方账号", "对方开户机构", "记账日期", "摘要", "备注", "账户明细编号-交易流水号"],
+            ["53001905038050548106", "云南溯源科技有限公司", "20260410 17:07:09", "40737.33", "0", "407812.09", "人民币元", "供应商B", "2001", "开户行", "20260410", "电子转账", "工资", "13523"],
+        ]
+        cmbc_rows = [
+            ["账户名称:", "云南溯源科技有限公司"],
+            ["账号:", "641979486"],
+            ["币种:", "人民币"],
+            ["交易时间", "交易流水号", "借方发生额", "贷方发生额", "账户余额", "凭证号", "客户附言", "对方账号", "对方账号名称", "对方开户行"],
+            ["2026-04-13 10:05:43", "CMBC-001", "65000.00", "", "8189.46", "9800000000041", "本公司帐户", "2502014019350006386", "云南溯源科技有限公司", "中国工商银行总行清算中心"],
+        ]
+
+        icbc = parse_icbc_rows(icbc_rows)[0]
+        ccb = parse_ccb_rows(ccb_rows)[0]
+        cmbc = parse_cmbc_rows(cmbc_rows)[0]
+
+        self.assertEqual(
+            icbc["bank_text_fields"],
+            [
+                {"label": "摘要", "value": "本公司税户"},
+                {"label": "用途", "value": "本公司税户"},
+                {"label": "附言", "value": "18841483"},
+            ],
+        )
+        self.assertEqual(
+            ccb["bank_text_fields"],
+            [
+                {"label": "摘要", "value": "电子转账"},
+                {"label": "备注", "value": "工资"},
+            ],
+        )
+        self.assertIsNone(cmbc["summary"])
+        self.assertEqual(cmbc["remark"], "本公司帐户")
+        self.assertEqual(cmbc["bank_text_fields"], [{"label": "客户附言", "value": "本公司帐户"}])
 
     def test_bank_transaction_import_preserves_text_fields_without_changing_identity(self) -> None:
         import_service = ImportNormalizationService()

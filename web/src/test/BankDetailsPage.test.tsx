@@ -145,11 +145,16 @@ describe("Bank details page", () => {
     expect(within(table).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
     expect(table.closest(".bank-transaction-grid")).toHaveClass("bank-transaction-grid-readable");
     expect(await within(table).findByText("云南溯源科技有限公司")).toBeInTheDocument();
+    const tradeTimeChip = within(table).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-chip");
+    expect(within(table).queryByText("2026-05-01 10:30:00+08:00")).not.toBeInTheDocument();
     expect(within(table).getByText("2026-05-01 10:30:00")).toHaveClass("MuiChip-label");
-    expect(within(table).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-chip")).toHaveClass("bank-trade-time-chip-full");
-    expect(within(table).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-chip")).toHaveClass("bank-chip-auto-size");
+    expect(tradeTimeChip).toHaveClass("bank-trade-time-chip-full");
+    expect(tradeTimeChip).toHaveClass("bank-chip-auto-size");
+    expect(tradeTimeChip?.closest(".bank-relation-time-row")).not.toBeNull();
+    expect(tradeTimeChip?.closest(".bank-relation-chip-row")).toBeNull();
     expect(within(table).getByText("有oa").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-has");
     expect(within(table).getByText("无发票").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-none");
+    expect(within(table).getByText("有oa").closest(".bank-relation-chip-row")?.previousElementSibling).toHaveClass("bank-relation-time-row");
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-direction-tag-centered");
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-chip-auto-size");
     expect(within(table).getByText("工商银行 6386")).toHaveClass("MuiChip-label");
