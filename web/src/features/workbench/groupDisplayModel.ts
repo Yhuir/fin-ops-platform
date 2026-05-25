@@ -274,6 +274,10 @@ function normalizeSourceOaId(value: string | undefined) {
 
 export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number {
   return workbenchPaneIds.reduce((total, paneId) => {
+    const paneCount = group.rowCounts?.[paneId];
+    if (typeof paneCount === "number") {
+      return total + paneCount;
+    }
     const collapsedPaneCount = group.collapsedRowCounts?.[paneId];
     if (typeof collapsedPaneCount === "number") {
       return total + collapsedPaneCount;
@@ -281,10 +285,6 @@ export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number 
     const collapsedPaneRows = group.collapsedRows?.[paneId] ?? [];
     if (collapsedPaneRows.length > 0) {
       return total + collapsedPaneRows.length;
-    }
-    const paneCount = group.rowCounts?.[paneId];
-    if (typeof paneCount === "number") {
-      return total + paneCount;
     }
     return total + group.rows[paneId].length;
   }, 0);

@@ -381,19 +381,27 @@ function CandidateGroupGrid({
           const collapseKey = `${group.id}:${paneId}`;
           const isExpanded = expandedCollapsedGroups.has(collapseKey);
           const isLoading = loadingCollapsedGroups.has(collapseKey);
-          const collapsedRowCount = group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
+          const displayRowCount = group.displayRowCounts?.[paneId] ?? group.rows[paneId].length;
+          const collapsedRowCount = group.rowCounts?.[paneId] ?? group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
           return [
-            <button
-              aria-expanded={isExpanded}
-              aria-label={isExpanded ? "收起免OA批次明细" : `展开免OA批次明细，${collapsedRowCount} 条`}
-              className="row-action-btn candidate-group-collapse-control"
-              disabled={isLoading}
-              key={collapseKey}
-              type="button"
-              onClick={() => void toggleCollapsedGroup(group, paneId, isExpanded, collapsedRowCount, collapsedRows.length)}
-            >
-              {isLoading ? "加载中" : isExpanded ? "收起明细" : `展开 ${collapsedRowCount} 条明细`}
-            </button>,
+            <Fragment key={collapseKey}>
+              <button
+                aria-expanded={isExpanded}
+                aria-label={isExpanded ? "收起免OA批次明细" : `展开免OA批次明细，${collapsedRowCount} 条`}
+                className="row-action-btn candidate-group-collapse-control"
+                disabled={isLoading}
+                type="button"
+                onClick={() => void toggleCollapsedGroup(group, paneId, isExpanded, collapsedRowCount, collapsedRows.length)}
+              >
+                {isLoading ? "加载中" : isExpanded ? "收起明细" : `展开 ${collapsedRowCount} 条明细`}
+              </button>
+              {!isExpanded ? (
+                <span className="candidate-group-collapse-counts">
+                  <span>当前显示 {displayRowCount} 条摘要</span>
+                  <span>实际 {collapsedRowCount} 条流水</span>
+                </span>
+              ) : null}
+            </Fragment>,
           ];
         });
         const displaySegments = buildWorkbenchGroupDisplaySegments(group);

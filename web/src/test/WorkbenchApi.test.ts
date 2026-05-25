@@ -546,6 +546,8 @@ describe("workbench api bank amount mapping", () => {
             oa_rows: [],
             bank_rows: [{ id: "summary", type: "bank", source_kind: "no_oa_bank_batch_summary" }],
             invoice_rows: [],
+            row_counts: { bank: 4, rows: 4 },
+            display_row_counts: { bank: 1, rows: 1 },
             collapsed_rows: {
               bank: [
                 { id: "bank-1", type: "bank", source_kind: "bank_transaction" },
@@ -569,6 +571,8 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("zone")).toBe("paired");
     expect(url.searchParams.get("group_id")).toBe("case:no-oa");
     expect(group.id).toBe("case:no-oa");
+    expect(group.rowCounts?.bank).toBe(4);
+    expect(group.displayRowCounts?.bank).toBe(1);
     expect(group.collapsedRows?.bank).toHaveLength(4);
   });
 
@@ -2233,7 +2237,8 @@ describe("workbench groups summary contract", () => {
               group_type: "candidate",
               match_confidence: "medium",
               reason: "summary preview",
-              row_counts: { oa: 5, bank: 0, invoice: 2 },
+              row_counts: { oa: 5, bank: 8, invoice: 2, rows: 15 },
+              display_row_counts: { oa: 5, bank: 0, invoice: 2, rows: 7 },
               collapsed_row_counts: { bank: 8 },
               oa_rows: Array.from({ length: 5 }, (_item, index) => ({
                 id: `oa-preview-${index + 1}`,
@@ -2255,10 +2260,47 @@ describe("workbench groups summary contract", () => {
     const result = await fetchWorkbenchGroupsPage("all", "paired", 1, 50, undefined, { detailLevel: "summary" });
     const group = result.groups[0];
 
-    expect(group.rowCounts).toEqual({ oa: 5, bank: 0, invoice: 2 });
+    expect(group.rowCounts).toEqual({ oa: 5, bank: 8, invoice: 2 });
+    expect(group.displayRowCounts).toEqual({ oa: 5, bank: 0, invoice: 2 });
     expect(group.collapsedRowCounts).toEqual({ bank: 8 });
     expect(group.rows.oa).toHaveLength(5);
     expect(countWorkbenchGroupRows(group)).toBe(15);
+  });
+
+  test("prefers authoritative row counts over collapsed-only fallback counts", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "all",
+          zone: "paired",
+          page: 1,
+          page_size: 50,
+          total: 1,
+          has_more: false,
+          groups: [
+            {
+              group_id: "case-mixed",
+              group_type: "candidate",
+              match_confidence: "medium",
+              row_counts: { oa: 0, bank: 10, invoice: 0, rows: 10 },
+              display_row_counts: { oa: 0, bank: 2, invoice: 0, rows: 2 },
+              collapsed_row_counts: { bank: 8 },
+              oa_rows: [],
+              bank_rows: [{ id: "visible-bank-1", type: "bank" }, { id: "visible-bank-2", type: "bank" }],
+              invoice_rows: [],
+              collapsed_rows: {
+                bank: [{ id: "collapsed-bank-1", type: "bank" }],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await fetchWorkbenchGroupsPage("all", "paired", 1, 50, undefined, { detailLevel: "summary" });
+
+    expect(countWorkbenchGroupRows(result.groups[0])).toBe(10);
   });
 });
 

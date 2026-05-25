@@ -28,6 +28,7 @@ BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 1
 WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.v2"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
+NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
 WORKBENCH_ALLOWED_FILTER_COLUMNS = {
     "oa": {"applicant", "projectName", "applicationType", "counterparty", "reconciliationStatus"},
     "bank": {"counterparty", "amount", "direction", "paymentAccount", "invoiceRelationStatus", "loanRepaymentDate"},
@@ -1433,7 +1434,16 @@ class PostgresReadModelRepository:
             payload = _read_model_payload(materialized_row)
             if isinstance(payload, dict):
                 result = dict(payload)
-                if isinstance(result.get("summary"), dict):
+                structured_summary = self._workbench_summary_counts_from_group_rows(
+                    scope_key=normalized_scope_key
+                )
+                if isinstance(structured_summary, dict):
+                    result["summary"] = structured_summary["summary"]
+                    result["generated_at"] = (
+                        structured_summary.get("generated_at")
+                        or text(materialized_row.get("generated_at"))
+                    )
+                elif isinstance(result.get("summary"), dict):
                     result["summary"] = _normalize_workbench_summary_counts(result["summary"])
                 result.setdefault("month", normalized_scope_key)
                 result.setdefault("scope_key", normalized_scope_key)
@@ -1441,47 +1451,62 @@ class PostgresReadModelRepository:
                 result["read_model_status"] = self._workbench_summary_read_model_status(
                     scope_key=normalized_scope_key
                 )
+                result["diagnostics"] = self._workbench_bank_count_diagnostics(
+                    scope_key=normalized_scope_key,
+                    summary=result.get("summary") if isinstance(result.get("summary"), dict) else {},
+                )
                 return result
 
+        structured_summary = self._workbench_summary_counts_from_group_rows(scope_key=normalized_scope_key)
+        if not isinstance(structured_summary, dict):
+            return None
+        summary = structured_summary["summary"]
+        generated_at = structured_summary.get("generated_at")
+        refresh_status = self.get_workbench_refresh_status(scope_key=normalized_scope_key)
+        return {
+            "month": normalized_scope_key,
+            "scope_key": normalized_scope_key,
+            "summary": summary,
+            "diagnostics": self._workbench_bank_count_diagnostics(
+                scope_key=normalized_scope_key,
+                summary=summary,
+            ),
+            "invoice_inventory": self._workbench_invoice_inventory(scope_key=normalized_scope_key),
+            "read_model_status": refresh_status["read_model_status"],
+            "generated_at": generated_at,
+        }
+
+    def _workbench_summary_counts_from_group_rows(self, *, scope_key: str) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
         group_where, group_params = self._workbench_scope_filter(normalized_scope_key)
-        row_where, row_params = self._workbench_scope_filter(normalized_scope_key)
         group_rows = self._connection.fetch_all(
             f"""
             select
-                zone,
-                count(*)::bigint as count,
-                coalesce(sum(
-                    case when jsonb_typeof(payload->'oa_rows') = 'array'
-                        then jsonb_array_length(payload->'oa_rows')
-                        else 0
-                    end
-                ), 0)::bigint as oa_count,
-                coalesce(sum(
-                    case when jsonb_typeof(payload->'bank_rows') = 'array'
-                        then jsonb_array_length(payload->'bank_rows')
-                        else 0
-                    end
-                ), 0)::bigint as bank_count,
-                coalesce(sum(
-                    case when jsonb_typeof(payload->'invoice_rows') = 'array'
-                        then jsonb_array_length(payload->'invoice_rows')
-                        else 0
-                    end
-                ), 0)::bigint as invoice_count
+                g.zone,
+                count(distinct g.group_id)::bigint as count,
+                count(distinct r.row_id) filter (
+                    where r.pane = 'oa'
+                      and coalesce(r.row_role, '') <> 'summary'
+                )::bigint as oa_count,
+                count(distinct r.row_id) filter (
+                    where r.pane = 'bank'
+                      and coalesce(r.row_role, '') <> 'summary'
+                      and coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'
+                )::bigint as bank_count,
+                count(distinct r.row_id) filter (
+                    where r.pane = 'invoice'
+                      and coalesce(r.row_role, '') <> 'summary'
+                )::bigint as invoice_count
             from read_model.workbench_groups
-            where {group_where}
-            group by zone
+            g
+            left join read_model.workbench_group_rows r
+              on r.scope_key = g.scope_key
+             and r.zone = g.zone
+             and r.group_id = g.group_id
+            where g.{group_where}
+            group by g.zone
             """,
             tuple(group_params),
-        )
-        row_count_rows = self._connection.fetch_all(
-            f"""
-            select coalesce(nullif(payload->>'type', ''), source_kind) as row_type, count(*)::bigint as count
-            from read_model.workbench_rows
-            where {row_where}
-            group by row_type
-            """,
-            tuple(row_params),
         )
         generated_row = self._connection.fetch_one(
             f"""
@@ -1500,15 +1525,6 @@ class PostgresReadModelRepository:
             "exception_count": 0,
             "zone_counts": _empty_workbench_zone_counts(),
         }
-        for row in row_count_rows:
-            row_type = text(row.get("row_type")) or ""
-            count = int_value(row.get("count"), 0)
-            if row_type == "oa":
-                summary["oa_count"] += count
-            elif row_type == "bank":
-                summary["bank_count"] += count
-            elif row_type == "invoice":
-                summary["invoice_count"] += count
         for row in group_rows:
             zone = text(row.get("zone")) or ""
             count = int_value(row.get("count"), 0)
@@ -1523,17 +1539,63 @@ class PostgresReadModelRepository:
                 zone_counts["bank"] += int_value(row.get("bank_count"), 0)
                 zone_counts["invoice"] += int_value(row.get("invoice_count"), 0)
                 zone_counts["rows"] = zone_counts["oa"] + zone_counts["bank"] + zone_counts["invoice"]
+        for zone in ("paired", "open"):
+            zone_counts = summary["zone_counts"][zone]
+            summary["oa_count"] += zone_counts["oa"]
+            summary["bank_count"] += zone_counts["bank"]
+            summary["invoice_count"] += zone_counts["invoice"]
         generated_at = text((generated_row or {}).get("generated_at"))
         if generated_at is None and not any(summary.values()):
             return None
-        refresh_status = self.get_workbench_refresh_status(scope_key=normalized_scope_key)
         return {
-            "month": normalized_scope_key,
-            "scope_key": normalized_scope_key,
             "summary": summary,
-            "invoice_inventory": self._workbench_invoice_inventory(scope_key=normalized_scope_key),
-            "read_model_status": refresh_status["read_model_status"],
             "generated_at": generated_at,
+        }
+
+    def _workbench_bank_count_diagnostics(self, *, scope_key: str, summary: dict[str, Any]) -> dict[str, Any]:
+        normalized_scope_key = str(scope_key or "all").strip() or "all"
+        bank_where = ["status <> 'deleted'"]
+        bank_params: list[Any] = []
+        if normalized_scope_key != "all":
+            bank_where.append("txn_month = %s::date")
+            bank_params.append(month_start(normalized_scope_key))
+        bank_row = self._connection.fetch_one(
+            f"""
+            select count(*)::bigint as bank_detail_count
+            from app.bank_transactions
+            where {" and ".join(bank_where)}
+            """,
+            tuple(bank_params),
+        ) or {}
+        ignored_where, ignored_params = self._workbench_scope_filter(normalized_scope_key)
+        ignored_row = self._connection.fetch_one(
+            f"""
+            select count(distinct row_id)::bigint as ignored_bank_count
+            from read_model.workbench_rows
+            where {ignored_where}
+              and status = 'ignored'
+              and (
+                  coalesce(nullif(payload->>'type', ''), nullif(payload->>'record_type', ''), source_kind)
+                      in ('bank', 'bank_transaction')
+                  or source_kind in ('bank', 'bank_transaction')
+              )
+            """,
+            tuple(ignored_params),
+        ) or {}
+        ignored_bank_count = int_value(ignored_row.get("ignored_bank_count"), 0)
+        expected_bank_detail_count = int_value(summary.get("bank_count"), 0) + ignored_bank_count
+        raw_bank_detail_count = bank_row.get("bank_detail_count")
+        bank_detail_count = int_value(raw_bank_detail_count, expected_bank_detail_count)
+        if raw_bank_detail_count is None:
+            status = "unavailable"
+        elif bank_detail_count == expected_bank_detail_count:
+            status = "matched"
+        else:
+            status = "mismatch"
+        return {
+            "bank_detail_count": bank_detail_count,
+            "ignored_bank_count": ignored_bank_count,
+            "bank_detail_reconciliation_status": status,
         }
 
     def _workbench_invoice_inventory(self, *, scope_key: str) -> dict[str, int]:
@@ -1782,6 +1844,27 @@ class PostgresReadModelRepository:
             params.extend(row_filter_params)
         where_sql = " and ".join(clauses)
         order_by_sql = _workbench_groups_order_by(sort)
+        oa_row_filter_sql, oa_row_filter_params = _workbench_group_row_count_filter_sql(
+            "oa",
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
+            search_by_pane=normalized_search_by_pane,
+            fallback_search=normalized_search,
+        )
+        bank_row_filter_sql, bank_row_filter_params = _workbench_group_row_count_filter_sql(
+            "bank",
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
+            search_by_pane=normalized_search_by_pane,
+            fallback_search=normalized_search,
+        )
+        invoice_row_filter_sql, invoice_row_filter_params = _workbench_group_row_count_filter_sql(
+            "invoice",
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
+            search_by_pane=normalized_search_by_pane,
+            fallback_search=normalized_search,
+        )
         count_row = self._connection.fetch_one(
             f"""
             select count(*) as total_count
@@ -1793,28 +1876,37 @@ class PostgresReadModelRepository:
         row_count_row = self._connection.fetch_one(
             f"""
             select
-                coalesce(sum(
-                    case when jsonb_typeof(payload->'oa_rows') = 'array'
-                        then jsonb_array_length(payload->'oa_rows')
-                        else 0
-                    end
-                ), 0)::bigint as oa_count,
-                coalesce(sum(
-                    case when jsonb_typeof(payload->'bank_rows') = 'array'
-                        then jsonb_array_length(payload->'bank_rows')
-                        else 0
-                    end
-                ), 0)::bigint as bank_count,
-                coalesce(sum(
-                    case when jsonb_typeof(payload->'invoice_rows') = 'array'
-                        then jsonb_array_length(payload->'invoice_rows')
-                        else 0
-                    end
-                ), 0)::bigint as invoice_count
+                count(distinct r.row_id) filter (
+                    where r.pane = 'oa'
+                      and coalesce(r.row_role, '') <> 'summary'
+                      {oa_row_filter_sql}
+                )::bigint as oa_count,
+                count(distinct r.row_id) filter (
+                    where r.pane = 'bank'
+                      and coalesce(r.row_role, '') <> 'summary'
+                      and coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'
+                      {bank_row_filter_sql}
+                )::bigint as bank_count,
+                count(distinct r.row_id) filter (
+                    where r.pane = 'invoice'
+                      and coalesce(r.row_role, '') <> 'summary'
+                      {invoice_row_filter_sql}
+                )::bigint as invoice_count
             from read_model.workbench_groups g
+            left join read_model.workbench_group_rows r
+              on r.scope_key = g.scope_key
+             and r.zone = g.zone
+             and r.group_id = g.group_id
             where {where_sql}
             """,
-            tuple(params),
+            tuple(
+                [
+                    *oa_row_filter_params,
+                    *bank_row_filter_params,
+                    *invoice_row_filter_params,
+                    *params,
+                ]
+            ),
         )
         page_params = [*params, normalized_page_size + 1, offset]
         rows = self._connection.fetch_all(
@@ -1834,6 +1926,7 @@ class PostgresReadModelRepository:
             if not isinstance(group, dict):
                 group = {"group_id": text(row.get("group_id"))}
             group = _sanitize_workbench_group_invoice_rows(group)
+            group = _with_workbench_group_counts(group)
             if normalized_detail_level == "summary":
                 group = _filter_workbench_group_preview_rows_for_criteria(
                     group,
@@ -1883,7 +1976,7 @@ class PostgresReadModelRepository:
         group = _read_model_payload(row)
         if not isinstance(group, dict):
             return {"group_id": text(row.get("group_id"))}
-        return _sanitize_workbench_group_invoice_rows(group)
+        return _with_workbench_group_counts(_sanitize_workbench_group_invoice_rows(group))
 
     def get_workbench_refresh_status(self, *, scope_key: str | None = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
@@ -4151,18 +4244,14 @@ class PostgresReadModelRepository:
             for index, group in enumerate(section_groups):
                 if not isinstance(group, dict):
                     continue
-                group_id = text(group.get("group_id") or group.get("id")) or f"{zone}:{index}"
+                normalized_group = _with_workbench_group_counts(group)
+                group_id = text(normalized_group.get("group_id") or normalized_group.get("id")) or f"{zone}:{index}"
                 key = (zone, group_id)
                 if key in seen:
                     continue
                 seen.add(key)
-                group_rows = list(_iter_group_rows(group))
-                row_ids = {
-                    row_id
-                    for row in group_rows
-                    if (row_id := text(row.get("id") or row.get("row_id"))) is not None
-                }
-                row_identity = _workbench_group_row_identity(group)
+                group_rows = list(_iter_group_rows(normalized_group))
+                row_identity = _workbench_group_row_identity(normalized_group)
                 if row_identity:
                     row_key = (zone, row_identity)
                     if row_key in seen_row_sets:
@@ -4175,20 +4264,20 @@ class PostgresReadModelRepository:
                         if (source_kind := text(row.get("source_kind") or row.get("type"))) is not None
                     }
                 )
-                sort_keys = _workbench_group_sort_keys(group)
+                sort_keys = _workbench_group_sort_keys(normalized_group)
                 groups.append(
                     {
                         "group_id": group_id,
-                        "scope_month": group.get("scope_month") or group.get("month") or payload.get("month"),
-                        "month": group.get("month") or payload.get("month"),
+                        "scope_month": normalized_group.get("scope_month") or normalized_group.get("month") or payload.get("month"),
+                        "month": normalized_group.get("month") or payload.get("month"),
                         "zone": zone,
                         "status": zone,
-                        "group_type": text(group.get("group_type")) or "candidate",
+                        "group_type": text(normalized_group.get("group_type")) or "candidate",
                         "source_kinds": source_kinds,
-                        "row_count": len(row_ids),
-                        "searchable_text": _searchable_group_text(group),
+                        "row_count": _workbench_group_fact_row_counts(normalized_group)["rows"],
+                        "searchable_text": _searchable_group_text(normalized_group),
                         **sort_keys,
-                        "payload": serialize_value(group),
+                        "payload": serialize_value(normalized_group),
                     }
                 )
         return groups
@@ -4797,8 +4886,8 @@ def _normalize_all_scope_group(group: dict[str, Any], *, zone: str, group_id: st
     normalized["scope_month"] = None
     normalized.pop("_source_scope_key", None)
     normalized.pop("_source_scope_month", None)
-    normalized.pop("row_counts", None)
     normalized.pop("collapsed_row_counts", None)
+    normalized.pop("display_row_counts", None)
     for key in ("oa_rows", "bank_rows", "invoice_rows"):
         normalized[key] = _dedupe_workbench_rows(normalized.get(key))
     collapsed_rows = normalized.get("collapsed_rows")
@@ -4808,7 +4897,7 @@ def _normalize_all_scope_group(group: dict[str, Any], *, zone: str, group_id: st
             for row_type, rows in collapsed_rows.items()
             if isinstance(rows, list)
         }
-    return normalized
+    return _with_workbench_group_counts(normalized)
 
 
 def _all_scope_group_id(group: dict[str, Any], group_id: str) -> str:
@@ -4854,14 +4943,14 @@ def _merge_all_scope_group(target: dict[str, Any], incoming: dict[str, Any]) -> 
 
 
 def _finalize_all_scope_group(group: dict[str, Any], *, zone: str) -> None:
-    group.pop("row_counts", None)
     group.pop("collapsed_row_counts", None)
+    group.pop("display_row_counts", None)
     group["zone"] = zone
     group["status"] = zone
     group["scope_key"] = "all"
     group["month"] = "all"
     group["scope_month"] = None
-    group["row_count"] = len(_workbench_group_row_identity(group))
+    group.update(_with_workbench_group_counts(group))
     group["source_kinds"] = sorted(
         {
             source_kind
@@ -4897,6 +4986,77 @@ def _as_workbench_row_list(rows: Any) -> list[dict[str, Any]]:
     if not isinstance(rows, list):
         return []
     return [deepcopy(row) for row in rows if isinstance(row, dict)]
+
+
+def _workbench_row_id(row: dict[str, Any]) -> str | None:
+    return text(row.get("id") or row.get("row_id"))
+
+
+def _is_workbench_summary_display_row(row: dict[str, Any], pane: str) -> bool:
+    return pane == "bank" and (
+        text(row.get("row_role")) == "summary"
+        or text(row.get("source_kind")) == NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND
+    )
+
+
+def _empty_workbench_row_counts() -> dict[str, int]:
+    return {"oa": 0, "bank": 0, "invoice": 0, "rows": 0}
+
+
+def _workbench_group_fact_row_counts(group: dict[str, Any]) -> dict[str, int]:
+    counts = _empty_workbench_row_counts()
+    seen: set[tuple[str, str]] = set()
+    for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
+        if pane not in WORKBENCH_PANES or row_role == "summary":
+            continue
+        row_id = _workbench_row_id(row)
+        if row_id is None:
+            continue
+        row_key = (pane, row_id)
+        if row_key in seen:
+            continue
+        seen.add(row_key)
+        counts[pane] += 1
+        counts["rows"] += 1
+    return counts
+
+
+def _workbench_panes_with_summary_display_rows(group: dict[str, Any]) -> set[str]:
+    panes: set[str] = set()
+    for pane, row_role, _row_index, _row in _iter_typed_group_rows_with_metadata(group):
+        if row_role == "summary":
+            panes.add(pane)
+    return panes
+
+
+def _workbench_group_display_row_counts(group: dict[str, Any]) -> dict[str, int]:
+    counts = _empty_workbench_row_counts()
+    for pane, row_key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
+        rows = group.get(row_key)
+        if isinstance(rows, list):
+            counts[pane] = sum(1 for row in rows if isinstance(row, dict))
+            counts["rows"] += counts[pane]
+    return counts
+
+
+def _normalize_workbench_row_counts(value: Any, fallback: dict[str, int]) -> dict[str, int]:
+    source = value if isinstance(value, dict) else {}
+    counts = {
+        "oa": int_value(source.get("oa"), fallback.get("oa", 0)),
+        "bank": int_value(source.get("bank"), fallback.get("bank", 0)),
+        "invoice": int_value(source.get("invoice"), fallback.get("invoice", 0)),
+        "rows": 0,
+    }
+    counts["rows"] = int_value(source.get("rows"), counts["oa"] + counts["bank"] + counts["invoice"])
+    return counts
+
+
+def _with_workbench_group_counts(group: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(group)
+    normalized["row_counts"] = _workbench_group_fact_row_counts(normalized)
+    normalized["display_row_counts"] = _workbench_group_display_row_counts(normalized)
+    normalized["row_count"] = normalized["row_counts"]["rows"]
+    return normalized
 
 
 def _empty_workbench_zone_counts() -> dict[str, dict[str, int]]:
@@ -5025,52 +5185,100 @@ def _workbench_group_row_filter_exists_sql(
     pane_exists: list[str] = []
     params: list[Any] = []
     for pane in WORKBENCH_PANES:
-        pane_column_filters = column_filters.get(pane, {})
-        pane_time_filter = time_filters.get(pane)
-        pane_search = search_by_pane.get(pane)
-        if not pane_search and fallback_search and (pane_column_filters or pane_time_filter):
-            pane_search = fallback_search
-        if not pane_column_filters and not pane_time_filter and not pane_search:
+        row_match_clauses, row_match_params = _workbench_group_row_match_sql(
+            pane,
+            column_filters=column_filters,
+            time_filters=time_filters,
+            search_by_pane=search_by_pane,
+            fallback_search=fallback_search,
+            include_pane=True,
+        )
+        if not row_match_clauses:
             continue
         row_clauses = [
             "r.scope_key = g.scope_key",
             "r.zone = g.zone",
             "r.group_id = g.group_id",
-            "r.pane = %s",
+            *row_match_clauses,
         ]
-        row_params: list[Any] = [pane]
-        for column_key in sorted(pane_column_filters):
-            values = pane_column_filters[column_key]
-            value_match_clauses: list[str] = []
-            if pane == "bank" and column_key == "amount":
-                for value in values:
-                    value_clauses = []
-                    value_clauses.append("r.column_values @> %s::jsonb")
-                    row_params.append(json.dumps({"direction": value}, ensure_ascii=False))
-                    value_clauses.append("r.column_values @> %s::jsonb")
-                    row_params.append(json.dumps({"paymentAccount": value}, ensure_ascii=False))
-                    value_match_clauses.append("(" + " or ".join(value_clauses) + ")")
-            else:
-                for value in values:
-                    value_match_clauses.append("r.column_values @> %s::jsonb")
-                    row_params.append(json.dumps({column_key: value}, ensure_ascii=False))
-            if value_match_clauses:
-                row_clauses.append("(" + " and ".join(value_match_clauses) + ")")
-        if pane_time_filter:
-            start_date, end_date = _workbench_time_filter_date_range(pane_time_filter)
-            if start_date and end_date:
-                row_clauses.append("r.time_date >= %s::date and r.time_date < %s::date")
-                row_params.extend([start_date, end_date])
-        if pane_search:
-            row_clauses.append("r.searchable_text ilike %s")
-            row_params.append(f"%{pane_search}%")
         pane_exists.append(
             "exists (select 1 from read_model.workbench_group_rows r where " + " and ".join(row_clauses) + ")"
         )
-        params.extend(row_params)
+        params.extend(row_match_params)
     if not pane_exists:
         return "", []
     return "(" + " and ".join(pane_exists) + ")", params
+
+
+def _workbench_group_row_count_filter_sql(
+    pane: str,
+    *,
+    column_filters: dict[str, dict[str, list[str]]],
+    time_filters: dict[str, dict[str, str]],
+    search_by_pane: dict[str, str],
+    fallback_search: str | None,
+) -> tuple[str, list[Any]]:
+    row_clauses, params = _workbench_group_row_match_sql(
+        pane,
+        column_filters=column_filters,
+        time_filters=time_filters,
+        search_by_pane=search_by_pane,
+        fallback_search=fallback_search,
+        include_pane=False,
+    )
+    if not row_clauses:
+        return "", []
+    return "and " + " and ".join(row_clauses), params
+
+
+def _workbench_group_row_match_sql(
+    pane: str,
+    *,
+    column_filters: dict[str, dict[str, list[str]]],
+    time_filters: dict[str, dict[str, str]],
+    search_by_pane: dict[str, str],
+    fallback_search: str | None,
+    include_pane: bool,
+) -> tuple[list[str], list[Any]]:
+    pane_column_filters = column_filters.get(pane, {})
+    pane_time_filter = time_filters.get(pane)
+    pane_search = search_by_pane.get(pane)
+    if not pane_search and fallback_search and (pane_column_filters or pane_time_filter):
+        pane_search = fallback_search
+    if not pane_column_filters and not pane_time_filter and not pane_search:
+        return [], []
+
+    row_clauses: list[str] = []
+    row_params: list[Any] = []
+    if include_pane:
+        row_clauses.append("r.pane = %s")
+        row_params.append(pane)
+    for column_key in sorted(pane_column_filters):
+        values = pane_column_filters[column_key]
+        value_match_clauses: list[str] = []
+        if pane == "bank" and column_key == "amount":
+            for value in values:
+                value_clauses = []
+                value_clauses.append("r.column_values @> %s::jsonb")
+                row_params.append(json.dumps({"direction": value}, ensure_ascii=False))
+                value_clauses.append("r.column_values @> %s::jsonb")
+                row_params.append(json.dumps({"paymentAccount": value}, ensure_ascii=False))
+                value_match_clauses.append("(" + " or ".join(value_clauses) + ")")
+        else:
+            for value in values:
+                value_match_clauses.append("r.column_values @> %s::jsonb")
+                row_params.append(json.dumps({column_key: value}, ensure_ascii=False))
+        if value_match_clauses:
+            row_clauses.append("(" + " and ".join(value_match_clauses) + ")")
+    if pane_time_filter:
+        start_date, end_date = _workbench_time_filter_date_range(pane_time_filter)
+        if start_date and end_date:
+            row_clauses.append("r.time_date >= %s::date and r.time_date < %s::date")
+            row_params.extend([start_date, end_date])
+    if pane_search:
+        row_clauses.append("r.searchable_text ilike %s")
+        row_params.append(f"%{pane_search}%")
+    return row_clauses, row_params
 
 
 def _workbench_time_filter_date_range(time_filter: dict[str, str]) -> tuple[str | None, str | None]:
@@ -5116,9 +5324,11 @@ def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, An
                 continue
             if zone == "open" and _workbench_group_has_danger(group):
                 summary["exception_count"] += 1
-            for row_type, row in _iter_typed_group_rows(group):
-                row_type = text(row.get("type") or row.get("record_type")) or row_type
-                row_id = text(row.get("id") or row.get("row_id"))
+            for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
+                if row_role == "summary":
+                    continue
+                row_type = text(row.get("type") or row.get("record_type")) or pane
+                row_id = _workbench_row_id(row)
                 if row_type is None or row_id is None:
                     continue
                 row_key = (row_type, row_id)
@@ -5245,7 +5455,7 @@ def _filter_workbench_group_preview_rows_for_criteria(
     panes_to_filter = [
         pane
         for pane in WORKBENCH_PANES
-        if column_filters.get(pane) or time_filters.get(pane)
+        if column_filters.get(pane) or time_filters.get(pane) or search_by_pane.get(pane)
     ]
     if not panes_to_filter:
         return group
@@ -5355,12 +5565,12 @@ def _workbench_payload_row_matches_preview_criteria(
 
 def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str, Any]:
     compact = without_keys(dict(group), {"raw_payload", "payload"})
-    existing_row_counts = group.get("row_counts") if isinstance(group.get("row_counts"), dict) else {}
-    compact["row_counts"] = {
-        "oa": int_value(existing_row_counts.get("oa"), len(group.get("oa_rows") if isinstance(group.get("oa_rows"), list) else [])),
-        "bank": int_value(existing_row_counts.get("bank"), len(group.get("bank_rows") if isinstance(group.get("bank_rows"), list) else [])),
-        "invoice": int_value(existing_row_counts.get("invoice"), len(group.get("invoice_rows") if isinstance(group.get("invoice_rows"), list) else [])),
-    }
+    normalized_counts = _with_workbench_group_counts(group)
+    compact["row_counts"] = _normalize_workbench_row_counts(group.get("row_counts"), normalized_counts["row_counts"])
+    compact["display_row_counts"] = _normalize_workbench_row_counts(
+        group.get("display_row_counts"),
+        normalized_counts["display_row_counts"],
+    )
     for row_key in ("oa_rows", "bank_rows", "invoice_rows"):
         rows = group.get(row_key)
         compact[row_key] = [
@@ -5633,8 +5843,10 @@ def _searchable_row_text(row: dict[str, Any], pane_id: str) -> str:
 
 def _workbench_group_row_identity(group: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     identities = []
-    for fallback_row_type, row in _iter_typed_group_rows(group):
-        row_id = text(row.get("id") or row.get("row_id"))
+    for fallback_row_type, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
+        if row_role == "summary":
+            continue
+        row_id = _workbench_row_id(row)
         if row_id is None:
             continue
         row_type = text(row.get("type") or row.get("record_type")) or fallback_row_type
@@ -5689,7 +5901,16 @@ def _iter_typed_group_rows_with_metadata(group: dict[str, Any]) -> list[tuple[st
     for row_type, key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
         value = group.get(key)
         if isinstance(value, list):
-            rows.extend((row_type, "normal", index, row) for index, row in enumerate(value) if isinstance(row, dict))
+            rows.extend(
+                (
+                    row_type,
+                    "summary" if _is_workbench_summary_display_row(row, row_type) else "normal",
+                    index,
+                    row,
+                )
+                for index, row in enumerate(value)
+                if isinstance(row, dict)
+            )
     collapsed_rows = group.get("collapsed_rows")
     if isinstance(collapsed_rows, dict):
         for row_type, value in collapsed_rows.items():

@@ -207,6 +207,7 @@ export type WorkbenchCandidateGroup = {
   summaryRow?: WorkbenchRecord;
   rows: WorkbenchPaneRows;
   rowCounts?: WorkbenchPaneRowCounts;
+  displayRowCounts?: WorkbenchPaneRowCounts;
   collapsedRows?: Partial<WorkbenchPaneRows>;
   collapsedRowCounts?: WorkbenchPaneRowCounts;
   canWithdraw?: boolean;

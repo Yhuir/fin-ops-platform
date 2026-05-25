@@ -309,6 +309,7 @@ type ApiWorkbenchGroup = {
   default_collapsed?: boolean | null;
   summary_row?: ApiWorkbenchRow | null;
   row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
+  display_row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
   collapsed_rows?: Partial<Record<WorkbenchRecordType, ApiWorkbenchRow[]>> | null;
   collapsed_row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
   oa_rows: ApiWorkbenchRow[];
@@ -1345,6 +1346,7 @@ function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): Wor
 function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): WorkbenchCandidateGroup {
   const summaryRow = group.summary_row ? mapRow(group.summary_row) : undefined;
   const rowCounts = mapPaneRowCounts(group.row_counts);
+  const displayRowCounts = mapPaneRowCounts(group.display_row_counts);
   const collapsedRowCounts = mapPaneRowCounts(group.collapsed_row_counts);
   const collapsedRows = group.collapsed_rows && typeof group.collapsed_rows === "object"
     ? {
@@ -1382,6 +1384,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     summaryRow,
     rows,
     rowCounts,
+    displayRowCounts,
     collapsedRows,
     collapsedRowCounts,
     relationNote: toDisplayValue(group.relation_note, "") || undefined,

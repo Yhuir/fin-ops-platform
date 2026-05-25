@@ -116,6 +116,8 @@ class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
         self.fetch_one_calls.append((normalized, params))
         if "from read_model.workbench_groups" in normalized and "count(*) as total_count" in normalized:
             return {"total_count": 2}
+        if "read_model.workbench_group_rows" in normalized and "as oa_count" in normalized:
+            return {"oa_count": 3, "bank_count": 4, "invoice_count": 5}
         if "from read_model.workbench_groups" in normalized and "jsonb_array_length" in normalized:
             return {"oa_count": 3, "bank_count": 4, "invoice_count": 5}
         if "from read_model.workbench_groups" in normalized and "max(generated_at)" in normalized:
@@ -155,7 +157,7 @@ class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
             raise AssertionError("psycopg SQL uses % placeholders; ilike patterns must be query parameters")
         if "from read_model.workbench_snapshots" in normalized and "payload, raw_payload" in normalized:
             raise AssertionError("summary/groups hot path must not load full workbench snapshots")
-        if "from read_model.workbench_groups" in normalized and "group by zone" in normalized:
+        if "from read_model.workbench_groups" in normalized and ("group by zone" in normalized or "group by g.zone" in normalized):
             return [
                 {"zone": "paired", "count": 1, "oa_count": 1, "bank_count": 2, "invoice_count": 0},
                 {"zone": "open", "count": 2, "oa_count": 2, "bank_count": 2, "invoice_count": 5},
@@ -266,6 +268,11 @@ class MaterializedWorkbenchSummaryConnection(WorkbenchSummaryGroupsConnection):
                         "exception_count": 0,
                     },
                     "invoice_inventory": {"system_total": 99},
+                    "diagnostics": {
+                        "bank_detail_count": 999,
+                        "ignored_bank_count": 888,
+                        "bank_detail_reconciliation_status": "stale",
+                    },
                     "generated_at": "2026-05-22T10:00:00+00:00",
                 },
                 "generated_at": "2026-05-22T10:00:00+00:00",
@@ -278,9 +285,7 @@ class MaterializedWorkbenchSummaryConnection(WorkbenchSummaryGroupsConnection):
         self.fetch_all_calls.append((normalized, params))
         if "from job.read_model_dirty_scopes" in normalized:
             return []
-        if "from read_model.workbench_groups" in normalized or "from read_model.workbench_rows" in normalized:
-            raise AssertionError("materialized summary fast path must not recalculate summary from groups or rows")
-        return []
+        return super().fetch_all(sql, params)
 
 
 class QueueRecorder:
@@ -824,25 +829,40 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             },
         )
         self.assertFalse(
+            any("jsonb_array_length(payload->'bank_rows')" in sql for sql, _params in connection.fetch_all_calls)
+        )
+        self.assertFalse(
             any(
                 "from read_model.workbench_snapshots" in sql and "payload, raw_payload" in sql
                 for sql, _params in connection.fetch_all_calls
             )
         )
 
-    def test_repository_reads_materialized_workbench_summary_when_available(self) -> None:
+    def test_repository_repairs_materialized_workbench_summary_counts_from_structured_rows(self) -> None:
         connection = MaterializedWorkbenchSummaryConnection()
         repository = PostgresReadModelRepository(connection)
 
         summary = repository.get_workbench_summary(scope_key="all")
 
-        self.assertEqual(summary["summary"]["oa_count"], 10)
-        self.assertEqual(summary["summary"]["open_count"], 14)
+        self.assertEqual(summary["summary"]["oa_count"], 3)
+        self.assertEqual(summary["summary"]["bank_count"], 4)
+        self.assertEqual(summary["summary"]["invoice_count"], 5)
+        self.assertEqual(summary["summary"]["paired_count"], 1)
+        self.assertEqual(summary["summary"]["open_count"], 2)
+        self.assertEqual(summary["diagnostics"]["bank_detail_count"], 4)
+        self.assertEqual(summary["diagnostics"]["ignored_bank_count"], 0)
+        self.assertEqual(summary["diagnostics"]["bank_detail_reconciliation_status"], "unavailable")
         self.assertEqual(summary["invoice_inventory"]["system_total"], 99)
         self.assertEqual(summary["read_model_status"], "fresh")
         self.assertTrue(any("from read_model.workbench_summary" in sql for sql, _params in connection.fetch_one_calls))
-        self.assertFalse(
-            any("from read_model.workbench_groups" in sql or "from read_model.workbench_rows" in sql for sql, _params in connection.fetch_all_calls)
+        self.assertTrue(
+            any(
+                "from read_model.workbench_groups" in sql
+                and "left join read_model.workbench_group_rows" in sql
+                and "coalesce(r.row_role, '') <> 'summary'" in sql
+                and "coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
         )
 
     def test_repository_reads_workbench_groups_page_from_structured_groups(self) -> None:
@@ -1101,7 +1121,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group = page["groups"][0]
         self.assertEqual(page["detail_level"], "summary")
         self.assertEqual(group["group_id"], "case:1")
-        self.assertEqual(group["row_counts"], {"oa": 5, "bank": 0, "invoice": 1})
+        self.assertEqual(group["row_counts"], {"oa": 9, "bank": 0, "invoice": 1, "rows": 10})
+        self.assertEqual(group["display_row_counts"], {"oa": 5, "bank": 0, "invoice": 1, "rows": 6})
         self.assertEqual(group["collapsed_row_counts"], {"oa": 4})
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-1", "oa-2", "oa-3", "oa-4", "oa-5"])
         self.assertEqual(group["invoice_rows"][0]["invoice_code"], "053002200111")
@@ -1115,6 +1136,180 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
         self.assertNotIn("detail_fields", group["oa_rows"][0])
         self.assertNotIn("raw_payload", group)
+
+    def test_repository_groups_page_row_counts_use_fact_rows_before_pagination(self) -> None:
+        class FactRowCountsConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_groups g" in normalized and "count(*) as total_count" in normalized:
+                    return {"total_count": 2}
+                if "read_model.workbench_group_rows" in normalized and "as oa_count" in normalized:
+                    return {"oa_count": 1, "bank_count": 3, "invoice_count": 0}
+                return super().fetch_one(sql, params)
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" in normalized and "group by" not in normalized:
+                    return [
+                        {
+                            "group_id": "case:first-page",
+                            "zone": "paired",
+                            "payload": {
+                                "group_id": "case:first-page",
+                                "group_type": "candidate",
+                                "match_confidence": "medium",
+                                "reason": "first page",
+                                "oa_rows": [{"id": "oa-1", "type": "oa"}],
+                                "bank_rows": [
+                                    {
+                                        "id": "no_oa_summary:batch-1",
+                                        "type": "bank",
+                                        "source_kind": "no_oa_bank_batch_summary",
+                                    }
+                                ],
+                                "invoice_rows": [],
+                                "collapsed_rows": {
+                                    "bank": [
+                                        {"id": "bank-1", "type": "bank", "source_kind": "bank"},
+                                        {"id": "bank-2", "type": "bank"},
+                                    ]
+                                },
+                            },
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        connection = FactRowCountsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(scope_key="all", zone="paired", page=1, page_size=1)
+
+        self.assertEqual(page["total"], 2)
+        self.assertEqual(page["row_counts"], {"oa": 1, "bank": 3, "invoice": 0, "rows": 4})
+        self.assertEqual(len(page["groups"]), 1)
+        self.assertFalse(
+            any("jsonb_array_length(payload->'bank_rows')" in sql for sql, _params in connection.fetch_one_calls)
+        )
+        self.assertTrue(
+            any(
+                "coalesce(r.row_role, '') <> 'summary'" in sql
+                and
+                "coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'" in sql
+                for sql, _params in connection.fetch_one_calls
+            )
+        )
+
+    def test_repository_groups_page_row_counts_apply_pane_row_filters(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=25,
+            search_by_pane={"bank": "建行"},
+            column_filters={"bank": {"amount": ["支出"]}},
+            time_filters={"bank": {"mode": "month", "month": "2026-04"}},
+        )
+
+        row_count_queries = [
+            (sql, params)
+            for sql, params in connection.fetch_one_calls
+            if "count(distinct r.row_id) filter" in sql
+        ]
+        self.assertTrue(row_count_queries)
+        self.assertTrue(
+            any(
+                "r.column_values @> %s::jsonb" in sql
+                and "r.time_date >= %s::date and r.time_date < %s::date" in sql
+                and "r.searchable_text ilike %s" in sql
+                and '"direction": "支出"' in str(params)
+                and "2026-04-01" in str(params)
+                and "%建行%" in params
+                for sql, params in row_count_queries
+            )
+        )
+
+    def test_repository_summary_diagnostics_reconciles_bank_detail_and_ignored_counts(self) -> None:
+        class DiagnosticsConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from app.bank_transactions" in normalized:
+                    return {"bank_detail_count": 5}
+                if "from read_model.workbench_rows" in normalized and "ignored_bank_count" in normalized:
+                    return {"ignored_bank_count": 1}
+                return super().fetch_one(sql, params)
+
+        connection = DiagnosticsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        summary = repository.get_workbench_summary(scope_key="all")
+
+        self.assertEqual(summary["summary"]["bank_count"], 4)
+        self.assertEqual(
+            summary["summary"]["bank_count"],
+            summary["summary"]["zone_counts"]["paired"]["bank"] + summary["summary"]["zone_counts"]["open"]["bank"],
+        )
+        self.assertEqual(summary["diagnostics"]["bank_detail_count"], 5)
+        self.assertEqual(summary["diagnostics"]["ignored_bank_count"], 1)
+        self.assertEqual(
+            summary["diagnostics"]["bank_detail_count"],
+            summary["summary"]["bank_count"] + summary["diagnostics"]["ignored_bank_count"],
+        )
+        self.assertEqual(summary["diagnostics"]["bank_detail_reconciliation_status"], "matched")
+        self.assertTrue(
+            any(
+                "source_kind in ('bank', 'bank_transaction')" in sql
+                for sql, _params in connection.fetch_one_calls
+            )
+        )
+
+    def test_repository_group_detail_returns_fact_and_display_counts_for_collapsed_bank_rows(self) -> None:
+        class CollapsedGroupDetailConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_groups" in normalized and "group_id = %s" in normalized:
+                    return {
+                        "group_id": "case:no-oa",
+                        "zone": "paired",
+                        "payload": {
+                            "group_id": "case:no-oa",
+                            "group_type": "auto_closed",
+                            "match_confidence": "high",
+                            "reason": "detail",
+                            "oa_rows": [],
+                            "bank_rows": [
+                                {
+                                    "id": "no_oa_summary:batch-1",
+                                    "type": "bank",
+                                    "source_kind": "no_oa_bank_batch_summary",
+                                }
+                            ],
+                            "invoice_rows": [],
+                            "collapsed_rows": {
+                                "bank": [
+                                    {"id": "bank-1", "type": "bank", "source_kind": "bank"},
+                                    {"id": "bank-2", "type": "bank"},
+                                ]
+                            },
+                        },
+                    }
+                return super().fetch_one(sql, params)
+
+        connection = CollapsedGroupDetailConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        group = repository.get_workbench_group_detail(scope_key="all", zone="paired", group_id="case:no-oa")
+
+        assert group is not None
+        self.assertEqual(group["row_counts"], {"oa": 0, "bank": 2, "invoice": 0, "rows": 2})
+        self.assertEqual(group["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
+        self.assertEqual([row["id"] for row in group["collapsed_rows"]["bank"]], ["bank-1", "bank-2"])
 
     def test_repository_keeps_all_oa_attachment_invoice_rows_in_summary_page(self) -> None:
         class OaAttachmentInvoiceRowsConnection(WorkbenchSummaryGroupsConnection):
@@ -1427,7 +1622,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             [row["id"] for row in group_payload["invoice_rows"]],
             ["oa-att-inv-1", "oa-att-inv-2"],
         )
-        self.assertNotIn("row_counts", group_payload)
+        self.assertEqual(group_payload["row_counts"], {"oa": 1, "bank": 1, "invoice": 2, "rows": 4})
+        self.assertEqual(group_payload["display_row_counts"], {"oa": 1, "bank": 1, "invoice": 2, "rows": 4})
         self.assertNotIn("collapsed_row_counts", group_payload)
         aggregate_source_versions = next(
             params[13].obj
@@ -1435,6 +1631,129 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             if "insert into read_model.workbench_groups" in sql and "values ( %s, 'all'" in sql
         )
         self.assertEqual(aggregate_source_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
+
+    def test_repository_persists_no_oa_collapsed_group_fact_and_display_counts(self) -> None:
+        connection = WorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {
+                            "paired": {
+                                "groups": [
+                                    {
+                                        "group_id": "case:NO-OA-BATCH",
+                                        "group_type": "auto_closed",
+                                        "match_confidence": "high",
+                                        "reason": "免OA批次",
+                                        "oa_rows": [],
+                                        "bank_rows": [
+                                            {
+                                                "id": "no_oa_summary:batch-1",
+                                                "type": "bank",
+                                                "source_kind": "no_oa_bank_batch_summary",
+                                                "summary": "免OA批次摘要",
+                                            }
+                                        ],
+                                        "invoice_rows": [],
+                                        "collapsed_rows": {
+                                            "bank": [
+                                                {"id": "bank-1", "type": "bank", "source_kind": "bank"},
+                                                {"id": "bank-2", "type": "bank"},
+                                                {"id": "bank-3", "type": "bank", "source_kind": ""},
+                                            ]
+                                        },
+                                    }
+                                ]
+                            },
+                            "open": {"groups": []},
+                        },
+                        "source_versions": {"source_version": 7},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        group_insert = next(
+            params
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and params[0] == "case:NO-OA-BATCH"
+        )
+        group_payload = group_insert[18].obj
+        self.assertEqual(group_insert[7], 3)
+        self.assertEqual(group_payload["row_counts"], {"oa": 0, "bank": 3, "invoice": 0, "rows": 3})
+        self.assertEqual(group_payload["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
+
+        group_row_roles = [
+            (params[4], params[5], params[6], params[8])
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_group_rows" in sql and params[3] == "case:NO-OA-BATCH"
+        ]
+        self.assertIn(("bank", "no_oa_summary:batch-1", "summary", "no_oa_bank_batch_summary"), group_row_roles)
+        self.assertIn(("bank", "bank-1", "collapsed", "bank"), group_row_roles)
+
+    def test_repository_treats_row_role_summary_as_display_only_even_with_bank_source_kind(self) -> None:
+        connection = WorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {
+                            "paired": {
+                                "groups": [
+                                    {
+                                        "group_id": "case:ROLE-SUMMARY",
+                                        "group_type": "auto_closed",
+                                        "oa_rows": [],
+                                        "bank_rows": [
+                                            {
+                                                "id": "summary-bank-source-kind",
+                                                "type": "bank",
+                                                "source_kind": "bank",
+                                                "row_role": "summary",
+                                            }
+                                        ],
+                                        "invoice_rows": [],
+                                        "collapsed_rows": {
+                                            "bank": [
+                                                {"id": "bank-1", "type": "bank", "source_kind": "bank"},
+                                                {"id": "bank-2", "type": "bank", "source_kind": "bank"},
+                                            ]
+                                        },
+                                    }
+                                ]
+                            },
+                            "open": {"groups": []},
+                        },
+                        "source_versions": {"source_version": 8},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        group_insert = next(
+            params
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and params[0] == "case:ROLE-SUMMARY"
+        )
+        group_payload = group_insert[18].obj
+        self.assertEqual(group_payload["row_counts"], {"oa": 0, "bank": 2, "invoice": 0, "rows": 2})
+        self.assertEqual(group_payload["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
+
+        group_row_roles = [
+            (params[4], params[5], params[6], params[8])
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_group_rows" in sql and params[3] == "case:ROLE-SUMMARY"
+        ]
+        self.assertIn(("bank", "summary-bank-source-kind", "summary", "bank"), group_row_roles)
 
     def test_repository_keeps_synthetic_all_scope_groups_separate_by_month_shard(self) -> None:
         class AggregateAllSyntheticGroupsConnection(WorkbenchWriteConnection):

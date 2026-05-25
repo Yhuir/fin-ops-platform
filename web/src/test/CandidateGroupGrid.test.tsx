@@ -217,6 +217,18 @@ describe("Workbench candidate grouping layout", () => {
         bank: [summary],
         invoice: [],
       },
+      rowCounts: {
+        oa: 0,
+        bank: 2,
+        invoice: 0,
+        rows: 2,
+      },
+      displayRowCounts: {
+        oa: 0,
+        bank: 1,
+        invoice: 0,
+        rows: 1,
+      },
       collapsedRows: {
         bank: [
           createNoOaBankRecord("bk-nooa-fee-001", "建设银行手续费", "10.00", "摘要：账户管理费"),
@@ -613,6 +625,8 @@ describe("Workbench candidate grouping layout", () => {
     const expandButton = screen.getByRole("button", { name: "展开免OA批次明细，2 条" });
     expect(expandButton).toHaveTextContent("展开 2 条明细");
     expect(expandButton).toHaveClass("candidate-group-collapse-control");
+    expect(screen.getByText("当前显示 1 条摘要")).toBeInTheDocument();
+    expect(screen.getByText("实际 2 条流水")).toBeInTheDocument();
     expect(bankCell).not.toContainElement(expandButton);
     expect(within(bankCell).getAllByRole("row")).toHaveLength(1);
 
