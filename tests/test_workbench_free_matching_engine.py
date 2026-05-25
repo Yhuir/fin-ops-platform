@@ -110,6 +110,78 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(decision.invoice_row_ids, ("iv-1", "iv-2"))
         self.assertTrue(decision.invoice_amount_closed)
 
+    def test_multiple_oa_bank_pairs_sum_to_single_invoice_is_paired(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [
+                oa(
+                    "oa-maintenance",
+                    "9414.30",
+                    reason="昭通卷烟厂能源集中监控平台系统维护采购项目",
+                ),
+                oa(
+                    "oa-goods",
+                    "21966.70",
+                    reason="昭通卷烟厂能源集中监控平台系统维护采购项目",
+                ),
+            ],
+            [
+                bank(
+                    "bk-maintenance",
+                    "9414.30",
+                    counterparty="北京标志卓信科技有限公司",
+                ),
+                bank(
+                    "bk-goods",
+                    "21966.70",
+                    counterparty="北京标志卓信科技有限公司",
+                ),
+            ],
+            [
+                invoice(
+                    "iv-combined",
+                    "31381.00",
+                    seller_name="北京标志卓信科技有限公司",
+                ),
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decision.match_shape, "oa_bank_invoice")
+        self.assertEqual(decision.rule_code, "oa_bank_pairs_single_invoice_exact_sum")
+        self.assertEqual(
+            decision.row_ids,
+            ("oa-goods", "oa-maintenance", "bk-goods", "bk-maintenance", "iv-combined"),
+        )
+        self.assertEqual(decision.oa_row_ids, ("oa-goods", "oa-maintenance"))
+        self.assertEqual(decision.bank_row_ids, ("bk-goods", "bk-maintenance"))
+        self.assertEqual(decision.invoice_row_ids, ("iv-combined",))
+        self.assertTrue(decision.payment_amount_closed)
+        self.assertTrue(decision.invoice_amount_closed)
+
+    def test_multiple_oa_bank_pairs_do_not_pick_one_when_single_invoice_sum_is_ambiguous(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [
+                oa("oa-a", "100.00", reason="星河项目 供应商A"),
+                oa("oa-b", "200.00", reason="星河项目 供应商A"),
+            ],
+            [
+                bank("bk-a", "100.00", counterparty="供应商A"),
+                bank("bk-b", "200.00", counterparty="供应商A"),
+            ],
+            [
+                invoice("iv-a", "300.00", seller_name="供应商A"),
+                invoice("iv-b", "300.00", seller_name="供应商A"),
+            ],
+        )
+
+        self.assertEqual({decision.display_state for decision in decisions}, {DISPLAY_STATE_OPEN})
+        self.assertEqual({decision.decision_status for decision in decisions}, {DECISION_STATUS_OPEN})
+        self.assertIn("multiple_three_way_candidates", {b["code"] for d in decisions for b in d.blockers})
+
     def test_oa_attachment_invoices_pair_with_bank_and_warn_when_invoice_sum_differs(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-03",

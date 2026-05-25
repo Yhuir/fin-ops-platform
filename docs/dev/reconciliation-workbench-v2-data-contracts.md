@@ -356,6 +356,7 @@ GET /api/workbench/groups?month=all&zone=open&page=1&page_size=200&detail_level=
 - 匹配窗口为 `T-2 / T / T+2`。处理 T 月 dirty scope 时，可读取前后各 2 个月的候选池。
 - 唯一性判断必须覆盖完整 5 个月候选窗口；同金额、同证据等级下存在多个可行组合时，全部保持 `open`。
 - 跨月自动决策只写一个 `scope_month`：包含银行流水时归属银行交易月份；没有银行流水的 OA+发票关系归属 OA 月份。
+- `rule_code=oa_bank_pairs_single_invoice_exact_sum` 表示多条 OA-银行流水付款项合计匹配一张进项发票。每个付款项内部必须满足 OA 金额等于银行流出金额并具备 OA-银行证据；付款项总额必须等于发票价税合计；发票必须与至少一个 OA 或银行流水具备主体/文本证据；若同一窗口存在多个付款组合或多张可行发票，必须输出 `open` 冲突而非 `paired`。
 - OA 来源附件发票与 OA 强关联。若 OA 金额等于银行流水金额但正式附件发票合计不一致，仍可 `display_state=paired`，同时输出 `invoice_amount_mismatch` warning、`payment_amount_closed=true`、`invoice_amount_closed=false`。
 
 消费顺序：

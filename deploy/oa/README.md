@@ -163,6 +163,13 @@ systemd 模板位于：
 - `deploy/oa/systemd/fin-ops-rabbitmq-topology.service.example`
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
 
+关联台自动配对必须单独启用 `workbench-matching` worker。它消费
+`job.workbench_matching_dirty_scopes`，生成 `read_model.workbench_reconciliation_decisions`；
+`workbench-read-model` worker 只负责把已有关系和自动决策投影到页面读模型，不能替代自动配对。
+生产实例配置示例：
+
+- `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
+
 生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。migrator DSN 只能用于手动/受控 migration，不要加载到 API 或 worker unit。
 
 PostgreSQL migration 示例：
