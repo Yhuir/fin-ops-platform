@@ -272,7 +272,8 @@ function normalizePreviewGroups(groups: WorkbenchCandidateGroup[], title: string
   return [
     {
       id: `empty-${title}`,
-      groupType: "candidate",
+      groupType: "open",
+      rawGroupType: "relation_preview_empty",
       matchConfidence: "medium",
       reason: "relation_preview_empty",
       rows: {

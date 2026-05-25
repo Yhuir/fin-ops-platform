@@ -153,6 +153,108 @@ describe("WorkbenchZone", () => {
     expect(screen.getByText(/差额说明：财务确认差额闭环/)).toBeInTheDocument();
   });
 
+  test("shows reconciliation warning details on paired OA rows", async () => {
+    const user = userEvent.setup();
+    const oaRowWithWarning = {
+      ...panes[0].rows[0],
+      reconciliationWarnings: [
+        {
+          code: "invoice_amount_mismatch",
+          message: "附件发票合计与 OA/流水金额不一致",
+        },
+      ],
+    };
+
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        title="已配对"
+        tone="success"
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={[
+          {
+            ...panes[0],
+            rows: [oaRowWithWarning],
+          },
+          panes[1],
+          panes[2],
+        ]}
+        zoneId="paired"
+      />,
+    );
+
+    const icon = await screen.findByLabelText("查看自动匹配警示");
+    expect(icon).toBeInTheDocument();
+
+    await user.click(icon);
+    expect(await screen.findByText("附件发票合计与 OA/流水金额不一致")).toBeInTheDocument();
+    expect(screen.getByText("金额不一致")).toBeInTheDocument();
+  });
+
+  test("does not expose automatic matching warning icons in open rows", () => {
+    const oaRowWithWarning = {
+      ...panes[0].rows[0],
+      reconciliationWarnings: [
+        {
+          code: "invoice_amount_mismatch",
+          message: "附件发票合计与 OA/流水金额不一致",
+        },
+      ],
+    };
+
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        title="未配对"
+        tone="warning"
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={[
+          {
+            ...panes[0],
+            rows: [oaRowWithWarning],
+          },
+          panes[1],
+          panes[2],
+        ]}
+        zoneId="open"
+      />,
+    );
+
+    expect(screen.queryByLabelText("查看自动匹配警示")).not.toBeInTheDocument();
+  });
+
+  test("keeps paired/open zones as the only visible display states", () => {
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        title="未配对"
+        tone="warning"
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={panes}
+        zoneId="open"
+      />,
+    );
+
+    expect(screen.getByText("未配对")).toBeInTheDocument();
+    expect(screen.queryByText("候选")).not.toBeInTheDocument();
+    expect(screen.queryByText("needs_review")).not.toBeInTheDocument();
+  });
+
   test("opens batch accounting mismatch details on keyboard focus and hover", async () => {
     render(
       <WorkbenchZone

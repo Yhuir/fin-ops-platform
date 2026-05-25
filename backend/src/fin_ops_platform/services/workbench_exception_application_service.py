@@ -11,6 +11,7 @@ from fin_ops_platform.services.workbench_exception_case_service import Workbench
 from fin_ops_platform.services.workbench_exception_classifier import WorkbenchExceptionClassifier
 from fin_ops_platform.services.workbench_exception_rules import ACTION_DEFINITIONS, RULE_VERSION, action
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 
 
 RowProvider = Callable[[str, list[str]], list[dict[str, Any]]]
@@ -32,6 +33,7 @@ class WorkbenchExceptionApplicationService:
         case_service: WorkbenchExceptionCaseService,
         pair_relation_service: WorkbenchPairRelationService,
         candidate_match_service: WorkbenchCandidateMatchService | None = None,
+        decision_store: WorkbenchReconciliationDecisionStore | None = None,
         classifier: WorkbenchExceptionClassifier | None = None,
         source_versions_provider: SourceVersionsProvider | None = None,
     ) -> None:
@@ -39,6 +41,7 @@ class WorkbenchExceptionApplicationService:
         self._case_service = case_service
         self._pair_relation_service = pair_relation_service
         self._candidate_match_service = candidate_match_service
+        self._decision_store = decision_store
         self._classifier = classifier or WorkbenchExceptionClassifier()
         self._source_versions_provider = source_versions_provider or (lambda: {})
 
@@ -95,6 +98,11 @@ class WorkbenchExceptionApplicationService:
         existing_case = self._case_service.find_case_by_idempotency_key(idempotency_key)
         if existing_case is not None:
             relation = self._pair_relation_service.get_active_relation_by_case_id(str(existing_case.get("id") or ""))
+            self._mark_decisions_resolved(
+                row_ids=row_ids,
+                case_id=str(existing_case.get("id") or ""),
+                relation_case_id=str(relation.get("case_id") or "") if isinstance(relation, dict) else "",
+            )
             return self._apply_payload(
                 case=existing_case,
                 pair_relation=relation,
@@ -168,6 +176,11 @@ class WorkbenchExceptionApplicationService:
                 actor=actor,
                 payload={"candidate_ids": [str(candidate.get("candidate_id") or "") for candidate in consumed_candidates]},
             )
+        self._mark_decisions_resolved(
+            row_ids=row_ids,
+            case_id=str(case_payload.get("id") or ""),
+            relation_case_id=str(pair_relation.get("case_id") or "") if isinstance(pair_relation, dict) else "",
+        )
         return self._apply_payload(
             case=case_payload,
             pair_relation=pair_relation,
@@ -492,6 +505,15 @@ class WorkbenchExceptionApplicationService:
                 ],
             },
         )
+
+    def _mark_decisions_resolved(self, *, row_ids: list[str], case_id: str, relation_case_id: str) -> int:
+        if self._decision_store is None:
+            return 0
+        if relation_case_id:
+            return self._decision_store.consume_by_row_ids(row_ids, relation_id=relation_case_id)
+        if case_id:
+            return self._decision_store.suppress_by_row_ids(row_ids, exception_case_id=case_id)
+        return 0
 
     def _source_versions(self, rule_version: str) -> dict[str, Any]:
         source_versions = deepcopy(self._source_versions_provider() or {})

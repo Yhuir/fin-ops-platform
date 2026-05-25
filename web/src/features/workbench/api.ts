@@ -31,6 +31,8 @@ import type {
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
+  WorkbenchReconciliationDecision,
+  WorkbenchReconciliationWarning,
   WorkbenchSourceKind,
   WorkbenchGroupType,
   WorkbenchGroupsPageQuery,
@@ -125,6 +127,10 @@ type ApiWorkbenchRow = {
   relation_amount_check?: ApiWorkbenchRelationAmountCheck | null;
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
+  workbench_reconciliation_decision?: ApiWorkbenchReconciliationDecision | null;
+  reconciliation_decision?: ApiWorkbenchReconciliationDecision | null;
+  workbench_reconciliation_warnings?: ApiWorkbenchReconciliationWarning[] | null;
+  reconciliation_warnings?: ApiWorkbenchReconciliationWarning[] | null;
 };
 
 type ApiWorkbenchPayload = {
@@ -280,7 +286,7 @@ type ApiWorkbenchSettingsOption =
 
 type ApiWorkbenchGroup = {
   group_id: string;
-  group_type: "auto_closed" | "manual_confirmed" | "candidate" | "source_linked" | "processed_exception" | "open_exception" | (string & {});
+  group_type: string;
   match_confidence: "high" | "medium" | "low";
   reason: string;
   relation_mode?: string | null;
@@ -298,6 +304,53 @@ type ApiWorkbenchGroup = {
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
   special_metadata?: Record<string, unknown> | null;
   processed_exception_summary?: Record<string, unknown> | null;
+  warnings?: ApiWorkbenchReconciliationWarning[] | null;
+};
+
+type ApiWorkbenchReconciliationWarning = {
+  code?: unknown;
+  message?: unknown;
+  label?: unknown;
+  severity?: unknown;
+};
+
+type ApiWorkbenchReconciliationDecision = {
+  decision_id?: unknown;
+  decisionId?: unknown;
+  decision_key?: unknown;
+  decisionKey?: unknown;
+  display_state?: unknown;
+  displayState?: unknown;
+  decision_status?: unknown;
+  decisionStatus?: unknown;
+  match_domain?: unknown;
+  matchDomain?: unknown;
+  match_shape?: unknown;
+  matchShape?: unknown;
+  rule_code?: unknown;
+  ruleCode?: unknown;
+  rule_version?: unknown;
+  ruleVersion?: unknown;
+  row_ids?: unknown;
+  rowIds?: unknown;
+  oa_row_ids?: unknown;
+  oaRowIds?: unknown;
+  bank_row_ids?: unknown;
+  bankRowIds?: unknown;
+  invoice_row_ids?: unknown;
+  invoiceRowIds?: unknown;
+  amount?: unknown;
+  direction?: unknown;
+  payment_amount_closed?: unknown;
+  paymentAmountClosed?: unknown;
+  invoice_amount_closed?: unknown;
+  invoiceAmountClosed?: unknown;
+  warnings?: ApiWorkbenchReconciliationWarning[] | null;
+  evidence?: unknown;
+  blockers?: unknown;
+  explanation?: unknown;
+  source_versions?: unknown;
+  sourceVersions?: unknown;
 };
 
 type ApiWorkbenchRelationAmountCheck = {
@@ -749,6 +802,122 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
   };
 }
 
+function cleanReconciliationStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return Array.from(new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean)));
+}
+
+function optionalString(value: unknown): string | undefined {
+  const text = String(value ?? "").trim();
+  return text ? text : undefined;
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function optionalUnknownArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
+function optionalBoolean(value: unknown): boolean | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return undefined;
+}
+
+function mapReconciliationWarning(value: unknown): WorkbenchReconciliationWarning | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const payload = value as ApiWorkbenchReconciliationWarning;
+  const code = optionalString(payload.code) ?? optionalString(payload.label) ?? "warning";
+  const message = optionalString(payload.message) ?? optionalString(payload.label) ?? code;
+  const severity = optionalString(payload.severity);
+  return {
+    code,
+    message,
+    ...(severity ? { severity: severity as WorkbenchReconciliationWarning["severity"] } : {}),
+  };
+}
+
+function mapReconciliationWarnings(value: unknown): WorkbenchReconciliationWarning[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return dedupeReconciliationWarnings(value.map(mapReconciliationWarning).filter((warning): warning is WorkbenchReconciliationWarning => Boolean(warning)));
+}
+
+function dedupeReconciliationWarnings(warnings: WorkbenchReconciliationWarning[]): WorkbenchReconciliationWarning[] {
+  const seen = new Set<string>();
+  const result: WorkbenchReconciliationWarning[] = [];
+  warnings.forEach((warning) => {
+    const key = `${warning.code}\u0000${warning.message}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push(warning);
+  });
+  return result;
+}
+
+function normalizeDecisionDisplayState(value: unknown): WorkbenchGroupType {
+  return String(value ?? "").trim() === "paired" ? "paired" : "open";
+}
+
+function mapReconciliationDecision(value: unknown): WorkbenchReconciliationDecision | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const payload = value as ApiWorkbenchReconciliationDecision;
+  const decisionId = optionalString(payload.decision_id ?? payload.decisionId) ?? "";
+  const decisionKey = optionalString(payload.decision_key ?? payload.decisionKey) ?? decisionId;
+  const warnings = mapReconciliationWarnings(payload.warnings);
+  const amount = optionalString(payload.amount);
+  const direction = optionalString(payload.direction);
+  const evidence = optionalRecord(payload.evidence);
+  const blockers = optionalUnknownArray(payload.blockers);
+  const explanation = optionalString(payload.explanation);
+  const sourceVersions = optionalRecord(payload.source_versions ?? payload.sourceVersions);
+  if (!decisionId && !decisionKey) {
+    return undefined;
+  }
+
+  return {
+    decisionId,
+    decisionKey,
+    displayState: normalizeDecisionDisplayState(payload.display_state ?? payload.displayState),
+    decisionStatus: optionalString(payload.decision_status ?? payload.decisionStatus) ?? "",
+    matchDomain: optionalString(payload.match_domain ?? payload.matchDomain) ?? "",
+    matchShape: optionalString(payload.match_shape ?? payload.matchShape) ?? "",
+    ruleCode: optionalString(payload.rule_code ?? payload.ruleCode) ?? "",
+    ruleVersion: optionalString(payload.rule_version ?? payload.ruleVersion) ?? "",
+    rowIds: cleanReconciliationStringList(payload.row_ids ?? payload.rowIds),
+    oaRowIds: cleanReconciliationStringList(payload.oa_row_ids ?? payload.oaRowIds),
+    bankRowIds: cleanReconciliationStringList(payload.bank_row_ids ?? payload.bankRowIds),
+    invoiceRowIds: cleanReconciliationStringList(payload.invoice_row_ids ?? payload.invoiceRowIds),
+    ...(amount ? { amount } : {}),
+    ...(direction ? { direction } : {}),
+    paymentAmountClosed: optionalBoolean(payload.payment_amount_closed ?? payload.paymentAmountClosed),
+    invoiceAmountClosed: optionalBoolean(payload.invoice_amount_closed ?? payload.invoiceAmountClosed),
+    warnings,
+    ...(evidence ? { evidence } : {}),
+    ...(blockers ? { blockers } : {}),
+    ...(explanation ? { explanation } : {}),
+    ...(sourceVersions ? { sourceVersions } : {}),
+  };
+}
+
 function mapProcessedExceptionSummary(value: unknown) {
   if (!value || typeof value !== "object") {
     return undefined;
@@ -835,16 +1004,23 @@ function groupHasNoOaWithdrawAction(group: ApiWorkbenchGroup) {
   return group.summary_row ? normalizeRowAvailableActions(group.summary_row).includes("withdraw_no_oa_batch") : false;
 }
 
-function mapGroupType(groupType: ApiWorkbenchGroup["group_type"]): WorkbenchGroupType {
-  const normalizedGroupType = String(groupType);
+function mapGroupType(groupType: ApiWorkbenchGroup["group_type"], zoneHint?: WorkbenchZoneId): WorkbenchGroupType {
+  if (zoneHint) {
+    return zoneHint;
+  }
+  const normalizedGroupType = String(groupType || "").trim();
+  if (normalizedGroupType === "paired" || normalizedGroupType === "open") {
+    return normalizedGroupType;
+  }
   if (
     normalizedGroupType === "auto_closed"
     || normalizedGroupType === "manual_confirmed"
-    || normalizedGroupType === "candidate"
+    || normalizedGroupType === "source_linked"
+    || normalizedGroupType === "processed_exception"
   ) {
-    return normalizedGroupType as WorkbenchGroupType;
+    return "paired";
   }
-  return "candidate";
+  return "open";
 }
 
 function rowActionVariant(row: ApiWorkbenchRow, availableActions: string[]): WorkbenchActionVariant {
@@ -1072,7 +1248,14 @@ function resolveBankAmount(row: ApiWorkbenchRow) {
 
 function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
   const availableActions = normalizeRowAvailableActions(row);
-  return {
+  const reconciliationDecision = mapReconciliationDecision(
+    row.workbench_reconciliation_decision ?? row.reconciliation_decision,
+  );
+  const reconciliationWarnings = dedupeReconciliationWarnings([
+    ...mapReconciliationWarnings(row.workbench_reconciliation_warnings ?? row.reconciliation_warnings),
+    ...(reconciliationDecision?.warnings ?? []),
+  ]);
+  const mapped: WorkbenchRecord = {
     id: row.id,
     caseId: row.case_id ?? undefined,
     exceptionCaseId: row.exception_case_id ?? undefined,
@@ -1099,6 +1282,13 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     relationAmountCheck: mapRelationAmountCheck(row.relation_amount_check),
     specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
   };
+  if (reconciliationDecision) {
+    mapped.reconciliationDecision = reconciliationDecision;
+  }
+  if (reconciliationWarnings.length > 0) {
+    mapped.reconciliationWarnings = reconciliationWarnings;
+  }
+  return mapped;
 }
 
 function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): WorkbenchPaneRows {
@@ -1109,7 +1299,7 @@ function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): Wor
   };
 }
 
-function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
+function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): WorkbenchCandidateGroup {
   const summaryRow = group.summary_row ? mapRow(group.summary_row) : undefined;
   const rowCounts = mapPaneRowCounts(group.row_counts);
   const collapsedRowCounts = mapPaneRowCounts(group.collapsed_row_counts);
@@ -1120,9 +1310,23 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
       invoice: (group.collapsed_rows.invoice ?? []).map(mapRow),
     }
     : undefined;
-  return {
+  const rows = {
+    oa: group.oa_rows.map(mapRow),
+    bank: group.bank_rows.map(mapRow),
+    invoice: group.invoice_rows.map(mapRow),
+  };
+  const rowWarnings = dedupeReconciliationWarnings([
+    ...mapReconciliationWarnings(group.warnings),
+    ...[...rows.oa, ...rows.bank, ...rows.invoice].flatMap((row) => row.reconciliationWarnings ?? []),
+  ]);
+  const reconciliationDecision = [...rows.oa, ...rows.bank, ...rows.invoice]
+    .map((row) => row.reconciliationDecision)
+    .find((decision): decision is WorkbenchReconciliationDecision => Boolean(decision));
+  const rawGroupType = String(group.group_type || "").trim();
+  const mapped: WorkbenchCandidateGroup = {
     id: group.group_id,
-    groupType: mapGroupType(group.group_type),
+    groupType: mapGroupType(group.group_type, zoneHint),
+    rawGroupType: rawGroupType || undefined,
     matchConfidence: group.match_confidence,
     reason: group.reason,
     relationMode: typeof group.relation_mode === "string" && group.relation_mode.trim()
@@ -1133,11 +1337,7 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
       : undefined,
     defaultCollapsed: group.default_collapsed === true ? true : undefined,
     summaryRow,
-    rows: {
-      oa: group.oa_rows.map(mapRow),
-      bank: group.bank_rows.map(mapRow),
-      invoice: group.invoice_rows.map(mapRow),
-    },
+    rows,
     rowCounts,
     collapsedRows,
     collapsedRowCounts,
@@ -1150,6 +1350,13 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
       || groupHasNoOaWithdrawAction(group),
     ),
   };
+  if (reconciliationDecision) {
+    mapped.reconciliationDecision = reconciliationDecision;
+  }
+  if (rowWarnings.length > 0) {
+    mapped.warnings = rowWarnings;
+  }
+  return mapped;
 }
 
 function mapPaneRowCounts(counts: ApiWorkbenchGroup["row_counts"]): WorkbenchCandidateGroup["rowCounts"] | undefined {
@@ -1183,10 +1390,10 @@ function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRela
     requiresNote: Boolean(payload.requires_note),
     message: String(payload.message ?? "").trim(),
     before: {
-      groups: (payload.before?.groups ?? []).map(mapGroup),
+      groups: (payload.before?.groups ?? []).map((group) => mapGroup(group)),
     },
     after: {
-      groups: (payload.after?.groups ?? []).map(mapGroup),
+      groups: (payload.after?.groups ?? []).map((group) => mapGroup(group)),
     },
     amountSummary: {
       before: mapAmountTotals(amountSummary.before),
@@ -1986,7 +2193,7 @@ export async function fetchWorkbenchGroupsPage(
   });
   return {
     zone: payload.zone,
-    groups: payload.groups.map(mapGroup),
+    groups: payload.groups.map((group) => mapGroup(group, payload.zone)),
     page: mapWorkbenchZonePage(payload),
   };
 }
@@ -2008,7 +2215,7 @@ export async function fetchWorkbenchGroupDetail(
     method: "GET",
     signal,
   });
-  return mapGroup(payload.group);
+  return mapGroup(payload.group, zone);
 }
 
 export async function fetchWorkbenchInitialPage(
@@ -2108,8 +2315,8 @@ export async function fetchWorkbenchWithProgress(
     });
   }
 
-  const pairedGroups = payload.paired.groups.map(mapGroup);
-  const openGroups = payload.open.groups.map(mapGroup);
+  const pairedGroups = payload.paired.groups.map((group) => mapGroup(group, "paired"));
+  const openGroups = payload.open.groups.map((group) => mapGroup(group, "open"));
 
   return {
     month: payload.month,

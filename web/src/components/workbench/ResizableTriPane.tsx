@@ -111,7 +111,7 @@ function ResizableTriPane({
 
   const rowTemplateColumns = headerTemplateColumns;
   const visiblePanes = visibleIndices.map((paneIndex) => panes[paneIndex]);
-  const effectiveGroups = useMemo(() => groups ?? buildFallbackGroups(panes), [groups, panes]);
+  const effectiveGroups = useMemo(() => groups ?? buildFallbackGroups(panes, zoneId), [groups, panes, zoneId]);
 
   return (
     <div
@@ -173,11 +173,12 @@ function ResizableTriPane({
 
 export default memo(ResizableTriPane);
 
-function buildFallbackGroups(panes: WorkbenchPane[]): WorkbenchCandidateGroup[] {
+function buildFallbackGroups(panes: WorkbenchPane[], zoneId: "paired" | "open"): WorkbenchCandidateGroup[] {
   const maxRows = Math.max(...panes.map((pane) => pane.rows.length), 0);
   return Array.from({ length: maxRows }, (_, index) => ({
     id: `fallback-${index + 1}`,
-    groupType: "candidate",
+    groupType: zoneId,
+    rawGroupType: "fallback_pane_alignment",
     matchConfidence: "medium",
     reason: "fallback_pane_alignment",
     rows: {

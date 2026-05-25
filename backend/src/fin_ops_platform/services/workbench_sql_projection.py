@@ -15,11 +15,12 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
-from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
-from fin_ops_platform.services.workbench_matching_rules import (
-    WORKBENCH_MATCHING_RULES_VERSION,
-    WorkbenchMatchingRules,
+from fin_ops_platform.services.workbench_reconciliation_models import (
+    DECISION_STATUS_OPEN,
+    DECISION_STATUS_PAIRED,
+    DISPLAY_STATE_OPEN,
+    DISPLAY_STATE_PAIRED,
 )
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_query_service import (
@@ -29,7 +30,6 @@ from fin_ops_platform.services.workbench_query_service import (
 )
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     OA_INVOICE_OFFSET_AUTO_MATCH,
-    WORKBENCH_SPECIAL_RULES_VERSION,
 )
 
 
@@ -118,12 +118,14 @@ class WorkbenchSqlProjectionBuilder:
         resolved_source_version = _int_value(source_version, self._current_dirty_scope_source_version(normalized_scope))
         rows_by_id = self._workbench_rows_for_month(normalized_scope)
         relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
+        decisions = self._active_reconciliation_decisions_for_month(normalized_scope)
         self._supplement_missing_relation_rows(rows_by_id, relations)
+        self._supplement_missing_decision_rows(rows_by_id, decisions)
         payload = self._group_payload(
             normalized_scope,
             rows_by_id,
             relations,
-            source_version=resolved_source_version,
+            decisions=decisions,
         )
         snapshot = {
             "read_models": {
@@ -883,6 +885,20 @@ class WorkbenchSqlProjectionBuilder:
             )
         return result
 
+    def _active_reconciliation_decisions_for_month(self, month: str) -> list[dict[str, Any]]:
+        list_decisions = getattr(self._read_model_repository, "list_workbench_reconciliation_decisions", None)
+        if not callable(list_decisions):
+            return []
+        return [
+            decision
+            for decision in list_decisions(
+                tenant_id="default",
+                scope_month=month,
+                statuses={DECISION_STATUS_PAIRED, DECISION_STATUS_OPEN},
+            )
+            if self._decision_is_projectable(decision)
+        ]
+
     def _supplement_missing_relation_rows(
         self,
         rows_by_id: dict[str, dict[str, Any]],
@@ -906,13 +922,36 @@ class WorkbenchSqlProjectionBuilder:
             if row_id and row_id not in rows_by_id:
                 rows_by_id[row_id] = row
 
+    def _supplement_missing_decision_rows(
+        self,
+        rows_by_id: dict[str, dict[str, Any]],
+        decisions: list[dict[str, Any]],
+    ) -> None:
+        decision_row_ids = {
+            str(row_id).strip()
+            for decision in decisions
+            for row_id in list(decision.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+        missing_row_ids = decision_row_ids - set(rows_by_id)
+        if not missing_row_ids:
+            return
+        for row in [
+            *self._oa_projection_rows_by_ids(missing_row_ids),
+            *self._bank_rows_by_ids(missing_row_ids),
+            *self._invoice_rows_by_ids(missing_row_ids),
+        ]:
+            row_id = str(row.get("id") or "").strip()
+            if row_id and row_id not in rows_by_id:
+                rows_by_id[row_id] = row
+
     def _group_payload(
         self,
         month: str,
         rows_by_id: dict[str, dict[str, Any]],
         relations: list[dict[str, Any]],
         *,
-        source_version: int | str | None = None,
+        decisions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         working_rows_by_id = {row_id: dict(row) for row_id, row in rows_by_id.items()}
         self._apply_workbench_overrides_and_exceptions(working_rows_by_id)
@@ -937,13 +976,11 @@ class WorkbenchSqlProjectionBuilder:
                 if str(relation.get("relation_mode") or "").strip() == NO_OA_BANK_BATCH_RELATION_MODE:
                     self._apply_no_oa_relation_metadata(row, relation)
 
-        candidates = self._rebuild_candidate_matches(
-            month,
+        self._apply_reconciliation_decisions_to_rows(
             working_rows_by_id,
+            decisions or [],
             paired_row_ids,
-            source_version=source_version,
         )
-        self._apply_candidate_matches_to_rows(working_rows_by_id, candidates, paired_row_ids)
 
         grouped = WorkbenchCandidateGroupingService().group_payload(
             month,
@@ -967,70 +1004,19 @@ class WorkbenchSqlProjectionBuilder:
         grouped["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
         return grouped
 
-    def _rebuild_candidate_matches(
-        self,
-        month: str,
-        rows_by_id: dict[str, dict[str, Any]],
-        paired_row_ids: set[str],
-        *,
-        source_version: int | str | None = None,
-    ) -> list[dict[str, Any]]:
-        source_versions = self._matching_source_versions(source_version=source_version)
-        settings = self._matching_settings()
-        candidate_service = WorkbenchCandidateMatchService()
-        candidate_service.delete_month(month)
-        rules = WorkbenchMatchingRules(include_special_rules=True)
-        candidates = rules.generate_candidates(
-            month,
-            [
-                deepcopy(row)
-                for row_id, row in rows_by_id.items()
-                if row_id not in paired_row_ids
-                and not self._row_is_held_for_matching(row)
-                and str(row.get("type") or "") == "oa"
-            ],
-            [
-                deepcopy(row)
-                for row_id, row in rows_by_id.items()
-                if row_id not in paired_row_ids
-                and not self._row_is_held_for_matching(row)
-                and str(row.get("type") or "") == "bank"
-            ],
-            [
-                deepcopy(row)
-                for row_id, row in rows_by_id.items()
-                if row_id not in paired_row_ids
-                and not self._row_is_held_for_matching(row)
-                and str(row.get("type") or "") == "invoice"
-            ],
-            settings=settings,
-            source_versions=source_versions,
-        )
-        upserted = [candidate_service.upsert_candidate(candidate) for candidate in candidates]
-        candidate_service.mark_scope_processed(
-            month,
-            source_versions=source_versions,
-            candidate_count=len(upserted),
-            request_id=f"workbench-sql-projection:{month}",
-            reason="workbench_sql_projection",
-        )
-        self._read_model_repository.save_workbench_candidate_matches(
-            candidate_service.snapshot(),
-            changed_scope_months={month},
-        )
-        return upserted
-
-    def _apply_candidate_matches_to_rows(
+    def _apply_reconciliation_decisions_to_rows(
         self,
         rows_by_id: dict[str, dict[str, Any]],
-        candidates: list[dict[str, Any]],
+        decisions: list[dict[str, Any]],
         paired_row_ids: set[str],
     ) -> None:
         claimed_row_ids: set[str] = set()
-        for candidate in sorted(candidates, key=self._candidate_display_sort_key):
+        for decision in sorted(decisions, key=self._decision_display_sort_key):
+            if not self._decision_is_projectable(decision):
+                continue
             row_ids = [
                 str(row_id).strip()
-                for row_id in list(candidate.get("row_ids") or [])
+                for row_id in list(decision.get("row_ids") or [])
                 if str(row_id).strip()
             ]
             if not row_ids or any(row_id in paired_row_ids for row_id in row_ids):
@@ -1042,17 +1028,23 @@ class WorkbenchSqlProjectionBuilder:
                 continue
             if any(self._row_is_held_for_matching(row) for row in applicable_rows if isinstance(row, dict)):
                 continue
-            if not self._candidate_can_apply_to_rows(candidate, row_ids):
+            decision_key = str(decision.get("decision_key") or decision.get("decision_id") or "").strip()
+            if not decision_key:
                 continue
-            case_id = str(candidate.get("candidate_key") or candidate.get("candidate_id") or "").strip()
-            if not case_id:
-                continue
-            relation = self._candidate_relation_payload(candidate)
+            display_state = str(decision.get("display_state") or "").strip()
+            metadata = self._decision_metadata(decision)
             for row_id in row_ids:
                 row = rows_by_id[row_id]
-                row["case_id"] = case_id
-                row[self._relation_field_name(str(row.get("type") or ""))] = deepcopy(relation)
-                if str(candidate.get("rule_code") or "") == OA_INVOICE_OFFSET_AUTO_MATCH:
+                row["workbench_reconciliation_decision"] = deepcopy(metadata)
+                if metadata.get("warnings"):
+                    row["workbench_reconciliation_warnings"] = deepcopy(metadata["warnings"])
+                if display_state != DISPLAY_STATE_PAIRED:
+                    continue
+                row["status"] = "paired"
+                row["case_id"] = decision_key
+                row["relation_mode"] = "automatic_decision"
+                row[self._relation_field_name(str(row.get("type") or ""))] = self._decision_relation_payload(decision)
+                if str(decision.get("rule_code") or "") == OA_INVOICE_OFFSET_AUTO_MATCH:
                     tags = [
                         str(tag).strip()
                         for tag in list(row.get("tags") or [])
@@ -1064,15 +1056,63 @@ class WorkbenchSqlProjectionBuilder:
                     row["cost_excluded"] = True
             claimed_row_ids.update(row_ids)
 
-    def _matching_source_versions(self, *, source_version: int | str | None = None) -> dict[str, Any]:
-        versions: dict[str, Any] = {
-            "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-            "matching_rules": WORKBENCH_MATCHING_RULES_VERSION,
-            "special_rules": WORKBENCH_SPECIAL_RULES_VERSION,
+    @staticmethod
+    def _decision_is_projectable(decision: dict[str, Any]) -> bool:
+        decision_status = str(decision.get("decision_status") or "").strip()
+        display_state = str(decision.get("display_state") or "").strip()
+        return (
+            (decision_status == DECISION_STATUS_PAIRED and display_state == DISPLAY_STATE_PAIRED)
+            or (decision_status == DECISION_STATUS_OPEN and display_state == DISPLAY_STATE_OPEN)
+        )
+
+    @staticmethod
+    def _decision_display_sort_key(decision: dict[str, Any]) -> tuple[int, int, str, str]:
+        state_priority = {
+            DISPLAY_STATE_PAIRED: 0,
+            DISPLAY_STATE_OPEN: 1,
         }
-        if source_version is not None:
-            versions["source_version"] = _int_value(source_version, 0)
-        return versions
+        row_count = len({str(row_id).strip() for row_id in list(decision.get("row_ids") or []) if str(row_id).strip()})
+        return (
+            state_priority.get(str(decision.get("display_state") or ""), 9),
+            -row_count,
+            str(decision.get("rule_code") or ""),
+            str(decision.get("decision_key") or decision.get("decision_id") or ""),
+        )
+
+    @staticmethod
+    def _decision_metadata(decision: dict[str, Any]) -> dict[str, Any]:
+        keys = (
+            "decision_id",
+            "decision_key",
+            "display_state",
+            "decision_status",
+            "match_domain",
+            "match_shape",
+            "rule_code",
+            "rule_version",
+            "row_ids",
+            "oa_row_ids",
+            "bank_row_ids",
+            "invoice_row_ids",
+            "amount",
+            "direction",
+            "payment_amount_closed",
+            "invoice_amount_closed",
+            "warnings",
+            "evidence",
+            "blockers",
+            "explanation",
+            "source_versions",
+        )
+        return {key: deepcopy(decision.get(key)) for key in keys if key in decision}
+
+    @staticmethod
+    def _decision_relation_payload(decision: dict[str, Any]) -> dict[str, str]:
+        rule_code = str(decision.get("rule_code") or "").strip()
+        warnings = list(decision.get("warnings") or [])
+        if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH:
+            return {"code": rule_code, "label": "冲", "tone": "warn" if warnings else "success"}
+        return {"code": "automatic_match", "label": "自动匹配", "tone": "warn" if warnings else "success"}
 
     def _current_dirty_scope_source_version(self, scope_key: str) -> int:
         row = self._connection.fetch_one(
@@ -1089,21 +1129,6 @@ class WorkbenchSqlProjectionBuilder:
             (scope_key,),
         )
         return _int_value(row.get("source_version") if isinstance(row, dict) else None, 0)
-
-    def _matching_settings(self) -> dict[str, Any]:
-        row = self._connection.fetch_one(
-            "select settings_payload from app.app_settings where settings_key = 'app_settings'"
-        )
-        payload = row_payload(row, "settings_payload")
-        settings = payload if isinstance(payload, dict) else {}
-        offset = settings.get("oa_invoice_offset") if isinstance(settings.get("oa_invoice_offset"), dict) else {}
-        return {
-            "offset_applicant_names": [
-                str(name).strip()
-                for name in list(offset.get("applicant_names") or [])
-                if str(name).strip()
-            ],
-        }
 
     def _apply_workbench_overrides_and_exceptions(self, rows_by_id: dict[str, dict[str, Any]]) -> None:
         if not rows_by_id:
@@ -1173,43 +1198,6 @@ class WorkbenchSqlProjectionBuilder:
                 payload.setdefault("case_id", row.get("case_id"))
                 result.append(payload)
         return result
-
-    @staticmethod
-    def _candidate_can_apply_to_rows(candidate: dict[str, Any], row_ids: list[str]) -> bool:
-        unique_row_ids = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
-        if len(unique_row_ids) <= 1:
-            return True
-        return str(candidate.get("status") or "").strip() in {"auto_closed", "incomplete"}
-
-    @staticmethod
-    def _candidate_display_sort_key(candidate: dict[str, Any]) -> tuple[int, int, str, str]:
-        status_priority = {
-            "auto_closed": 0,
-            "conflict": 1,
-            "incomplete": 2,
-            "needs_review": 3,
-        }
-        row_count = len({str(row_id).strip() for row_id in list(candidate.get("row_ids") or []) if str(row_id).strip()})
-        return (
-            status_priority.get(str(candidate.get("status") or ""), 9),
-            -row_count,
-            str(candidate.get("rule_code") or ""),
-            str(candidate.get("candidate_key") or candidate.get("candidate_id") or ""),
-        )
-
-    @staticmethod
-    def _candidate_relation_payload(candidate: dict[str, Any]) -> dict[str, str]:
-        status = str(candidate.get("status") or "").strip()
-        rule_code = str(candidate.get("rule_code") or "").strip()
-        if status == "auto_closed":
-            if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH:
-                return {"code": rule_code, "label": "冲", "tone": "success"}
-            return {"code": "automatic_match", "label": "自动匹配", "tone": "success"}
-        if status == "conflict":
-            return {"code": "candidate_conflict", "label": "候选冲突", "tone": "danger"}
-        if status == "incomplete":
-            return {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"}
-        return {"code": "suggested_match", "label": "待人工确认", "tone": "warn"}
 
     @staticmethod
     def _active_relation_payload(relation: dict[str, Any]) -> dict[str, str]:

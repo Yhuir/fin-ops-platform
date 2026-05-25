@@ -8,6 +8,15 @@ from unittest.mock import patch
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.workbench_reconciliation_models import (
+    DECISION_STATUS_CONSUMED,
+    DECISION_STATUS_OPEN,
+    DECISION_STATUS_PAIRED,
+    DISPLAY_STATE_OPEN,
+    DISPLAY_STATE_PAIRED,
+    MATCH_DOMAIN_FREE,
+    WARNING_INVOICE_AMOUNT_MISMATCH,
+)
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
 
@@ -402,8 +411,9 @@ class InvoiceRowsProjectionConnection(WorkbenchProjectionSettingsConnection):
 
 
 class CandidateSnapshotRecorder:
-    def __init__(self) -> None:
+    def __init__(self, *, reconciliation_decisions: list[dict[str, object]] | None = None) -> None:
         self.saved_snapshots: list[tuple[dict[str, object], set[str] | None]] = []
+        self.reconciliation_decisions = list(reconciliation_decisions or [])
 
     def save_workbench_candidate_matches(
         self,
@@ -412,6 +422,54 @@ class CandidateSnapshotRecorder:
         changed_scope_months: set[str] | None = None,
     ) -> None:
         self.saved_snapshots.append((snapshot, changed_scope_months))
+
+    def list_workbench_reconciliation_decisions(
+        self,
+        *,
+        tenant_id: str,
+        scope_month: str,
+        statuses: set[str] | None = None,
+    ) -> list[dict[str, object]]:
+        status_filter = set(statuses or [])
+        return [
+            dict(decision)
+            for decision in self.reconciliation_decisions
+            if decision.get("scope_month") == scope_month
+            and (not status_filter or decision.get("decision_status") in status_filter)
+        ]
+
+
+def reconciliation_decision_payload(
+    decision_key: str,
+    *,
+    status: str,
+    display_state: str,
+    row_ids: list[str],
+    warnings: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "decision_id": decision_key,
+        "decision_key": decision_key,
+        "scope_month": "2026-05",
+        "display_state": display_state,
+        "decision_status": status,
+        "match_domain": MATCH_DOMAIN_FREE,
+        "match_shape": "oa_bank_invoice" if any(row_id.startswith("invoice-") for row_id in row_ids) else "oa_bank",
+        "rule_code": "free.test",
+        "rule_version": "test",
+        "row_ids": list(row_ids),
+        "oa_row_ids": [row_id for row_id in row_ids if row_id.startswith("oa-")],
+        "bank_row_ids": [row_id for row_id in row_ids if row_id.startswith("bank-")],
+        "invoice_row_ids": [row_id for row_id in row_ids if row_id.startswith("invoice-")],
+        "amount": "100.00",
+        "direction": "expense",
+        "payment_amount_closed": True,
+        "invoice_amount_closed": display_state == DISPLAY_STATE_PAIRED,
+        "warnings": list(warnings or []),
+        "evidence": {"source": "unit-test"},
+        "blockers": [],
+        "source_versions": {"rules": "v1"},
+    }
 
 
 class FakeWorkbenchReadModelService:
@@ -2500,7 +2558,77 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             {"oa-left"},
         )
 
-    def test_sql_projection_rebuilds_candidate_matches_from_sql_rows(self) -> None:
+    def test_sql_projection_projects_paired_reconciliation_decisions_without_candidate_write(self) -> None:
+        recorder = CandidateSnapshotRecorder()
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=recorder,
+        )
+        rows_by_id = {
+            "oa-1": {
+                "id": "oa-1",
+                "type": "oa",
+                "source_kind": "oa",
+                "amount": "100.00",
+                "counterparty_name": "杭州测试供应商",
+                "application_date": "2026-05-10",
+                "project_name": "测试项目",
+                "reason": "测试采购",
+            },
+            "bank-1": {
+                "id": "bank-1",
+                "type": "bank",
+                "source_kind": "bank",
+                "debit_amount": "100.00",
+                "counterparty_name": "杭州测试供应商",
+                "trade_time": "2026-05-11 10:00",
+                "summary": "测试采购付款",
+            },
+            "invoice-1": {
+                "id": "invoice-1",
+                "type": "invoice",
+                "source_kind": "invoice",
+                "total_with_tax": "99.00",
+                "seller_name": "杭州测试供应商",
+                "issue_date": "2026-05-12",
+            },
+        }
+        decision = reconciliation_decision_payload(
+            "decision-paired",
+            status=DECISION_STATUS_PAIRED,
+            display_state=DISPLAY_STATE_PAIRED,
+            row_ids=["oa-1", "bank-1", "invoice-1"],
+            warnings=[
+                {
+                    "code": WARNING_INVOICE_AMOUNT_MISMATCH,
+                    "message": "附件发票合计与 OA/流水金额不一致",
+                }
+            ],
+        )
+
+        payload = builder._group_payload("2026-05", rows_by_id, [], decisions=[decision])
+
+        self.assertEqual(recorder.saved_snapshots, [])
+        self.assertEqual(payload["open"]["groups"], [])
+        paired_groups = payload["paired"]["groups"]
+        self.assertEqual(len(paired_groups), 1)
+        self.assertNotEqual(paired_groups[0]["group_type"], "candidate")
+        paired_rows = [
+            row
+            for group in paired_groups
+            for row in [*group.get("oa_rows", []), *group.get("bank_rows", []), *group.get("invoice_rows", [])]
+        ]
+        self.assertEqual({row["id"] for row in paired_rows}, {"oa-1", "bank-1", "invoice-1"})
+        self.assertTrue(all(row["status"] == "paired" for row in paired_rows))
+        self.assertTrue(all(row["case_id"] == "decision-paired" for row in paired_rows))
+        self.assertTrue(
+            all(
+                row["workbench_reconciliation_decision"]["warnings"][0]["code"] == WARNING_INVOICE_AMOUNT_MISMATCH
+                for row in paired_rows
+            )
+        )
+
+    def test_sql_projection_projects_open_reconciliation_decisions_as_independent_open_rows(self) -> None:
         recorder = CandidateSnapshotRecorder()
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
@@ -2527,21 +2655,87 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 "summary": "测试采购付款",
             },
         }
+        decision = reconciliation_decision_payload(
+            "decision-open",
+            status=DECISION_STATUS_OPEN,
+            display_state=DISPLAY_STATE_OPEN,
+            row_ids=["oa-1", "bank-1"],
+        )
 
-        payload = builder._group_payload("2026-05", rows_by_id, [])
+        payload = builder._group_payload("2026-05", rows_by_id, [], decisions=[decision])
 
-        snapshot, months = recorder.saved_snapshots[-1]
-        candidates = snapshot["candidates"]
-        self.assertEqual(months, {"2026-05"})
-        self.assertTrue(any(candidate["status"] == "incomplete" for candidate in candidates.values()))
-        open_rows = [
+        self.assertEqual(recorder.saved_snapshots, [])
+        self.assertEqual(payload["paired"]["groups"], [])
+        open_groups = payload["open"]["groups"]
+        self.assertEqual(len(open_groups), 2)
+        self.assertTrue(all(group["group_type"] == "open" for group in open_groups))
+        self.assertTrue(all(sum(len(group[f"{kind}_rows"]) for kind in ("oa", "bank", "invoice")) == 1 for group in open_groups))
+        self.assertEqual(
+            {
+                row["id"]
+                for group in open_groups
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            },
+            {"oa-1", "bank-1"},
+        )
+
+    def test_sql_projection_ignores_non_projectable_reconciliation_decisions(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-1": {"id": "oa-1", "type": "oa", "source_kind": "oa", "amount": "100.00"},
+            "bank-1": {"id": "bank-1", "type": "bank", "source_kind": "bank", "debit_amount": "100.00"},
+        }
+        decision = reconciliation_decision_payload(
+            "decision-consumed",
+            status=DECISION_STATUS_CONSUMED,
+            display_state=DISPLAY_STATE_PAIRED,
+            row_ids=["oa-1", "bank-1"],
+        )
+
+        payload = builder._group_payload("2026-05", rows_by_id, [], decisions=[decision])
+
+        row_payloads = [
             row
-            for group in payload["open"]["groups"]
-            for row in [*group.get("oa_rows", []), *group.get("bank_rows", [])]
+            for section in ("paired", "open")
+            for group in payload[section]["groups"]
+            for row in [*group.get("oa_rows", []), *group.get("bank_rows", []), *group.get("invoice_rows", [])]
         ]
-        self.assertEqual({row["id"] for row in open_rows}, {"oa-1", "bank-1"})
-        self.assertTrue(all(str(row.get("case_id", "")).startswith("candidate:") for row in open_rows))
-        self.assertTrue(any(group["group_type"] == "candidate" for group in payload["open"]["groups"]))
+        self.assertTrue(all("workbench_reconciliation_decision" not in row for row in row_payloads))
+        self.assertEqual(payload["paired"]["groups"], [])
+
+    def test_sql_projection_keeps_active_manual_relation_ahead_of_automatic_decision(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-1": {"id": "oa-1", "type": "oa", "source_kind": "oa", "amount": "100.00"},
+            "bank-1": {"id": "bank-1", "type": "bank", "source_kind": "bank", "debit_amount": "100.00"},
+            "invoice-1": {"id": "invoice-1", "type": "invoice", "source_kind": "invoice", "total_with_tax": "100.00"},
+        }
+        relation = {
+            "case_id": "CASE-MANUAL-1",
+            "relation_mode": "manual_confirmed",
+            "row_ids": ["oa-1", "bank-1", "invoice-1"],
+            "row_types": ["oa", "bank", "invoice"],
+        }
+        decision = reconciliation_decision_payload(
+            "decision-overlap",
+            status=DECISION_STATUS_PAIRED,
+            display_state=DISPLAY_STATE_PAIRED,
+            row_ids=["oa-1", "bank-1", "invoice-1"],
+        )
+
+        payload = builder._group_payload("2026-05", rows_by_id, [relation], decisions=[decision])
+
+        paired_group = payload["paired"]["groups"][0]
+        paired_rows = [*paired_group["oa_rows"], *paired_group["bank_rows"], *paired_group["invoice_rows"]]
+        self.assertEqual(paired_group["group_id"], "case:CASE-MANUAL-1")
+        self.assertTrue(all(row["case_id"] == "CASE-MANUAL-1" for row in paired_rows))
+        self.assertTrue(all("workbench_reconciliation_decision" not in row for row in paired_rows))
 
     def test_sql_projection_active_no_oa_relation_uses_grouping_contract(self) -> None:
         recorder = CandidateSnapshotRecorder()

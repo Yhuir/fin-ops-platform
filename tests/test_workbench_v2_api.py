@@ -33,6 +33,14 @@ from fin_ops_platform.services.workbench_candidate_match_service import (
     WorkbenchCandidateMatchService,
 )
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
+from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
+from fin_ops_platform.services.workbench_reconciliation_models import (
+    DECISION_STATUS_CONSUMED,
+    DECISION_STATUS_PAIRED,
+    DISPLAY_STATE_PAIRED,
+    MATCH_DOMAIN_FREE,
+    WorkbenchDecision,
+)
 from fin_ops_platform.services.etc_service import UploadedEtcZipFile
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 from tests.test_etc_backend import etc_zip
@@ -56,6 +64,29 @@ class MemoryAttachmentInvoiceCache:
 
     def save_oa_attachment_invoice_cache_entry(self, cache_key: str, payload: dict[str, object]) -> None:
         self.entries[cache_key] = dict(payload)
+
+
+def workbench_reconciliation_decision(key: str, *, scope_month: str, row_ids: tuple[str, ...]) -> WorkbenchDecision:
+    return WorkbenchDecision(
+        decision_id=key,
+        decision_key=key,
+        scope_month=scope_month,
+        display_state=DISPLAY_STATE_PAIRED,
+        decision_status=DECISION_STATUS_PAIRED,
+        match_domain=MATCH_DOMAIN_FREE,
+        match_shape="oa_bank_invoice",
+        rule_code="free.test",
+        rule_version="test",
+        row_ids=row_ids,
+        oa_row_ids=tuple(row_id for row_id in row_ids if str(row_id).startswith("oa-")),
+        bank_row_ids=tuple(row_id for row_id in row_ids if str(row_id).startswith("bk-") or str(row_id).startswith("bank-")),
+        invoice_row_ids=tuple(row_id for row_id in row_ids if str(row_id).startswith("iv-") or str(row_id).startswith("invoice-")),
+        amount="100.00",
+        direction="expense",
+        payment_amount_closed=True,
+        invoice_amount_closed=True,
+        source_versions={"rules": "v1"},
+    )
 
 
 class WorkbenchSystemAutoPairModePolicyTests(unittest.TestCase):
@@ -4329,6 +4360,17 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
         bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
         invoice_row = flatten_groups(payload["open"]["groups"], "invoice")[0]
+        decision_store = WorkbenchReconciliationDecisionStore()
+        decision_store.upsert_decisions(
+            [
+                workbench_reconciliation_decision(
+                    "decision-confirm-link",
+                    scope_month="2026-03",
+                    row_ids=(oa_row["id"], bank_row["id"], invoice_row["id"]),
+                )
+            ]
+        )
+        app._workbench_reconciliation_decision_store = decision_store
 
         response = app.handle_request(
             "POST",
@@ -4350,6 +4392,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIsNone(app._workbench_override_service.case_id_for_row(oa_row["id"]))
         self.assertIsNone(app._workbench_override_service.case_id_for_row(bank_row["id"]))
         self.assertIsNone(app._workbench_override_service.case_id_for_row(invoice_row["id"]))
+        stored_decision = decision_store.list_decisions("2026-03")[0]
+        self.assertEqual(stored_decision["decision_status"], DECISION_STATUS_CONSUMED)
+        self.assertEqual(stored_decision["consumed_by_relation_id"], "CASE-PAIR-ONLY-001")
 
     def test_confirm_link_returns_503_and_rolls_back_when_pair_relation_persist_fails(self) -> None:
         app = build_application()

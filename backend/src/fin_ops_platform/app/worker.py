@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
+from datetime import datetime
+from threading import Thread
+from time import sleep
 from typing import Any
 
 from fin_ops_platform.services.app_settings_service import (
@@ -66,6 +69,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-output-invoice-collection-read-model-refresh", action="store_true", help="Register output invoice collection SQL read model refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
+    parser.add_argument("--enable-workbench-matching", action="store_true", help="Poll DB-backed workbench matching dirty scopes.")
+    parser.add_argument("--workbench-matching-batch-size", type=int, default=10)
+    parser.add_argument("--workbench-matching-lease-seconds", type=int, default=600)
+    parser.add_argument("--workbench-matching-retry-delay-seconds", type=int, default=None)
     parser.add_argument("--check", action="store_true", help="Print worker configuration and exit without polling.")
     return parser
 
@@ -214,6 +221,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "task_timeout_seconds": config.task_timeout_seconds,
                     "statement_timeout_seconds": config.statement_timeout_seconds,
                     "max_attempts": config.max_attempts,
+                    "workbench_matching_enabled": bool(args.enable_workbench_matching),
+                    "workbench_matching_batch_size": args.workbench_matching_batch_size,
+                    "workbench_matching_lease_seconds": args.workbench_matching_lease_seconds,
+                    "workbench_matching_retry_delay_seconds": args.workbench_matching_retry_delay_seconds,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -221,6 +232,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 0
+
+    if args.enable_workbench_matching:
+        from fin_ops_platform.app.server import Application
+
+        workbench_application = Application(data_dir=default_data_dir())
+        workbench_loop_kwargs = {
+            "worker_id": config.worker_id,
+            "poll_interval_seconds": args.poll_interval_seconds,
+            "batch_size": args.workbench_matching_batch_size,
+            "lease_seconds": args.workbench_matching_lease_seconds,
+            "retry_delay_seconds": args.workbench_matching_retry_delay_seconds,
+            "max_iterations": args.max_iterations,
+        }
+        if not config.event_types and not handlers:
+            _run_workbench_matching_dirty_queue_loop(
+                workbench_application,
+                **workbench_loop_kwargs,
+            )
+            return 0
+        Thread(
+            target=_run_workbench_matching_dirty_queue_loop,
+            args=(workbench_application,),
+            kwargs=workbench_loop_kwargs,
+            daemon=True,
+        ).start()
 
     worker = RuntimeWorker(queue_repository=queue, config=config, redis_helper=redis_helper, handlers=handlers)
     if queue_settings.backend == "rabbitmq":
@@ -239,6 +275,43 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def _run_workbench_matching_dirty_queue_loop(
+    application: Any,
+    *,
+    worker_id: str,
+    poll_interval_seconds: float,
+    batch_size: int,
+    lease_seconds: int,
+    retry_delay_seconds: int | None,
+    max_iterations: int | None,
+) -> None:
+    iterations = 0
+    while True:
+        try:
+            application._rebuild_workbench_matching_dirty_scopes_once(
+                worker_id=worker_id,
+                limit=batch_size,
+                lease_seconds=lease_seconds,
+                retry_delay_seconds=retry_delay_seconds,
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "kind": "workbench_matching_worker_warning",
+                        "detail": str(exc),
+                        "timestamp": datetime.now().isoformat(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+        iterations += 1
+        if max_iterations is not None and iterations >= max(0, int(max_iterations)):
+            return
+        sleep(max(float(poll_interval_seconds), 0.1))
+
+
 def _infer_worker_kind(args: argparse.Namespace) -> str:
     enabled = [
         name
@@ -253,6 +326,7 @@ def _infer_worker_kind(args: argparse.Namespace) -> str:
             ("output-invoice-collection-read-model", args.enable_output_invoice_collection_read_model_refresh),
             ("oa-sync", args.enable_oa_sync),
             ("import-job", args.enable_import_job_processing),
+            ("workbench-matching", args.enable_workbench_matching),
         )
         if enabled_flag
     ]

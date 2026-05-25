@@ -40,6 +40,7 @@ EXPECTED_MIGRATIONS = [
     "0025_pending_invoice_runtime_grants.sql",
     "0026_invoice_usage_collection_read_models.sql",
     "0027_invoice_usage_collection_runtime_grants.sql",
+    "0028_workbench_reconciliation_decisions.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -101,6 +102,7 @@ EXPECTED_TABLES = [
     "read_model.workbench_summary",
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
+    "read_model.workbench_reconciliation_decisions",
     "read_model.search_index_rows",
     "read_model.pending_invoice_rows",
     "read_model.pending_invoice_scopes",
@@ -130,7 +132,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 28)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 29)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -347,8 +349,68 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_worker",
             "grant select on read_model.workbench_summary to fin_ops_readonly",
             "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_migrator",
+            "workbench_reconciliation_decisions_tenant_key_uidx",
+            "workbench_reconciliation_decisions_scope_status_idx",
+            "workbench_reconciliation_decisions_row_ids_gin",
+            "workbench_matching_dirty_scopes_claim_idx",
+            "matching_runs_tenant_request_id_uidx",
         ):
             self.assertIn(required, sql)
+
+    def test_workbench_reconciliation_decision_and_dirty_queue_schema(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        decision_body = re.search(
+            r"create table if not exists read_model\.workbench_reconciliation_decisions\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        self.assertIsNotNone(decision_body)
+        body = decision_body.group(1)
+        for required in (
+            "tenant_id text not null default 'default'",
+            "scope_month date not null",
+            "decision_key text not null",
+            "display_state text not null",
+            "decision_status text not null",
+            "match_domain text not null",
+            "match_shape text not null",
+            "rule_code text not null",
+            "rule_version text not null",
+            "row_ids text[] not null default '{}'::text[]",
+            "oa_row_ids text[] not null default '{}'::text[]",
+            "bank_row_ids text[] not null default '{}'::text[]",
+            "invoice_row_ids text[] not null default '{}'::text[]",
+            "source_versions jsonb not null default '{}'::jsonb",
+            "raw_payload jsonb not null default '{}'::jsonb",
+            "consumed_by_relation_id text",
+            "suppressed_by_exception_case_id text",
+        ):
+            self.assertIn(required, body)
+        self.assertIn("decision_status in ('proposed', 'paired', 'open', 'suppressed', 'consumed', 'expired')", sql)
+        self.assertIn("match_domain in ('free', 'special')", sql)
+        self.assertIn("display_state in ('paired', 'open')", sql)
+
+        dirty_body = re.search(
+            r"create table if not exists job\.workbench_matching_dirty_scopes\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        self.assertIsNotNone(dirty_body)
+        full_sql = sql
+        for required in (
+            "add column if not exists tenant_id text not null default 'default'",
+            "add column if not exists lease_owner text",
+            "add column if not exists lease_expires_at timestamptz",
+            "add column if not exists source_versions jsonb not null default '{}'::jsonb",
+            "add column if not exists request_id text",
+            "add column if not exists tenant_id text not null default 'default'",
+            "add column if not exists started_at timestamptz",
+            "add column if not exists completed_at timestamptz",
+            "add column if not exists failed_at timestamptz",
+            "add column if not exists duration_ms integer",
+            "add column if not exists error_summary text",
+        ):
+            self.assertIn(required, full_sql)
 
     def test_sql_does_not_contain_forbidden_operations_or_secrets(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

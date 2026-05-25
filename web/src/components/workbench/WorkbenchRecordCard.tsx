@@ -227,6 +227,10 @@ function renderCellValue(
     );
   }
 
+  if (paneId === "oa" && column.kind === "money") {
+    return renderOaMoneyValue(value, row, zoneId);
+  }
+
   if (paneId === "bank" && column.kind === "money") {
     return renderBankMoneyValue(
       column.key,
@@ -456,6 +460,22 @@ function renderBankMoneyValue(
   );
 }
 
+function renderOaMoneyValue(
+  value: string,
+  row: WorkbenchRecord,
+  zoneId: "paired" | "open",
+) {
+  const hasValue = value !== "--" && value !== "—" && value !== "";
+  return (
+    <span className="money-cell-stack">
+      <span className="money-cell-value">
+        <span>{hasValue ? value : "--"}</span>
+        <ReconciliationDecisionWarningIcon row={row} zoneId={zoneId} />
+      </span>
+    </span>
+  );
+}
+
 function BankAmountMismatchWarning({ row }: { row: WorkbenchRecord }) {
   const [open, setOpen] = useState(false);
   const amountCheck = row.relationAmountCheck;
@@ -519,6 +539,74 @@ function BankAmountMismatchWarning({ row }: { row: WorkbenchRecord }) {
       </IconButton>
     </Tooltip>
   );
+}
+
+function ReconciliationDecisionWarningIcon({ row, zoneId }: { row: WorkbenchRecord; zoneId: "paired" | "open" }) {
+  const [open, setOpen] = useState(false);
+  const warnings = zoneId === "paired" ? row.reconciliationWarnings ?? [] : [];
+
+  if (warnings.length === 0) {
+    return null;
+  }
+
+  const showTooltip = (
+    event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>,
+  ) => {
+    event.stopPropagation();
+    setOpen(true);
+  };
+  const hideTooltip = (event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setOpen(false);
+  };
+
+  return (
+    <Tooltip
+      arrow
+      describeChild
+      onClose={() => setOpen(false)}
+      onOpen={() => setOpen(true)}
+      open={open}
+      placement="top"
+      title={(
+        <span className="bank-amount-mismatch-tooltip" style={{ display: "grid", gap: 2 }}>
+          <strong>{reconciliationWarningTitle(warnings)}</strong>
+          {warnings.map((warning) => (
+            <span key={`${warning.code}:${warning.message}`}>
+              {warning.message || warning.code}
+            </span>
+          ))}
+        </span>
+      )}
+    >
+      <IconButton
+        aria-label="查看自动匹配警示"
+        color="warning"
+        size="small"
+        sx={{
+          ml: 0.25,
+          p: 0.25,
+          verticalAlign: "middle",
+          "& .MuiSvgIcon-root": { fontSize: 16 },
+        }}
+        onBlur={hideTooltip}
+        onClick={showTooltip}
+        onFocus={showTooltip}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onTouchStart={showTooltip}
+      >
+        <WarningAmberRoundedIcon fontSize="inherit" />
+      </IconButton>
+    </Tooltip>
+  );
+}
+
+function reconciliationWarningTitle(warnings: WorkbenchRecord["reconciliationWarnings"]) {
+  if (warnings?.some((warning) => warning.code === "invoice_amount_mismatch")) {
+    return "金额不一致";
+  }
+  return "自动匹配警示";
 }
 
 function formatMismatchAmount(value: string | undefined) {

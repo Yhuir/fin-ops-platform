@@ -31,7 +31,7 @@ backend/src/fin_ops_platform/
 
 - 导入：`imports.py`、`import_file_service.py`、`import_preview_audit.py`
 - 工作台：`workbench_query_service.py`、`workbench_action_service.py`、`workbench_read_model_service.py`
-- 配对：`workbench_pair_relation_service.py`、`workbench_candidate_match_service.py`、`workbench_matching_orchestrator.py`
+- 配对：`workbench_pair_relation_service.py`、`workbench_matching_orchestrator.py`。当前迁移期仍可能由 `workbench_candidate_match_service.py` 承载旧自动候选链路；关联台自动决策重构落地后，它只能作为 legacy/internal compatibility 入口，不再是生产展示事实源。
 - 异常：`workbench_exception_case_service.py`、`workbench_exception_application_service.py`
 - 银行明细：`bank_details_service.py`、`bank_transaction_category_service.py`
 - 税金/ETC：`tax_offset_service.py`、`etc_service.py`、`etc_reconciliation_service.py`
@@ -46,7 +46,7 @@ backend/src/fin_ops_platform/
 - 影响工作台展示的写操作必须考虑 read model 和 search cache 失效。
 - 导入确认必须重新校验幂等性。
 - 导入事实读取必须优先走 PostgreSQL `import_fact_repository`；发票、银行流水、批次和导入文件列表不得在生产 API path 通过 `imports` snapshot 全量加载后分页。
-- 工作台读取必须优先走 PostgreSQL `read_model.workbench_snapshots` / `read_model.workbench_rows` / `read_model.workbench_candidate_matches`；`/api/workbench` 不得在生产请求路径调用 `_build_raw_workbench_payload()` 同步 rebuild。
+- 关联台自动决策重构完成后，工作台读取必须优先消费 PostgreSQL `app.workbench_pair_relations` 手工事实、`read_model.workbench_reconciliation_decisions` 自动决策，以及 `read_model.workbench_rows` / `read_model.workbench_groups` / `read_model.workbench_group_rows` 投影；迁移期旧 `read_model.workbench_candidate_matches` 只能作为替换前的现行实现或 shadow 对账来源，不得继续扩展成新的展示事实源；`/api/workbench` 不得在生产请求路径调用 `_build_raw_workbench_payload()` 同步 rebuild。
 - 新服务需要 snapshot/persistence 时，优先明确状态边界，不继续扩大整包状态。
 - 新后台任务优先写入 `job.outbox_events`，由独立 worker claim；不要把新生产机制挂在 API 进程内 thread 上。RabbitMQ 未来只能投递 `RuntimeQueueEvent.to_envelope()`，不能成为事实源。
 - `LEGACY_SNAPSHOT_ALLOWLIST` 在 production 模块层面必须保持为空；legacy full snapshot 只允许 migration、shadow、test 或显式 `bootstrap_mode=legacy` 场景使用，并保持 `app/server.py` 不直接调用 `state_store.load()`。
@@ -106,7 +106,7 @@ RabbitMQ 消息体不得携带 read model payload 或页面 snapshot。回滚时
 
 工作台首屏读取使用拆分后的 SQL-native 契约：
 
-- `/api/workbench/summary?month=all`：返回 summary、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回候选组或行级快照。
+- `/api/workbench/summary?month=all`：返回 summary、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回投影 group 或行级快照。
 - `/api/workbench/groups?month=all&zone=open|paired&page=1&page_size=200&detail_level=summary`：从 `read_model.workbench_groups` 返回当前页 group 摘要，支持 `status`、`source_kind`、兼容搜索 `search`、分栏搜索 `search_by_pane`、受控排序 `sort=oa|bank|invoice:asc|desc`、`column_filters` 和 `time_filters`。分栏搜索、列筛选和时间筛选通过 `read_model.workbench_group_rows` 命中 group；同一栏内必须命中同一行，多个栏之间按交集组合，不读取 `workbench_snapshots` 大 JSON。`detail_level` 默认为 `full` 以兼容旧调用；前端首屏和 load-more 必须显式传 `summary`。
 - `/api/workbench/groups/detail?month=all&zone=open|paired&group_id=...`：从同一 SQL read model 返回单个 group 的完整 payload。列表页不得通过扩大 page size 或读取旧 snapshot 获取详情。
 - `/api/workbench/refresh-status`：返回 workbench dirty scopes、worker heartbeat/lag、outbox backlog、最近错误和 source version。

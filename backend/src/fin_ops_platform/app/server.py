@@ -189,6 +189,8 @@ from fin_ops_platform.services.workbench_matching_rules import (
     WORKBENCH_MATCHING_RULES_VERSION,
     WorkbenchMatchingRules,
 )
+from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
+from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_exception_application_service import (
     WorkbenchExceptionApplicationConflict,
     WorkbenchExceptionApplicationService,
@@ -330,6 +332,7 @@ class Application:
         self._initialize_runtime_services(self._runtime_bootstrap_state())
         self._recover_interrupted_cost_statistics_cache_warmup_jobs()
         self._recover_pending_etc_business_oa_detection_loops()
+        self._schedule_startup_workbench_matching_stale_scan()
         if (
             os.getenv("FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR", "").strip() not in {"1", "true", "yes"}
             and self._historical_etc_repair_needs_startup_reconcile()
@@ -359,6 +362,39 @@ class Application:
         if self._bootstrap_mode not in {"production", "lightweight"}:
             return False
         return str(getattr(self._state_store, "storage_backend", "") or "").strip() == "postgres"
+
+    @staticmethod
+    def _workbench_reconciliation_tenant_id() -> str:
+        return str(os.getenv("FIN_OPS_TENANT_ID") or "default").strip() or "default"
+
+    def _workbench_reconciliation_dirty_queue_repository(self):
+        repository = getattr(self._state_store, "read_model_repository", None)
+        required_methods = (
+            "mark_workbench_matching_dirty_scopes",
+            "claim_workbench_matching_dirty_scopes",
+            "complete_workbench_matching_dirty_scope",
+            "fail_workbench_matching_dirty_scope",
+        )
+        if repository is not None and all(
+            callable(getattr(repository, method_name, None)) for method_name in required_methods
+        ):
+            return repository
+        return None
+
+    def _workbench_reconciliation_decision_store_repository(self):
+        repository = getattr(self._state_store, "read_model_repository", None)
+        required_methods = (
+            "upsert_workbench_reconciliation_decisions",
+            "list_workbench_reconciliation_decisions",
+            "consume_workbench_reconciliation_decisions_by_row_ids",
+            "suppress_workbench_reconciliation_decisions_by_row_ids",
+            "expire_stale_workbench_reconciliation_decisions",
+        )
+        if repository is not None and all(
+            callable(getattr(repository, method_name, None)) for method_name in required_methods
+        ):
+            return repository
+        return None
 
     def _runtime_repository_snapshot(
         self,
@@ -477,6 +513,24 @@ class Application:
         self._workbench_matching_dirty_scope_service = WorkbenchMatchingDirtyScopeService.from_snapshot(
             persisted_state.get("workbench_matching_dirty_scopes"),
         )
+        dirty_queue_repository = self._workbench_reconciliation_dirty_queue_repository()
+        self._workbench_reconciliation_dirty_queue = (
+            WorkbenchReconciliationDirtyQueue(
+                repository=dirty_queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+            if dirty_queue_repository is not None
+            else None
+        )
+        decision_store_repository = self._workbench_reconciliation_decision_store_repository()
+        self._workbench_reconciliation_decision_store = (
+            WorkbenchReconciliationDecisionStore(
+                repository=decision_store_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+            if decision_store_repository is not None
+            else None
+        )
         self._cost_statistics_read_model_service = CostStatisticsReadModelService.from_snapshot(
             persisted_state.get("cost_statistics_read_models"),
         )
@@ -559,6 +613,7 @@ class Application:
             rules=self._workbench_matching_rules,
             special_rule_service=self._workbench_special_pair_rule_service,
             exception_case_service=self._workbench_exception_case_service,
+            decision_store=self._workbench_reconciliation_decision_store,
             settings_provider=self._workbench_matching_settings,
             source_versions_provider=self._workbench_matching_source_versions,
         )
@@ -713,8 +768,15 @@ class Application:
             case_service=self._workbench_exception_case_service,
             pair_relation_service=self._workbench_pair_relation_service,
             candidate_match_service=self._workbench_candidate_match_service,
+            decision_store=getattr(self, "_workbench_reconciliation_decision_store", None),
             source_versions_provider=self._workbench_matching_source_versions,
         )
+
+    def _consume_workbench_reconciliation_decisions(self, *, row_ids: list[str], relation_id: str) -> int:
+        decision_store = getattr(self, "_workbench_reconciliation_decision_store", None)
+        if decision_store is None:
+            return 0
+        return decision_store.consume_by_row_ids(row_ids, relation_id=relation_id)
 
     def _reload_runtime_services(self) -> None:
         self._initialize_runtime_services(self._runtime_bootstrap_state())
@@ -3997,7 +4059,7 @@ class Application:
             months=normalized_months,
             metadata={"source": "etc_invoice_sync", "reason": reason},
         )
-        self._run_workbench_auto_matching_for_scopes(normalized_months, reason=reason)
+        self._schedule_or_run_workbench_auto_matching_for_scopes(normalized_months, reason=reason)
         self._persist_state()
 
     def _refresh_after_historical_etc_repair_sync(self, changed_months: list[str], *, reason: str) -> None:
@@ -5908,9 +5970,9 @@ class Application:
             )
         )
         self._execute_derived_data_lifecycle_event(
-            "batch_accounting_relation_changed",
+            "exception_case_changed",
             scope_keys=changed_scope_keys,
-            metadata={"source": "repair_batch_accounting_relation_case_ids"},
+            metadata={"source": action_name, "reason": action_name},
         )
         if isinstance(relation, dict):
             self._schedule_workbench_pair_relation_persist(
@@ -6008,10 +6070,54 @@ class Application:
 
     def _run_workbench_matching_dirty_scope_worker(self, *, interval_seconds: float) -> None:
         while True:
-            self._rebuild_workbench_matching_dirty_scopes_once()
+            try:
+                self._rebuild_workbench_matching_dirty_scopes_once()
+            except Exception as exc:
+                self._emit_workbench_persistence_warning(
+                    operation="dirty_scope_worker",
+                    detail=f"workbench dirty scope worker iteration failed: {exc}",
+                )
             sleep(interval_seconds)
 
-    def _rebuild_workbench_matching_dirty_scopes_once(self) -> dict[str, object] | None:
+    def _schedule_startup_workbench_matching_stale_scan(self) -> dict[str, object] | None:
+        if getattr(self, "_workbench_reconciliation_dirty_queue", None) is None:
+            return None
+        scope_months = [
+            str(month).strip()
+            for month in list(self._workbench_query_service.list_available_months() or [])
+            if SEARCH_MONTH_RE.match(str(month).strip())
+        ]
+        scope_months = sorted(dict.fromkeys(scope_months))
+        if not scope_months:
+            return None
+        return self._execute_derived_data_lifecycle_event(
+            "startup_stale_scan",
+            months=scope_months,
+            include_all=False,
+            metadata={"source": "application_startup", "reason": "startup_stale_scan"},
+            schedule_cost_warmup=False,
+        )
+
+    def _rebuild_workbench_matching_dirty_scopes_once(
+        self,
+        *,
+        worker_id: str | None = None,
+        request_id: str | None = None,
+        limit: int | None = None,
+        lease_seconds: int | None = None,
+        retry_delay_seconds: int | None = None,
+    ) -> dict[str, object] | None:
+        queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
+        claim_due_scopes = getattr(queue, "claim_due_scopes", None)
+        if callable(claim_due_scopes):
+            return self._rebuild_workbench_matching_db_dirty_scopes_once(
+                worker_id=worker_id,
+                request_id=request_id,
+                limit=limit,
+                lease_seconds=lease_seconds,
+                retry_delay_seconds=retry_delay_seconds,
+            )
+
         scope_months = self._workbench_matching_dirty_scope_service.take_dirty_scopes()
         if not scope_months:
             return None
@@ -6019,6 +6125,76 @@ class Application:
             scope_months,
             reason="dirty_scope_retry",
         )
+
+    def _rebuild_workbench_matching_db_dirty_scopes_once(
+        self,
+        *,
+        worker_id: str | None,
+        request_id: str | None,
+        limit: int | None,
+        lease_seconds: int | None,
+        retry_delay_seconds: int | None,
+    ) -> dict[str, object] | None:
+        queue = self._workbench_reconciliation_dirty_queue
+        resolved_worker_id = str(
+            worker_id or os.getenv("FIN_OPS_WORKBENCH_MATCHING_WORKER_ID") or "workbench-matching-worker"
+        ).strip()
+        resolved_request_id = str(request_id or f"workbench-dirty-{uuid4().hex}").strip()
+        try:
+            configured_limit = int(os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_BATCH_SIZE", "10"))
+        except ValueError:
+            configured_limit = 10
+        resolved_limit = max(1, int(limit or configured_limit))
+        scope_months = queue.claim_due_scopes(
+            worker_id=resolved_worker_id,
+            limit=resolved_limit,
+            lease_seconds=lease_seconds,
+            request_id=resolved_request_id,
+        )
+        if not scope_months:
+            return None
+
+        summary: dict[str, object] = {
+            "request_id": resolved_request_id,
+            "processed_months": [],
+            "failed_months": [],
+            "candidate_count": 0,
+            "scope_months": list(scope_months),
+        }
+        for scope_month in scope_months:
+            scope_request_id = f"{resolved_request_id}:{scope_month}"
+            try:
+                run_summary = self._run_workbench_auto_matching_for_scopes(
+                    [scope_month],
+                    reason="dirty_scope_retry",
+                    request_id=scope_request_id,
+                    requeue_on_error=False,
+                    raise_on_error=True,
+                ) or {}
+                queue.complete(
+                    scope_month,
+                    source_versions=self._workbench_matching_source_versions(),
+                    worker_id=resolved_worker_id,
+                    request_id=scope_request_id,
+                )
+                processed_months = list(summary["processed_months"])
+                processed_months.append(scope_month)
+                summary["processed_months"] = processed_months
+                summary["candidate_count"] = int(summary.get("candidate_count") or 0) + int(
+                    run_summary.get("candidate_count") or 0
+                )
+            except Exception as exc:
+                queue.fail(
+                    scope_month,
+                    error=str(exc),
+                    retry_delay_seconds=retry_delay_seconds,
+                    worker_id=resolved_worker_id,
+                    request_id=scope_request_id,
+                )
+                failed_months = list(summary["failed_months"])
+                failed_months.append(scope_month)
+                summary["failed_months"] = failed_months
+        return summary
 
     def _run_oa_sync_polling_worker(self, *, interval_seconds: float) -> None:
         while True:
@@ -6123,7 +6299,7 @@ class Application:
         if not normalized_scope_keys:
             return
         read_model_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(normalized_scope_keys)
-        self._run_workbench_auto_matching_for_scopes(
+        self._schedule_or_run_workbench_auto_matching_for_scopes(
             normalized_scope_keys,
             reason="oa_sync_hot_rebuild",
         )
@@ -7403,6 +7579,9 @@ class Application:
         bank_transaction_tags = payload.get("bank_transaction_tags")
         pending_invoice_tag_groups = payload.get("pending_invoice_tag_groups")
         actor_id = str(session.identity.username or "workbench_settings").strip()
+        previous_oa_invoice_offset = self._app_settings_service.get_settings_payload().get("oa_invoice_offset")
+        if not isinstance(previous_oa_invoice_offset, dict):
+            previous_oa_invoice_offset = {}
         if (
             not isinstance(completed_project_ids, list)
             or not isinstance(bank_account_mappings, list)
@@ -7491,6 +7670,11 @@ class Application:
             )
         self._search_service.clear_cache()
         self._invalidate_search_read_model_scopes(["all"], reason="settings_update")
+        if updated_payload.get("oa_invoice_offset") != previous_oa_invoice_offset:
+            self._mark_workbench_matching_dirty_scopes(
+                self._workbench_query_service.list_available_months(),
+                reason="oa_invoice_offset_settings_changed",
+            )
         if bank_transaction_tags is not None or pending_invoice_tag_groups is not None:
             self._invalidate_pending_invoice_read_model_scopes(reason="settings_update")
         return self._json_response(HTTPStatus.OK, updated_payload)
@@ -8010,7 +8194,7 @@ class Application:
             try:
                 if progress is not None:
                     progress("rebuild", "正在按 OA 导入设置重新拉取 OA 并重建关联台缓存。", 95)
-                self._run_workbench_auto_matching_for_scopes(
+                self._schedule_or_run_workbench_auto_matching_for_scopes(
                     self._expand_workbench_matching_months(self._workbench_query_service.list_available_months()),
                     reason="oa_reset_rebuild",
                 )
@@ -11125,6 +11309,10 @@ class Application:
                 request_id=request_id,
                 action_name=action_name,
             )
+            self._consume_workbench_reconciliation_decisions(
+                row_ids=row_ids,
+                relation_id=resolved_case_id,
+            )
         except Exception as exc:
             self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
             self._configure_workbench_exception_application_service()
@@ -12155,7 +12343,7 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_sync_request", "message": str(exc)},
             )
-        self._run_workbench_auto_matching_for_scopes(
+        self._schedule_or_run_workbench_auto_matching_for_scopes(
             self._expand_workbench_matching_months(self._workbench_query_service.list_available_months()),
             reason="oa_integration_sync",
         )
@@ -12517,7 +12705,7 @@ class Application:
             self._tax_offset_scope_keys_for_import_preview(preview),
             reason="invoice_import_confirm",
         )
-        self._run_workbench_auto_matching_for_scopes(
+        self._schedule_or_run_workbench_auto_matching_for_scopes(
             self._workbench_matching_scope_months_for_import_preview(preview),
             reason="import_confirm",
         )
@@ -13181,6 +13369,65 @@ class Application:
                     break
         return sorted(months) if months else ["all"]
 
+    def _mark_workbench_matching_dirty_scopes(
+        self,
+        scope_months: list[str],
+        *,
+        reason: str,
+        error: str | None = None,
+    ) -> list[str]:
+        normalized_months = [
+            str(month).strip()
+            for month in list(scope_months or [])
+            if SEARCH_MONTH_RE.match(str(month).strip())
+        ]
+        normalized_months = sorted(dict.fromkeys(normalized_months))
+        if not normalized_months:
+            return []
+
+        queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
+        mark_dirty_expanded = getattr(queue, "mark_dirty_expanded", None)
+        if callable(mark_dirty_expanded):
+            return list(
+                mark_dirty_expanded(
+                    normalized_months,
+                    reason=reason,
+                    source_versions=self._workbench_matching_source_versions(),
+                )
+            )
+
+        dirty_months = self._workbench_matching_dirty_scope_service.mark_dirty(
+            normalized_months,
+            reason=reason,
+            error=error,
+        )
+        self._persist_workbench_matching_dirty_scopes_best_effort(operation=f"{reason}_legacy_dirty_scopes")
+        return dirty_months
+
+    def _schedule_or_run_workbench_auto_matching_for_scopes(
+        self,
+        scope_months: list[str],
+        *,
+        reason: str,
+        request_id: str | None = None,
+        progress_callback=None,
+    ) -> dict[str, object] | None:
+        queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
+        if queue is not None:
+            queued_months = self._mark_workbench_matching_dirty_scopes(scope_months, reason=reason)
+            return {
+                "queued_months": queued_months,
+                "processed_months": [],
+                "candidate_count": 0,
+                "reason": reason,
+            }
+        return self._run_workbench_auto_matching_for_scopes(
+            scope_months,
+            reason=reason,
+            request_id=request_id,
+            progress_callback=progress_callback,
+        )
+
     def _enqueue_workbench_auto_matching_for_scopes(
         self,
         scope_months: list[str],
@@ -13251,22 +13498,33 @@ class Application:
                     },
                 )
 
-            summary = self._run_workbench_auto_matching_for_scopes(
+            summary = self._schedule_or_run_workbench_auto_matching_for_scopes(
                 normalized_months,
                 reason=reason,
                 request_id=f"workbench-match-job-{running_job.job_id}",
                 progress_callback=progress_callback,
             ) or {}
+            processed_months = (
+                list(summary.get("processed_months") or [])
+                if summary.get("queued_months")
+                else list(summary.get("processed_months") or normalized_months)
+            )
+            queued_months = list(summary.get("queued_months") or [])
             result_summary = {
                 **summary,
-                "processed_months": normalized_months,
+                "processed_months": processed_months,
                 "affected_months": normalized_months,
             }
+            completion_message = (
+                f"关联台匹配已排队：{', '.join(queued_months)}。"
+                if queued_months
+                else f"关联台候选已生成：{', '.join(normalized_months)}。"
+            )
             self._background_job_service.update_progress(
                 running_job.job_id,
                 phase="workbench_matching",
-                message=f"关联台候选已生成：{', '.join(normalized_months)}。",
-                current=len(normalized_months),
+                message=completion_message,
+                current=0 if queued_months else len(normalized_months),
                 total=len(normalized_months),
                 result_summary=result_summary,
             )
@@ -13283,6 +13541,8 @@ class Application:
         reason: str,
         request_id: str | None = None,
         progress_callback=None,
+        requeue_on_error: bool = True,
+        raise_on_error: bool = False,
     ) -> dict[str, object] | None:
         normalized_months = [
             str(month).strip()
@@ -13295,12 +13555,15 @@ class Application:
         with self._workbench_matching_run_lock:
             running_overlap = sorted(set(normalized_months).intersection(self._workbench_matching_running_scope_months))
             if running_overlap:
-                self._workbench_matching_dirty_scope_service.mark_dirty(
-                    normalized_months,
-                    reason=f"{reason}_coalesced",
-                )
+                if requeue_on_error:
+                    self._mark_workbench_matching_dirty_scopes(
+                        normalized_months,
+                        reason=f"{reason}_coalesced",
+                    )
                 if self._state_store is not None:
                     self._persist_state()
+                if raise_on_error:
+                    raise RuntimeError(f"Workbench matching scopes already running: {', '.join(running_overlap)}")
                 return None
             self._workbench_matching_running_scope_months.update(normalized_months)
         try:
@@ -13311,17 +13574,25 @@ class Application:
                 progress_callback=progress_callback,
             )
         except Exception as exc:
-            self._workbench_matching_dirty_scope_service.mark_dirty(
-                normalized_months,
-                reason=reason,
-                error=str(exc),
-            )
+            if requeue_on_error:
+                self._mark_workbench_matching_dirty_scopes(
+                    normalized_months,
+                    reason=reason,
+                    error=str(exc),
+                )
             if self._state_store is not None:
                 self._persist_state()
+            warning_detail = (
+                f"queued dirty scopes after matching failure: {exc}"
+                if requeue_on_error
+                else f"matching failed without requeue; caller owns retry state: {exc}"
+            )
             self._emit_workbench_persistence_warning(
                 operation=f"{reason}_auto_matching",
-                detail=f"queued dirty scopes after matching failure: {exc}",
+                detail=warning_detail,
             )
+            if raise_on_error:
+                raise
             return None
         finally:
             with self._workbench_matching_run_lock:
@@ -14282,7 +14553,7 @@ class Application:
         )
         if not stale_months:
             return
-        self._run_workbench_auto_matching_for_scopes(
+        self._schedule_or_run_workbench_auto_matching_for_scopes(
             stale_months,
             reason=reason,
         )
@@ -15976,11 +16247,10 @@ class Application:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
         months = self._months_from_lifecycle_scope_keys(scope_keys)
         if months:
-            dirty_months = self._workbench_matching_dirty_scope_service.mark_dirty(
+            dirty_months = self._mark_workbench_matching_dirty_scopes(
                 months,
                 reason=str(domain_plan.get("reason") or "derived_lifecycle"),
             )
-            self._persist_workbench_matching_dirty_scopes_best_effort(operation="derived_lifecycle_dirty_scopes")
         else:
             dirty_months = []
         return {
@@ -18680,7 +18950,7 @@ def run_http_server(host: str, port: int, app: Application | None = None) -> Non
     application = app or build_application()
     if os.getenv("FIN_OPS_OA_POLLING_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}:
         application.start_oa_sync_polling_worker()
-    if os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
+    if os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}:
         application.start_workbench_matching_dirty_scope_worker()
     handler_factory = _build_handler_factory(application)
     server = ThreadingHTTPServer((host, port), handler_factory)

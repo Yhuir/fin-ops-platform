@@ -8,6 +8,7 @@ from fin_ops_platform.services.workbench_matching_orchestrator import (
 )
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.workbench_special_pair_rule_service import WORKBENCH_SPECIAL_RULES_VERSION
 
@@ -206,6 +207,27 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertTrue(any("workbench_matching.run.failed" in message for message in logs.output))
         self.assertTrue(any("req-006" in message for message in logs.output))
 
+    def test_decision_store_mode_collects_window_rows_and_does_not_write_legacy_candidates(self) -> None:
+        decision_store = WorkbenchReconciliationDecisionStore()
+        candidate_service = WorkbenchCandidateMatchService()
+        candidate_service.upsert_candidate(candidate("2026-06", "old_legacy_rule", ["bank-old"]))
+
+        summary = self._orchestrator(
+            row_provider=FakeRowProvider(
+                oa_rows={"2026-05": [oa_row("oa-may")]},
+                bank_rows={"2026-06": [bank_row("bank-june")]},
+            ),
+            candidate_service=candidate_service,
+            decision_store=decision_store,
+            rules=StaticRules([candidate("2026-06", "legacy_rule", ["bank-legacy"])]),
+        ).run(changed_scope_months=["2026-06"], reason="unit-test", request_id="req-007")
+
+        self.assertEqual(candidate_service.list_candidates_by_month("2026-06"), [])
+        decisions = decision_store.list_decisions("2026-06")
+        self.assertEqual([decision["row_ids"] for decision in decisions], [["oa-may", "bank-june"]])
+        self.assertEqual(summary["decision_count"], 1)
+        self.assertEqual(summary["candidate_count"], 0)
+
     def _orchestrator(
         self,
         *,
@@ -214,6 +236,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         candidate_service: WorkbenchCandidateMatchService | None = None,
         read_model_service: WorkbenchReadModelService | None = None,
         exception_case_service: object | None = None,
+        decision_store: WorkbenchReconciliationDecisionStore | None = None,
         rules: object,
     ) -> WorkbenchMatchingOrchestrator:
         return WorkbenchMatchingOrchestrator(
@@ -221,6 +244,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             pair_relation_service=pair_relation_service or WorkbenchPairRelationService(),
             candidate_match_service=candidate_service or WorkbenchCandidateMatchService(),
             read_model_service=read_model_service or WorkbenchReadModelService(),
+            decision_store=decision_store,
             rules=rules,
             exception_case_service=exception_case_service,
             logger=logging.getLogger("fin_ops_platform.services.workbench_matching_orchestrator"),
@@ -369,6 +393,30 @@ class SkippingRules:
 
 def row(row_id: str) -> dict[str, object]:
     return {"id": row_id}
+
+
+def oa_row(row_id: str, *, month: str = "2026-05") -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "oa",
+        "month": month,
+        "amount": "100.00",
+        "applicant": "张三",
+        "project_name": "项目A",
+        "reason": "支付供应商",
+    }
+
+
+def bank_row(row_id: str, *, month: str = "2026-06") -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "bank",
+        "month": month,
+        "debit_amount": "100.00",
+        "credit_amount": "",
+        "counterparty_name": "供应商",
+        "summary": "支付供应商",
+    }
 
 
 def candidate(
