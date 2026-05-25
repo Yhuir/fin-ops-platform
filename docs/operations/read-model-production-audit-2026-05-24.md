@@ -80,7 +80,7 @@ EXPLAIN 摘要：
 
 - 事实源：`job.outbox_events`、`job.read_model_dirty_scopes`。
 - 消息内容：只包含 envelope 的 `event_id/scope_key/source_version` 等小字段。
-- worker 消费：收到 RabbitMQ message 后必须回 PostgreSQL `claim_event_by_id()`，完成后先 PostgreSQL `ack_event()`，再 RabbitMQ ack。
+- worker 消费：收到 RabbitMQ message 后必须回 PostgreSQL `claim_event_by_id()`，完成后先 PostgreSQL `ack_event()`，再 RabbitMQ ack；consumer idle heartbeat 还会低频 drain PostgreSQL durable queue，避免 RabbitMQ 消息缺失导致 stale `processing` 事件长期卡住。
 
 不需要接 RabbitMQ 的场景：
 
