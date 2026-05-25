@@ -6205,18 +6205,30 @@ def _bank_detail_text_display_fields(payload: dict[str, Any], row: dict[str, Any
     purpose_text = _first_bank_detail_text_field(fields_by_label, BANK_DETAIL_PURPOSE_TEXT_LABELS)
     note_text = _first_bank_detail_text_field(fields_by_label, BANK_DETAIL_NOTE_TEXT_LABELS)
     if not fields_by_label:
-        summary_text = text(payload.get("summary_text") or payload.get("summary") or row.get("summary") or normalized_payload.get("summary")) or ""
-        purpose_text = text(payload.get("purpose_text") or payload.get("purpose") or row.get("purpose") or normalized_payload.get("purpose")) or ""
-        note_text = text(payload.get("note_text") or payload.get("note") or payload.get("remark") or normalized_payload.get("note") or normalized_payload.get("remark")) or ""
-    else:
-        summary_text = summary_text or text(payload.get("summary_text")) or ""
-        purpose_text = purpose_text or text(payload.get("purpose_text")) or ""
-        note_text = note_text or text(payload.get("note_text")) or ""
+        return _legacy_bank_detail_text_display_fields(payload, row, normalized_payload)
     return {
         "purpose_text": purpose_text.strip(),
         "summary_text": summary_text.strip(),
         "note_text": note_text.strip(),
     }
+
+
+def _legacy_bank_detail_text_display_fields(payload: dict[str, Any], row: dict[str, Any], normalized_payload: dict[str, Any]) -> dict[str, str]:
+    bank_name = text(payload.get("bank_name") or normalized_payload.get("imported_bank_name") or normalized_payload.get("bank_name")) or ""
+    summary_text = text(payload.get("summary_text") or payload.get("summary") or row.get("summary") or normalized_payload.get("summary")) or ""
+    purpose_text = text(payload.get("purpose_text") or payload.get("purpose") or row.get("purpose") or normalized_payload.get("purpose")) or ""
+    note_text = text(payload.get("note_text") or payload.get("note") or payload.get("remark") or normalized_payload.get("note") or normalized_payload.get("remark")) or ""
+    if "民生" in bank_name:
+        return {"purpose_text": "", "summary_text": "", "note_text": note_text or purpose_text or summary_text}
+    if "交通" in bank_name or "光大" in bank_name:
+        return {"purpose_text": "", "summary_text": summary_text or purpose_text or note_text, "note_text": ""}
+    if "建设" in bank_name:
+        return {"purpose_text": "", "summary_text": summary_text, "note_text": note_text or purpose_text}
+    if "平安" in bank_name:
+        return {"purpose_text": purpose_text or note_text, "summary_text": summary_text, "note_text": ""}
+    if "工商" in bank_name:
+        return {"purpose_text": purpose_text if purpose_text != note_text else "", "summary_text": summary_text, "note_text": note_text}
+    return {"purpose_text": purpose_text, "summary_text": summary_text, "note_text": note_text}
 
 
 def _bank_detail_text_fields_by_label(value: Any) -> dict[str, str]:

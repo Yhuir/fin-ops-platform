@@ -167,11 +167,46 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(rows["txn-fields"]["purpose_text"], "工行用途")
         self.assertEqual(rows["txn-fields"]["summary_text"], "工行摘要")
         self.assertEqual(rows["txn-fields"]["note_text"], "工行附言")
-        self.assertEqual(rows["txn-legacy"]["purpose_text"], "SQL用途")
+        self.assertEqual(rows["txn-legacy"]["purpose_text"], "")
         self.assertEqual(rows["txn-legacy"]["summary_text"], "SQL摘要")
-        self.assertEqual(rows["txn-legacy"]["note_text"], "")
+        self.assertEqual(rows["txn-legacy"]["note_text"], "SQL用途")
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertIn("select payload, raw_payload, summary, purpose", sql_text)
+
+    def test_transactions_map_legacy_minsheng_text_to_note_only(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-04", row_count=1)],
+                {"total": 1},
+                [],
+                [
+                    {
+                        "payload": {
+                            "id": "txn-cmbc-legacy",
+                            "bank_name": "民生银行",
+                            "account_last4": "9486",
+                            "purpose_text": "",
+                            "summary_text": "",
+                            "note_text": "",
+                            "purpose": "客户附言内容",
+                            "summary": "客户附言内容",
+                        },
+                        "raw_payload": {},
+                        "summary": "客户附言内容",
+                        "purpose": "客户附言内容",
+                    }
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_transactions(date_from="2026-04-01", date_to="2026-04-30")
+
+        self.assertIsNotNone(payload)
+        row = payload["rows"][0]
+        self.assertEqual(row["purpose_text"], "")
+        self.assertEqual(row["summary_text"], "")
+        self.assertEqual(row["note_text"], "客户附言内容")
 
     def test_accounts_aggregate_from_bank_detail_rows_only_when_scopes_are_fresh(self) -> None:
         connection = FakeConnection(

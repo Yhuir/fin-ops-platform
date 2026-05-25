@@ -209,9 +209,29 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         self.assertEqual(sheet["L2"].value, "工行用途")
         self.assertEqual(sheet["M2"].value, "工行摘要")
         self.assertEqual(sheet["N2"].value, "工行附言")
-        self.assertEqual(sheet["L3"].value, "旧用途")
+        self.assertIn(sheet["L3"].value, (None, ""))
         self.assertEqual(sheet["M3"].value, "旧摘要")
         self.assertEqual(sheet["N3"].value, "旧备注")
+
+    def test_export_maps_legacy_minsheng_text_to_note_only(self) -> None:
+        rows = [
+            {
+                **_row("cmbc-legacy", bank_name="民生银行", account_last4="9486", account_key="民生银行:9486"),
+                "purpose_text": "",
+                "summary_text": "",
+                "note_text": "",
+                "purpose": "客户附言内容",
+                "summary": "客户附言内容",
+            }
+        ]
+        service = BankDetailsExportService(transaction_page_loader=_PagedRowsLoader(rows), account_loader=lambda **_kwargs: _accounts())
+
+        result = service.export(mode="all", date_from="2026-04-01", date_to="2026-05-18", keyword=None)
+        sheet = load_workbook(BytesIO(result.content))["全部流水"]
+
+        self.assertIn(sheet["L2"].value, (None, ""))
+        self.assertIn(sheet["M2"].value, (None, ""))
+        self.assertEqual(sheet["N2"].value, "客户附言内容")
 
     def test_row_limit_is_enforced_before_collecting_all_pages(self) -> None:
         rows = [

@@ -145,6 +145,37 @@ describe("bank details API", () => {
     expect(payload.categoryCounts.fee).toBe(1);
   });
 
+  test("does not copy legacy purpose or summary into split bank text columns", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        rows: [
+          {
+            id: "bank-detail-legacy",
+            trade_time: "2026-04-16 11:09:14",
+            counterparty_name: "未知对手方",
+            direction: "expense",
+            direction_label: "支",
+            amount: "4.00",
+            balance: "276.63",
+            summary: "客户附言内容",
+            purpose: "客户附言内容",
+            bank_name: "民生银行",
+            account_last4: "9486",
+          },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+
+    const payload = await fetchBankDetailTransactions({});
+
+    expect(payload.rows[0]).toMatchObject({
+      purposeText: "",
+      summaryText: "",
+      noteText: "",
+    });
+  });
+
   test("sends keyword when fetching bank detail transactions", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       rows: [],

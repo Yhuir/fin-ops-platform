@@ -312,18 +312,30 @@ class BankDetailsExportService:
         purpose_text = cls._first_field_value(fields_by_label, PURPOSE_TEXT_LABELS)
         note_text = cls._first_field_value(fields_by_label, NOTE_TEXT_LABELS)
         if not fields_by_label:
-            summary_text = cls._text(row.get("summary_text") or row.get("summary"))
-            purpose_text = cls._text(row.get("purpose_text") or row.get("purpose"))
-            note_text = cls._text(row.get("note_text") or row.get("note") or row.get("remark"))
-        else:
-            summary_text = summary_text or cls._text(row.get("summary_text"))
-            purpose_text = purpose_text or cls._text(row.get("purpose_text"))
-            note_text = note_text or cls._text(row.get("note_text"))
+            return cls._legacy_bank_text_display_fields(row)
         return {
             "purpose_text": purpose_text.strip(),
             "summary_text": summary_text.strip(),
             "note_text": note_text.strip(),
         }
+
+    @classmethod
+    def _legacy_bank_text_display_fields(cls, row: dict[str, Any]) -> dict[str, str]:
+        bank_name = cls._text(row.get("bank_name"))
+        summary = cls._text(row.get("summary_text") or row.get("summary"))
+        purpose = cls._text(row.get("purpose_text") or row.get("purpose"))
+        note = cls._text(row.get("note_text") or row.get("note") or row.get("remark"))
+        if "民生" in bank_name:
+            return {"purpose_text": "", "summary_text": "", "note_text": note or purpose or summary}
+        if "交通" in bank_name or "光大" in bank_name:
+            return {"purpose_text": "", "summary_text": summary or purpose or note, "note_text": ""}
+        if "建设" in bank_name:
+            return {"purpose_text": "", "summary_text": summary, "note_text": note or purpose}
+        if "平安" in bank_name:
+            return {"purpose_text": purpose or note, "summary_text": summary, "note_text": ""}
+        if "工商" in bank_name:
+            return {"purpose_text": purpose if purpose != note else "", "summary_text": summary, "note_text": note if note else ""}
+        return {"purpose_text": purpose, "summary_text": summary, "note_text": note}
 
     @classmethod
     def _bank_text_fields_by_label(cls, value: Any) -> dict[str, str]:
