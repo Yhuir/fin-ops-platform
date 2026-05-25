@@ -761,7 +761,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-hurong-292"])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-hurong-292"])
 
-    def test_oa_attachment_source_group_accepts_payment_and_unknown_but_does_not_auto_close(self) -> None:
+    def test_oa_attachment_source_group_excludes_payment_and_unknown_evidence_from_invoice_rows(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
             "2026-03",
@@ -811,10 +811,15 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         source_group = next(group for group in payload["open"]["groups"] if group["reason"] == "oa_attachment_source_relation")
         self.assertEqual(source_group["group_type"], "source_linked")
         self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-hurong-2035"])
-        self.assertCountEqual(
-            [row["id"] for row in source_group["invoice_rows"]],
-            ["iv-hurong-2035", "pay-hurong-2035", "unknown-hurong-2035"],
-        )
+        self.assertEqual([row["id"] for row in source_group["invoice_rows"]], ["iv-hurong-2035"])
+        all_invoice_ids = [
+            row["id"]
+            for section in ("paired", "open")
+            for group in payload[section]["groups"]
+            for row in group["invoice_rows"]
+        ]
+        self.assertNotIn("pay-hurong-2035", all_invoice_ids)
+        self.assertNotIn("unknown-hurong-2035", all_invoice_ids)
 
     def test_oa_attachment_invoice_stays_standalone_when_source_oa_is_missing(self) -> None:
         service = WorkbenchCandidateGroupingService()

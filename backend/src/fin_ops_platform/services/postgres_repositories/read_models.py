@@ -1313,6 +1313,7 @@ class PostgresReadModelRepository:
             group = _read_model_payload(row)
             if not isinstance(group, dict):
                 group = {"group_id": text(row.get("group_id"))}
+            group = _sanitize_workbench_group_invoice_rows(group)
             if normalized_detail_level == "summary":
                 group = _filter_workbench_group_preview_rows_for_criteria(
                     group,
@@ -1362,7 +1363,7 @@ class PostgresReadModelRepository:
         group = _read_model_payload(row)
         if not isinstance(group, dict):
             return {"group_id": text(row.get("group_id"))}
-        return group
+        return _sanitize_workbench_group_invoice_rows(group)
 
     def get_workbench_refresh_status(self, *, scope_key: str | None = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
@@ -4624,6 +4625,57 @@ def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:
 
 
 WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT = 3
+OA_ATTACHMENT_NON_INVOICE_EVIDENCE_SOURCE_KINDS = {
+    "oa_attachment_payment_receipt",
+    "oa_attachment_unknown",
+}
+
+
+def _is_non_invoice_oa_attachment_evidence_summary_row(row: dict[str, Any]) -> bool:
+    return (text(row.get("source_kind") or row.get("sourceKind")) or "") in OA_ATTACHMENT_NON_INVOICE_EVIDENCE_SOURCE_KINDS
+
+
+def _sanitize_workbench_group_invoice_rows(group: dict[str, Any]) -> dict[str, Any]:
+    rows = group.get("invoice_rows")
+    if not isinstance(rows, list):
+        return group
+    sanitized_rows = [
+        row
+        for row in rows
+        if not (isinstance(row, dict) and _is_non_invoice_oa_attachment_evidence_summary_row(row))
+    ]
+    if len(sanitized_rows) == len(rows):
+        return group
+    sanitized = dict(group)
+    sanitized["invoice_rows"] = sanitized_rows
+    return sanitized
+
+
+def _is_oa_attachment_invoice_summary_row(row: dict[str, Any]) -> bool:
+    return (text(row.get("source_kind") or row.get("sourceKind")) or "") == "oa_attachment_invoice"
+
+
+def _workbench_group_summary_preview_rows(row_key: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    preview_rows = list(rows[:WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT])
+    if row_key != "invoice_rows":
+        return preview_rows
+
+    preview_ids = {
+        row_id
+        for row in preview_rows
+        if isinstance(row, dict)
+        if (row_id := text(row.get("id") or row.get("row_id") or row.get("rowId")))
+    }
+    for row in rows[WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT:]:
+        if not isinstance(row, dict) or not _is_oa_attachment_invoice_summary_row(row):
+            continue
+        row_id = text(row.get("id") or row.get("row_id") or row.get("rowId"))
+        if row_id and row_id in preview_ids:
+            continue
+        preview_rows.append(row)
+        if row_id:
+            preview_ids.add(row_id)
+    return preview_rows
 
 
 def _filter_workbench_group_preview_rows_for_criteria(
@@ -4755,7 +4807,7 @@ def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str
         rows = group.get(row_key)
         compact[row_key] = [
             _compact_workbench_row_for_summary_page(row)
-            for row in rows[:WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT]
+            for row in _workbench_group_summary_preview_rows(row_key, rows)
             if isinstance(row, dict)
         ] if isinstance(rows, list) else []
     collapsed_rows = group.get("collapsed_rows")

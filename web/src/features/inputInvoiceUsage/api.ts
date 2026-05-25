@@ -194,6 +194,8 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
         operators: arrayValue(config.operators).map(stringValue) as InputInvoiceUsageRowsResponse["filterConfig"][number]["operators"],
       };
     }),
+    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
+    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
   };
 }
 
@@ -397,6 +399,8 @@ function mapFilterOptionsResponse(payload: unknown): InputInvoiceUsageFilterOpti
         }),
       };
     }),
+    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
+    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
   };
 }
 

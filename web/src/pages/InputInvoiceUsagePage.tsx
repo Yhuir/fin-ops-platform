@@ -47,6 +47,7 @@ const initialQuery: InputInvoiceUsageQuery = {
   activeWorkflow: null,
   detailTarget: null,
 };
+const READ_MODEL_REFRESH_RETRY_MS = 10000;
 
 function isFilterArray(value: unknown): value is InputInvoiceUsageFilter[] {
   return Array.isArray(value) && value.every((item) => (
@@ -158,6 +159,7 @@ export default function InputInvoiceUsagePage() {
   const [filterOptions, setFilterOptions] = useState<Record<string, InputInvoiceUsageFilterOption[]>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [readModelStatus, setReadModelStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
@@ -207,6 +209,11 @@ export default function InputInvoiceUsagePage() {
         setTotal(payload.pagination.total);
         setFilterConfigs(payload.filterConfig.length > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields));
         setFilterOptions(filterOptionsByField(optionsPayload.fields));
+        setReadModelStatus(
+          payload.readModelStatus === "refreshing" || optionsPayload.readModelStatus === "refreshing"
+            ? "refreshing"
+            : payload.readModelStatus || optionsPayload.readModelStatus || "",
+        );
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -216,6 +223,7 @@ export default function InputInvoiceUsagePage() {
         setTotal(0);
         setFilterConfigs([]);
         setFilterOptions({});
+        setReadModelStatus("");
         setError(caught instanceof Error ? caught.message : "进项发票使用情况加载失败，请稍后重试。");
       })
       .finally(() => {
@@ -241,6 +249,14 @@ export default function InputInvoiceUsagePage() {
     loadRows("reset", controller.signal);
     return () => controller.abort();
   }, [loadRows]);
+
+  useEffect(() => {
+    if (readModelStatus !== "refreshing" || loading || refreshing) {
+      return undefined;
+    }
+    const retryId = window.setTimeout(() => loadRows("refresh"), READ_MODEL_REFRESH_RETRY_MS);
+    return () => window.clearTimeout(retryId);
+  }, [loadRows, loading, readModelStatus, refreshing]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({
@@ -390,6 +406,9 @@ export default function InputInvoiceUsagePage() {
             </Button>
           </Stack>
           {error ? <Alert severity="error">{error}</Alert> : null}
+          {readModelStatus === "refreshing" ? (
+            <Alert severity="info">进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。</Alert>
+          ) : null}
           {loading ? (
             <Stack spacing={1.25} aria-label="进项发票使用情况加载中">
               <Skeleton variant="rounded" height={44} />

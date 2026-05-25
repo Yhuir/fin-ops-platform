@@ -102,6 +102,8 @@ export type InputInvoiceUsageRowsResponse = {
     total: number;
   };
   filterConfig: InputInvoiceUsageFilterFieldConfig[];
+  readModelStatus?: string;
+  readModelScopeKey?: string;
 };
 
 export type InputInvoiceUsageFilterFieldConfig = {
@@ -122,6 +124,8 @@ export type InputInvoiceUsageFilterOptionsResponse = {
   fields: Array<InputInvoiceUsageFilterFieldConfig & {
     options: InputInvoiceUsageFilterOption[];
   }>;
+  readModelStatus?: string;
+  readModelScopeKey?: string;
 };
 
 export type InputInvoiceUsageDetailResponse = {

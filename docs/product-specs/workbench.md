@@ -9,6 +9,7 @@
 - OA 栏：付款申请、报销单、项目或审批来源。
 - 银行流水栏：收入、支出、账号、银行、对方户名、摘要、有效分类。
 - 发票栏：销项、进项、ETC 附件发票、已认证发票等。
+- OA 对应的发票栏只允许正式发票行，例如 `source_kind=oa_attachment_invoice`。付款凭证、未知附件、解析失败附件只能留在 OA 附件审计证据里，不进入发票栏、不进入配对关系。
 
 收入侧原则上不走 OA；支出侧看 OA、支出流水和进项发票。
 
@@ -18,6 +19,7 @@
 - 已配对：`display_state=paired` 的同组对象，来源可以是人工确认关系或自动确定性关系。
 - 已忽略：用户主动忽略但可恢复的 override 视图，位于 `display_state` 之外，不是合法 `zone` 值。
 - 已处理异常：结构化异常 case 处理后的异常视图，位于 `display_state` 之外，不是合法 `zone` 值。
+- 区域标题显示该区域 OA、银行流水、发票三栏合计总项数，使用 `row_counts.rows` 或 `zone_counts.*.rows`，不显示 group 数；group 数只用于分页和内部组织。
 
 ## 展示状态和自动决策
 
@@ -50,6 +52,7 @@
 
 - `GET /api/workbench/summary?month=all` 返回汇总、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回投影 group 或行级快照。
 - `GET /api/workbench/groups?month=all&zone=open|paired&page=1&page_size=200&detail_level=summary` 返回当前页 group 摘要；支持服务端 `status`、`source_kind`、`search`、`sort=oa|bank|invoice:asc|desc`、`column_filters` 和 `time_filters`。前端首屏和分页必须使用 `summary`，避免把重 `detail_fields` 带入列表页。
+- `detail_level=summary` 可以为了 payload 大小按栏裁剪 group 内预览行，但 `source_kind=oa_attachment_invoice` 的 OA 附件发票必须完整返回，有多少显示多少，不走展开/收起。summary 响应仍必须返回未裁剪的 `row_counts`；当前端发现非 OA 附件栏位 `row_counts` 大于已返回行数时，必须明确展示“当前显示/总数”，并通过 `/api/workbench/groups/detail` 读取完整 group。
 - `GET /api/workbench/groups/detail?month=all&zone=open|paired&group_id=...` 返回单个 group 完整详情，用于详情抽屉、审计和需要重字段的交互。
 - `GET /api/workbench/refresh-status` 返回 dirty scope、worker heartbeat/lag、failed backlog 和最近错误。
 - 旧 `GET /api/workbench?month=all` 只作为兼容期接口，不再作为前端首屏依赖。

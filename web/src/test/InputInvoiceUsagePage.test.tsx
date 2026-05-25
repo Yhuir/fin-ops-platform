@@ -117,6 +117,39 @@ afterEach(() => {
 });
 
 describe("Input invoice usage page", () => {
+  test("surfaces read model refresh state instead of silently showing an empty table", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/input-invoice-usage/rows") {
+        return new Response(JSON.stringify({
+          rows: [],
+          pagination: { page: 1, pageSize: 20, total: 0 },
+          filterConfig: [],
+          read_model_status: "refreshing",
+        }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.pathname === "/api/input-invoice-usage/filter-options") {
+        return new Response(JSON.stringify({ fields: [], read_model_status: "refreshing" }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    expect(await within(page).findByText("进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。")).toBeInTheDocument();
+  });
+
   test("adds sidebar route and renders the MUI Table layout without DataGrid or fake export", async () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch();

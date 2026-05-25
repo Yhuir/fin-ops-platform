@@ -81,6 +81,22 @@ type CandidateGroupGridProps = {
   canMutateData: boolean;
 };
 
+type PreviewTruncationSummary = {
+  title: string;
+  visible: number;
+  total: number;
+};
+
+function buildPreviewDetailLabel(truncatedPanes: PreviewTruncationSummary[]) {
+  if (truncatedPanes.length === 0) {
+    return "";
+  }
+  const summary = truncatedPanes
+    .map((pane) => `${pane.title}当前显示 ${pane.visible} 条，共 ${pane.total} 条`)
+    .join("，");
+  return `显示完整组：${summary}`;
+}
+
 function CandidateGroupGrid({
   zoneId,
   panes,
@@ -112,6 +128,7 @@ function CandidateGroupGrid({
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
   const [expandedCollapsedGroups, setExpandedCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [loadingCollapsedGroups, setLoadingCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const [loadingPreviewGroups, setLoadingPreviewGroups] = useState<Set<string>>(() => new Set());
   const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
     oa: false,
     bank: false,
@@ -259,6 +276,22 @@ function CandidateGroupGrid({
     setCollapsedGroupExpanded(group.id, paneId, true);
   }, [onEnsureGroupDetail, setCollapsedGroupExpanded, zoneId]);
 
+  const loadCompletePreviewGroup = useCallback(async (groupId: string) => {
+    if (!onEnsureGroupDetail) {
+      return;
+    }
+    setLoadingPreviewGroups((current) => new Set(current).add(groupId));
+    try {
+      await onEnsureGroupDetail(zoneId, groupId);
+    } finally {
+      setLoadingPreviewGroups((current) => {
+        const next = new Set(current);
+        next.delete(groupId);
+        return next;
+      });
+    }
+  }, [onEnsureGroupDetail, zoneId]);
+
   const clearDragClasses = useCallback(() => {
     const current = dragStateRef.current;
     current?.activeElement?.classList.remove("column-drag-active");
@@ -368,15 +401,35 @@ function CandidateGroupGrid({
             </button>,
           ];
         });
+        const previewTruncatedPanes = collapseControls.length > 0 ? [] : panes.flatMap((pane) => {
+          const paneId = pane.id as WorkbenchRecordType;
+          const visible = group.rows[paneId]?.length ?? 0;
+          const total = group.rowCounts?.[paneId] ?? visible;
+          return total > visible ? [{ title: pane.title, visible, total }] : [];
+        });
+        const previewDetailLabel = buildPreviewDetailLabel(previewTruncatedPanes);
+        const isLoadingPreviewGroup = loadingPreviewGroups.has(group.id);
+        const previewDetailControl = previewDetailLabel && onEnsureGroupDetail ? (
+          <button
+            aria-label={previewDetailLabel}
+            className="row-action-btn candidate-group-detail-control"
+            disabled={isLoadingPreviewGroup}
+            type="button"
+            onClick={() => void loadCompletePreviewGroup(group.id)}
+          >
+            {isLoadingPreviewGroup ? "加载中" : previewDetailLabel}
+          </button>
+        ) : null;
 
         return (
           <div
             key={group.id}
-            className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}`}
+            className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}${previewDetailControl ? " candidate-group-row-has-detail-control" : ""}`}
             data-testid={`candidate-group-${zoneId}-${group.id}`}
             style={{ gridTemplateColumns: rowTemplateColumns }}
           >
             {collapseControls}
+            {previewDetailControl}
             {panes.map((pane, paneIndex) => {
               const paneId = pane.id as WorkbenchRecordType;
               const collapsedRows = group.collapsedRows?.[paneId] ?? [];
@@ -447,6 +500,8 @@ function CandidateGroupGrid({
     groups,
     highlightedRowId,
     loadingCollapsedGroups,
+    loadingPreviewGroups,
+    loadCompletePreviewGroup,
     onEnsureGroupDetail,
     onOpenDetail,
     onRowAction,

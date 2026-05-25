@@ -936,6 +936,127 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("detail_fields", group["oa_rows"][0])
         self.assertNotIn("raw_payload", group)
 
+    def test_repository_keeps_all_oa_attachment_invoice_rows_in_summary_page(self) -> None:
+        class OaAttachmentInvoiceRowsConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" in normalized and "group by zone" not in normalized:
+                    return [
+                        {
+                            "group_id": "case:oa-attachments-many",
+                            "zone": "paired",
+                            "payload": {
+                                "group_id": "case:oa-attachments-many",
+                                "group_type": "paired",
+                                "match_confidence": "high",
+                                "reason": "oa attachment invoices",
+                                "oa_rows": [{"id": "oa-exp-many", "type": "oa", "source_kind": "oa"}],
+                                "bank_rows": [],
+                                "invoice_rows": [
+                                    {
+                                        "id": f"oa-att-inv-{index}",
+                                        "type": "invoice",
+                                        "source_kind": "oa_attachment_invoice",
+                                        "invoice_no": f"OAATT{index:03d}",
+                                    }
+                                    for index in range(1, 6)
+                                ],
+                            },
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        connection = OaAttachmentInvoiceRowsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="paired",
+            page=1,
+            page_size=1,
+            detail_level="summary",
+        )
+
+        group = page["groups"][0]
+        self.assertEqual(group["row_counts"]["invoice"], 5)
+        self.assertEqual(
+            [row["id"] for row in group["invoice_rows"]],
+            [f"oa-att-inv-{index}" for index in range(1, 6)],
+        )
+
+    def test_repository_filters_non_invoice_oa_attachment_evidence_from_summary_and_detail(self) -> None:
+        polluted_group_payload = {
+            "group_id": "case:oa-attachment-with-payment-receipt",
+            "group_type": "source_linked",
+            "match_confidence": "high",
+            "reason": "oa attachment evidence",
+            "oa_rows": [{"id": "oa-exp-payment", "type": "oa", "source_kind": "oa"}],
+            "bank_rows": [],
+            "invoice_rows": [
+                {
+                    "id": "oa-att-inv-formal",
+                    "type": "invoice",
+                    "source_kind": "oa_attachment_invoice",
+                    "invoice_no": "FORMAL-001",
+                },
+                {
+                    "id": "oa-att-pay-receipt",
+                    "type": "invoice",
+                    "source_kind": "oa_attachment_payment_receipt",
+                },
+                {
+                    "id": "oa-att-unknown",
+                    "type": "invoice",
+                    "source_kind": "oa_attachment_unknown",
+                },
+            ],
+        }
+
+        class PollutedOaAttachmentEvidenceConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_groups" in normalized and "group_id = %s" in normalized:
+                    return {
+                        "group_id": "case:oa-attachment-with-payment-receipt",
+                        "zone": "open",
+                        "payload": polluted_group_payload,
+                    }
+                return super().fetch_one(sql, params)
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" in normalized and "group by zone" not in normalized:
+                    return [
+                        {
+                            "group_id": "case:oa-attachment-with-payment-receipt",
+                            "zone": "open",
+                            "payload": polluted_group_payload,
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        connection = PollutedOaAttachmentEvidenceConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=1,
+            detail_level="summary",
+        )
+        detail = repository.get_workbench_group_detail(
+            scope_key="all",
+            zone="open",
+            group_id="case:oa-attachment-with-payment-receipt",
+        )
+
+        self.assertEqual([row["id"] for row in page["groups"][0]["invoice_rows"]], ["oa-att-inv-formal"])
+        self.assertEqual([row["id"] for row in detail["invoice_rows"]], ["oa-att-inv-formal"])
+
     def test_workbench_rows_inherit_status_from_containing_group_zone(self) -> None:
         payload = {
             "paired": {

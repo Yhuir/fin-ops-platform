@@ -81,6 +81,32 @@ describe("Workbench candidate grouping layout", () => {
     } as WorkbenchRecord;
   }
 
+  function createTruncatedManualInvoiceGroup(): WorkbenchCandidateGroup {
+    const invoiceRows = [
+      createInvoiceRecord("manual-inv-many-1", "MANUAL-MANY-001"),
+      createInvoiceRecord("manual-inv-many-2", "MANUAL-MANY-002"),
+      createInvoiceRecord("manual-inv-many-3", "MANUAL-MANY-003"),
+    ];
+    return {
+      id: "case:CASE-MANUAL-INVOICE-MANY",
+      groupType: "open",
+      rawGroupType: "source_linked",
+      matchConfidence: "high",
+      reason: "manual_invoice_source_relation",
+      rows: {
+        oa: [],
+        bank: [],
+        invoice: invoiceRows,
+      },
+      rowCounts: {
+        oa: 0,
+        bank: 0,
+        invoice: 5,
+        rows: 5,
+      },
+    };
+  }
+
   function createNoOaBankRecord(id: string, counterparty: string, amount: string, note: string): WorkbenchRecord {
     return {
       id,
@@ -206,6 +232,10 @@ describe("Workbench candidate grouping layout", () => {
         paired_count: 1,
         open_count: 0,
         exception_count: 0,
+        zone_counts: {
+          paired: { groups: 1, oa: 0, bank: 3, invoice: 0, rows: 3 },
+          open: { groups: 0, oa: 0, bank: 0, invoice: 0, rows: 0 },
+        },
       },
       invoice_inventory: {},
       paired: {
@@ -294,6 +324,9 @@ describe("Workbench candidate grouping layout", () => {
             page: 1,
             page_size: 50,
             total: groups.length,
+            row_counts: zone === "paired"
+              ? { oa: 0, bank: 3, invoice: 0, rows: 3 }
+              : { oa: 0, bank: 0, invoice: 0, rows: 0 },
             has_more: false,
             groups,
             read_model_status: "fresh",
@@ -398,6 +431,50 @@ describe("Workbench candidate grouping layout", () => {
     expect(getStandaloneCssRuleBody(".record-card-cell-content")).toMatch(/overflow:\s*hidden/);
     expect(getStandaloneCssRuleBody(".record-card-cell.column-compact .cell-text-value-full")).toMatch(/overflow-wrap:\s*anywhere/);
     expect(getStandaloneCssRuleBody(".record-card-cell.column-compact .cell-text-value-full")).toMatch(/word-break:\s*break-word/);
+  });
+
+  test("shows zone titles with total item counts instead of group counts", async () => {
+    mockWorkbenchPageFetch();
+    renderWorkbenchPage();
+
+    expect(await screen.findByText("已配对 3 项")).toBeInTheDocument();
+    expect(screen.getByText("未配对 0 项")).toBeInTheDocument();
+    expect(screen.queryByText("已配对 1 组")).not.toBeInTheDocument();
+  });
+
+  test("loads complete group detail when summary response truncates non-attachment invoice rows", async () => {
+    const group = createTruncatedManualInvoiceGroup();
+    const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        getRowState={() => "idle"}
+        groups={[group]}
+        onEnsureGroupDetail={ensureGroupDetail}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        sourceGroups={[group]}
+        zoneId="open"
+      />,
+    );
+
+    const loadFullGroupButton = screen.getByRole("button", {
+      name: "显示完整组：进销项发票当前显示 3 条，共 5 条",
+    });
+
+    fireEvent.click(loadFullGroupButton);
+
+    await waitFor(() => {
+      expect(ensureGroupDetail).toHaveBeenCalledWith("open", "case:CASE-MANUAL-INVOICE-MANY");
+    });
   });
 
   test("renders OA, bank, and invoice candidates on the same horizontal group row", async () => {

@@ -91,6 +91,11 @@ class WorkbenchCandidateGroupingService:
         invoice_rows: list[dict[str, Any]],
         turnover_relations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        invoice_rows = [
+            row
+            for row in invoice_rows
+            if not self._is_non_invoice_oa_attachment_evidence_row(row)
+        ]
         all_rows = [*oa_rows, *bank_rows, *invoice_rows]
         paired_rows = [row for row in all_rows if self._is_paired_row(row)]
         open_rows = [row for row in all_rows if not self._is_paired_row(row)]
@@ -1647,7 +1652,7 @@ class WorkbenchCandidateGroupingService:
     def _oa_attachment_evidence_source_id(self, row: dict[str, Any]) -> str | None:
         if row.get("type") != "invoice":
             return None
-        if not self._is_oa_attachment_evidence_row(row):
+        if not self._is_oa_attachment_invoice_row(row):
             return None
         if not self._can_join_oa_attachment_source_group(row):
             return None
@@ -1765,6 +1770,6 @@ class WorkbenchCandidateGroupingService:
     def _attachment_group_primary_row(self, group: CandidateGroup) -> dict[str, Any] | None:
         if len(group.oa_rows) != 1 or group.bank_rows:
             return None
-        if not group.invoice_rows or not all(self._is_oa_attachment_evidence_row(row) for row in group.invoice_rows):
+        if not group.invoice_rows or not all(self._is_oa_attachment_invoice_row(row) for row in group.invoice_rows):
             return None
         return group.oa_rows[0]

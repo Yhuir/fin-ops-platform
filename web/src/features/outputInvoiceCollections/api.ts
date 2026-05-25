@@ -211,6 +211,7 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
       };
     }),
     readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
+    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
     generatedAt: stringValue(camelOrSnake(raw, "generatedAt", "generated_at")),
     sourceVersion: stringValue(camelOrSnake(raw, "sourceVersion", "source_version")),
   };
@@ -340,6 +341,8 @@ function mapFilterOptionsResponse(payload: unknown): OutputInvoiceCollectionFilt
         }),
       };
     }),
+    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
+    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
   };
 }
 

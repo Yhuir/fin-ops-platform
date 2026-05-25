@@ -127,6 +127,7 @@ export type OutputInvoiceCollectionRowsResponse = {
   };
   filterConfig: OutputInvoiceCollectionFilterFieldConfig[];
   readModelStatus?: string;
+  readModelScopeKey?: string;
   generatedAt?: string;
   sourceVersion?: string;
 };
@@ -149,6 +150,8 @@ export type OutputInvoiceCollectionFilterOptionsResponse = {
   fields: Array<OutputInvoiceCollectionFilterFieldConfig & {
     options: OutputInvoiceCollectionFilterOption[];
   }>;
+  readModelStatus?: string;
+  readModelScopeKey?: string;
 };
 
 export type OutputInvoiceCollectionDetailResponse = {

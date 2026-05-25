@@ -169,9 +169,9 @@ function installOutputInvoiceCollectionsFetch() {
   return fetchMock;
 }
 
-function jsonResponse(body: unknown) {
+function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -187,6 +187,31 @@ afterEach(() => {
 });
 
 describe("Output invoice collections page", () => {
+  test("surfaces read model refresh state instead of silently showing an empty table", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/output-invoice-collections/rows") {
+        return jsonResponse({
+          rows: [],
+          pagination: { page: 1, pageSize: 20, total: 0 },
+          filterConfig: [],
+          read_model_status: "refreshing",
+          readModelStatus: "refreshing",
+        }, 202);
+      }
+      if (url.pathname === "/api/output-invoice-collections/filter-options") {
+        return jsonResponse({ fields: [], read_model_status: "refreshing", readModelStatus: "refreshing" }, 202);
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderAuthenticatedAppAt("/output-invoice-collections");
+
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    expect(await within(page).findByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).toBeInTheDocument();
+  });
+
   test("adds sidebar route and renders grouped MUI Table layout without fake export", async () => {
     const user = userEvent.setup();
     const fetchMock = installOutputInvoiceCollectionsFetch();

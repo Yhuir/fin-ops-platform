@@ -65,6 +65,7 @@ import type {
   WorkbenchRecord,
   WorkbenchRelationPreview,
   WorkbenchSettings,
+  WorkbenchZoneCounts,
   WorkbenchZonePageInfo,
 } from "../features/workbench/types";
 import { useMonth } from "../contexts/MonthContext";
@@ -121,6 +122,13 @@ function createInitialZonePages(): Record<"paired" | "open", WorkbenchZonePageIn
     paired: createInitialZonePageInfo("paired"),
     open: createInitialZonePageInfo("open"),
   };
+}
+
+function resolveZoneItemCount(pageInfo: WorkbenchZonePageInfo, zoneCounts?: WorkbenchZoneCounts) {
+  if (pageInfo.rowCounts.rows > 0) {
+    return pageInfo.rowCounts.rows;
+  }
+  return zoneCounts?.rows ?? 0;
 }
 
 function isWorkbenchZoneDisplayState(value: unknown): value is WorkbenchZoneDisplayState {
@@ -1749,6 +1757,8 @@ export default function ReconciliationWorkbenchPage() {
   const oaStatusPanelMessage = oaStatus && !isOaReady ? `${oaStatus.message}，本次结果未包含完整 OA 数据。` : null;
   const isPairedVisible = expandedZoneId === null || expandedZoneId === "paired";
   const isOpenVisible = expandedZoneId === null || expandedZoneId === "open";
+  const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
+  const openZoneItemCount = resolveZoneItemCount(zonePages.open, workbenchData?.summary.zoneCounts.open);
 
   const pairedZoneElement = (
     <WorkbenchZone
@@ -1784,7 +1794,7 @@ export default function ReconciliationWorkbenchPage() {
       panes={pairedPanes}
       primarySelectionActionLabel="撤回关联"
       selectionSummary={pairedSelectionSummary}
-      title={`已配对 ${workbenchData?.summary.zoneCounts.paired.groups ?? workbenchData?.summary.pairedCount ?? 0} 组`}
+      title={`已配对 ${pairedZoneItemCount} 项`}
       tone="success"
       zoneId="paired"
     />
@@ -1831,7 +1841,7 @@ export default function ReconciliationWorkbenchPage() {
       secondarySelectionActionLabel="异常处理"
       tertiarySelectionActionLabel="撤回关联"
       selectionSummary={openSelectionSummary}
-      title={`未配对 ${workbenchData?.summary.zoneCounts.open.groups ?? workbenchData?.summary.openCount ?? 0} 组`}
+      title={`未配对 ${openZoneItemCount} 项`}
       tone="warning"
       zoneId="open"
     />
