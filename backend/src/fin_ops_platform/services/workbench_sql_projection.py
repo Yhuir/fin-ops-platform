@@ -36,7 +36,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-05-25-etc-submitted-summary"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-05-25-oa-attachment-source-groups"
 ETC_BATCH_TAG = "ETC批量提交"
 
 

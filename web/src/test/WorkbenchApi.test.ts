@@ -2234,7 +2234,11 @@ describe("workbench groups summary contract", () => {
               reason: "summary preview",
               row_counts: { oa: 5, bank: 0, invoice: 2 },
               collapsed_row_counts: { bank: 8 },
-              oa_rows: [{ id: "oa-preview", type: "oa", available_actions: ["detail"] }],
+              oa_rows: Array.from({ length: 5 }, (_item, index) => ({
+                id: `oa-preview-${index + 1}`,
+                type: "oa",
+                available_actions: ["detail"],
+              })),
               bank_rows: [],
               invoice_rows: [{ id: "invoice-preview", type: "invoice", available_actions: ["detail"] }],
               collapsed_rows: {
@@ -2252,7 +2256,7 @@ describe("workbench groups summary contract", () => {
 
     expect(group.rowCounts).toEqual({ oa: 5, bank: 0, invoice: 2 });
     expect(group.collapsedRowCounts).toEqual({ bank: 8 });
-    expect(group.rows.oa).toHaveLength(1);
+    expect(group.rows.oa).toHaveLength(5);
     expect(countWorkbenchGroupRows(group)).toBe(15);
   });
 });

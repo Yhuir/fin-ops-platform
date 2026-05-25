@@ -756,6 +756,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["paired_count"], 0)
         self.assertEqual(payload["summary"]["open_count"], 1)
         group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_id"], "source:oa_attachment:oa-hurong-292")
         self.assertEqual(group["group_type"], "source_linked")
         self.assertEqual(group["reason"], "oa_attachment_source_relation")
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-hurong-292"])
@@ -1588,6 +1589,94 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(group["group_type"], "candidate")
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-same-counterparty-2000"])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-same-counterparty-2000"])
+
+    def test_splits_unmatched_rows_out_of_candidate_case_without_losing_exact_pair(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[
+                {
+                    "id": "oa-fuel-2000",
+                    "type": "oa",
+                    "case_id": "candidate:mixed-context",
+                    "apply_type": "支付申请",
+                    "amount": "2000.00",
+                    "pay_receive_time": "2026-05-06",
+                    "counterparty_name": "中国石油云南昆明销售分公司",
+                    "oa_bank_relation": {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"},
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-fuel-2000",
+                    "type": "bank",
+                    "case_id": "candidate:mixed-context",
+                    "debit_amount": "2000.00",
+                    "credit_amount": "",
+                    "trade_time": "2026-05-06 09:30",
+                    "counterparty_name": "中国石油云南昆明销售分公司",
+                    "invoice_relation": {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-express-32",
+                    "type": "invoice",
+                    "case_id": "candidate:mixed-context",
+                    "amount": "32.90",
+                    "total_with_tax": "32.90",
+                    "issue_date": "2026-05-06",
+                    "seller_name": "云南顺丰速运有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 2)
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "oa_rows"), [["oa-fuel-2000"], []])
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "bank_rows"), [["bk-fuel-2000"], []])
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "invoice_rows"), [[], ["iv-express-32"]])
+
+    def test_does_not_group_open_rows_by_fuzzy_amount_bucket(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-fuzzy-2040",
+                    "type": "bank",
+                    "case_id": None,
+                    "debit_amount": "2040.00",
+                    "credit_amount": "",
+                    "trade_time": "2026-05-06 09:30",
+                    "counterparty_name": "同主体服务有限公司",
+                    "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-fuzzy-2000",
+                    "type": "invoice",
+                    "case_id": None,
+                    "amount": "2000.00",
+                    "total_with_tax": "2000.00",
+                    "issue_date": "2026-05-06",
+                    "seller_name": "同主体服务有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 2)
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "bank_rows"), [["bk-fuzzy-2040"], []])
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "invoice_rows"), [[], ["iv-fuzzy-2000"]])
 
     def test_keeps_oa_bank_candidate_group_when_bank_counterparty_is_payee_prefix(self) -> None:
         service = WorkbenchCandidateGroupingService()

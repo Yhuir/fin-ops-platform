@@ -25,6 +25,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 1
+WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.v2"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 WORKBENCH_ALLOWED_FILTER_COLUMNS = {
@@ -1642,6 +1643,34 @@ class PostgresReadModelRepository:
             return "refreshing"
         if "failed" in statuses:
             return "stale"
+        if self._workbench_groups_schema_status(scope_key=normalized_scope_key) != "fresh":
+            return "stale"
+        return "fresh"
+
+    def _workbench_groups_schema_status(self, *, scope_key: str) -> str:
+        normalized_scope_key = str(scope_key or "all").strip() or "all"
+        expected_builder = _expected_workbench_groups_builder(normalized_scope_key)
+        if not expected_builder:
+            return "fresh"
+        where_sql, params = self._workbench_scope_filter(normalized_scope_key)
+        row = self._connection.fetch_one(
+            f"""
+            select
+                count(*)::bigint as group_count,
+                count(*) filter (
+                    where coalesce(source_versions->>'builder', '') = %s
+                )::bigint as current_group_count
+            from read_model.workbench_groups
+            where {where_sql}
+            """,
+            (expected_builder, *params),
+        )
+        if not isinstance(row, dict):
+            return "fresh"
+        group_count = int_value(row.get("group_count"), 0)
+        current_group_count = int_value(row.get("current_group_count"), 0)
+        if group_count > 0 and current_group_count < group_count:
+            return "stale"
         return "fresh"
 
     @staticmethod
@@ -1912,10 +1941,13 @@ class PostgresReadModelRepository:
             for row in dirty_rows
         ]
         dirty_statuses = {scope["status"] for scope in dirty_scopes}
+        groups_schema_status = self._workbench_groups_schema_status(scope_key=normalized_scope_key)
         read_model_status = "fresh"
         if dirty_statuses.intersection({"pending", "processing"}):
             read_model_status = "refreshing"
         elif "failed" in dirty_statuses:
+            read_model_status = "stale"
+        elif groups_schema_status != "fresh":
             read_model_status = "stale"
         last_error = next((scope["last_error"] for scope in dirty_scopes if scope.get("last_error")), None)
         worker_lag_values = [
@@ -1923,10 +1955,14 @@ class PostgresReadModelRepository:
             for row in worker_rows
             if isinstance(row.get("lag_seconds"), (int, float))
         ]
+        stale_reasons = []
+        if groups_schema_status != "fresh":
+            stale_reasons.append("builder_schema_mismatch")
         return {
             "scope_key": normalized_scope_key,
             "read_model_status": read_model_status,
             "dirty_scopes": dirty_scopes,
+            "read_model_stale_reasons": stale_reasons,
             "worker_lag_seconds": max(worker_lag_values, default=None),
             "last_error": last_error,
             "workers": [
@@ -2440,6 +2476,8 @@ class PostgresReadModelRepository:
             if not isinstance(group, dict):
                 continue
             normalized_group = deepcopy(group)
+            normalized_group["_source_scope_key"] = text(row.get("scope_key"))
+            normalized_group["_source_scope_month"] = text(row.get("scope_month"))
             normalized_group.setdefault("group_id", text(row.get("group_id")))
             normalized_group["zone"] = text(row.get("zone")) or normalized_group.get("zone") or "open"
             normalized_group["scope_key"] = "all"
@@ -2457,7 +2495,7 @@ class PostgresReadModelRepository:
 
         aggregate_payload = _aggregate_workbench_all_scope_payload(groups)
         aggregate_source_versions = {
-            "builder": "workbench_sql_projection.aggregate.v1",
+            "builder": WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
             "source_version": max_source_version or 0,
         }
         generated_at = max_generated_at or None
@@ -4722,16 +4760,17 @@ def _aggregate_workbench_all_scope_payload(groups: list[dict[str, Any]]) -> dict
         "read_model_scope_key": "all",
         "paired": {"groups": []},
         "open": {"groups": []},
-        "workbench_read_model_schema_version": "workbench_sql_projection.aggregate.v1",
+        "workbench_read_model_schema_version": WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
     }
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for group in groups:
         zone = text(group.get("zone") or group.get("status")) or "open"
         if zone not in {"paired", "open"}:
             zone = "open"
-        group_id = text(group.get("group_id") or group.get("id"))
-        if group_id is None:
+        source_group_id = text(group.get("group_id") or group.get("id"))
+        if source_group_id is None:
             continue
+        group_id = _all_scope_group_id(group, source_group_id)
         key = (zone, group_id)
         if key not in grouped:
             grouped[key] = _normalize_all_scope_group(group, zone=zone, group_id=group_id)
@@ -4756,6 +4795,8 @@ def _normalize_all_scope_group(group: dict[str, Any], *, zone: str, group_id: st
     normalized["scope_key"] = "all"
     normalized["month"] = "all"
     normalized["scope_month"] = None
+    normalized.pop("_source_scope_key", None)
+    normalized.pop("_source_scope_month", None)
     normalized.pop("row_counts", None)
     normalized.pop("collapsed_row_counts", None)
     for key in ("oa_rows", "bank_rows", "invoice_rows"):
@@ -4768,6 +4809,26 @@ def _normalize_all_scope_group(group: dict[str, Any], *, zone: str, group_id: st
             if isinstance(rows, list)
         }
     return normalized
+
+
+def _all_scope_group_id(group: dict[str, Any], group_id: str) -> str:
+    if _is_all_scope_mergeable_group_id(group_id):
+        return group_id
+    source_scope_key = text(group.get("_source_scope_key") or group.get("source_scope_key"))
+    if source_scope_key and source_scope_key != "all":
+        return f"scope:{source_scope_key}:{group_id}"
+    source_scope_month = text(group.get("_source_scope_month") or group.get("source_scope_month"))
+    if source_scope_month:
+        return f"scope-month:{source_scope_month}:{group_id}"
+    return group_id
+
+
+def _is_all_scope_mergeable_group_id(group_id: str) -> bool:
+    return group_id.startswith(("case:", "turnover:", "batch-accounting:", "source:oa_attachment:"))
+
+
+def _expected_workbench_groups_builder(scope_key: str) -> str | None:
+    return WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION if scope_key == "all" else None
 
 
 def _merge_all_scope_group(target: dict[str, Any], incoming: dict[str, Any]) -> None:
@@ -5147,6 +5208,9 @@ def _is_oa_attachment_invoice_summary_row(row: dict[str, Any]) -> bool:
 
 
 def _workbench_group_summary_preview_rows(row_key: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if row_key == "oa_rows":
+        return list(rows)
+
     preview_rows = list(rows[:WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT])
     if row_key != "invoice_rows":
         return preview_rows

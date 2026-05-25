@@ -78,10 +78,10 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 ### 2.1 Group summary 与完整组
 
 `GET /api/workbench/groups?detail_level=summary` 可以只返回每个 group 每栏的预览行，
-但 `source_kind=oa_attachment_invoice` 的 OA 附件发票不得被预览行上限裁剪。OA 附件发票有多少张，
-summary 就必须返回多少张，前端直接显示，不做展开/收起。
+但 OA 栏不得被预览行上限裁剪；`source_kind=oa_attachment_invoice` 的 OA 附件发票也不得被裁剪。
+OA 和 OA 附件发票有多少条，summary 就必须返回多少条，前端直接显示，不做展开/收起。
 
-summary 响应必须带未裁剪的 `row_counts`。如果非 OA 附件栏位的 `row_counts` 大于已返回 rows 长度，
+summary 响应必须带未裁剪的 `row_counts`。如果银行流水或非 OA 附件发票栏位的 `row_counts` 大于已返回 rows 长度，
 前端必须显示当前行数和总行数，并调用
 `GET /api/workbench/groups/detail?zone=...&group_id=...` 获取完整 group 后再展开展示。
 前端不能把 summary 预览当作完整附件清单。

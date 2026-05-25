@@ -529,7 +529,7 @@ class WorkbenchCandidateGroupingService:
         used_row_keys: set[int] = set()
         for source_id, invoice_rows in invoice_rows_by_source_id.items():
             group = CandidateGroup(
-                group_id=self._next_temp_group_id(),
+                group_id=self._oa_attachment_source_group_id(source_id),
                 group_type="source_linked",
                 match_confidence="high",
                 reason="oa_attachment_source_relation",
@@ -662,7 +662,7 @@ class WorkbenchCandidateGroupingService:
             if not self._should_split_unsafe_candidate_case_group(group):
                 split_groups.append(group)
                 continue
-            split_groups.extend(self._single_row_candidate_groups(group))
+            split_groups.extend(self._partition_unsafe_candidate_case_group(group))
         return split_groups
 
     def _should_split_unsafe_candidate_case_group(self, group: CandidateGroup) -> bool:
@@ -764,6 +764,51 @@ class WorkbenchCandidateGroupingService:
             )
             for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
         ]
+
+    def _partition_unsafe_candidate_case_group(self, group: CandidateGroup) -> list[CandidateGroup]:
+        single_row_groups = [
+            self._candidate_group_for_row(
+                row,
+                self._candidate_case_partition_group_id(group, [row]),
+                "low",
+                "split_unsafe_candidate_case_group",
+            )
+            for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+        ]
+        partitioned_groups = self._merge_candidate_groups(single_row_groups)
+        if len(partitioned_groups) == 1:
+            return [group]
+
+        rebuilt_groups: list[CandidateGroup] = []
+        for partition in partitioned_groups:
+            rows = [*partition.oa_rows, *partition.bank_rows, *partition.invoice_rows]
+            if not rows:
+                continue
+            row_count = len(rows)
+            rebuilt_group = CandidateGroup(
+                group_id=self._candidate_case_partition_group_id(group, rows),
+                group_type=self._group_type_for_open_case_rows(rows),
+                match_confidence="medium" if row_count > 1 else "low",
+                reason="deterministic_candidate_case_subgroup" if row_count > 1 else "split_unsafe_candidate_case_group",
+                temp_key=partition.temp_key,
+                metadata=deepcopy(group.metadata),
+            )
+            for row in rows:
+                rebuilt_group.append(row)
+            rebuilt_groups.append(rebuilt_group)
+        return rebuilt_groups
+
+    def _candidate_case_partition_group_id(self, group: CandidateGroup, rows: list[dict[str, Any]]) -> str:
+        row_ids = sorted(
+            row_id
+            for row in rows
+            if (row_id := self._string_value(row.get("id")))
+        )
+        if len(row_ids) == 1:
+            return f"row:{row_ids[0]}"
+        if row_ids:
+            return f"{group.group_id}:part:{'|'.join(row_ids)}"
+        return self._next_temp_group_id()
 
     def _candidate_group_for_row(
         self,
@@ -1638,6 +1683,10 @@ class WorkbenchCandidateGroupingService:
 
     def _next_temp_group_id(self) -> str:
         return f"temp:{next(self._group_counter):04d}"
+
+    @staticmethod
+    def _oa_attachment_source_group_id(source_id: str) -> str:
+        return f"source:oa_attachment:{source_id}"
 
     @staticmethod
     def _is_oa_attachment_invoice_row(row: dict[str, Any]) -> bool:

@@ -6,7 +6,10 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
+    PostgresReadModelRepository,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_CONSUMED,
@@ -1015,7 +1018,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(group["group_id"], "case:1")
         self.assertEqual(group["row_counts"], {"oa": 5, "bank": 0, "invoice": 1})
         self.assertEqual(group["collapsed_row_counts"], {"oa": 4})
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-1", "oa-2", "oa-3"])
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-1", "oa-2", "oa-3", "oa-4", "oa-5"])
         self.assertEqual(group["invoice_rows"][0]["invoice_code"], "053002200111")
         self.assertEqual(group["invoice_rows"][0]["invoice_no"], "40512344")
         self.assertEqual(group["invoice_rows"][0]["digital_invoice_no"], "—")
@@ -1196,6 +1199,29 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(status["worker_lag_seconds"], 12.0)
         self.assertEqual(status["outbox_backlog"]["failed"], 1)
 
+    def test_repository_marks_all_scope_groups_stale_when_aggregate_builder_changes(self) -> None:
+        class StaleAggregateBuilderConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "as group_count" in normalized and "as current_group_count" in normalized:
+                    return {"group_count": 2, "current_group_count": 0}
+                return super().fetch_one(sql, params)
+
+        connection = StaleAggregateBuilderConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        status = repository.get_workbench_refresh_status(scope_key="all")
+
+        self.assertEqual(status["read_model_status"], "stale")
+        self.assertIn("builder_schema_mismatch", status["read_model_stale_reasons"])
+        self.assertTrue(
+            any(
+                params and params[0] == WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+                for _sql, params in connection.fetch_one_calls
+            )
+        )
+
     def test_repository_persists_workbench_groups_alongside_rows_and_snapshot(self) -> None:
         connection = WorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)
@@ -1318,6 +1344,104 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertNotIn("row_counts", group_payload)
         self.assertNotIn("collapsed_row_counts", group_payload)
+        aggregate_source_versions = next(
+            params[13].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, 'all'" in sql
+        )
+        self.assertEqual(aggregate_source_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
+
+    def test_repository_keeps_synthetic_all_scope_groups_separate_by_month_shard(self) -> None:
+        class AggregateAllSyntheticGroupsConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                return [
+                    {
+                        "scope_key": "2026-05",
+                        "scope_month": "2026-05-01",
+                        "zone": "open",
+                        "group_id": "temp:0001",
+                        "generated_at": "2026-05-24T00:02:00+00:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": "temp:0001",
+                            "zone": "open",
+                            "group_type": "source_linked",
+                            "oa_rows": [{"id": "oa-may", "type": "oa", "source_kind": "oa"}],
+                            "bank_rows": [],
+                            "invoice_rows": [
+                                {
+                                    "id": "oa-att-inv-may",
+                                    "type": "invoice",
+                                    "source_kind": "oa_attachment_invoice",
+                                    "derived_from_oa_id": "oa-may",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-04",
+                        "scope_month": "2026-04-01",
+                        "zone": "open",
+                        "group_id": "temp:0001",
+                        "generated_at": "2026-05-24T00:01:00+00:00",
+                        "source_versions": {"source_version": 1},
+                        "payload": {
+                            "group_id": "temp:0001",
+                            "zone": "open",
+                            "group_type": "source_linked",
+                            "oa_rows": [{"id": "oa-apr", "type": "oa", "source_kind": "oa"}],
+                            "bank_rows": [],
+                            "invoice_rows": [
+                                {
+                                    "id": "oa-att-inv-apr",
+                                    "type": "invoice",
+                                    "source_kind": "oa_attachment_invoice",
+                                    "derived_from_oa_id": "oa-apr",
+                                }
+                            ],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllSyntheticGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {"paired": {"groups": []}, "open": {"groups": []}},
+                        "source_versions": {"source_version": 3},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        aggregate_group_payloads = [
+            params[15].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, 'all'" in sql
+        ]
+
+        self.assertEqual(
+            sorted(group["group_id"] for group in aggregate_group_payloads),
+            ["scope:2026-04:temp:0001", "scope:2026-05:temp:0001"],
+        )
+        rows_by_group_id = {
+            group["group_id"]: (
+                [row["id"] for row in group["oa_rows"]],
+                [row["id"] for row in group["invoice_rows"]],
+            )
+            for group in aggregate_group_payloads
+        }
+        self.assertEqual(rows_by_group_id["scope:2026-05:temp:0001"], (["oa-may"], ["oa-att-inv-may"]))
+        self.assertEqual(rows_by_group_id["scope:2026-04:temp:0001"], (["oa-apr"], ["oa-att-inv-apr"]))
 
     def test_workbench_api_returns_sql_read_model_without_sync_build(self) -> None:
         app = object.__new__(Application)
