@@ -357,6 +357,53 @@ describe("Bank details page", () => {
     expect(within(page).getByRole("button", { name: /工商银行 6386.*299 条/ })).toBeInTheDocument();
   });
 
+  test("exports all banks or the selected account with the current filters", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const originalCreateObjectUrl = window.URL.createObjectURL;
+    const originalRevokeObjectUrl = window.URL.revokeObjectURL;
+    Object.defineProperty(window.URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:bank-export") });
+    Object.defineProperty(window.URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+
+    await user.click(within(page).getByRole("button", { name: "导出" }));
+    await user.click(await screen.findByRole("menuitem", { name: "导出全部银行" }));
+
+    await waitFor(() => {
+      const exportRequest = requestUrls(fetchMock, "/api/bank-details/transactions/export").at(-1);
+      expect(exportRequest?.searchParams.get("mode")).toBe("all");
+      expect(exportRequest?.searchParams.get("date_from")).toBe("2026-01-01");
+      expect(exportRequest?.searchParams.get("date_to")).toBe("2026-12-31");
+      expect(exportRequest?.searchParams.get("account_key")).toBeNull();
+    });
+    expect(clickSpy).toHaveBeenCalled();
+    expect(await within(page).findByText("已开始下载")).toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: /工商银行 6386/ }));
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "跨页目标");
+    await waitFor(() => {
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(transactionRequest?.searchParams.get("keyword")).toBe("跨页目标");
+    });
+    await user.click(within(page).getByRole("button", { name: "导出" }));
+    await user.click(await screen.findByRole("menuitem", { name: "导出当前账户" }));
+
+    await waitFor(() => {
+      const exportRequest = requestUrls(fetchMock, "/api/bank-details/transactions/export").at(-1);
+      expect(exportRequest?.searchParams.get("mode")).toBe("account");
+      expect(exportRequest?.searchParams.get("account_key")).toBe("icbc:6386");
+      expect(exportRequest?.searchParams.get("keyword")).toBe("跨页目标");
+    });
+
+    clickSpy.mockRestore();
+    Object.defineProperty(window.URL, "createObjectURL", { configurable: true, value: originalCreateObjectUrl });
+    Object.defineProperty(window.URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectUrl });
+  });
+
   test("refetches bank detail data when workbench relation updates without local tag patching", async () => {
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();

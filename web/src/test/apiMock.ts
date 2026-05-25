@@ -5172,6 +5172,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/bank-details/transactions/export": ({ url }) => new Response("mock-bank-detail-export", {
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="bank-details.xlsx"; filename*=UTF-8''${encodeURIComponent(
+          url.searchParams.get("mode") === "account" ? "银行明细_工商银行6386.xlsx" : "银行明细_当前筛选_全部银行.xlsx",
+        )}`,
+      },
+    }),
     "/api/bank-details/transactions": ({ url }) => {
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");

@@ -7247,10 +7247,28 @@ body.column-layout-dragging {
   row-gap: 6px;
 }
 
+.bank-export-feedback {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+  color: var(--bank-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bank-grid-toolbar-actions .MuiButton-root {
   min-width: 28px;
   padding-inline: 5px;
   font-size: 11px;
+}
+
+.bank-grid-toolbar-actions .bank-export-button {
+  min-width: 52px;
+  padding-inline: 9px;
+  border-color: var(--bank-border);
+  color: var(--bank-text);
+  font-weight: 700;
 }
 
 .bank-grid-toolbar-actions .MuiInputBase-root {
@@ -7277,12 +7295,17 @@ body.column-layout-dragging {
 .bank-transaction-table .MuiTableCell-root {
   padding: 8px 7px;
   border-bottom-color: var(--bank-border-subtle);
+  border-right: 1px solid rgba(113, 128, 150, 0.18);
   color: var(--bank-text);
   font-size: 12.5px;
   line-height: 1.25;
   overflow-wrap: anywhere;
   vertical-align: middle;
   white-space: normal;
+}
+
+.bank-transaction-table .MuiTableCell-root:last-child {
+  border-right: 0;
 }
 
 .bank-transaction-table .MuiTableCell-stickyHeader {
@@ -7345,27 +7368,30 @@ body.column-layout-dragging {
 }
 
 .bank-col-type {
-  width: 66px;
+  width: 58px;
 }
 
 .bank-col-amount {
-  width: 120px;
+  width: 112px;
 }
 
 .bank-col-balance {
-  width: 98px;
+  width: 88px;
 }
 
 .bank-col-purpose {
-  width: 14%;
+  width: 13%;
+  vertical-align: top;
 }
 
 .bank-col-summary {
-  width: 15%;
+  width: 14%;
+  vertical-align: top;
 }
 
 .bank-col-note {
-  width: 16%;
+  width: 15%;
+  vertical-align: top;
 }
 
 .bank-auto-type-empty {

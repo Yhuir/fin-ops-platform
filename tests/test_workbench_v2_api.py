@@ -4,6 +4,7 @@ import pickle
 import tempfile
 import unittest
 from contextlib import contextmanager
+from io import BytesIO
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from threading import Thread
@@ -13,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pymongo.errors import ServerSelectionTimeoutError
+from openpyxl import load_workbook
 
 from fin_ops_platform.app.server import (
     Application,
@@ -21,6 +23,7 @@ from fin_ops_platform.app.server import (
     _build_handler_factory,
     build_application,
 )
+from fin_ops_platform.services.bank_details_export_service import BANK_DETAIL_EXPORT_ROW_LIMIT
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
@@ -472,6 +475,93 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["category_counts"]["fee"], 1)
         self.assertEqual(payload["category_counts"]["uncategorized"], 0)
+
+    def test_bank_details_export_api_returns_xlsx_and_records_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-16 11:09:14+08:00",
+                counterparty_name="云南溯源科技有限公司",
+                summary="网银手续费",
+                remark="工行附言",
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions/export"
+                "?mode=all"
+                "&date_from=2026-04-01"
+                "&date_to=2026-05-18"
+                "&keyword=%E6%BA%AF%E6%BA%90",
+            )
+            workbook = load_workbook(BytesIO(response.body))
+            audit_entries = app._audit_service.as_dicts()
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response.headers["Content-Type"])
+        self.assertIn("filename*=UTF-8''", response.headers["Content-Disposition"])
+        self.assertEqual(workbook.sheetnames, ["全部流水", "工商银行"])
+        sheet = workbook["全部流水"]
+        self.assertEqual(sheet["A2"].value, "2026-04-16 11:09:14")
+        self.assertEqual(sheet["D2"].value, "云南溯源科技有限公司")
+        self.assertEqual(sheet["I2"].value, "手续费")
+        self.assertEqual(sheet["K2"].value, "无发票")
+        self.assertEqual(sheet["O2"].value, transaction_id)
+        self.assertEqual(audit_entries[-1]["action"], "bank_detail_export_downloaded")
+        self.assertEqual(audit_entries[-1]["entity_type"], "bank_detail_export")
+        self.assertEqual(audit_entries[-1]["metadata"]["row_count"], 1)
+        self.assertEqual(audit_entries[-1]["metadata"]["filters"]["keyword"], "溯源")
+
+    def test_bank_details_export_api_validates_account_mode_and_row_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            missing_account_response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions/export?mode=account",
+            )
+            with patch.object(
+                app._bank_details_service,
+                "list_transactions",
+                return_value={"rows": [], "pagination": {"page": 1, "page_size": 500, "total": BANK_DETAIL_EXPORT_ROW_LIMIT + 1}},
+            ):
+                row_limit_response = app.handle_request(
+                    "GET",
+                    "/api/bank-details/transactions/export?mode=all",
+                )
+
+        self.assertEqual(missing_account_response.status_code, 400)
+        self.assertEqual(json.loads(missing_account_response.body)["error"], "bank_detail_export_account_required")
+        self.assertEqual(row_limit_response.status_code, 400)
+        self.assertEqual(json.loads(row_limit_response.body)["error"], "bank_detail_export_row_limit_exceeded")
+
+    def test_bank_details_export_api_uses_sql_read_model_refresh_contract_in_sql_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            with (
+                patch.object(app, "_requires_sql_read_model_runtime", return_value=True),
+                patch.object(app, "_get_bank_detail_transactions_from_sql_read_model", return_value={
+                    "account_key": None,
+                    "date_from": "2026-04-01",
+                    "date_to": "2026-05-18",
+                    "rows": [],
+                    "category_counts": {"uncategorized": 0},
+                    "pagination": {"page": 1, "page_size": 100, "total": 0},
+                    "read_model_status": "refreshing",
+                    "cache_status": "bypass",
+                }) as sql_loader,
+                patch.object(app._bank_details_service, "list_transactions", side_effect=AssertionError("export should not bypass SQL read model")),
+            ):
+                response = app.handle_request(
+                    "GET",
+                    "/api/bank-details/transactions/export?mode=all&date_from=2026-04-01&date_to=2026-05-18",
+                )
+            audit_entries = app._audit_service.as_dicts()
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(json.loads(response.body)["read_model_status"], "refreshing")
+        self.assertTrue(sql_loader.called)
+        self.assertFalse(any(entry["action"] == "bank_detail_export_downloaded" for entry in audit_entries))
 
     def test_bank_details_api_projects_workbench_relation_tags(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

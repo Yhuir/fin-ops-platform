@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { fetchBankDetailTransactions } from "../features/bankDetails/api";
+import { downloadBankDetailTransactionsExport, fetchBankDetailTransactions } from "../features/bankDetails/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -198,6 +198,58 @@ describe("bank details API", () => {
     expect(payload.rows).toEqual([]);
     expect(payload.readModelStatus).toBe("refreshing");
     expect(payload.cacheStatus).toBe("bypass");
+  });
+
+  test("downloads bank detail export with current filters and encoded filename", async () => {
+    const fetchMock = vi.fn(async () => new Response("xlsx", {
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": "attachment; filename=\"__.xlsx\"; filename*=UTF-8''%E9%93%B6%E8%A1%8C%E6%98%8E%E7%BB%86.xlsx",
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await downloadBankDetailTransactionsExport({
+      mode: "account",
+      accountKey: "工商银行:6386",
+      dateFrom: "2026-04-01",
+      dateTo: "2026-05-18",
+      keyword: "手续费",
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
+    expect(url.pathname).toBe("/api/bank-details/transactions/export");
+    expect(url.searchParams.get("mode")).toBe("account");
+    expect(url.searchParams.get("account_key")).toBe("工商银行:6386");
+    expect(url.searchParams.get("date_from")).toBe("2026-04-01");
+    expect(url.searchParams.get("date_to")).toBe("2026-05-18");
+    expect(url.searchParams.get("keyword")).toBe("手续费");
+    expect(result.fileName).toBe("银行明细.xlsx");
+    expect(result.blob).toBeInstanceOf(Blob);
+  });
+
+  test("maps bank detail export API errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        error: "bank_detail_export_account_required",
+      }), { status: 400, headers: { "Content-Type": "application/json" } })),
+    );
+
+    await expect(downloadBankDetailTransactionsExport({ mode: "account" })).rejects.toThrow("请选择具体银行账户后再导出当前账户。");
+  });
+
+  test("rejects successful HTML responses from bank detail export", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<!doctype html><html></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      })),
+    );
+
+    await expect(downloadBankDetailTransactionsExport({ mode: "all" })).rejects.toThrow("接口返回了 HTML 页面");
   });
 
 });
