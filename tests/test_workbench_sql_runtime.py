@@ -3432,6 +3432,76 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_sql_projection_groups_multi_payment_single_invoice_decision(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-a": {
+                "id": "oa-a",
+                "type": "oa",
+                "source_kind": "oa",
+                "amount": "9414.30",
+                "counterparty_name": "北京标志卓信科技有限公司",
+                "application_date": "2026-03-06",
+                "project_name": "昭通卷烟厂能源集中监控平台系统维护采购项目",
+            },
+            "bank-a": {
+                "id": "bank-a",
+                "type": "bank",
+                "source_kind": "bank",
+                "debit_amount": "9414.30",
+                "counterparty_name": "北京标志卓信科技有限公司",
+                "trade_time": "2026-03-06 11:44:52",
+                "summary": "预付货款",
+            },
+            "oa-b": {
+                "id": "oa-b",
+                "type": "oa",
+                "source_kind": "oa",
+                "amount": "21966.70",
+                "counterparty_name": "北京标志卓信科技有限公司",
+                "application_date": "2026-03-27",
+                "project_name": "昭通卷烟厂能源集中监控平台系统维护采购项目",
+            },
+            "bank-b": {
+                "id": "bank-b",
+                "type": "bank",
+                "source_kind": "bank",
+                "debit_amount": "21966.70",
+                "counterparty_name": "北京标志卓信科技有限公司",
+                "trade_time": "2026-03-27 10:45:13",
+                "summary": "货款",
+            },
+            "invoice-combined": {
+                "id": "invoice-combined",
+                "type": "invoice",
+                "source_kind": "invoice",
+                "total_with_tax": "31381.00",
+                "seller_name": "北京标志卓信科技有限公司",
+                "issue_date": "2026-03-28",
+            },
+        }
+        decision = reconciliation_decision_payload(
+            "decision-multi-payment-invoice",
+            status=DECISION_STATUS_PAIRED,
+            display_state=DISPLAY_STATE_PAIRED,
+            row_ids=["oa-a", "oa-b", "bank-a", "bank-b", "invoice-combined"],
+        )
+
+        payload = builder._group_payload("2026-05", rows_by_id, [], decisions=[decision])
+
+        paired_groups = payload["paired"]["groups"]
+        self.assertEqual(len(paired_groups), 1)
+        group = paired_groups[0]
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-a", "oa-b"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-a", "bank-b"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["invoice-combined"])
+        paired_rows = [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+        self.assertTrue(all(row["status"] == "paired" for row in paired_rows))
+        self.assertTrue(all(row["case_id"] == "decision-multi-payment-invoice" for row in paired_rows))
+
     def test_sql_projection_projects_open_reconciliation_decisions_as_independent_open_rows(self) -> None:
         recorder = CandidateSnapshotRecorder()
         builder = WorkbenchSqlProjectionBuilder(

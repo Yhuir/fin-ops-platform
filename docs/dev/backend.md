@@ -75,6 +75,27 @@ PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh --worker-kind workbench-read-model --check
 ```
 
+关联台自动配对 dirty scope worker：
+
+```bash
+FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
+PYTHONPATH=backend/src \
+python3 -m fin_ops_platform.app.worker \
+  --enable-workbench-matching \
+  --worker-kind workbench-matching \
+  --workbench-matching-batch-size 10 \
+  --workbench-matching-lease-seconds 600 \
+  --workbench-matching-retry-delay-seconds 60 \
+  --poll-interval-seconds 5 \
+  --task-timeout-seconds 900 \
+  --statement-timeout-seconds 120
+```
+
+这个 worker 消费 `job.workbench_matching_dirty_scopes` 并写入
+`read_model.workbench_reconciliation_decisions`。它必须和
+`workbench.read_model.refresh` worker 同时长期运行；只有 read-model worker
+不会生成新的自动配对决策。
+
 Queue 配置边界：
 
 ```text

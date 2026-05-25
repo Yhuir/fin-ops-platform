@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -493,6 +494,18 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertEqual(len(app.calls), 2)
         self.assertEqual(app.calls[0]["worker_id"], "worker-a")
         self.assertEqual(app.calls[0]["limit"], 7)
+
+    def test_deploy_env_includes_dedicated_workbench_matching_worker(self) -> None:
+        root_dir = Path(__file__).resolve().parents[1]
+        env_path = root_dir / "deploy/oa/env/fin-ops.worker.workbench-matching.env.example"
+
+        content = env_path.read_text(encoding="utf-8")
+
+        self.assertIn("FIN_OPS_QUEUE_BACKEND=postgres", content)
+        self.assertIn("FIN_OPS_WORKER_KIND=workbench-matching", content)
+        self.assertIn("--enable-workbench-matching", content)
+        self.assertIn("--workbench-matching-batch-size", content)
+        self.assertIn("--workbench-matching-lease-seconds", content)
 
 
 if __name__ == "__main__":

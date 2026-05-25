@@ -65,6 +65,7 @@ set +a
 长期 worker 建议拆分为：
 
 - `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`
+- `worker-workbench-matching`：`--enable-workbench-matching --worker-kind workbench-matching`，消费 `job.workbench_matching_dirty_scopes`，生成 `read_model.workbench_reconciliation_decisions`。它不使用 `--event-type`，也不依赖 RabbitMQ 作为事实源。
 - `worker-search`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
 - `worker-pending-invoice`：`--enable-pending-invoice-read-model-refresh --worker-kind pending-invoice-read-model --event-type pending_invoice.read_model.refresh`。Legacy `expense:all` / `income:all` 事件只做 fan-out，实际 rebuild scope 必须是 `direction:filter:YYYY-MM`。
 - `worker-invoice-usage-collection`：`--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --worker-kind invoice-usage-collection-read-model --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh`。

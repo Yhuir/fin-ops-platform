@@ -20,9 +20,10 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
 from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens
 
 
-RULE_VERSION = "2026-05-25"
+RULE_VERSION = "2026-05-25-multi-payment-single-invoice"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 MAX_INVOICE_COMBINATION_SIZE = 6
+MAX_PAYMENT_PAIR_COMBINATION_SIZE = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,8 +38,8 @@ class _Row:
 
 @dataclass(frozen=True, slots=True)
 class _ThreeWayCandidate:
-    oa: _Row
-    bank: _Row
+    oas: tuple[_Row, ...]
+    banks: tuple[_Row, ...]
     invoices: tuple[_Row, ...]
     rule_code: str
     invoice_amount_closed: bool
@@ -107,8 +108,8 @@ class WorkbenchFreeMatchingEngine:
                 for invoice_group in invoice_groups:
                     candidates.append(
                         _ThreeWayCandidate(
-                            oa=oa,
-                            bank=bank,
+                            oas=(oa,),
+                            banks=(bank,),
                             invoices=invoice_group,
                             rule_code="oa_bank_invoice_exact_amount",
                             invoice_amount_closed=True,
@@ -122,6 +123,7 @@ class WorkbenchFreeMatchingEngine:
                             ),
                         )
                     )
+        candidates.extend(self._oa_bank_pair_groups_for_single_invoice(oa_rows, bank_rows, invoice_rows, window))
         return candidates
 
     def _attachment_candidate(
@@ -135,8 +137,8 @@ class WorkbenchFreeMatchingEngine:
         invoice_amount_closed = invoice_sum == oa.amount
         warning_codes = () if invoice_amount_closed else (WARNING_INVOICE_AMOUNT_MISMATCH,)
         return _ThreeWayCandidate(
-            oa=oa,
-            bank=bank,
+            oas=(oa,),
+            banks=(bank,),
             invoices=invoices,
             rule_code="oa_attachment_invoice_with_bank",
             invoice_amount_closed=invoice_amount_closed,
@@ -153,6 +155,56 @@ class WorkbenchFreeMatchingEngine:
                 },
             ),
         )
+
+    def _oa_bank_pair_groups_for_single_invoice(
+        self,
+        oa_rows: list[_Row],
+        bank_rows: list[_Row],
+        invoice_rows: list[_Row],
+        window: tuple[str, ...],
+    ) -> list[_ThreeWayCandidate]:
+        exact_pairs = [
+            (oa, bank)
+            for oa, bank in self._unique_pairs(oa_rows, bank_rows)
+            if oa.amount == bank.amount
+        ]
+        candidates: list[_ThreeWayCandidate] = []
+        for invoice in sorted(invoice_rows, key=lambda row: row.row_id):
+            if invoice.data.get("source_kind") == OA_ATTACHMENT_INVOICE_SOURCE_KIND:
+                continue
+            compatible_pairs = [
+                pair
+                for pair in exact_pairs
+                if self._has_evidence(pair[0], invoice) or self._has_evidence(pair[1], invoice)
+            ]
+            max_size = min(len(compatible_pairs), MAX_PAYMENT_PAIR_COMBINATION_SIZE)
+            for size in range(2, max_size + 1):
+                for pair_group in combinations(compatible_pairs, size):
+                    oa_total = sum((pair[0].amount for pair in pair_group), Decimal("0.00"))
+                    bank_total = sum((pair[1].amount for pair in pair_group), Decimal("0.00"))
+                    if oa_total != invoice.amount or bank_total != invoice.amount:
+                        continue
+                    sorted_pairs = tuple(sorted(pair_group, key=lambda pair: (pair[0].row_id, pair[1].row_id)))
+                    oas = tuple(pair[0] for pair in sorted_pairs)
+                    banks = tuple(pair[1] for pair in sorted_pairs)
+                    invoices = (invoice,)
+                    candidates.append(
+                        _ThreeWayCandidate(
+                            oas=oas,
+                            banks=banks,
+                            invoices=invoices,
+                            rule_code="oa_bank_pairs_single_invoice_exact_sum",
+                            invoice_amount_closed=True,
+                            warning_codes=(),
+                            evidence=self._multi_payment_single_invoice_evidence(
+                                window=window,
+                                oas=oas,
+                                banks=banks,
+                                invoice=invoice,
+                            ),
+                        )
+                    )
+        return candidates
 
     def _invoice_groups_for_amount(
         self,
@@ -178,9 +230,12 @@ class WorkbenchFreeMatchingEngine:
 
     def _conflicted_rows(self, candidates: list[_ThreeWayCandidate]) -> dict[str, dict[str, Any]]:
         by_oa_bank: dict[tuple[str, str], list[_ThreeWayCandidate]] = {}
+        by_payment_rows: dict[tuple[str, ...], list[_ThreeWayCandidate]] = {}
         by_row: dict[str, list[_ThreeWayCandidate]] = {}
         for candidate in candidates:
-            by_oa_bank.setdefault((candidate.oa.row_id, candidate.bank.row_id), []).append(candidate)
+            if len(candidate.oas) == 1 and len(candidate.banks) == 1:
+                by_oa_bank.setdefault((candidate.oas[0].row_id, candidate.banks[0].row_id), []).append(candidate)
+            by_payment_rows.setdefault(self._payment_row_ids(candidate), []).append(candidate)
             for row_id in self._row_ids(candidate):
                 by_row.setdefault(row_id, []).append(candidate)
 
@@ -189,6 +244,12 @@ class WorkbenchFreeMatchingEngine:
             invoice_sets = {tuple(invoice.row_id for invoice in candidate.invoices) for candidate in pair_candidates}
             if len(invoice_sets) > 1:
                 for candidate in pair_candidates:
+                    self._mark_conflict(conflicted, candidate, "multiple_three_way_candidates")
+
+        for payment_candidates in by_payment_rows.values():
+            invoice_sets = {tuple(invoice.row_id for invoice in candidate.invoices) for candidate in payment_candidates}
+            if len(invoice_sets) > 1:
+                for candidate in payment_candidates:
                     self._mark_conflict(conflicted, candidate, "multiple_three_way_candidates")
 
         for row_candidates in by_row.values():
@@ -204,7 +265,7 @@ class WorkbenchFreeMatchingEngine:
         candidate: _ThreeWayCandidate,
         code: str,
     ) -> None:
-        for row in (candidate.oa, candidate.bank, *candidate.invoices):
+        for row in (*candidate.oas, *candidate.banks, *candidate.invoices):
             entry = conflicted.setdefault(
                 row.row_id,
                 {
@@ -283,13 +344,16 @@ class WorkbenchFreeMatchingEngine:
         source_versions: dict[str, Any],
     ) -> WorkbenchDecision:
         row_ids = self._row_ids(candidate)
+        first_bank = candidate.banks[0] if candidate.banks else None
+        first_oa = candidate.oas[0] if candidate.oas else None
         scope_month = resolve_decision_scope_month(
-            has_bank=True,
-            bank_trade_month=candidate.bank.month,
-            has_oa=True,
-            oa_month=candidate.oa.month,
+            has_bank=first_bank is not None,
+            bank_trade_month=first_bank.month if first_bank is not None else None,
+            has_oa=first_oa is not None,
+            oa_month=first_oa.month if first_oa is not None else None,
         )
         warnings = tuple(self._warning(code, candidate) for code in candidate.warning_codes)
+        total_amount = sum((row.amount for row in candidate.banks), Decimal("0.00"))
         return WorkbenchDecision(
             decision_id=self._decision_key(scope_month, candidate.rule_code, row_ids),
             decision_key=self._decision_key(scope_month, candidate.rule_code, row_ids),
@@ -301,10 +365,10 @@ class WorkbenchFreeMatchingEngine:
             rule_code=candidate.rule_code,
             rule_version=RULE_VERSION,
             row_ids=row_ids,
-            oa_row_ids=(candidate.oa.row_id,),
-            bank_row_ids=(candidate.bank.row_id,),
+            oa_row_ids=tuple(row.row_id for row in candidate.oas),
+            bank_row_ids=tuple(row.row_id for row in candidate.banks),
             invoice_row_ids=tuple(invoice.row_id for invoice in candidate.invoices),
-            amount=candidate.oa.amount,
+            amount=total_amount,
             direction="expenditure",
             payment_amount_closed=True,
             invoice_amount_closed=candidate.invoice_amount_closed,
@@ -554,6 +618,36 @@ class WorkbenchFreeMatchingEngine:
             payload.update(extra)
         return payload
 
+    def _multi_payment_single_invoice_evidence(
+        self,
+        *,
+        window: tuple[str, ...],
+        oas: tuple[_Row, ...],
+        banks: tuple[_Row, ...],
+        invoice: _Row,
+    ) -> dict[str, Any]:
+        oa_bank_matches = [
+            match
+            for oa, bank in zip(oas, banks, strict=False)
+            for match in matching_tokens(self._tokens(oa), self._tokens(bank))
+        ]
+        invoice_matches = [
+            match
+            for row in (*oas, *banks)
+            for match in matching_tokens(self._tokens(row), self._tokens(invoice))
+        ]
+        payment_total = sum((bank.amount for bank in banks), Decimal("0.00"))
+        return {
+            "scope_window": list(window),
+            "uniqueness_scope": "five_month_window",
+            "three_way_evidence": "multi_payment_single_invoice_sum",
+            "oa_bank_text_matches": oa_bank_matches,
+            "invoice_text_matches": invoice_matches,
+            "payment_pair_count": len(banks),
+            "payment_total": str(payment_total),
+            "invoice_total": str(invoice.amount),
+        }
+
     def _three_way_evidence_kind(self, oa: _Row, bank: _Row, invoices: tuple[_Row, ...]) -> str:
         has_oa_invoice = any(self._has_evidence(oa, invoice) for invoice in invoices)
         has_bank_invoice = any(self._has_evidence(bank, invoice) for invoice in invoices)
@@ -562,6 +656,8 @@ class WorkbenchFreeMatchingEngine:
         return "bridged_by_oa"
 
     def _three_way_explanation(self, candidate: _ThreeWayCandidate) -> str:
+        if candidate.rule_code == "oa_bank_pairs_single_invoice_exact_sum":
+            return "Multiple OA-bank payment pairs sum exactly to one invoice in the five-month window."
         if candidate.warning_codes:
             return "OA and bank payment amounts close; OA attachment invoice amount does not close."
         if len(candidate.invoices) > 1:
@@ -571,19 +667,27 @@ class WorkbenchFreeMatchingEngine:
     def _warning(self, code: str, candidate: _ThreeWayCandidate) -> DecisionWarning:
         if code == WARNING_INVOICE_AMOUNT_MISMATCH:
             invoice_sum = sum((invoice.amount for invoice in candidate.invoices), Decimal("0.00"))
-            delta = candidate.oa.amount - invoice_sum
+            payment_sum = sum((bank.amount for bank in candidate.banks), Decimal("0.00"))
+            delta = payment_sum - invoice_sum
             return DecisionWarning(
                 code=code,
                 message=(
                     "OA 与流水金额一致，但 OA 来源附件发票合计金额不一致。"
-                    f"OA 金额 {candidate.oa.amount}，流水金额 {candidate.bank.amount}，"
+                    f"OA 金额 {payment_sum}，流水金额 {payment_sum}，"
                     f"附件发票合计 {invoice_sum}，差额 {delta}，正式发票数量 {len(candidate.invoices)}。"
                 ),
             )
         return DecisionWarning(code=code, message=code)
 
     def _row_ids(self, candidate: _ThreeWayCandidate) -> tuple[str, ...]:
-        return (candidate.oa.row_id, candidate.bank.row_id, *(invoice.row_id for invoice in candidate.invoices))
+        return (
+            *(row.row_id for row in candidate.oas),
+            *(row.row_id for row in candidate.banks),
+            *(invoice.row_id for invoice in candidate.invoices),
+        )
+
+    def _payment_row_ids(self, candidate: _ThreeWayCandidate) -> tuple[str, ...]:
+        return (*(row.row_id for row in candidate.oas), *(row.row_id for row in candidate.banks))
 
     def _candidate_key(self, candidate: _ThreeWayCandidate) -> tuple[str, ...]:
         return (candidate.rule_code, *self._row_ids(candidate))
