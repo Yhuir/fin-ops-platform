@@ -516,7 +516,9 @@ export default function BankDetailsPage() {
     page: 0,
     pageSize: DEFAULT_PAGE_SIZE,
   });
+  const [searchInput, setSearchInput] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [readModelStatus, setReadModelStatus] = useState<"fresh" | "refreshing">("fresh");
   const [loading, setLoading] = useState(true);
   const [rowLoading, setRowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -551,6 +553,9 @@ export default function BankDetailsPage() {
           totalBalance: payload.totalBalance,
           missingBalanceAccountCount: payload.missingBalanceAccountCount,
         });
+        if (payload.readModelStatus === "refreshing") {
+          setReadModelStatus("refreshing");
+        }
         setSelectedAccountKey((current) => (
           current && (current === ALL_ACCOUNTS_KEY || payload.accounts.some((account) => account.accountKey === current))
             ? current
@@ -569,6 +574,13 @@ export default function BankDetailsPage() {
       });
     return () => controller.abort();
   }, [dateFilter.dateFrom, dateFilter.dateTo, refreshToken, setSelectedAccountKey]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearchKeyword(searchInput.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
 
   useEffect(() => {
     if (!selectedAccountKey) {
@@ -594,6 +606,7 @@ export default function BankDetailsPage() {
         setRows(payload.rows);
         setRowCount(payload.pagination.total);
         setCategoryCounts(payload.categoryCounts);
+        setReadModelStatus(payload.readModelStatus === "refreshing" ? "refreshing" : "fresh");
         if (payload.tagDictionary?.tags) {
           setCategoryOptions(payload.tagDictionary.tags.filter((tag) => tag.status === "active"));
         }
@@ -769,7 +782,7 @@ export default function BankDetailsPage() {
 
   const handleSearchKeywordChange = (value: string) => {
     resetToFirstPage();
-    setSearchKeyword(value);
+    setSearchInput(value);
   };
 
   const applyPreset = (preset: BankDateFilter["preset"]) => {
@@ -962,6 +975,9 @@ export default function BankDetailsPage() {
       <Stack className="bank-details-workbench" spacing={1}>
         {error ? <StatePanel tone="error">{error}</StatePanel> : null}
         {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
+        {readModelStatus === "refreshing" && !error ? (
+          <StatePanel tone="loading" compact>银行明细读模型正在刷新。</StatePanel>
+        ) : null}
         {!loading && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}
@@ -1124,16 +1140,13 @@ export default function BankDetailsPage() {
                 loading={rowLoading}
                 disableRowSelectionOnClick
                 rowHeight={80}
-                getRowHeight={() => "auto"}
-                getEstimatedRowHeight={() => 88}
                 columnHeaderHeight={44}
-                columnBufferPx={1200}
-                disableVirtualization
+                columnBufferPx={360}
                 paginationMode="server"
                 rowCount={rowCount}
                 paginationModel={paginationModel}
                 onPaginationModelChange={setPaginationModel}
-                pageSizeOptions={[100, 200, 500]}
+                pageSizeOptions={[25, 50, 100]}
                 showToolbar
                 getRowClassName={(params) => (params.indexRelativeToCurrentPage % 2 === 0 ? "bank-grid-row-even" : "bank-grid-row-odd")}
                 localeText={DATA_GRID_LOCALE_TEXT}
@@ -1146,7 +1159,7 @@ export default function BankDetailsPage() {
                     effectiveCategoryCounts,
                     dirtyCount,
                     visibleCategorySummary,
-                    searchKeyword,
+                    searchKeyword: searchInput,
                     onSearchKeywordChange: handleSearchKeywordChange,
                   },
                 }}

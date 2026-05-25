@@ -146,6 +146,13 @@ type ApiPendingInvoiceRowsResponse = {
     total_rows?: number | null;
     missing_invoice_rows?: number | null;
     create_invoice_available_rows?: number | null;
+    source_summary?: Partial<{
+      bank_transaction_rows: number | string | null;
+      expense_rows: number | string | null;
+      income_rows: number | string | null;
+      current_direction_rows: number | string | null;
+      excluded_direction_rows: number | string | null;
+    }> | null;
   } | null;
   read_model_status?: string | null;
   tag_dictionary?: ApiTagDictionary | null;
@@ -471,6 +478,7 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
 }
 
 function mapRowsResponse(payload: ApiPendingInvoiceRowsResponse, request: FetchPendingInvoiceRowsRequest): PendingInvoiceRowsResponse {
+  const sourceSummary = payload.summary?.source_summary;
   return {
     direction: (payload.direction ?? request.direction) as PendingInvoiceDirection,
     filter: (payload.filter ?? request.filter ?? "all") as PendingInvoiceFilter,
@@ -484,6 +492,13 @@ function mapRowsResponse(payload: ApiPendingInvoiceRowsResponse, request: FetchP
       totalRows: payload.summary?.total_rows ?? payload.rows?.length ?? 0,
       missingInvoiceRows: payload.summary?.missing_invoice_rows ?? 0,
       createInvoiceAvailableRows: payload.summary?.create_invoice_available_rows ?? 0,
+      sourceSummary: sourceSummary ? {
+        bankTransactionRows: numberValue(sourceSummary.bank_transaction_rows),
+        expenseRows: numberValue(sourceSummary.expense_rows),
+        incomeRows: numberValue(sourceSummary.income_rows),
+        currentDirectionRows: numberValue(sourceSummary.current_direction_rows),
+        excludedDirectionRows: numberValue(sourceSummary.excluded_direction_rows),
+      } : undefined,
     },
     readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRowsResponse["readModelStatus"],
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),

@@ -162,6 +162,31 @@ describe("bank details API", () => {
     expect(url.searchParams.get("page_size")).toBe("100");
   });
 
+  test("maps refreshing read model responses without throwing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        rows: [],
+        pagination: {
+          page: 1,
+          page_size: 100,
+          total: 0,
+        },
+        category_counts: {
+          uncategorized: 0,
+        },
+        read_model_status: "refreshing",
+        cache_status: "bypass",
+      }), { status: 202, headers: { "Content-Type": "application/json" } })),
+    );
+
+    const payload = await fetchBankDetailTransactions({ page: 1, pageSize: 100 });
+
+    expect(payload.rows).toEqual([]);
+    expect(payload.readModelStatus).toBe("refreshing");
+    expect(payload.cacheStatus).toBe("bypass");
+  });
+
   test("reports HTML API responses as a routing problem instead of a JSON parse error", async () => {
     vi.stubGlobal(
       "fetch",

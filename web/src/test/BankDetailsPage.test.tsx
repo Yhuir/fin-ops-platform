@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
@@ -66,6 +68,14 @@ afterEach(() => {
 });
 
 describe("Bank details page", () => {
+  test("keeps the production DataGrid virtualized with community-safe page sizes", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/pages/BankDetailsPage.tsx"), "utf8");
+
+    expect(source).not.toContain("disableVirtualization");
+    expect(source).not.toContain("getRowHeight={() => \"auto\"}");
+    expect(source).toContain("pageSizeOptions={[25, 50, 100]}");
+  });
+
   test("loads all accounts by default and its transactions", async () => {
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();

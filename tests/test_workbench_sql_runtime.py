@@ -410,6 +410,47 @@ class InvoiceRowsProjectionConnection(WorkbenchProjectionSettingsConnection):
         return [row]
 
 
+class EtcSummaryProjectionConnection(WorkbenchProjectionSettingsConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "with submitted_batches as" in normalized and "from app.invoices invoices" in normalized:
+            return [
+                {
+                    "external_etc_batch_id": "ETC-OA-20260215-154900",
+                    "row_id": "inv-hidden-etc-1",
+                    "invoice_type": "进项发票",
+                    "invoice_no": "26537911970100000001",
+                    "digital_invoice_no": "26537911970100000001",
+                    "invoice_date": "2026-01-03",
+                    "counterparty_name": "高速公路通行费",
+                    "seller_name": "高速公路通行费",
+                    "buyer_name": "云南溯源科技",
+                    "amount": "100.00",
+                    "total_with_tax": "100.00",
+                    "status": "submitted",
+                    "workbench_visibility": "hidden_after_etc_submission",
+                    "raw_payload": {"workbench_visibility": "hidden_after_etc_submission"},
+                },
+                {
+                    "external_etc_batch_id": "ETC-OA-20260215-154900",
+                    "row_id": "inv-hidden-etc-2",
+                    "invoice_type": "进项发票",
+                    "invoice_no": "26537911970100000002",
+                    "digital_invoice_no": "26537911970100000002",
+                    "invoice_date": "2026-01-05",
+                    "counterparty_name": "高速公路通行费",
+                    "seller_name": "高速公路通行费",
+                    "buyer_name": "云南溯源科技",
+                    "amount": "44.50",
+                    "total_with_tax": "44.50",
+                    "status": "submitted",
+                    "workbench_visibility": "hidden_after_etc_submission",
+                    "raw_payload": {"workbench_visibility": "hidden_after_etc_submission"},
+                },
+            ]
+        return super().fetch_all(sql, params)
+
+
 class CandidateSnapshotRecorder:
     def __init__(self, *, reconciliation_decisions: list[dict[str, object]] | None = None) -> None:
         self.saved_snapshots: list[tuple[dict[str, object], set[str] | None]] = []
@@ -504,6 +545,57 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["tax_amount"], "22.64")
         self.assertEqual(rows[0]["summary_fields"]["税率"], "6%")
         self.assertEqual(rows[0]["summary_fields"]["税额"], "22.64")
+
+    def test_sql_projection_attaches_existing_etc_summary_to_active_relation(self) -> None:
+        connection = EtcSummaryProjectionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+        rows_by_id = {
+            "oa-exp-1994": {
+                "id": "oa-exp-1994",
+                "type": "oa",
+                "applicant": "刘树刚",
+                "project_name": "云南溯源科技",
+                "amount": "1549.00",
+            },
+            "txn_imported_1328": {
+                "id": "txn_imported_1328",
+                "type": "bank",
+                "source_kind": "bank_transaction",
+                "debit_amount": "1549.00",
+                "counterparty_name": "批量账务集中处理",
+            },
+        }
+        relation = {
+            "case_id": "CASE-BATCH-txn_imported_1328",
+            "relation_mode": "manual_confirmed",
+            "row_ids": ["txn_imported_1328", "oa-exp-1994"],
+            "row_types": ["bank", "oa"],
+            "amount_check": {
+                "external_etc_batch_id": "ETC-OA-20260215-154900",
+                "invoice_count": 2,
+                "invoice_total": "144.50",
+                "status": "mismatch",
+            },
+        }
+
+        payload = builder._group_payload("2026-02", rows_by_id, [relation])
+
+        groups = payload["paired"]["groups"]
+        self.assertEqual(len(groups), 1)
+        group = groups[0]
+        self.assertEqual(group["group_id"], "case:CASE-BATCH-txn_imported_1328")
+        self.assertEqual(len(group["oa_rows"]), 1)
+        self.assertEqual(len(group["bank_rows"]), 1)
+        self.assertEqual(len(group["invoice_rows"]), 1)
+        oa_row = group["oa_rows"][0]
+        self.assertEqual(oa_row["etc_batch_id"], "ETC-OA-20260215-154900")
+        self.assertIn("ETC批量提交", oa_row["tags"])
+        summary_row = group["invoice_rows"][0]
+        self.assertEqual(summary_row["source_kind"], "etc_invoice_summary")
+        self.assertEqual(summary_row["case_id"], "CASE-BATCH-txn_imported_1328")
+        self.assertEqual(summary_row["invoice_bank_relation"]["label"], "已关联ETC发票")
+        self.assertEqual(summary_row["etc_invoice_count"], 2)
+        self.assertEqual(summary_row["total_with_tax"], "144.50")
 
     def test_repository_reads_workbench_snapshot_and_dirty_status_without_state_fallback(self) -> None:
         connection = WorkbenchSqlReadConnection(

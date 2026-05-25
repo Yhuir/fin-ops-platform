@@ -1151,6 +1151,8 @@ class WorkbenchCandidateGroupingService:
             return deepcopy(original_relation)
         if original_code == "automatic_match" or original_code in AUTO_PAIRED_CODES:
             return deepcopy(original_relation)
+        if row_type == "invoice" and str(row.get("source_kind") or "").strip() == "etc_invoice_summary":
+            return {"code": "fully_linked", "label": "已关联ETC发票", "tone": "success"}
         if group_kind == "oa_bank_invoice":
             return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
         if group_kind == "oa_bank":

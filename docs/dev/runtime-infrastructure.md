@@ -85,7 +85,7 @@ python3 -m fin_ops_platform.app.rabbitmq_topology --apply
 标准拓扑覆盖所有已迁入 RabbitMQ 的 runtime event。队列名称默认由 `RABBITMQ_QUEUE_PREFIX` 加 event type 生成，例如：
 
 - exchange：`finops.events`，`topic`，durable。
-- queue：`finops.workbench.read_model.refresh`、`finops.search.read_model.refresh`、`finops.pending_invoice.read_model.refresh`、`finops.cost_statistics.read_model.refresh`、`finops.tax_offset.read_model.refresh`、`finops.oa.sync`、`finops.file_object.gridfs_migration`、`finops.import.process.requested`，durable。
+- queue：`finops.workbench.read_model.refresh`、`finops.search.read_model.refresh`、`finops.pending_invoice.read_model.refresh`、`finops.bank_detail.read_model.refresh`、`finops.cost_statistics.read_model.refresh`、`finops.tax_offset.read_model.refresh`、`finops.oa.sync`、`finops.file_object.gridfs_migration`、`finops.import.process.requested`，durable。
 - routing key：对应 event type。
 - DLX：`finops.events.dlx`。
 - DLQ：每个 queue 对应 `<queue>.dlq`。
@@ -130,6 +130,23 @@ python3 -m fin_ops_platform.app.worker \
   --enable-workbench-read-model-refresh \
   --worker-kind workbench-read-model \
   --event-type workbench.read_model.refresh \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 60 \
+  --statement-timeout-seconds 30 \
+  --max-attempts 5
+```
+
+银行明细 SQL read model worker：
+
+```bash
+FIN_OPS_QUEUE_BACKEND=rabbitmq \
+FIN_OPS_POSTGRES_DATABASE_URL=postgresql://fin_ops_worker:***@postgres.internal:5432/fin_ops \
+RABBITMQ_URL=amqps://finops_worker:***@rabbitmq.internal:5671/%2Ffinops \
+PYTHONPATH=backend/src \
+python3 -m fin_ops_platform.app.worker \
+  --enable-bank-detail-read-model-refresh \
+  --worker-kind bank-detail-read-model \
+  --event-type bank_detail.read_model.refresh \
   --lock-timeout-seconds 300 \
   --task-timeout-seconds 60 \
   --statement-timeout-seconds 30 \

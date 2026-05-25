@@ -31,6 +31,8 @@ type ApiBankDetailAccountsResponse = {
   total_balance: string | null;
   balance_account_count: number;
   missing_balance_account_count: number;
+  read_model_status?: "fresh" | "refreshing";
+  cache_status?: string | null;
 };
 
 type ApiBankDetailTransaction = {
@@ -79,6 +81,8 @@ type ApiBankDetailTransactionsResponse = {
   category_counts?: Record<string, number>;
   tag_dictionary?: Parameters<typeof mapBankTransactionTagDictionary>[0];
   bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
+  read_model_status?: "fresh" | "refreshing";
+  cache_status?: string | null;
 };
 
 type ApiSavedBankTransactionCategory = {
@@ -227,6 +231,8 @@ export async function fetchBankDetailAccounts({
     totalBalance: payload.total_balance,
     balanceAccountCount: payload.balance_account_count,
     missingBalanceAccountCount: payload.missing_balance_account_count,
+    readModelStatus: payload.read_model_status,
+    cacheStatus: payload.cache_status ?? null,
   };
 }
 
@@ -276,6 +282,8 @@ export async function fetchBankDetailTransactions({
     },
     categoryCounts: mapCategoryCounts(payload.category_counts),
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
+    readModelStatus: payload.read_model_status,
+    cacheStatus: payload.cache_status ?? null,
   };
 }
 

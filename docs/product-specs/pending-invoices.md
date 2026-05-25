@@ -6,6 +6,8 @@
 
 本页面不新增平行菜单，不替代关联工作台写模型。它读取和写入既有事实源：银行流水、进项发票、OA 投影、`workbench_pair_relations`、银行明细标签和 `pending_invoice_tag_groups`。
 
+页面应明确展示流水方向边界：全量银行流水可以同时包含收入和支出，但本工作台主表只展示支出流水；收入流水应进入销项发票收款、收入核销或往来台账等收入侧工作流。
+
 ## 首版范围
 
 - 主表使用 MUI Table，不使用 DataGrid。
@@ -90,7 +92,9 @@
 列表热路径使用 `read_model.pending_invoice_rows`。首版不引入 Redis 作为正确性依赖。
 
 - fresh scope 的空结果返回 `200 OK`、`rows=[]`、`read_model_status=fresh`。
-- missing scope 或 stale/dirty scope 返回 `202 Accepted`、`read_model_status=refreshing`，并 enqueue `pending_invoice.read_model.refresh`。
+- stale/dirty scope 已有可用行时返回最近一次稳定结果，`read_model_status=refreshing` 或 `stale`，页面展示刷新提示但不阻塞用户读取。
+- missing scope 或 schema 不兼容时返回 `202 Accepted`、`read_model_status=refreshing`，并 enqueue `pending_invoice.read_model.refresh`。
+- 读请求不得因为已有 active dirty scope 而重复写 `job.read_model_dirty_scopes` 或 `job.outbox_events`。
 - API 热路径不得因为 read model miss/stale 同步扫描全量流水、发票、OA 和关系事实。
 
 详细 API 契约见 [`../dev/pending-invoices-api.md`](../dev/pending-invoices-api.md)。执行设计记录见 [`../superpowers/specs/2026-05-25-pending-invoice-page-upgrade-design.md`](../superpowers/specs/2026-05-25-pending-invoice-page-upgrade-design.md)。

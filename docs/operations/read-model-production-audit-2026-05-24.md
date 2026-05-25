@@ -59,7 +59,7 @@ EXPLAIN 摘要：
 - `pending_invoice_rows` 是结构化分页 read model，worker scope 已细化为 `direction:filter:YYYY-MM`。
 - `cost_statistics_rows` 是成本统计行级 read model，API 从行表重建 `time_rows/project_rows/expense_type_rows`。
 - `tax_offset_items` 是税金抵扣 item 级 read model，API 从 item 表重建各类发票明细。
-- `/api/bank-details/transactions` 直接分页读 `app.bank_transactions`，当前不需要单独 read model；需要的是索引和分页，不是 RabbitMQ。
+- `/api/bank-details/transactions` 原审计时直接分页读 `app.bank_transactions`；2026-05-25 用户确认银行明细需要生产级独立 read model 后，该结论废止。生产热路径应走 `read_model.bank_detail_rows`，缺失/过期时由 `bank_detail.read_model.refresh` 异步刷新。
 
 不合格或需收口：
 

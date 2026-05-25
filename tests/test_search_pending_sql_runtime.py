@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 from http import HTTPStatus
 import unittest
@@ -29,21 +30,34 @@ class SearchPendingConnection:
         *,
         search_rows: list[dict] | None = None,
         pending_rows: list[dict] | None = None,
+        pending_source_counts: dict[str, int] | None = None,
         dirty: bool = False,
         pending_scope_exists: bool = True,
     ) -> None:
         self.search_rows = list(search_rows or [])
         self.pending_rows = list(pending_rows or [])
+        self.pending_source_counts = dict(pending_source_counts or {"expense": len(self.pending_rows)})
         self.dirty = dirty
         self.pending_scope_exists = pending_scope_exists
         self.fetch_all_calls: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
+        self.transaction_count = 0
+
+    @contextmanager
+    def transaction(self):
+        self.transaction_count += 1
+        yield self
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
         if "from read_model.search_index_rows" in normalized:
             return self.search_rows
+        if "from read_model.pending_invoice_rows" in normalized and "group by direction" in normalized:
+            return [
+                {"direction": direction, "count": count}
+                for direction, count in sorted(self.pending_source_counts.items())
+            ]
         if "from read_model.pending_invoice_rows" in normalized:
             return self.pending_rows
         return []
@@ -196,7 +210,8 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "missing_invoice": True,
                     "can_create_invoice": True,
                 }
-            ]
+            ],
+            pending_source_counts={"expense": 356, "income": 75},
         )
         repository = PostgresReadModelRepository(connection)
 
@@ -205,6 +220,17 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["summary"]["missing_invoice_rows"], 1)
         self.assertEqual(payload["rows"][0]["id"], "txn-1")
+        self.assertEqual(connection.transaction_count, 1)
+        self.assertEqual(
+            payload["summary"]["source_summary"],
+            {
+                "bank_transaction_rows": 431,
+                "expense_rows": 356,
+                "income_rows": 75,
+                "current_direction_rows": 356,
+                "excluded_direction_rows": 75,
+            },
+        )
 
     def test_pending_invoice_repository_returns_fresh_empty_scope_without_api_miss(self) -> None:
         connection = SearchPendingConnection(pending_rows=[], dirty=False)
@@ -370,7 +396,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_schema_stale")])
 
-    def test_pending_invoice_api_returns_refreshing_without_stale_rows(self) -> None:
+    def test_pending_invoice_api_serves_existing_rows_while_scope_refreshes(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
@@ -393,18 +419,27 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
-                    "refresh_status": "stale",
-                }
+                    "refresh_status": "refreshing",
+                },
+                "pending_invoice_source_summary": lambda *_args, **_kwargs: {
+                    "bank_transaction_rows": 431,
+                    "expense_rows": 356,
+                    "income_rows": 75,
+                    "current_direction_rows": 356,
+                    "excluded_direction_rows": 75,
+                },
             },
         )()
 
         response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["rows"], [])
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["rows"][0]["id"], "txn-stale")
+        self.assertEqual(payload["summary"]["source_summary"]["bank_transaction_rows"], 431)
+        self.assertEqual(payload["summary"]["source_summary"]["income_rows"], 75)
         self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_stale")])
+        self.assertEqual(queue.refreshes, [])
 
     def test_pending_invoice_sql_page_preserves_bank_tag_settings(self) -> None:
         app = object.__new__(Application)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from copy import deepcopy
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 import re
 from types import SimpleNamespace
 from typing import Any
@@ -34,7 +36,8 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-05-24-invoice-tax-meta-summary"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-05-25-etc-submitted-summary"
+ETC_BATCH_TAG = "ETC批量提交"
 
 
 class WorkbenchSqlProjectionBuilder:
@@ -776,10 +779,14 @@ class WorkbenchSqlProjectionBuilder:
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
                    digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
-                   buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status, raw_payload
+                   buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status,
+                   workbench_visibility, raw_payload
             from app.invoices
             where invoice_month = %s::date
               and status <> 'deleted'
+              and coalesce(workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(raw_payload->'normalized_payload'->>'workbench_visibility', 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(raw_payload->'normalized_payload'->>'etc_submission_status', '') <> 'submitted'
             order by invoice_date desc nulls last, row_id
             """,
             (month_start(month),),
@@ -798,10 +805,14 @@ class WorkbenchSqlProjectionBuilder:
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
                    digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
-                   buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status, raw_payload
+                   buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status,
+                   workbench_visibility, raw_payload
             from app.invoices
             where coalesce(legacy_mongo_id, id::text) = any(%s)
               and status <> 'deleted'
+              and coalesce(workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(raw_payload->'normalized_payload'->>'workbench_visibility', 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(raw_payload->'normalized_payload'->>'etc_submission_status', '') <> 'submitted'
             order by invoice_date desc nulls last, row_id
             """,
             (normalized_row_ids,),
@@ -814,6 +825,8 @@ class WorkbenchSqlProjectionBuilder:
             return None
         detail_fields = row_payload(row, "raw_payload")
         detail_fields = detail_fields if isinstance(detail_fields, dict) else {}
+        if self._invoice_hidden_after_etc_submission(row, detail_fields):
+            return None
         invoice_code = _first_display_value(row.get("invoice_code"), detail_fields.get("发票代码"))
         invoice_no = _first_display_value(row.get("invoice_no"), detail_fields.get("发票号码"))
         digital_invoice_no = _first_display_value(row.get("digital_invoice_no"), detail_fields.get("数电发票号码"))
@@ -955,6 +968,7 @@ class WorkbenchSqlProjectionBuilder:
     ) -> dict[str, Any]:
         working_rows_by_id = {row_id: dict(row) for row_id, row in rows_by_id.items()}
         self._apply_workbench_overrides_and_exceptions(working_rows_by_id)
+        etc_summary_rows_by_external_batch_id = self._etc_invoice_summary_rows_for_relations(relations)
         paired_row_ids: set[str] = set()
         for relation in relations:
             relation_row_ids = [row_id for row_id in list(relation.get("row_ids") or []) if row_id in working_rows_by_id]
@@ -966,6 +980,8 @@ class WorkbenchSqlProjectionBuilder:
             if not relation_row_ids:
                 continue
             case_id = str(relation.get("case_id") or "")
+            external_etc_batch_id = self._relation_external_etc_batch_id(relation)
+            relation_amount_check = relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else None
             for row_id in relation_row_ids:
                 paired_row_ids.add(row_id)
                 row = working_rows_by_id[row_id]
@@ -973,8 +989,31 @@ class WorkbenchSqlProjectionBuilder:
                 row["case_id"] = case_id
                 row["relation_mode"] = relation.get("relation_mode")
                 row[self._relation_field_name(str(row.get("type") or ""))] = self._active_relation_payload(relation)
+                if relation_amount_check:
+                    row["relation_amount_check"] = deepcopy(relation_amount_check)
+                if external_etc_batch_id and str(row.get("type") or "").strip() == "oa":
+                    row["etc_batch_id"] = external_etc_batch_id
+                    tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
+                    if ETC_BATCH_TAG not in tags:
+                        tags.append(ETC_BATCH_TAG)
+                    row["tags"] = tags
                 if str(relation.get("relation_mode") or "").strip() == NO_OA_BANK_BATCH_RELATION_MODE:
                     self._apply_no_oa_relation_metadata(row, relation)
+            if case_id and external_etc_batch_id:
+                summary_row = etc_summary_rows_by_external_batch_id.get(external_etc_batch_id)
+                if summary_row:
+                    row = deepcopy(summary_row)
+                    row["case_id"] = case_id
+                    row["status"] = "paired"
+                    row["relation_mode"] = relation.get("relation_mode")
+                    row["invoice_bank_relation"] = {
+                        "code": "fully_linked",
+                        "label": "已关联ETC发票",
+                        "tone": "success",
+                    }
+                    if relation_amount_check:
+                        row["relation_amount_check"] = deepcopy(relation_amount_check)
+                    working_rows_by_id[str(row["id"])] = row
 
         self._apply_reconciliation_decisions_to_rows(
             working_rows_by_id,
@@ -1247,6 +1286,144 @@ class WorkbenchSqlProjectionBuilder:
         row["available_actions"] = actions
 
     @staticmethod
+    def _invoice_hidden_after_etc_submission(row: dict[str, Any], payload: dict[str, Any]) -> bool:
+        return (
+            str(row.get("workbench_visibility") or payload.get("workbench_visibility") or "").strip()
+            == "hidden_after_etc_submission"
+            or str(payload.get("etc_submission_status") or "").strip() == "submitted"
+        )
+
+    def _etc_invoice_summary_rows_for_relations(self, relations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        external_batch_ids = {
+            external_batch_id
+            for relation in relations
+            if (external_batch_id := self._relation_external_etc_batch_id(relation))
+        }
+        if not external_batch_ids:
+            return {}
+        rows = self._connection.fetch_all(
+            """
+            with submitted_batches as (
+                select
+                    submission_batch_id,
+                    coalesce(raw_payload->'normalized_payload'->>'etc_batch_id', submission_batch_id) as external_etc_batch_id
+                from app.etc_submission_batches
+            )
+            select
+                submitted_batches.external_etc_batch_id,
+                coalesce(invoices.legacy_mongo_id, invoices.id::text) as row_id,
+                invoices.invoice_type,
+                invoices.invoice_no,
+                invoices.invoice_code,
+                invoices.digital_invoice_no,
+                invoices.invoice_date,
+                invoices.counterparty_name,
+                invoices.seller_name,
+                invoices.seller_tax_no,
+                invoices.buyer_name,
+                invoices.buyer_tax_no,
+                invoices.amount,
+                invoices.tax_rate,
+                invoices.tax_amount,
+                invoices.total_with_tax,
+                invoices.status,
+                invoices.workbench_visibility,
+                invoices.raw_payload
+            from app.invoices invoices
+            join submitted_batches
+              on submitted_batches.submission_batch_id = coalesce(invoices.raw_payload->'normalized_payload'->>'etc_submission_batch_id', '')
+              or submitted_batches.external_etc_batch_id = coalesce(invoices.raw_payload->'normalized_payload'->>'etc_submission_batch_id', '')
+            where submitted_batches.external_etc_batch_id = any(%s)
+              and invoices.status <> 'deleted'
+              and (
+                    invoices.workbench_visibility = 'hidden_after_etc_submission'
+                 or invoices.raw_payload->'normalized_payload'->>'workbench_visibility' = 'hidden_after_etc_submission'
+                 or invoices.raw_payload->'normalized_payload'->>'etc_submission_status' = 'submitted'
+              )
+            order by submitted_batches.external_etc_batch_id, invoices.invoice_date, row_id
+            """,
+            (sorted(external_batch_ids),),
+        )
+        invoices_by_external_batch_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            external_batch_id = str(row.get("external_etc_batch_id") or "").strip()
+            if external_batch_id:
+                invoices_by_external_batch_id[external_batch_id].append(row)
+        return {
+            external_batch_id: self._build_etc_invoice_summary_row(external_batch_id, invoices)
+            for external_batch_id, invoices in invoices_by_external_batch_id.items()
+            if invoices
+        }
+
+    def _build_etc_invoice_summary_row(self, external_batch_id: str, invoices: list[dict[str, Any]]) -> dict[str, Any]:
+        total_amount = sum((_decimal_value(row.get("total_with_tax") or row.get("amount")) for row in invoices), Decimal("0.00"))
+        issue_dates = [_date_text(row.get("invoice_date")) for row in invoices if _date_text(row.get("invoice_date"))]
+        seller_names = [
+            str(row.get("seller_name") or row.get("counterparty_name") or "").strip()
+            for row in invoices
+            if str(row.get("seller_name") or row.get("counterparty_name") or "").strip()
+        ]
+        first_seller_name = seller_names[0] if seller_names else "ETC发票"
+        count = len(invoices)
+        title = f"ETC发票 {count} 张"
+        issue_range = _date_range_label(issue_dates)
+        total_amount_text = _money_text(total_amount)
+        invoice_lines = [self._etc_invoice_summary_line(row) for row in invoices]
+        return {
+            "id": _etc_invoice_summary_row_id(external_batch_id),
+            "type": "invoice",
+            "case_id": None,
+            "source_kind": "etc_invoice_summary",
+            "seller_tax_no": "ETC批次",
+            "seller_name": title,
+            "buyer_tax_no": external_batch_id,
+            "buyer_name": first_seller_name,
+            "invoice_code": external_batch_id,
+            "invoice_no": title,
+            "digital_invoice_no": title,
+            "issue_date": issue_range or "—",
+            "amount": total_amount_text,
+            "tax_rate": "—",
+            "tax_amount": "—",
+            "total_with_tax": total_amount_text,
+            "invoice_type": "进项发票",
+            "invoice_bank_relation": {"code": "etc_invoice_summary", "label": "已关联ETC发票", "tone": "success"},
+            "tags": ["ETC", "已关联ETC发票"],
+            "etc_batch_id": external_batch_id,
+            "etc_invoice_count": count,
+            "available_actions": ["detail"],
+            "summary_fields": {
+                "ETC批次": external_batch_id,
+                "ETC发票数量": f"{count} 张",
+                "ETC发票合计": total_amount_text,
+                "开票日期范围": issue_range or "—",
+                "代表销方": first_seller_name,
+            },
+            "detail_fields": {
+                "ETC批次": external_batch_id,
+                "ETC发票数量": f"{count} 张",
+                "ETC发票合计": total_amount_text,
+                "开票日期范围": issue_range or "—",
+                "发票清单": "\n".join(invoice_lines) if invoice_lines else "—",
+            },
+        }
+
+    @staticmethod
+    def _relation_external_etc_batch_id(relation: dict[str, Any]) -> str:
+        amount_check = relation.get("amount_check")
+        if not isinstance(amount_check, dict):
+            return ""
+        return str(amount_check.get("external_etc_batch_id") or amount_check.get("etc_batch_id") or "").strip()
+
+    @staticmethod
+    def _etc_invoice_summary_line(row: dict[str, Any]) -> str:
+        invoice_no = str(row.get("digital_invoice_no") or row.get("invoice_no") or "—")
+        issue_date = _date_text(row.get("invoice_date")) or "—"
+        seller_name = str(row.get("seller_name") or row.get("counterparty_name") or "—")
+        amount = _money_text(_decimal_value(row.get("total_with_tax") or row.get("amount")))
+        return f"{issue_date} ｜ {invoice_no} ｜ {seller_name} ｜ {amount}"
+
+    @staticmethod
     def _row_is_held_for_matching(row: dict[str, Any]) -> bool:
         if bool(row.get("ignored")) or bool(row.get("handled_exception")):
             return True
@@ -1314,6 +1491,31 @@ def _first_display_value(*values: object) -> str:
         if normalized and normalized not in {"—", "--"}:
             return normalized
     return "—"
+
+
+def _decimal_value(value: object) -> Decimal:
+    try:
+        return Decimal(str(value or "0").replace(",", "")).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return Decimal("0.00")
+
+
+def _money_text(value: Decimal) -> str:
+    return f"{value.quantize(Decimal('0.01')):,.2f}"
+
+
+def _date_range_label(values: list[str]) -> str:
+    normalized = sorted(value[:10] for value in values if len(value) >= 10)
+    if not normalized:
+        return ""
+    if normalized[0] == normalized[-1]:
+        return normalized[0]
+    return f"{normalized[0]} 至 {normalized[-1]}"
+
+
+def _etc_invoice_summary_row_id(external_batch_id: str) -> str:
+    safe_batch_id = re.sub(r"[^A-Za-z0-9_-]+", "-", external_batch_id).strip("-") or "unknown"
+    return f"etc-summary-{safe_batch_id}"
 
 
 def _is_outflow(direction: str, signed_amount: object) -> bool:

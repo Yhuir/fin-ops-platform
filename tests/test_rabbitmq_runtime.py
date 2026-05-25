@@ -229,6 +229,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         declared_queues = [kwargs["queue"] for name, kwargs in channel.calls if name == "queue_declare"]
         self.assertIn("finops.workbench.read_model.refresh", declared_queues)
         self.assertIn("finops.search.read_model.refresh", declared_queues)
+        self.assertIn("finops.bank_detail.read_model.refresh", declared_queues)
         self.assertIn("finops.oa.sync.dlq", declared_queues)
         self.assertIn("finops.import.process.requested", declared_queues)
 

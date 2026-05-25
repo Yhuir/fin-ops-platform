@@ -77,6 +77,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
     def test_settings_default_to_postgres_and_parse_reserved_rabbitmq_boundary(self) -> None:
         self.assertEqual(RuntimeQueueSettings.from_env({}).backend, "postgres")
         self.assertEqual(RuntimeQueueSettings.from_env({}).rabbitmq_dispatch_event_types, DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES)
+        self.assertIn("bank_detail.read_model.refresh", DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES)
 
         settings = RuntimeQueueSettings.from_env(
             {

@@ -298,6 +298,24 @@ class PostgresCoreRepository:
             (normalized_invoice_id, normalized_invoice_id),
         )
 
+    def list_submitted_etc_invoices(self) -> list[Invoice]:
+        rows = self._connection.fetch_all(
+            """
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   invoice_type, invoice_no, invoice_code, digital_invoice_no, source_unique_key,
+                   data_fingerprint, invoice_date, counterparty_id, counterparty_name, seller_name,
+                   seller_tax_no, buyer_name, buyer_tax_no, amount, signed_amount, written_off_amount,
+                   tax_rate, tax_amount, total_with_tax, currency, legacy_source_batch_id,
+                   oa_form_id, etc_invoice_id, workbench_visibility, status, tags, source_links, raw_payload
+            from app.invoices
+            where workbench_visibility = 'hidden_after_etc_submission'
+               or raw_payload->'normalized_payload'->>'workbench_visibility' = 'hidden_after_etc_submission'
+               or raw_payload->'normalized_payload'->>'etc_submission_status' = 'submitted'
+            order by invoice_date, legacy_id
+            """
+        )
+        return [self._invoice_from_row(row) for row in rows]
+
     def get_transaction(self, transaction_id: str) -> BankTransaction | None:
         normalized_transaction_id = self._text(transaction_id)
         if not normalized_transaction_id:
@@ -411,6 +429,39 @@ class PostgresCoreRepository:
         else:
             self._save_imports_with_connection(connection, snapshot)
             self._mark_import_fact_read_models_dirty(connection, snapshot)
+
+    def save_invoices(self, invoices: list[Any], *, mark_read_models_dirty: bool = True) -> None:
+        serialized_invoices = self._iter_items(invoices)
+        if not serialized_invoices:
+            return
+        snapshot = {"invoices": serialized_invoices}
+        connection = self._connection
+        transaction_factory = getattr(connection, "transaction", None)
+        if callable(transaction_factory):
+            with transaction_factory() as tx:
+                for invoice in serialized_invoices:
+                    self._save_invoice(tx, invoice)
+                if mark_read_models_dirty:
+                    self._mark_import_fact_read_models_dirty(tx, snapshot)
+        else:
+            for invoice in serialized_invoices:
+                self._save_invoice(connection, invoice)
+            if mark_read_models_dirty:
+                self._mark_import_fact_read_models_dirty(connection, snapshot)
+
+    def save_invoice_etc_metadata(self, invoices: list[Any]) -> None:
+        serialized_invoices = self._iter_items(invoices)
+        if not serialized_invoices:
+            return
+        connection = self._connection
+        transaction_factory = getattr(connection, "transaction", None)
+        if callable(transaction_factory):
+            with transaction_factory() as tx:
+                for invoice in serialized_invoices:
+                    self._update_invoice_etc_metadata(tx, invoice)
+        else:
+            for invoice in serialized_invoices:
+                self._update_invoice_etc_metadata(connection, invoice)
 
     def load_file_imports(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(
@@ -770,6 +821,41 @@ class PostgresCoreRepository:
             ),
         )
 
+    def _update_invoice_etc_metadata(self, connection: Any, invoice: dict[str, Any]) -> None:
+        invoice_id = self._text(invoice.get("id"))
+        if not invoice_id:
+            return
+        connection.execute(
+            """
+            update app.invoices
+            set etc_invoice_id = %s,
+                legacy_source_batch_id = coalesce(%s, legacy_source_batch_id),
+                workbench_visibility = %s,
+                status = %s,
+                tags = %s,
+                source_links = %s,
+                raw_payload = jsonb_set(
+                    coalesce(raw_payload, '{}'::jsonb),
+                    '{normalized_payload}',
+                    %s,
+                    true
+                ),
+                updated_at = now()
+            where legacy_mongo_id = %s or id::text = %s
+            """,
+            (
+                self._text(invoice.get("etc_invoice_id")),
+                self._text(invoice.get("source_batch_id") or invoice.get("legacy_source_batch_id")),
+                self._text(invoice.get("workbench_visibility")) or "visible",
+                self._text(invoice.get("status")) or InvoiceStatus.PENDING.value,
+                self._text_list(invoice.get("tags")),
+                _jsonb(invoice.get("source_links") if isinstance(invoice.get("source_links"), list) else []),
+                _jsonb(invoice),
+                invoice_id,
+                invoice_id,
+            ),
+        )
+
     def _save_transaction(self, connection: Any, transaction: dict[str, Any]) -> None:
         transaction_id = self._text(transaction.get("id"))
         if not transaction_id:
@@ -931,6 +1017,9 @@ class PostgresCoreRepository:
             tags=self._text_list(payload.get("tags") or row.get("tags")),
             source_links=list(payload.get("source_links") if isinstance(payload.get("source_links"), list) else row.get("source_links") or []),
             etc_invoice_id=self._text(payload.get("etc_invoice_id") or row.get("etc_invoice_id")),
+            etc_import_batch_id=self._text(payload.get("etc_import_batch_id") or row.get("etc_import_batch_id")),
+            etc_submission_batch_id=self._text(payload.get("etc_submission_batch_id") or row.get("etc_submission_batch_id")),
+            etc_submission_status=self._text(payload.get("etc_submission_status") or row.get("etc_submission_status")),
             workbench_visibility=self._text(payload.get("workbench_visibility") or row.get("workbench_visibility")) or "visible",
             status=InvoiceStatus(self._text(payload.get("status") or row.get("status")) or InvoiceStatus.PENDING.value),
         )

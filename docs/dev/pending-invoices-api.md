@@ -75,6 +75,16 @@
 - `input_invoices`
 - `oa`
 
+列表响应的 `summary.source_summary` 用于说明当前读模型中的流水方向边界：
+
+| 字段 | 说明 |
+| --- | --- |
+| `bank_transaction_rows` | 当前日期范围内的全部银行流水数，等于支出和收入之和。 |
+| `expense_rows` | 当前日期范围内进入待找发票支出侧口径的流水数。 |
+| `income_rows` | 当前日期范围内收入流水数；收入侧不进入待找发票支出工作台。 |
+| `current_direction_rows` | 当前 `direction` 的流水数。 |
+| `excluded_direction_rows` | 当前页面方向之外的流水数。 |
+
 `invoice_acquisition_status.code` 固定为：
 
 - `paid_invoiced`
@@ -283,7 +293,8 @@ GET /api/pending-invoices/export
 `read_model.pending_invoice_rows` 必须区分 fresh empty、missing scope 和 stale/dirty scope：
 
 - fresh empty：`200 OK`、`rows=[]`、`read_model_status=fresh`。
-- missing/stale：`202 Accepted`、`rows=[]`、`read_model_status=refreshing`，enqueue `pending_invoice.read_model.refresh`。
+- stale/dirty 但已有可用 SQL 行：`200 OK`，返回最近一次稳定行数据，`read_model_status=refreshing` 或 `stale`，由后台 worker 收敛新版本；读请求不得重复写 dirty scope/outbox。
+- missing 或 schema 不兼容：`202 Accepted`、`rows=[]`、`read_model_status=refreshing`，enqueue `pending_invoice.read_model.refresh`。
 - API 热路径不得因 read model miss/stale 同步扫描全量事实。
 
 实现阶段需要扩展 SQL query columns 和索引，至少覆盖 `status_code`、`seller_name`、`invoice_total`、`oa_applicant`、`project_name` 和筛选/排序需要的日期金额字段。
