@@ -16,6 +16,8 @@ export type BankDetailAccountsResponse = {
   totalBalance: string | null;
   balanceAccountCount: number;
   missingBalanceAccountCount: number;
+  readModelStatus?: "fresh" | "refreshing";
+  cacheStatus?: string | null;
 };
 
 export type BankDetailAccountsRequest = {
@@ -79,6 +81,8 @@ export type BankDetailTransactionsResponse = {
   };
   categoryCounts: BankTransactionCategoryCounts;
   tagDictionary?: BankTransactionTagDictionary;
+  readModelStatus?: "fresh" | "refreshing";
+  cacheStatus?: string | null;
 };
 
 export type BankDetailTransactionsRequest = {

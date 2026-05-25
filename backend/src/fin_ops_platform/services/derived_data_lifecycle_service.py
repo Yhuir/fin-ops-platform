@@ -37,6 +37,7 @@ DERIVED_DATA_DOMAINS = (
     "tax_offset_read_model",
     "tax_offset_month_cache",
     "pending_invoice_read_model",
+    "bank_detail_read_model",
     "search_cache",
     "oa_adapter_records_cache",
     "file_import_sessions",
@@ -77,6 +78,7 @@ class DerivedDataLifecycleService:
         "tax_offset_read_model": "invalidate",
         "tax_offset_month_cache": "clear",
         "pending_invoice_read_model": "invalidate",
+        "bank_detail_read_model": "invalidate",
         "search_cache": "clear",
         "oa_adapter_records_cache": "clear",
         "file_import_sessions": "ttl_cleanup",
@@ -95,6 +97,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "bank_import_confirmed": (
+            "bank_detail_read_model",
             "workbench_read_model",
             "workbench_matching_dirty_scopes",
             "cost_statistics_read_model",
@@ -144,6 +147,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "pair_relation_changed": (
+            "bank_detail_read_model",
             "workbench_read_model",
             "workbench_matching_dirty_scopes",
             "pending_invoice_read_model",
@@ -153,6 +157,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "exception_case_changed": (
+            "bank_detail_read_model",
             "workbench_read_model",
             "workbench_matching_dirty_scopes",
             "pending_invoice_read_model",
@@ -162,6 +167,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "bank_transaction_category_changed": (
+            "bank_detail_read_model",
             "workbench_read_model",
             "workbench_candidate_matches",
             "workbench_matching_dirty_scopes",
@@ -170,6 +176,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "pending_invoice_manual_invoice_confirmed": (
+            "bank_detail_read_model",
             "workbench_read_model",
             "workbench_matching_dirty_scopes",
             "pending_invoice_read_model",
@@ -179,6 +186,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "pending_invoice_attach_existing_invoice_confirmed": (
+            "bank_detail_read_model",
             "workbench_read_model",
             "workbench_matching_dirty_scopes",
             "pending_invoice_read_model",
@@ -218,6 +226,7 @@ class DerivedDataLifecycleService:
         ),
         "settings_reset_completed": (
             "oa_adapter_records_cache",
+            "bank_detail_read_model",
             "workbench_read_model",
             "workbench_candidate_matches",
             "workbench_matching_dirty_scopes",

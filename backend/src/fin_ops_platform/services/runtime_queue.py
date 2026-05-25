@@ -13,6 +13,7 @@ DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES = (
     "workbench.read_model.refresh",
     "search.read_model.refresh",
     "pending_invoice.read_model.refresh",
+    "bank_detail.read_model.refresh",
     "input_invoice_usage.read_model.refresh",
     "output_invoice_collection.read_model.refresh",
     "cost_statistics.read_model.refresh",
@@ -501,15 +502,16 @@ class RuntimeQueueRepository:
         event_id: str,
         worker_id: str,
         event_types: Iterable[str] | None = None,
+        lock_timeout_seconds: int = 300,
     ) -> RuntimeQueueEvent | None:
         event_type_list = list(event_types or [])
         event_type_filter = ""
         params: tuple[Any, ...]
         if event_type_list:
             event_type_filter = "and event_type = any(%s)"
-            params = (worker_id, event_id, event_type_list)
+            params = (worker_id, event_id, lock_timeout_seconds, event_type_list)
         else:
-            params = (worker_id, event_id)
+            params = (worker_id, event_id, lock_timeout_seconds)
 
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one(
@@ -522,8 +524,14 @@ class RuntimeQueueRepository:
                     updated_at = now(),
                     attempts = attempts + 1
                 where id = %s
-                  and status = 'pending'
-                  and available_at <= now()
+                  and (
+                      (status = 'pending' and available_at <= now())
+                      or (
+                          status = 'processing'
+                          and available_at <= now()
+                          and locked_at < now() - (%s * interval '1 second')
+                      )
+                  )
                   {event_type_filter}
                 returning
                     id::text as event_id,

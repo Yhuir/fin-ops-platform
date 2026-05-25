@@ -66,6 +66,7 @@ RABBITMQ_SHADOW_PUBLISH=false
 ```
 
 `FIN_OPS_QUEUE_BACKEND` 默认 `postgres`，只允许 `postgres|rabbitmq`。设置为 `rabbitmq` 后，worker 改为 RabbitMQ consumer 模式，但收到消息后仍必须回 PostgreSQL 用 `event_id` claim `job.outbox_events`。RabbitMQ 消息体不得携带 read model payload、页面 snapshot 或任何业务事实。
+RabbitMQ 只是低延迟唤醒层，不是唯一正确性来源；consumer idle heartbeat 会低频调用同一套 PostgreSQL claim 逻辑，接管超时 `processing` 事件并处理已在 PostgreSQL 中待执行的事件。这样 RabbitMQ 消息丢失、旧 consumer 崩溃或 dispatcher 短暂 publish 失败时，read model 仍由 PostgreSQL durable queue 收敛。
 
 RabbitMQ 拓扑通过显式 CLI 创建，应用启动不会偷偷声明生产资源：
 
@@ -84,7 +85,7 @@ python3 -m fin_ops_platform.app.rabbitmq_topology --apply
 标准拓扑覆盖所有已迁入 RabbitMQ 的 runtime event。队列名称默认由 `RABBITMQ_QUEUE_PREFIX` 加 event type 生成，例如：
 
 - exchange：`finops.events`，`topic`，durable。
-- queue：`finops.workbench.read_model.refresh`、`finops.search.read_model.refresh`、`finops.pending_invoice.read_model.refresh`、`finops.cost_statistics.read_model.refresh`、`finops.tax_offset.read_model.refresh`、`finops.oa.sync`、`finops.file_object.gridfs_migration`、`finops.import.process.requested`，durable。
+- queue：`finops.workbench.read_model.refresh`、`finops.search.read_model.refresh`、`finops.pending_invoice.read_model.refresh`、`finops.bank_detail.read_model.refresh`、`finops.cost_statistics.read_model.refresh`、`finops.tax_offset.read_model.refresh`、`finops.oa.sync`、`finops.file_object.gridfs_migration`、`finops.import.process.requested`，durable。
 - routing key：对应 event type。
 - DLX：`finops.events.dlx`。
 - DLQ：每个 queue 对应 `<queue>.dlq`。
@@ -118,7 +119,7 @@ PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.app.rabbitmq_dispatcher --shadow-publish --check
 ```
 
-consumer 模式使用同一个 worker 入口。切到 `FIN_OPS_QUEUE_BACKEND=rabbitmq` 后，worker 不再 polling claim，而是从 RabbitMQ 收到 envelope，再回 PostgreSQL claim event：
+consumer 模式使用同一个 worker 入口。切到 `FIN_OPS_QUEUE_BACKEND=rabbitmq` 后，worker 主要从 RabbitMQ 收到 envelope，再回 PostgreSQL claim event；同时会按 heartbeat 间隔低频执行 PostgreSQL queue drain，用于接管超时 `processing` event 和恢复未被 RabbitMQ 唤醒的 pending event：
 
 ```bash
 FIN_OPS_QUEUE_BACKEND=rabbitmq \
@@ -129,6 +130,23 @@ python3 -m fin_ops_platform.app.worker \
   --enable-workbench-read-model-refresh \
   --worker-kind workbench-read-model \
   --event-type workbench.read_model.refresh \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 60 \
+  --statement-timeout-seconds 30 \
+  --max-attempts 5
+```
+
+银行明细 SQL read model worker：
+
+```bash
+FIN_OPS_QUEUE_BACKEND=rabbitmq \
+FIN_OPS_POSTGRES_DATABASE_URL=postgresql://fin_ops_worker:***@postgres.internal:5432/fin_ops \
+RABBITMQ_URL=amqps://finops_worker:***@rabbitmq.internal:5671/%2Ffinops \
+PYTHONPATH=backend/src \
+python3 -m fin_ops_platform.app.worker \
+  --enable-bank-detail-read-model-refresh \
+  --worker-kind bank-detail-read-model \
+  --event-type bank_detail.read_model.refresh \
   --lock-timeout-seconds 300 \
   --task-timeout-seconds 60 \
   --statement-timeout-seconds 30 \

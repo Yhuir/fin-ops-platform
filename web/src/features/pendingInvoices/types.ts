@@ -189,6 +189,14 @@ export type PendingInvoiceOaZone = {
   summaries: PendingInvoiceOaSummary[];
 };
 
+export type PendingInvoiceSourceSummary = {
+  bankTransactionRows: number;
+  expenseRows: number;
+  incomeRows: number;
+  currentDirectionRows: number;
+  excludedDirectionRows: number;
+};
+
 export type PendingInvoiceRow = {
   id: string;
   bankTransaction: PendingInvoiceBankTransaction;
@@ -214,6 +222,7 @@ export type PendingInvoiceRowsResponse = {
     totalRows: number;
     missingInvoiceRows: number;
     createInvoiceAvailableRows: number;
+    sourceSummary?: PendingInvoiceSourceSummary;
   };
   readModelStatus: PendingInvoiceReadModelStatus;
   tagDictionary?: BankTransactionTagDictionary;

@@ -39,6 +39,9 @@ EXPECTED_MIGRATION_FILES = [
     "0025_pending_invoice_runtime_grants.sql",
     "0026_invoice_usage_collection_read_models.sql",
     "0027_invoice_usage_collection_runtime_grants.sql",
+    "0028_workbench_reconciliation_decisions.sql",
+    "0029_workbench_reconciliation_runtime_grants.sql",
+    "0030_bank_detail_read_model.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -56,9 +59,12 @@ TEST_TABLES = (
     "read_model.workbench_summary",
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
+    "read_model.workbench_reconciliation_decisions",
     "read_model.search_index_rows",
     "read_model.pending_invoice_rows",
     "read_model.pending_invoice_scopes",
+    "read_model.bank_detail_rows",
+    "read_model.bank_detail_scopes",
     "read_model.input_invoice_usage_rows",
     "read_model.input_invoice_usage_scopes",
     "read_model.output_invoice_collection_rows",

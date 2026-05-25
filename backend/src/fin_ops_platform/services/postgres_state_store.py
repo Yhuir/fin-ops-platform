@@ -629,6 +629,12 @@ class PostgresStateStore:
         return self._sql_read_model_repository
 
     @property
+    def workbench_sql_projection_builder(self) -> Any:
+        from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
+
+        return WorkbenchSqlProjectionBuilder(connection=self._connection, read_model_repository=self._read_model_repository)
+
+    @property
     def cost_statistics_sql_read_repository(self) -> PostgresReadModelRepository:
         return self._sql_read_model_repository
 
@@ -642,6 +648,10 @@ class PostgresStateStore:
 
     @property
     def pending_invoice_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._sql_read_model_repository
+
+    @property
+    def bank_detail_sql_read_repository(self) -> PostgresReadModelRepository:
         return self._sql_read_model_repository
 
     @property
@@ -666,6 +676,15 @@ class PostgresStateStore:
 
     def list_import_files_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_import_files_page(**kwargs)
+
+    def list_submitted_etc_invoices(self) -> list[Any]:
+        return self._core_repository.list_submitted_etc_invoices()
+
+    def save_invoices(self, invoices: list[Any], *, mark_read_models_dirty: bool = True) -> None:
+        self._core_repository.save_invoices(invoices, mark_read_models_dirty=mark_read_models_dirty)
+
+    def save_invoice_etc_metadata(self, invoices: list[Any]) -> None:
+        self._core_repository.save_invoice_etc_metadata(invoices)
 
     def load(self) -> dict[str, Any]:
         return self._load_snapshot_payload(include_import_facts=True)

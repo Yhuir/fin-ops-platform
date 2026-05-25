@@ -119,7 +119,18 @@ describe("pending invoices and tag settings API mapping", () => {
         },
       ],
       pagination: { page: 2, page_size: 25, total: 51 },
-      summary: { total_rows: 51, missing_invoice_rows: 8, create_invoice_available_rows: 7 },
+      summary: {
+        total_rows: 51,
+        missing_invoice_rows: 8,
+        create_invoice_available_rows: 7,
+        source_summary: {
+          bank_transaction_rows: 431,
+          expense_rows: 356,
+          income_rows: 75,
+          current_direction_rows: 356,
+          excluded_direction_rows: 75,
+        },
+      },
       read_model_status: "fresh",
       tag_dictionary: {
         version: 9,
@@ -158,6 +169,13 @@ describe("pending invoices and tag settings API mapping", () => {
     expect(url.searchParams.get("sort_field")).toBe("invoice_total");
     expect(url.searchParams.get("sort_direction")).toBe("asc");
     expect(JSON.parse(url.searchParams.get("filters") ?? "[]")).toEqual(filters);
+    expect(payload.summary.sourceSummary).toEqual({
+      bankTransactionRows: 431,
+      expenseRows: 356,
+      incomeRows: 75,
+      currentDirectionRows: 356,
+      excludedDirectionRows: 75,
+    });
     expect(payload.rows[0]).toMatchObject({
       id: "txn_001",
       bankTransaction: {
@@ -190,7 +208,18 @@ describe("pending invoices and tag settings API mapping", () => {
       },
     });
     expect(payload.pagination).toEqual({ page: 2, pageSize: 25, total: 51 });
-    expect(payload.summary).toEqual({ totalRows: 51, missingInvoiceRows: 8, createInvoiceAvailableRows: 7 });
+    expect(payload.summary).toEqual({
+      totalRows: 51,
+      missingInvoiceRows: 8,
+      createInvoiceAvailableRows: 7,
+      sourceSummary: {
+        bankTransactionRows: 431,
+        expenseRows: 356,
+        incomeRows: 75,
+        currentDirectionRows: 356,
+        excludedDirectionRows: 75,
+      },
+    });
     expect(payload.readModelStatus).toBe("fresh");
     expect(payload.tagDictionary?.version).toBe(9);
   });

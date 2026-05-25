@@ -52,6 +52,7 @@ class FakeChannel:
         self.nacked: list[tuple[object, bool]] = []
         self.rejected: list[tuple[object, bool]] = []
         self.confirmed = False
+        self.is_open = True
 
     def confirm_delivery(self) -> None:
         self.confirmed = True
@@ -88,6 +89,29 @@ class FakeChannel:
         self.calls.append(("start_consuming", {}))
 
 
+class ClosedFakeChannel(FakeChannel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.is_open = False
+
+    def basic_publish(self, **kwargs):
+        raise RuntimeError("Channel is closed.")
+
+
+class FakeConnection:
+    def __init__(self, channel: FakeChannel) -> None:
+        self.channel_obj = channel
+        self.closed = False
+        self.is_open = True
+
+    def channel(self) -> FakeChannel:
+        return self.channel_obj
+
+    def close(self) -> None:
+        self.closed = True
+        self.is_open = False
+
+
 class FakeQueue:
     def __init__(self) -> None:
         self.events = [event()]
@@ -95,6 +119,7 @@ class FakeQueue:
         self.failed: list[tuple[str, str]] = []
         self.claim_by_id_result = event(status="processing", attempts=1)
         self.current_event: RuntimeQueueEvent | None = None
+        self.claim_by_id_calls: list[dict[str, object]] = []
 
     def claim_publishable_events(self, *, publisher_id, event_types, lock_timeout_seconds, limit):
         return list(self.events)
@@ -107,7 +132,15 @@ class FakeQueue:
         self.failed.append((event_id, error))
         return True
 
-    def claim_event_by_id(self, *, event_id, worker_id, event_types):
+    def claim_event_by_id(self, *, event_id, worker_id, event_types, lock_timeout_seconds=300):
+        self.claim_by_id_calls.append(
+            {
+                "event_id": event_id,
+                "worker_id": worker_id,
+                "event_types": list(event_types),
+                "lock_timeout_seconds": lock_timeout_seconds,
+            }
+        )
         return self.claim_by_id_result
 
     def get_event(self, event_id):
@@ -118,6 +151,8 @@ class FakeWorker:
     def __init__(self) -> None:
         self.processed: list[str] = []
         self.heartbeats: list[tuple[str, dict[str, object]]] = []
+        self.run_once_calls = 0
+        self.run_once_result = RuntimeWorkerResult.IDLE
 
     def process_claimed_event(self, claimed):
         self.processed.append(claimed.event_id)
@@ -125,6 +160,10 @@ class FakeWorker:
 
     def record_heartbeat(self, status, payload):
         self.heartbeats.append((status, payload))
+
+    def run_once(self):
+        self.run_once_calls += 1
+        return self.run_once_result
 
 
 class RabbitMqRuntimeTests(unittest.TestCase):
@@ -159,6 +198,22 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(call["mandatory"], True)
         self.assertIn(b'"event_id":"event-1"', call["body"])
 
+    def test_publisher_reopens_known_closed_channel_before_publish(self) -> None:
+        settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
+        closed_channel = ClosedFakeChannel()
+        reopened_channel = FakeChannel()
+        publisher = RabbitMqPublisher(settings, channel=closed_channel)
+
+        with patch(
+            "fin_ops_platform.services.rabbitmq_runtime._open_blocking_connection",
+            return_value=FakeConnection(reopened_channel),
+        ):
+            result = publisher.publish(event().to_envelope())
+
+        self.assertEqual(result.message_id, "event-1")
+        self.assertEqual(len(reopened_channel.calls), 1)
+        self.assertEqual(closed_channel.calls, [])
+
     def test_topology_manager_declares_durable_exchange_queue_and_dlq(self) -> None:
         settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
         channel = FakeChannel()
@@ -174,6 +229,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         declared_queues = [kwargs["queue"] for name, kwargs in channel.calls if name == "queue_declare"]
         self.assertIn("finops.workbench.read_model.refresh", declared_queues)
         self.assertIn("finops.search.read_model.refresh", declared_queues)
+        self.assertIn("finops.bank_detail.read_model.refresh", declared_queues)
         self.assertIn("finops.oa.sync.dlq", declared_queues)
         self.assertIn("finops.import.process.requested", declared_queues)
 
@@ -251,6 +307,42 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(worker.processed, ["event-1"])
         self.assertEqual(channel.acked, [123])
         self.assertEqual(channel.nacked, [])
+        self.assertEqual(queue.claim_by_id_calls[0]["lock_timeout_seconds"], 300)
+
+    def test_consumer_passes_lock_timeout_for_stale_processing_reclaim(self) -> None:
+        queue = FakeQueue()
+        channel = FakeChannel()
+        settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
+        consumer = RabbitMqConsumer(
+            settings=settings,
+            queue_repository=queue,
+            worker=FakeWorker(),
+            worker_id="worker-1",
+            event_types=["workbench.read_model.refresh"],
+            lock_timeout_seconds=45,
+        )
+
+        consumer.process_envelope(event().to_envelope(), channel=channel, delivery_tag=789)
+
+        self.assertEqual(queue.claim_by_id_calls[0]["lock_timeout_seconds"], 45)
+
+    def test_consumer_can_drain_postgres_queue_when_no_rabbitmq_message_arrives(self) -> None:
+        worker = FakeWorker()
+        worker.run_once_result = RuntimeWorkerResult.PROCESSED
+        settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
+        consumer = RabbitMqConsumer(
+            settings=settings,
+            queue_repository=FakeQueue(),
+            worker=worker,
+            worker_id="worker-1",
+            event_types=["workbench.read_model.refresh"],
+            lock_timeout_seconds=45,
+        )
+
+        result = consumer.drain_postgres_queue_once()
+
+        self.assertEqual(result, RuntimeWorkerResult.PROCESSED)
+        self.assertEqual(worker.run_once_calls, 1)
 
     def test_consumer_records_idle_heartbeat_for_rabbitmq_transport(self) -> None:
         worker = FakeWorker()

@@ -156,7 +156,18 @@ function installPendingInvoiceFetch() {
         filter: url.searchParams.get("filter") ?? "all",
         rows,
         pagination: { page: Number(url.searchParams.get("page") ?? 1), page_size: 50, total: rows.length },
-        summary: { total_rows: rows.length, missing_invoice_rows: 2, create_invoice_available_rows: 1 },
+        summary: {
+          total_rows: rows.length,
+          missing_invoice_rows: 2,
+          create_invoice_available_rows: 1,
+          source_summary: {
+            bank_transaction_rows: 431,
+            expense_rows: 356,
+            income_rows: 75,
+            current_direction_rows: 356,
+            excluded_direction_rows: 75,
+          },
+        },
         read_model_status: "fresh",
         tag_dictionary: { version: 1, tags: [] },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -334,6 +345,10 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "项目 / 详情" })).toBeInTheDocument();
 
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
+    expect(within(page).getByText("全部流水 431")).toBeInTheDocument();
+    expect(within(page).getByText("支出流水 356")).toBeInTheDocument();
+    expect(within(page).getByText("收入流水 75")).toBeInTheDocument();
+
     expect(within(page).getByText("2026-04-19 10:52:02")).toBeInTheDocument();
     expect(within(page).getByText("建行 8106")).toBeInTheDocument();
     expect(within(page).queryByText("2026-04-19T10:52:02+08:00")).not.toBeInTheDocument();

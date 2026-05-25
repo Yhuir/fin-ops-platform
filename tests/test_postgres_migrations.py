@@ -41,6 +41,8 @@ EXPECTED_MIGRATIONS = [
     "0026_invoice_usage_collection_read_models.sql",
     "0027_invoice_usage_collection_runtime_grants.sql",
     "0028_workbench_reconciliation_decisions.sql",
+    "0029_workbench_reconciliation_runtime_grants.sql",
+    "0030_bank_detail_read_model.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -110,6 +112,8 @@ EXPECTED_TABLES = [
     "read_model.input_invoice_usage_scopes",
     "read_model.output_invoice_collection_rows",
     "read_model.output_invoice_collection_scopes",
+    "read_model.bank_detail_rows",
+    "read_model.bank_detail_scopes",
     "read_model.cost_statistics_read_models",
     "read_model.cost_statistics_rows",
     "read_model.tax_offset_read_models",
@@ -132,7 +136,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 29)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 31)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -339,6 +343,9 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_migrator",
             "grant select, insert, update, delete on read_model.input_invoice_usage_rows to fin_ops_app_runtime",
             "grant select, insert, update, delete on read_model.output_invoice_collection_rows to fin_ops_app_runtime",
+            "grant select, insert, update, delete on read_model.workbench_reconciliation_decisions to fin_ops_app_runtime",
+            "grant select, insert, update on job.workbench_matching_dirty_scopes to fin_ops_app_runtime",
+            "grant select, insert, update on app.matching_runs to fin_ops_app_runtime",
             "create extension if not exists pg_stat_statements",
             "create table if not exists read_model.workbench_summary",
             "workbench_summary_scope_key_uidx",
@@ -354,8 +361,64 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "workbench_reconciliation_decisions_row_ids_gin",
             "workbench_matching_dirty_scopes_claim_idx",
             "matching_runs_tenant_request_id_uidx",
+            "bank_detail_rows_transaction_uidx",
+            "bank_detail_rows_month_time_idx",
+            "bank_detail_rows_month_account_time_idx",
+            "bank_detail_rows_category_idx",
+            "bank_detail_rows_search_trgm",
+            "bank_detail_scopes_tenant_scope_uidx",
+            "bank_detail_scopes_status_idx",
+            "grant select on read_model.bank_detail_rows to fin_ops_api",
+            "grant select on read_model.bank_detail_scopes to fin_ops_api",
+            "grant select, insert, update, delete on read_model.bank_detail_rows to fin_ops_worker",
+            "grant select, insert, update, delete on read_model.bank_detail_scopes to fin_ops_worker",
         ):
             self.assertIn(required, sql)
+
+    def test_bank_detail_read_model_schema_is_native_sql_projection(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        rows_body = re.search(
+            r"create table if not exists read_model\.bank_detail_rows\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        scopes_body = re.search(
+            r"create table if not exists read_model\.bank_detail_scopes\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        self.assertIsNotNone(rows_body)
+        self.assertIsNotNone(scopes_body)
+        for required in (
+            "transaction_id text not null",
+            "scope_key text not null",
+            "scope_month date not null",
+            "account_key text not null",
+            "trade_time_sort timestamptz not null",
+            "effective_category_code text",
+            "oa_relation_tag text",
+            "invoice_relation_tag text",
+            "relation_tags text[] not null default '{}'::text[]",
+            "search_text text not null default ''",
+            "schema_version integer not null",
+            "source_versions jsonb not null default '{}'::jsonb",
+            "payload jsonb not null default '{}'::jsonb",
+            "raw_payload jsonb not null default '{}'::jsonb",
+        ):
+            self.assertIn(required, rows_body.group(1))
+        for required in (
+            "tenant_id text not null default 'default'",
+            "scope_type text not null default 'bank_detail'",
+            "scope_key text not null",
+            "schema_version integer not null",
+            "status text not null default 'fresh'",
+            "row_count integer not null default 0",
+            "source_version bigint",
+            "generated_at timestamptz",
+            "last_error text",
+        ):
+            self.assertIn(required, scopes_body.group(1))
+        self.assertIn("status in ('fresh', 'pending', 'processing', 'stale', 'failed')", sql)
 
     def test_workbench_reconciliation_decision_and_dirty_queue_schema(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

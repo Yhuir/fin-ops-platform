@@ -869,6 +869,7 @@ class MongoOAAdapter(OAAdapter):
         expense_type = self._resolve_expense_type(data, reason)
         expense_content = reason
         etc_metadata = detect_etc_batch_metadata(data)
+        completed_at = self._datetime_string(document.get("modifiedTime"))
         return OAApplicationRecord(
             id=f"oa-pay-{external_id}",
             month=self._derive_month(data, document),
@@ -894,6 +895,7 @@ class MongoOAAdapter(OAAdapter):
                 "OA单号": self._payment_form_no(data, document),
                 "表单ID": self._settings.payment_request_form_id,
                 "申请日期": self._first_text(data, "applicationDate", "ApplicationDate"),
+                "审批完成时间": completed_at or "—",
                 "收款账号": self._first_text(data, "payeeAccount"),
                 "开户行": self._first_text(data, "bank"),
                 "付款方式": self._first_text(data, "paymentMethod"),
@@ -1065,6 +1067,7 @@ class MongoOAAdapter(OAAdapter):
             "OA单号": self._expense_form_no(data, document),
             "表单ID": self._settings.expense_claim_form_id,
             "申请日期": self._first_text(data, "ApplicationDate", "applicationDate"),
+            "审批完成时间": self._datetime_string(document.get("modifiedTime")) or "—",
             "流程状态": self._form_status(data),
             "明细数量": str(len(expense_items)),
             "明细金额合计": self._format_decimal(detail_sum) or "—",

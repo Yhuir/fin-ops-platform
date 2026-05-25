@@ -43,6 +43,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
+                "bank_detail_read_model",
                 "workbench_read_model",
                 "workbench_matching_dirty_scopes",
                 "cost_statistics_read_model",
@@ -60,6 +61,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
+                "bank_detail_read_model",
                 "workbench_read_model",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
@@ -99,6 +101,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
+                "bank_detail_read_model",
                 "workbench_read_model",
                 "workbench_matching_dirty_scopes",
                 "pending_invoice_read_model",
@@ -243,6 +246,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "pending_invoice_read_model",
+                "bank_detail_read_model",
                 "search_cache",
                 "oa_adapter_records_cache",
                 "file_import_sessions",

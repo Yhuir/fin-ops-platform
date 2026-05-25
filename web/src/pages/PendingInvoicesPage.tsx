@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
@@ -39,6 +40,7 @@ import type {
   PendingInvoiceRow,
   PendingInvoiceSortDirection,
   PendingInvoiceSortField,
+  PendingInvoiceSourceSummary,
 } from "../features/pendingInvoices/types";
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -95,6 +97,7 @@ export default function PendingInvoicesPage() {
   const [filter, setFilter] = useState<PendingInvoiceFilter>("all");
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [sourceSummary, setSourceSummary] = useState<PendingInvoiceSourceSummary | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [keyword, setKeyword] = useState("");
@@ -131,6 +134,7 @@ export default function PendingInvoicesPage() {
       .then((payload) => {
         setRows(payload.rows);
         setTotal(payload.pagination.total);
+        setSourceSummary(payload.summary.sourceSummary ?? null);
         setReadModelStatus(payload.readModelStatus);
         const version = payload.tagDictionary?.version;
         if (typeof version === "number" && version > 0) {
@@ -336,6 +340,13 @@ export default function PendingInvoicesPage() {
                 ))}
               </Menu>
             </Stack>
+            {sourceSummary ? (
+              <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap" aria-label="待找发票流水范围">
+                <Chip size="small" color="primary" variant="outlined" label={`全部流水 ${sourceSummary.bankTransactionRows}`} />
+                <Chip size="small" color="success" variant="outlined" label={`支出流水 ${sourceSummary.expenseRows}`} />
+                <Chip size="small" variant="outlined" label={`收入流水 ${sourceSummary.incomeRows}`} />
+              </Stack>
+            ) : null}
             <Stack direction="row" spacing={1} alignItems="center">
               <TextField
                 size="small"

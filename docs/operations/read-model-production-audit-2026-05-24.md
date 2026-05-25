@@ -59,7 +59,7 @@ EXPLAIN 摘要：
 - `pending_invoice_rows` 是结构化分页 read model，worker scope 已细化为 `direction:filter:YYYY-MM`。
 - `cost_statistics_rows` 是成本统计行级 read model，API 从行表重建 `time_rows/project_rows/expense_type_rows`。
 - `tax_offset_items` 是税金抵扣 item 级 read model，API 从 item 表重建各类发票明细。
-- `/api/bank-details/transactions` 直接分页读 `app.bank_transactions`，当前不需要单独 read model；需要的是索引和分页，不是 RabbitMQ。
+- `/api/bank-details/transactions` 原审计时直接分页读 `app.bank_transactions`；2026-05-25 用户确认银行明细需要生产级独立 read model 后，该结论废止。生产热路径应走 `read_model.bank_detail_rows`，缺失/过期时由 `bank_detail.read_model.refresh` 异步刷新。
 
 不合格或需收口：
 
@@ -80,7 +80,7 @@ EXPLAIN 摘要：
 
 - 事实源：`job.outbox_events`、`job.read_model_dirty_scopes`。
 - 消息内容：只包含 envelope 的 `event_id/scope_key/source_version` 等小字段。
-- worker 消费：收到 RabbitMQ message 后必须回 PostgreSQL `claim_event_by_id()`，完成后先 PostgreSQL `ack_event()`，再 RabbitMQ ack。
+- worker 消费：收到 RabbitMQ message 后必须回 PostgreSQL `claim_event_by_id()`，完成后先 PostgreSQL `ack_event()`，再 RabbitMQ ack；consumer idle heartbeat 还会低频 drain PostgreSQL durable queue，避免 RabbitMQ 消息缺失导致 stale `processing` 事件长期卡住。
 
 不需要接 RabbitMQ 的场景：
 

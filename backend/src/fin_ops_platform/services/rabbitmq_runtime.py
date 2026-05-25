@@ -18,6 +18,7 @@ SUPPORTED_EVENT_TYPES = (
     "workbench.read_model.refresh",
     "search.read_model.refresh",
     "pending_invoice.read_model.refresh",
+    "bank_detail.read_model.refresh",
     "input_invoice_usage.read_model.refresh",
     "output_invoice_collection.read_model.refresh",
     "cost_statistics.read_model.refresh",
@@ -214,14 +215,19 @@ class RabbitMqPublisher:
             },
         )
         started_at = monotonic()
-        published = channel.basic_publish(
-            exchange=exchange,
-            routing_key=routing_key,
-            body=body,
-            properties=properties,
-            mandatory=True,
-        )
+        try:
+            published = channel.basic_publish(
+                exchange=exchange,
+                routing_key=routing_key,
+                body=body,
+                properties=properties,
+                mandatory=True,
+            )
+        except Exception:
+            self.close()
+            raise
         if published is False:
+            self.close()
             raise RabbitMqPublishError("RabbitMQ basic_publish returned false under publisher confirms.")
         return RabbitMqPublishResult(
             exchange=exchange,
@@ -231,6 +237,10 @@ class RabbitMqPublisher:
         )
 
     def _ensure_channel(self) -> Any:
+        if self._connection is not None and not _is_open(self._connection):
+            self.close()
+        if self._channel is not None and not _is_open(self._channel):
+            self.close()
         if self._channel is None:
             self._connection = _open_blocking_connection(self._settings)
             self._channel = self._connection.channel()
@@ -330,6 +340,7 @@ class RabbitMqConsumer:
             event_id=event_id,
             worker_id=self._worker_id,
             event_types=self._event_types,
+            lock_timeout_seconds=self._lock_timeout_seconds,
         )
         if event is None:
             current = self._queue.get_event(event_id)
@@ -367,8 +378,28 @@ class RabbitMqConsumer:
                 connection.process_data_events(time_limit=1.0)
                 now = monotonic()
                 if now >= next_heartbeat_at:
-                    self._record_consumer_heartbeat("idle")
+                    drain_result = self.drain_postgres_queue_once()
+                    heartbeat_status = (
+                        "postgres_queue_processed"
+                        if drain_result == RuntimeWorkerResult.PROCESSED
+                        else "idle"
+                    )
+                    self._record_consumer_heartbeat(heartbeat_status)
                     next_heartbeat_at = now + heartbeat_interval_seconds
+
+    def drain_postgres_queue_once(self) -> RuntimeWorkerResult | str:
+        try:
+            return self._worker.run_once()
+        except Exception as exc:
+            self._record_consumer_heartbeat(
+                "postgres_queue_error",
+                {
+                    "transport": "rabbitmq",
+                    "event_types": list(self._event_types),
+                    "error": str(exc) or exc.__class__.__name__,
+                },
+            )
+            return "postgres_queue_error"
 
     def _record_consumer_heartbeat(self, status: str) -> None:
         record = getattr(self._worker, "record_heartbeat", None)
@@ -474,6 +505,16 @@ def _open_blocking_connection(settings: RuntimeQueueSettings) -> Any:
     parameters.heartbeat = settings.rabbitmq_heartbeat_seconds
     parameters.blocked_connection_timeout = settings.rabbitmq_blocked_connection_timeout_seconds
     return pika.BlockingConnection(parameters)
+
+
+def _is_open(candidate: Any) -> bool:
+    is_open = getattr(candidate, "is_open", None)
+    if isinstance(is_open, bool):
+        return is_open
+    is_closed = getattr(candidate, "is_closed", None)
+    if isinstance(is_closed, bool):
+        return not is_closed
+    return True
 
 
 class _blocking_connection:

@@ -9,11 +9,32 @@ from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError
 
 
+class FakeSqlProjectionBuilder:
+    def __init__(self) -> None:
+        self.rebuilt_scope_keys: list[str] = []
+
+    def rebuild_workbench_read_model_scope(self, scope_key: str) -> dict[str, object]:
+        self.rebuilt_scope_keys.append(scope_key)
+        return {
+            "scope_key": scope_key,
+            "base_scope_key": scope_key,
+            "row_count": 7,
+            "ignored_row_count": 0,
+        }
+
+
 class FakeStore:
-    def __init__(self, *, runtime_snapshots: dict[str, dict] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_snapshots: dict[str, dict] | None = None,
+        sql_projection_builder: FakeSqlProjectionBuilder | None = None,
+    ) -> None:
         self.runtime_snapshots = runtime_snapshots or {}
+        self.workbench_sql_projection_builder = sql_projection_builder
         self.runtime_loader_calls: list[str] = []
         self.full_snapshot_load_called = False
+        self.saved_workbench_read_models = 0
 
     def __getattr__(self, name: str):
         if name.startswith("load_"):
@@ -96,6 +117,9 @@ class FakeStore:
     def save_background_jobs(self, snapshot: dict) -> None:
         return None
 
+    def save_workbench_read_models(self, snapshot: dict, *, changed_scope_keys: set[str] | None = None) -> None:
+        self.saved_workbench_read_models += 1
+
     def load_app_health_alerts(self) -> dict:
         return {}
 
@@ -155,6 +179,19 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertEqual(active_relations[0]["row_ids"], ["txn-1", "invoice-1"])
         self.assertEqual(active_relations[0]["relation_mode"], "manual_confirmed")
         self.assertEqual(active_relations[0]["month_scope"], "2026-05")
+
+    def test_postgres_runtime_workbench_rebuild_uses_sql_projection_not_legacy_snapshot(self) -> None:
+        projection_builder = FakeSqlProjectionBuilder()
+        store = FakeStore(sql_projection_builder=projection_builder)
+
+        with TemporaryDirectory() as temp_dir, patch("fin_ops_platform.app.server.build_state_store", return_value=store):
+            app = build_application(data_dir=Path(temp_dir))
+            result = app.rebuild_workbench_read_model_scope("2026-02")
+            app._rebuild_workbench_read_models_in_background(version=0, scope_keys=["2026-03"])
+
+        self.assertEqual(result["projection"], "sql")
+        self.assertEqual(projection_builder.rebuilt_scope_keys, ["2026-02", "2026-03"])
+        self.assertEqual(store.saved_workbench_read_models, 0)
 
 
 if __name__ == "__main__":

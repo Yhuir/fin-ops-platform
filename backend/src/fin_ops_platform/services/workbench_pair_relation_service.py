@@ -250,6 +250,59 @@ class WorkbenchPairRelationService:
         )
         return deepcopy(normalized_relation), history
 
+    def update_relation_metadata_for_case_id(
+        self,
+        case_id: str,
+        *,
+        amount_check: dict[str, Any] | None = None,
+        special_metadata: dict[str, Any] | None = None,
+        display_tags: list[str] | None = None,
+        updated_by: str,
+        note: str | None = None,
+        updated_at: str | None = None,
+        operation_type: str = "update_pair_relation_metadata",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        active_relation = self.get_active_relation_by_case_id(case_id)
+        if not isinstance(active_relation, dict):
+            raise KeyError("workbench_pair_relation_not_found")
+        timestamp = updated_at or self._timestamp()
+        before_relation = deepcopy(active_relation)
+        merged_metadata = {
+            **deepcopy(active_relation.get("special_metadata") if isinstance(active_relation.get("special_metadata"), dict) else {}),
+            **deepcopy(special_metadata if isinstance(special_metadata, dict) else {}),
+        }
+        merged_display_tags = [
+            str(tag).strip()
+            for tag in [
+                *list(active_relation.get("display_tags") or []),
+                *list(display_tags or []),
+            ]
+            if str(tag).strip()
+        ]
+        merged_display_tags = list(dict.fromkeys(merged_display_tags))
+        normalized_relation = self._normalize_relation(
+            {
+                **deepcopy(active_relation),
+                "amount_check": deepcopy(amount_check) if isinstance(amount_check, dict) else deepcopy(active_relation.get("amount_check") or {}),
+                "special_metadata": merged_metadata,
+                "display_tags": merged_display_tags,
+                "updated_at": timestamp,
+            },
+            fallback_case_id=str(active_relation.get("case_id") or ""),
+        )
+        self._pair_relations[str(normalized_relation["case_id"])] = normalized_relation
+        history = self.record_history(
+            operation_type=operation_type,
+            before_relations=[before_relation],
+            after_relations=[normalized_relation],
+            affected_row_ids=list(normalized_relation.get("row_ids") or []),
+            created_by=updated_by,
+            note=note,
+            amount_check=dict(normalized_relation.get("amount_check") or {}),
+            created_at=timestamp,
+        )
+        return deepcopy(normalized_relation), history
+
     def clear_special_metadata_for_row_ids(
         self,
         row_ids: list[str],

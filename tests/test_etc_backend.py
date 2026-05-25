@@ -35,6 +35,10 @@ from fin_ops_platform.services.historical_etc_repair_service import (
     HistoricalEtcRepairBatchSpec,
     HistoricalEtcRepairService,
 )
+from fin_ops_platform.services.existing_etc_batch_link_service import (
+    ExistingEtcBatchLinkService,
+    ExistingEtcBatchLinkSpec,
+)
 from unittest.mock import patch
 
 
@@ -3637,6 +3641,228 @@ class EtcApiTests(unittest.TestCase):
         assert relation is not None
         self.assertEqual(relation["relation_mode"], "etc_batch_invoice_link")
         self.assertEqual(persisted_state["ETC-HIST-TEST"]["status"], "ok")
+
+    def test_existing_etc_batch_link_extends_active_oa_bank_relation_and_renders_summary(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            manual_preview = app._import_service.preview_import(
+                batch_type=BatchType.INPUT_INVOICE,
+                source_name="manual-etc.xlsx",
+                imported_by="finance",
+                rows=[
+                    {
+                        "digital_invoice_no": "ETC001",
+                        "invoice_no": "ETC001",
+                        "counterparty_name": "云南高速公路联网收费管理有限公司",
+                        "seller_name": "云南高速公路联网收费管理有限公司",
+                        "seller_tax_no": "915300007194052520",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052521",
+                        "amount": "12.68",
+                        "total_with_tax": "13.07",
+                        "tax_amount": "0.39",
+                        "invoice_date": "2026-02-27",
+                    },
+                    {
+                        "digital_invoice_no": "ETC002",
+                        "invoice_no": "ETC002",
+                        "counterparty_name": "云南高速公路联网收费管理有限公司",
+                        "seller_name": "云南高速公路联网收费管理有限公司",
+                        "seller_tax_no": "915300007194052520",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052521",
+                        "amount": "12.68",
+                        "total_with_tax": "13.07",
+                        "tax_amount": "0.39",
+                        "invoice_date": "2026-02-28",
+                    },
+                ],
+            )
+            app._import_service.confirm_import(manual_preview.id)
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-EXISTING-ETC",
+                row_ids=["txn-existing-etc", "oa-existing-etc"],
+                row_types=["bank", "oa"],
+                relation_mode="manual_confirmed",
+                created_by="system",
+                month_scope="2026-02",
+                note="existing OA-bank relation",
+                amount_check={
+                    "status": "matched",
+                    "direction": "expense",
+                    "oa_amount": "30.00",
+                    "bank_amount": "30.00",
+                    "amount_delta": "0.00",
+                },
+            )
+            service = ExistingEtcBatchLinkService(
+                etc_service=app._etc_service,
+                import_service=app._import_service,
+                pair_relation_service=app._workbench_pair_relation_service,
+                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
+                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
+                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
+                    changed_case_ids=case_ids,
+                ),
+                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
+                persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
+            )
+
+            result = service.link_existing_invoices(
+                ExistingEtcBatchLinkSpec(
+                    label="测试 ETC 批次",
+                    case_id="CASE-EXISTING-ETC",
+                    external_batch_id="ETC-EXISTING-2026-02",
+                    oa_row_id="oa-existing-etc",
+                    bank_row_id="txn-existing-etc",
+                    oa_amount=Decimal("30.00"),
+                    bank_amount=Decimal("30.00"),
+                    invoice_numbers=("ETC001", "ETC002"),
+                    note="把现有 ETC 发票补充到已配对 OA-银行批次",
+                )
+            )
+            relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-EXISTING-ETC")
+            invoices = {invoice.invoice_no: invoice for invoice in app._import_service.list_invoices()}
+            raw_payload = {
+                "month": "2026-02",
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 1,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 1,
+                    "exception_count": 0,
+                },
+                "paired": {"oa": [], "bank": [], "invoice": []},
+                "open": {
+                    "oa": [
+                        {
+                            "id": "oa-existing-etc",
+                            "type": "oa",
+                            "case_id": "",
+                            "applicant": "张三",
+                            "apply_type": "支付申请",
+                            "amount": "30.00",
+                            "counterparty_name": "云南高速通行费",
+                            "reason": "ETC通行费",
+                            "oa_bank_relation": {"code": "pending_match", "label": "待找流水", "tone": "warn"},
+                            "available_actions": ["detail"],
+                        }
+                    ],
+                    "bank": [
+                        {
+                            "id": "txn-existing-etc",
+                            "type": "bank",
+                            "trade_time": "2026-02-15 09:04:01",
+                            "direction": "支出",
+                            "debit_amount": "30.00",
+                            "credit_amount": "",
+                            "counterparty_name": "批量账务集中处理",
+                            "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+                            "available_actions": ["detail"],
+                        }
+                    ],
+                    "invoice": [],
+                },
+            }
+            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+                payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
+            invoice_rows = [
+                row
+                for group in payload["paired"]["groups"]
+                for row in group["invoice_rows"]
+            ]
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.invoice_count, 2)
+        self.assertEqual(result.invoice_total, Decimal("26.14"))
+        self.assertEqual(result.delta, Decimal("3.86"))
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["case_id"], "CASE-EXISTING-ETC")
+        self.assertEqual(relation["relation_mode"], "manual_confirmed")
+        self.assertEqual(relation["row_ids"], ["txn-existing-etc", "oa-existing-etc"])
+        self.assertEqual(relation["amount_check"]["status"], "mismatch")
+        self.assertEqual(relation["amount_check"]["invoice_total"], "26.14")
+        self.assertEqual(relation["amount_check"]["delta"], "3.86")
+        self.assertEqual(relation["amount_check"]["external_etc_batch_id"], "ETC-EXISTING-2026-02")
+        self.assertEqual(invoices["ETC001"].workbench_visibility, "hidden_after_etc_submission")
+        self.assertEqual(invoices["ETC001"].etc_submission_status, "submitted")
+        self.assertEqual(invoices["ETC002"].workbench_visibility, "hidden_after_etc_submission")
+        self.assertEqual(len(invoice_rows), 1)
+        self.assertEqual(invoice_rows[0]["source_kind"], "etc_invoice_summary")
+        self.assertEqual(invoice_rows[0]["seller_name"], "ETC发票 2 张")
+        self.assertEqual(invoice_rows[0]["total_with_tax"], "26.14")
+
+    def test_existing_etc_batch_link_is_idempotent_and_does_not_create_parallel_relation(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            manual_preview = app._import_service.preview_import(
+                batch_type=BatchType.INPUT_INVOICE,
+                source_name="manual-etc.xlsx",
+                imported_by="finance",
+                rows=[
+                    {
+                        "digital_invoice_no": "ETC001",
+                        "invoice_no": "ETC001",
+                        "counterparty_name": "云南高速公路联网收费管理有限公司",
+                        "seller_name": "云南高速公路联网收费管理有限公司",
+                        "seller_tax_no": "915300007194052520",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052521",
+                        "amount": "12.68",
+                        "total_with_tax": "13.07",
+                        "tax_amount": "0.39",
+                        "invoice_date": "2026-02-27",
+                    },
+                ],
+            )
+            app._import_service.confirm_import(manual_preview.id)
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-IDEMPOTENT-ETC",
+                row_ids=["txn-idempotent-etc", "oa-idempotent-etc"],
+                row_types=["bank", "oa"],
+                relation_mode="manual_confirmed",
+                created_by="system",
+                month_scope="2026-02",
+                amount_check={"status": "matched", "oa_amount": "13.07", "bank_amount": "13.07", "amount_delta": "0.00"},
+            )
+            service = ExistingEtcBatchLinkService(
+                etc_service=app._etc_service,
+                import_service=app._import_service,
+                pair_relation_service=app._workbench_pair_relation_service,
+                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
+                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
+                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
+                    changed_case_ids=case_ids,
+                ),
+                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
+                persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
+            )
+            spec = ExistingEtcBatchLinkSpec(
+                label="幂等 ETC 批次",
+                case_id="CASE-IDEMPOTENT-ETC",
+                external_batch_id="ETC-IDEMPOTENT-2026-02",
+                oa_row_id="oa-idempotent-etc",
+                bank_row_id="txn-idempotent-etc",
+                oa_amount=Decimal("13.07"),
+                bank_amount=Decimal("13.07"),
+                invoice_numbers=("ETC001",),
+            )
+
+            first = service.link_existing_invoices(spec)
+            second = service.link_existing_invoices(spec)
+            relations = app._workbench_pair_relation_service.list_active_relations()
+            batches = app._etc_service.list_batches(status="submitted")
+
+        self.assertEqual(first.status, "ok")
+        self.assertEqual(second.status, "ok")
+        self.assertEqual(first.batch_id, second.batch_id)
+        self.assertEqual([relation["case_id"] for relation in relations], ["CASE-IDEMPOTENT-ETC"])
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0].etc_batch_id, "ETC-IDEMPOTENT-2026-02")
 
     def test_etc_draft_returns_clear_error_when_oa_token_is_missing(self) -> None:
         with TemporaryDirectory() as temp_dir:

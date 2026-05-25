@@ -81,6 +81,17 @@ type ApiWorkbenchRow = {
   exception_case_id?: string | null;
   handled_exception?: boolean | null;
   applicant?: string | null;
+  apply_time?: string | null;
+  application_time?: string | null;
+  application_date?: string | null;
+  apply_date?: string | null;
+  submitted_at?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  modified_time?: string | null;
+  modifiedTime?: string | null;
+  date?: string | null;
   project_name?: string | null;
   project_name_display?: string | null;
   project_names?: string[] | null;
@@ -1121,9 +1132,23 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
       applicant: toDisplayValue(row.applicant),
       applicationTime: toWorkbenchDateTimeDisplayValue(
         detailFields["审批完成时间"]
-          ?? detailFields["申请日期"]
-          ?? detailFields["创建时间"]
           ?? summaryFields["审批完成时间"]
+          ?? row.apply_time
+          ?? row.application_time
+          ?? row.completed_at
+          ?? row.submitted_at
+          ?? row.modified_time
+          ?? row.modifiedTime
+          ?? detailFields["申请时间"]
+          ?? summaryFields["申请时间"]
+          ?? row.application_date
+          ?? row.apply_date
+          ?? row.date
+          ?? row.created_at
+          ?? row.updated_at
+          ?? detailFields["申请日期"]
+          ?? summaryFields["申请日期"]
+          ?? detailFields["创建时间"]
           ?? summaryFields["申请日期"]
           ?? summaryFields["创建时间"],
       ),

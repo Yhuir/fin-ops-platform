@@ -207,6 +207,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
     CASH_TURNOVER_TAG,
     WorkbenchSpecialPairRuleService,
 )
+from fin_ops_platform.services.workbench_sql_projection import MONTH_RE as WORKBENCH_SQL_MONTH_RE
 from fin_ops_platform.services.seeds import build_demo_seed
 
 
@@ -215,7 +216,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-24-invoice-tax-meta-summary"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-25-etc-submitted-summary"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
 }
@@ -432,10 +433,12 @@ class Application:
     def _initialize_runtime_services(self, persisted_state: dict[str, object]) -> None:
         import_fact_repository = getattr(self._state_store, "import_fact_repository", None)
         self._workbench_sql_read_repository = getattr(self._state_store, "workbench_sql_read_repository", None)
+        self._workbench_sql_projection_builder = getattr(self._state_store, "workbench_sql_projection_builder", None)
         self._cost_statistics_sql_read_repository = getattr(self._state_store, "cost_statistics_sql_read_repository", None)
         self._tax_offset_sql_read_repository = getattr(self._state_store, "tax_offset_sql_read_repository", None)
         self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
         self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
+        self._bank_detail_sql_read_repository = getattr(self._state_store, "bank_detail_sql_read_repository", None)
         self._input_invoice_usage_sql_read_repository = getattr(self._state_store, "input_invoice_usage_sql_read_repository", None)
         self._output_invoice_collection_sql_read_repository = getattr(self._state_store, "output_invoice_collection_sql_read_repository", None)
         self._import_service = ImportNormalizationService.from_snapshot(
@@ -6891,7 +6894,11 @@ class Application:
         try:
             sql_payload = self._get_pending_invoice_rows_from_sql_read_model(query)
             if sql_payload is not None:
-                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                status_code = (
+                    HTTPStatus.ACCEPTED
+                    if sql_payload.get("read_model_status") == "refreshing" and not sql_payload.get("rows")
+                    else HTTPStatus.OK
+                )
                 return self._json_response(status_code, sql_payload)
             payload = self._pending_invoice_query_service.list_rows(
                 direction=query.get("direction", [""])[0],
@@ -7360,45 +7367,55 @@ class Application:
         scope_key = self._pending_invoice_scope_key(direction=normalized_direction, filter_name=normalized_filter)
         if not isinstance(payload, dict):
             self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_miss")
-            return {
-                "direction": normalized_direction,
-                "filter": normalized_filter,
-                "rows": [],
-                "pagination": {"page": 1, "page_size": 50, "total": 0},
-                "summary": {"total_rows": 0, "missing_invoice_rows": 0, "create_invoice_available_rows": 0},
-                "bank_transaction_tags": {},
-                "bank_transaction_tags_version": 1,
-                "read_model_status": "refreshing",
-                "read_model_scope_key": scope_key,
-            }
-        if self._pending_invoice_sql_payload_requires_schema_refresh(payload):
-            self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_schema_stale")
-            return {
-                "direction": normalized_direction,
-                "filter": normalized_filter,
-                "rows": [],
-                "pagination": {"page": 1, "page_size": 50, "total": 0},
-                "summary": {"total_rows": 0, "missing_invoice_rows": 0, "create_invoice_available_rows": 0},
-                "bank_transaction_tags": {},
-                "bank_transaction_tags_version": 1,
-                "read_model_status": "refreshing",
-                "read_model_scope_key": scope_key,
-            }
+            return self._pending_invoice_refreshing_payload(
+                direction=normalized_direction,
+                filter_name=normalized_filter,
+                scope_key=scope_key,
+                query=query,
+            )
         refresh_status = str(payload.get("refresh_status") or "fresh")
+        if self._pending_invoice_sql_payload_requires_schema_refresh(payload):
+            if refresh_status == "fresh":
+                self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_schema_stale")
+            return self._pending_invoice_refreshing_payload(
+                direction=normalized_direction,
+                filter_name=normalized_filter,
+                scope_key=scope_key,
+                query=query,
+                source_payload=payload,
+            )
         if refresh_status != "fresh":
-            self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_stale")
-            return {
-                "direction": normalized_direction,
-                "filter": normalized_filter,
-                "rows": [],
-                "pagination": {"page": 1, "page_size": 50, "total": 0},
-                "summary": {"total_rows": 0, "missing_invoice_rows": 0, "create_invoice_available_rows": 0},
-                "bank_transaction_tags": {},
-                "bank_transaction_tags_version": 1,
-                "read_model_status": "refreshing",
-                "read_model_scope_key": scope_key,
-            }
+            result = self._pending_invoice_sql_payload_response(
+                payload,
+                read_model_status=refresh_status,
+                scope_key=scope_key,
+            )
+            return result
+        result = self._pending_invoice_sql_payload_response(
+            payload,
+            read_model_status=refresh_status,
+            scope_key=scope_key,
+        )
+        return result
+
+    def _pending_invoice_sql_payload_response(
+        self,
+        payload: dict[str, object],
+        *,
+        read_model_status: str,
+        scope_key: str,
+    ) -> dict[str, object]:
         result = dict(payload)
+        summary = result.get("summary")
+        if isinstance(summary, dict) and not isinstance(summary.get("source_summary"), dict):
+            direction, _sep, _filter_name = scope_key.partition(":")
+            summary = dict(summary)
+            summary["source_summary"] = self._pending_invoice_source_summary_for_query(
+                direction=direction,
+                query={},
+                source_payload=result,
+            )
+            result["summary"] = summary
         rows = result.get("rows")
         pending_invoice_query_service = getattr(self, "_pending_invoice_query_service", None)
         normalizer = getattr(pending_invoice_query_service, "normalize_row_payloads", None)
@@ -7418,10 +7435,70 @@ class Application:
                 result["bank_transaction_tags_version"] = int(
                     bank_transaction_tags.get("version") or result.get("bank_transaction_tags_version") or 1
                 )
-        result["read_model_status"] = refresh_status
+        result["read_model_status"] = read_model_status
         result["read_model_scope_key"] = scope_key
         result.pop("refresh_status", None)
         return result
+
+    def _pending_invoice_refreshing_payload(
+        self,
+        *,
+        direction: str,
+        filter_name: str,
+        scope_key: str,
+        query: dict[str, list[str]],
+        source_payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "direction": direction,
+            "filter": filter_name,
+            "rows": [],
+            "pagination": {"page": 1, "page_size": 50, "total": 0},
+            "summary": {
+                "total_rows": 0,
+                "missing_invoice_rows": 0,
+                "create_invoice_available_rows": 0,
+                "source_summary": self._pending_invoice_source_summary_for_query(
+                    direction=direction,
+                    query=query,
+                    source_payload=source_payload,
+                ),
+            },
+            "bank_transaction_tags": {},
+            "bank_transaction_tags_version": 1,
+            "read_model_status": "refreshing",
+            "read_model_scope_key": scope_key,
+        }
+
+    def _pending_invoice_source_summary_for_query(
+        self,
+        *,
+        direction: str,
+        query: dict[str, list[str]],
+        source_payload: dict[str, object] | None = None,
+    ) -> dict[str, int]:
+        summary = source_payload.get("summary") if isinstance(source_payload, dict) else None
+        source_summary = summary.get("source_summary") if isinstance(summary, dict) else None
+        if isinstance(source_summary, dict):
+            return {
+                "bank_transaction_rows": self._optional_int(source_summary.get("bank_transaction_rows")) or 0,
+                "expense_rows": self._optional_int(source_summary.get("expense_rows")) or 0,
+                "income_rows": self._optional_int(source_summary.get("income_rows")) or 0,
+                "current_direction_rows": self._optional_int(source_summary.get("current_direction_rows")) or 0,
+                "excluded_direction_rows": self._optional_int(source_summary.get("excluded_direction_rows")) or 0,
+            }
+        repository = getattr(self, "_pending_invoice_sql_read_repository", None)
+        source_summary_loader = getattr(repository, "pending_invoice_source_summary", None)
+        if callable(source_summary_loader):
+            try:
+                return source_summary_loader(
+                    direction=direction,
+                    date_from=query.get("date_from", [None])[0],
+                    date_to=query.get("date_to", [None])[0],
+                )
+            except Exception:
+                return {}
+        return {}
 
     @staticmethod
     def _pending_invoice_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:
@@ -9740,6 +9817,11 @@ class Application:
         )
 
     def _handle_api_bank_details_accounts(self, *, date_from: str | None, date_to: str | None) -> Response:
+        if self._requires_sql_read_model_runtime():
+            sql_payload = self._get_bank_detail_accounts_from_sql_read_model(date_from=date_from, date_to=date_to)
+            if sql_payload is not None:
+                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status, sql_payload)
         return self._json_response(
             HTTPStatus.OK,
             self._bank_details_service.list_accounts(date_from=date_from, date_to=date_to),
@@ -9755,6 +9837,24 @@ class Application:
         page: str | None,
         page_size: str | None,
     ) -> Response:
+        if self._requires_sql_read_model_runtime():
+            try:
+                sql_payload = self._get_bank_detail_transactions_from_sql_read_model(
+                    account_key=account_key,
+                    date_from=date_from,
+                    date_to=date_to,
+                    keyword=keyword,
+                    page=int(page or 1),
+                    page_size=int(page_size or 100),
+                )
+            except ValueError as exc:
+                return self._json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "invalid_bank_details_request", "message": str(exc)},
+                )
+            if sql_payload is not None:
+                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status, sql_payload)
         try:
             payload = self._bank_details_service.list_transactions(
                 account_key=account_key,
@@ -9770,6 +9870,290 @@ class Application:
                 {"error": "invalid_bank_details_request", "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _get_bank_detail_accounts_from_sql_read_model(self, *, date_from: str | None, date_to: str | None) -> dict[str, object] | None:
+        repository = getattr(self, "_bank_detail_sql_read_repository", None)
+        if repository is None:
+            self._enqueue_bank_detail_read_model_refreshes(["all"], reason="api_sql_repository_unavailable")
+            return self._bank_detail_accounts_refreshing_payload(
+                scope_keys=["all"],
+                date_from=date_from,
+                date_to=date_to,
+            )
+        scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
+        scope_summary = self._bank_detail_scope_summary(scope_keys)
+        if scope_summary.get("read_model_status") != "fresh":
+            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason=f"api_{scope_summary.get('read_model_status') or 'stale'}")
+            return self._bank_detail_accounts_refreshing_payload(
+                scope_keys=scope_keys,
+                date_from=date_from,
+                date_to=date_to,
+                scope_summary=scope_summary,
+            )
+        cache_key = self._bank_detail_redis_cache_key(
+            "accounts",
+            {
+                "date_from": date_from,
+                "date_to": date_to,
+            },
+            scope_summary=scope_summary,
+        )
+        cached = self._get_bank_detail_cached_payload(cache_key)
+        if cached is not None:
+            cached["cache_status"] = "hit"
+            return cached
+        loader = getattr(repository, "list_bank_detail_accounts", None)
+        if not callable(loader):
+            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_sql_repository_unavailable")
+            return self._bank_detail_accounts_refreshing_payload(scope_keys=scope_keys, date_from=date_from, date_to=date_to)
+        payload = loader(date_from=date_from, date_to=date_to)
+        if not isinstance(payload, dict):
+            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_miss")
+            return self._bank_detail_accounts_refreshing_payload(scope_keys=scope_keys, date_from=date_from, date_to=date_to)
+        if str(payload.get("read_model_status") or "fresh") != "fresh":
+            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_stale")
+            return self._bank_detail_accounts_refreshing_payload(
+                scope_keys=scope_keys,
+                date_from=date_from,
+                date_to=date_to,
+                scope_summary=payload,
+            )
+        result = dict(payload)
+        result["read_model_status"] = "fresh"
+        result["cache_status"] = "miss"
+        self._set_bank_detail_cached_payload(cache_key, result)
+        return result
+
+    def _get_bank_detail_transactions_from_sql_read_model(
+        self,
+        *,
+        account_key: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        keyword: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object] | None:
+        repository = getattr(self, "_bank_detail_sql_read_repository", None)
+        normalized_page = max(int(page or 1), 1)
+        normalized_page_size = min(max(int(page_size or 100), 1), 100)
+        if repository is None:
+            self._enqueue_bank_detail_read_model_refreshes(["all"], reason="api_sql_repository_unavailable")
+            return self._bank_detail_transactions_refreshing_payload(
+                scope_keys=["all"],
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                page=normalized_page,
+                page_size=normalized_page_size,
+            )
+        scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
+        scope_summary = self._bank_detail_scope_summary(scope_keys)
+        if scope_summary.get("read_model_status") != "fresh":
+            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason=f"api_{scope_summary.get('read_model_status') or 'stale'}")
+            return self._bank_detail_transactions_refreshing_payload(
+                scope_keys=scope_keys,
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                page=normalized_page,
+                page_size=normalized_page_size,
+                scope_summary=scope_summary,
+            )
+        cache_key = self._bank_detail_redis_cache_key(
+            "transactions",
+            {
+                "account_key": account_key,
+                "date_from": date_from,
+                "date_to": date_to,
+                "keyword": keyword,
+                "page": normalized_page,
+                "page_size": normalized_page_size,
+            },
+            scope_summary=scope_summary,
+        )
+        cached = self._get_bank_detail_cached_payload(cache_key)
+        if cached is not None:
+            cached["cache_status"] = "hit"
+            return self._with_bank_detail_tag_dictionary(cached)
+        loader = getattr(repository, "list_bank_detail_transactions", None)
+        if not callable(loader):
+            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_sql_repository_unavailable")
+            return self._bank_detail_transactions_refreshing_payload(
+                scope_keys=scope_keys,
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                page=normalized_page,
+                page_size=normalized_page_size,
+            )
+        payload = loader(
+            account_key=account_key,
+            date_from=date_from,
+            date_to=date_to,
+            keyword=keyword,
+            page=normalized_page,
+            page_size=normalized_page_size,
+        )
+        if not isinstance(payload, dict):
+            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_miss")
+            return self._bank_detail_transactions_refreshing_payload(
+                scope_keys=scope_keys,
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                page=normalized_page,
+                page_size=normalized_page_size,
+            )
+        if str(payload.get("read_model_status") or "fresh") != "fresh":
+            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_stale")
+            return self._bank_detail_transactions_refreshing_payload(
+                scope_keys=scope_keys,
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                page=normalized_page,
+                page_size=normalized_page_size,
+                scope_summary=payload,
+            )
+        result = self._with_bank_detail_tag_dictionary(dict(payload))
+        result["read_model_status"] = "fresh"
+        result["cache_status"] = "miss"
+        self._set_bank_detail_cached_payload(cache_key, result)
+        return result
+
+    def _bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
+        repository = getattr(self, "_bank_detail_sql_read_repository", None)
+        scope_key_loader = getattr(repository, "bank_detail_scope_keys_for_range", None)
+        if callable(scope_key_loader):
+            return list(scope_key_loader(date_from=date_from, date_to=date_to) or ["all"])
+        months: set[str] = set()
+        for value in (date_from, date_to):
+            month = str(value or "")[:7]
+            if SEARCH_MONTH_RE.match(month):
+                months.add(month)
+        return sorted(months) or ["all"]
+
+    def _bank_detail_scope_summary(self, scope_keys: list[str]) -> dict[str, object]:
+        repository = getattr(self, "_bank_detail_sql_read_repository", None)
+        summary_loader = getattr(repository, "bank_detail_scope_summary", None)
+        if callable(summary_loader):
+            summary = summary_loader(scope_keys=scope_keys)
+            if isinstance(summary, dict):
+                return summary
+        return {
+            "read_model_status": "missing",
+            "read_model_scope_keys": scope_keys,
+            "read_model_generated_at": None,
+            "read_model_scope_signatures": {},
+        }
+
+    def _bank_detail_accounts_refreshing_payload(
+        self,
+        *,
+        scope_keys: list[str],
+        date_from: str | None,
+        date_to: str | None,
+        scope_summary: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        summary = dict(scope_summary or {})
+        return {
+            "accounts": [],
+            "total_balance": None,
+            "balance_account_count": 0,
+            "missing_balance_account_count": 0,
+            "read_model_status": "refreshing",
+            "read_model_scope_keys": list(summary.get("read_model_scope_keys") or scope_keys),
+            "read_model_generated_at": summary.get("read_model_generated_at"),
+            "date_from": date_from,
+            "date_to": date_to,
+            "cache_status": "bypass",
+        }
+
+    def _bank_detail_transactions_refreshing_payload(
+        self,
+        *,
+        scope_keys: list[str],
+        account_key: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        page: int,
+        page_size: int,
+        scope_summary: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        summary = dict(scope_summary or {})
+        return self._with_bank_detail_tag_dictionary(
+            {
+                "account_key": account_key,
+                "date_from": date_from,
+                "date_to": date_to,
+                "rows": [],
+                "category_counts": {"uncategorized": 0},
+                "pagination": {"page": page, "page_size": page_size, "total": 0},
+                "read_model_status": "refreshing",
+                "read_model_scope_keys": list(summary.get("read_model_scope_keys") or scope_keys),
+                "read_model_generated_at": summary.get("read_model_generated_at"),
+                "cache_status": "bypass",
+            }
+        )
+
+    def _with_bank_detail_tag_dictionary(self, payload: dict[str, object]) -> dict[str, object]:
+        tag_loader = getattr(self._bank_details_service, "_bank_transaction_tags_payload", None)
+        if callable(tag_loader):
+            payload.setdefault("bank_transaction_tags", tag_loader())
+        return payload
+
+    def _enqueue_bank_detail_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueued = False
+        for scope_key in [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]:
+            self._delete_bank_detail_redis_cache(scope_key)
+            enqueue(scope_type="bank_detail", scope_key=scope_key, reason=reason)
+            enqueued = True
+        return enqueued
+
+    def _bank_detail_redis_cache_key(self, kind: str, query: dict[str, object], *, scope_summary: dict[str, object]) -> str:
+        signature = {
+            "kind": kind,
+            "query": query,
+            "scope_signatures": scope_summary.get("read_model_scope_signatures") or {},
+            "schema": "bank_detail:v1",
+        }
+        digest = hashlib.sha256(json.dumps(signature, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        return f"bank_detail:{kind}:{digest}"
+
+    def _get_bank_detail_cached_payload(self, cache_key: str) -> dict[str, object] | None:
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        get_cached = getattr(redis_helper, "get_json", None)
+        if not callable(get_cached):
+            return None
+        try:
+            cached = get_cached(cache_key)
+            return dict(cached) if isinstance(cached, dict) else None
+        except Exception:
+            return None
+
+    def _set_bank_detail_cached_payload(self, cache_key: str, payload: dict[str, object]) -> None:
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        set_cached = getattr(redis_helper, "set_json", None)
+        if not callable(set_cached):
+            return
+        try:
+            set_cached(cache_key, payload, ttl_seconds=30)
+        except Exception:
+            return
+
+    def _delete_bank_detail_redis_cache(self, scope_key: str) -> None:
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        publish_wakeup = getattr(redis_helper, "publish_wakeup", None)
+        if callable(publish_wakeup):
+            try:
+                publish_wakeup("bank_detail_read_model_refresh", {"scope_key": scope_key})
+            except Exception:
+                pass
 
     def _handle_api_import_fact_invoices(self, query: dict[str, list[str]]) -> Response:
         repository = getattr(self._state_store, "import_fact_repository", None)
@@ -9927,6 +10311,10 @@ class Application:
         workbench_rebuild_queued = self._invalidate_workbench_after_bank_transaction_categories(
             affected_months,
         )
+        bank_detail_rebuild_queued = self._enqueue_bank_detail_read_model_refreshes(
+            affected_months,
+            reason="bank_transaction_category_changed",
+        )
         if self._state_store is not None:
             self._state_store.save_bank_transaction_categories(
                 self._bank_transaction_category_service.snapshot()
@@ -9940,6 +10328,7 @@ class Application:
                 "updated_categories": list(update_result.get("updated_categories") or []),
                 "affected_months": affected_months,
                 "workbench_rebuild_queued": workbench_rebuild_queued,
+                "bank_detail_rebuild_queued": bank_detail_rebuild_queued,
                 "turnover_relations_updated": turnover_relations_updated,
                 "turnover_ledger_invalidated": bool(updated_transaction_ids),
             },
@@ -10943,6 +11332,7 @@ class Application:
                     method(event)
                 break
         self._search_service.clear_cache()
+        self._enqueue_bank_detail_read_model_refreshes(["all"], reason="bank_transaction_tag_settings_changed")
 
     def _list_tax_offset_oa_attachment_invoice_rows(self, month: str) -> list[dict[str, object]]:
         return self._workbench_query_service.list_attachment_invoice_rows_by_issue_month(month)
@@ -14083,9 +14473,12 @@ class Application:
         if not scope_keys_to_rebuild:
             return
         rebuild_started_at = monotonic()
+        legacy_scope_keys: list[str] = []
         for scope_key in scope_keys_to_rebuild:
             scope_started_at = monotonic()
-            self.rebuild_workbench_read_model_scope(scope_key, persist=False)
+            result = self.rebuild_workbench_read_model_scope(scope_key, persist=False)
+            if not (isinstance(result, dict) and result.get("projection") == "sql"):
+                legacy_scope_keys.append(scope_key)
             if request_id is not None and action_name is not None:
                 self._emit_workbench_action_timing(
                     request_id=request_id,
@@ -14094,11 +14487,21 @@ class Application:
                     duration_ms=self._duration_ms(scope_started_at),
                     detail=scope_key,
                 )
+        if not legacy_scope_keys:
+            if request_id is not None and action_name is not None:
+                self._emit_workbench_action_timing(
+                    request_id=request_id,
+                    action_name=action_name,
+                    phase="background_total",
+                    duration_ms=self._duration_ms(rebuild_started_at),
+                    detail=",".join(scope_keys_to_rebuild),
+                )
+            return
         persist_started_at = monotonic()
-        snapshot = self._workbench_read_model_service.snapshot_scope_keys(scope_keys_to_rebuild)
+        snapshot = self._workbench_read_model_service.snapshot_scope_keys(legacy_scope_keys)
         self._persist_workbench_read_models_best_effort(
             snapshot=snapshot,
-            changed_scope_keys=scope_keys_to_rebuild,
+            changed_scope_keys=legacy_scope_keys,
             operation="background_rebuild_read_models",
         )
         if request_id is not None and action_name is not None:
@@ -14107,7 +14510,7 @@ class Application:
                 action_name=action_name,
                 phase="persist_read_models",
                 duration_ms=self._duration_ms(persist_started_at),
-                detail=",".join(scope_keys_to_rebuild),
+                detail=",".join(legacy_scope_keys),
             )
             self._emit_workbench_action_timing(
                 request_id=request_id,
@@ -14119,6 +14522,9 @@ class Application:
 
     def rebuild_workbench_read_model_scope(self, scope_key: str, *, persist: bool = True) -> dict[str, object]:
         normalized_scope_key = str(scope_key or "").strip() or "all"
+        sql_result = self._rebuild_workbench_sql_projection_scope(normalized_scope_key)
+        if sql_result is not None:
+            return sql_result
         base_scope_key = self._workbench_read_model_base_scope_key(normalized_scope_key)
         raw_payload = self._build_raw_workbench_payload(base_scope_key)
         candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
@@ -14147,7 +14553,63 @@ class Application:
             "base_scope_key": base_scope_key,
             "row_count": row_count,
             "ignored_row_count": len(ignored_rows),
+            "projection": "legacy",
         }
+
+    def _rebuild_workbench_sql_projection_scope(self, scope_key: str) -> dict[str, object] | None:
+        builder = getattr(self, "_workbench_sql_projection_builder", None)
+        rebuild = getattr(builder, "rebuild_workbench_read_model_scope", None)
+        if not callable(rebuild):
+            return None
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        if normalized_scope_key.startswith("visibility:"):
+            return None
+        if normalized_scope_key == "all":
+            list_shards = getattr(builder, "list_workbench_scope_shards", None)
+            if not callable(list_shards):
+                return None
+            shard_keys = [
+                str(item).strip()
+                for item in list(list_shards(normalized_scope_key) or [])
+                if WORKBENCH_SQL_MONTH_RE.match(str(item).strip())
+            ]
+            row_count = 0
+            ignored_row_count = 0
+            for shard_key in shard_keys:
+                shard_result = rebuild(shard_key)
+                if isinstance(shard_result, dict):
+                    row_count += self._workbench_projection_int(shard_result.get("row_count"))
+                    ignored_row_count += self._workbench_projection_int(shard_result.get("ignored_row_count"))
+                self._invalidate_workbench_groups_redis_scope(shard_key)
+            self._invalidate_workbench_groups_redis_scope(normalized_scope_key)
+            return {
+                "scope_key": normalized_scope_key,
+                "base_scope_key": normalized_scope_key,
+                "row_count": row_count,
+                "ignored_row_count": ignored_row_count,
+                "projection": "sql",
+                "shard_scope_keys": shard_keys,
+            }
+        if not WORKBENCH_SQL_MONTH_RE.match(normalized_scope_key):
+            return None
+        result = rebuild(normalized_scope_key)
+        payload = dict(result) if isinstance(result, dict) else {"scope_key": normalized_scope_key}
+        payload.setdefault("scope_key", normalized_scope_key)
+        payload.setdefault("base_scope_key", normalized_scope_key)
+        payload["projection"] = "sql"
+        self._invalidate_workbench_groups_redis_scope(normalized_scope_key)
+        return payload
+
+    @staticmethod
+    def _workbench_projection_int(value: object) -> int:
+        try:
+            return int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0
+
+    def _invalidate_workbench_groups_redis_scope(self, scope_key: str) -> None:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        self._runtime_redis_delete_best_effort(self._workbench_groups_redis_version_key(normalized_scope_key))
 
     def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
         parsed = self._parse_cost_statistics_scope_key(scope_key)
@@ -14688,7 +15150,12 @@ class Application:
         batches_by_internal_id = {batch.id: batch for batch in self._etc_service.list_batches()}
         batches_by_external_id = {batch.etc_batch_id: batch for batch in batches_by_internal_id.values()}
         invoices_by_external_batch_id: dict[str, list[object]] = defaultdict(list)
-        for invoice in self._import_service.list_invoices():
+        invoices = self._import_service.list_invoices()
+        if not invoices:
+            list_submitted_etc_invoices = getattr(self._state_store, "list_submitted_etc_invoices", None)
+            if callable(list_submitted_etc_invoices):
+                invoices = list_submitted_etc_invoices()
+        for invoice in invoices:
             if getattr(invoice, "workbench_visibility", "visible") != "hidden_after_etc_submission":
                 continue
             submission_batch_id = str(getattr(invoice, "etc_submission_batch_id", "") or "").strip()
@@ -16105,6 +16572,21 @@ class Application:
         relation_amount_check = relation.get("amount_check")
         if isinstance(relation_amount_check, dict) and relation_amount_check:
             payload["relation_amount_check"] = self._serialize_value(relation_amount_check)
+            external_etc_batch_id = str(
+                relation_amount_check.get("external_etc_batch_id")
+                or relation_amount_check.get("etc_batch_id")
+                or ""
+            ).strip()
+            if external_etc_batch_id and str(payload.get("type")) == "oa":
+                payload["etc_batch_id"] = external_etc_batch_id
+                tags = [
+                    str(tag).strip()
+                    for tag in list(payload.get("tags") or [])
+                    if str(tag).strip()
+                ]
+                if "ETC批量提交" not in tags:
+                    tags.append("ETC批量提交")
+                payload["tags"] = tags
         self._workbench_override_service._sync_summary_relation(payload, str(linked_relation.get("label", "")))
         if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
             self._apply_oa_invoice_offset_pair_metadata(payload)
@@ -16183,6 +16665,7 @@ class Application:
                 "tax_offset_read_model": self._derived_lifecycle_tax_offset_executor,
                 "tax_offset_month_cache": self._derived_lifecycle_tax_offset_month_cache_executor,
                 "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
+                "bank_detail_read_model": self._derived_lifecycle_bank_detail_executor,
                 "search_cache": self._derived_lifecycle_search_cache_executor,
                 "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
                 "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
@@ -16309,6 +16792,20 @@ class Application:
         return {
             "deleted_counts": {"pending_invoice_read_models": len(invalidated_scope_keys)},
             "invalidated_scopes": invalidated_scope_keys,
+        }
+
+    def _derived_lifecycle_bank_detail_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        months = self._months_from_lifecycle_scope_keys(scope_keys)
+        target_scope_keys = months or (["all"] if "all" in scope_keys else ["all"])
+        enqueued = self._enqueue_bank_detail_read_model_refreshes(
+            target_scope_keys,
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_detail"),
+        )
+        return {
+            "deleted_counts": {"bank_detail_read_models": 0},
+            "invalidated_scopes": target_scope_keys,
+            "enqueued_jobs": ["bank_detail.read_model.refresh"] if enqueued else [],
         }
 
     def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:

@@ -115,11 +115,15 @@ class PendingInvoiceQueryService:
         page_number = max(_optional_int(page, default=1), 1)
         page_limit = min(max(_optional_int(page_size, default=50), 1), 200)
 
-        transactions = [
+        all_transactions = [
             transaction
             for transaction in self._import_service.list_transactions(month="all")
+            if self._matches_date_range(transaction, date_from=date_from, date_to=date_to)
+        ]
+        transactions = [
+            transaction
+            for transaction in all_transactions
             if self._transaction_matches_direction(transaction, normalized_direction)
-            and self._matches_date_range(transaction, date_from=date_from, date_to=date_to)
         ]
         categories = self._effective_categories(transactions)
         tag_groups = self._pending_invoice_tag_groups()
@@ -163,6 +167,10 @@ class PendingInvoiceQueryService:
                 "total_rows": total,
                 "missing_invoice_rows": missing_invoice_rows,
                 "create_invoice_available_rows": create_invoice_available_rows,
+                "source_summary": self._source_summary_for_transactions(
+                    all_transactions,
+                    direction=normalized_direction,
+                ),
             },
             "bank_transaction_tags": self._app_settings_provider().get("bank_transaction_tags") or {},
             "bank_transaction_tags_version": int(
@@ -235,6 +243,25 @@ class PendingInvoiceQueryService:
     def _transaction_matches_direction(transaction: BankTransaction, direction: str) -> bool:
         expected = TransactionDirection.OUTFLOW if direction == "expense" else TransactionDirection.INFLOW
         return transaction.txn_direction == expected
+
+    @classmethod
+    def _source_summary_for_transactions(
+        cls,
+        transactions: list[BankTransaction],
+        *,
+        direction: str,
+    ) -> dict[str, int]:
+        expense_rows = sum(1 for transaction in transactions if cls._transaction_matches_direction(transaction, "expense"))
+        income_rows = sum(1 for transaction in transactions if cls._transaction_matches_direction(transaction, "income"))
+        total_rows = expense_rows + income_rows
+        current_rows = expense_rows if direction == "expense" else income_rows
+        return {
+            "bank_transaction_rows": total_rows,
+            "expense_rows": expense_rows,
+            "income_rows": income_rows,
+            "current_direction_rows": current_rows,
+            "excluded_direction_rows": max(total_rows - current_rows, 0),
+        }
 
     @staticmethod
     def _matches_date_range(
