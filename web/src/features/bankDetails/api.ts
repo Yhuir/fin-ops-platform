@@ -7,6 +7,11 @@ import type {
   BankDetailTransaction,
   BankDetailTransactionsRequest,
   BankDetailTransactionsResponse,
+  BankAutoTagEditableRule,
+  BankAutoTagRuleConditions,
+  BankAutoTagRulesResponse,
+  BankAutoTagSystemRule,
+  SaveBankAutoTagRulesRequest,
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
   InvoiceRelationTag,
@@ -88,10 +93,58 @@ type ApiBankDetailTransactionsResponse = {
   cache_status?: string | null;
 };
 
+type ApiBankAutoTagRuleConditions = {
+  match_fields?: unknown[];
+  exact?: unknown[];
+  contains?: unknown[];
+  excludes?: unknown[];
+};
+
+type ApiBankAutoTagEditableRule = {
+  code?: string;
+  label?: string;
+  status?: "active" | "archived";
+  source?: "system" | "custom";
+  priority?: number;
+  priority_label?: string;
+  rules?: ApiBankAutoTagRuleConditions;
+  rule_summary?: string;
+  editable?: boolean;
+  archivable?: boolean;
+  sortable?: boolean;
+};
+
+type ApiBankAutoTagSystemRule = {
+  code?: string;
+  label?: string;
+  priority_label?: string;
+  source?: "system" | "custom";
+  status?: "active" | "archived";
+  editable?: boolean;
+  archivable?: boolean;
+  sortable?: boolean;
+};
+
+type ApiBankAutoTagRulesResponse = {
+  version?: number;
+  system_rule?: ApiBankAutoTagSystemRule;
+  active_rules?: ApiBankAutoTagEditableRule[];
+  archived_rules?: ApiBankAutoTagEditableRule[];
+  field_options?: { value?: string; label?: string }[];
+  permissions?: { can_save?: boolean };
+  read_model_status?: "fresh" | "refreshing" | string;
+};
+
 const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   invalid_category_code: "该银行明细标签不存在，请刷新后重新选择。",
   archived_category_code: "该银行明细标签已停用，不能再用于新的银行明细。",
   category_version_conflict: "银行明细标签已更新，请刷新后重新保存。",
+  permission_denied: "当前账户没有保存自动标签规则权限。",
+  bank_transaction_tags_version_conflict: "规则已被其他用户更新，请刷新后重新编辑。",
+  invalid_bank_auto_tag_rules_request: "自动标签规则请求不合法，请刷新后重试。",
+  invalid_auto_tag_rule: "自动标签规则校验失败，请检查规则内容。",
+  unknown_bank_transaction_tag: "该银行明细标签不存在，请刷新后重新选择。",
+  bank_transaction_tag_in_use_by_pending_invoice_filter: "该银行明细标签仍被下游规则引用，请先解除引用后再停用。",
   bank_detail_export_account_required: "请选择具体银行账户后再导出当前账户。",
   bank_detail_export_account_not_found: "当前银行账户不存在或不在当前筛选范围内。",
   bank_detail_export_row_limit_exceeded: "当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。",
@@ -256,6 +309,90 @@ function mapCategoryCounts(
   };
 }
 
+function stringList(values: unknown[] | undefined) {
+  return Array.isArray(values) ? values.map(String).map((value) => value.trim()).filter(Boolean) : [];
+}
+
+function mapAutoTagRuleConditions(rules: ApiBankAutoTagRuleConditions | undefined): BankAutoTagRuleConditions {
+  return {
+    matchFields: stringList(rules?.match_fields),
+    exact: stringList(rules?.exact),
+    contains: stringList(rules?.contains),
+    excludes: stringList(rules?.excludes),
+  };
+}
+
+function mapAutoTagEditableRule(rule: ApiBankAutoTagEditableRule): BankAutoTagEditableRule {
+  return {
+    code: typeof rule.code === "string" && rule.code.trim() ? rule.code.trim() : undefined,
+    label: String(rule.label ?? "").trim(),
+    status: rule.status === "archived" ? "archived" : "active",
+    source: rule.source === "system" ? "system" : "custom",
+    priority: typeof rule.priority === "number" ? rule.priority : undefined,
+    priorityLabel: String(rule.priority_label ?? "").trim() || undefined,
+    rules: mapAutoTagRuleConditions(rule.rules),
+    ruleSummary: String(rule.rule_summary ?? "").trim(),
+    editable: rule.editable !== false,
+    archivable: rule.archivable !== false,
+    sortable: rule.sortable !== false,
+  };
+}
+
+function mapAutoTagSystemRule(rule: ApiBankAutoTagSystemRule | undefined): BankAutoTagSystemRule {
+  return {
+    code: String(rule?.code ?? "internal_transfer"),
+    label: String(rule?.label ?? "内部往来款"),
+    priorityLabel: String(rule?.priority_label ?? "优先级 0"),
+    source: rule?.source === "custom" ? "custom" : "system",
+    status: rule?.status === "archived" ? "archived" : "active",
+    editable: Boolean(rule?.editable),
+    archivable: Boolean(rule?.archivable),
+    sortable: Boolean(rule?.sortable),
+  };
+}
+
+function mapAutoTagRulesResponse(payload: ApiBankAutoTagRulesResponse): BankAutoTagRulesResponse {
+  return {
+    version: Number(payload.version) || 1,
+    systemRule: mapAutoTagSystemRule(payload.system_rule),
+    activeRules: Array.isArray(payload.active_rules) ? payload.active_rules.map(mapAutoTagEditableRule) : [],
+    archivedRules: Array.isArray(payload.archived_rules) ? payload.archived_rules.map(mapAutoTagEditableRule) : [],
+    fieldOptions: Array.isArray(payload.field_options)
+      ? payload.field_options.map((option) => ({
+        value: String(option.value ?? "").trim(),
+        label: String(option.label ?? "").trim(),
+      })).filter((option) => option.value && option.label)
+      : [],
+    permissions: { canSave: payload.permissions?.can_save !== false },
+    readModelStatus: payload.read_model_status,
+  };
+}
+
+function serializeAutoTagRuleConditions(rules: BankAutoTagRuleConditions) {
+  return {
+    match_fields: rules.matchFields,
+    exact: rules.exact,
+    contains: rules.contains,
+    excludes: rules.excludes,
+  };
+}
+
+function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) {
+  return {
+    expected_version: payload.expectedVersion,
+    active_rules: payload.activeRules.map((rule) => ({
+      ...(rule.code ? { code: rule.code } : {}),
+      label: rule.label,
+      rules: serializeAutoTagRuleConditions(rule.rules),
+    })),
+    archived_rules: payload.archivedRules.map((rule) => ({
+      ...(rule.code ? { code: rule.code } : {}),
+      label: rule.label,
+      rules: serializeAutoTagRuleConditions(rule.rules),
+    })),
+  };
+}
+
 export async function fetchBankDetailAccounts({
   dateFrom,
   dateTo,
@@ -332,6 +469,27 @@ export async function fetchBankDetailTransactions({
     readModelStatus: payload.read_model_status,
     cacheStatus: payload.cache_status ?? null,
   };
+}
+
+export async function fetchBankAutoTagRules({
+  signal,
+}: { signal?: AbortSignal } = {}): Promise<BankAutoTagRulesResponse> {
+  const payload = await requestJson<ApiBankAutoTagRulesResponse>("/api/bank-details/auto-tag-rules", {
+    method: "GET",
+    signal,
+  });
+  return mapAutoTagRulesResponse(payload);
+}
+
+export async function saveBankAutoTagRules(
+  payload: SaveBankAutoTagRulesRequest,
+): Promise<BankAutoTagRulesResponse> {
+  const response = await requestJson<ApiBankAutoTagRulesResponse>("/api/bank-details/auto-tag-rules", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(serializeSaveAutoTagRulesRequest(payload)),
+  });
+  return mapAutoTagRulesResponse(response);
 }
 
 export async function downloadBankDetailTransactionsExport({

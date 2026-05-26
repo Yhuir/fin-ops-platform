@@ -6,7 +6,7 @@ from fin_ops_platform.services.workbench_matching_orchestrator import (
     WORKBENCH_EXCEPTION_RULES_VERSION,
     WorkbenchMatchingOrchestrator,
 )
-from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
+from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
@@ -36,6 +36,57 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(len(candidate_service.list_candidates_by_month("2026-04")), 1)
         self.assertEqual(summary["candidate_count"], 1)
         self.assertEqual(rules.calls[0]["bank_rows"], [row("bank-001")])
+
+    def test_legacy_mode_persists_free_engine_bank_invoice_candidate(self) -> None:
+        candidate_service = WorkbenchCandidateMatchService()
+
+        summary = self._orchestrator(
+            row_provider=FakeRowProvider(
+                bank_rows={
+                    "2026-02": [
+                        {
+                            "id": "bank-ccb-8106",
+                            "type": "bank",
+                            "trade_time": "2026-02-11 11:49:39",
+                            "credit_amount": "13440.00",
+                            "debit_amount": "",
+                            "counterparty_name": "北京长征高科技有限公司",
+                            "summary": "",
+                            "remark": "",
+                        }
+                    ]
+                },
+                invoice_rows={
+                    "2026-02": [
+                        {
+                            "id": "invoice-output-052520",
+                            "type": "invoice",
+                            "amount": "13440.00",
+                            "total_with_tax": "13440.00",
+                            "seller_name": "云南溯源科技有限公司",
+                            "seller_tax_no": "915300007194052520",
+                            "buyer_name": "北京长征高科技有限公司",
+                            "buyer_tax_no": "91110106102126771H",
+                            "invoice_type": "销项发票",
+                            "issue_date": "2026-02-11",
+                        }
+                    ]
+                },
+            ),
+            candidate_service=candidate_service,
+            rules=WorkbenchMatchingRules(include_special_rules=False),
+        ).run(changed_scope_months=["2026-02"], reason="unit-test", request_id="req-bank-invoice")
+
+        candidates = candidate_service.list_candidates_by_month("2026-02")
+        self.assertEqual(summary["auto_closed_count"], 1)
+        self.assertEqual([candidate["rule_code"] for candidate in candidates], ["bank_invoice_exact_amount"])
+        self.assertEqual(candidates[0]["status"], "auto_closed")
+        self.assertEqual(candidates[0]["bank_row_ids"], ["bank-ccb-8106"])
+        self.assertEqual(candidates[0]["invoice_row_ids"], ["invoice-output-052520"])
+        self.assertEqual(
+            candidates[0]["special_metadata"]["workbench_reconciliation_decision"]["rule_code"],
+            "bank_invoice_exact_amount",
+        )
 
     def test_manual_confirmed_relation_row_ids_are_excluded_from_automatic_candidates(self) -> None:
         pair_service = WorkbenchPairRelationService()

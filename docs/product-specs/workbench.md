@@ -75,6 +75,7 @@ SQL 读模型只消费手工关系事实和自动决策结果，不在投影阶�
 - 银行摘要、备注中的购方名称、发票号、数电票号、合同号、订单号和项目号是收入 `bank_invoice` 的补强证据，可用于同主体同金额候选排序；但摘要/备注不能替代银行对方主体字段。没有银行对方户名/税号主体证据时，摘要/备注命中购方也不能自动关闭。
 - 收入流水金额等于一张销项发票价税合计且候选唯一时，输出 `rule_code=bank_invoice_exact_amount`；收入流水金额等于多张同购方销项发票价税合计且组合唯一时，输出 `rule_code=bank_invoice_exact_sum`，`bank_row_ids` 包含一笔流水，`invoice_row_ids` 包含多张发票，并标记 `payment_amount_closed=true`、`invoice_amount_closed=true`。
 - 一笔收入流水金额等于多张同金额销项发票各自金额时，不能把多张发票同时标记已收款。只有存在唯一最强证据候选时才自动选择一张；若最高证据并列或存在多个可行合计组合，必须输出结构化 `open` 决策和 blocker（如 `same_score_bank_invoice_candidates`、`multiple_bank_invoice_sum_candidates`），供页面和审计解释“为什么未关联”。
+- 在 PostgreSQL decision-store 路径和 Mongo/legacy candidate 路径中，银行-发票自由匹配必须复用同一套 `WorkbenchFreeMatchingEngine` 规则。legacy candidate 只负责把 `bank_invoice` 决策转换成页面可消费的候选，不得保留独立的旧 `exact_counterparty_amount_one_to_one` 或 `same_counterparty_many_invoices_one_transaction` 银行-发票规则。
 - 自由匹配窗口为 `T-2 / T / T+2`。当业务变化发生在 T 月时，引擎可读取前后各 2 个月的 OA、流水和发票候选池。
 - 唯一性判断必须覆盖完整 5 个月候选窗口，不能只看 dirty 月份内是否唯一。
 - 跨月自动决策只归属一个主月份：包含银行流水时使用银行交易月份；没有银行流水的 OA+发票关系使用 OA 月份。

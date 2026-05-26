@@ -6,6 +6,7 @@ from typing import Any, Callable
 from fin_ops_platform.domain.models import ProjectMaster
 from fin_ops_platform.services.access_control_service import DEFAULT_ADMIN_USERNAME
 from fin_ops_platform.services.bank_transaction_category_service import (
+    BankAutoTagRulesValidationError,
     BankTransactionCategoryService,
     default_bank_transaction_tag_dictionary_payload,
 )
@@ -51,6 +52,7 @@ class AppSettingsService:
         oa_role_sync_service: OARoleSyncService | None = None,
         oa_import_options_provider: Callable[[], dict[str, Any]] | None = None,
         bank_transaction_category_service: BankTransactionCategoryService | None = None,
+        bank_transaction_auto_category_service: Any | None = None,
         audit_service: Any | None = None,
     ) -> None:
         self._state_store = state_store
@@ -58,6 +60,7 @@ class AppSettingsService:
         self._oa_role_sync_service = oa_role_sync_service
         self._oa_import_options_provider = oa_import_options_provider
         self._bank_transaction_category_service = bank_transaction_category_service
+        self._bank_transaction_auto_category_service = bank_transaction_auto_category_service
         self._audit_service = audit_service
         self._snapshot = self._normalize_settings(
             state_store.load_app_settings() if state_store is not None else {},
@@ -215,6 +218,60 @@ class AppSettingsService:
                 after_bank_transaction_tag_settings_saved(dict(tag_settings_event))
         self._restore_manual_projects()
         return self.get_settings_payload()
+
+    def get_bank_auto_tag_rules_payload(
+        self,
+        *,
+        can_save: bool = True,
+        read_model_status: str | None = None,
+    ) -> dict[str, Any]:
+        return BankTransactionCategoryService.auto_tag_rules_payload(
+            self._snapshot["bank_transaction_tags"],
+            can_save=can_save,
+            read_model_status=read_model_status,
+        )
+
+    def update_bank_auto_tag_rules(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+        after_bank_auto_tag_rules_saved: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        previous_snapshot = dict(self._snapshot)
+        previous_tags = previous_snapshot["bank_transaction_tags"]
+        normalized = BankTransactionCategoryService.normalize_auto_tag_rules_update(
+            payload,
+            previous_tag_dictionary=previous_tags,
+            references_by_code=self._pending_invoice_reference_map(previous_snapshot["pending_invoice_tag_groups"]),
+        )
+        next_tags = normalized["tag_dictionary"]
+        if not normalized["changes"]["changed"]:
+            return self.get_bank_auto_tag_rules_payload(can_save=True)
+
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["bank_transaction_tags"] = next_tags
+        next_snapshot["pending_invoice_tag_groups"] = {
+            **self._snapshot["pending_invoice_tag_groups"],
+            "version": int(next_tags["version"]),
+        }
+        try:
+            if self._state_store is not None:
+                self._state_store.save_app_settings(next_snapshot)
+        except Exception:
+            raise
+        self._snapshot = next_snapshot
+        self._configure_category_service(next_snapshot)
+        event = {
+            "actor_id": str(actor_id or "bank_auto_tag_rules").strip() or "bank_auto_tag_rules",
+            "old_version": int(normalized["old_version"]),
+            "new_version": int(normalized["new_version"]),
+            **normalized["changes"],
+        }
+        self._record_bank_auto_tag_rules_audit(event)
+        if after_bank_auto_tag_rules_saved is not None:
+            after_bank_auto_tag_rules_saved(dict(event))
+        return self.get_bank_auto_tag_rules_payload(can_save=True)
 
     def sync_oa_projects(self, *, actor_id: str) -> dict[str, Any]:
         self._project_costing_service.sync_projects_from_oa(actor_id=actor_id)
@@ -720,13 +777,16 @@ class AppSettingsService:
         }
 
     def _configure_category_service(self, snapshot: dict[str, Any]) -> None:
-        if self._bank_transaction_category_service is None:
-            return
-        self._bank_transaction_category_service.configure_tag_dictionary(
+        tag_dictionary = (
             snapshot.get("bank_transaction_tags")
             if isinstance(snapshot.get("bank_transaction_tags"), dict)
             else default_bank_transaction_tag_dictionary_payload()
         )
+        if self._bank_transaction_category_service is not None:
+            self._bank_transaction_category_service.configure_tag_dictionary(tag_dictionary)
+        configure_auto = getattr(self._bank_transaction_auto_category_service, "configure_tag_dictionary", None)
+        if callable(configure_auto):
+            configure_auto(tag_dictionary)
 
     @staticmethod
     def _tag_settings_comparable(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -846,6 +906,26 @@ class AppSettingsService:
                 metadata=metadata,
             )
 
+    def _record_bank_auto_tag_rules_audit(self, event: dict[str, Any]) -> None:
+        if self._audit_service is None:
+            return
+        self._audit_service.record_action(
+            actor_id=str(event.get("actor_id") or "bank_auto_tag_rules"),
+            action="bank_auto_tag_rules_updated",
+            entity_type="app_settings",
+            entity_id="bank_auto_tag_rules",
+            metadata={
+                "old_version": int(event.get("old_version") or 0),
+                "new_version": int(event.get("new_version") or 0),
+                "added_tags": list(event.get("added_tags") or []),
+                "renamed_tags": list(event.get("renamed_tags") or []),
+                "archived_codes": list(event.get("archived_codes") or []),
+                "reenabled_codes": list(event.get("reenabled_codes") or []),
+                "priority_changes": list(event.get("priority_changes") or []),
+                "rule_changes": list(event.get("rule_changes") or []),
+            },
+        )
+
     @staticmethod
     def _validate_bank_transaction_tag_settings_update(
         previous_snapshot: dict[str, Any],
@@ -926,6 +1006,37 @@ class AppSettingsService:
                 if str(item or "").strip()
             )
         return mapped_codes
+
+    @staticmethod
+    def _pending_invoice_reference_map(value: Any) -> dict[str, list[dict[str, Any]]]:
+        raw_payload = value if isinstance(value, dict) else {}
+        raw_groups = raw_payload.get("groups") if isinstance(raw_payload.get("groups"), dict) else raw_payload
+        if not isinstance(raw_groups, dict):
+            raw_groups = {}
+        references: dict[str, list[dict[str, Any]]] = {}
+        for group_id, default_label in PENDING_INVOICE_TAG_GROUP_LABELS.items():
+            group = raw_groups.get(group_id)
+            if isinstance(group, dict):
+                tag_codes = group.get("tag_codes")
+                label = str(group.get("label") or default_label)
+            elif isinstance(group, list):
+                tag_codes = group
+                label = default_label
+            else:
+                tag_codes = []
+                label = default_label
+            for item in list(tag_codes or []):
+                tag_code = str(item or "").strip()
+                if not tag_code:
+                    continue
+                references.setdefault(tag_code, []).append(
+                    {
+                        "domain": "pending_invoice_tag_groups",
+                        "label": f"待找发票规则：{label}",
+                        "tag_code": tag_code,
+                    }
+                )
+        return references
 
     @staticmethod
     def _normalize_option_list(

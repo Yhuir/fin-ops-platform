@@ -16,6 +16,7 @@ DERIVED_DATA_EVENTS = (
     "pair_relation_changed",
     "exception_case_changed",
     "bank_transaction_category_changed",
+    "bank_auto_tag_rules_changed",
     "pending_invoice_manual_invoice_confirmed",
     "pending_invoice_attach_existing_invoice_confirmed",
     "no_oa_bank_batch_changed",
@@ -167,6 +168,15 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "bank_transaction_category_changed": (
+            "bank_detail_read_model",
+            "workbench_read_model",
+            "workbench_candidate_matches",
+            "workbench_matching_dirty_scopes",
+            "pending_invoice_read_model",
+            "cost_statistics_read_model",
+            "search_cache",
+        ),
+        "bank_auto_tag_rules_changed": (
             "bank_detail_read_model",
             "workbench_read_model",
             "workbench_candidate_matches",

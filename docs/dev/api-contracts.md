@@ -23,6 +23,101 @@
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
 
+## 银行明细自动标签规则 API
+
+`GET /api/bank-details/auto-tag-rules`
+
+返回银行明细文本类自动标签规则。该接口只读取 `bank_transaction_tags`，不读取平行规则表。
+
+响应字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `version` | 当前银行明细标签配置版本，用于保存时乐观锁。 |
+| `system_rule` | 固定系统规则，目前为 `internal_transfer`/`内部往来款`，只展示不允许编辑。 |
+| `active_rules` | 可用文本类标签，按优先级升序返回。 |
+| `archived_rules` | 停用文本类标签，不参与自动命中。 |
+| `field_options` | 可用于规则配置的稳定语义字段。 |
+| `permissions.can_save` | 当前用户是否可以保存。 |
+| `read_model_status` | 可选，说明保存后派生数据是否仍在刷新。 |
+
+`active_rules[*]` 和 `archived_rules[*]` 至少包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `code` | 稳定标签身份；新增标签保存前可为空，保存后由后端生成。 |
+| `label` | 当前显示名称。 |
+| `status` | `active` 或 `archived`。 |
+| `priority` / `priority_label` | 可用区优先级；停用区可为空。 |
+| `rules.match_fields` | 语义字段列表。 |
+| `rules.exact` | 精确命中字样列表，可为空。 |
+| `rules.contains` | 包含字样列表，可为空。 |
+| `rules.excludes` | 不包含字样列表，可为空。 |
+| `rule_summary` | 后端生成的人类可读摘要。 |
+| `editable` / `archivable` / `sortable` | 前端交互能力标志。 |
+
+`field_options` 固定暴露语义字段，不暴露银行原始字段名：`counterparty_name`、`purpose_text`、`summary_text`、`note_text`、`detail_text`、`all_text`。后端导入和自动分类服务负责把工行、建行、民生、平安等不同银行原始字段映射到这些语义字段。
+
+`PUT /api/bank-details/auto-tag-rules`
+
+请求示例：
+
+```json
+{
+  "expected_version": 3,
+  "active_rules": [
+    {
+      "code": "salary",
+      "label": "人员薪酬",
+      "rules": {
+        "match_fields": ["summary_text", "purpose_text", "note_text", "detail_text"],
+        "exact": [],
+        "contains": ["工资"],
+        "excludes": []
+      }
+    },
+    {
+      "label": "供应商退款",
+      "rules": {
+        "match_fields": ["all_text"],
+        "exact": [],
+        "contains": ["退款"],
+        "excludes": ["保证金"]
+      }
+    }
+  ],
+  "archived_rules": []
+}
+```
+
+保存规则：
+
+- `expected_version` 必填；版本不一致返回 `409 bank_transaction_tags_version_conflict`。
+- 请求提交完整的可用区和停用区文本规则列表。`internal_transfer` 不在请求体中提交。
+- 已存在标签必须携带原 `code`；新建标签不得提交 `code`，由后端生成稳定 `custom_...` code。
+- 可用标签 `label` 去首尾空格后不能为空，同一状态区内不可重复。
+- 可用标签必须至少填写 `exact` 或 `contains`；`excludes` 可单独为空或配合正向条件使用。
+- `match_fields` 只能使用 `field_options` 中的语义字段，且不能为空。
+- 停用已被待找发票规则引用的标签返回 `400 bank_transaction_tag_in_use_by_pending_invoice_filter`，响应 `details.references` 给出引用位置。
+- 成功后返回与 GET 相同结构，并写审计动作 `bank_auto_tag_rules_updated`。
+- 成功保存只标记派生数据 dirty/enqueue 后台刷新，不在 API 请求热路径同步扫描全量银行流水、免 OA 批次、关联台或待找发票 read model。
+
+错误响应保持 JSON envelope：
+
+```json
+{
+  "error": {
+    "code": "invalid_bank_auto_tag_rules_request",
+    "message": "自动标签规则无效。",
+    "details": {
+      "field_errors": [
+        { "field": "active_rules[0].rules.match_fields", "message": "匹配字段不能为空。" }
+      ]
+    }
+  }
+}
+```
+
 ## 工作台 DTO
 
 工作台 DTO 的详细结构见 `reconciliation-workbench-v2-data-contracts.md`。

@@ -9,6 +9,12 @@ from typing import Any
 
 from fin_ops_platform.services.imports import normalize_name
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
+from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
+from fin_ops_platform.services.workbench_reconciliation_models import (
+    DECISION_STATUS_OPEN,
+    DECISION_STATUS_PAIRED,
+    WorkbenchDecision,
+)
 from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
 
 
@@ -34,7 +40,7 @@ GENERIC_COUNTERPARTY_NAMES = {
 }
 GENERIC_SUMMARY_TERMS = {"报销", "转账", "付款", "支付", "费用", "代付", "批量"}
 TEXT_SPLIT_RE = re.compile(r"[\s,，.。;；:：、/\\|()（）\[\]【】{}<>《》\"'“”‘’+-]+")
-WORKBENCH_MATCHING_RULES_VERSION = "2026-05-25-multi-payment-single-invoice"
+WORKBENCH_MATCHING_RULES_VERSION = "2026-05-26-bank-invoice-free-engine-legacy"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 NON_INVOICE_OA_ATTACHMENT_SOURCE_KINDS = {
     "oa_attachment_payment_receipt",
@@ -47,6 +53,7 @@ class WorkbenchMatchingRules:
         self._skipped_rules: list[dict[str, Any]] = []
         self._include_special_rules = include_special_rules
         self._special_rule_service = WorkbenchSpecialPairRuleService()
+        self._free_matching_engine = WorkbenchFreeMatchingEngine()
 
     def generate_candidates(
         self,
@@ -75,7 +82,6 @@ class WorkbenchMatchingRules:
         candidates.extend(self._oa_multi_invoice_exact_sum(scope_month, oa, invoices, resolved_versions))
         candidates.extend(self._oa_bank_multi_invoice_exact_sum(scope_month, oa, bank, invoices, resolved_versions))
         candidates.extend(self._oa_item_invoice_exact_amount(scope_month, oa, invoices, resolved_versions))
-        candidates.extend(self._bank_invoice_exact_amount(scope_month, bank, invoices, resolved_versions))
         if self._include_special_rules:
             candidates.extend(
                 self._special_rule_service.generate_candidates(
@@ -87,7 +93,16 @@ class WorkbenchMatchingRules:
                     source_versions=resolved_versions,
                 )
             )
-        candidates.extend(self._matching_engine_compatibility(scope_month, bank, invoices, resolved_versions))
+        claimed_by_existing = self._determined_candidate_row_ids(candidates)
+        candidates.extend(
+            self._matching_engine_compatibility(
+                scope_month,
+                bank,
+                invoices,
+                resolved_versions,
+                preclaimed_row_ids=claimed_by_existing,
+            )
+        )
         return self._mark_conflicts(self._dedupe_candidates(candidates))
 
     def last_summary(self) -> dict[str, Any]:
@@ -487,95 +502,37 @@ class WorkbenchMatchingRules:
                     )
         return candidates
 
-    def _bank_invoice_exact_amount(
-        self,
-        scope_month: str,
-        bank_rows: list[dict[str, Any]],
-        invoice_rows: list[dict[str, Any]],
-        source_versions: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        candidates: list[dict[str, Any]] = []
-        for bank_row in sorted(bank_rows, key=self._row_id):
-            bank_amount = self._amount(bank_row)
-            if bank_amount is None:
-                continue
-            for invoice_row in sorted(invoice_rows, key=self._row_id):
-                if bank_amount != self._amount(invoice_row):
-                    continue
-                if self._direction(bank_row) != self._direction(invoice_row):
-                    continue
-                same_counterparty = self._counterparties_compatible(bank_row, invoice_row, require_known=True)
-                if not same_counterparty:
-                    continue
-                candidates.append(
-                    self._candidate(
-                        scope_month,
-                        rule_code="exact_counterparty_amount_one_to_one",
-                        rows=[bank_row, invoice_row],
-                        status="auto_closed",
-                        confidence="high",
-                        amount=bank_amount,
-                        explanation="Counterparty, direction, and amount matched exactly.",
-                        source_versions=source_versions,
-                    )
-                )
-        return candidates
-
     def _matching_engine_compatibility(
         self,
         scope_month: str,
         bank_rows: list[dict[str, Any]],
         invoice_rows: list[dict[str, Any]],
         source_versions: dict[str, Any],
+        *,
+        preclaimed_row_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
-        claimed_bank_ids: set[str] = set()
-        claimed_invoice_ids: set[str] = set()
+        resolved_preclaimed_row_ids = set(preclaimed_row_ids or set())
+        claimed_bank_ids: set[str] = {
+            self._row_id(row)
+            for row in bank_rows
+            if self._row_id(row) in resolved_preclaimed_row_ids
+        }
+        claimed_invoice_ids: set[str] = {
+            self._row_id(row)
+            for row in invoice_rows
+            if self._row_id(row) in resolved_preclaimed_row_ids
+        }
 
-        exact_matches = [
-            candidate
-            for candidate in self._bank_invoice_exact_amount(scope_month, bank_rows, invoice_rows, source_versions)
-            if candidate["rule_code"] == "exact_counterparty_amount_one_to_one"
-        ]
-        candidates.extend(exact_matches)
-        claimed_bank_ids.update(row_id for candidate in exact_matches for row_id in candidate["bank_row_ids"])
-        claimed_invoice_ids.update(row_id for candidate in exact_matches for row_id in candidate["invoice_row_ids"])
-
-        for bank_row in sorted(bank_rows, key=self._row_id):
-            bank_id = self._row_id(bank_row)
-            if bank_id in claimed_bank_ids:
-                continue
-            bank_amount = self._amount(bank_row)
-            if bank_amount is None:
-                continue
-            invoices = [
-                invoice
-                for invoice in invoice_rows
-                if self._row_id(invoice) not in claimed_invoice_ids
-                and self._direction(invoice) == self._direction(bank_row)
-                and self._counterparties_compatible(bank_row, invoice, require_known=True)
-            ]
-            match = self._find_unique_sum_match(
-                invoices,
-                bank_amount,
-                scope_month=scope_month,
-                rule_code="same_counterparty_many_invoices_one_transaction",
-            )
-            if not match:
-                continue
-            candidate = self._candidate(
-                scope_month,
-                rule_code="same_counterparty_many_invoices_one_transaction",
-                rows=[bank_row, *match],
-                status="needs_review",
-                confidence="medium",
-                amount=bank_amount,
-                explanation="Multiple invoices under the same counterparty sum to one transaction.",
-                source_versions=source_versions,
-            )
-            candidates.append(candidate)
-            claimed_bank_ids.add(bank_id)
-            claimed_invoice_ids.update(self._row_id(row) for row in match)
+        bank_invoice_candidates = self._bank_invoice_decision_candidates(
+            scope_month,
+            [row for row in bank_rows if self._row_id(row) not in claimed_bank_ids],
+            [row for row in invoice_rows if self._row_id(row) not in claimed_invoice_ids],
+            source_versions,
+        )
+        candidates.extend(bank_invoice_candidates)
+        claimed_bank_ids.update(row_id for candidate in bank_invoice_candidates for row_id in candidate["bank_row_ids"])
+        claimed_invoice_ids.update(row_id for candidate in bank_invoice_candidates for row_id in candidate["invoice_row_ids"])
 
         for invoice_row in sorted(invoice_rows, key=self._row_id):
             invoice_id = self._row_id(invoice_row)
@@ -687,6 +644,93 @@ class WorkbenchMatchingRules:
                 )
             )
         return candidates
+
+    @staticmethod
+    def _determined_candidate_row_ids(candidates: list[dict[str, Any]]) -> set[str]:
+        claimed: set[str] = set()
+        for candidate in candidates:
+            if str(candidate.get("status") or "").strip() != "auto_closed":
+                continue
+            claimed.update(
+                str(row_id).strip()
+                for row_id in list(candidate.get("row_ids") or [])
+                if str(row_id).strip()
+            )
+        return claimed
+
+    def _bank_invoice_decision_candidates(
+        self,
+        scope_month: str,
+        bank_rows: list[dict[str, Any]],
+        invoice_rows: list[dict[str, Any]],
+        source_versions: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if not bank_rows or not invoice_rows:
+            return []
+        rows_by_id = {
+            row_id: row
+            for row in [*bank_rows, *invoice_rows]
+            if (row_id := self._row_id(row))
+        }
+        decisions = self._free_matching_engine.generate_decisions(
+            scope_month,
+            [],
+            bank_rows,
+            invoice_rows,
+            source_versions=source_versions,
+        )
+        candidates: list[dict[str, Any]] = []
+        for decision in decisions:
+            if decision.match_shape != "bank_invoice":
+                continue
+            candidate = self._candidate_from_bank_invoice_decision(
+                scope_month=scope_month,
+                decision=decision,
+                rows_by_id=rows_by_id,
+                source_versions=source_versions,
+            )
+            if candidate is not None:
+                candidates.append(candidate)
+        return candidates
+
+    def _candidate_from_bank_invoice_decision(
+        self,
+        *,
+        scope_month: str,
+        decision: WorkbenchDecision,
+        rows_by_id: dict[str, dict[str, Any]],
+        source_versions: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        rows = [rows_by_id.get(row_id) for row_id in decision.row_ids]
+        if any(row is None for row in rows):
+            return None
+        amount = self._amount_from_value(decision.amount)
+        if amount is None:
+            return None
+        if decision.decision_status == DECISION_STATUS_PAIRED:
+            status = "auto_closed"
+            confidence = "high"
+        elif decision.decision_status == DECISION_STATUS_OPEN:
+            status = "conflict"
+            confidence = "medium"
+        else:
+            return None
+        decision_payload = decision.to_dict()
+        return self._candidate(
+            scope_month,
+            rule_code=decision.rule_code,
+            rows=[row for row in rows if row is not None],
+            status=status,
+            confidence=confidence,
+            amount=amount,
+            explanation=decision.explanation,
+            source_versions=source_versions,
+            special_metadata={
+                "workbench_reconciliation_decision": decision_payload,
+                "evidence": decision_payload.get("evidence") or {},
+                "blockers": decision_payload.get("blockers") or [],
+            },
+        )
 
     def _mark_conflicts(self, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
         auto_candidates = [candidate for candidate in candidates if candidate["status"] == "auto_closed"]

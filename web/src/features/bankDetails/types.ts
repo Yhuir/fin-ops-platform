@@ -114,6 +114,67 @@ export type BankDetailExportResponse = {
   fileName: string;
 };
 
+export type BankAutoTagFieldOption = {
+  value: string;
+  label: string;
+};
+
+export type BankAutoTagRuleConditions = {
+  matchFields: string[];
+  exact: string[];
+  contains: string[];
+  excludes: string[];
+};
+
+export type BankAutoTagSystemRule = {
+  code: string;
+  label: string;
+  priorityLabel: string;
+  source: "system" | "custom";
+  status: "active" | "archived";
+  editable: boolean;
+  archivable: boolean;
+  sortable: boolean;
+};
+
+export type BankAutoTagEditableRule = {
+  code?: string;
+  label: string;
+  status: "active" | "archived";
+  source: "system" | "custom";
+  priority?: number;
+  priorityLabel?: string;
+  rules: BankAutoTagRuleConditions;
+  ruleSummary: string;
+  editable: boolean;
+  archivable: boolean;
+  sortable: boolean;
+};
+
+export type BankAutoTagRulesResponse = {
+  version: number;
+  systemRule: BankAutoTagSystemRule;
+  activeRules: BankAutoTagEditableRule[];
+  archivedRules: BankAutoTagEditableRule[];
+  fieldOptions: BankAutoTagFieldOption[];
+  permissions: {
+    canSave: boolean;
+  };
+  readModelStatus?: "fresh" | "refreshing" | string;
+};
+
+export type SaveBankAutoTagRule = {
+  code?: string;
+  label: string;
+  rules: BankAutoTagRuleConditions;
+};
+
+export type SaveBankAutoTagRulesRequest = {
+  expectedVersion: number;
+  activeRules: SaveBankAutoTagRule[];
+  archivedRules: SaveBankAutoTagRule[];
+};
+
 export type BankDatePreset =
   | "current_month"
   | "previous_month"

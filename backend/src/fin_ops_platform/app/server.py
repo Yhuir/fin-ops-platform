@@ -60,6 +60,7 @@ from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
+    BankAutoTagRulesValidationError,
     BankTransactionCategoryService,
 )
 from fin_ops_platform.services.bank_transaction_effective_category_provider import (
@@ -174,6 +175,7 @@ from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_TYPE
 from fin_ops_platform.services.turnover_relation_service import (
+    TURNOVER_CATEGORY_RULES,
     TURNOVER_RELATION_SCHEMA_VERSION,
     TurnoverRelationService,
     TurnoverRelationValidationError,
@@ -583,6 +585,7 @@ class Application:
             oa_role_sync_service=self._oa_role_sync_service,
             oa_import_options_provider=oa_import_options_provider,
             bank_transaction_category_service=self._bank_transaction_category_service,
+            bank_transaction_auto_category_service=self._bank_transaction_auto_category_service,
             audit_service=self._audit_service,
         )
         if source_oa_adapter is not None:
@@ -816,6 +819,12 @@ class Application:
             category = categories_by_transaction_id.get(transaction_id, {})
             category_code = category.get("category_code")
             if not category_code:
+                manual_category = self._bank_transaction_category_service.get(transaction_id)
+                manual_category_code = str(manual_category.get("category_code") or "").strip()
+                if manual_category_code in TURNOVER_CATEGORY_RULES:
+                    category = manual_category
+                    category_code = manual_category_code
+            if not category_code:
                 continue
             row = dict(payload)
             row["category_code"] = category_code
@@ -991,6 +1000,10 @@ class Application:
             return response
         if method == "GET" and route_path == "/api/workbench/refresh-status":
             return self._handle_api_workbench_refresh_status(query.get("month", [None])[0])
+        if method == "GET" and route_path == "/api/bank-details/auto-tag-rules":
+            return self._handle_api_bank_details_auto_tag_rules(headers)
+        if method == "PUT" and route_path == "/api/bank-details/auto-tag-rules":
+            return self._handle_api_bank_details_auto_tag_rules_update(body, headers)
         if method == "GET" and route_path == "/api/bank-details/accounts":
             return self._handle_api_bank_details_accounts(
                 date_from=query.get("date_from", [None])[0],
@@ -9864,6 +9877,54 @@ class Application:
             self._bank_details_service.list_accounts(date_from=date_from, date_to=date_to),
         )
 
+    def _handle_api_bank_details_auto_tag_rules(self, headers: dict[str, str] | None) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        can_save = True if session is None else bool(session.can_mutate_data)
+        payload = self._app_settings_service.get_bank_auto_tag_rules_payload(can_save=can_save)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_bank_details_auto_tag_rules_update(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有保存自动标签规则权限。"},
+            )
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor_id = (
+            session.identity.username or session.identity.user_id
+            if session is not None
+            else "bank_auto_tag_rules"
+        )
+        try:
+            updated = self._app_settings_service.update_bank_auto_tag_rules(
+                payload,
+                actor_id=str(actor_id or "bank_auto_tag_rules"),
+                after_bank_auto_tag_rules_saved=self._finalize_bank_auto_tag_rules_update,
+            )
+        except BankAutoTagRulesValidationError as exc:
+            status = HTTPStatus.CONFLICT if exc.error_code == "bank_transaction_tags_version_conflict" else HTTPStatus.BAD_REQUEST
+            return self._json_response(
+                status,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc),
+                    "field_errors": list(exc.field_errors),
+                    "references": list(exc.references),
+                },
+            )
+        return self._json_response(HTTPStatus.OK, updated)
+
     def _handle_api_bank_details_transactions(
         self,
         *,
@@ -10429,7 +10490,7 @@ class Application:
                     HTTPStatus.OK,
                     {
                         "summary": self._no_oa_bank_batch_summary(summary_read_model_batches),
-                        "batches": read_model_batches,
+                        "batches": self._resolve_no_oa_bank_batch_labels(read_model_batches),
                         "read_model_status": "fresh",
                     },
                 )
@@ -10440,7 +10501,7 @@ class Application:
             HTTPStatus.OK,
             {
                 "summary": self._no_oa_bank_batch_summary(summary_batches),
-                "batches": batches,
+                "batches": self._resolve_no_oa_bank_batch_labels(batches),
             },
         )
 
@@ -10459,7 +10520,7 @@ class Application:
         return self._json_response(
             HTTPStatus.OK,
             {
-                "batch": batch,
+                "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
                 "rows": rows,
                 "tag_counts": batch.get("tag_counts") if isinstance(batch.get("tag_counts"), dict) else {},
                 "direction_counts": batch.get("direction_counts") if isinstance(batch.get("direction_counts"), dict) else {},
@@ -10838,7 +10899,7 @@ class Application:
             persist=persist,
         )
         return {
-            "batch": batch,
+            "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
             "pair_relation": relation or {},
             "affected_months": affected_months,
             "workbench_rebuild_queued": workbench_rebuild_queued,
@@ -10868,7 +10929,7 @@ class Application:
             persist=True,
         )
         return {
-            "batch": batch,
+            "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
             "pair_relation": relation or {},
             "affected_months": affected_months,
             "workbench_rebuild_queued": workbench_rebuild_queued,
@@ -10977,13 +11038,36 @@ class Application:
             rows.append(row)
         return rows
 
-    @staticmethod
-    def _no_oa_bank_batch_summary(batches: list[dict[str, object]]) -> dict[str, object]:
+    def _resolve_no_oa_bank_batch_labels(self, batches: list[dict[str, object]]) -> list[dict[str, object]]:
+        resolved: list[dict[str, object]] = []
+        for batch in list(batches or []):
+            if not isinstance(batch, dict):
+                continue
+            next_batch = dict(batch)
+            batch_type = str(next_batch.get("batch_type") or "").strip()
+            if batch_type:
+                label = self._bank_transaction_tag_label_current(batch_type)
+                next_batch["batch_label"] = label
+                next_batch["display_tags"] = ["免OA", label]
+            resolved.append(next_batch)
+        return resolved
+
+    def _bank_transaction_tag_label_current(self, code: str) -> str:
+        tag_code = str(code or "").strip()
+        if not tag_code:
+            return ""
+        payload = self._bank_transaction_category_service.tag_dictionary_payload()
+        for definition in list(payload.get("definitions") or []):
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip() == tag_code:
+                return str(definition.get("label") or tag_code)
+        return NO_OA_MANAGED_LABELS.get(tag_code, BANK_TRANSACTION_CATEGORY_LABELS.get(tag_code, tag_code))
+
+    def _no_oa_bank_batch_summary(self, batches: list[dict[str, object]]) -> dict[str, object]:
         counts: dict[str, int] = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
         category_counts: dict[str, dict[str, object]] = {
             batch_type: {
                 "code": batch_type,
-                "label": NO_OA_MANAGED_LABELS[batch_type],
+                "label": self._bank_transaction_tag_label_current(batch_type),
                 "total": 0,
                 "draft": 0,
                 "submitted": 0,
@@ -11268,6 +11352,9 @@ class Application:
             )
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
         try:
+            self._turnover_relation_service.rebuild_from_bank_rows(
+                self._turnover_bank_transaction_rows()
+            )
             result = self._turnover_ledger_api_routes.confirm_relation(
                 bank_row_ids=[str(row_id) for row_id in bank_row_ids],
                 actor=actor,
@@ -11406,6 +11493,24 @@ class Application:
                 break
         self._search_service.clear_cache()
         self._enqueue_bank_detail_read_model_refreshes(["all"], reason="bank_transaction_tag_settings_changed")
+
+    def _finalize_bank_auto_tag_rules_update(self, event: dict[str, object]) -> None:
+        projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
+        if projection is not None:
+            try:
+                setattr(projection, "_index_cache_key", "")
+                setattr(projection, "_index_cache", {})
+            except Exception:
+                pass
+        self._execute_derived_data_lifecycle_event(
+            "bank_auto_tag_rules_changed",
+            scope_keys=["all"],
+            include_all=True,
+            metadata={
+                "reason": "bank_auto_tag_rules_changed",
+                "new_version": event.get("new_version"),
+            },
+        )
 
     def _list_tax_offset_oa_attachment_invoice_rows(self, month: str) -> list[dict[str, object]]:
         return self._workbench_query_service.list_attachment_invoice_rows_by_issue_month(month)
@@ -16816,6 +16921,8 @@ class Application:
     def _derived_lifecycle_dirty_scopes_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
         months = self._months_from_lifecycle_scope_keys(scope_keys)
+        if not months and "all" in scope_keys:
+            months = self._workbench_query_service.list_available_months()
         if months:
             dirty_months = self._mark_workbench_matching_dirty_scopes(
                 months,
@@ -18513,29 +18620,39 @@ class Application:
                 add("支")
             category_label = str(row.get("category_label") or "").strip()
             category_code = str(row.get("category_code") or "").strip()
-            if category_label in set(BANK_TRANSACTION_CATEGORY_LABELS.values()):
+            if category_code:
+                add(self._bank_transaction_tag_label_current(category_code))
+            elif category_label in set(BANK_TRANSACTION_CATEGORY_LABELS.values()):
                 add(category_label)
-            elif category_code in BANK_TRANSACTION_CATEGORY_LABELS:
-                add(BANK_TRANSACTION_CATEGORY_LABELS[category_code])
 
         if relation_mode == "internal_transfer_pair":
             add("内部往来")
         if relation_mode == "salary_personal_auto_match":
-            add("工资")
+            add(self._bank_transaction_tag_label_current("salary"))
         if relation_mode == PERSONAL_ADVANCE_REPAYMENT_MODE:
             add("还清个人暂借款")
         special_metadata = relation.get("special_metadata") if isinstance(relation, dict) else row.get("special_metadata")
         special_type = str(special_metadata.get("special_type") or "") if isinstance(special_metadata, dict) else ""
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
+            managed_labels = set(NO_OA_MANAGED_LABELS.values())
             for tag in list(relation.get("display_tags") or []) if isinstance(relation, dict) else []:
-                add(str(tag).strip())
+                tag_text = str(tag).strip()
+                if tag_text not in managed_labels:
+                    add(tag_text)
             for tag in list(group.get("display_tags") or []):
-                add(str(tag).strip())
+                tag_text = str(tag).strip()
+                if tag_text not in managed_labels:
+                    add(tag_text)
             if isinstance(special_metadata, dict):
                 for tag in list(special_metadata.get("display_tags") or []):
-                    add(str(tag).strip())
+                    tag_text = str(tag).strip()
+                    if tag_text not in managed_labels:
+                        add(tag_text)
+                batch_type = str(special_metadata.get("batch_type") or "").strip()
+                if batch_type:
+                    add(self._bank_transaction_tag_label_current(batch_type))
                 batch_label = str(special_metadata.get("batch_label") or "").strip()
-                if batch_label:
+                if batch_label and batch_label not in managed_labels:
                     add(batch_label)
         if special_type == CASH_PASS_THROUGH_MODE:
             add(CASH_TURNOVER_TAG)
@@ -18544,6 +18661,9 @@ class Application:
             add(CASH_TURNOVER_TAG)
             add("买票")
         for tag in tags:
+            if tag == "工资":
+                add(self._bank_transaction_tag_label_current("salary"))
+                continue
             if tag in {"ETC", "ETC批量提交", "已关联ETC发票", "ETC补充凭证", "冲", "内部往来", "工资", "非税", CASH_TURNOVER_TAG, "过账", "买票"}:
                 add(tag)
         if any(str(row.get(key, "")).find("非税") >= 0 for key in ("summary", "remark", "reason", "purpose")):
@@ -18800,8 +18920,8 @@ class Application:
             return next(iter(normalized_months))
         return "all"
 
-    @staticmethod
     def _pair_relation_display_payload(
+        self,
         *,
         relation_mode: str,
         row_type: str = "",
@@ -18819,7 +18939,7 @@ class Application:
         if relation_mode == "internal_transfer_pair":
             return {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"}
         if relation_mode == "salary_personal_auto_match":
-            return {"code": "salary_personal_auto_match", "label": "已匹配：工资", "tone": "success"}
+            return {"code": "salary_personal_auto_match", "label": f"已匹配：{self._bank_transaction_tag_label_current('salary')}", "tone": "success"}
         if relation_mode == PERSONAL_ADVANCE_REPAYMENT_MODE:
             return {"code": PERSONAL_ADVANCE_REPAYMENT_MODE, "label": "已匹配：还清个人暂借款", "tone": "success"}
         if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:

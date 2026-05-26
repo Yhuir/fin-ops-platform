@@ -627,7 +627,7 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         self.assertIn("item-level", candidate["explanation"])
         self.assertIn("item-hotel", candidate["explanation"])
 
-    def test_bank_invoice_exact_amount_uses_matching_engine_compatibility_code_for_same_counterparty(self) -> None:
+    def test_bank_invoice_exact_amount_uses_free_matching_engine_code_for_same_counterparty(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-05",
             oa_rows=[],
@@ -635,10 +635,88 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
             invoice_rows=[invoice_row("invoice-001", "100.00", buyer_name="客户A", invoice_type="销项发票")],
         )
 
-        candidate = find_candidate(candidates, "exact_counterparty_amount_one_to_one")
+        candidate = find_candidate(candidates, "bank_invoice_exact_amount")
         self.assertEqual(candidate["status"], "auto_closed")
         self.assertEqual(candidate["confidence"], "high")
         self.assertEqual(candidate["candidate_type"], "bank_invoice")
+
+    def test_legacy_candidates_use_free_engine_for_income_bank_output_invoice(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-02",
+            oa_rows=[],
+            bank_rows=[
+                bank_row(
+                    "bank-ccb-8106",
+                    "13440.00",
+                    counterparty_name="北京长征高科技有限公司",
+                    direction="inflow",
+                    account_no="53001905038050548106",
+                    account_name="云南溯源科技有限公司建设银行基本户",
+                    trade_time="2026-02-11 11:49:39",
+                )
+            ],
+            invoice_rows=[
+                invoice_row(
+                    "invoice-output-052520",
+                    "13440.00",
+                    seller_name="云南溯源科技有限公司",
+                    buyer_name="北京长征高科技有限公司",
+                    invoice_type="销项发票",
+                    issue_date="2026-02-11",
+                    total_with_tax="13440.00",
+                )
+            ],
+        )
+
+        candidate = find_candidate(candidates, "bank_invoice_exact_amount")
+        self.assertEqual(candidate["status"], "auto_closed")
+        self.assertEqual(candidate["confidence"], "high")
+        self.assertEqual(candidate["candidate_type"], "bank_invoice")
+        self.assertEqual(candidate["bank_row_ids"], ["bank-ccb-8106"])
+        self.assertEqual(candidate["invoice_row_ids"], ["invoice-output-052520"])
+        self.assertEqual(candidate["special_metadata"]["workbench_reconciliation_decision"]["match_shape"], "bank_invoice")
+
+    def test_legacy_candidates_auto_close_income_bank_output_invoice_sum(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-02",
+            oa_rows=[],
+            bank_rows=[
+                bank_row(
+                    "bank-ccb-26880",
+                    "26880.00",
+                    counterparty_name="北京长征高科技有限公司",
+                    direction="inflow",
+                    trade_time="2026-02-11 11:49:39",
+                )
+            ],
+            invoice_rows=[
+                invoice_row(
+                    "invoice-output-001",
+                    "13440.00",
+                    seller_name="云南溯源科技有限公司",
+                    buyer_name="北京长征高科技有限公司",
+                    invoice_type="销项发票",
+                    issue_date="2026-02-11",
+                    total_with_tax="13440.00",
+                ),
+                invoice_row(
+                    "invoice-output-002",
+                    "13440.00",
+                    seller_name="云南溯源科技有限公司",
+                    buyer_name="北京长征高科技有限公司",
+                    invoice_type="销项发票",
+                    issue_date="2026-02-11",
+                    total_with_tax="13440.00",
+                ),
+            ],
+        )
+
+        candidate = find_candidate(candidates, "bank_invoice_exact_sum")
+        self.assertEqual(candidate["status"], "auto_closed")
+        self.assertEqual(candidate["confidence"], "high")
+        self.assertEqual(candidate["bank_row_ids"], ["bank-ccb-26880"])
+        self.assertEqual(candidate["invoice_row_ids"], ["invoice-output-001", "invoice-output-002"])
+        self.assertEqual(candidate["amount"], "26880.00")
 
     def test_bank_invoice_exact_amount_does_not_create_amount_only_review_candidate(self) -> None:
         candidates = self.rules.generate_candidates(
@@ -794,7 +872,8 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
             ],
         )
 
-        self.assertIsNotNone(find_candidate(candidates, "same_counterparty_many_invoices_one_transaction"))
+        bank_invoice_sum = find_candidate(candidates, "bank_invoice_exact_sum")
+        self.assertEqual(bank_invoice_sum["status"], "auto_closed")
         self.assertIsNotNone(find_candidate(candidates, "same_counterparty_one_invoice_many_transactions"))
         self.assertIsNotNone(find_candidate(candidates, "same_counterparty_partial_amount_match"))
         no_confident = [candidate for candidate in candidates if candidate["rule_code"] == "no_confident_match"]
@@ -812,11 +891,11 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         auto_claiming_candidates = [
             candidate
             for candidate in candidates
-            if candidate["rule_code"] in {"exact_counterparty_amount_one_to_one", "salary_personal_auto_match"}
+            if candidate["rule_code"] in {"bank_invoice_exact_amount", "salary_personal_auto_match"}
         ]
         self.assertEqual(len(auto_claiming_candidates), 1)
         by_rule_code = {candidate["rule_code"]: candidate for candidate in auto_claiming_candidates}
-        self.assertEqual(by_rule_code["exact_counterparty_amount_one_to_one"]["status"], "auto_closed")
+        self.assertEqual(by_rule_code["bank_invoice_exact_amount"]["status"], "auto_closed")
         self.assertNotIn("salary_personal_auto_match", by_rule_code)
 
     def test_every_candidate_can_be_upserted(self) -> None:
@@ -925,6 +1004,7 @@ def invoice_row(
     seller_name: str = "供应商A",
     buyer_name: str = "云南溯源科技有限公司",
     invoice_type: str = "进项发票",
+    issue_date: str = "2026-05-03",
     source_kind: str | None = None,
     oa_row_id: str | None = None,
     derived_from_oa_id: str | None = None,
@@ -939,7 +1019,7 @@ def invoice_row(
         "seller_name": seller_name,
         "buyer_name": buyer_name,
         "invoice_type": invoice_type,
-        "issue_date": "2026-05-03",
+        "issue_date": issue_date,
     }
     if source_kind is not None:
         row["source_kind"] = source_kind

@@ -300,6 +300,8 @@ PUT /api/pending-invoices/rules
 
 规则保存同一份 `pending_invoice_tag_groups`，不新增规则表。`PUT` 校验 unknown tag、archived tag 和重复分组，成功后写设置审计并标记 pending invoice read model dirty。
 
+规则组持久化银行明细标签 `code`，响应展示时实时从 `bank_transaction_tags` 解析当前标签名称。银行标签改名后，本接口返回的新规则名称应同步变化；被任一规则组引用的银行标签不得在 `/api/bank-details/auto-tag-rules` 中停用。
+
 ## 导出
 
 ```text

@@ -5181,6 +5181,106 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         )}`,
       },
     }),
+    "/api/bank-details/auto-tag-rules": ({ init, jsonBody }) => {
+      const baseRules = {
+        version: 1,
+        system_rule: {
+          code: "internal_transfer",
+          label: "内部往来款",
+          priority_label: "优先级 0",
+          source: "system",
+          status: "active",
+          editable: false,
+          archivable: false,
+          sortable: false,
+        },
+        active_rules: [
+          {
+            code: "fee",
+            label: "手续费",
+            status: "active",
+            source: "system",
+            priority: 10,
+            priority_label: "优先级 1",
+            rules: { match_fields: ["counterparty_name", "summary_text", "note_text"], exact: [], contains: ["手续费"], excludes: [] },
+            rule_summary: "对方户名/摘要/备注包含：手续费",
+            editable: true,
+            archivable: true,
+            sortable: true,
+          },
+          {
+            code: "salary",
+            label: "工资",
+            status: "active",
+            source: "system",
+            priority: 20,
+            priority_label: "优先级 2",
+            rules: { match_fields: ["summary_text", "purpose_text", "note_text", "detail_text"], exact: [], contains: ["工资"], excludes: [] },
+            rule_summary: "摘要/用途/备注/其他明细包含：工资",
+            editable: true,
+            archivable: true,
+            sortable: true,
+          },
+        ],
+        archived_rules: [
+          {
+            code: "old_bonus",
+            label: "旧奖金",
+            status: "archived",
+            source: "custom",
+            rules: { match_fields: ["all_text"], exact: [], contains: ["旧奖金"], excludes: [] },
+            rule_summary: "全部文本包含：旧奖金",
+            editable: true,
+            archivable: false,
+            sortable: false,
+          },
+        ],
+        field_options: [
+          { value: "counterparty_name", label: "对方户名" },
+          { value: "purpose_text", label: "用途/交易用途" },
+          { value: "summary_text", label: "摘要" },
+          { value: "note_text", label: "备注/附言/客户附言" },
+          { value: "detail_text", label: "其他明细" },
+          { value: "all_text", label: "全部文本" },
+        ],
+        permissions: { can_save: true },
+      };
+      if (String(init?.method || "GET").toUpperCase() !== "PUT") {
+        return { body: baseRules };
+      }
+      const activeRules = Array.isArray(jsonBody?.active_rules) ? jsonBody.active_rules as Array<Record<string, unknown>> : [];
+      const archivedRules = Array.isArray(jsonBody?.archived_rules) ? jsonBody.archived_rules as Array<Record<string, unknown>> : [];
+      return {
+        body: {
+          ...baseRules,
+          version: 2,
+          active_rules: activeRules.map((rule, index) => ({
+            code: String(rule.code || `custom_saved_${index}`),
+            label: String(rule.label || ""),
+            status: "active",
+            source: rule.code ? "system" : "custom",
+            priority: (index + 1) * 10,
+            priority_label: `优先级 ${index + 1}`,
+            rules: rule.rules,
+            rule_summary: "已保存",
+            editable: true,
+            archivable: true,
+            sortable: true,
+          })),
+          archived_rules: archivedRules.map((rule) => ({
+            code: String(rule.code || ""),
+            label: String(rule.label || ""),
+            status: "archived",
+            source: "custom",
+            rules: rule.rules,
+            rule_summary: "已停用",
+            editable: true,
+            archivable: false,
+            sortable: false,
+          })),
+        },
+      };
+    },
     "/api/bank-details/transactions": ({ url }) => {
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");

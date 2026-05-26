@@ -362,6 +362,7 @@ GET /api/workbench/groups?month=all&zone=open&page=1&page_size=200&detail_level=
 - 收入 `bank_invoice` 的 `evidence` 至少包含 `scope_window`、`uniqueness_scope`、`amount_relation`、`subject_evidence` 和补强证据。摘要/备注命中购方名称、发票号、数电票号、合同号、订单号或项目号只能作为 `supporting_evidence` 参与同主体候选排序，不能替代银行对方主体字段。
 - 收入流水金额等于多张同金额销项发票各自金额时，只能在唯一最高证据分候选存在时自动输出 `bank_invoice_exact_amount`。若最高分并列，必须输出 `decision_status=open`、`match_shape=bank_invoice`、`rule_code=bank_invoice_conflict`，blocker code 为 `same_score_bank_invoice_candidates`，并包含 `candidate_rows`、`candidate_groups`、`amount_relation`、`evidence_summary` 和 `reason`。
 - 收入流水存在多个多发票合计组合时，必须输出 `rule_code=bank_invoice_conflict`，blocker code 为 `multiple_bank_invoice_sum_candidates`；不得按导入顺序、row id、数据库 id 或无业务含义排序选择一个组合。
+- Mongo/legacy runtime 的 `WorkbenchMatchingRules` 不再维护独立银行-发票算法。它必须调用 `WorkbenchFreeMatchingEngine`，并把 `bank_invoice` 决策转换为 legacy candidate：`paired` 决策转换为 `status=auto_closed`，`open` 冲突转换为 `status=conflict`，`special_metadata.workbench_reconciliation_decision` 保留原始决策、evidence 和 blockers 供审计使用。
 - OA 来源附件发票与 OA 强关联。若 OA 金额等于银行流水金额但正式附件发票合计不一致，仍可 `display_state=paired`，同时输出 `invoice_amount_mismatch` warning、`payment_amount_closed=true`、`invoice_amount_closed=false`。
 
 消费顺序：

@@ -271,6 +271,7 @@ class BankDetailsService:
             "auto_category_source": str(auto_category.get("source") or "") if isinstance(auto_category, dict) else "",
             "auto_category_reason": str(auto_category.get("reason") or "") if isinstance(auto_category, dict) else "",
             "auto_category_confidence": str(auto_category.get("confidence") or "") if isinstance(auto_category, dict) else "",
+            "auto_category_evidence": dict(auto_category.get("auto_category_evidence") or {}) if isinstance(auto_category, dict) else {},
             "effective_category_code": effective_code,
             "effective_category_label": effective_label,
             "effective_category_path": effective_path,

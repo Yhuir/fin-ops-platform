@@ -199,6 +199,112 @@ BANK_TRANSACTION_CATEGORY_COUNT_KEYS = [
 ]
 BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION = 1
 BANK_TRANSACTION_TAG_CODE_RE = re.compile(r"^[A-Za-z0-9_:-]+$")
+BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE = "internal_transfer"
+BANK_AUTO_TAG_EDITABLE_CODES = (
+    "fee",
+    "holiday_bonus",
+    "salary",
+    "bonus",
+    "treasury_tax_collection",
+    "social_security",
+    "tax_payment",
+)
+BANK_AUTO_TAG_FIELD_OPTIONS: tuple[dict[str, str], ...] = (
+    {"value": "counterparty_name", "label": "对方户名"},
+    {"value": "purpose_text", "label": "用途/交易用途"},
+    {"value": "summary_text", "label": "摘要"},
+    {"value": "note_text", "label": "备注/附言/客户附言"},
+    {"value": "detail_text", "label": "其他明细"},
+    {"value": "all_text", "label": "全部文本"},
+)
+BANK_AUTO_TAG_FIELD_LABELS = {
+    str(option["value"]): str(option["label"])
+    for option in BANK_AUTO_TAG_FIELD_OPTIONS
+}
+BANK_AUTO_TAG_ALLOWED_FIELDS = set(BANK_AUTO_TAG_FIELD_LABELS)
+BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS = ("summary_text", "purpose_text", "note_text", "detail_text")
+DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
+    "fee": {
+        "priority": 10,
+        "rule_code": "fee_text_keyword",
+        "rules": {
+            "match_fields": ["counterparty_name", "summary_text", "note_text"],
+            "exact": [],
+            "contains": ["手续费", "短信服务费"],
+            "excludes": [],
+        },
+    },
+    "holiday_bonus": {
+        "priority": 20,
+        "rule_code": "holiday_bonus_text_keyword",
+        "rules": {
+            "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
+            "exact": [],
+            "contains": ["过节费"],
+            "excludes": [],
+        },
+    },
+    "salary": {
+        "priority": 30,
+        "rule_code": "salary_text_keyword",
+        "rules": {
+            "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
+            "exact": [],
+            "contains": ["工资"],
+            "excludes": [],
+        },
+    },
+    "bonus": {
+        "priority": 40,
+        "rule_code": "bonus_text_keyword",
+        "rules": {
+            "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
+            "exact": [],
+            "contains": ["奖金", "绩效奖", "年终奖"],
+            "excludes": [],
+        },
+    },
+    "treasury_tax_collection": {
+        "priority": 50,
+        "rule_code": "treasury_tax_collection_text_keyword",
+        "rules": {
+            "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
+            "exact": [],
+            "contains": ["代理国库税收收缴", "国库税收收缴"],
+            "excludes": [],
+        },
+    },
+    "social_security": {
+        "priority": 60,
+        "rule_code": "social_security_text_keyword",
+        "rules": {
+            "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
+            "exact": [],
+            "contains": ["社保款", "社保费", "社会保险费", "缴纳社保"],
+            "excludes": [],
+        },
+    },
+    "tax_payment": {
+        "priority": 70,
+        "rule_code": "tax_payment_text_keyword",
+        "rules": {
+            "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
+            "exact": [],
+            "contains": ["税款", "缴纳税款", "电子缴税", "税库银", "税务局", "完税"],
+            "excludes": ["社保及税款", "社保和税款", "社保税款", "社保、税款"],
+        },
+    },
+}
+BANK_AUTO_TAG_SYSTEM_RULE = {
+    "code": BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE,
+    "label": "内部往来款",
+    "priority_label": "优先级 0",
+    "source": "system",
+    "status": "active",
+    "editable": False,
+    "archivable": False,
+    "sortable": False,
+}
 
 
 def build_system_bank_transaction_tag_definitions() -> list[dict[str, Any]]:
@@ -220,9 +326,21 @@ def build_system_bank_transaction_tag_definitions() -> list[dict[str, Any]]:
                     ],
                     "source": "system",
                     "status": "active",
+                    **_default_auto_tag_rule_fields(str(code)),
                 }
             )
     return definitions
+
+
+def _default_auto_tag_rule_fields(code: str) -> dict[str, Any]:
+    default = DEFAULT_BANK_AUTO_TAG_RULES.get(code)
+    if not isinstance(default, dict):
+        return {}
+    return {
+        "priority": int(default["priority"]),
+        "rule_code": str(default["rule_code"]),
+        "rules": deepcopy(default["rules"]),
+    }
 
 
 def default_bank_transaction_tag_dictionary_payload() -> dict[str, Any]:
@@ -255,6 +373,21 @@ class BankTransactionCategoryValidationError(BankTransactionCategoryError):
 
 class BankTransactionCategoryConflictError(BankTransactionCategoryError):
     pass
+
+
+class BankAutoTagRulesValidationError(ValueError):
+    def __init__(
+        self,
+        error_code: str,
+        message: str,
+        *,
+        field_errors: list[dict[str, str]] | None = None,
+        references: list[dict[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.field_errors = list(field_errors or [])
+        self.references = [dict(reference) for reference in list(references or []) if isinstance(reference, dict)]
 
 
 class BankTransactionCategoryService:
@@ -314,6 +447,193 @@ class BankTransactionCategoryService:
         with self._lock:
             self._tag_dictionary_payload = normalized_payload
             self._tag_definitions_by_code = self._build_tag_definition_index(normalized_payload)
+
+    @classmethod
+    def auto_tag_rules_payload(
+        cls,
+        tag_dictionary: dict[str, Any] | None,
+        *,
+        can_save: bool = True,
+        read_model_status: str | None = None,
+    ) -> dict[str, Any]:
+        normalized = cls._normalize_tag_dictionary_payload(tag_dictionary)
+        definitions = [
+            dict(definition)
+            for definition in list(normalized.get("definitions") or [])
+            if cls._is_auto_tag_rule_definition(definition)
+        ]
+        active = [
+            definition
+            for definition in definitions
+            if str(definition.get("status") or "active") == "active"
+        ]
+        archived = [
+            definition
+            for definition in definitions
+            if str(definition.get("status") or "active") == "archived"
+        ]
+        active.sort(key=lambda definition: (cls._normalize_optional_priority(definition.get("priority")) or 10_000, str(definition.get("code") or "")))
+        archived.sort(key=lambda definition: (str(definition.get("label") or ""), str(definition.get("code") or "")))
+        payload: dict[str, Any] = {
+            "version": int(normalized.get("version") or BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION),
+            "system_rule": dict(BANK_AUTO_TAG_SYSTEM_RULE),
+            "active_rules": [
+                cls._public_auto_tag_rule(definition, priority_index=index)
+                for index, definition in enumerate(active, start=1)
+            ],
+            "archived_rules": [
+                cls._public_auto_tag_rule(definition, priority_index=None)
+                for definition in archived
+            ],
+            "field_options": [dict(option) for option in BANK_AUTO_TAG_FIELD_OPTIONS],
+            "permissions": {"can_save": bool(can_save)},
+        }
+        if read_model_status:
+            payload["read_model_status"] = str(read_model_status)
+        return payload
+
+    @classmethod
+    def normalize_auto_tag_rules_update(
+        cls,
+        value: Any,
+        *,
+        previous_tag_dictionary: dict[str, Any],
+        references_by_code: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise BankAutoTagRulesValidationError(
+                "invalid_bank_auto_tag_rules_request",
+                "自动标签规则请求必须是对象。",
+            )
+        if "system_rule" in value:
+            raise BankAutoTagRulesValidationError(
+                "invalid_bank_auto_tag_rules_request",
+                "内部往来款为系统规则，不能在请求中提交或修改。",
+            )
+        if "expected_version" not in value:
+            raise BankAutoTagRulesValidationError(
+                "invalid_bank_auto_tag_rules_request",
+                "expected_version is required.",
+            )
+        previous = cls._normalize_tag_dictionary_payload(previous_tag_dictionary)
+        expected_version = cls._normalize_version(value.get("expected_version"))
+        previous_version = int(previous.get("version") or BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION)
+        if expected_version != previous_version:
+            raise BankAutoTagRulesValidationError(
+                "bank_transaction_tags_version_conflict",
+                "规则已被其他用户更新，请刷新后重新编辑。",
+            )
+
+        active_items = value.get("active_rules")
+        archived_items = value.get("archived_rules")
+        if not isinstance(active_items, list) or not isinstance(archived_items, list):
+            raise BankAutoTagRulesValidationError(
+                "invalid_bank_auto_tag_rules_request",
+                "active_rules 和 archived_rules 必须是数组。",
+            )
+
+        previous_definitions_by_code = cls._build_tag_definition_index(previous)
+        previous_managed_codes = {
+            code
+            for code, definition in previous_definitions_by_code.items()
+            if cls._is_auto_tag_rule_definition(definition)
+        }
+        next_managed_definitions: list[dict[str, Any]] = []
+        seen_codes: set[str] = set()
+        field_errors: list[dict[str, str]] = []
+
+        for index, item in enumerate(active_items):
+            definition = cls._normalize_auto_tag_rule_item(
+                item,
+                path_prefix=f"active_rules[{index}]",
+                previous_definitions_by_code=previous_definitions_by_code,
+                previous_managed_codes=previous_managed_codes,
+                status="active",
+                priority=(index + 1) * 10,
+                field_errors=field_errors,
+            )
+            code = definition["code"]
+            if code in seen_codes:
+                field_errors.append({"path": f"active_rules[{index}].code", "message": "标签 code 不能重复。"})
+            seen_codes.add(code)
+            next_managed_definitions.append(definition)
+
+        for index, item in enumerate(archived_items):
+            definition = cls._normalize_auto_tag_rule_item(
+                item,
+                path_prefix=f"archived_rules[{index}]",
+                previous_definitions_by_code=previous_definitions_by_code,
+                previous_managed_codes=previous_managed_codes,
+                status="archived",
+                priority=None,
+                field_errors=field_errors,
+            )
+            code = definition["code"]
+            if code in seen_codes:
+                field_errors.append({"path": f"archived_rules[{index}].code", "message": "标签 code 不能重复。"})
+            seen_codes.add(code)
+            next_managed_definitions.append(definition)
+
+        if BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE in seen_codes:
+            raise BankAutoTagRulesValidationError(
+                "invalid_bank_auto_tag_rules_request",
+                "内部往来款为系统规则，不能修改、排序或停用。",
+            )
+
+        missing_codes = sorted(previous_managed_codes - seen_codes)
+        if missing_codes:
+            field_errors.append({
+                "path": "active_rules",
+                "message": "必须提交完整自动标签规则列表。",
+            })
+
+        cls._validate_auto_tag_duplicate_labels(next_managed_definitions, field_errors=field_errors)
+        if field_errors:
+            raise BankAutoTagRulesValidationError(
+                "invalid_auto_tag_rule",
+                "自动标签规则校验失败。",
+                field_errors=field_errors,
+            )
+
+        newly_archived_codes = [
+            definition["code"]
+            for definition in next_managed_definitions
+            if definition["status"] == "archived"
+            and str(previous_definitions_by_code.get(definition["code"], {}).get("status") or "active") != "archived"
+        ]
+        references: list[dict[str, Any]] = []
+        for code in newly_archived_codes:
+            references.extend(list((references_by_code or {}).get(code) or []))
+        if references:
+            raise BankAutoTagRulesValidationError(
+                "bank_transaction_tag_in_use_by_pending_invoice_filter",
+                "该银行明细标签仍被下游规则引用，请先解除引用后再停用。",
+                references=references,
+            )
+
+        next_by_code = dict(previous_definitions_by_code)
+        for code in list(previous_managed_codes):
+            if code in next_by_code:
+                del next_by_code[code]
+        for definition in next_managed_definitions:
+            next_by_code[definition["code"]] = definition
+        normalized_next = cls._normalize_tag_dictionary_payload(
+            {
+                "version": previous_version,
+                "definitions": list(next_by_code.values()),
+            }
+        )
+        changes = cls._auto_tag_rule_changes(previous, normalized_next)
+        if changes["changed"]:
+            normalized_next["version"] = previous_version + 1
+        else:
+            normalized_next["version"] = previous_version
+        return {
+            "tag_dictionary": normalized_next,
+            "changes": changes,
+            "old_version": previous_version,
+            "new_version": int(normalized_next["version"]),
+        }
 
     def get(self, transaction_id: str) -> dict[str, Any]:
         transaction_key = self._normalize_transaction_id(transaction_id)
@@ -461,6 +781,222 @@ class BankTransactionCategoryService:
         return list(definition["category_path"])
 
     @classmethod
+    def _is_auto_tag_rule_definition(cls, definition: dict[str, Any]) -> bool:
+        code = str(definition.get("code") or "").strip()
+        if code == BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE:
+            return False
+        return code in BANK_AUTO_TAG_EDITABLE_CODES or isinstance(definition.get("rules"), dict)
+
+    @classmethod
+    def _public_auto_tag_rule(cls, definition: dict[str, Any], *, priority_index: int | None) -> dict[str, Any]:
+        code = str(definition.get("code") or "").strip()
+        rules = cls._normalize_auto_tag_rule_conditions(definition.get("rules"), allow_invalid=True)
+        payload: dict[str, Any] = {
+            "code": code,
+            "label": str(definition.get("label") or code),
+            "status": str(definition.get("status") or "active"),
+            "source": str(definition.get("source") or "custom"),
+            "rules": rules,
+            "rule_code": str(definition.get("rule_code") or code),
+            "rule_summary": cls._auto_tag_rule_summary(rules, archived=priority_index is None),
+            "editable": True,
+            "archivable": priority_index is not None,
+            "sortable": priority_index is not None,
+        }
+        if priority_index is not None:
+            payload["priority"] = cls._normalize_optional_priority(definition.get("priority")) or priority_index * 10
+            payload["priority_label"] = f"优先级 {priority_index}"
+        return payload
+
+    @classmethod
+    def _normalize_auto_tag_rule_item(
+        cls,
+        item: Any,
+        *,
+        path_prefix: str,
+        previous_definitions_by_code: dict[str, dict[str, Any]],
+        previous_managed_codes: set[str],
+        status: str,
+        priority: int | None,
+        field_errors: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            field_errors.append({"path": path_prefix, "message": "规则必须是对象。"})
+            item = {}
+        raw_code = item.get("code")
+        code = str(raw_code or "").strip()
+        is_new = not code
+        if code == BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE:
+            field_errors.append({"path": f"{path_prefix}.code", "message": "内部往来款不能编辑。"})
+        if not is_new and code not in previous_managed_codes:
+            field_errors.append({"path": f"{path_prefix}.code", "message": "不能提交未知或非自动规则标签 code。"})
+        if is_new and raw_code not in (None, ""):
+            field_errors.append({"path": f"{path_prefix}.code", "message": "新增标签不能由前端指定 code。"})
+
+        label = str(item.get("label") or "").strip()
+        if not label:
+            field_errors.append({"path": f"{path_prefix}.label", "message": "标签名称不能为空。"})
+            label = code or "未命名标签"
+
+        rules = cls._normalize_auto_tag_rule_conditions(item.get("rules"), allow_invalid=False)
+        raw_match_fields = item.get("rules", {}).get("match_fields") if isinstance(item.get("rules"), dict) else []
+        invalid_fields = [
+            str(field or "").strip()
+            for field in list(raw_match_fields or [])
+            if str(field or "").strip() and str(field or "").strip() not in BANK_AUTO_TAG_ALLOWED_FIELDS
+        ]
+        if invalid_fields:
+            field_errors.append({"path": f"{path_prefix}.rules.match_fields", "message": "匹配字段不在允许范围内。"})
+        if status == "active":
+            if not rules["match_fields"]:
+                field_errors.append({"path": f"{path_prefix}.rules.match_fields", "message": "匹配字段不能为空。"})
+            if not rules["exact"] and not rules["contains"]:
+                field_errors.append({"path": f"{path_prefix}.rules.contains", "message": "精确命中字样和包含字样不能同时为空。"})
+        if not rules["match_fields"]:
+            rules["match_fields"] = ["all_text"] if status == "active" else []
+
+        if is_new:
+            code = cls._generate_custom_auto_tag_code(label, rules, previous_definitions_by_code)
+            source = "custom"
+            path = ["自动识别", label]
+            rule_code = code
+        else:
+            previous = previous_definitions_by_code.get(code, {})
+            source = str(previous.get("source") or "custom")
+            path = list(previous.get("path") or ["自动识别", label])
+            if path and len(path) >= 2 and path[0] == "自动识别":
+                path = ["自动识别", label]
+            rule_code = str(previous.get("rule_code") or code).strip() or code
+
+        definition: dict[str, Any] = {
+            "code": code,
+            "label": label,
+            "path": path,
+            "source": source if source in {"system", "custom"} else "custom",
+            "status": status,
+            "rules": rules,
+            "rule_code": rule_code,
+        }
+        if priority is not None:
+            definition["priority"] = priority
+        return definition
+
+    @classmethod
+    def _generate_custom_auto_tag_code(
+        cls,
+        label: str,
+        rules: dict[str, list[str]],
+        previous_definitions_by_code: dict[str, dict[str, Any]],
+    ) -> str:
+        seed = json.dumps(
+            {"label": label, "rules": rules},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        base = f"custom_{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+        if base not in previous_definitions_by_code:
+            return base
+        suffix = 2
+        while f"{base}_{suffix}" in previous_definitions_by_code:
+            suffix += 1
+        return f"{base}_{suffix}"
+
+    @staticmethod
+    def _validate_auto_tag_duplicate_labels(
+        definitions: list[dict[str, Any]],
+        *,
+        field_errors: list[dict[str, str]],
+    ) -> None:
+        seen_by_status: dict[str, dict[str, int]] = {"active": {}, "archived": {}}
+        for index, definition in enumerate(definitions):
+            status = str(definition.get("status") or "active")
+            label = str(definition.get("label") or "").strip()
+            if not label:
+                continue
+            seen = seen_by_status.setdefault(status, {})
+            if label in seen:
+                prefix = "active_rules" if status == "active" else "archived_rules"
+                field_errors.append({"path": f"{prefix}[{index}].label", "message": "同一状态下标签名称不能重复。"})
+                continue
+            seen[label] = index
+
+    @classmethod
+    def _auto_tag_rule_summary(cls, rules: dict[str, list[str]], *, archived: bool) -> str:
+        if archived and not (rules.get("exact") or rules.get("contains") or rules.get("excludes")):
+            return "已停用"
+        field_labels = [
+            BANK_AUTO_TAG_FIELD_LABELS.get(field, field)
+            for field in list(rules.get("match_fields") or [])
+        ]
+        prefix = "、".join(field_labels) if field_labels else "未选择字段"
+        parts: list[str] = []
+        if rules.get("exact"):
+            parts.append(f"{prefix}精确命中：{'、'.join(rules['exact'])}")
+        if rules.get("contains"):
+            parts.append(f"{prefix}包含：{'、'.join(rules['contains'])}")
+        if rules.get("excludes"):
+            parts.append(f"排除：{'、'.join(rules['excludes'])}")
+        return "；".join(parts) if parts else ("已停用" if archived else "未配置规则")
+
+    @classmethod
+    def _auto_tag_rule_changes(cls, previous: dict[str, Any], next_payload: dict[str, Any]) -> dict[str, Any]:
+        previous_rules = cls.auto_tag_rules_payload(previous)
+        next_rules = cls.auto_tag_rules_payload(next_payload)
+        previous_by_code = {
+            rule["code"]: rule
+            for rule in [*previous_rules["active_rules"], *previous_rules["archived_rules"]]
+        }
+        next_by_code = {
+            rule["code"]: rule
+            for rule in [*next_rules["active_rules"], *next_rules["archived_rules"]]
+        }
+        added = [
+            {"code": code, "label": next_by_code[code]["label"]}
+            for code in sorted(set(next_by_code) - set(previous_by_code))
+        ]
+        renamed = [
+            {
+                "code": code,
+                "old_label": previous_by_code[code]["label"],
+                "new_label": next_by_code[code]["label"],
+            }
+            for code in sorted(set(previous_by_code).intersection(next_by_code))
+            if previous_by_code[code]["label"] != next_by_code[code]["label"]
+        ]
+        archived = [
+            code
+            for code in sorted(set(previous_by_code).intersection(next_by_code))
+            if previous_by_code[code]["status"] != "archived" and next_by_code[code]["status"] == "archived"
+        ]
+        reenabled = [
+            code
+            for code in sorted(set(previous_by_code).intersection(next_by_code))
+            if previous_by_code[code]["status"] == "archived" and next_by_code[code]["status"] == "active"
+        ]
+        previous_order = [rule["code"] for rule in previous_rules["active_rules"]]
+        next_order = [rule["code"] for rule in next_rules["active_rules"]]
+        priority_changes = [] if previous_order == next_order else [{"old_order": previous_order, "new_order": next_order}]
+        rule_changes = [
+            {
+                "code": code,
+                "old_summary": previous_by_code[code].get("rule_summary", ""),
+                "new_summary": next_by_code[code].get("rule_summary", ""),
+            }
+            for code in sorted(set(previous_by_code).intersection(next_by_code))
+            if previous_by_code[code].get("rules") != next_by_code[code].get("rules")
+        ]
+        changed = bool(added or renamed or archived or reenabled or priority_changes or rule_changes)
+        return {
+            "changed": changed,
+            "added_tags": added,
+            "renamed_tags": renamed,
+            "archived_codes": archived,
+            "reenabled_codes": reenabled,
+            "priority_changes": priority_changes,
+            "rule_changes": rule_changes,
+        }
+
+    @classmethod
     def _build_tag_definition_index(cls, payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
         return {
             str(definition["code"]): dict(definition)
@@ -490,10 +1026,19 @@ class BankTransactionCategoryService:
             definition = cls._normalize_tag_definition(item)
             code = definition["code"]
             if definition["source"] == "system" and code in definitions_by_code:
-                definitions_by_code[code] = {
+                next_definition = {
                     **definitions_by_code[code],
                     "status": definition["status"],
                 }
+                if code in BANK_AUTO_TAG_EDITABLE_CODES:
+                    next_definition["label"] = definition["label"]
+                    if definition.get("priority") is not None:
+                        next_definition["priority"] = definition["priority"]
+                    if isinstance(definition.get("rules"), dict):
+                        next_definition["rules"] = deepcopy(definition["rules"])
+                    if definition.get("rule_code"):
+                        next_definition["rule_code"] = definition["rule_code"]
+                definitions_by_code[code] = next_definition
                 continue
             if code in definitions_by_code and definitions_by_code[code]["source"] == "system":
                 continue
@@ -523,13 +1068,75 @@ class BankTransactionCategoryService:
         status = str(item.get("status") or "active").strip()
         if status not in {"active", "archived"}:
             status = "active"
-        return {
+        definition = {
             "code": code,
             "label": label or code,
             "path": path,
             "source": source,
             "status": status,
         }
+        priority = cls._normalize_optional_priority(item.get("priority"))
+        default_fields = _default_auto_tag_rule_fields(code)
+        if priority is None and default_fields:
+            priority = int(default_fields["priority"])
+        if priority is not None:
+            definition["priority"] = priority
+        rules = item.get("rules")
+        if not isinstance(rules, dict) and default_fields:
+            rules = default_fields["rules"]
+        if isinstance(rules, dict):
+            definition["rules"] = cls._normalize_auto_tag_rule_conditions(rules, allow_invalid=True)
+        rule_code = str(item.get("rule_code") or default_fields.get("rule_code") or "").strip()
+        if rule_code:
+            definition["rule_code"] = rule_code
+        return definition
+
+    @classmethod
+    def _normalize_auto_tag_rule_conditions(cls, value: Any, *, allow_invalid: bool = False) -> dict[str, list[str]]:
+        raw = value if isinstance(value, dict) else {}
+        match_fields = cls._normalize_match_fields(raw.get("match_fields"), allow_invalid=allow_invalid)
+        return {
+            "match_fields": match_fields,
+            "exact": cls._normalize_term_list(raw.get("exact")),
+            "contains": cls._normalize_term_list(raw.get("contains")),
+            "excludes": cls._normalize_term_list(raw.get("excludes")),
+        }
+
+    @staticmethod
+    def _normalize_term_list(value: Any) -> list[str]:
+        terms: list[str] = []
+        seen: set[str] = set()
+        raw_values = value if isinstance(value, list) else []
+        for item in raw_values:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            terms.append(text)
+        return terms
+
+    @staticmethod
+    def _normalize_match_fields(value: Any, *, allow_invalid: bool = False) -> list[str]:
+        fields: list[str] = []
+        seen: set[str] = set()
+        raw_values = value if isinstance(value, list) else []
+        for item in raw_values:
+            field = str(item or "").strip()
+            if not field or field in seen:
+                continue
+            if allow_invalid or field in BANK_AUTO_TAG_ALLOWED_FIELDS:
+                seen.add(field)
+                fields.append(field)
+        return fields
+
+    @staticmethod
+    def _normalize_optional_priority(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            return None
 
     def _normalize_categories(self, categories: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         normalized: dict[str, dict[str, Any]] = {}

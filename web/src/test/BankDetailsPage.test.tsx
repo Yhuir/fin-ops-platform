@@ -218,6 +218,55 @@ describe("Bank details page", () => {
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
   });
 
+  test("opens automatic tag rules drawer from the page toolbar", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+
+    expect(await screen.findByRole("dialog", { name: "自动标签规则" })).toBeInTheDocument();
+    expect(screen.getByText("优先级 0")).toBeInTheDocument();
+    expect(screen.getByText("内部往来款")).toBeInTheDocument();
+    const rulesRequest = requestUrls(fetchMock, "/api/bank-details/auto-tag-rules").at(-1);
+    expect(rulesRequest?.pathname).toBe("/api/bank-details/auto-tag-rules");
+  });
+
+  test("saving automatic tag rules refreshes bank details", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitFor(() => {
+      expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
+    });
+    const labelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
+    await user.clear(labelInputs[1]);
+    await user.type(labelInputs[1], "人员薪酬");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("规则已保存，银行明细正在刷新。").length).toBeGreaterThan(0);
+    });
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
+    });
+    const saveCall = fetchMock.mock.calls.find(([input, init]) => (
+      new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
+      && init?.method === "PUT"
+    ));
+    expect(saveCall).toBeTruthy();
+  });
+
   test("uncategorized rows display a dash in the narrow type column", async () => {
     const user = userEvent.setup();
     installMockApiFetch();

@@ -1634,7 +1634,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             },
         )
 
-        def raw_payload(month: str) -> dict[str, object]:
+        def raw_payload(month: str, **_kwargs: object) -> dict[str, object]:
             return {
                 "month": month,
                 "oa_status": {"code": "ready", "message": "OA 已同步"},
@@ -1699,7 +1699,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         with patch.object(app, "_build_raw_workbench_payload", side_effect=raw_payload) as build_raw:
             payload = app._build_api_workbench_payload("all")
 
-        build_raw.assert_any_call("2026-01")
+        build_raw.assert_any_call("2026-01", supplement_missing_pair_relation_rows=False)
         build_raw.assert_any_call("all")
         self.assertEqual(payload["open"]["groups"], [])
         self.assertEqual(len(payload["paired"]["groups"]), 1)
@@ -1714,7 +1714,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_monthly_matching_uses_imported_bank_rows_without_month_limit_for_oa_attachment_closure(self) -> None:
         app = build_application()
 
-        def raw_payload(month: str) -> dict[str, object]:
+        def raw_payload(month: str, **_kwargs: object) -> dict[str, object]:
             if month == "2026-03":
                 return {
                     "month": month,
@@ -1840,7 +1840,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertIn("bank-tian-318", [row["id"] for row in rows["bank_rows"]])
         list_transactions.assert_called()
-        build_raw.assert_any_call("2026-03")
+        build_raw.assert_any_call("2026-03", supplement_missing_pair_relation_rows=False)
         self.assertNotIn("2026-04", [call.args[0] for call in build_raw.call_args_list])
         candidates = app._workbench_candidate_match_service.list_candidates_by_month("2026-03")
         candidate = next(
@@ -4736,7 +4736,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             for group in initial_payload["paired"]["groups"]
             if group["group_id"] == "case:CASE-OA-ATT-oa-exp-202605-attachment"
         )
-        self.assertEqual(source_group["reason"], "unique_candidate_chain")
+        self.assertEqual(source_group["reason"], "existing_case_group")
         self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-exp-202605-attachment"])
         self.assertEqual(
             [row["id"] for row in source_group["invoice_rows"]],

@@ -10,7 +10,10 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
     BankTransactionCategoryService,
 )
-from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
+from fin_ops_platform.services.turnover_relation_service import (
+    TURNOVER_CATEGORY_RULES,
+    TurnoverRelationService,
+)
 
 
 MONEY_QUANT = Decimal("0.01")
@@ -224,23 +227,32 @@ class TurnoverLedgerService:
         return rows
 
     def _categories_for_rows(self, bank_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        transaction_ids = [
+            str(row.get("id") or "").strip()
+            for row in bank_rows
+            if str(row.get("id") or "").strip()
+        ]
         provider = self._category_provider
         if provider is not None and hasattr(provider, "bulk_get_for_rows"):
             raw_records = provider.bulk_get_for_rows(bank_rows)
         else:
-            transaction_ids = [
-                str(row.get("id") or "").strip()
-                for row in bank_rows
-                if str(row.get("id") or "").strip()
-            ]
             raw_records = self._category_service.bulk_get(transaction_ids)
         if not isinstance(raw_records, dict):
-            return {}
-        return {
+            raw_records = {}
+        records = {
             str(transaction_id): record
             for transaction_id, record in raw_records.items()
             if isinstance(record, dict)
         }
+        for transaction_id in transaction_ids:
+            record = records.get(transaction_id) or {}
+            if record.get("category_code"):
+                continue
+            manual = self._category_service.get(transaction_id)
+            manual_code = str(manual.get("category_code") or "").strip()
+            if manual_code in TURNOVER_CATEGORY_RULES:
+                records[transaction_id] = manual
+        return records
 
     @staticmethod
     def _transaction_payload(transaction: Any) -> dict[str, Any]:

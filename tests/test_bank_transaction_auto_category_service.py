@@ -99,6 +99,68 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestion["source"], "auto")
         self.assertNotIn("workbench_special_rule_detector", suggestion["reason"])
 
+    def test_uses_configured_label_semantic_fields_excludes_priority_and_evidence(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 12,
+                "definitions": [
+                    {
+                        "code": "salary",
+                        "label": "人员薪酬",
+                        "path": ["自动识别", "人员薪酬"],
+                        "source": "system",
+                        "status": "active",
+                        "priority": 10,
+                        "rules": {
+                            "match_fields": ["note_text"],
+                            "exact": [],
+                            "contains": ["工资"],
+                            "excludes": ["社保代扣"],
+                        },
+                    },
+                    {
+                        "code": "bonus",
+                        "label": "奖金",
+                        "path": ["自动识别", "奖金"],
+                        "source": "system",
+                        "status": "active",
+                        "priority": 20,
+                        "rules": {
+                            "match_fields": ["all_text"],
+                            "exact": ["工资"],
+                            "contains": ["奖金"],
+                            "excludes": [],
+                        },
+                    },
+                ],
+            }
+        )
+
+        suggestions = self.service.suggest_for_rows(
+            [
+                {"id": "txn-salary-note", "customer_note": "4月工资", "summary": "普通转账"},
+                {"id": "txn-excluded", "customer_note": "工资 社保代扣", "summary": "奖金"},
+                {"id": "txn-exact", "summary": "工资"},
+            ]
+        )
+
+        salary = suggestions["txn-salary-note"]
+        self.assertEqual(salary["category_code"], "salary")
+        self.assertEqual(salary["category_label"], "人员薪酬")
+        evidence = salary["auto_category_evidence"]
+        self.assertEqual(evidence["tag_code"], "salary")
+        self.assertEqual(evidence["tag_label"], "人员薪酬")
+        self.assertEqual(evidence["rule_code"], "salary_text_keyword")
+        self.assertEqual(evidence["rule_version"], BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION)
+        self.assertEqual(evidence["condition_type"], "contains")
+        self.assertEqual(evidence["semantic_field"], "note_text")
+        self.assertEqual(evidence["semantic_field_label"], "备注/附言/客户附言")
+        self.assertEqual(evidence["raw_field_key"], "customer_note")
+        self.assertIsNone(evidence["raw_field_label"])
+        self.assertEqual(evidence["matched_text"], "工资")
+        self.assertEqual(suggestions["txn-excluded"]["category_code"], "bonus")
+        self.assertEqual(suggestions["txn-exact"]["category_code"], "bonus")
+
     def test_detects_holiday_bonus_from_keywords(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [{"id": "txn-holiday", "purpose": "中秋过节费", "note": "员工慰问金"}]

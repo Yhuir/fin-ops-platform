@@ -63,27 +63,24 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         return [transaction.id for transaction in app._import_service.list_transactions()]
 
     def _tag_borrow_in_rows(self, app: Application, transaction_ids: list[str]) -> None:
-        response = app.handle_request(
-            "PATCH",
-            "/api/bank-details/transactions/categories",
-            body=json.dumps(
+        app._bank_transaction_category_service.apply_updates(
+            [
                 {
-                    "updates": [
-                        {
-                            "transaction_id": transaction_ids[0],
-                            "category_code": "borrow_in_company_pending_repayment",
-                            "expected_version": 0,
-                        },
-                        {
-                            "transaction_id": transaction_ids[1],
-                            "category_code": "borrow_in_company_repaid",
-                            "expected_version": 0,
-                        },
-                    ]
-                }
-            ),
+                    "transaction_id": transaction_ids[0],
+                    "category_code": "borrow_in_company_pending_repayment",
+                    "expected_version": 0,
+                },
+                {
+                    "transaction_id": transaction_ids[1],
+                    "category_code": "borrow_in_company_repaid",
+                    "expected_version": 0,
+                },
+            ],
+            actor="YNSYLP005",
         )
-        self.assertEqual(response.status_code, 200)
+        app._state_store.save_bank_transaction_categories(
+            app._bank_transaction_category_service.snapshot()
+        )
 
     @staticmethod
     def _workbench_open_groups(app: Application) -> list[dict[str, object]]:

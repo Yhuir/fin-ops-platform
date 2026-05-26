@@ -99,6 +99,10 @@
 
 如果存在多个可行组合，输出 `open` 决策，blocker 为 `multiple_bank_invoice_sum_candidates`。
 
+### Runtime 集成
+
+PostgreSQL decision-store 路径直接持久化 `WorkbenchFreeMatchingEngine` 的 `bank_invoice` 决策。Mongo/legacy candidate 路径也必须复用同一引擎：`WorkbenchMatchingRules` 只做决策到 legacy candidate 的适配，`paired` 转为 `auto_closed`，`open` 冲突转为 `conflict`，并在 `special_metadata.workbench_reconciliation_decision` 中保留原始 evidence/blockers。legacy 路径不得继续使用独立的旧银行-发票精确金额或多发票合计规则。
+
 ### 2. 单发票精确匹配
 
 如果只有一张销项发票金额等于流水金额，且主体证据成立，则自动输出 `paired`：

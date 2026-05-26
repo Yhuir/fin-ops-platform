@@ -1,0 +1,94 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import MuiProviders from "../app/MuiProviders";
+import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
+import { installMockApiFetch } from "./apiMock";
+
+function renderDrawer(onSaved = vi.fn()) {
+  const onClose = vi.fn();
+  render(
+    <MuiProviders>
+      <AutoTagRulesDrawer open onClose={onClose} onSaved={onSaved} />
+    </MuiProviders>,
+  );
+  return { onClose, onSaved };
+}
+
+function requestPayload(fetchMock: ReturnType<typeof installMockApiFetch>, pathname: string, method: string) {
+  const call = fetchMock.mock.calls.find(([input, init]) => (
+    new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === pathname
+    && String(init?.method || "GET").toUpperCase() === method
+  ));
+  if (!call) {
+    return null;
+  }
+  return JSON.parse(String(call[1]?.body || "{}")) as Record<string, unknown>;
+}
+
+async function waitForLoadedRule(drawer: HTMLElement, label: string) {
+  await waitFor(() => {
+    expect(within(drawer).getAllByDisplayValue(label).length).toBeGreaterThan(0);
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("AutoTagRulesDrawer", () => {
+  test("loads system, active, and archived rule areas", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+
+    expect(within(drawer).getByText("优先级 0")).toBeInTheDocument();
+    expect(within(drawer).getByText("内部往来款")).toBeInTheDocument();
+    expect(within(drawer).getByText("优先级 1")).toBeInTheDocument();
+    await waitForLoadedRule(drawer, "手续费");
+
+    await user.click(within(drawer).getByRole("button", { name: "停用" }));
+    expect(await within(drawer).findByText("旧奖金")).toBeInTheDocument();
+  });
+
+  test("validates active rules before save", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    expect(await within(drawer).findByText("优先级 3 的标签名称不能为空。")).toBeInTheDocument();
+    expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
+  });
+
+  test("saves edited and newly created rules", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const onSaved = vi.fn();
+    renderDrawer(onSaved);
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
+
+    const labelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
+    await user.type(labelInputs[labelInputs.length - 1], "银行利息");
+    const containsInputs = within(drawer).getAllByLabelText("包含字样", { selector: "textarea" });
+    await user.type(containsInputs[containsInputs.length - 1], "利息");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    expect(payload?.expected_version).toBe(1);
+    expect(payload?.active_rules).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "银行利息" }),
+    ]));
+  });
+});

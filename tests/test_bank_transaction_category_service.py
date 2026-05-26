@@ -102,7 +102,68 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(definitions_by_code["fee"]["source"], "system")
         self.assertEqual(definitions_by_code["fee"]["status"], "active")
         self.assertEqual(definitions_by_code["fee"]["path"], ["自动识别", "手续费"])
+        self.assertEqual(definitions_by_code["fee"]["rules"]["match_fields"], ["counterparty_name", "summary_text", "note_text"])
+        self.assertEqual(definitions_by_code["fee"]["rules"]["contains"], ["手续费", "短信服务费"])
+        self.assertNotIn("rules", definitions_by_code["internal_transfer"])
         self.assertIn("internal_transfer", definitions_by_code)
+
+    def test_auto_tag_rules_update_validates_identity_labels_and_rules(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(None)
+        current = service.auto_tag_rules_payload(service.tag_dictionary_payload())
+        salary = next(rule for rule in current["active_rules"] if rule["code"] == "salary")
+
+        with self.assertRaisesRegex(ValueError, "自动标签规则校验失败"):
+            BankTransactionCategoryService.normalize_auto_tag_rules_update(
+                {
+                    "expected_version": current["version"],
+                    "active_rules": [
+                        {
+                            **salary,
+                            "label": "人员薪酬",
+                            "rules": {
+                                "match_fields": [],
+                                "exact": [],
+                                "contains": [],
+                                "excludes": ["社保代扣"],
+                            },
+                        }
+                    ],
+                    "archived_rules": [],
+                },
+                previous_tag_dictionary=service.tag_dictionary_payload(),
+            )
+
+        next_active = [
+            (
+                {
+                    **rule,
+                    "label": "人员薪酬",
+                    "rules": {
+                        "match_fields": ["all_text"],
+                        "exact": [],
+                        "contains": ["工资"],
+                        "excludes": [],
+                    },
+                }
+                if rule["code"] == "salary"
+                else rule
+            )
+            for rule in current["active_rules"]
+        ]
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_update(
+            {
+                "expected_version": current["version"],
+                "active_rules": next_active,
+                "archived_rules": [],
+            },
+            previous_tag_dictionary=service.tag_dictionary_payload(),
+        )
+
+        updated = BankTransactionCategoryService.auto_tag_rules_payload(result["tag_dictionary"])
+        updated_salary = next(rule for rule in updated["active_rules"] if rule["code"] == "salary")
+        self.assertEqual(updated_salary["code"], "salary")
+        self.assertEqual(updated_salary["label"], "人员薪酬")
+        self.assertEqual(result["changes"]["renamed_tags"][0]["code"], "salary")
 
     def test_configured_custom_tag_is_valid_manual_choice(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(

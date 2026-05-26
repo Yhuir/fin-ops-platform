@@ -24,12 +24,14 @@ import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import RuleIcon from "@mui/icons-material/Rule";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
 
 import StatePanel from "../components/common/StatePanel";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
+import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
 import { downloadBankDetailTransactionsExport, fetchBankDetailAccounts, fetchBankDetailTransactions } from "../features/bankDetails/api";
 import {
   FINANCE_DOMAIN_EVENTS,
@@ -389,6 +391,8 @@ export default function BankDetailsPage() {
   const [exportMenuAnchorEl, setExportMenuAnchorEl] = useState<HTMLElement | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
+  const [rulesDrawerOpen, setRulesDrawerOpen] = useState(false);
+  const [rulesFeedback, setRulesFeedback] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
@@ -649,6 +653,19 @@ export default function BankDetailsPage() {
       });
   };
 
+  const handleAutoTagRulesSaved = (payload: { version: number }) => {
+    persistTagVersion(payload.version);
+    tagVersionRef.current = payload.version;
+    window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, { detail: { version: payload.version } }));
+    if (typeof BroadcastChannel !== "undefined") {
+      const channel = new BroadcastChannel(TAG_SYNC_EVENT);
+      channel.postMessage({ version: payload.version });
+      channel.close();
+    }
+    setRulesFeedback("规则已保存，银行明细正在刷新。");
+    setRefreshToken((current) => current + 1);
+  };
+
   const handleMonthChange = (value: string) => {
     if (!value) {
       setMonthValue(value);
@@ -681,6 +698,7 @@ export default function BankDetailsPage() {
         {readModelStatus === "refreshing" && !error ? (
           <StatePanel tone="loading" compact>银行明细读模型正在刷新。</StatePanel>
         ) : null}
+        {rulesFeedback ? <StatePanel tone="success" compact>{rulesFeedback}</StatePanel> : null}
         {!loading && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}
@@ -785,6 +803,14 @@ export default function BankDetailsPage() {
                 </Stack>
 
                 <Stack className="bank-header-controls" direction="row" spacing={0.75} alignItems="center">
+                  <Button
+                    startIcon={<RuleIcon />}
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setRulesDrawerOpen(true)}
+                  >
+                    自动标签规则
+                  </Button>
                   <Stack className="bank-date-toolbar" spacing={0.5} alignItems="flex-end">
                     <ToggleButtonGroup
                       aria-label="日期快捷筛选"
@@ -942,6 +968,11 @@ export default function BankDetailsPage() {
           </Paper>
         </Box>
       </Stack>
+      <AutoTagRulesDrawer
+        open={rulesDrawerOpen}
+        onClose={() => setRulesDrawerOpen(false)}
+        onSaved={handleAutoTagRulesSaved}
+      />
       <Popover
         id="bank-date-filter-popover"
         open={dateFilterOpen}
