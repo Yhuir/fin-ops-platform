@@ -246,6 +246,7 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await user.click(await within(drawer).findByRole("button", { name: "展开 工资" }));
     await waitFor(() => {
       expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
     });
