@@ -236,6 +236,31 @@ class PagedFactConnection:
         return 1
 
 
+class BankAutoCategoryContextConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        return [
+            {
+                "legacy_id": "txn_context_1",
+                "account_no": "6222000011116386",
+                "txn_direction": TransactionDirection.OUTFLOW.value,
+                "counterparty_name_raw": "云南溯源科技有限公司建设银行账户",
+                "amount": "13000.00",
+                "signed_amount": "-13000.00",
+                "written_off_amount": "0.00",
+                "txn_date": "2026-04-03",
+                "trade_time": "2026-04-03 10:00:00",
+                "legacy_source_batch_id": "batch_import_0008",
+                "status": "pending",
+                "raw_payload": {"normalized_payload": {"id": "txn_context_1"}},
+            }
+        ]
+
+
 def test_core_repository_lists_invoice_and_bank_facts_with_sql_pagination() -> None:
     connection = PagedFactConnection()
     repository = PostgresCoreRepository(connection)
@@ -249,6 +274,24 @@ def test_core_repository_lists_invoice_and_bank_facts_with_sql_pagination() -> N
     assert transactions[0].id == "txn_page_1"
     assert all("from app.invoices order by" not in sql for sql, _params in connection.fetch_all_calls)
     assert all("from app.bank_transactions order by" not in sql for sql, _params in connection.fetch_all_calls)
+
+
+def test_core_repository_lists_bank_auto_category_context_without_account_keyword_or_pagination() -> None:
+    connection = BankAutoCategoryContextConnection()
+    repository = PostgresCoreRepository(connection)
+
+    transactions = repository.list_bank_transactions_auto_category_context(
+        date_from="2026-04-01",
+        date_to="2026-04-30",
+    )
+
+    assert [transaction.id for transaction in transactions] == ["txn_context_1"]
+    sql, params = connection.fetch_all_calls[0]
+    assert "from app.bank_transactions" in sql
+    assert "limit %s offset %s" not in sql
+    assert "counterparty_name_raw ilike" not in sql
+    assert "raw_payload->'normalized_payload'->>'imported_bank_name'" not in sql
+    assert params == ("2026-04-01", "2026-04-30")
 
 
 def test_core_repository_restores_imported_bank_identity_from_normalized_payload() -> None:

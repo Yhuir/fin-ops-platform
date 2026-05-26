@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -50,7 +50,9 @@ class BankDetailSqlProjectionBuilder:
         normalized_scope_key = str(scope_key or "").strip()
         if not _is_month_scope(normalized_scope_key):
             raise ValueError("Bank detail read model rebuild requires YYYY-MM scope_key.")
-        transaction_rows = self._load_transaction_rows(normalized_scope_key)
+        transaction_rows, auto_category_context_rows = self._load_transaction_rows_with_auto_category_context(
+            normalized_scope_key
+        )
         if not transaction_rows:
             self._read_model_repository.save_bank_detail_rows(scope_key=normalized_scope_key, rows=[])
             self._read_model_repository.mark_bank_detail_scope(
@@ -62,7 +64,7 @@ class BankDetailSqlProjectionBuilder:
         transaction_ids = [str(row["id"]) for row in transaction_rows]
         manual_categories = self._load_manual_categories(transaction_rows)
         relations = self._load_relation_tags(transaction_ids)
-        auto_categories = self._auto_category_service.suggestions_by_transaction_id(transaction_rows)
+        auto_categories = self._auto_category_service.suggestions_by_transaction_id(auto_category_context_rows)
         generated_at = datetime.now(UTC).isoformat()
         source_versions = self._source_versions(source_version=source_version, row_count=len(transaction_rows))
         rows = [
@@ -80,7 +82,8 @@ class BankDetailSqlProjectionBuilder:
         self._read_model_repository.save_bank_detail_rows(scope_key=normalized_scope_key, rows=rows)
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "generated_at": generated_at}
 
-    def _load_transaction_rows(self, scope_key: str) -> list[dict[str, Any]]:
+    def _load_transaction_rows_with_auto_category_context(self, scope_key: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        start_date, end_date = _bank_detail_auto_category_context_bounds(scope_key)
         rows = self._connection.fetch_all(
             """
             select coalesce(legacy_mongo_id, id::text) as id,
@@ -104,12 +107,19 @@ class BankDetailSqlProjectionBuilder:
                    bank_text_fields,
                    raw_payload
             from app.bank_transactions
-            where txn_month = %s::date
+            where txn_date >= %s::date
+              and txn_date < %s::date
             order by coalesce(trade_time, txn_date::timestamptz) desc, coalesce(legacy_mongo_id, id::text) desc
             """,
-            (f"{scope_key}-01",),
+            (start_date.isoformat(), end_date.isoformat()),
         )
-        return [self._normalize_transaction_row(row) for row in rows]
+        context_rows = [self._normalize_transaction_row(row) for row in rows]
+        scope_rows = [
+            row
+            for row in context_rows
+            if str(row.get("trade_date") or row.get("trade_time") or "")[:7] == scope_key
+        ]
+        return scope_rows, context_rows
 
     def _load_manual_categories(self, transaction_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         identity_to_row_id: dict[str, str] = {}
@@ -330,6 +340,16 @@ class BankDetailSqlProjectionBuilder:
 
 def _is_month_scope(scope_key: str) -> bool:
     return len(scope_key) == 7 and scope_key[4] == "-" and scope_key[:4].isdigit() and scope_key[5:7].isdigit()
+
+
+def _bank_detail_auto_category_context_bounds(scope_key: str) -> tuple[date, date]:
+    month_start = datetime.strptime(f"{scope_key}-01", "%Y-%m-%d").date()
+    if month_start.month == 12:
+        next_month_start = date(month_start.year + 1, 1, 1)
+    else:
+        next_month_start = date(month_start.year, month_start.month + 1, 1)
+    boundary_window = timedelta(days=2)
+    return month_start - boundary_window, next_month_start + boundary_window
 
 
 def _direction(value: Any, signed_amount: Any) -> str:

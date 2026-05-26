@@ -668,6 +668,9 @@ class PostgresStateStore:
     def list_bank_transactions_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_bank_transactions_page(**kwargs)
 
+    def list_bank_transactions_auto_category_context(self, **kwargs: Any) -> list[Any]:
+        return self._core_repository.list_bank_transactions_auto_category_context(**kwargs)
+
     def list_bank_transaction_accounts(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self._core_repository.list_bank_transaction_accounts(**kwargs)
 

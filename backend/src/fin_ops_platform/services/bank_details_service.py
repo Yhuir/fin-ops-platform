@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -126,7 +126,12 @@ class BankDetailsService:
                 page_size=normalized_page_size,
             )
             display_payloads = [self._transaction_payload(transaction) for transaction in transactions]
-            auto_categories = self._auto_category_payloads(display_payloads)
+            auto_context_payloads = self._sql_auto_category_context_payloads(
+                display_payloads,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            auto_categories = self._auto_category_payloads(auto_context_payloads)
             relation_tags_by_id = self._relation_tag_relations(
                 [str(payload.get("id") or "") for payload in display_payloads]
             )
@@ -295,6 +300,30 @@ class BankDetailsService:
         return self._auto_category_service.suggestions_by_transaction_id(
             [self._auto_category_input_row(row) for row in rows]
         )
+
+    def _sql_auto_category_context_payloads(
+        self,
+        display_payloads: list[dict[str, Any]],
+        *,
+        date_from: str | None,
+        date_to: str | None,
+    ) -> list[dict[str, Any]]:
+        context_loader = getattr(self._fact_repository, "list_bank_transactions_auto_category_context", None)
+        if not callable(context_loader):
+            return list(display_payloads)
+        context_date_from, context_date_to = _auto_category_context_date_range(date_from=date_from, date_to=date_to)
+        context_rows = context_loader(date_from=context_date_from, date_to=context_date_to)
+        context_payloads = [self._transaction_payload(transaction) for transaction in list(context_rows or [])]
+        payloads_by_id = {
+            str(payload.get("id") or ""): payload
+            for payload in context_payloads
+            if str(payload.get("id") or "").strip()
+        }
+        for payload in display_payloads:
+            transaction_id = str(payload.get("id") or "").strip()
+            if transaction_id:
+                payloads_by_id.setdefault(transaction_id, payload)
+        return list(payloads_by_id.values()) or list(display_payloads)
 
     def _auto_category_input_row(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = dict(row)
@@ -519,3 +548,18 @@ class BankDetailsService:
     @staticmethod
     def _format_decimal(value: Any) -> str:
         return f"{Decimal(str(value)):.2f}"
+
+
+def _auto_category_context_date_range(*, date_from: str | None, date_to: str | None) -> tuple[str | None, str | None]:
+    return _shift_iso_date(date_from, days=-2), _shift_iso_date(date_to, days=2)
+
+
+def _shift_iso_date(value: str | None, *, days: int) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.strptime(text[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return text
+    return (parsed + timedelta(days=days)).isoformat()

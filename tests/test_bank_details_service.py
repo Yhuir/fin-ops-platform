@@ -38,6 +38,23 @@ class _PagedBankTransactionRepository:
         return list(self.rows), self.total
 
 
+class _ContextBankTransactionRepository(_PagedBankTransactionRepository):
+    def __init__(
+        self,
+        *,
+        page_rows: list[BankTransaction],
+        context_rows: list[BankTransaction],
+        total: int,
+    ) -> None:
+        super().__init__(page_rows, total)
+        self.context_rows = context_rows
+        self.context_calls: list[dict[str, object]] = []
+
+    def list_bank_transactions_auto_category_context(self, **kwargs: object) -> list[BankTransaction]:
+        self.context_calls.append(dict(kwargs))
+        return list(self.context_rows)
+
+
 class _BankAccountRepository:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self.rows = rows
@@ -1059,6 +1076,37 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(in_account_payload["rows"][0]["effective_category_code"], "internal_transfer")
         self.assertEqual(in_account_payload["category_counts"]["internal_transfer"], 1)
         self.assertEqual(in_account_payload["category_counts"]["uncategorized"], 0)
+
+    def test_sql_paged_bank_details_uses_full_date_context_for_internal_transfer_auto_category(self) -> None:
+        transactions = self._internal_transfer_transactions()
+        repository = _ContextBankTransactionRepository(
+            page_rows=[transactions[0]],
+            context_rows=transactions,
+            total=1,
+        )
+        service = BankDetailsService(
+            _ExplodingImportService(),
+            auto_category_service=BankTransactionAutoCategoryService(),
+            fact_repository=repository,
+        )
+
+        payload = service.list_transactions(
+            account_key="工商银行:6386",
+            date_from="2026-04-01",
+            date_to="2026-04-30",
+            page=1,
+            page_size=1,
+        )
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["txn-transfer-out"])
+        self.assertEqual(payload["rows"][0]["auto_category_code"], "internal_transfer")
+        self.assertEqual(payload["rows"][0]["effective_category_code"], "internal_transfer")
+        self.assertEqual(payload["category_counts"]["internal_transfer"], 1)
+        self.assertEqual(payload["category_counts"]["uncategorized"], 0)
+        self.assertEqual(
+            repository.context_calls,
+            [{"date_from": "2026-03-30", "date_to": "2026-05-02"}],
+        )
 
     def test_internal_transfer_auto_category_runs_before_social_tax_text(self) -> None:
         transactions = [
