@@ -117,6 +117,8 @@ def main() -> int:
             *invoice_usage_collection_worker_args(),
             "--max-iterations",
             str(max(1, args.max_iterations)),
+            "--max-events-per-iteration",
+            "24",
             "--poll-interval-seconds",
             "0.2",
             "--lock-timeout-seconds",

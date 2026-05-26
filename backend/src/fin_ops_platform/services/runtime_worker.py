@@ -35,6 +35,7 @@ class RuntimeWorkerConfig:
     poll_interval_seconds: float = 5.0
     max_iterations: int | None = None
     max_attempts: int = 5
+    max_events_per_iteration: int = 1
 
     def __post_init__(self) -> None:
         if self.lock_timeout_seconds <= 0:
@@ -49,6 +50,8 @@ class RuntimeWorkerConfig:
             raise ValueError("poll_interval_seconds must be positive.")
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive.")
+        if self.max_events_per_iteration <= 0:
+            raise ValueError("max_events_per_iteration must be positive.")
 
 
 class RuntimeWorker:
@@ -128,7 +131,11 @@ class RuntimeWorker:
     def run_forever(self) -> None:
         iterations = 0
         while self._config.max_iterations is None or iterations < self._config.max_iterations:
-            result = self.run_once()
+            result = RuntimeWorkerResult.IDLE
+            for _ in range(self._config.max_events_per_iteration):
+                result = self.run_once()
+                if result is RuntimeWorkerResult.IDLE:
+                    break
             iterations += 1
             if result is RuntimeWorkerResult.IDLE:
                 sleep(self._config.poll_interval_seconds)

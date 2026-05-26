@@ -70,6 +70,16 @@ class FakeQueue:
         self.statement_timeouts.append(seconds)
 
 
+class FakeSequenceQueue(FakeQueue):
+    def __init__(self, claimed_events: list[RuntimeQueueEvent]) -> None:
+        super().__init__(None)
+        self.claimed_events = list(claimed_events)
+
+    def claim_next(self, worker_id: str, event_types=None, lock_timeout_seconds: int = 300):
+        self.claim_calls.append((worker_id, list(event_types) if event_types is not None else None, lock_timeout_seconds))
+        return self.claimed_events.pop(0) if self.claimed_events else None
+
+
 class RuntimeWorkerTests(unittest.TestCase):
     def test_run_once_claims_from_postgres_queue_without_redis_and_completes_event(self) -> None:
         queue = FakeQueue(event())
@@ -192,6 +202,29 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(queue.claim_calls, [])
         self.assertEqual(queue.completed, [])
         self.assertEqual(queue.failed, [])
+
+    def test_run_forever_drains_multiple_events_before_idle_sleep(self) -> None:
+        events = [
+            RuntimeQueueEvent(**{**event().__dict__, "event_id": f"event-{index}"})
+            for index in range(1, 5)
+        ]
+        queue = FakeSequenceQueue(events)
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["runtime.test"],
+                max_iterations=1,
+                max_events_per_iteration=3,
+            ),
+            handlers={"runtime.test": lambda claimed: {"handled": claimed.event_id}},
+        )
+
+        worker.run_forever()
+
+        self.assertEqual([event_id for event_id, _worker_id, _payload in queue.acked], ["event-1", "event-2", "event-3"])
+        self.assertEqual(len(queue.claim_calls), 3)
+        self.assertEqual([claimed.event_id for claimed in queue.claimed_events], ["event-4"])
 
 
 if __name__ == "__main__":

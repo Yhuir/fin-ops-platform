@@ -61,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task-timeout-seconds", type=int, default=None)
     parser.add_argument("--statement-timeout-seconds", type=int, default=None)
     parser.add_argument("--max-iterations", type=int, default=None, help="Testing/smoke limit. Omit to run continuously.")
+    parser.add_argument("--max-events-per-iteration", type=int, default=1, help="Maximum events to drain before an idle sleep.")
     parser.add_argument("--enable-file-object-migration", action="store_true", help="Register GridFS to object storage migration handler.")
     parser.add_argument("--enable-workbench-read-model-refresh", action="store_true", help="Register workbench SQL read model refresh handler.")
     parser.add_argument("--enable-cost-statistics-read-model-refresh", action="store_true", help="Register cost statistics SQL read model refresh handler.")
@@ -96,6 +97,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         task_timeout_seconds=args.task_timeout_seconds,
         statement_timeout_seconds=args.statement_timeout_seconds,
         max_iterations=args.max_iterations,
+        max_events_per_iteration=args.max_events_per_iteration,
         max_attempts=args.max_attempts,
         worker_kind=args.worker_kind or _infer_worker_kind(args),
     )
@@ -233,6 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "task_timeout_seconds": config.task_timeout_seconds,
                     "statement_timeout_seconds": config.statement_timeout_seconds,
                     "max_attempts": config.max_attempts,
+                    "max_events_per_iteration": config.max_events_per_iteration,
                     "workbench_matching_enabled": bool(args.enable_workbench_matching),
                     "workbench_matching_batch_size": args.workbench_matching_batch_size,
                     "workbench_matching_lease_seconds": args.workbench_matching_lease_seconds,
