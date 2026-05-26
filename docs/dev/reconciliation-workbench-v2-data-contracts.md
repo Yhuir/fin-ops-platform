@@ -351,12 +351,17 @@ GET /api/workbench/groups?month=all&zone=open&page=1&page_size=200&detail_level=
 
 自动自由匹配契约：
 
-- 首版只覆盖支出方向：普通支出 OA、银行流出、进项或供应商发票。
-- 收入方向没有 OA 桥接对象，不进入 OA、流水、发票自由匹配。
+- 支出方向覆盖普通支出 OA、银行流出、进项或供应商发票，可形成 OA-银行-发票或两两关系。
+- 收入方向没有 OA 桥接对象，只允许收入流水与销项发票形成银行-发票两方关系。
 - 匹配窗口为 `T-2 / T / T+2`。处理 T 月 dirty scope 时，可读取前后各 2 个月的候选池。
 - 唯一性判断必须覆盖完整 5 个月候选窗口；同金额、同证据等级下存在多个可行组合时，全部保持 `open`。
 - 跨月自动决策只写一个 `scope_month`：包含银行流水时归属银行交易月份；没有银行流水的 OA+发票关系归属 OA 月份。
 - `rule_code=oa_bank_pairs_single_invoice_exact_sum` 表示多条 OA-银行流水付款项合计匹配一张进项发票。每个付款项内部必须满足 OA 金额等于银行流出金额并具备 OA-银行证据；付款项总额必须等于发票价税合计；发票必须与至少一个 OA 或银行流水具备主体/文本证据；若同一窗口存在多个付款组合或多张可行发票，必须输出 `open` 冲突而非 `paired`。
+- `rule_code=bank_invoice_exact_amount` 可用于收入流水与销项发票的确定性两方关系。收入方向必须使用银行对方户名/对方税号与销项发票购方名称/购方税号作为主体证据、银行贷方发生额与发票价税合计、以及完整候选窗口内唯一性；销项发票销方不能作为收入流水的匹配主体。
+- `rule_code=bank_invoice_exact_sum` 表示一笔收入流水金额等于多张同购方销项发票价税合计。决策必须为 `match_shape=bank_invoice`，`bank_row_ids` 包含一笔流水，`invoice_row_ids` 包含多张发票，`payment_amount_closed=true`，`invoice_amount_closed=true`，并在 `evidence.amount_relation` 标记 `invoice_sum_exact_amount`。
+- 收入 `bank_invoice` 的 `evidence` 至少包含 `scope_window`、`uniqueness_scope`、`amount_relation`、`subject_evidence` 和补强证据。摘要/备注命中购方名称、发票号、数电票号、合同号、订单号或项目号只能作为 `supporting_evidence` 参与同主体候选排序，不能替代银行对方主体字段。
+- 收入流水金额等于多张同金额销项发票各自金额时，只能在唯一最高证据分候选存在时自动输出 `bank_invoice_exact_amount`。若最高分并列，必须输出 `decision_status=open`、`match_shape=bank_invoice`、`rule_code=bank_invoice_conflict`，blocker code 为 `same_score_bank_invoice_candidates`，并包含 `candidate_rows`、`candidate_groups`、`amount_relation`、`evidence_summary` 和 `reason`。
+- 收入流水存在多个多发票合计组合时，必须输出 `rule_code=bank_invoice_conflict`，blocker code 为 `multiple_bank_invoice_sum_candidates`；不得按导入顺序、row id、数据库 id 或无业务含义排序选择一个组合。
 - OA 来源附件发票与 OA 强关联。若 OA 金额等于银行流水金额但正式附件发票合计不一致，仍可 `display_state=paired`，同时输出 `invoice_amount_mismatch` warning、`payment_amount_closed=true`、`invoice_amount_closed=false`。
 
 消费顺序：
@@ -364,7 +369,7 @@ GET /api/workbench/groups?month=all&zone=open&page=1&page_size=200&detail_level=
 1. 人工 `app.workbench_pair_relations` 优先形成 `manual_confirmed` group。
 2. 再应用自动决策，把同一 `decision_key` 的 `row_ids` 写成同一 `case_id`。
 3. 自动 `paired` group 内 row 不再作为 standalone 行重复展示。
-4. 自动 `open` 决策只解释未配对原因，不把多个未唯一确定的对象合并成一行。
+4. 自动 `open` 决策只解释未配对原因。普通三方冲突保持相关行独立 open；收入 `bank_invoice` 歧义应输出一个结构化 open 冲突组，保留银行流水、候选发票和 evidence 上下文，便于页面和审计解释。
 5. 已被手工关系覆盖的自动决策更新为 `decision_status=consumed`，不得继续投影。
 
 触发链路：

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -16,11 +17,12 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
     expand_scope_month_window,
     resolve_decision_scope_month,
 )
-from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens
+from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens, normalize_match_text
 
 
-RULE_VERSION = "2026-05-25-multi-payment-single-invoice"
+RULE_VERSION = "2026-05-26-bank-invoice-scored-sum"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
+MATCHABLE_DIRECTIONS = {"expenditure", "income"}
 MAX_INVOICE_COMBINATION_SIZE = 6
 MAX_PAYMENT_PAIR_COMBINATION_SIZE = 6
 MAX_SUBSET_GROUP_RESULTS = 2
@@ -46,6 +48,16 @@ class _ThreeWayCandidate:
     invoice_amount_closed: bool
     warning_codes: tuple[str, ...]
     evidence: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class _BankInvoiceCandidate:
+    bank: _Row
+    invoice: _Row
+    subject_evidence: list[dict[str, Any]]
+    supporting_evidence: list[dict[str, Any]]
+    score: int
+    date_distance_days: int | None
 
 
 class WorkbenchFreeMatchingEngine:
@@ -93,7 +105,9 @@ class WorkbenchFreeMatchingEngine:
         candidates: list[_ThreeWayCandidate] = []
         for oa in oa_rows:
             for bank in bank_rows:
-                if oa.amount != bank.amount or not self._has_evidence(oa, bank):
+                if oa.direction != bank.direction:
+                    continue
+                if oa.amount != bank.amount or not self._has_pair_evidence(oa, bank, "oa_bank"):
                     continue
                 attachment_invoices = self._attachment_invoices(oa, invoice_rows)
                 if attachment_invoices:
@@ -166,7 +180,7 @@ class WorkbenchFreeMatchingEngine:
     ) -> list[_ThreeWayCandidate]:
         exact_pairs = [
             (oa, bank)
-            for oa, bank in self._unique_pairs(oa_rows, bank_rows)
+            for oa, bank in self._unique_pairs(oa_rows, bank_rows, "oa_bank")
             if oa.amount == bank.amount
         ]
         candidates: list[_ThreeWayCandidate] = []
@@ -176,7 +190,11 @@ class WorkbenchFreeMatchingEngine:
             compatible_pairs = [
                 pair
                 for pair in exact_pairs
-                if self._has_evidence(pair[0], invoice) or self._has_evidence(pair[1], invoice)
+                if pair[0].direction == invoice.direction
+                and (
+                    self._has_pair_evidence(pair[0], invoice, "oa_invoice")
+                    or self._has_pair_evidence(pair[1], invoice, "bank_invoice")
+                )
             ]
             pair_groups = self._subset_groups_by_amount(
                 compatible_pairs,
@@ -223,8 +241,12 @@ class WorkbenchFreeMatchingEngine:
         eligible = [
             invoice
             for invoice in invoices
-            if invoice.data.get("source_kind") != OA_ATTACHMENT_INVOICE_SOURCE_KIND
-            and (self._has_evidence(oa, invoice) or self._has_evidence(bank, invoice))
+            if invoice.direction == bank.direction
+            and invoice.data.get("source_kind") != OA_ATTACHMENT_INVOICE_SOURCE_KIND
+            and (
+                self._has_pair_evidence(oa, invoice, "oa_invoice")
+                or self._has_pair_evidence(bank, invoice, "bank_invoice")
+            )
         ]
         exact_single_invoices = [
             invoice
@@ -373,12 +395,16 @@ class WorkbenchFreeMatchingEngine:
         pair_specs = (
             (oa_rows, bank_rows, "oa_bank", "oa_bank_exact_amount"),
             (oa_rows, invoice_rows, "oa_invoice", "oa_invoice_exact_amount"),
-            (bank_rows, invoice_rows, "bank_invoice", "bank_invoice_exact_amount"),
         )
         for left_rows, right_rows, match_shape, rule_code in pair_specs:
             available_left = [row for row in left_rows if row.row_id not in claimed]
             available_right = [row for row in right_rows if row.row_id not in claimed]
-            pairs = sorted(self._unique_pairs(available_left, available_right), key=lambda pair: (pair[0].row_id, pair[1].row_id))
+            candidate_pairs = self._pair_candidates(available_left, available_right, match_shape)
+            pairs = sorted(self._mutual_unique_pairs(candidate_pairs), key=lambda pair: (pair[0].row_id, pair[1].row_id))
+            conflicted = self._conflicted_two_way_rows(candidate_pairs, pairs, rule_code)
+            if conflicted:
+                decisions.extend(self._open_decisions(scope_month, conflicted, window, source_versions))
+                claimed.update(conflicted.keys())
             for left, right in pairs:
                 if left.row_id in claimed or right.row_id in claimed:
                     continue
@@ -394,15 +420,427 @@ class WorkbenchFreeMatchingEngine:
                     )
                 )
                 claimed.update((left.row_id, right.row_id))
+        decisions.extend(self._bank_invoice_decisions(scope_month, bank_rows, invoice_rows, window, source_versions, claimed))
         return decisions
 
-    def _unique_pairs(self, left_rows: list[_Row], right_rows: list[_Row]) -> list[tuple[_Row, _Row]]:
-        candidates = [
+    def _bank_invoice_decisions(
+        self,
+        scope_month: str,
+        bank_rows: list[_Row],
+        invoice_rows: list[_Row],
+        window: tuple[str, ...],
+        source_versions: dict[str, Any],
+        claimed_row_ids: set[str],
+    ) -> list[WorkbenchDecision]:
+        decisions: list[WorkbenchDecision] = []
+        claimed = claimed_row_ids
+        for bank in sorted(bank_rows, key=lambda row: row.row_id):
+            if bank.row_id in claimed:
+                continue
+            candidates = [
+                candidate
+                for invoice in sorted(invoice_rows, key=lambda row: row.row_id)
+                if invoice.row_id not in claimed
+                for candidate in self._bank_invoice_candidate(bank, invoice)
+            ]
+            if not candidates:
+                continue
+
+            sum_eligible = [candidate for candidate in candidates if candidate.invoice.amount < bank.amount]
+            sum_groups = [
+                tuple(sorted(group, key=lambda candidate: candidate.invoice.row_id))
+                for group in self._subset_groups_by_amount(
+                    sum_eligible,
+                    target_amount=bank.amount,
+                    max_size=MAX_INVOICE_COMBINATION_SIZE,
+                    amount_getter=lambda candidate: candidate.invoice.amount,
+                )
+                if len(group) >= 2
+            ]
+            if len(sum_groups) == 1:
+                group = sum_groups[0]
+                decision = self._paired_bank_invoice_sum_decision(
+                    bank=bank,
+                    candidates=group,
+                    window=window,
+                    source_versions=source_versions,
+                )
+                decisions.append(decision)
+                claimed.update(decision.row_ids)
+                continue
+            if len(sum_groups) > 1:
+                decision = self._open_bank_invoice_conflict_decision(
+                    bank=bank,
+                    candidates=tuple(candidate for group in sum_groups for candidate in group),
+                    window=window,
+                    source_versions=source_versions,
+                    blocker_code="multiple_bank_invoice_sum_candidates",
+                    amount_relation="invoice_sum_exact_amount",
+                    candidate_groups=[
+                        [bank.row_id, *(candidate.invoice.row_id for candidate in group)]
+                        for group in sum_groups
+                    ],
+                    reason="Multiple invoice combinations sum exactly to the bank transaction amount.",
+                )
+                decisions.append(decision)
+                claimed.update(decision.row_ids)
+                continue
+
+            exact_candidates = [candidate for candidate in candidates if candidate.invoice.amount == bank.amount]
+            if not exact_candidates:
+                continue
+            scored_candidates = self._with_unique_date_score(exact_candidates)
+            if len(scored_candidates) == 1:
+                decision = self._paired_bank_invoice_single_decision(
+                    candidate=scored_candidates[0],
+                    window=window,
+                    source_versions=source_versions,
+                )
+                decisions.append(decision)
+                claimed.update(decision.row_ids)
+                continue
+
+            best_score = max(candidate.score for candidate in scored_candidates)
+            best_candidates = [candidate for candidate in scored_candidates if candidate.score == best_score]
+            if len(best_candidates) == 1:
+                decision = self._paired_bank_invoice_single_decision(
+                    candidate=best_candidates[0],
+                    window=window,
+                    source_versions=source_versions,
+                    candidate_scores=self._candidate_score_payload(scored_candidates),
+                )
+                decisions.append(decision)
+                claimed.update(decision.row_ids)
+                continue
+
+            decision = self._open_bank_invoice_conflict_decision(
+                bank=bank,
+                candidates=tuple(scored_candidates),
+                window=window,
+                source_versions=source_versions,
+                blocker_code="same_score_bank_invoice_candidates",
+                amount_relation="single_exact_amount",
+                candidate_groups=[[bank.row_id, candidate.invoice.row_id] for candidate in scored_candidates],
+                reason="Multiple same-amount invoices have the same strongest evidence score.",
+            )
+            decisions.append(decision)
+            claimed.update(decision.row_ids)
+        return decisions
+
+    def _bank_invoice_candidate(self, bank: _Row, invoice: _Row) -> list[_BankInvoiceCandidate]:
+        if bank.row_type != "bank" or invoice.row_type != "invoice":
+            return []
+        if bank.direction != invoice.direction:
+            return []
+        if invoice.data.get("source_kind") == OA_ATTACHMENT_INVOICE_SOURCE_KIND:
+            return []
+        if invoice.amount <= Decimal("0.00") or invoice.amount > bank.amount:
+            return []
+        subject_evidence = self._bank_invoice_subject_evidence(bank, invoice)
+        if not subject_evidence:
+            return []
+        supporting_evidence = self._bank_invoice_supporting_evidence(bank, invoice)
+        score = self._bank_invoice_score(subject_evidence, supporting_evidence)
+        return [
+            _BankInvoiceCandidate(
+                bank=bank,
+                invoice=invoice,
+                subject_evidence=subject_evidence,
+                supporting_evidence=supporting_evidence,
+                score=score,
+                date_distance_days=self._date_distance_days(bank, invoice),
+            )
+        ]
+
+    def _bank_invoice_subject_evidence(self, bank: _Row, invoice: _Row) -> list[dict[str, Any]]:
+        evidence: list[dict[str, Any]] = []
+        bank_tax_values = self._normalized_field_values(
+            {
+                "bank.counterparty_tax_no": bank.data.get("counterparty_tax_no"),
+            }
+        )
+        invoice_tax_values = self._normalized_field_values(self._invoice_tax_fields(invoice))
+        for bank_field, bank_value in bank_tax_values:
+            for invoice_field, invoice_value in invoice_tax_values:
+                if bank_value and bank_value == invoice_value:
+                    evidence.append(
+                        {
+                            "kind": "tax_no",
+                            "bank_field": bank_field,
+                            "invoice_field": invoice_field,
+                            "token": bank_value,
+                        }
+                    )
+
+        bank_name_tokens = self._bank_counterparty_tokens(bank)
+        invoice_name_tokens = self._invoice_name_tokens(invoice)
+        for match in matching_tokens(bank_name_tokens, invoice_name_tokens):
+            kind = "name_exact" if self._is_exact_name_match(match, bank_name_tokens, invoice_name_tokens) else "name_partial"
+            evidence.append(
+                {
+                    "kind": kind,
+                    "bank_field": match["left_source_field"],
+                    "invoice_field": match["right_source_field"],
+                    "token": match["token"],
+                }
+            )
+        return self._dedupe_evidence(evidence)
+
+    def _bank_invoice_supporting_evidence(self, bank: _Row, invoice: _Row) -> list[dict[str, Any]]:
+        evidence: list[dict[str, Any]] = []
+        bank_text_tokens = self._bank_text_tokens(bank)
+        for match in matching_tokens(bank_text_tokens, self._invoice_identity_tokens(invoice)):
+            if not self._is_full_invoice_identity_match(match, invoice):
+                continue
+            evidence.append(
+                {
+                    "kind": "invoice_number",
+                    "bank_field": match["left_source_field"],
+                    "invoice_field": match["right_source_field"],
+                    "token": match["token"],
+                }
+            )
+        for match in matching_tokens(bank_text_tokens, self._invoice_business_reference_tokens(invoice)):
+            evidence.append(
+                {
+                    "kind": "business_reference",
+                    "bank_field": match["left_source_field"],
+                    "invoice_field": match["right_source_field"],
+                    "token": match["token"],
+                }
+            )
+        for match in matching_tokens(bank_text_tokens, self._invoice_name_tokens(invoice)):
+            evidence.append(
+                {
+                    "kind": "buyer_name_in_bank_text" if invoice.direction == "income" else "seller_name_in_bank_text",
+                    "bank_field": match["left_source_field"],
+                    "invoice_field": match["right_source_field"],
+                    "token": match["token"],
+                }
+            )
+        return self._dedupe_evidence(evidence)
+
+    @staticmethod
+    def _bank_invoice_score(subject_evidence: list[dict[str, Any]], supporting_evidence: list[dict[str, Any]]) -> int:
+        score = 0
+        if any(item["kind"] == "tax_no" for item in subject_evidence):
+            score += 100
+        if any(item["kind"] == "invoice_number" for item in supporting_evidence):
+            score += 80
+        if any(item["kind"] == "business_reference" for item in supporting_evidence):
+            score += 60
+        if any(item["kind"] == "name_exact" for item in subject_evidence):
+            score += 50
+        if any(item["kind"] in {"buyer_name_in_bank_text", "seller_name_in_bank_text"} for item in supporting_evidence):
+            score += 20
+        return score
+
+    def _with_unique_date_score(self, candidates: list[_BankInvoiceCandidate]) -> list[_BankInvoiceCandidate]:
+        distances = [candidate.date_distance_days for candidate in candidates if candidate.date_distance_days is not None]
+        if not distances:
+            return candidates
+        min_distance = min(distances)
+        if sum(1 for candidate in candidates if candidate.date_distance_days == min_distance) != 1:
+            return candidates
+        return [
+            replace(
+                candidate,
+                score=candidate.score + 10,
+                supporting_evidence=[
+                    *candidate.supporting_evidence,
+                    {
+                        "kind": "date_proximity",
+                        "distance_days": candidate.date_distance_days,
+                    },
+                ],
+            )
+            if candidate.date_distance_days == min_distance
+            else candidate
+            for candidate in candidates
+        ]
+
+    def _paired_bank_invoice_single_decision(
+        self,
+        *,
+        candidate: _BankInvoiceCandidate,
+        window: tuple[str, ...],
+        source_versions: dict[str, Any],
+        candidate_scores: list[dict[str, Any]] | None = None,
+    ) -> WorkbenchDecision:
+        bank = candidate.bank
+        invoice = candidate.invoice
+        row_ids = (bank.row_id, invoice.row_id)
+        evidence = {
+            "scope_window": list(window),
+            "uniqueness_scope": "five_month_window",
+            "amount_relation": "single_exact_amount",
+            "subject_evidence": candidate.subject_evidence,
+            "supporting_evidence": candidate.supporting_evidence,
+            "score": candidate.score,
+            "selected_invoice_row_id": invoice.row_id,
+        }
+        if candidate_scores is not None:
+            evidence["candidate_scores"] = candidate_scores
+        return WorkbenchDecision(
+            decision_id=self._decision_key(bank.month, "bank_invoice_exact_amount", row_ids),
+            decision_key=self._decision_key(bank.month, "bank_invoice_exact_amount", row_ids),
+            scope_month=bank.month,
+            display_state=DISPLAY_STATE_PAIRED,
+            decision_status=DECISION_STATUS_PAIRED,
+            match_domain=MATCH_DOMAIN_FREE,
+            match_shape="bank_invoice",
+            rule_code="bank_invoice_exact_amount",
+            rule_version=RULE_VERSION,
+            row_ids=row_ids,
+            bank_row_ids=(bank.row_id,),
+            invoice_row_ids=(invoice.row_id,),
+            amount=bank.amount,
+            direction=bank.direction,
+            payment_amount_closed=True,
+            invoice_amount_closed=True,
+            evidence=evidence,
+            blockers=(),
+            explanation="Bank transaction and output invoice match by subject evidence, amount and deterministic supporting evidence.",
+            source_versions=source_versions,
+        )
+
+    def _paired_bank_invoice_sum_decision(
+        self,
+        *,
+        bank: _Row,
+        candidates: tuple[_BankInvoiceCandidate, ...],
+        window: tuple[str, ...],
+        source_versions: dict[str, Any],
+    ) -> WorkbenchDecision:
+        invoices = tuple(candidate.invoice for candidate in candidates)
+        row_ids = (bank.row_id, *(invoice.row_id for invoice in invoices))
+        invoice_total = sum((invoice.amount for invoice in invoices), Decimal("0.00"))
+        evidence = {
+            "scope_window": list(window),
+            "uniqueness_scope": "five_month_window",
+            "amount_relation": "invoice_sum_exact_amount",
+            "subject_evidence": [
+                {
+                    "invoice_row_id": candidate.invoice.row_id,
+                    "matches": candidate.subject_evidence,
+                }
+                for candidate in candidates
+            ],
+            "supporting_evidence": [
+                {
+                    "invoice_row_id": candidate.invoice.row_id,
+                    "matches": candidate.supporting_evidence,
+                    "score": candidate.score,
+                }
+                for candidate in candidates
+            ],
+            "invoice_total": str(invoice_total),
+            "payment_amount": str(bank.amount),
+        }
+        return WorkbenchDecision(
+            decision_id=self._decision_key(bank.month, "bank_invoice_exact_sum", row_ids),
+            decision_key=self._decision_key(bank.month, "bank_invoice_exact_sum", row_ids),
+            scope_month=bank.month,
+            display_state=DISPLAY_STATE_PAIRED,
+            decision_status=DECISION_STATUS_PAIRED,
+            match_domain=MATCH_DOMAIN_FREE,
+            match_shape="bank_invoice",
+            rule_code="bank_invoice_exact_sum",
+            rule_version=RULE_VERSION,
+            row_ids=row_ids,
+            bank_row_ids=(bank.row_id,),
+            invoice_row_ids=tuple(invoice.row_id for invoice in invoices),
+            amount=bank.amount,
+            direction=bank.direction,
+            payment_amount_closed=True,
+            invoice_amount_closed=True,
+            evidence=evidence,
+            blockers=(),
+            explanation="Bank transaction amount closes against a unique sum of output invoices for the same buyer.",
+            source_versions=source_versions,
+        )
+
+    def _open_bank_invoice_conflict_decision(
+        self,
+        *,
+        bank: _Row,
+        candidates: tuple[_BankInvoiceCandidate, ...],
+        window: tuple[str, ...],
+        source_versions: dict[str, Any],
+        blocker_code: str,
+        amount_relation: str,
+        candidate_groups: list[list[str]],
+        reason: str,
+    ) -> WorkbenchDecision:
+        candidates_by_invoice = {candidate.invoice.row_id: candidate for candidate in candidates}
+        invoice_ids = tuple(sorted(candidates_by_invoice))
+        row_ids = (bank.row_id, *invoice_ids)
+        evidence_summary = self._candidate_score_payload([candidates_by_invoice[row_id] for row_id in invoice_ids])
+        blocker = {
+            "code": blocker_code,
+            "candidate_rows": list(row_ids),
+            "candidate_groups": candidate_groups,
+            "amount_relation": amount_relation,
+            "evidence_summary": evidence_summary,
+            "reason": reason,
+        }
+        return WorkbenchDecision(
+            decision_id=self._decision_key(bank.month, "bank_invoice_conflict", row_ids),
+            decision_key=self._decision_key(bank.month, "bank_invoice_conflict", row_ids),
+            scope_month=bank.month,
+            display_state=DISPLAY_STATE_OPEN,
+            decision_status=DECISION_STATUS_OPEN,
+            match_domain=MATCH_DOMAIN_FREE,
+            match_shape="bank_invoice",
+            rule_code="bank_invoice_conflict",
+            rule_version=RULE_VERSION,
+            row_ids=row_ids,
+            bank_row_ids=(bank.row_id,),
+            invoice_row_ids=invoice_ids,
+            amount=bank.amount,
+            direction=bank.direction,
+            payment_amount_closed=False,
+            invoice_amount_closed=False,
+            evidence={
+                "scope_window": list(window),
+                "uniqueness_scope": "five_month_window",
+                "amount_relation": amount_relation,
+                "candidate_scores": evidence_summary,
+            },
+            blockers=(blocker,),
+            explanation="Bank-invoice free matching found competing candidates and needs review.",
+            source_versions=source_versions,
+        )
+
+    @staticmethod
+    def _candidate_score_payload(candidates: list[_BankInvoiceCandidate]) -> list[dict[str, Any]]:
+        return [
+            {
+                "bank_row_id": candidate.bank.row_id,
+                "invoice_row_id": candidate.invoice.row_id,
+                "score": candidate.score,
+                "subject_evidence": candidate.subject_evidence,
+                "supporting_evidence": candidate.supporting_evidence,
+                "date_distance_days": candidate.date_distance_days,
+            }
+            for candidate in sorted(candidates, key=lambda item: item.invoice.row_id)
+        ]
+
+    def _unique_pairs(self, left_rows: list[_Row], right_rows: list[_Row], match_shape: str) -> list[tuple[_Row, _Row]]:
+        return self._mutual_unique_pairs(self._pair_candidates(left_rows, right_rows, match_shape))
+
+    def _pair_candidates(self, left_rows: list[_Row], right_rows: list[_Row], match_shape: str) -> list[tuple[_Row, _Row]]:
+        return [
             (left, right)
             for left in left_rows
             for right in right_rows
-            if left.amount == right.amount and self._has_evidence(left, right)
+            if left.direction == right.direction
+            and left.amount == right.amount
+            and self._has_pair_evidence(left, right, match_shape)
         ]
+
+    @staticmethod
+    def _mutual_unique_pairs(candidates: list[tuple[_Row, _Row]]) -> list[tuple[_Row, _Row]]:
         left_counts: dict[str, int] = {}
         right_counts: dict[str, int] = {}
         for left, right in candidates:
@@ -413,6 +851,29 @@ class WorkbenchFreeMatchingEngine:
             for left, right in candidates
             if left_counts[left.row_id] == 1 and right_counts[right.row_id] == 1
         ]
+
+    def _conflicted_two_way_rows(
+        self,
+        candidate_pairs: list[tuple[_Row, _Row]],
+        selected_pairs: list[tuple[_Row, _Row]],
+        rule_code: str,
+    ) -> dict[str, dict[str, Any]]:
+        selected_keys = {(left.row_id, right.row_id) for left, right in selected_pairs}
+        conflicted: dict[str, dict[str, Any]] = {}
+        for left, right in candidate_pairs:
+            if (left.row_id, right.row_id) in selected_keys:
+                continue
+            candidate_rows = [left.row_id, right.row_id]
+            for row in (left, right):
+                entry = conflicted.setdefault(row.row_id, {"row": row, "blockers": []})
+                entry["blockers"].append(
+                    {
+                        "code": "multiple_two_way_candidates",
+                        "rule_code": rule_code,
+                        "candidate_rows": candidate_rows,
+                    }
+                )
+        return conflicted
 
     def _paired_three_way_decision(
         self,
@@ -446,7 +907,7 @@ class WorkbenchFreeMatchingEngine:
             bank_row_ids=tuple(row.row_id for row in candidate.banks),
             invoice_row_ids=tuple(invoice.row_id for invoice in candidate.invoices),
             amount=total_amount,
-            direction="expenditure",
+            direction=candidate.banks[0].direction if candidate.banks else "expenditure",
             payment_amount_closed=True,
             invoice_amount_closed=candidate.invoice_amount_closed,
             warnings=warnings,
@@ -493,8 +954,8 @@ class WorkbenchFreeMatchingEngine:
             bank_row_ids=tuple(row.row_id for row in (left, right) if row.row_type == "bank"),
             invoice_row_ids=tuple(row.row_id for row in (left, right) if row.row_type == "invoice"),
             amount=left.amount,
-            direction="expenditure",
-            payment_amount_closed=True if match_shape == "oa_bank" else None,
+            direction=left.direction,
+            payment_amount_closed=True if match_shape in {"oa_bank", "bank_invoice"} else None,
             invoice_amount_closed=True if match_shape in {"oa_invoice", "bank_invoice"} else None,
             evidence={
                 "scope_window": list(window),
@@ -534,7 +995,7 @@ class WorkbenchFreeMatchingEngine:
                     bank_row_ids=(row.row_id,) if row.row_type == "bank" else (),
                     invoice_row_ids=(row.row_id,) if row.row_type == "invoice" else (),
                     amount=row.amount,
-                    direction="expenditure",
+                    direction=row.direction,
                     evidence={"scope_window": list(window), "uniqueness_scope": "five_month_window"},
                     blockers=blockers,
                     explanation="Free matching found competing candidates, so the row remains open.",
@@ -547,7 +1008,9 @@ class WorkbenchFreeMatchingEngine:
         normalized: list[_Row] = []
         for row in rows:
             direction = self._direction(row_type, row)
-            if direction != "expenditure":
+            if row_type == "oa" and direction != "expenditure":
+                continue
+            if direction not in MATCHABLE_DIRECTIONS:
                 continue
             row_id = str(row.get("row_id") or row.get("id") or "").strip()
             amount = self._amount(row_type, row)
@@ -634,6 +1097,174 @@ class WorkbenchFreeMatchingEngine:
     def _has_evidence(self, left: _Row, right: _Row) -> bool:
         return bool(matching_tokens(self._tokens(left), self._tokens(right)))
 
+    def _has_pair_evidence(self, left: _Row, right: _Row, match_shape: str) -> bool:
+        if match_shape == "bank_invoice":
+            return self._has_bank_invoice_counterparty_evidence(left, right)
+        return self._has_evidence(left, right)
+
+    def _has_bank_invoice_counterparty_evidence(self, left: _Row, right: _Row) -> bool:
+        bank = left if left.row_type == "bank" else right if right.row_type == "bank" else None
+        invoice = left if left.row_type == "invoice" else right if right.row_type == "invoice" else None
+        if bank is None or invoice is None or bank.direction != invoice.direction:
+            return False
+        return bool(matching_tokens(self._bank_counterparty_tokens(bank), self._invoice_counterparty_tokens(invoice)))
+
+    def _bank_counterparty_tokens(self, row: _Row):
+        detail_fields = row.data.get("detail_fields") if isinstance(row.data.get("detail_fields"), dict) else {}
+        return evidence_tokens(
+            {
+                "bank.counterparty": row.data.get("counterparty") or row.data.get("counterparty_name"),
+                "bank.counterparty_tax_no": row.data.get("counterparty_tax_no"),
+                "bank.detail_counterparty": detail_fields.get("对方户名") if isinstance(detail_fields, dict) else None,
+            }
+        )
+
+    def _bank_text_tokens(self, row: _Row):
+        detail_fields = row.data.get("detail_fields") if isinstance(row.data.get("detail_fields"), dict) else {}
+        return evidence_tokens(
+            {
+                "bank.summary": row.data.get("summary"),
+                "bank.remark": row.data.get("remark"),
+                "bank.purpose": row.data.get("purpose"),
+                "bank.postscript": row.data.get("postscript"),
+                "bank.detail_summary": detail_fields.get("摘要") if isinstance(detail_fields, dict) else None,
+                "bank.detail_remark": detail_fields.get("备注") if isinstance(detail_fields, dict) else None,
+                "bank.detail_purpose": detail_fields.get("用途") if isinstance(detail_fields, dict) else None,
+                "bank.detail_postscript": detail_fields.get("附言") if isinstance(detail_fields, dict) else None,
+            }
+        )
+
+    def _invoice_counterparty_tokens(self, row: _Row):
+        if row.direction == "income":
+            return evidence_tokens(
+                {
+                    "invoice.buyer_name": row.data.get("buyer_name"),
+                    "invoice.buyer_tax_no": row.data.get("buyer_tax_no"),
+                }
+            )
+        return evidence_tokens(
+            {
+                "invoice.seller_name": row.data.get("seller_name"),
+                "invoice.seller_tax_no": row.data.get("seller_tax_no"),
+            }
+        )
+
+    def _invoice_name_tokens(self, row: _Row):
+        if row.direction == "income":
+            return evidence_tokens({"invoice.buyer_name": row.data.get("buyer_name")})
+        return evidence_tokens({"invoice.seller_name": row.data.get("seller_name")})
+
+    def _invoice_identity_tokens(self, row: _Row):
+        return evidence_tokens(
+            {
+                "invoice.invoice_no": row.data.get("invoice_no") or row.data.get("invoice_number"),
+                "invoice.digital_invoice_no": row.data.get("digital_invoice_no") or row.data.get("digital_no"),
+                "invoice.invoice_code": row.data.get("invoice_code") or row.data.get("code"),
+            }
+        )
+
+    def _invoice_business_reference_tokens(self, row: _Row):
+        return evidence_tokens(
+            {
+                "invoice.contract_no": row.data.get("contract_no") or row.data.get("contract_number"),
+                "invoice.order_no": row.data.get("order_no") or row.data.get("order_number"),
+                "invoice.project_no": row.data.get("project_no") or row.data.get("project_code"),
+                "invoice.project_name": row.data.get("project_name") or row.data.get("project"),
+            }
+        )
+
+    def _invoice_tax_fields(self, row: _Row) -> dict[str, Any]:
+        if row.direction == "income":
+            return {"invoice.buyer_tax_no": row.data.get("buyer_tax_no")}
+        return {"invoice.seller_tax_no": row.data.get("seller_tax_no")}
+
+    @staticmethod
+    def _normalized_field_values(fields: dict[str, Any]) -> list[tuple[str, str]]:
+        values: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for field, raw_value in fields.items():
+            value = normalize_match_text(raw_value)
+            if not value:
+                continue
+            key = (field, value)
+            if key in seen:
+                continue
+            seen.add(key)
+            values.append(key)
+        return values
+
+    @staticmethod
+    def _is_exact_name_match(match: dict[str, str], left_tokens, right_tokens) -> bool:
+        left_values = [
+            token.value
+            for token in left_tokens
+            if token.source_field == match["left_source_field"] and token.value == match["token"]
+        ]
+        right_values = [
+            token.value
+            for token in right_tokens
+            if token.source_field == match["right_source_field"] and token.value == match["token"]
+        ]
+        return bool(left_values and right_values)
+
+    def _is_full_invoice_identity_match(self, match: dict[str, str], invoice: _Row) -> bool:
+        identity_values = {
+            value
+            for _, value in self._normalized_field_values(
+                {
+                    "invoice.invoice_no": invoice.data.get("invoice_no") or invoice.data.get("invoice_number"),
+                    "invoice.digital_invoice_no": invoice.data.get("digital_invoice_no") or invoice.data.get("digital_no"),
+                    "invoice.invoice_code": invoice.data.get("invoice_code") or invoice.data.get("code"),
+                }
+            )
+        }
+        return match["token"] in identity_values
+
+    @staticmethod
+    def _dedupe_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[Any, ...]] = set()
+        for item in items:
+            key = tuple(sorted(item.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
+
+    def _date_distance_days(self, bank: _Row, invoice: _Row) -> int | None:
+        bank_date = self._row_date(
+            bank,
+            ("trade_time", "pay_receive_time", "transaction_time", "transaction_date", "trade_date", "month", "trade_month"),
+        )
+        invoice_date = self._row_date(invoice, ("invoice_date", "issue_date", "month", "invoice_month"))
+        if bank_date is None or invoice_date is None:
+            return None
+        return abs((bank_date - invoice_date).days)
+
+    @staticmethod
+    def _row_date(row: _Row, fields: tuple[str, ...]) -> date | None:
+        for field in fields:
+            value = str(row.data.get(field) or "").strip()
+            if not value:
+                continue
+            if len(value) >= 10:
+                try:
+                    return date.fromisoformat(value[:10])
+                except ValueError:
+                    continue
+            if len(value) >= 7:
+                try:
+                    return date.fromisoformat(f"{value[:7]}-01")
+                except ValueError:
+                    continue
+        if row.month:
+            try:
+                return date.fromisoformat(f"{row.month}-01")
+            except ValueError:
+                return None
+        return None
+
     def _tokens(self, row: _Row):
         if row.row_type == "oa":
             return evidence_tokens(
@@ -652,7 +1283,19 @@ class WorkbenchFreeMatchingEngine:
                     "bank.remark": row.data.get("remark"),
                 }
             )
-        return evidence_tokens({"invoice.seller_name": row.data.get("seller_name")})
+        if row.direction == "income":
+            return evidence_tokens(
+                {
+                    "invoice.buyer_name": row.data.get("buyer_name"),
+                    "invoice.buyer_tax_no": row.data.get("buyer_tax_no"),
+                }
+            )
+        return evidence_tokens(
+            {
+                "invoice.seller_name": row.data.get("seller_name"),
+                "invoice.seller_tax_no": row.data.get("seller_tax_no"),
+            }
+        )
 
     def _attachment_invoices(self, oa: _Row, invoices: list[_Row]) -> tuple[_Row, ...]:
         attached = [

@@ -195,6 +195,124 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         self.assertEqual({decision["decision_status"] for decision in decisions}, {DECISION_STATUS_OPEN})
         self.assertEqual({decision["display_state"] for decision in decisions}, {"open"})
 
+    def test_income_bank_output_invoice_decision_is_persisted(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=WorkbenchPairRelationService(),
+        ).run_scope(
+            "2026-02",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "txn-income-13440",
+                    "type": "bank",
+                    "month": "2026-02",
+                    "credit_amount": "13440.00",
+                    "debit_amount": "",
+                    "counterparty_name": "北京长征高科技有限公司",
+                    "summary": "外协收入",
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "inv-output-13440",
+                    "type": "invoice",
+                    "month": "2026-02",
+                    "issue_date": "2026-02-20",
+                    "total_with_tax": "13440.00",
+                    "invoice_type": "销项发票",
+                    "seller_name": "云南溯源科技有限公司",
+                    "buyer_name": "北京长征高科技有限公司",
+                }
+            ],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-02")
+        self.assertEqual(summary["paired_count"], 1)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_PAIRED)
+        self.assertEqual(decisions[0]["match_shape"], "bank_invoice")
+        self.assertEqual(decisions[0]["rule_code"], "bank_invoice_exact_amount")
+        self.assertEqual(decisions[0]["direction"], "income")
+        self.assertEqual(decisions[0]["row_ids"], ["txn-income-13440", "inv-output-13440"])
+
+    def test_income_bank_output_invoice_sum_decision_is_persisted(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=WorkbenchPairRelationService(),
+        ).run_scope(
+            "2026-02",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "txn-income-26880",
+                    "type": "bank",
+                    "month": "2026-02",
+                    "credit_amount": "26880.00",
+                    "debit_amount": "",
+                    "counterparty_name": "北京长征高科技有限公司",
+                    "summary": "外协收入",
+                }
+            ],
+            invoice_rows=[
+                output_invoice_row("inv-output-13440-a", amount="13440.00"),
+                output_invoice_row("inv-output-13440-b", amount="13440.00"),
+            ],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-02")
+        self.assertEqual(summary["paired_count"], 1)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_PAIRED)
+        self.assertEqual(decisions[0]["match_shape"], "bank_invoice")
+        self.assertEqual(decisions[0]["rule_code"], "bank_invoice_exact_sum")
+        self.assertEqual(decisions[0]["row_ids"], ["txn-income-26880", "inv-output-13440-a", "inv-output-13440-b"])
+        self.assertTrue(decisions[0]["payment_amount_closed"])
+        self.assertTrue(decisions[0]["invoice_amount_closed"])
+
+    def test_income_bank_output_invoice_open_blocker_is_persisted(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=WorkbenchPairRelationService(),
+        ).run_scope(
+            "2026-02",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "txn-income-13440",
+                    "type": "bank",
+                    "month": "2026-02",
+                    "credit_amount": "13440.00",
+                    "debit_amount": "",
+                    "counterparty_name": "北京长征高科技有限公司",
+                    "summary": "外协收入",
+                }
+            ],
+            invoice_rows=[
+                output_invoice_row("inv-output-13440-a", amount="13440.00"),
+                output_invoice_row("inv-output-13440-b", amount="13440.00"),
+            ],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-02")
+        self.assertEqual(summary["open_count"], 1)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_OPEN)
+        self.assertEqual(decisions[0]["match_shape"], "bank_invoice")
+        self.assertEqual(decisions[0]["rule_code"], "bank_invoice_conflict")
+        self.assertEqual(decisions[0]["row_ids"], ["txn-income-13440", "inv-output-13440-a", "inv-output-13440-b"])
+        self.assertEqual({blocker["code"] for blocker in decisions[0]["blockers"]}, {"same_score_bank_invoice_candidates"})
+        self.assertEqual(decisions[0]["blockers"][0]["amount_relation"], "single_exact_amount")
+
 
 class StaticSpecialAdapter:
     def __init__(self, decisions: list[WorkbenchDecision]) -> None:
@@ -241,6 +359,19 @@ def invoice_row(row_id: str, *, month: str = "2026-05", seller_name: str = "供�
         "total_with_tax": amount,
         "invoice_type": "进项发票",
         "seller_name": seller_name,
+    }
+
+
+def output_invoice_row(row_id: str, *, month: str = "2026-02", amount: str = "13440.00") -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "invoice",
+        "month": month,
+        "invoice_date": f"{month}-20",
+        "total_with_tax": amount,
+        "invoice_type": "销项发票",
+        "seller_name": "云南溯源科技有限公司",
+        "buyer_name": "北京长征高科技有限公司",
     }
 
 

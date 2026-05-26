@@ -68,6 +68,32 @@ def invoice(
     return row
 
 
+def output_invoice(
+    row_id: str,
+    amount: str,
+    *,
+    month: str = "2026-02",
+    buyer_name: str = "北京长征高科技有限公司",
+    buyer_tax_no: str | None = None,
+    invoice_no: str | None = None,
+    issue_date: str | None = None,
+) -> dict[str, object]:
+    row: dict[str, object] = {
+        "id": row_id,
+        "type": "invoice",
+        "invoice_type": "销项发票",
+        "total_with_tax": amount,
+        "issue_date": issue_date or f"{month}-20",
+        "seller_name": "云南溯源科技有限公司",
+        "buyer_name": buyer_name,
+    }
+    if buyer_tax_no is not None:
+        row["buyer_tax_no"] = buyer_tax_no
+    if invoice_no is not None:
+        row["invoice_no"] = invoice_no
+    return row
+
+
 class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = WorkbenchFreeMatchingEngine()
@@ -284,15 +310,239 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         blockers = [blocker["code"] for decision in decisions for blocker in decision.blockers]
         self.assertIn("multiple_three_way_candidates", blockers)
 
-    def test_income_rows_are_ignored_by_free_matching(self) -> None:
+    def test_income_bank_and_output_invoice_exact_counterparty_amount_is_paired(self) -> None:
         decisions = self.engine.generate_decisions(
-            "2026-03",
-            [oa("oa-1", "1200.00")],
-            [bank("bk-income", "1200.00", direction="income")],
-            [invoice("iv-1", "800.00")],
+            "2026-02",
+            [],
+            [
+                bank(
+                    "txn-income-13440",
+                    "13440.00",
+                    month="2026-02",
+                    counterparty="北京长征高科技有限公司",
+                    direction="income",
+                )
+            ],
+            [output_invoice("inv-output-13440", "13440.00")],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decision.decision_status, DECISION_STATUS_PAIRED)
+        self.assertEqual(decision.match_shape, "bank_invoice")
+        self.assertEqual(decision.rule_code, "bank_invoice_exact_amount")
+        self.assertEqual(decision.row_ids, ("txn-income-13440", "inv-output-13440"))
+        self.assertEqual(decision.bank_row_ids, ("txn-income-13440",))
+        self.assertEqual(decision.invoice_row_ids, ("inv-output-13440",))
+        self.assertEqual(decision.scope_month, "2026-02")
+        self.assertEqual(decision.direction, "income")
+        self.assertTrue(decision.payment_amount_closed)
+        self.assertTrue(decision.invoice_amount_closed)
+        self.assertEqual(decision.evidence["amount_relation"], "single_exact_amount")
+        self.assertTrue(decision.evidence["subject_evidence"])
+
+    def test_income_bank_invoice_requires_bank_counterparty_not_summary_only(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [],
+            [
+                {
+                    "id": "txn-income-summary-only",
+                    "type": "bank",
+                    "direction": "income",
+                    "trade_month": "2026-02",
+                    "amount": "13440.00",
+                    "counterparty_name": "",
+                    "summary": "收到北京长征高科技有限公司外协款",
+                    "remark": "北京长征高科技有限公司",
+                }
+            ],
+            [output_invoice("inv-output-summary-only", "13440.00")],
         )
 
         self.assertEqual(decisions, [])
+
+    def test_income_bank_matches_multiple_output_invoices_by_exact_sum(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [],
+            [
+                bank(
+                    "txn-income-26880",
+                    "26880.00",
+                    month="2026-02",
+                    counterparty="北京长征高科技有限公司",
+                    direction="income",
+                )
+            ],
+            [
+                output_invoice("inv-output-13440-a", "13440.00", invoice_no="FP-A"),
+                output_invoice("inv-output-13440-b", "13440.00", invoice_no="FP-B"),
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decision.match_shape, "bank_invoice")
+        self.assertEqual(decision.rule_code, "bank_invoice_exact_sum")
+        self.assertEqual(decision.bank_row_ids, ("txn-income-26880",))
+        self.assertEqual(decision.invoice_row_ids, ("inv-output-13440-a", "inv-output-13440-b"))
+        self.assertEqual(decision.row_ids, ("txn-income-26880", "inv-output-13440-a", "inv-output-13440-b"))
+        self.assertTrue(decision.payment_amount_closed)
+        self.assertTrue(decision.invoice_amount_closed)
+        self.assertEqual(decision.evidence["amount_relation"], "invoice_sum_exact_amount")
+
+    def test_income_bank_selects_unique_invoice_by_invoice_number_in_remark(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [],
+            [
+                {
+                    "id": "txn-income-13440",
+                    "type": "bank",
+                    "direction": "income",
+                    "trade_month": "2026-02",
+                    "amount": "13440.00",
+                    "counterparty_name": "北京长征高科技有限公司",
+                    "summary": "外协收入",
+                    "remark": "回款 发票 FP-B",
+                }
+            ],
+            [
+                output_invoice("inv-output-13440-a", "13440.00", invoice_no="FP-A"),
+                output_invoice("inv-output-13440-b", "13440.00", invoice_no="FP-B"),
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decision.rule_code, "bank_invoice_exact_amount")
+        self.assertEqual(decision.invoice_row_ids, ("inv-output-13440-b",))
+        self.assertEqual(decision.evidence["selected_invoice_row_id"], "inv-output-13440-b")
+        self.assertGreater(decision.evidence["score"], 0)
+        self.assertIn("invoice_number", {item["kind"] for item in decision.evidence["supporting_evidence"]})
+
+    def test_income_bank_same_score_candidates_remain_open_with_structured_blocker(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [],
+            [
+                bank(
+                    "txn-income-13440",
+                    "13440.00",
+                    month="2026-02",
+                    counterparty="北京长征高科技有限公司",
+                    direction="income",
+                )
+            ],
+            [
+                output_invoice("inv-output-13440-a", "13440.00", issue_date="2026-02-20"),
+                output_invoice("inv-output-13440-b", "13440.00", issue_date="2026-02-20"),
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual({decision.display_state for decision in decisions}, {DISPLAY_STATE_OPEN})
+        self.assertEqual(decision.match_shape, "bank_invoice")
+        self.assertEqual(decision.row_ids, ("txn-income-13440", "inv-output-13440-a", "inv-output-13440-b"))
+        self.assertEqual(decision.bank_row_ids, ("txn-income-13440",))
+        self.assertEqual(decision.invoice_row_ids, ("inv-output-13440-a", "inv-output-13440-b"))
+        self.assertEqual({blocker["code"] for blocker in decision.blockers}, {"same_score_bank_invoice_candidates"})
+        self.assertEqual(decision.blockers[0]["amount_relation"], "single_exact_amount")
+        self.assertIn("evidence_summary", decision.blockers[0])
+
+    def test_income_bank_summary_buyer_name_supports_scoring_after_subject_match(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [],
+            [
+                {
+                    "id": "txn-income-13440",
+                    "type": "bank",
+                    "direction": "income",
+                    "trade_month": "2026-02",
+                    "amount": "13440.00",
+                    "counterparty_name": "北京长征高科技有限公司",
+                    "summary": "北京长征高科技有限公司 外协收入",
+                    "remark": "",
+                }
+            ],
+            [
+                output_invoice("inv-output-13440-a", "13440.00", buyer_name="北京长征高科技有限公司"),
+                output_invoice("inv-output-13440-b", "13440.00", buyer_name="北京长征高科技有限公司二部"),
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decision.invoice_row_ids, ("inv-output-13440-a",))
+        self.assertIn("buyer_name_in_bank_text", {item["kind"] for item in decision.evidence["supporting_evidence"]})
+
+    def test_income_bank_invoice_sum_multiple_combinations_remain_open(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [],
+            [
+                bank(
+                    "txn-income-26880",
+                    "26880.00",
+                    month="2026-02",
+                    counterparty="北京长征高科技有限公司",
+                    direction="income",
+                )
+            ],
+            [
+                output_invoice("inv-output-a1", "13440.00"),
+                output_invoice("inv-output-a2", "13440.00"),
+                output_invoice("inv-output-b1", "10000.00"),
+                output_invoice("inv-output-b2", "16880.00"),
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_OPEN)
+        self.assertEqual(decision.rule_code, "bank_invoice_conflict")
+        self.assertEqual({blocker["code"] for blocker in decision.blockers}, {"multiple_bank_invoice_sum_candidates"})
+        self.assertEqual(decision.blockers[0]["amount_relation"], "invoice_sum_exact_amount")
+
+    def test_income_bank_invoice_tax_no_subject_evidence_scores_above_name_only(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [],
+            [
+                {
+                    "id": "txn-income-13440",
+                    "type": "bank",
+                    "direction": "income",
+                    "trade_month": "2026-02",
+                    "amount": "13440.00",
+                    "counterparty_name": "北京长征高科技有限公司",
+                    "counterparty_tax_no": "91110106102126771H",
+                    "summary": "外协收入",
+                }
+            ],
+            [
+                output_invoice("inv-output-name-only", "13440.00", buyer_name="北京长征高科技有限公司"),
+                output_invoice(
+                    "inv-output-tax",
+                    "13440.00",
+                    buyer_name="北京长征高科技有限公司",
+                    buyer_tax_no="91110106102126771H",
+                ),
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decision.invoice_row_ids, ("inv-output-tax",))
+        self.assertIn("tax_no", {item["kind"] for item in decision.evidence["subject_evidence"]})
 
     def test_two_way_fallback_runs_only_after_three_way_cannot_uniquely_form(self) -> None:
         decisions = self.engine.generate_decisions(
