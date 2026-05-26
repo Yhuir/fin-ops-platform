@@ -6,7 +6,7 @@
 
 ## 上线步骤
 
-1. 应用 migration `0030_bank_detail_read_model.sql`。
+1. 应用 migration `0030_bank_detail_read_model.sql` 和后续银行明细索引/版本 migration。
 2. 在灰度环境检查 RabbitMQ topology，确认包含 `bank_detail.read_model.refresh`。
 3. 先 dry-run backfill：
 
@@ -55,6 +55,16 @@ select status, count(*)
 from job.read_model_dirty_scopes
 where scope_type = 'bank_detail'
 group by status;
+
+select event_type, status, count(*)
+from job.outbox_events
+where event_type = 'bank_detail.read_model.refresh'
+group by event_type, status;
+
+select worker_id, worker_kind, event_types, heartbeat_at
+from job.runtime_worker_heartbeats
+where worker_kind = 'bank-detail-read-model'
+order by heartbeat_at desc;
 ```
 
 ## 监控边界
@@ -63,3 +73,4 @@ group by status;
 - RabbitMQ 只投递 envelope，不携带业务 payload。
 - Redis 只做短 TTL page cache；Redis miss/error 必须回 SQL read model。
 - 分类保存、银行导入、pair relation/candidate/exception、标签字典变更都必须入队受影响月份或 `all`。
+- 银行明细 API 持续返回 `read_model_status=refreshing` 超过一个 worker 轮询周期时，不视为正常完成态；必须检查 `bank_detail.read_model.refresh` 是否有 pending/failed 事件、`worker-bank-detail` 是否有心跳、以及 `read_model.bank_detail_scopes.last_error`。

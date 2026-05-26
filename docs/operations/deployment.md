@@ -64,6 +64,7 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 | --- | --- | --- |
 | `worker-oa-sync` | `oa.sync` | `--enable-oa-sync --event-type oa.sync` |
 | `worker-workbench` | `workbench.read_model.refresh` | `--enable-workbench-read-model-refresh --event-type workbench.read_model.refresh` |
+| `worker-bank-detail` | `bank_detail.read_model.refresh` | `--enable-bank-detail-read-model-refresh --event-type bank_detail.read_model.refresh` |
 | `worker-search` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
 | `worker-pending-invoice` | `pending_invoice.read_model.refresh` | `--enable-pending-invoice-read-model-refresh --event-type pending_invoice.read_model.refresh` |
 | `worker-cost-tax` | `cost_statistics.read_model.refresh`, `tax_offset.read_model.refresh` | `--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh` |
@@ -103,6 +104,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
 ```bash
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
   --enable-workbench-read-model-refresh \
+  --enable-bank-detail-read-model-refresh \
   --enable-search-read-model-refresh \
   --enable-pending-invoice-read-model-refresh \
   --enable-cost-statistics-read-model-refresh \

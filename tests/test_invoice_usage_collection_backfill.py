@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import importlib.util
+from io import StringIO
+import json
 from pathlib import Path
+import sys
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.services.invoice_usage_collection_backfill import (
     build_invoice_usage_collection_backfill_plan,
@@ -171,9 +176,33 @@ class InvoiceUsageCollectionBackfillTests(unittest.TestCase):
 
         self.assertTrue(report["dry_run"])
         self.assertEqual(report["enqueued_count"], 0)
-        self.assertEqual(report["planned_count"], 13)
+        self.assertEqual(report["planned_count"], 14)
         self.assertEqual(report["invoice_usage_collection"]["planned_count"], 2)
         self.assertEqual(report["invoice_usage_collection"]["enqueued_count"], 0)
+
+    def test_runtime_backfill_worker_args_include_bank_detail_refresh_handler(self) -> None:
+        module = load_backfill_script_module()
+        original_coverage = module.coverage_report
+        original_connection = module.PostgresConnection
+        original_settings = module.PostgresSettings
+        module.coverage_report = lambda _connection: {}
+        module.PostgresConnection = lambda _settings: FakeBackfillConnection()
+        module.PostgresSettings = type("FakePostgresSettings", (), {"from_env": staticmethod(lambda: object())})
+        stdout = StringIO()
+        try:
+            with patch.object(sys, "argv", ["backfill-runtime-read-models.py", "--run-worker", "--dry-run", "--json"]), redirect_stdout(stdout):
+                exit_code = module.main()
+        finally:
+            module.coverage_report = original_coverage
+            module.PostgresConnection = original_connection
+            module.PostgresSettings = original_settings
+
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        worker_action = next(action for action in report["actions"] if action["action"] == "run_worker")
+        worker_args = worker_action["worker_args"]
+        self.assertIn("--enable-bank-detail-read-model-refresh", worker_args)
+        self.assertIn("bank_detail.read_model.refresh", worker_args)
 
 
 if __name__ == "__main__":

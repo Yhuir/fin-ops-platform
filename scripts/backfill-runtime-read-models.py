@@ -99,6 +99,7 @@ def main() -> int:
             "--enable-workbench-read-model-refresh",
             "--enable-search-read-model-refresh",
             "--enable-pending-invoice-read-model-refresh",
+            "--enable-bank-detail-read-model-refresh",
             "--enable-cost-statistics-read-model-refresh",
             "--enable-tax-offset-read-model-refresh",
             "--event-type",
@@ -107,6 +108,8 @@ def main() -> int:
             "search.read_model.refresh",
             "--event-type",
             "pending_invoice.read_model.refresh",
+            "--event-type",
+            "bank_detail.read_model.refresh",
             "--event-type",
             "cost_statistics.read_model.refresh",
             "--event-type",
@@ -189,7 +192,7 @@ def enqueue_fact_scopes(
     months = fact_months(connection)
     enqueued: list[dict[str, str]] = []
     for month in months:
-        for scope_type in ("workbench", "search", "tax_offset"):
+        for scope_type in ("workbench", "search", "bank_detail", "tax_offset"):
             _enqueue_read_model_refresh(
                 queue,
                 enqueued,
@@ -369,6 +372,16 @@ def coverage_report(connection: PostgresConnection) -> dict[str, Any]:
         """
     )
     workbench_scope_keys = {str(row.get("scope_key")) for row in workbench_rows}
+    bank_detail_rows = connection.fetch_all(
+        """
+        select scope_key, count(*)::int as row_count
+        from read_model.bank_detail_rows
+        where scope_key <> 'all'
+        group by scope_key
+        order by scope_key
+        """
+    )
+    bank_detail_scope_keys = {str(row.get("scope_key")) for row in bank_detail_rows}
     input_invoice_usage_rows = read_model_scope_counts(connection, "read_model.input_invoice_usage_rows")
     input_invoice_usage_scope_keys = {str(row.get("scope_key")) for row in input_invoice_usage_rows}
     output_invoice_collection_rows = read_model_scope_counts(connection, "read_model.output_invoice_collection_rows")
@@ -396,6 +409,9 @@ def coverage_report(connection: PostgresConnection) -> dict[str, Any]:
         "workbench_months": sorted(workbench_scope_keys),
         "missing_workbench_months": sorted(fact_scope_keys - workbench_scope_keys),
         "workbench_rows": [dict(row) for row in workbench_rows],
+        "bank_detail_months": sorted(bank_detail_scope_keys),
+        "missing_bank_detail_months": sorted(fact_scope_keys - bank_detail_scope_keys),
+        "bank_detail_rows": [dict(row) for row in bank_detail_rows],
         "input_invoice_usage_months": sorted(input_invoice_usage_scope_keys),
         "missing_input_invoice_usage_months": sorted(input_invoice_months - input_invoice_usage_scope_keys),
         "input_invoice_usage_rows": input_invoice_usage_rows,

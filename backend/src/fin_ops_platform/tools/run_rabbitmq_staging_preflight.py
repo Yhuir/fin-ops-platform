@@ -178,6 +178,7 @@ def run_checks(
         "workbench.read_model.refresh",
         "search.read_model.refresh",
         "pending_invoice.read_model.refresh",
+        "bank_detail.read_model.refresh",
         "cost_statistics.read_model.refresh",
         "tax_offset.read_model.refresh",
         "oa.sync",
@@ -211,6 +212,13 @@ def run_checks(
             "pending_invoice.read_model.refresh",
             "--worker-kind",
             "search-pending-read-model",
+        ],
+        "rabbitmq.consumer_worker_check.bank_detail": [
+            "--enable-bank-detail-read-model-refresh",
+            "--event-type",
+            "bank_detail.read_model.refresh",
+            "--worker-kind",
+            "bank-detail-read-model",
         ],
         "rabbitmq.consumer_worker_check.cost_tax": [
             "--enable-cost-statistics-read-model-refresh",
