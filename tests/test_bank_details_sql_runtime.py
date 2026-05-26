@@ -126,6 +126,28 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
 
+    def test_transactions_treat_previous_bank_detail_schema_as_refreshing(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-05", schema_version=BANK_DETAIL_READ_MODEL_SCHEMA_VERSION - 1)],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_transactions(
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            page=1,
+            page_size=100,
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["read_model_status"], "schema_mismatch")
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
+        self.assertEqual(len(connection.calls), 1)
+
     def test_transactions_rebuild_bank_text_columns_from_raw_payload_or_sql_columns(self) -> None:
         connection = FakeConnection(
             rows=[
