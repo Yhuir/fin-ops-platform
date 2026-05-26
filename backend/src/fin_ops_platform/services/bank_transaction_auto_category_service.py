@@ -3,10 +3,11 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from fin_ops_platform.services.bank_internal_transfer_detector import BankInternalTransferDetector
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 
 
-BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION = "2026-05-bank-auto-category-sms-fee"
+BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION = "2026-05-bank-auto-category-internal-transfer-first"
 
 _TEXT_FIELDS = ("summary", "remark", "purpose", "note")
 _NESTED_TEXT_FIELDS = ("detail_fields", "_detail_fields", "summary_fields", "_summary_fields")
@@ -60,12 +61,12 @@ _TEXT_RULES: tuple[dict[str, Any], ...] = (
 
 
 class BankTransactionAutoCategoryService:
-    def __init__(self) -> None:
-        pass
+    def __init__(self, *, internal_transfer_detector: BankInternalTransferDetector | None = None) -> None:
+        self._internal_transfer_detector = internal_transfer_detector or BankInternalTransferDetector()
 
     def suggest_for_rows(self, bank_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         rows = [deepcopy(row) for row in list(bank_rows or []) if isinstance(row, dict)]
-        suggestions: dict[str, dict[str, Any]] = {}
+        suggestions = self._internal_transfer_detector.detect(rows)
         for row in rows:
             transaction_id = self._transaction_id(row)
             if not transaction_id or transaction_id in suggestions:

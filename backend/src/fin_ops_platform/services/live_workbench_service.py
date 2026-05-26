@@ -8,6 +8,7 @@ from typing import Any
 from fin_ops_platform.domain.enums import MatchingConfidence, MatchingResultType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice, MatchingResult
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_internal_transfer_detector import INTERNAL_TRANSFER_MATCH_WINDOW
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_LABELS
 from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -17,7 +18,6 @@ from fin_ops_platform.services.matching import MatchingEngineService
 ZERO = Decimal("0.00")
 DEFAULT_COMPANY_NAME = "溯源科技有限公司"
 LEGACY_DEMO_TRANSACTION_SOURCES = {"bank_transaction.json"}
-INTERNAL_TRANSFER_MATCH_WINDOW = timedelta(hours=72)
 INTERNAL_TRANSFER_COMPANY_NAME = "云南溯源科技有限公司"
 SALARY_AUTO_MATCH_RULE_CODE = "salary_personal_auto_match"
 INTERNAL_TRANSFER_RULE_CODE = "internal_transfer_pair"

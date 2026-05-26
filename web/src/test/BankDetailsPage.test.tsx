@@ -188,8 +188,16 @@ describe("Bank details page", () => {
     await within(page).findByText("云南溯源科技有限公司");
     expect(within(page).getByText("每页行数")).toBeInTheDocument();
     expect(within(page).getByText("1-100 / 299")).toBeInTheDocument();
+    expect(within(page).getByText("1-100 / 299").closest(".bank-transaction-pagination")).toBeInTheDocument();
     expect(within(page).getByPlaceholderText("搜索流水")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /筛选器/ })).not.toBeInTheDocument();
+  });
+
+  test("keeps pagination outside the table scroll area", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+
+    expect(source).toMatch(/\.bank-transaction-table-container\s*\{[^}]*flex:\s*1 1 0[^}]*overflow-y:\s*auto/s);
+    expect(source).toMatch(/\.bank-transaction-pagination\.MuiTablePagination-root\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
   });
 
   test("shows read-only auto category and keeps manual category controls out of bank details", async () => {
@@ -204,6 +212,7 @@ describe("Bank details page", () => {
     expect(within(table).queryByText("自动")).not.toBeInTheDocument();
     expect(await within(page).findByText(exactTextContent("公司暂借款：待还款 2"))).toBeInTheDocument();
     expect(within(page).getByText("工资 1")).toBeInTheDocument();
+    expect(within(page).getByText("内部往来款 2")).toBeInTheDocument();
     expect(within(page).getByText(exactTextContent("质保金：待收款 1"))).toBeInTheDocument();
     expect(within(page).queryByText(/未保存/)).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();

@@ -925,6 +925,7 @@ export default function BankDetailsPage() {
                 </Table>
               </TableContainer>
               <TablePagination
+                className="bank-transaction-pagination"
                 component="div"
                 count={rowCount}
                 labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count === -1 ? `超过 ${to}` : count}`}

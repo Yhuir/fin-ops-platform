@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 import hashlib
 from typing import Any
 
+from fin_ops_platform.services.bank_internal_transfer_detector import INTERNAL_TRANSFER_MATCH_WINDOW
 from fin_ops_platform.services.no_oa_legacy_relation_migration_service import NoOaLegacyRelationMigrationService
 from fin_ops_platform.services.no_oa_managed_rule_policy import (
     NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
@@ -16,7 +17,6 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 
 NO_OA_BANK_BATCH_SCHEMA_VERSION = "2026-05-no-oa-bank-batch-v1"
 NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
-INTERNAL_TRANSFER_MATCH_WINDOW = timedelta(hours=48)
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 

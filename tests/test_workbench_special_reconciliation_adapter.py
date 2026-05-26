@@ -2,16 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from fin_ops_platform.services.workbench_reconciliation_models import (
-    DECISION_STATUS_OPEN,
-    DECISION_STATUS_PAIRED,
-    DISPLAY_STATE_OPEN,
-    DISPLAY_STATE_PAIRED,
-    MATCH_DOMAIN_SPECIAL,
-)
+from fin_ops_platform.services.workbench_reconciliation_models import DECISION_STATUS_PAIRED, DISPLAY_STATE_PAIRED, MATCH_DOMAIN_SPECIAL
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
-    CASH_TURNOVER_DETECTED,
-    INTERNAL_TRANSFER_PAIR,
     OA_INVOICE_OFFSET_AUTO_MATCH,
     SALARY_PERSONAL_AUTO_MATCH,
 )
@@ -20,14 +12,11 @@ from fin_ops_platform.services.workbench_special_reconciliation_adapter import (
 )
 
 
-EXTERNAL_TURNOVER_EVIDENCE = "external_turnover_evidence"
-
-
 class WorkbenchSpecialReconciliationAdapterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.adapter = WorkbenchSpecialReconciliationAdapter()
 
-    def test_deterministic_internal_transfer_outputs_paired_special_decision(self) -> None:
+    def test_internal_transfer_is_not_projected_by_workbench_special_adapter(self) -> None:
         result = self.adapter.generate_decisions(
             "2026-03",
             oa_rows=[],
@@ -54,19 +43,10 @@ class WorkbenchSpecialReconciliationAdapterTests(unittest.TestCase):
             invoice_rows=[],
         )
 
-        self.assertEqual(len(result.decisions), 1)
-        decision = result.decisions[0]
-        self.assertEqual(decision.match_domain, MATCH_DOMAIN_SPECIAL)
-        self.assertEqual(decision.rule_code, INTERNAL_TRANSFER_PAIR)
-        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
-        self.assertEqual(decision.decision_status, DECISION_STATUS_PAIRED)
-        self.assertEqual(decision.match_shape, "bank_bank")
-        self.assertTrue(decision.payment_amount_closed)
-        self.assertIsNone(decision.invoice_amount_closed)
-        self.assertEqual(decision.bank_row_ids, ("bank-in-001", "bank-out-001"))
-        self.assertEqual(result.claimed_row_ids_by_domain, {MATCH_DOMAIN_SPECIAL: {"bank-in-001", "bank-out-001"}})
+        self.assertEqual(result.decisions, ())
+        self.assertEqual(result.claimed_row_ids_by_domain, {MATCH_DOMAIN_SPECIAL: set()})
 
-    def test_salary_no_oa_batch_row_claims_special_domain_without_free_projection(self) -> None:
+    def test_salary_is_not_projected_by_workbench_special_adapter(self) -> None:
         result = self.adapter.generate_decisions(
             "2026-03",
             oa_rows=[],
@@ -83,17 +63,10 @@ class WorkbenchSpecialReconciliationAdapterTests(unittest.TestCase):
             invoice_rows=[],
         )
 
-        self.assertEqual(len(result.decisions), 1)
-        decision = result.decisions[0]
-        self.assertEqual(decision.match_domain, MATCH_DOMAIN_SPECIAL)
-        self.assertEqual(decision.rule_code, SALARY_PERSONAL_AUTO_MATCH)
-        self.assertEqual(decision.display_state, DISPLAY_STATE_OPEN)
-        self.assertEqual(decision.decision_status, DECISION_STATUS_OPEN)
-        self.assertEqual(decision.match_shape, "single")
-        self.assertEqual(decision.bank_row_ids, ("bank-salary-001",))
-        self.assertEqual(result.claimed_row_ids_by_domain[MATCH_DOMAIN_SPECIAL], {"bank-salary-001"})
+        self.assertEqual(result.decisions, ())
+        self.assertEqual(result.claimed_row_ids_by_domain, {MATCH_DOMAIN_SPECIAL: set()})
 
-    def test_hint_only_external_and_cash_turnover_remain_open_but_claim_rows(self) -> None:
+    def test_hint_only_external_and_cash_turnover_are_not_projected_by_workbench_special_adapter(self) -> None:
         result = self.adapter.generate_decisions(
             "2026-03",
             oa_rows=[],
@@ -118,15 +91,8 @@ class WorkbenchSpecialReconciliationAdapterTests(unittest.TestCase):
             invoice_rows=[],
         )
 
-        by_rule = {decision.rule_code: decision for decision in result.decisions}
-        self.assertEqual(by_rule[CASH_TURNOVER_DETECTED].display_state, DISPLAY_STATE_OPEN)
-        self.assertEqual(by_rule[CASH_TURNOVER_DETECTED].decision_status, DECISION_STATUS_OPEN)
-        self.assertEqual(by_rule[EXTERNAL_TURNOVER_EVIDENCE].display_state, DISPLAY_STATE_OPEN)
-        self.assertEqual(by_rule[EXTERNAL_TURNOVER_EVIDENCE].decision_status, DECISION_STATUS_OPEN)
-        self.assertEqual(
-            result.claimed_row_ids_by_domain[MATCH_DOMAIN_SPECIAL],
-            {"bank-cash-001", "bank-external-001"},
-        )
+        self.assertEqual(result.decisions, ())
+        self.assertEqual(result.claimed_row_ids_by_domain, {MATCH_DOMAIN_SPECIAL: set()})
 
     def test_configured_oa_invoice_offset_outputs_paired_special_decision(self) -> None:
         result = self.adapter.generate_decisions(
@@ -134,7 +100,7 @@ class WorkbenchSpecialReconciliationAdapterTests(unittest.TestCase):
             oa_rows=[
                 {
                     "id": "oa-offset-001",
-                    "applicant": "刘际涛",
+                    "applicant": "周洁莹",
                     "amount": "299.00",
                 }
             ],
@@ -147,7 +113,7 @@ class WorkbenchSpecialReconciliationAdapterTests(unittest.TestCase):
                     "total_with_tax": "299.00",
                 }
             ],
-            settings={"offset_applicant_names": ["刘际涛"]},
+            settings={"offset_applicant_names": ["周洁莹"]},
         )
 
         self.assertEqual(len(result.decisions), 1)

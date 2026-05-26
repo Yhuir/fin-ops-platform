@@ -1021,7 +1021,7 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(payload["category_counts"]["fee"], 1)
         self.assertEqual(payload["category_counts"]["uncategorized"], 0)
 
-    def test_internal_transfer_pair_is_not_a_bank_auto_category(self) -> None:
+    def test_internal_transfer_pair_is_bank_auto_category_across_account_filters(self) -> None:
         transactions = self._internal_transfer_transactions()
         service = BankDetailsService(
             _ImportServiceStub(transactions),
@@ -1041,24 +1041,26 @@ class BankDetailsServiceTests(unittest.TestCase):
         )
 
         self.assertCountEqual([row["id"] for row in all_payload["rows"]], ["txn-transfer-out", "txn-transfer-in"])
-        self.assertEqual({row["auto_category_code"] for row in all_payload["rows"]}, {None})
-        self.assertEqual({row["effective_category_code"] for row in all_payload["rows"]}, {None})
-        self.assertEqual(all_payload["category_counts"]["internal_transfer"], 0)
-        self.assertEqual(all_payload["category_counts"]["uncategorized"], 2)
+        self.assertEqual({row["auto_category_code"] for row in all_payload["rows"]}, {"internal_transfer"})
+        self.assertEqual({row["effective_category_code"] for row in all_payload["rows"]}, {"internal_transfer"})
+        self.assertEqual(all_payload["category_counts"]["internal_transfer"], 2)
+        self.assertEqual(all_payload["category_counts"]["uncategorized"], 0)
 
         self.assertEqual([row["id"] for row in out_account_payload["rows"]], ["txn-transfer-out"])
-        self.assertEqual(out_account_payload["rows"][0]["auto_category_code"], None)
-        self.assertEqual(out_account_payload["rows"][0]["effective_category_code"], None)
-        self.assertEqual(out_account_payload["category_counts"]["internal_transfer"], 0)
-        self.assertEqual(out_account_payload["category_counts"]["uncategorized"], 1)
+        self.assertEqual(out_account_payload["rows"][0]["auto_category_code"], "internal_transfer")
+        self.assertEqual(out_account_payload["rows"][0]["auto_category_label"], "内部往来款")
+        self.assertEqual(out_account_payload["rows"][0]["effective_category_code"], "internal_transfer")
+        self.assertEqual(out_account_payload["category_counts"]["internal_transfer"], 1)
+        self.assertEqual(out_account_payload["category_counts"]["uncategorized"], 0)
 
         self.assertEqual([row["id"] for row in in_account_payload["rows"]], ["txn-transfer-in"])
-        self.assertEqual(in_account_payload["rows"][0]["auto_category_code"], None)
-        self.assertEqual(in_account_payload["rows"][0]["effective_category_code"], None)
-        self.assertEqual(in_account_payload["category_counts"]["internal_transfer"], 0)
-        self.assertEqual(in_account_payload["category_counts"]["uncategorized"], 1)
+        self.assertEqual(in_account_payload["rows"][0]["auto_category_code"], "internal_transfer")
+        self.assertEqual(in_account_payload["rows"][0]["auto_category_label"], "内部往来款")
+        self.assertEqual(in_account_payload["rows"][0]["effective_category_code"], "internal_transfer")
+        self.assertEqual(in_account_payload["category_counts"]["internal_transfer"], 1)
+        self.assertEqual(in_account_payload["category_counts"]["uncategorized"], 0)
 
-    def test_imported_account_identity_does_not_create_internal_transfer_auto_category(self) -> None:
+    def test_internal_transfer_auto_category_runs_before_social_tax_text(self) -> None:
         transactions = [
             BankTransaction(
                 id="txn-social-tax-in",
@@ -1099,14 +1101,14 @@ class BankDetailsServiceTests(unittest.TestCase):
         payload = service.list_transactions(date_from="2026-01-01", date_to="2026-01-31")
 
         self.assertCountEqual([row["id"] for row in payload["rows"]], ["txn-social-tax-in", "txn-social-tax-out"])
-        self.assertEqual({row["auto_category_code"] for row in payload["rows"]}, {None})
-        self.assertEqual({row["effective_category_code"] for row in payload["rows"]}, {None})
-        self.assertEqual(payload["category_counts"]["internal_transfer"], 0)
+        self.assertEqual({row["auto_category_code"] for row in payload["rows"]}, {"internal_transfer"})
+        self.assertEqual({row["effective_category_code"] for row in payload["rows"]}, {"internal_transfer"})
+        self.assertEqual(payload["category_counts"]["internal_transfer"], 2)
         self.assertEqual(payload["category_counts"]["social_security"], 0)
         self.assertEqual(payload["category_counts"]["tax_payment"], 0)
-        self.assertEqual(payload["category_counts"]["uncategorized"], 2)
+        self.assertEqual(payload["category_counts"]["uncategorized"], 0)
 
-    def test_manual_clear_history_does_not_affect_uncategorized_internal_transfer_like_rows(self) -> None:
+    def test_manual_clear_history_does_not_suppress_internal_transfer_auto_category(self) -> None:
         transactions = self._internal_transfer_transactions()
         category_service = BankTransactionCategoryService.from_snapshot(
             None,
@@ -1137,21 +1139,21 @@ class BankDetailsServiceTests(unittest.TestCase):
         cleared_row = out_account_payload["rows"][0]
         self.assertEqual(cleared_row["id"], "txn-transfer-out")
         self.assertEqual(cleared_row["manual_category_source"], "manual")
-        self.assertEqual(cleared_row["auto_category_code"], None)
-        self.assertEqual(cleared_row["effective_category_code"], None)
-        self.assertEqual(out_account_payload["category_counts"]["internal_transfer"], 0)
-        self.assertEqual(out_account_payload["category_counts"]["uncategorized"], 1)
+        self.assertEqual(cleared_row["auto_category_code"], "internal_transfer")
+        self.assertEqual(cleared_row["effective_category_code"], "internal_transfer")
+        self.assertEqual(out_account_payload["category_counts"]["internal_transfer"], 1)
+        self.assertEqual(out_account_payload["category_counts"]["uncategorized"], 0)
 
         counterpart_row = in_account_payload["rows"][0]
         self.assertEqual(counterpart_row["id"], "txn-transfer-in")
         self.assertEqual(counterpart_row["manual_category_source"], "")
-        self.assertEqual(counterpart_row["auto_category_code"], None)
-        self.assertEqual(counterpart_row["effective_category_code"], None)
-        self.assertEqual(in_account_payload["category_counts"]["internal_transfer"], 0)
-        self.assertEqual(in_account_payload["category_counts"]["uncategorized"], 1)
+        self.assertEqual(counterpart_row["auto_category_code"], "internal_transfer")
+        self.assertEqual(counterpart_row["effective_category_code"], "internal_transfer")
+        self.assertEqual(in_account_payload["category_counts"]["internal_transfer"], 1)
+        self.assertEqual(in_account_payload["category_counts"]["uncategorized"], 0)
 
-        self.assertEqual(all_payload["category_counts"]["internal_transfer"], 0)
-        self.assertEqual(all_payload["category_counts"]["uncategorized"], 2)
+        self.assertEqual(all_payload["category_counts"]["internal_transfer"], 2)
+        self.assertEqual(all_payload["category_counts"]["uncategorized"], 0)
 
 
 if __name__ == "__main__":

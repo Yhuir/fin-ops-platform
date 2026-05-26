@@ -404,7 +404,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(bank_row["category_source"], "auto")
         self.assertIn("手续费", bank_row["tags"])
 
-    def test_bank_rows_manual_category_overrides_auto_effective_category(self) -> None:
+    def test_bank_rows_manual_category_history_does_not_override_auto_effective_category(self) -> None:
         import_service = ImportNormalizationService()
         preview = import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -446,13 +446,13 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
 
         bank_row = service.get_workbench("2026-03")["open"]["bank"][0]
 
-        self.assertEqual(bank_row["category_code"], "bonus")
-        self.assertEqual(bank_row["category_label"], "奖金")
-        self.assertEqual(bank_row["category_source"], "manual")
-        self.assertIn("奖金", bank_row["tags"])
-        self.assertNotIn("手续费", bank_row["tags"])
+        self.assertEqual(bank_row["category_code"], "fee")
+        self.assertEqual(bank_row["category_label"], "手续费")
+        self.assertEqual(bank_row["category_source"], "auto")
+        self.assertIn("手续费", bank_row["tags"])
+        self.assertNotIn("奖金", bank_row["tags"])
 
-    def test_bank_rows_manual_clear_suppresses_auto_effective_category(self) -> None:
+    def test_bank_rows_manual_clear_history_does_not_suppress_auto_effective_category(self) -> None:
         import_service = ImportNormalizationService()
         preview = import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -488,10 +488,10 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
 
         bank_row = service.get_workbench("2026-03")["open"]["bank"][0]
 
-        self.assertIsNone(bank_row["category_code"])
-        self.assertIsNone(bank_row["category_label"])
-        self.assertIsNone(bank_row["category_source"])
-        self.assertNotIn("手续费", bank_row["tags"])
+        self.assertEqual(bank_row["category_code"], "fee")
+        self.assertEqual(bank_row["category_label"], "手续费")
+        self.assertEqual(bank_row["category_source"], "auto")
+        self.assertIn("手续费", bank_row["tags"])
 
     def test_bank_rows_include_auto_internal_transfer_effective_category(self) -> None:
         import_service = ImportNormalizationService()

@@ -43,6 +43,18 @@ class FakeConnection:
         return Transaction()
 
 
+class CaptureBankDetailReadModelRepository:
+    def __init__(self) -> None:
+        self.saved_rows: list[dict[str, object]] = []
+        self.marked_scopes: list[dict[str, object]] = []
+
+    def save_bank_detail_rows(self, *, scope_key: str, rows: list[dict[str, object]], tenant_id: str = "default") -> None:
+        self.saved_rows = list(rows)
+
+    def mark_bank_detail_scope(self, **kwargs: object) -> None:
+        self.marked_scopes.append(dict(kwargs))
+
+
 def scope_row(scope_key: str, **overrides: object) -> dict[str, object]:
     row: dict[str, object] = {
         "scope_key": scope_key,
@@ -307,6 +319,58 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(row["purpose_text"], "")
         self.assertEqual(row["summary_text"], "")
         self.assertEqual(row["note_text"], "民生客户附言")
+
+    def test_rebuild_persists_internal_transfer_auto_category_before_text_category(self) -> None:
+        repository = CaptureBankDetailReadModelRepository()
+        connection = FakeConnection(
+            rows=[
+                [
+                    {
+                        "id": "txn-transfer-out",
+                        "transaction_id": "uuid-transfer-out",
+                        "account_no": "6222000011116386",
+                        "account_name": "云南溯源科技有限公司",
+                        "txn_direction": "expense",
+                        "counterparty_name_raw": "云南溯源科技有限公司建设银行账户",
+                        "amount": "13000.00",
+                        "signed_amount": "-13000.00",
+                        "balance": "900.00",
+                        "txn_date": "2026-04-03",
+                        "trade_time": "2026-04-03 10:00:00",
+                        "summary": "手续费",
+                        "remark": "",
+                        "raw_payload": {"normalized_payload": {"imported_bank_name": "工商银行", "imported_bank_last4": "6386"}},
+                    },
+                    {
+                        "id": "txn-transfer-in",
+                        "transaction_id": "uuid-transfer-in",
+                        "account_no": "6227000011111410",
+                        "account_name": "云南溯源科技有限公司",
+                        "txn_direction": "income",
+                        "counterparty_name_raw": "云南溯源科技有限公司工商银行账户",
+                        "amount": "13000.00",
+                        "signed_amount": "13000.00",
+                        "balance": "13900.00",
+                        "txn_date": "2026-04-03",
+                        "trade_time": "2026-04-03 12:00:00",
+                        "summary": "工资",
+                        "remark": "",
+                        "raw_payload": {"normalized_payload": {"imported_bank_name": "建设银行", "imported_bank_last4": "1410"}},
+                    },
+                ],
+                [],
+                [],
+                [],
+            ]
+        )
+        builder = BankDetailSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+
+        result = builder.rebuild_bank_detail_read_model_scope("2026-04", source_version=9)
+
+        self.assertEqual(result["row_count"], 2)
+        self.assertEqual({row["auto_category_code"] for row in repository.saved_rows}, {"internal_transfer"})
+        self.assertEqual({row["effective_category_code"] for row in repository.saved_rows}, {"internal_transfer"})
+        self.assertEqual({row["auto_category_label"] for row in repository.saved_rows}, {"内部往来款"})
 
 
 class FakeProjectionBuilder:

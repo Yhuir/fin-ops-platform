@@ -151,7 +151,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
 
         self.assertEqual(suggestions, {})
 
-    def test_internal_transfer_pair_no_longer_creates_bank_auto_category(self) -> None:
+    def test_internal_transfer_pair_is_classified_before_text_rules(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [
                 {
@@ -162,6 +162,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
                     "debit_amount": "13000.00",
                     "credit_amount": "",
                     "pay_receive_time": "2026-03-10 10:00:00",
+                    "summary": "手续费",
                 },
                 {
                     "id": "txn-transfer-in",
@@ -171,40 +172,133 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
                     "debit_amount": "",
                     "credit_amount": "13000.00",
                     "pay_receive_time": "2026-03-10 12:00:00",
+                    "remark": "工资",
+                },
+            ]
+        )
+
+        self.assertEqual(suggestions["txn-transfer-out"]["category_code"], "internal_transfer")
+        self.assertEqual(suggestions["txn-transfer-in"]["category_code"], "internal_transfer")
+        self.assertEqual(suggestions["txn-transfer-out"]["category_label"], "内部往来款")
+        self.assertEqual(suggestions["txn-transfer-out"]["rule_code"], "internal_transfer_pair")
+        self.assertIn("txn-transfer-in", suggestions["txn-transfer-out"]["reason"])
+        self.assertNotEqual(suggestions["txn-transfer-out"]["category_code"], "fee")
+        self.assertNotEqual(suggestions["txn-transfer-in"]["category_code"], "salary")
+
+    def test_internal_transfer_rejects_ineligible_pairs(self) -> None:
+        suggestions = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-same-account-out",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司建设银行账户",
+                    "account_no": "62220001",
+                    "debit_amount": "1000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-10 10:00:00",
+                },
+                {
+                    "id": "txn-same-account-in",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司工商银行账户",
+                    "account_no": "62220001",
+                    "debit_amount": "",
+                    "credit_amount": "1000.00",
+                    "pay_receive_time": "2026-03-10 12:00:00",
+                },
+                {
+                    "id": "txn-amount-out",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司建设银行账户",
+                    "account_no": "62220003",
+                    "debit_amount": "2000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-10 10:00:00",
+                },
+                {
+                    "id": "txn-amount-in",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司工商银行账户",
+                    "account_no": "62220004",
+                    "debit_amount": "",
+                    "credit_amount": "2001.00",
+                    "pay_receive_time": "2026-03-10 12:00:00",
+                },
+                {
+                    "id": "txn-window-out",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司建设银行账户",
+                    "account_no": "62220005",
+                    "debit_amount": "3000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-10 10:00:00",
+                },
+                {
+                    "id": "txn-window-in",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司工商银行账户",
+                    "account_no": "62220006",
+                    "debit_amount": "",
+                    "credit_amount": "3000.00",
+                    "pay_receive_time": "2026-03-12 10:00:01",
+                },
+                {
+                    "id": "txn-single-sided",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司建设银行账户",
+                    "account_no": "62220007",
+                    "debit_amount": "4000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-10 10:00:00",
                 },
             ]
         )
 
         self.assertEqual(suggestions, {})
 
-    def test_text_labels_still_apply_to_internal_transfer_like_rows(self) -> None:
+    def test_internal_transfer_multi_solution_does_not_guess(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [
                 {
-                    "id": "txn-transfer-out-fee-text",
+                    "id": "txn-transfer-out-a",
                     "account_name": "云南溯源科技有限公司",
                     "counterparty_name": "云南溯源科技有限公司建设银行账户",
                     "account_no": "62220001",
                     "debit_amount": "13000.00",
                     "credit_amount": "",
                     "pay_receive_time": "2026-03-10 10:00:00",
-                    "summary": "手续费",
                 },
                 {
-                    "id": "txn-transfer-in-fee-text",
+                    "id": "txn-transfer-out-b",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司建设银行账户",
+                    "account_no": "62220003",
+                    "debit_amount": "13000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-10 10:05:00",
+                },
+                {
+                    "id": "txn-transfer-in-a",
                     "account_name": "云南溯源科技有限公司",
                     "counterparty_name": "云南溯源科技有限公司工商银行账户",
                     "account_no": "62220002",
                     "debit_amount": "",
                     "credit_amount": "13000.00",
                     "pay_receive_time": "2026-03-10 12:00:00",
-                    "remark": "手续费",
+                },
+                {
+                    "id": "txn-transfer-in-b",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司工商银行账户",
+                    "account_no": "62220004",
+                    "debit_amount": "",
+                    "credit_amount": "13000.00",
+                    "pay_receive_time": "2026-03-10 12:05:00",
                 },
             ]
         )
 
-        self.assertEqual(suggestions["txn-transfer-out-fee-text"]["category_code"], "fee")
-        self.assertEqual(suggestions["txn-transfer-in-fee-text"]["category_code"], "fee")
+        self.assertEqual(suggestions, {})
 
     def test_effective_category_ignores_manual_history_when_auto_exists(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(

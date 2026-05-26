@@ -7199,11 +7199,17 @@ body.column-layout-dragging {
 }
 
 .bank-transaction-table-container {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   width: 100%;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.bank-transaction-pagination.MuiTablePagination-root {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--bank-border-subtle);
+  background: var(--bank-surface);
 }
 
 .bank-transaction-table {

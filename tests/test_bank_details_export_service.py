@@ -90,6 +90,7 @@ class BankDetailsExportServiceTests(unittest.TestCase):
     def test_all_bank_export_builds_summary_and_bank_sheets_with_professional_columns(self) -> None:
         rows = [
             _row("icbc", bank_name="工商银行", account_last4="6386", account_key="工商银行:6386", purpose_text="工行用途", summary_text="工行摘要", note_text="工行附言", category="手续费"),
+            _row("internal", bank_name="建设银行", account_last4="1410", account_key="建设银行:1410", direction="income", amount="13000.00", summary_text="内部往来收入", category="内部往来款"),
             _row("bocom", bank_name="交通银行", account_last4="3847", account_key="交通银行:3847", summary_text="交行摘要"),
             _row("ccb", bank_name="建设银行", account_last4="8106", account_key="建设银行:8106", summary_text="建行摘要", note_text="建行备注"),
             _row("cmbc", bank_name="民生银行", account_last4="9486", account_key="民生银行:9486", note_text="客户附言", oa_tag="有oa", invoice_tag="有发票"),
@@ -101,8 +102,8 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         result = service.export(mode="all", date_from="2026-04-01", date_to="2026-05-18", keyword=None)
         workbook = load_workbook(BytesIO(result.content))
 
-        self.assertEqual(result.row_count, 6)
-        self.assertEqual(workbook.sheetnames, ["全部流水", "工商银行", "交通银行", "建设银行", "民生银行", "光大银行", "平安银行"])
+        self.assertEqual(result.row_count, 7)
+        self.assertEqual(workbook.sheetnames, ["全部流水", "工商银行", "建设银行", "交通银行", "民生银行", "光大银行", "平安银行"])
         sheet = workbook["全部流水"]
         self.assertEqual([cell.value for cell in sheet[1]], BANK_DETAIL_EXPORT_COLUMNS)
         self.assertEqual(sheet.freeze_panes, "A2")
@@ -111,13 +112,14 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         self.assertIsInstance(sheet["G2"].value, (int, float))
         self.assertIsNone(sheet["F2"].value)
         self.assertEqual(sheet["I2"].value, "手续费")
-        self.assertEqual(sheet["J5"].value, "有oa")
-        self.assertEqual(sheet["K5"].value, "有发票")
+        self.assertEqual(sheet["I3"].value, "内部往来款")
+        self.assertEqual(sheet["J6"].value, "有oa")
+        self.assertEqual(sheet["K6"].value, "有发票")
         self.assertEqual(sheet["L2"].value, "工行用途")
-        self.assertEqual(sheet["M3"].value, "交行摘要")
-        self.assertEqual(sheet["N4"].value, "建行备注")
-        self.assertEqual(sheet["N5"].value, "客户附言")
-        self.assertEqual(sheet["L7"].value, "平安交易用途")
+        self.assertEqual(sheet["M4"].value, "交行摘要")
+        self.assertEqual(sheet["N5"].value, "建行备注")
+        self.assertEqual(sheet["N6"].value, "客户附言")
+        self.assertEqual(sheet["L8"].value, "平安交易用途")
 
     def test_account_export_validates_account_metadata_and_allows_empty_filtered_result(self) -> None:
         loader = _PagedRowsLoader([])

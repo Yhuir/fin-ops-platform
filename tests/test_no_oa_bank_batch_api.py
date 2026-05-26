@@ -13,6 +13,17 @@ from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
 
 
+AUTO_CATEGORY_TEXT_BY_CODE = {
+    "fee": "手续费",
+    "salary": "工资",
+    "holiday_bonus": "过节费",
+    "bonus": "奖金",
+    "tax_payment": "电子缴税",
+    "treasury_tax_collection": "代理国库税收收缴",
+    "social_security": "社保费",
+}
+
+
 def bank_transaction(
     transaction_id: str,
     *,
@@ -25,6 +36,7 @@ def bank_transaction(
     trade_time: str = "2026-03-10T09:00:00",
 ) -> BankTransaction:
     signed_amount = Decimal(amount) if direction == TransactionDirection.INFLOW else -Decimal(amount)
+    text = AUTO_CATEGORY_TEXT_BY_CODE.get(category_code, category_code)
     return BankTransaction(
         id=transaction_id,
         account_no=account_no,
@@ -37,8 +49,8 @@ def bank_transaction(
         pay_receive_time=trade_time,
         imported_bank_name=bank_name,
         imported_bank_last4=account_last4,
-        summary=category_code,
-        remark=category_code,
+        summary=text,
+        remark=text,
     )
 
 
@@ -53,6 +65,12 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         if updates:
             app._bank_transaction_category_service.apply_updates(updates, actor="tester")
         return app
+
+    def _replace_transaction_text(self, app, transaction_id: str, text: str) -> None:
+        transaction = app._import_service.get_transaction(transaction_id)
+        transaction.summary = text
+        transaction.remark = text
+        transaction.bank_text_fields = []
 
     def _list_batches(self, app, query: str = ""):
         response = app.handle_request("GET", f"/api/no-oa-bank-batches{query}")
@@ -112,7 +130,12 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         app = self._app_with_transactions(
             [
                 bank_transaction("bank-202603-fee-1", amount="3.00"),
-                bank_transaction("bank-202604-salary-1", amount="1000.00", trade_time="2026-04-10T09:00:00"),
+                bank_transaction(
+                    "bank-202604-salary-1",
+                    category_code="salary",
+                    amount="1000.00",
+                    trade_time="2026-04-10T09:00:00",
+                ),
             ],
             categories={"bank-202603-fee-1": "fee", "bank-202604-salary-1": "salary"},
         )
@@ -161,7 +184,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "bank-202603-fee-1")
         self.assertEqual(payload["rows"][0]["category_code"], "fee")
         self.assertEqual(payload["rows"][0]["category_label"], "手续费")
-        self.assertEqual(payload["rows"][0]["category_source"], "manual")
+        self.assertEqual(payload["rows"][0]["category_source"], "auto")
 
     def test_bucket_filter_returns_unsubmitted_and_submitted_after_category_drift(self) -> None:
         app = self._app_with_transactions(
@@ -190,10 +213,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual([batch["batch_id"] for batch in submitted_payload["batches"]], [submitted["batch_id"]])
         self.assertEqual(submitted_payload["summary"]["submitted_count"], 1)
         self.assertEqual(submitted_payload["summary"]["draft_count"], 1)
-        app._bank_transaction_category_service.apply_updates(
-            [{"transaction_id": "bank-202603-fee-1", "category_code": "external_turnover"}],
-            actor="tester",
-        )
+        self._replace_transaction_text(app, "bank-202603-fee-1", "其他流水")
         stale = self._list_batches(app, "?bucket=unsubmitted")["batches"][0]
         withdraw_response = app.handle_request(
             "POST",
@@ -317,10 +337,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             body=json.dumps({"expected_version": batch["version"]}),
         )
         submitted = json.loads(submit_response.body)["batch"]
-        app._bank_transaction_category_service.apply_updates(
-            [{"transaction_id": "bank-202603-fee-1", "category_code": "external_turnover"}],
-            actor="tester",
-        )
+        self._replace_transaction_text(app, "bank-202603-fee-1", "其他流水")
 
         stale_payload = self._list_batches(app, "?bucket=unsubmitted")
         stale = stale_payload["batches"][0]
