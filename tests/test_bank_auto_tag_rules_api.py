@@ -15,6 +15,14 @@ def _session(*, can_mutate_data: bool = True) -> SimpleNamespace:
     )
 
 
+class _ReadModelQueue:
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+        self.enqueued.append((scope_type, scope_key, reason))
+
+
 class BankAutoTagRulesApiTests(unittest.TestCase):
     def test_get_returns_system_active_archived_fields_and_permissions(self) -> None:
         app = build_application()
@@ -150,6 +158,50 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         suggestion = suggestions["txn-online-banking-certificate-fee"]
         self.assertEqual(suggestion["category_code"], custom_rule["code"])
         self.assertEqual(suggestion["auto_category_evidence"]["condition_type"], "contains_all")
+
+    def test_put_enqueues_bank_detail_month_shards_for_rule_changes(self) -> None:
+        app = build_application()
+        queue = _ReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._import_service = SimpleNamespace(
+            list_transactions=lambda month=None: [
+                {"id": "txn-jan", "txn_date": "2026-01-24"},
+                {"id": "txn-mar", "trade_time": "2026-03-05T10:00:00"},
+            ]
+        )
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        active = [
+            *current["active_rules"],
+            {
+                "label": "网银证书服务费",
+                "rules": {
+                    "match_fields": ["all_text"],
+                    "exact_any": [],
+                    "contains_any": [],
+                    "contains_all": ["网银", "服务费"],
+                    "none_of": [],
+                    "regex_any": [],
+                },
+            },
+        ]
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_details_auto_tag_rules_update(
+                json.dumps(
+                    {
+                        "expected_version": current["version"],
+                        "active_rules": active,
+                        "archived_rules": current["archived_rules"],
+                    },
+                    ensure_ascii=False,
+                ),
+                {},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(("bank_detail", "2026-01", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertIn(("bank_detail", "2026-03", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
     def test_put_rejects_invalid_payloads_with_structured_errors(self) -> None:
         app = build_application()

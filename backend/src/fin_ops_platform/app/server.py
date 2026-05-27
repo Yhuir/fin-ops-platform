@@ -16993,7 +16993,12 @@ class Application:
     def _derived_lifecycle_bank_detail_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
         months = self._months_from_lifecycle_scope_keys(scope_keys)
-        target_scope_keys = months or (["all"] if "all" in scope_keys else ["all"])
+        if months:
+            target_scope_keys = months
+        elif "all" in scope_keys:
+            target_scope_keys = self._bank_detail_available_month_scope_keys()
+        else:
+            target_scope_keys = ["all"]
         enqueued = self._enqueue_bank_detail_read_model_refreshes(
             target_scope_keys,
             reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_detail"),
@@ -17003,6 +17008,25 @@ class Application:
             "invalidated_scopes": target_scope_keys,
             "enqueued_jobs": ["bank_detail.read_model.refresh"] if enqueued else [],
         }
+
+    def _bank_detail_available_month_scope_keys(self) -> list[str]:
+        months: set[str] = set()
+        try:
+            transactions = self._import_service.list_transactions(month="all")
+        except TypeError:
+            transactions = self._import_service.list_transactions()
+        except Exception:
+            transactions = []
+        for transaction in list(transactions or []):
+            payload = self._serialize_value(transaction)
+            if not isinstance(payload, dict):
+                continue
+            for key in ("txn_date", "trade_time", "pay_receive_time", "business_date", "transaction_at"):
+                value = str(payload.get(key) or "").strip()
+                if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
+                    months.add(value[:7])
+                    break
+        return sorted(months) or ["all"]
 
     def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         self._search_service.clear_cache()
