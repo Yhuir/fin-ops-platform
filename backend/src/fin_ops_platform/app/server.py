@@ -10098,7 +10098,11 @@ class Application:
         scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
         scope_summary = self._bank_detail_scope_summary(scope_keys)
         if scope_summary.get("read_model_status") != "fresh":
-            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason=f"api_{scope_summary.get('read_model_status') or 'stale'}")
+            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
+                scope_keys,
+                reason=f"api_{scope_summary.get('read_model_status') or 'stale'}",
+                scope_summary=scope_summary,
+            )
             return self._bank_detail_accounts_refreshing_payload(
                 scope_keys=scope_keys,
                 date_from=date_from,
@@ -10126,7 +10130,11 @@ class Application:
             self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_miss")
             return self._bank_detail_accounts_refreshing_payload(scope_keys=scope_keys, date_from=date_from, date_to=date_to)
         if str(payload.get("read_model_status") or "fresh") != "fresh":
-            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_stale")
+            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
+                scope_keys,
+                reason="api_stale",
+                scope_summary=payload,
+            )
             return self._bank_detail_accounts_refreshing_payload(
                 scope_keys=scope_keys,
                 date_from=date_from,
@@ -10165,7 +10173,11 @@ class Application:
         scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
         scope_summary = self._bank_detail_scope_summary(scope_keys)
         if scope_summary.get("read_model_status") != "fresh":
-            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason=f"api_{scope_summary.get('read_model_status') or 'stale'}")
+            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
+                scope_keys,
+                reason=f"api_{scope_summary.get('read_model_status') or 'stale'}",
+                scope_summary=scope_summary,
+            )
             return self._bank_detail_transactions_refreshing_payload(
                 scope_keys=scope_keys,
                 account_key=account_key,
@@ -10221,7 +10233,11 @@ class Application:
                 page_size=normalized_page_size,
             )
         if str(payload.get("read_model_status") or "fresh") != "fresh":
-            self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_stale")
+            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
+                scope_keys,
+                reason="api_stale",
+                scope_summary=payload,
+            )
             return self._bank_detail_transactions_refreshing_payload(
                 scope_keys=scope_keys,
                 account_key=account_key,
@@ -10317,6 +10333,17 @@ class Application:
         if callable(tag_loader):
             payload.setdefault("bank_transaction_tags", tag_loader())
         return payload
+
+    def _enqueue_bank_detail_read_model_refreshes_unless_refreshing(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        scope_summary: dict[str, object],
+    ) -> bool:
+        if str(scope_summary.get("read_model_status") or "").strip() == "refreshing":
+            return False
+        return self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason=reason)
 
     def _enqueue_bank_detail_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)

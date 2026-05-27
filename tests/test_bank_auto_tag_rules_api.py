@@ -23,6 +23,34 @@ class _ReadModelQueue:
         self.enqueued.append((scope_type, scope_key, reason))
 
 
+class _BankDetailStatusRepository:
+    def __init__(self, *, status: str) -> None:
+        self.status = status
+
+    def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
+        return [str(date_from or "")[:7] or "2026-01"]
+
+    def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+        return {
+            "read_model_status": self.status,
+            "read_model_scope_keys": list(scope_keys),
+            "read_model_generated_at": "2026-05-27T21:00:00+00:00",
+            "read_model_scope_signatures": {
+                scope_key: {
+                    "status": "fresh",
+                    "dirty_status": "pending" if self.status == "refreshing" else None,
+                }
+                for scope_key in scope_keys
+            },
+        }
+
+    def list_bank_detail_transactions(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("refreshing or stale scopes must not read bank detail rows")
+
+    def list_bank_detail_accounts(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("refreshing or stale scopes must not read bank detail rows")
+
+
 class BankAutoTagRulesApiTests(unittest.TestCase):
     def test_get_returns_system_active_archived_fields_and_permissions(self) -> None:
         app = build_application()
@@ -202,6 +230,47 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertIn(("bank_detail", "2026-01", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("bank_detail", "2026-03", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+
+    def test_bank_detail_api_does_not_reenqueue_already_refreshing_scopes(self) -> None:
+        app = build_application()
+        queue = _ReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._bank_detail_sql_read_repository = _BankDetailStatusRepository(status="refreshing")
+
+        transactions = app._get_bank_detail_transactions_from_sql_read_model(
+            account_key=None,
+            date_from="2026-01-01",
+            date_to="2026-12-31",
+            keyword="网银证书服务费",
+            page=1,
+            page_size=100,
+        )
+        accounts = app._get_bank_detail_accounts_from_sql_read_model(
+            date_from="2026-01-01",
+            date_to="2026-12-31",
+        )
+
+        self.assertEqual(transactions["read_model_status"], "refreshing")
+        self.assertEqual(accounts["read_model_status"], "refreshing")
+        self.assertEqual(queue.enqueued, [])
+
+    def test_bank_detail_api_reenqueues_stale_scopes_once(self) -> None:
+        app = build_application()
+        queue = _ReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._bank_detail_sql_read_repository = _BankDetailStatusRepository(status="stale")
+
+        payload = app._get_bank_detail_transactions_from_sql_read_model(
+            account_key=None,
+            date_from="2026-01-01",
+            date_to="2026-12-31",
+            keyword="网银证书服务费",
+            page=1,
+            page_size=100,
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.enqueued, [("bank_detail", "2026-01", "api_stale")])
 
     def test_put_rejects_invalid_payloads_with_structured_errors(self) -> None:
         app = build_application()
