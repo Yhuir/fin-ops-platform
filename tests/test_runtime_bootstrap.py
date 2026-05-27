@@ -210,6 +210,56 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn("read_model_unavailable", response.body)
 
+    def test_production_postgres_bank_details_transactions_do_not_fallback_to_legacy_service(self) -> None:
+        app = object.__new__(server_module.Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
+        app._bank_detail_sql_read_repository = None
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
+        app._bank_details_service = type(
+            "LegacyBankDetails",
+            (),
+            {
+                "list_transactions": lambda *args, **kwargs: (_ for _ in ()).throw(
+                    AssertionError("production bank details API must not fallback to legacy service")
+                ),
+                "_bank_transaction_tags_payload": lambda *args, **kwargs: {},
+            },
+        )()
+
+        response = app._handle_api_bank_details_transactions(
+            account_key=None,
+            date_from="2026-04-01",
+            date_to="2026-04-30",
+            keyword=None,
+            page="1",
+            page_size="100",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("refreshing", response.body)
+
+    def test_production_postgres_bank_details_accounts_do_not_fallback_to_legacy_service(self) -> None:
+        app = object.__new__(server_module.Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
+        app._bank_detail_sql_read_repository = None
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
+        app._bank_details_service = type(
+            "LegacyBankDetails",
+            (),
+            {
+                "list_accounts": lambda *args, **kwargs: (_ for _ in ()).throw(
+                    AssertionError("production bank details accounts API must not fallback to legacy service")
+                ),
+            },
+        )()
+
+        response = app._handle_api_bank_details_accounts(date_from="2026-04-01", date_to="2026-04-30")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("refreshing", response.body)
+
     def test_production_snapshot_reads_are_confined_to_legacy_allowlist(self) -> None:
         allowed_paths = {
             Path("backend/src/fin_ops_platform/services/runtime_bootstrap.py"),

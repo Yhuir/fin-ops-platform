@@ -65,6 +65,11 @@ class BankDetailSqlProjectionBuilder:
         manual_categories = self._load_manual_categories(transaction_rows)
         relations = self._load_relation_tags(transaction_ids)
         auto_categories = self._auto_category_service.suggestions_by_transaction_id(auto_category_context_rows)
+        auto_category_context_by_id = {
+            str(row.get("id")): row
+            for row in auto_category_context_rows
+            if str(row.get("id") or "").strip()
+        }
         generated_at = datetime.now(UTC).isoformat()
         source_versions = self._source_versions(source_version=source_version, row_count=len(transaction_rows))
         rows = [
@@ -75,6 +80,7 @@ class BankDetailSqlProjectionBuilder:
                 source_versions=source_versions,
                 manual_category=manual_categories.get(str(row["id"])),
                 auto_category=auto_categories.get(str(row["id"])),
+                auto_category_context_by_id=auto_category_context_by_id,
                 relation=relations.get(str(row["id"])),
             )
             for row in transaction_rows
@@ -174,15 +180,6 @@ class BankDetailSqlProjectionBuilder:
             """,
             (transaction_ids,),
         )
-        candidate_rows = self._connection.fetch_all(
-            """
-            select candidate_key as case_id, row_ids, payload
-            from read_model.workbench_candidate_matches
-            where status in ('auto_closed', 'incomplete', 'active', 'candidate', 'proposed', 'open')
-              and row_ids && %s
-            """,
-            (transaction_ids,),
-        )
         result: dict[str, dict[str, Any]] = {}
         transaction_id_set = set(transaction_ids)
         for row in relation_rows:
@@ -198,23 +195,6 @@ class BankDetailSqlProjectionBuilder:
                 has_oa = True
             if not has_invoice and text_list(special_metadata.get("invoice_row_ids")):
                 has_invoice = True
-            self._merge_relation_tags(
-                result,
-                bank_ids=bank_ids,
-                has_oa=has_oa,
-                has_invoice=has_invoice,
-                case_id=text(row.get("case_id")),
-            )
-        for row in candidate_rows:
-            row_ids = text_list(row.get("row_ids"))
-            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-            bank_ids = [row_id for row_id in text_list(payload.get("bank_row_ids")) if row_id in transaction_id_set]
-            if not bank_ids:
-                bank_ids = [row_id for row_id in row_ids if row_id in transaction_id_set]
-            has_oa = bool(text_list(payload.get("oa_row_ids"))) or any(_looks_like_oa_row(row_id) for row_id in row_ids)
-            has_invoice = bool(text_list(payload.get("invoice_row_ids"))) or any(
-                _looks_like_invoice_row(row_id) for row_id in row_ids
-            )
             self._merge_relation_tags(
                 result,
                 bank_ids=bank_ids,
@@ -304,6 +284,7 @@ class BankDetailSqlProjectionBuilder:
         source_versions: dict[str, Any],
         manual_category: dict[str, Any] | None,
         auto_category: dict[str, Any] | None,
+        auto_category_context_by_id: dict[str, dict[str, Any]],
         relation: dict[str, Any] | None,
     ) -> dict[str, Any]:
         manual = manual_category or {
@@ -320,6 +301,11 @@ class BankDetailSqlProjectionBuilder:
             str(relation_payload.get("oa_relation_tag") or "无oa"),
             str(relation_payload.get("invoice_relation_tag") or "无发票"),
         ]
+        internal_transfer_counterpart = _internal_transfer_counterpart_payload(
+            auto,
+            effective_category_code=text(effective.get("effective_category_code")),
+            context_rows_by_id=auto_category_context_by_id,
+        )
         payload = {
             "id": row["id"],
             "trade_time": row.get("trade_time") or row.get("trade_date") or "",
@@ -353,6 +339,7 @@ class BankDetailSqlProjectionBuilder:
             "auto_category_reason": auto.get("reason"),
             "auto_category_confidence": auto.get("confidence"),
             "auto_category_rule_version": auto.get("rule_version") or BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION,
+            "internal_transfer_counterpart": internal_transfer_counterpart,
             "effective_category_code": effective.get("effective_category_code"),
             "effective_category_label": effective.get("effective_category_label"),
             "effective_category_path": list(effective.get("effective_category_path") or []),
@@ -412,6 +399,33 @@ def _direction(value: Any, signed_amount: Any) -> str:
 
 def _account_key(bank_name: str, account_last4: str) -> str:
     return f"{bank_name.lower().replace(' ', '-')}:{account_last4 or 'unknown'}"
+
+
+def _internal_transfer_counterpart_payload(
+    auto_category: dict[str, Any],
+    *,
+    effective_category_code: str | None,
+    context_rows_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    if effective_category_code != "internal_transfer":
+        return None
+    if auto_category.get("category_code") != "internal_transfer":
+        return None
+    counterpart_id = text(auto_category.get("counterpart_id"))
+    if not counterpart_id:
+        return None
+    counterpart = context_rows_by_id.get(counterpart_id)
+    if not counterpart:
+        return None
+    return {
+        "transaction_id": text(counterpart.get("id")) or counterpart_id,
+        "trade_time": text(counterpart.get("trade_time") or counterpart.get("trade_date")) or "",
+        "bank_name": text(counterpart.get("bank_name")) or "未知银行",
+        "account_last4": text(counterpart.get("account_last4")) or "unknown",
+        "amount": decimal_text(counterpart.get("amount")) or "0",
+        "direction_label": text(counterpart.get("direction_label")) or "",
+        "counterparty_name": text(counterpart.get("counterparty_name")) or "",
+    }
 
 
 def _bank_text_display_fields(

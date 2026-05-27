@@ -99,6 +99,10 @@ class BankInternalTransferDetector:
     ) -> dict[str, Any]:
         return {
             "transaction_id": transaction_id,
+            "counterpart_id": counterpart_id,
+            "counterpart_account_key": counterpart_account_key,
+            "match_delta_seconds": delta_seconds,
+            "matched_amount": amount_text,
             "category_code": "internal_transfer",
             "category_label": "内部往来款",
             "category_path": ["自动识别", "内部往来款"],

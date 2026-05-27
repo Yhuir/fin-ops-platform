@@ -218,6 +218,25 @@ describe("Bank details page", () => {
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
   });
 
+  test("shows counterpart transaction details when hovering internal transfer tag", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "内部转账");
+    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const internalTransferTag = (await within(table).findAllByText("内部往来款"))[0];
+
+    await user.hover(internalTransferTag);
+
+    const tooltip = await screen.findByRole("tooltip", { name: /对应内部往来流水/ });
+    expect(within(tooltip).getByText("2026-04-03 12:00:00")).toBeInTheDocument();
+    expect(within(tooltip).getByText("建设银行 1410")).toBeInTheDocument();
+    expect(within(tooltip).getByText("13,000.00")).toBeInTheDocument();
+    expect(within(tooltip).getByText("云南溯源科技有限公司工商银行账户")).toBeInTheDocument();
+  });
+
   test("opens automatic tag rules drawer from the page toolbar", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

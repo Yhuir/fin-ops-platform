@@ -36,6 +36,16 @@ export type OaRelationTag = "有oa" | "无oa";
 
 export type InvoiceRelationTag = "有发票" | "无发票";
 
+export type BankInternalTransferCounterpart = {
+  transactionId: string;
+  tradeTime: string;
+  bankName: string;
+  accountLast4: string;
+  amount: string;
+  directionLabel: "收" | "支" | "";
+  counterpartyName: string;
+};
+
 export type BankDetailTransaction = {
   id: string;
   tradeTime: string;
@@ -62,6 +72,7 @@ export type BankDetailTransaction = {
   autoCategorySource: string;
   autoCategoryReason: string | null;
   autoCategoryConfidence: string | null;
+  internalTransferCounterpart: BankInternalTransferCounterpart | null;
   effectiveCategoryCode: BankTransactionCategoryCode | null;
   effectiveCategoryLabel: string | null;
   effectiveCategoryPath: string[];

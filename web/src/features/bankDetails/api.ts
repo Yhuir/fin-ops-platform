@@ -11,6 +11,7 @@ import type {
   BankAutoTagRuleConditions,
   BankAutoTagRulesResponse,
   BankAutoTagSystemRule,
+  BankInternalTransferCounterpart,
   SaveBankAutoTagRulesRequest,
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
@@ -66,6 +67,7 @@ type ApiBankDetailTransaction = {
   auto_category_source?: string | null;
   auto_category_reason?: string | null;
   auto_category_confidence?: string | null;
+  internal_transfer_counterpart?: ApiBankInternalTransferCounterpart | null;
   effective_category_code?: BankTransactionCategoryCode | null;
   effective_category_label?: string | null;
   effective_category_path?: string[];
@@ -74,6 +76,16 @@ type ApiBankDetailTransaction = {
   invoice_relation_tag?: string | null;
   relation_tags?: string[];
   relation_case_id?: string | null;
+};
+
+type ApiBankInternalTransferCounterpart = {
+  transaction_id?: string | null;
+  trade_time?: string | null;
+  bank_name?: string | null;
+  account_last4?: string | null;
+  amount?: string | null;
+  direction_label?: string | null;
+  counterparty_name?: string | null;
 };
 
 type ApiBankDetailTransactionsResponse = {
@@ -253,6 +265,34 @@ function formatBankDetailTradeTime(value: string) {
   return normalized;
 }
 
+function normalizeDirectionLabel(value: unknown): BankInternalTransferCounterpart["directionLabel"] {
+  if (value === "收" || value === "支") {
+    return value;
+  }
+  return "";
+}
+
+function mapInternalTransferCounterpart(
+  value: ApiBankInternalTransferCounterpart | null | undefined,
+): BankInternalTransferCounterpart | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const transactionId = String(value.transaction_id ?? "").trim();
+  if (!transactionId) {
+    return null;
+  }
+  return {
+    transactionId,
+    tradeTime: formatBankDetailTradeTime(String(value.trade_time ?? "")),
+    bankName: String(value.bank_name ?? "").trim(),
+    accountLast4: String(value.account_last4 ?? "").trim(),
+    amount: String(value.amount ?? "").trim(),
+    directionLabel: normalizeDirectionLabel(value.direction_label),
+    counterpartyName: String(value.counterparty_name ?? "").trim(),
+  };
+}
+
 function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
   const relationTags = Array.isArray(row.relation_tags)
     ? row.relation_tags.map(String).map((tag) => tag.trim()).filter(Boolean)
@@ -285,6 +325,7 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     autoCategorySource: row.auto_category_source ?? "",
     autoCategoryReason: row.auto_category_reason ?? null,
     autoCategoryConfidence: row.auto_category_confidence ?? null,
+    internalTransferCounterpart: mapInternalTransferCounterpart(row.internal_transfer_counterpart),
     effectiveCategoryCode: row.effective_category_code ?? null,
     effectiveCategoryLabel: row.effective_category_label ?? null,
     effectiveCategoryPath: Array.isArray(row.effective_category_path) ? row.effective_category_path.map(String).filter(Boolean) : [],

@@ -20,6 +20,7 @@ import TableHead from "@mui/material/TableHead";
 import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
@@ -316,12 +317,44 @@ function TypeCell({ row }: { row: BankDetailTransaction }) {
   if (!row.autoCategoryCode || !row.autoCategoryLabel) {
     return <Typography className="bank-auto-type-empty" component="span">-</Typography>;
   }
-  return (
+  const categoryTag = (
     <BankCategoryTag
       categoryCode={row.autoCategoryCode}
       compact
       label={row.autoCategoryLabel}
     />
+  );
+  const counterpart = row.autoCategoryCode === "internal_transfer" ? row.internalTransferCounterpart : null;
+  if (!counterpart) {
+    return categoryTag;
+  }
+  const accountText = [counterpart.bankName, counterpart.accountLast4].filter(Boolean).join(" ") || "-";
+  return (
+    <Tooltip
+      arrow
+      placement="left"
+      title={(
+        <Box className="bank-internal-transfer-tooltip">
+          <Typography className="bank-internal-transfer-tooltip-title" variant="caption">
+            对应内部往来流水
+          </Typography>
+          <Box className="bank-internal-transfer-tooltip-grid">
+            <Typography variant="caption" color="inherit">时间</Typography>
+            <Typography variant="caption" color="inherit">{counterpart.tradeTime || "-"}</Typography>
+            <Typography variant="caption" color="inherit">账户</Typography>
+            <Typography variant="caption" color="inherit">{accountText}</Typography>
+            <Typography variant="caption" color="inherit">金额</Typography>
+            <Typography variant="caption" color="inherit">{formatMoney(counterpart.amount) || "-"}</Typography>
+            <Typography variant="caption" color="inherit">对方户名</Typography>
+            <Typography variant="caption" color="inherit">{counterpart.counterpartyName || "-"}</Typography>
+          </Box>
+        </Box>
+      )}
+    >
+      <Box component="span" className="bank-internal-transfer-tag-anchor">
+        {categoryTag}
+      </Box>
+    </Tooltip>
   );
 }
 

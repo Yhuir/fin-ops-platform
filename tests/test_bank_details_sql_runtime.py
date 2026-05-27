@@ -297,30 +297,19 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(tags["txn_imported_1242"]["invoice_relation_tag"], "有发票")
         self.assertEqual(tags["txn_imported_1242"]["relation_case_id"], "CASE-AUTO-0003")
 
-    def test_relation_tags_use_candidate_payload_invoice_row_ids_for_non_prefixed_invoice_rows(self) -> None:
+    def test_relation_tags_do_not_read_legacy_candidate_matches_in_projection(self) -> None:
         connection = FakeConnection(
             rows=[
                 [],
-                [
-                    {
-                        "case_id": "candidate:oa-bank-invoice",
-                        "row_ids": ["txn-oa-bank", "oa-exp-2001", "oa-att-inv-2001-a"],
-                        "payload": {
-                            "bank_row_ids": ["txn-oa-bank"],
-                            "oa_row_ids": ["oa-exp-2001"],
-                            "invoice_row_ids": ["oa-att-inv-2001-a"],
-                        },
-                    }
-                ],
             ]
         )
         builder = BankDetailSqlProjectionBuilder(connection=connection)
 
         tags = builder._load_relation_tags(["txn-oa-bank"])  # noqa: SLF001
 
-        self.assertEqual(tags["txn-oa-bank"]["oa_relation_tag"], "有oa")
-        self.assertEqual(tags["txn-oa-bank"]["invoice_relation_tag"], "有发票")
-        self.assertEqual(tags["txn-oa-bank"]["relation_case_id"], "candidate:oa-bank-invoice")
+        self.assertEqual(tags, {})
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertNotIn("workbench_candidate_matches", sql_text)
 
     def test_normalized_row_splits_bank_text_fields_for_bank_detail_table(self) -> None:
         builder = BankDetailSqlProjectionBuilder(connection=FakeConnection())
@@ -443,6 +432,74 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual({row["auto_category_code"] for row in repository.saved_rows}, {"internal_transfer"})
         self.assertEqual({row["effective_category_code"] for row in repository.saved_rows}, {"internal_transfer"})
         self.assertEqual({row["auto_category_label"] for row in repository.saved_rows}, {"内部往来款"})
+
+    def test_rebuild_embeds_internal_transfer_counterpart_summary(self) -> None:
+        repository = CaptureBankDetailReadModelRepository()
+        connection = FakeConnection(
+            rows=[
+                [
+                    {
+                        "id": "txn-transfer-out",
+                        "transaction_id": "uuid-transfer-out",
+                        "account_no": "6222000011116386",
+                        "account_name": "云南溯源科技有限公司",
+                        "txn_direction": "expense",
+                        "counterparty_name_raw": "云南溯源科技有限公司建设银行账户",
+                        "amount": "13000.00",
+                        "signed_amount": "-13000.00",
+                        "balance": "900.00",
+                        "txn_date": "2026-04-03",
+                        "trade_time": "2026-04-03 10:00:00",
+                        "summary": "内部转账",
+                        "remark": "",
+                        "raw_payload": {"normalized_payload": {"imported_bank_name": "工商银行", "imported_bank_last4": "6386"}},
+                    },
+                    {
+                        "id": "txn-transfer-in",
+                        "transaction_id": "uuid-transfer-in",
+                        "account_no": "6227000011111410",
+                        "account_name": "云南溯源科技有限公司",
+                        "txn_direction": "income",
+                        "counterparty_name_raw": "云南溯源科技有限公司工商银行账户",
+                        "amount": "13000.00",
+                        "signed_amount": "13000.00",
+                        "balance": "13900.00",
+                        "txn_date": "2026-04-03",
+                        "trade_time": "2026-04-03 12:00:00",
+                        "summary": "内部转账",
+                        "remark": "",
+                        "raw_payload": {"normalized_payload": {"imported_bank_name": "建设银行", "imported_bank_last4": "1410"}},
+                    },
+                ],
+                [],
+                [],
+                [],
+            ]
+        )
+        builder = BankDetailSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+
+        builder.rebuild_bank_detail_read_model_scope("2026-04", source_version=9)
+
+        rows_by_id = {str(row["id"]): row for row in repository.saved_rows}
+        out_counterpart = rows_by_id["txn-transfer-out"]["internal_transfer_counterpart"]
+        self.assertEqual(
+            out_counterpart,
+            {
+                "transaction_id": "txn-transfer-in",
+                "trade_time": "2026-04-03 12:00:00",
+                "bank_name": "建设银行",
+                "account_last4": "1410",
+                "amount": "13000.00",
+                "direction_label": "收",
+                "counterparty_name": "云南溯源科技有限公司工商银行账户",
+            },
+        )
+        self.assertEqual(rows_by_id["txn-transfer-out"]["payload"]["internal_transfer_counterpart"], out_counterpart)
+        in_counterpart = rows_by_id["txn-transfer-in"]["internal_transfer_counterpart"]
+        self.assertEqual(in_counterpart["transaction_id"], "txn-transfer-out")
+        self.assertEqual(in_counterpart["bank_name"], "工商银行")
+        self.assertEqual(in_counterpart["account_last4"], "6386")
+        self.assertEqual(in_counterpart["direction_label"], "支")
 
     def test_rebuild_uses_boundary_context_for_cross_month_internal_transfer_auto_category(self) -> None:
         repository = CaptureBankDetailReadModelRepository()
