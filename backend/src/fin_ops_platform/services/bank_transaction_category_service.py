@@ -996,18 +996,18 @@ class BankTransactionCategoryService:
         *,
         field_errors: list[dict[str, str]],
     ) -> None:
-        seen_by_status: dict[str, dict[str, int]] = {"active": {}, "archived": {}}
+        seen_active_labels: dict[str, int] = {}
         for index, definition in enumerate(definitions):
             status = str(definition.get("status") or "active")
+            if status != "active":
+                continue
             label = str(definition.get("label") or "").strip()
             if not label:
                 continue
-            seen = seen_by_status.setdefault(status, {})
-            if label in seen:
-                prefix = "active_rules" if status == "active" else "archived_rules"
-                field_errors.append({"path": f"{prefix}[{index}].label", "message": "同一状态下标签名称不能重复。"})
+            if label in seen_active_labels:
+                field_errors.append({"path": f"active_rules[{index}].label", "message": "同一状态下标签名称不能重复。"})
                 continue
-            seen[label] = index
+            seen_active_labels[label] = index
 
     @classmethod
     def _auto_tag_rule_summary(cls, rules: dict[str, list[str]], *, archived: bool) -> str:

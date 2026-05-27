@@ -226,6 +226,79 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(updated_fee["rules"]["none_of"], ["退手续费"])
         self.assertEqual(updated_fee["rules"]["regex_any"], ["短信\\s*服务费"])
 
+    def test_auto_tag_rules_update_allows_duplicate_archived_labels(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(None)
+        previous = service.tag_dictionary_payload()
+        previous_tag_dictionary = {
+            "version": 14,
+            "definitions": [
+                *previous["definitions"],
+                {
+                    "code": "custom_online_cert_fee_old",
+                    "label": "网银证书服务费",
+                    "path": ["自动识别", "网银证书服务费"],
+                    "source": "custom",
+                    "status": "archived",
+                    "direction": "any",
+                    "account_scope": {"type": "any", "values": []},
+                    "rules": {
+                        "match_fields": ["all_text"],
+                        "exact_any": ["网银证书服务费"],
+                        "contains_any": [],
+                        "contains_all": [],
+                        "none_of": [],
+                        "regex_any": [],
+                    },
+                    "rule_code": "custom_online_cert_fee_old",
+                },
+                {
+                    "code": "custom_online_cert_fee_new",
+                    "label": "网银证书服务费",
+                    "path": ["自动识别", "网银证书服务费"],
+                    "source": "custom",
+                    "status": "active",
+                    "priority": 90,
+                    "direction": "any",
+                    "account_scope": {"type": "any", "values": []},
+                    "rules": {
+                        "match_fields": ["all_text"],
+                        "exact_any": [],
+                        "contains_any": [],
+                        "contains_all": ["网银", "服务费"],
+                        "none_of": [],
+                        "regex_any": [],
+                    },
+                    "rule_code": "custom_online_cert_fee_new",
+                },
+            ],
+        }
+        current = BankTransactionCategoryService.auto_tag_rules_payload(previous_tag_dictionary)
+        target = next(rule for rule in current["active_rules"] if rule["code"] == "custom_online_cert_fee_new")
+
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_update(
+            {
+                "expected_version": current["version"],
+                "active_rules": [
+                    rule
+                    for rule in current["active_rules"]
+                    if rule["code"] != "custom_online_cert_fee_new"
+                ],
+                "archived_rules": [*current["archived_rules"], target],
+            },
+            previous_tag_dictionary=previous_tag_dictionary,
+        )
+
+        updated = BankTransactionCategoryService.auto_tag_rules_payload(result["tag_dictionary"])
+        archived_online_cert_fee_codes = [
+            rule["code"]
+            for rule in updated["archived_rules"]
+            if rule["label"] == "网银证书服务费"
+        ]
+        self.assertEqual(
+            archived_online_cert_fee_codes,
+            ["custom_online_cert_fee_new", "custom_online_cert_fee_old"],
+        )
+
     def test_configured_custom_tag_is_valid_manual_choice(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(
             None,

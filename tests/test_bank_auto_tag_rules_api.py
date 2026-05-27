@@ -413,6 +413,94 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             payload["field_errors"],
         )
 
+    def test_put_allows_deleting_active_rule_when_archived_has_same_label(self) -> None:
+        app = build_application()
+        settings = app._app_settings_service.get_settings_payload()
+        tag_dictionary = settings["bank_transaction_tags"]
+        existing_definitions = list(tag_dictionary["definitions"])
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            bank_transaction_tags={
+                "version": tag_dictionary["version"],
+                "definitions": [
+                    *existing_definitions,
+                    {
+                        "code": "custom_online_cert_fee_old",
+                        "label": "网银证书服务费",
+                        "path": ["自动识别", "网银证书服务费"],
+                        "source": "custom",
+                        "status": "archived",
+                        "direction": "any",
+                        "account_scope": {"type": "any", "values": []},
+                        "rules": {
+                            "match_fields": ["all_text"],
+                            "exact_any": ["网银证书服务费"],
+                            "contains_any": [],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                        "rule_code": "custom_online_cert_fee_old",
+                    },
+                    {
+                        "code": "custom_online_cert_fee_new",
+                        "label": "网银证书服务费",
+                        "path": ["自动识别", "网银证书服务费"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 90,
+                        "direction": "any",
+                        "account_scope": {"type": "any", "values": []},
+                        "rules": {
+                            "match_fields": ["all_text"],
+                            "exact_any": [],
+                            "contains_any": [],
+                            "contains_all": ["网银", "服务费"],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                        "rule_code": "custom_online_cert_fee_new",
+                    },
+                ],
+            },
+            pending_invoice_tag_groups=settings["pending_invoice_tag_groups"],
+            actor_id="settings-owner",
+        )
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        target = next(rule for rule in current["active_rules"] if rule["code"] == "custom_online_cert_fee_new")
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_details_auto_tag_rules_update(
+                json.dumps(
+                    {
+                        "expected_version": current["version"],
+                        "active_rules": [
+                            rule
+                            for rule in current["active_rules"]
+                            if rule["code"] != "custom_online_cert_fee_new"
+                        ],
+                        "archived_rules": [*current["archived_rules"], target],
+                    },
+                    ensure_ascii=False,
+                ),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [
+                rule["code"]
+                for rule in payload["archived_rules"]
+                if rule["label"] == "网银证书服务费"
+            ],
+            ["custom_online_cert_fee_new", "custom_online_cert_fee_old"],
+        )
+
     def test_put_rejects_archiving_pending_invoice_referenced_tag(self) -> None:
         app = build_application()
         settings = app._app_settings_service.get_settings_payload()
