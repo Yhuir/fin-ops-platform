@@ -189,6 +189,30 @@ describe("AutoTagRulesDrawer", () => {
     expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
   });
 
+  test("discards unsaved draft rules instead of submitting them as archived rules", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    const existingLabelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
+    await user.clear(existingLabelInputs[0]);
+    await user.type(existingLabelInputs[0], "手续费调整");
+    await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
+
+    await user.click(within(drawer).getByRole("button", { name: "未命名标签 停用" }));
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    expect(payload?.archived_rules).toEqual([
+      expect.objectContaining({ code: "old_bonus", label: "旧奖金" }),
+    ]);
+    expect(payload?.archived_rules).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "" }),
+    ]));
+  });
+
   test("saves edited and newly created rules", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

@@ -175,15 +175,44 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   bank_detail_export_row_limit_exceeded: "当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。",
 };
 
+function fieldErrorMessagesFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object" || !Array.isArray((payload as { field_errors?: unknown }).field_errors)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return ((payload as { field_errors: unknown[] }).field_errors)
+    .map((fieldError) => (
+      fieldError && typeof fieldError === "object"
+        ? String((fieldError as { message?: unknown }).message ?? "").trim()
+        : ""
+    ))
+    .filter((message) => {
+      if (!message || seen.has(message)) {
+        return false;
+      }
+      seen.add(message);
+      return true;
+    });
+}
+
+function withFieldErrorMessages(message: string, fieldMessages: string[]) {
+  if (!fieldMessages.length) {
+    return message;
+  }
+  return `${message.replace(/[。；;:：]+$/, "")}：${fieldMessages.join("；")}`;
+}
+
 function resolveBankDetailApiErrorMessage(payload: unknown, rawText: string) {
   if (payload && typeof payload === "object") {
     const errorCode = String((payload as { error?: unknown }).error ?? "").trim();
+    const fieldMessages = fieldErrorMessagesFromPayload(payload);
     if (errorCode && BANK_DETAIL_API_ERROR_MESSAGES[errorCode]) {
-      return BANK_DETAIL_API_ERROR_MESSAGES[errorCode];
+      const mapped = BANK_DETAIL_API_ERROR_MESSAGES[errorCode];
+      return withFieldErrorMessages(mapped, fieldMessages);
     }
     const message = String((payload as { message?: unknown }).message ?? "").trim();
     if (message) {
-      return message;
+      return withFieldErrorMessages(message, fieldMessages);
     }
     if (errorCode) {
       return errorCode;

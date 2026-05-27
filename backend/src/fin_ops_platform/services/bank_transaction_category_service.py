@@ -909,6 +909,8 @@ class BankTransactionCategoryService:
             field_errors.append({"path": f"{path_prefix}.code", "message": "不能提交未知或非自动规则标签 code。"})
         if is_new and raw_code not in (None, ""):
             field_errors.append({"path": f"{path_prefix}.code", "message": "新增标签不能由前端指定 code。"})
+        if status == "archived" and is_new:
+            field_errors.append({"path": f"{path_prefix}.code", "message": "停用规则必须包含已有标签 code。"})
 
         label = str(item.get("label") or "").strip()
         if not label:

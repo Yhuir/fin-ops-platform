@@ -385,6 +385,34 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                     self.assertIn("field_errors", payload)
                     self.assertIn("references", payload)
 
+    def test_put_rejects_archived_rules_without_existing_code(self) -> None:
+        app = build_application()
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        fee = next(rule for rule in current["active_rules"] if rule["code"] == "fee")
+        archived_fee_without_code = {**fee}
+        archived_fee_without_code.pop("code")
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_details_auto_tag_rules_update(
+                json.dumps(
+                    {
+                        "expected_version": current["version"],
+                        "active_rules": [rule for rule in current["active_rules"] if rule["code"] != "fee"],
+                        "archived_rules": [archived_fee_without_code],
+                    },
+                    ensure_ascii=False,
+                ),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_auto_tag_rule")
+        self.assertIn(
+            {"path": "archived_rules[0].code", "message": "停用规则必须包含已有标签 code。"},
+            payload["field_errors"],
+        )
+
     def test_put_rejects_archiving_pending_invoice_referenced_tag(self) -> None:
         app = build_application()
         settings = app._app_settings_service.get_settings_payload()

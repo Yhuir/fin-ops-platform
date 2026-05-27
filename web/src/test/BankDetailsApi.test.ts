@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { downloadBankDetailTransactionsExport, fetchBankDetailTransactions } from "../features/bankDetails/api";
+import { downloadBankDetailTransactionsExport, fetchBankDetailTransactions, saveBankAutoTagRules } from "../features/bankDetails/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -269,6 +269,24 @@ describe("bank details API", () => {
     );
 
     await expect(downloadBankDetailTransactionsExport({ mode: "account" })).rejects.toThrow("请选择具体银行账户后再导出当前账户。");
+  });
+
+  test("includes automatic tag rule field errors in save failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        error: "invalid_auto_tag_rule",
+        field_errors: [
+          { path: "archived_rules[0].code", message: "停用规则必须包含已有标签 code。" },
+        ],
+      }), { status: 400, headers: { "Content-Type": "application/json" } })),
+    );
+
+    await expect(saveBankAutoTagRules({
+      expectedVersion: 1,
+      activeRules: [],
+      archivedRules: [],
+    })).rejects.toThrow("自动标签规则校验失败，请检查规则内容：停用规则必须包含已有标签 code。");
   });
 
   test("rejects successful HTML responses from bank detail export", async () => {

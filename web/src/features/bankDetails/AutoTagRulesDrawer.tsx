@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import AddIcon from "@mui/icons-material/Add";
-import ArchiveIcon from "@mui/icons-material/Archive";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import CloseIcon from "@mui/icons-material/Close";
+import DeleteIcon from "@mui/icons-material/Delete";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import RestoreIcon from "@mui/icons-material/Restore";
@@ -368,7 +368,12 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         next.delete(localId);
         return next;
       });
-      setArchivedRules((archived) => [...archived, { ...target, status: "archived", priority: undefined, priorityLabel: undefined }]);
+      if (target.code) {
+        setArchivedRules((archived) => [
+          ...archived.filter((rule) => rule.code !== target.code),
+          { ...target, status: "archived", priority: undefined, priorityLabel: undefined },
+        ]);
+      }
       return current.filter((rule) => rule.localId !== localId);
     });
   };
@@ -409,7 +414,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
     saveBankAutoTagRules({
       expectedVersion: version,
       activeRules: activeRules.map(serializeRule),
-      archivedRules: archivedRules.map(serializeRule),
+      archivedRules: archivedRules.filter((rule) => rule.code).map(serializeRule),
     })
       .then((payload) => {
         const nextActive = payload.activeRules.map(cloneRule);
@@ -639,7 +644,7 @@ function RuleEditor({
             <ArrowDownwardIcon fontSize="small" />
           </IconButton>
           <IconButton aria-label={`${title} 停用`} size="small" onClick={onArchive} disabled={disabled}>
-            <ArchiveIcon fontSize="small" />
+            <DeleteIcon fontSize="small" />
           </IconButton>
           <IconButton aria-label={`${expanded ? "收起" : "展开"} ${title}`} size="small" onClick={onToggle}>
             {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
