@@ -9909,10 +9909,16 @@ class Application:
             else "bank_auto_tag_rules"
         )
         try:
+            priority_scope_keys = self._bank_detail_refresh_scope_keys_from_auto_tag_rules_payload(payload)
             updated = self._app_settings_service.update_bank_auto_tag_rules(
                 payload,
                 actor_id=str(actor_id or "bank_auto_tag_rules"),
-                after_bank_auto_tag_rules_saved=self._finalize_bank_auto_tag_rules_update,
+                after_bank_auto_tag_rules_saved=lambda event: self._finalize_bank_auto_tag_rules_update(
+                    {
+                        **dict(event),
+                        **({"bank_detail_priority_scope_keys": priority_scope_keys} if priority_scope_keys else {}),
+                    }
+                ),
             )
         except BankAutoTagRulesValidationError as exc:
             status = HTTPStatus.CONFLICT if exc.error_code == "bank_transaction_tags_version_conflict" else HTTPStatus.BAD_REQUEST
@@ -10264,6 +10270,21 @@ class Application:
             if SEARCH_MONTH_RE.match(month):
                 months.add(month)
         return sorted(months) or ["all"]
+
+    def _bank_detail_refresh_scope_keys_from_auto_tag_rules_payload(self, payload: dict[str, object]) -> list[str]:
+        refresh_scope = payload.get("refresh_scope") if isinstance(payload.get("refresh_scope"), dict) else {}
+        date_from = str(refresh_scope.get("date_from") or "").strip() if isinstance(refresh_scope, dict) else ""
+        date_to = str(refresh_scope.get("date_to") or "").strip() if isinstance(refresh_scope, dict) else ""
+        if not date_from and not date_to:
+            return []
+        return [
+            scope_key
+            for scope_key in self._bank_detail_scope_keys_for_range(
+                date_from=date_from or None,
+                date_to=date_to or None,
+            )
+            if scope_key and scope_key != "all"
+        ]
 
     def _bank_detail_scope_summary(self, scope_keys: list[str]) -> dict[str, object]:
         repository = getattr(self, "_bank_detail_sql_read_repository", None)
@@ -11577,6 +11598,16 @@ class Application:
                 setattr(projection, "_index_cache", {})
             except Exception:
                 pass
+        priority_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in list(event.get("bank_detail_priority_scope_keys") or [])
+            if str(scope_key).strip() and str(scope_key).strip() != "all"
+        ]
+        if priority_scope_keys:
+            self._enqueue_bank_detail_read_model_refreshes(
+                priority_scope_keys,
+                reason="bank_auto_tag_rules_changed_priority",
+            )
         self._execute_derived_data_lifecycle_event(
             "bank_auto_tag_rules_changed",
             scope_keys=["all"],

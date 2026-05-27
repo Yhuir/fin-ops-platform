@@ -73,7 +73,9 @@ type MockApiOptions = {
   includeOaAttachmentPaymentReceipt?: boolean;
   initialImportPreviewFileNames?: string[];
   initialImportPreviewOverrides?: Array<Record<string, string | null | undefined>>;
+  bankDetailAccountReadModelStatuses?: Array<"fresh" | "refreshing">;
   bankDetailTransactionReadModelStatuses?: Array<"fresh" | "refreshing">;
+  bankDetailRefreshingTransactionsEmpty?: boolean;
 };
 
 const templateRegistry = [
@@ -4263,6 +4265,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let latestEtcDraftInvoiceIds: string[] = [];
   let latestEtcDraftBatchId = "";
   let bankDetailAutoTagRulesSaved = false;
+  let bankDetailPostSaveAccountRequestCount = 0;
   let bankDetailPostSaveTransactionRequestCount = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
@@ -5145,6 +5148,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
+      const readModelStatus = bankDetailAutoTagRulesSaved && options.bankDetailAccountReadModelStatuses?.length
+        ? options.bankDetailAccountReadModelStatuses[
+          Math.min(bankDetailPostSaveAccountRequestCount++, options.bankDetailAccountReadModelStatuses.length - 1)
+        ]
+        : "fresh";
       return {
         body: {
           total_balance: "130500.50",
@@ -5172,6 +5180,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               transaction_count: 0,
             },
           ],
+          read_model_status: readModelStatus,
         },
       };
     },
@@ -5252,6 +5261,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { body: baseRules };
       }
       bankDetailAutoTagRulesSaved = true;
+      bankDetailPostSaveAccountRequestCount = 0;
       bankDetailPostSaveTransactionRequestCount = 0;
       const activeRules = Array.isArray(jsonBody?.active_rules) ? jsonBody.active_rules as Array<Record<string, unknown>> : [];
       const archivedRules = Array.isArray(jsonBody?.archived_rules) ? jsonBody.archived_rules as Array<Record<string, unknown>> : [];
@@ -5418,39 +5428,40 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const rows = !accountKey || accountKey === "icbc:6386"
         ? (matchedRows ?? [visibleRow])
         : [];
+      const responseRows = readModelStatus === "refreshing" && options.bankDetailRefreshingTransactionsEmpty ? [] : rows;
       return {
         body: {
           account_key: accountKey,
           date_from: dateFrom,
           date_to: dateTo,
-          rows,
+          rows: responseRows,
           category_counts: keyword
             ? {
               borrow_in_company_pending_repayment: 0,
               business_warranty_pending_collection: 0,
               borrow_out_personal_pending_collection: 0,
-              salary: rows.filter((row) => row.effective_category_code === "salary").length,
-              fee: rows.filter((row) => row.effective_category_code === "fee").length,
-              internal_transfer: rows.filter((row) => row.effective_category_code === "internal_transfer").length,
+              salary: responseRows.filter((row) => row.effective_category_code === "salary").length,
+              fee: responseRows.filter((row) => row.effective_category_code === "fee").length,
+              internal_transfer: responseRows.filter((row) => row.effective_category_code === "internal_transfer").length,
               holiday_bonus: 0,
               bonus: 0,
-              uncategorized: rows.filter((row) => !row.effective_category_code).length,
+              uncategorized: responseRows.filter((row) => !row.effective_category_code).length,
             }
             : {
               borrow_in_company_pending_repayment: 2,
               business_warranty_pending_collection: 1,
               borrow_out_personal_pending_collection: 0,
-              salary: !accountKey || accountKey === "icbc:6386" ? 1 : 0,
+              salary: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 1 : 0,
               fee: 0,
-              internal_transfer: !accountKey || accountKey === "icbc:6386" ? 2 : 0,
+              internal_transfer: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 2 : 0,
               holiday_bonus: 0,
               bonus: 0,
-              uncategorized: (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : rows.length,
+              uncategorized: responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : responseRows.length,
             },
           pagination: {
             page,
             page_size: pageSize,
-            total: keyword ? rows.length : (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : rows.length,
+            total: keyword ? responseRows.length : responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : responseRows.length,
           },
           bank_transaction_tags: {
             version: 1,

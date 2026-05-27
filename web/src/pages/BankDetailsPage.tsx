@@ -415,7 +415,8 @@ export default function BankDetailsPage() {
   });
   const [searchInput, setSearchInput] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [readModelStatus, setReadModelStatus] = useState<"fresh" | "refreshing">("fresh");
+  const [accountsReadModelStatus, setAccountsReadModelStatus] = useState<"fresh" | "refreshing">("fresh");
+  const [transactionsReadModelStatus, setTransactionsReadModelStatus] = useState<"fresh" | "refreshing">("fresh");
   const [loading, setLoading] = useState(true);
   const [rowLoading, setRowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -431,6 +432,9 @@ export default function BankDetailsPage() {
   const [rulesRefreshStatus, setRulesRefreshStatus] = useState<"idle" | "refreshing" | "fresh">("idle");
   const rulesRefreshPendingRef = useRef(false);
   const [refreshToken, setRefreshToken] = useState(0);
+  const readModelStatus = accountsReadModelStatus === "refreshing" || transactionsReadModelStatus === "refreshing"
+    ? "refreshing"
+    : "fresh";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -442,18 +446,16 @@ export default function BankDetailsPage() {
       signal: controller.signal,
     })
       .then((payload) => {
+        const nextReadModelStatus = payload.readModelStatus === "refreshing" ? "refreshing" : "fresh";
+        setAccountsReadModelStatus(nextReadModelStatus);
+        if (nextReadModelStatus === "refreshing") {
+          return;
+        }
         setAccountsData({
           accounts: payload.accounts,
           totalBalance: payload.totalBalance,
           missingBalanceAccountCount: payload.missingBalanceAccountCount,
         });
-        if (payload.readModelStatus === "refreshing") {
-          setReadModelStatus("refreshing");
-          if (rulesRefreshPendingRef.current) {
-            setRulesRefreshStatus("refreshing");
-            setRulesFeedback("规则已保存，银行明细正在刷新。");
-          }
-        }
         setSelectedAccountKey((current) => (
           current && (current === ALL_ACCOUNTS_KEY || payload.accounts.some((account) => account.accountKey === current))
             ? current
@@ -501,21 +503,14 @@ export default function BankDetailsPage() {
       signal: controller.signal,
     })
       .then((payload) => {
+        const nextReadModelStatus = payload.readModelStatus === "refreshing" ? "refreshing" : "fresh";
+        setTransactionsReadModelStatus(nextReadModelStatus);
+        if (nextReadModelStatus === "refreshing") {
+          return;
+        }
         setRows(payload.rows);
         setRowCount(payload.pagination.total);
         setCategoryCounts(payload.categoryCounts);
-        const nextReadModelStatus = payload.readModelStatus === "refreshing" ? "refreshing" : "fresh";
-        setReadModelStatus(nextReadModelStatus);
-        if (rulesRefreshPendingRef.current) {
-          if (nextReadModelStatus === "refreshing") {
-            setRulesRefreshStatus("refreshing");
-            setRulesFeedback("规则已保存，银行明细正在刷新。");
-          } else {
-            rulesRefreshPendingRef.current = false;
-            setRulesRefreshStatus("fresh");
-            setRulesFeedback("规则已保存，银行明细已刷新。");
-          }
-        }
         if (payload.tagDictionary?.tags) {
           setCategoryOptions(payload.tagDictionary.tags.filter((tag) => tag.status === "active"));
         }
@@ -536,6 +531,20 @@ export default function BankDetailsPage() {
       });
     return () => controller.abort();
   }, [dateFilter.dateFrom, dateFilter.dateTo, paginationModel.page, paginationModel.pageSize, refreshToken, searchKeyword, selectedAccountKey]);
+
+  useEffect(() => {
+    if (!rulesRefreshPendingRef.current) {
+      return;
+    }
+    if (readModelStatus === "refreshing") {
+      setRulesRefreshStatus("refreshing");
+      setRulesFeedback("规则已保存，银行明细正在刷新。");
+      return;
+    }
+    rulesRefreshPendingRef.current = false;
+    setRulesRefreshStatus("fresh");
+    setRulesFeedback("规则已保存，银行明细已刷新。");
+  }, [readModelStatus]);
 
   useEffect(() => {
     if (readModelStatus !== "refreshing" || loading || rowLoading) {
@@ -727,7 +736,8 @@ export default function BankDetailsPage() {
     rulesRefreshPendingRef.current = true;
     setRulesRefreshStatus("refreshing");
     setRulesFeedback("规则已保存，银行明细正在刷新。");
-    setReadModelStatus("refreshing");
+    setAccountsReadModelStatus("refreshing");
+    setTransactionsReadModelStatus("refreshing");
     setRefreshToken((current) => current + 1);
   };
 
@@ -764,7 +774,7 @@ export default function BankDetailsPage() {
           <StatePanel tone="loading" compact>银行明细读模型正在刷新。</StatePanel>
         ) : null}
         {rulesFeedback ? <StatePanel tone="success" compact>{rulesFeedback}</StatePanel> : null}
-        {!loading && accountsData.accounts.length === 0 ? (
+        {!loading && readModelStatus !== "refreshing" && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}
 
@@ -1037,6 +1047,7 @@ export default function BankDetailsPage() {
         open={rulesDrawerOpen}
         onClose={() => setRulesDrawerOpen(false)}
         onSaved={handleAutoTagRulesSaved}
+        refreshScope={{ dateFrom: dateFilter.dateFrom, dateTo: dateFilter.dateTo }}
         refreshStatus={rulesRefreshStatus}
       />
       <Popover

@@ -481,6 +481,12 @@ function serializeAutoTagRuleConditions(rules: BankAutoTagRuleConditions) {
 function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) {
   return {
     expected_version: payload.expectedVersion,
+    ...(payload.refreshScope ? {
+      refresh_scope: {
+        date_from: payload.refreshScope.dateFrom ?? null,
+        date_to: payload.refreshScope.dateTo ?? null,
+      },
+    } : {}),
     active_rules: payload.activeRules.map((rule) => ({
       ...(rule.code ? { code: rule.code } : {}),
       label: rule.label,

@@ -168,6 +168,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 json.dumps(
                     {
                         "expected_version": current["version"],
+                        "refresh_scope": {"date_from": "2026-01-01", "date_to": "2026-01-31"},
                         "active_rules": active,
                         "archived_rules": current["archived_rules"],
                     },
@@ -224,6 +225,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 json.dumps(
                     {
                         "expected_version": current["version"],
+                        "refresh_scope": {"date_from": "2026-01-01", "date_to": "2026-01-31"},
                         "active_rules": active,
                         "archived_rules": current["archived_rules"],
                     },
@@ -233,6 +235,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(queue.enqueued[0], ("bank_detail", "2026-01", "bank_auto_tag_rules_changed_priority"))
         self.assertIn(("bank_detail", "2026-01", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("bank_detail", "2026-03", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)

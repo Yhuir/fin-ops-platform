@@ -37,6 +37,7 @@ import type {
   BankAutoTagEditableRule,
   BankAutoTagRuleConditions,
   BankAutoTagRulesResponse,
+  BankAutoTagRefreshScope,
   BankAutoTagSystemRule,
   SaveBankAutoTagRule,
 } from "./types";
@@ -46,6 +47,7 @@ type AutoTagRulesDrawerProps = {
   onClose: () => void;
   onSaved?: (payload: BankAutoTagRulesResponse) => void;
   refreshStatus?: "idle" | "refreshing" | "fresh";
+  refreshScope?: BankAutoTagRefreshScope;
 };
 
 type DraftRule = BankAutoTagEditableRule & { localId: string };
@@ -245,7 +247,7 @@ function RuleLinesTextField({
   );
 }
 
-export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStatus = "idle" }: AutoTagRulesDrawerProps) {
+export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStatus = "idle", refreshScope }: AutoTagRulesDrawerProps) {
   const [tab, setTab] = useState<"active" | "archived">("active");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -413,6 +415,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
     setError(null);
     saveBankAutoTagRules({
       expectedVersion: version,
+      refreshScope,
       activeRules: activeRules.map(serializeRule),
       archivedRules: archivedRules.filter((rule) => rule.code).map(serializeRule),
     })

@@ -193,10 +193,16 @@ export type SaveBankAutoTagRule = {
   rules: BankAutoTagRuleConditions;
 };
 
+export type BankAutoTagRefreshScope = {
+  dateFrom?: string | null;
+  dateTo?: string | null;
+};
+
 export type SaveBankAutoTagRulesRequest = {
   expectedVersion: number;
   activeRules: SaveBankAutoTagRule[];
   archivedRules: SaveBankAutoTagRule[];
+  refreshScope?: BankAutoTagRefreshScope;
 };
 
 export type BankDatePreset =

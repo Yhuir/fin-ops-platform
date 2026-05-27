@@ -298,6 +298,44 @@ describe("Bank details page", () => {
       && init?.method === "PUT"
     ));
     expect(saveCall).toBeTruthy();
+    expect(JSON.parse(String(saveCall?.[1]?.body || "{}")).refresh_scope).toEqual({
+      date_from: "2026-01-01",
+      date_to: "2026-12-31",
+    });
+  });
+
+  test("keeps the read-model refresh banner stable while retaining the last fresh rows", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      bankDetailAccountReadModelStatuses: ["refreshing", "refreshing", "refreshing"],
+      bankDetailTransactionReadModelStatuses: ["fresh"],
+      bankDetailRefreshingTransactionsEmpty: true,
+    });
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await user.click(await within(drawer).findByRole("button", { name: "展开 工资" }));
+    await waitFor(() => {
+      expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
+    });
+    const labelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
+    await user.clear(labelInputs[1]);
+    await user.type(labelInputs[1], "人员薪酬");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
+    });
+
+    expect(screen.getByText("银行明细读模型正在刷新。")).toBeInTheDocument();
+    expect(screen.queryByText("规则已保存，银行明细已刷新。")).not.toBeInTheDocument();
+    expect(within(page).getByText("云南溯源科技有限公司")).toBeInTheDocument();
+    expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
   test("uncategorized rows display a dash in the narrow type column", async () => {
