@@ -7665,6 +7665,50 @@ body.column-layout-dragging {
   color: #00539a;
 }
 
+.bank-internal-transfer-tag-anchor {
+  display: inline-flex;
+}
+
+.bank-internal-transfer-tooltip {
+  max-width: 360px;
+  min-width: 280px;
+  padding: 2px 0;
+  color: #ffffff;
+}
+
+.bank-internal-transfer-tooltip-title {
+  display: block;
+  margin-bottom: 8px;
+  color: #ffffff;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.bank-internal-transfer-tooltip-grid {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: start;
+}
+
+.bank-internal-transfer-tooltip-label {
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.bank-internal-transfer-tooltip-value {
+  color: #ffffff;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.bank-internal-transfer-tooltip-amount {
+  font-variant-numeric: tabular-nums;
+}
+
 .bank-category-tag.category-tone-holiday-bonus {
   border-color: #d4bbff;
   background: #f6f2ff;

@@ -339,14 +339,14 @@ function TypeCell({ row }: { row: BankDetailTransaction }) {
             对应内部往来流水
           </Typography>
           <Box className="bank-internal-transfer-tooltip-grid">
-            <Typography variant="caption" color="inherit">时间</Typography>
-            <Typography variant="caption" color="inherit">{counterpart.tradeTime || "-"}</Typography>
-            <Typography variant="caption" color="inherit">账户</Typography>
-            <Typography variant="caption" color="inherit">{accountText}</Typography>
-            <Typography variant="caption" color="inherit">金额</Typography>
-            <Typography variant="caption" color="inherit">{formatMoney(counterpart.amount) || "-"}</Typography>
-            <Typography variant="caption" color="inherit">对方户名</Typography>
-            <Typography variant="caption" color="inherit">{counterpart.counterpartyName || "-"}</Typography>
+            <Typography className="bank-internal-transfer-tooltip-label" variant="caption" color="inherit">时间</Typography>
+            <Typography className="bank-internal-transfer-tooltip-value" variant="caption" color="inherit">{counterpart.tradeTime || "-"}</Typography>
+            <Typography className="bank-internal-transfer-tooltip-label" variant="caption" color="inherit">账户</Typography>
+            <Typography className="bank-internal-transfer-tooltip-value" variant="caption" color="inherit">{accountText}</Typography>
+            <Typography className="bank-internal-transfer-tooltip-label" variant="caption" color="inherit">金额</Typography>
+            <Typography className="bank-internal-transfer-tooltip-value bank-internal-transfer-tooltip-amount" variant="caption" color="inherit">{formatMoney(counterpart.amount) || "-"}</Typography>
+            <Typography className="bank-internal-transfer-tooltip-label" variant="caption" color="inherit">对方户名</Typography>
+            <Typography className="bank-internal-transfer-tooltip-value" variant="caption" color="inherit">{counterpart.counterpartyName || "-"}</Typography>
           </Box>
         </Box>
       )}

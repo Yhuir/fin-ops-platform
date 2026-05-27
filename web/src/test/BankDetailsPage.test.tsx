@@ -200,6 +200,14 @@ describe("Bank details page", () => {
     expect(source).toMatch(/\.bank-transaction-pagination\.MuiTablePagination-root\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
   });
 
+  test("formats the internal transfer tooltip as structured rows", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+
+    expect(source).toMatch(/\.bank-internal-transfer-tooltip\s*\{[^}]*max-width:\s*360px/s);
+    expect(source).toMatch(/\.bank-internal-transfer-tooltip-grid\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*52px minmax\(0,\s*1fr\)/s);
+    expect(source).toMatch(/\.bank-internal-transfer-tooltip-value\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  });
+
   test("shows read-only auto category and keeps manual category controls out of bank details", async () => {
     installMockApiFetch();
     renderBankDetailsPage();
