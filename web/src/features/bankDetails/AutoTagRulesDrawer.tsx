@@ -146,6 +146,15 @@ function summarizeFields(fields: string[], fieldOptions: BankAutoTagRulesRespons
     .join("、");
 }
 
+function RuleSummaryItem({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "warning" }) {
+  return (
+    <Box component="span" className={`bank-auto-tag-summary-item ${tone}`}>
+      <Typography component="span" className="bank-auto-tag-summary-label" variant="caption">{label}</Typography>
+      <Typography component="span" className="bank-auto-tag-summary-value" variant="caption">{value}</Typography>
+    </Box>
+  );
+}
+
 export default function AutoTagRulesDrawer({ open, onClose, onSaved }: AutoTagRulesDrawerProps) {
   const [tab, setTab] = useState<"active" | "archived">("active");
   const [loading, setLoading] = useState(false);
@@ -330,12 +339,13 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved }: AutoTagRu
       transitionDuration={{ enter: 180, exit: 140 }}
       PaperProps={{
         "aria-label": open ? "自动标签规则" : undefined,
+        className: "bank-auto-tag-drawer-paper",
         role: "dialog",
         sx: { width: { xs: "100%", sm: "60vw" }, maxWidth: "100vw" },
       }}
     >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
+      <Stack className="bank-auto-tag-drawer">
+        <Stack className="bank-auto-tag-drawer-header" direction="row" alignItems="center" justifyContent="space-between">
           <Box>
             <Typography component="h2" variant="h6" fontWeight={900}>自动标签规则</Typography>
             <Typography variant="caption" color="text.secondary">
@@ -348,11 +358,11 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved }: AutoTagRu
         </Stack>
         <Divider />
         <Stack
+          className="bank-auto-tag-drawer-toolbar"
           direction={{ xs: "column", sm: "row" }}
           alignItems={{ xs: "stretch", sm: "center" }}
           justifyContent="space-between"
           spacing={1.5}
-          sx={{ px: 2.5, py: 1.25, bgcolor: "background.default" }}
         >
           <ToggleButtonGroup
             exclusive
@@ -377,8 +387,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved }: AutoTagRu
             </Button>
           </Stack>
         </Stack>
-        <Divider />
-        <Stack spacing={1.25} sx={{ flex: 1, minHeight: 0, overflow: "auto", p: 2.5, bgcolor: "grey.50" }}>
+        <Stack className="bank-auto-tag-rule-list" spacing={1.25}>
           {loading ? (
             <Stack direction="row" alignItems="center" spacing={1}>
               <CircularProgress size={20} />
@@ -390,7 +399,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved }: AutoTagRu
           {tab === "active" ? (
             <>
               {systemRule ? (
-                <Paper variant="outlined" sx={{ borderRadius: 1, p: 1.5, bgcolor: "action.hover", opacity: 0.82 }}>
+                <Paper className="bank-auto-tag-system-card" elevation={0}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1.5}>
                     <Stack direction="row" alignItems="center" spacing={1} minWidth={0}>
                       <Chip size="small" variant="outlined" label={systemRule.priorityLabel} />
@@ -491,52 +500,32 @@ function RuleEditor({
   };
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden", bgcolor: "background.paper" }}>
+    <Paper className={`bank-auto-tag-rule-card${expanded ? " expanded" : ""}`} elevation={0}>
       <Stack
+        className="bank-auto-tag-rule-header"
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={onToggle}
         onKeyDown={handleHeaderKeyDown}
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        spacing={1.25}
-        sx={{
-          px: 1.5,
-          py: 1.25,
-          cursor: "pointer",
-          borderBottom: expanded ? 1 : 0,
-          borderColor: "divider",
-          "&:focus-visible": {
-            outline: "2px solid",
-            outlineColor: "primary.main",
-            outlineOffset: "-2px",
-          },
-        }}
       >
-        <Stack spacing={0.75} minWidth={0} sx={{ flex: 1 }}>
-          <Stack direction="row" alignItems="center" spacing={1} minWidth={0}>
+        <Box className="bank-auto-tag-rule-header-main">
+          <Stack className="bank-auto-tag-rule-title-row" direction="row" alignItems="center" spacing={1} minWidth={0}>
             <Chip size="small" color="primary" variant="outlined" label={priorityLabel} />
-            <Typography variant="subtitle1" fontWeight={900} noWrap>{title}</Typography>
+            <Typography component="h3" variant="subtitle1" fontWeight={900}>{title}</Typography>
             {rule.source === "custom" ? <Chip size="small" label="自定义" /> : null}
           </Stack>
-          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-            <Chip
-              size="small"
-              variant="outlined"
-              label={`字段：${summarizeFields(rule.rules.matchFields, fieldOptions)}`}
-              sx={{ maxWidth: "100%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }}
-            />
-            <Chip size="small" variant="outlined" label={summarizeTerms("精确", rule.rules.exact)} />
-            <Chip size="small" variant="outlined" label={summarizeTerms("包含", rule.rules.contains)} />
+          <Box className="bank-auto-tag-rule-summary">
+            <RuleSummaryItem label="字段" value={summarizeFields(rule.rules.matchFields, fieldOptions)} />
+            <RuleSummaryItem label="精确" value={summarizeTerms("", rule.rules.exact).replace(/^：|^ 0/, "0")} />
+            <RuleSummaryItem label="包含" value={summarizeTerms("", rule.rules.contains).replace(/^：|^ 0/, "0")} />
             {rule.rules.excludes.length > 0 ? (
-              <Chip size="small" variant="outlined" color="warning" label={summarizeTerms("排除", rule.rules.excludes)} />
+              <RuleSummaryItem label="排除" value={summarizeTerms("", rule.rules.excludes).replace(/^：|^ 0/, "0")} tone="warning" />
             ) : null}
-          </Stack>
-        </Stack>
-        <Stack direction="row" spacing={0.5} alignItems="center" onClick={stopHeaderAction}>
+          </Box>
+        </Box>
+        <Stack className="bank-auto-tag-rule-actions" direction="row" spacing={0.5} alignItems="center" onClick={stopHeaderAction}>
           <IconButton aria-label={`${title} 上移`} size="small" onClick={onMoveUp} disabled={disabled || !canMoveUp}>
             <ArrowUpwardIcon fontSize="small" />
           </IconButton>
@@ -552,17 +541,17 @@ function RuleEditor({
         </Stack>
       </Stack>
       <Collapse in={expanded} timeout="auto" unmountOnExit>
-        <Stack id={panelId} spacing={1.25} sx={{ p: 1.5 }}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} alignItems={{ md: "flex-start" }}>
+        <Box id={panelId} className="bank-auto-tag-rule-editor">
+          <Box className="bank-auto-tag-rule-editor-body">
             <TextField
+              className="bank-auto-tag-rule-name-field"
               label="标签名称"
               size="small"
               value={rule.label}
               onChange={(event) => onChange((current) => ({ ...current, label: event.target.value }))}
               disabled={disabled}
-              sx={{ flex: 1, minWidth: 0 }}
             />
-            <FormControl size="small" disabled={disabled} sx={{ flex: 2, minWidth: 0 }}>
+            <FormControl className="bank-auto-tag-rule-field-picker" size="small" disabled={disabled}>
               <InputLabel id={`${rule.localId}-fields-label`}>匹配字段</InputLabel>
               <Select
                 labelId={`${rule.localId}-fields-label`}
@@ -583,40 +572,43 @@ function RuleEditor({
                 ))}
               </Select>
             </FormControl>
-          </Stack>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+          </Box>
+          <Box className="bank-auto-tag-condition-grid">
             <TextField
+              className="bank-auto-tag-condition-field"
               label="精确命中字样"
               value={valuesToLines(rule.rules.exact)}
               onChange={(event) => setRules({ exact: linesToValues(event.target.value) })}
               disabled={disabled}
               multiline
-              minRows={4}
+              minRows={3}
               fullWidth
               helperText="一行一个完整匹配文本"
             />
             <TextField
+              className="bank-auto-tag-condition-field"
               label="包含字样"
               value={valuesToLines(rule.rules.contains)}
               onChange={(event) => setRules({ contains: linesToValues(event.target.value) })}
               disabled={disabled}
               multiline
-              minRows={4}
+              minRows={3}
               fullWidth
               helperText="任意一行命中即可"
             />
             <TextField
+              className="bank-auto-tag-condition-field"
               label="不包含字样"
               value={valuesToLines(rule.rules.excludes)}
               onChange={(event) => setRules({ excludes: linesToValues(event.target.value) })}
               disabled={disabled}
               multiline
-              minRows={4}
+              minRows={3}
               fullWidth
               helperText="命中后排除该规则"
             />
-          </Stack>
-        </Stack>
+          </Box>
+        </Box>
       </Collapse>
     </Paper>
   );

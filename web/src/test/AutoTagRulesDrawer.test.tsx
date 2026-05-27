@@ -1,5 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
@@ -52,6 +54,31 @@ describe("AutoTagRulesDrawer", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "停用" }));
     expect(await within(drawer).findByText("旧奖金")).toBeInTheDocument();
+  });
+
+  test("uses a structured rule layout with separate summary and editor areas", async () => {
+    installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+
+    const feeHeading = within(drawer).getByRole("heading", { name: "手续费" });
+    const feeCard = feeHeading.closest(".bank-auto-tag-rule-card");
+    expect(feeCard).not.toBeNull();
+    expect(feeCard?.querySelector(".bank-auto-tag-rule-summary")).toHaveTextContent("字段");
+    expect(feeCard?.querySelector(".bank-auto-tag-rule-summary")).toHaveTextContent("包含");
+    expect(feeCard?.querySelector(".bank-auto-tag-rule-editor-body")).toBeInTheDocument();
+    expect(feeCard?.querySelector(".bank-auto-tag-condition-grid")).toBeInTheDocument();
+  });
+
+  test("keeps automatic tag rule drawer styling simple and non-truncating", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+
+    expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*border:\s*1px solid var\(--bank-border-subtle\)/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-summary\s*\{[^}]*flex-wrap:\s*wrap/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-editor-body\s*\{[^}]*grid-template-columns:\s*minmax\(220px,\s*320px\) minmax\(0,\s*1fr\)/s);
+    expect(source).toMatch(/\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
   });
 
   test("validates active rules before save", async () => {

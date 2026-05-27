@@ -6778,6 +6778,7 @@ body.column-layout-dragging {
   padding: 0 2px;
 }
 
+.bank-auto-tag-drawer-paper,
 .bank-details-page,
 .bank-balance-summary,
 .bank-details-layout {
@@ -6792,6 +6793,173 @@ body.column-layout-dragging {
   --bank-hover: #e8e8e8;
   --bank-success: #24a148;
   --bank-danger: #da1e28;
+}
+
+.bank-auto-tag-drawer {
+  height: 100%;
+  min-width: 0;
+  background: #f7f8fa;
+  color: var(--bank-text);
+}
+
+.bank-auto-tag-drawer-header {
+  flex: 0 0 auto;
+  padding: 14px 20px;
+  background: #ffffff;
+}
+
+.bank-auto-tag-drawer-toolbar {
+  flex: 0 0 auto;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--bank-border-subtle);
+  background: #f7f8fa;
+}
+
+.bank-auto-tag-rule-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px 22px;
+  background: #f7f8fa;
+}
+
+.bank-auto-tag-system-card,
+.bank-auto-tag-rule-card {
+  border: 1px solid var(--bank-border-subtle);
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.bank-auto-tag-system-card {
+  padding: 14px 16px;
+  background: #f1f4f8;
+  color: var(--bank-text-secondary);
+}
+
+.bank-auto-tag-rule-card {
+  overflow: hidden;
+}
+
+.bank-auto-tag-rule-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.bank-auto-tag-rule-card.expanded .bank-auto-tag-rule-header {
+  border-bottom: 1px solid var(--bank-border-subtle);
+}
+
+.bank-auto-tag-rule-header:focus-visible {
+  outline: 2px solid var(--bank-blue);
+  outline-offset: -2px;
+}
+
+.bank-auto-tag-rule-header-main {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.bank-auto-tag-rule-title-row {
+  min-width: 0;
+}
+
+.bank-auto-tag-rule-title-row .MuiTypography-root {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.22;
+}
+
+.bank-auto-tag-rule-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  min-width: 0;
+  color: var(--bank-text-secondary);
+}
+
+.bank-auto-tag-summary-item {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  gap: 4px;
+  align-items: baseline;
+}
+
+.bank-auto-tag-summary-label {
+  flex: 0 0 auto;
+  color: var(--bank-text-secondary);
+  font-weight: 800;
+}
+
+.bank-auto-tag-summary-value {
+  min-width: 0;
+  color: var(--bank-text);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.bank-auto-tag-summary-item.warning .bank-auto-tag-summary-label,
+.bank-auto-tag-summary-item.warning .bank-auto-tag-summary-value {
+  color: #8a4600;
+}
+
+.bank-auto-tag-rule-actions {
+  flex: 0 0 auto;
+}
+
+.bank-auto-tag-rule-actions .MuiIconButton-root {
+  width: 30px;
+  height: 30px;
+}
+
+.bank-auto-tag-rule-editor {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px 16px;
+  background: #ffffff;
+}
+
+.bank-auto-tag-rule-editor-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.bank-auto-tag-rule-name-field,
+.bank-auto-tag-rule-field-picker,
+.bank-auto-tag-condition-field {
+  min-width: 0;
+}
+
+.bank-auto-tag-condition-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  min-width: 0;
+}
+
+.bank-auto-tag-rule-editor .MuiTextField-root,
+.bank-auto-tag-rule-editor .MuiFormControl-root {
+  background: #ffffff;
+}
+
+@media (max-width: 900px) {
+  .bank-auto-tag-rule-header,
+  .bank-auto-tag-rule-editor-body {
+    grid-template-columns: 1fr;
+  }
+
+  .bank-auto-tag-rule-actions {
+    justify-self: end;
+  }
 }
 
 .bank-details-page {
