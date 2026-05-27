@@ -14,7 +14,6 @@ import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
-import Collapse from "@mui/material/Collapse";
 import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
 import FormControl from "@mui/material/FormControl";
@@ -129,12 +128,12 @@ function priorityLabel(index: number) {
   return `优先级 ${index + 1}`;
 }
 
-function summarizeTerms(label: string, values: string[]) {
+function summarizeRuleValues(values: string[]) {
   if (values.length === 0) {
-    return `${label} 0`;
+    return "0";
   }
   const preview = values.slice(0, 2).join("、");
-  return values.length > 2 ? `${label} ${values.length}：${preview}…` : `${label}：${preview}`;
+  return values.length > 2 ? `${values.length}：${preview}…` : preview;
 }
 
 function summarizeFields(fields: string[], fieldOptions: BankAutoTagRulesResponse["fieldOptions"]) {
@@ -518,10 +517,10 @@ function RuleEditor({
           </Stack>
           <Box className="bank-auto-tag-rule-summary">
             <RuleSummaryItem label="字段" value={summarizeFields(rule.rules.matchFields, fieldOptions)} />
-            <RuleSummaryItem label="精确" value={summarizeTerms("", rule.rules.exact).replace(/^：|^ 0/, "0")} />
-            <RuleSummaryItem label="包含" value={summarizeTerms("", rule.rules.contains).replace(/^：|^ 0/, "0")} />
+            <RuleSummaryItem label="精确" value={summarizeRuleValues(rule.rules.exact)} />
+            <RuleSummaryItem label="包含" value={summarizeRuleValues(rule.rules.contains)} />
             {rule.rules.excludes.length > 0 ? (
-              <RuleSummaryItem label="排除" value={summarizeTerms("", rule.rules.excludes).replace(/^：|^ 0/, "0")} tone="warning" />
+              <RuleSummaryItem label="排除" value={summarizeRuleValues(rule.rules.excludes)} tone="warning" />
             ) : null}
           </Box>
         </Box>
@@ -540,7 +539,7 @@ function RuleEditor({
           </IconButton>
         </Stack>
       </Stack>
-      <Collapse in={expanded} timeout="auto" unmountOnExit>
+      {expanded ? (
         <Box id={panelId} className="bank-auto-tag-rule-editor">
           <Box className="bank-auto-tag-rule-editor-body">
             <TextField
@@ -609,7 +608,7 @@ function RuleEditor({
             />
           </Box>
         </Box>
-      </Collapse>
+      ) : null}
     </Paper>
   );
 }

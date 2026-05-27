@@ -6838,7 +6838,7 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-rule-card {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .bank-auto-tag-rule-header {

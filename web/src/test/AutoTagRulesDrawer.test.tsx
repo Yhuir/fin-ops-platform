@@ -76,9 +76,17 @@ describe("AutoTagRulesDrawer", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
     expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*border:\s*1px solid var\(--bank-border-subtle\)/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*overflow:\s*visible/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-summary\s*\{[^}]*flex-wrap:\s*wrap/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-editor-body\s*\{[^}]*grid-template-columns:\s*minmax\(220px,\s*320px\) minmax\(0,\s*1fr\)/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  });
+
+  test("does not use animated height measurement for expanded rule editors", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/features/bankDetails/AutoTagRulesDrawer.tsx"), "utf8");
+
+    expect(source).not.toContain("@mui/material/Collapse");
+    expect(source).not.toContain("<Collapse");
   });
 
   test("validates active rules before save", async () => {
