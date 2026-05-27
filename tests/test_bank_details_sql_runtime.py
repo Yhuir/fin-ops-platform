@@ -12,12 +12,20 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class FakeConnection:
-    def __init__(self, rows: list[object] | None = None) -> None:
+    def __init__(self, rows: list[object] | None = None, app_settings_payload: dict[str, object] | None = None) -> None:
         self.rows = list(rows or [])
+        self.app_settings_payload = app_settings_payload
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
         self.calls.append(("fetch_one", sql, params))
+        if "from app.app_settings" in " ".join(sql.lower().split()):
+            if self.app_settings_payload is not None:
+                return {"settings_payload": self.app_settings_payload}
+            if self.rows and isinstance(self.rows[0], dict) and "settings_payload" in self.rows[0]:
+                value = self.rows.pop(0)
+                return value if isinstance(value, dict) else None
+            return None
         value = self.rows.pop(0) if self.rows else None
         return value if isinstance(value, dict) else None
 
@@ -272,6 +280,78 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
 
 class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
+    def test_rebuild_loads_custom_auto_tag_rules_from_app_settings(self) -> None:
+        repository = CaptureBankDetailReadModelRepository()
+        connection = FakeConnection(
+            app_settings_payload={
+                "bank_transaction_tags": {
+                    "version": 2,
+                    "definitions": [
+                        {
+                            "code": "custom_netbank_certificate_service_fee",
+                            "label": "网银证书服务费",
+                            "path": ["自动识别", "网银证书服务费"],
+                            "source": "custom",
+                            "status": "active",
+                            "priority": 80,
+                            "rule_code": "custom_netbank_certificate_service_fee",
+                            "rules": {
+                                "match_fields": [
+                                    "all_text",
+                                    "detail_text",
+                                    "note_text",
+                                    "summary_text",
+                                    "purpose_text",
+                                    "counterparty_name",
+                                ],
+                                "exact": ["网银证书服务费"],
+                                "contains": [],
+                                "excludes": [],
+                            },
+                        }
+                    ],
+                },
+            },
+            rows=[
+                [
+                    {
+                        "id": "txn-netbank-certificate-fee",
+                        "transaction_id": "uuid-netbank-certificate-fee",
+                        "account_no": "6222000011116386",
+                        "account_name": "云南溯源科技有限公司",
+                        "txn_direction": "expense",
+                        "counterparty_name_raw": "中国工商银行云南昆明分行",
+                        "amount": "100.00",
+                        "signed_amount": "-100.00",
+                        "balance": "2138.00",
+                        "currency": "CNY",
+                        "txn_date": "2026-01-24",
+                        "trade_time": "2026-01-24 21:48:34",
+                        "summary": "网银证书服务费",
+                        "remark": "",
+                        "bank_text_fields": [{"label": "摘要", "value": "网银证书服务费"}],
+                        "raw_payload": {
+                            "normalized_payload": {
+                                "imported_bank_name": "工商银行",
+                                "imported_bank_last4": "6386",
+                            }
+                        },
+                    }
+                ],
+                [],
+                [],
+            ]
+        )
+        builder = BankDetailSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+
+        result = builder.rebuild_bank_detail_read_model_scope("2026-01", source_version=9)
+
+        self.assertEqual(result["row_count"], 1)
+        self.assertEqual(repository.saved_rows[0]["auto_category_code"], "custom_netbank_certificate_service_fee")
+        self.assertEqual(repository.saved_rows[0]["auto_category_label"], "网银证书服务费")
+        self.assertEqual(repository.saved_rows[0]["effective_category_code"], "custom_netbank_certificate_service_fee")
+        self.assertEqual(repository.saved_rows[0]["effective_category_label"], "网银证书服务费")
+
     def test_relation_tags_use_pair_relation_row_types_for_oa_attachment_invoices(self) -> None:
         connection = FakeConnection(
             rows=[

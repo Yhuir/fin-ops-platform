@@ -9,13 +9,17 @@ from fin_ops_platform.services.bank_transaction_auto_category_service import (
     BankTransactionAutoCategoryService,
     resolve_effective_category,
 )
-from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BankTransactionCategoryService,
+    default_bank_transaction_tag_dictionary_payload,
+)
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, text, text_list
 from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, PostgresReadModelRepository
 
 PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 SUMMARY_TEXT_LABELS = ("摘要",)
 NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
+APP_SETTINGS_KEY = "app_settings"
 
 
 class BankDetailSqlProjectionBuilder:
@@ -64,6 +68,7 @@ class BankDetailSqlProjectionBuilder:
         transaction_ids = [str(row["id"]) for row in transaction_rows]
         manual_categories = self._load_manual_categories(transaction_rows)
         relations = self._load_relation_tags(transaction_ids)
+        self._configure_auto_category_service_from_app_settings()
         auto_categories = self._auto_category_service.suggestions_by_transaction_id(auto_category_context_rows)
         auto_category_context_by_id = {
             str(row.get("id")): row
@@ -203,6 +208,28 @@ class BankDetailSqlProjectionBuilder:
                 case_id=text(row.get("case_id")),
             )
         return result
+
+    def _configure_auto_category_service_from_app_settings(self) -> None:
+        row = self._connection.fetch_one(
+            """
+            select settings_payload
+            from app.app_settings
+            where settings_key = %s
+            limit 1
+            """,
+            (APP_SETTINGS_KEY,),
+        )
+        settings_payload = row.get("settings_payload") if isinstance(row, dict) else {}
+        bank_transaction_tags = (
+            settings_payload.get("bank_transaction_tags")
+            if isinstance(settings_payload, dict)
+            else None
+        )
+        self._auto_category_service.configure_tag_dictionary(
+            bank_transaction_tags
+            if isinstance(bank_transaction_tags, dict)
+            else default_bank_transaction_tag_dictionary_payload()
+        )
 
     @staticmethod
     def _merge_relation_tags(
