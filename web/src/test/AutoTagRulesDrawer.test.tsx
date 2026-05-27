@@ -126,6 +126,38 @@ describe("AutoTagRulesDrawer", () => {
     ]));
   });
 
+  test("keeps Enter-created new lines visible while editing rule keywords", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
+
+    const labelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
+    await user.type(labelInputs[labelInputs.length - 1], "外部往来候选");
+    const containsInputs = within(drawer).getAllByLabelText("包含任一", { selector: "textarea" });
+    const textarea = containsInputs[containsInputs.length - 1];
+    await user.type(textarea, "借款{Enter}");
+
+    expect(textarea).toHaveValue("借款\n");
+
+    await user.type(textarea, "还款");
+    expect(textarea).toHaveValue("借款\n还款");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    expect(payload?.active_rules).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "外部往来候选",
+        rules: expect.objectContaining({
+          contains_any: ["借款", "还款"],
+        }),
+      }),
+    ]));
+  });
+
   test("keeps automatic tag rule drawer styling simple and non-truncating", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 

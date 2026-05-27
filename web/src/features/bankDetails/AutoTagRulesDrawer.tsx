@@ -183,6 +183,68 @@ function RuleSummaryItem({ label, value, tone = "default" }: { label: string; va
   );
 }
 
+type RuleLinesTextFieldProps = {
+  className?: string;
+  label: string;
+  values: string[];
+  onValuesChange: (values: string[]) => void;
+  disabled?: boolean;
+  helperText?: string;
+  minRows?: number;
+  fullWidth?: boolean;
+};
+
+function RuleLinesTextField({
+  className,
+  label,
+  values,
+  onValuesChange,
+  disabled = false,
+  helperText,
+  minRows = 3,
+  fullWidth = false,
+}: RuleLinesTextFieldProps) {
+  const normalizedText = valuesToLines(values);
+  const [text, setText] = useState(normalizedText);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) {
+      setText(normalizedText);
+    }
+  }, [focused, normalizedText]);
+
+  const normalizeAndCommit = (nextText: string) => {
+    const nextValues = linesToValues(nextText);
+    setText(valuesToLines(nextValues));
+    onValuesChange(nextValues);
+  };
+
+  return (
+    <TextField
+      className={className}
+      label={label}
+      size="small"
+      value={text}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        normalizeAndCommit(text);
+      }}
+      onChange={(event) => {
+        const nextText = event.target.value;
+        setText(nextText);
+        onValuesChange(linesToValues(nextText));
+      }}
+      disabled={disabled}
+      multiline
+      minRows={minRows}
+      fullWidth={fullWidth}
+      helperText={helperText}
+    />
+  );
+}
+
 export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStatus = "idle" }: AutoTagRulesDrawerProps) {
   const [tab, setTab] = useState<"active" | "archived">("active");
   const [loading, setLoading] = useState(false);
@@ -655,72 +717,62 @@ function RuleEditor({
                 ))}
               </Select>
             </FormControl>
-            <TextField
+            <RuleLinesTextField
               label="账户范围值"
-              size="small"
-              value={valuesToLines(rule.accountScope.values)}
-              onChange={(event) => {
-                const values = linesToValues(event.target.value);
-                onChange((current) => ({ ...current, accountScope: { ...current.accountScope, values } }));
-              }}
+              values={rule.accountScope.values}
+              onValuesChange={(values) => onChange((current) => ({ ...current, accountScope: { ...current.accountScope, values } }))}
               disabled={disabled || rule.accountScope.type === "any"}
               helperText={rule.accountScope.type === "any" ? "不限账户时无需填写" : "一行一个账户、类型或银行名称"}
-              multiline
               minRows={1}
             />
           </Box>
           <Box className="bank-auto-tag-condition-grid">
-            <TextField
+            <RuleLinesTextField
               className="bank-auto-tag-condition-field"
               label="精确命中字样"
-              value={valuesToLines(rule.rules.exactAny)}
-              onChange={(event) => setRules({ exactAny: linesToValues(event.target.value) })}
+              values={rule.rules.exactAny}
+              onValuesChange={(values) => setRules({ exactAny: values })}
               disabled={disabled}
-              multiline
               minRows={3}
               fullWidth
               helperText="一行一个完整匹配文本"
             />
-            <TextField
+            <RuleLinesTextField
               className="bank-auto-tag-condition-field"
               label="包含任一"
-              value={valuesToLines(rule.rules.containsAny)}
-              onChange={(event) => setRules({ containsAny: linesToValues(event.target.value) })}
+              values={rule.rules.containsAny}
+              onValuesChange={(values) => setRules({ containsAny: values })}
               disabled={disabled}
-              multiline
               minRows={3}
               fullWidth
               helperText="任意一行命中即可"
             />
-            <TextField
+            <RuleLinesTextField
               className="bank-auto-tag-condition-field"
               label="必须同时包含"
-              value={valuesToLines(rule.rules.containsAll)}
-              onChange={(event) => setRules({ containsAll: linesToValues(event.target.value) })}
+              values={rule.rules.containsAll}
+              onValuesChange={(values) => setRules({ containsAll: values })}
               disabled={disabled}
-              multiline
               minRows={3}
               fullWidth
               helperText="每一行都必须在选中字段中出现"
             />
-            <TextField
+            <RuleLinesTextField
               className="bank-auto-tag-condition-field"
               label="不包含字样"
-              value={valuesToLines(rule.rules.noneOf)}
-              onChange={(event) => setRules({ noneOf: linesToValues(event.target.value) })}
+              values={rule.rules.noneOf}
+              onValuesChange={(values) => setRules({ noneOf: values })}
               disabled={disabled}
-              multiline
               minRows={3}
               fullWidth
               helperText="命中后排除该规则"
             />
-            <TextField
+            <RuleLinesTextField
               className="bank-auto-tag-condition-field"
               label="正则命中"
-              value={valuesToLines(rule.rules.regexAny)}
-              onChange={(event) => setRules({ regexAny: linesToValues(event.target.value) })}
+              values={rule.rules.regexAny}
+              onValuesChange={(values) => setRules({ regexAny: values })}
               disabled={disabled}
-              multiline
               minRows={3}
               fullWidth
               helperText="高级条件，一行一个正则表达式"
