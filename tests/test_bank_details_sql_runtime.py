@@ -12,9 +12,15 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class FakeConnection:
-    def __init__(self, rows: list[object] | None = None, app_settings_payload: dict[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        rows: list[object] | None = None,
+        app_settings_payload: dict[str, object] | None = None,
+        dirty_scope_rows: list[dict[str, object]] | None = None,
+    ) -> None:
         self.rows = list(rows or [])
         self.app_settings_payload = app_settings_payload
+        self.dirty_scope_rows = list(dirty_scope_rows or [])
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
@@ -31,6 +37,8 @@ class FakeConnection:
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         self.calls.append(("fetch_all", sql, params))
+        if "from job.read_model_dirty_scopes" in " ".join(sql.lower().split()):
+            return list(self.dirty_scope_rows)
         value = self.rows.pop(0) if self.rows else []
         return list(value) if isinstance(value, list) else []
 
@@ -154,7 +162,41 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
-        self.assertEqual(len(connection.calls), 1)
+        self.assertEqual(len(connection.calls), 2)
+
+    def test_transactions_treat_pending_bank_detail_dirty_scope_as_refreshing(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-05", row_count=1)],
+            ],
+            dirty_scope_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "status": "pending",
+                    "updated_at": "2026-05-27T21:00:00+00:00",
+                    "last_error": None,
+                    "source_version": 8,
+                }
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_transactions(
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            page=1,
+            page_size=100,
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
+        self.assertEqual(payload["dirty_scopes"][0]["scope_key"], "2026-05")
+        self.assertEqual(payload["read_model_scope_signatures"]["2026-05"]["dirty_status"], "pending")
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("from job.read_model_dirty_scopes", sql_text)
+        self.assertNotIn("from read_model.bank_detail_rows", sql_text)
 
     def test_transactions_rebuild_bank_text_columns_from_raw_payload_or_sql_columns(self) -> None:
         connection = FakeConnection(
@@ -304,8 +346,9 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
                                     "purpose_text",
                                     "counterparty_name",
                                 ],
-                                "exact": ["网银证书服务费"],
+                                "exact": [],
                                 "contains": [],
+                                "contains_all": ["网银", "服务费"],
                                 "excludes": [],
                             },
                         }

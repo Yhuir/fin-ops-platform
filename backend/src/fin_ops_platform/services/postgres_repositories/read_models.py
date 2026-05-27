@@ -284,8 +284,30 @@ class PostgresReadModelRepository:
             """,
             (tenant_id, normalized_scope_keys),
         )
+        dirty_rows = executor.fetch_all(
+            """
+            select scope_key, status, updated_at::text as updated_at, last_error, source_version
+            from job.read_model_dirty_scopes
+            where tenant_id = %s
+              and scope_type = 'bank_detail'
+              and scope_key = any(%s)
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            """,
+            (tenant_id, normalized_scope_keys),
+        )
         by_scope = {text(row.get("scope_key")): row for row in rows if text(row.get("scope_key"))}
-        if any(scope_key not in by_scope for scope_key in normalized_scope_keys):
+        dirty_by_scope: dict[str, dict[str, Any]] = {}
+        for row in dirty_rows:
+            scope_key = text(row.get("scope_key"))
+            if scope_key and scope_key not in dirty_by_scope:
+                dirty_by_scope[scope_key] = row
+        dirty_statuses = {text(row.get("status")) for row in dirty_by_scope.values()}
+        if dirty_statuses.intersection({"pending", "processing"}):
+            status = "refreshing"
+        elif "failed" in dirty_statuses:
+            status = "stale"
+        elif any(scope_key not in by_scope for scope_key in normalized_scope_keys):
             status = "missing"
         elif any(int_value(by_scope[scope_key].get("schema_version"), 0) != BANK_DETAIL_READ_MODEL_SCHEMA_VERSION for scope_key in normalized_scope_keys):
             status = "schema_mismatch"
@@ -307,6 +329,9 @@ class PostgresReadModelRepository:
                 "source_versions": by_scope[scope_key].get("source_versions") if isinstance(by_scope[scope_key].get("source_versions"), dict) else {},
                 "generated_at": text(by_scope[scope_key].get("generated_at")),
                 "last_error": text(by_scope[scope_key].get("last_error")),
+                "dirty_status": text(dirty_by_scope.get(scope_key, {}).get("status")),
+                "dirty_source_version": int_value(dirty_by_scope.get(scope_key, {}).get("source_version"), 0),
+                "dirty_last_error": text(dirty_by_scope.get(scope_key, {}).get("last_error")),
             }
             for scope_key in normalized_scope_keys
             if scope_key in by_scope
@@ -316,6 +341,16 @@ class PostgresReadModelRepository:
             "read_model_scope_keys": normalized_scope_keys,
             "read_model_generated_at": max(generated_values) if generated_values else None,
             "read_model_scope_signatures": signatures,
+            "dirty_scopes": [
+                {
+                    "scope_key": scope_key,
+                    "status": text(row.get("status")),
+                    "updated_at": text(row.get("updated_at")),
+                    "last_error": text(row.get("last_error")),
+                    "source_version": int_value(row.get("source_version"), 0),
+                }
+                for scope_key, row in dirty_by_scope.items()
+            ],
         }
 
     def list_bank_detail_transactions(
