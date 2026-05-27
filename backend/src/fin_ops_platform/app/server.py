@@ -10271,13 +10271,59 @@ class Application:
         if callable(summary_loader):
             summary = summary_loader(scope_keys=scope_keys)
             if isinstance(summary, dict):
-                return summary
+                return self._with_bank_detail_auto_tag_rule_freshness(summary)
         return {
             "read_model_status": "missing",
             "read_model_scope_keys": scope_keys,
             "read_model_generated_at": None,
             "read_model_scope_signatures": {},
         }
+
+    def _with_bank_detail_auto_tag_rule_freshness(self, scope_summary: dict[str, object]) -> dict[str, object]:
+        if str(scope_summary.get("read_model_status") or "") != "fresh":
+            return scope_summary
+        expected_version = self._current_bank_auto_tag_rules_version()
+        signatures = (
+            scope_summary.get("read_model_scope_signatures")
+            if isinstance(scope_summary.get("read_model_scope_signatures"), dict)
+            else {}
+        )
+        stale_scope_keys: list[str] = []
+        for scope_key, signature in signatures.items():
+            if not isinstance(signature, dict):
+                stale_scope_keys.append(str(scope_key))
+                continue
+            source_versions = signature.get("source_versions") if isinstance(signature.get("source_versions"), dict) else {}
+            actual_version = self._int_or_none(source_versions.get("bank_auto_tag_rules_version"))
+            if actual_version != expected_version:
+                stale_scope_keys.append(str(scope_key))
+        if not stale_scope_keys:
+            return scope_summary
+        result = dict(scope_summary)
+        result["read_model_status"] = "stale"
+        result["read_model_stale_reasons"] = [
+            *list(result.get("read_model_stale_reasons") or []),
+            "bank_auto_tag_rules_version_mismatch",
+        ]
+        result["bank_auto_tag_rules_version"] = expected_version
+        result["bank_auto_tag_rules_stale_scope_keys"] = stale_scope_keys
+        return result
+
+    def _current_bank_auto_tag_rules_version(self) -> int:
+        try:
+            payload = self._app_settings_service.get_bank_auto_tag_rules_payload(can_save=False)
+        except Exception:
+            return 1
+        return self._int_or_none(payload.get("version")) or 1
+
+    @staticmethod
+    def _int_or_none(value: object) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _bank_detail_accounts_refreshing_payload(
         self,

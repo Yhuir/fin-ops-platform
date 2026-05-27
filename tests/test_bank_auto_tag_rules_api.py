@@ -24,8 +24,9 @@ class _ReadModelQueue:
 
 
 class _BankDetailStatusRepository:
-    def __init__(self, *, status: str) -> None:
+    def __init__(self, *, status: str, bank_auto_tag_rules_version: int | None = 1) -> None:
         self.status = status
+        self.bank_auto_tag_rules_version = bank_auto_tag_rules_version
 
     def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
         return [str(date_from or "")[:7] or "2026-01"]
@@ -38,6 +39,11 @@ class _BankDetailStatusRepository:
             "read_model_scope_signatures": {
                 scope_key: {
                     "status": "fresh",
+                    "source_versions": (
+                        {"bank_auto_tag_rules_version": self.bank_auto_tag_rules_version}
+                        if self.bank_auto_tag_rules_version is not None
+                        else {}
+                    ),
                     "dirty_status": "pending" if self.status == "refreshing" else None,
                 }
                 for scope_key in scope_keys
@@ -259,6 +265,27 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
         app._bank_detail_sql_read_repository = _BankDetailStatusRepository(status="stale")
+
+        payload = app._get_bank_detail_transactions_from_sql_read_model(
+            account_key=None,
+            date_from="2026-01-01",
+            date_to="2026-12-31",
+            keyword="网银证书服务费",
+            page=1,
+            page_size=100,
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.enqueued, [("bank_detail", "2026-01", "api_stale")])
+
+    def test_bank_detail_api_treats_old_auto_tag_rule_version_as_stale(self) -> None:
+        app = build_application()
+        queue = _ReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._bank_detail_sql_read_repository = _BankDetailStatusRepository(
+            status="fresh",
+            bank_auto_tag_rules_version=None,
+        )
 
         payload = app._get_bank_detail_transactions_from_sql_read_model(
             account_key=None,

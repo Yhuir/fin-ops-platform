@@ -13,7 +13,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
     default_bank_transaction_tag_dictionary_payload,
 )
-from fin_ops_platform.services.postgres_repositories.common import decimal_text, text, text_list
+from fin_ops_platform.services.postgres_repositories.common import decimal_text, int_value, text, text_list
 from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, PostgresReadModelRepository
 
 PURPOSE_TEXT_LABELS = ("用途", "交易用途")
@@ -33,6 +33,7 @@ class BankDetailSqlProjectionBuilder:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._auto_category_service = auto_category_service or BankTransactionAutoCategoryService()
+        self._bank_auto_tag_rules_version = 1
 
     def list_bank_detail_scope_shards(self, scope_key: str) -> list[str]:
         normalized_scope_key = str(scope_key or "").strip()
@@ -57,6 +58,7 @@ class BankDetailSqlProjectionBuilder:
         transaction_rows, auto_category_context_rows = self._load_transaction_rows_with_auto_category_context(
             normalized_scope_key
         )
+        self._configure_auto_category_service_from_app_settings()
         if not transaction_rows:
             self._read_model_repository.save_bank_detail_rows(scope_key=normalized_scope_key, rows=[])
             self._read_model_repository.mark_bank_detail_scope(
@@ -68,7 +70,6 @@ class BankDetailSqlProjectionBuilder:
         transaction_ids = [str(row["id"]) for row in transaction_rows]
         manual_categories = self._load_manual_categories(transaction_rows)
         relations = self._load_relation_tags(transaction_ids)
-        self._configure_auto_category_service_from_app_settings()
         auto_categories = self._auto_category_service.suggestions_by_transaction_id(auto_category_context_rows)
         auto_category_context_by_id = {
             str(row.get("id")): row
@@ -224,6 +225,10 @@ class BankDetailSqlProjectionBuilder:
             settings_payload.get("bank_transaction_tags")
             if isinstance(settings_payload, dict)
             else None
+        )
+        self._bank_auto_tag_rules_version = int_value(
+            bank_transaction_tags.get("version") if isinstance(bank_transaction_tags, dict) else None,
+            1,
         )
         self._auto_category_service.configure_tag_dictionary(
             bank_transaction_tags
@@ -388,11 +393,11 @@ class BankDetailSqlProjectionBuilder:
             "raw_payload": {"source": row.get("raw_payload") or {}, "normalized_payload": payload},
         }
 
-    @staticmethod
-    def _source_versions(*, source_version: int | None, row_count: int) -> dict[str, Any]:
+    def _source_versions(self, *, source_version: int | None, row_count: int) -> dict[str, Any]:
         return {
             "source_version": source_version,
             "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+            "bank_auto_tag_rules_version": self._bank_auto_tag_rules_version,
             "row_count": row_count,
         }
 

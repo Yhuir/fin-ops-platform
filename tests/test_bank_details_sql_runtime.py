@@ -394,6 +394,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(repository.saved_rows[0]["auto_category_label"], "网银证书服务费")
         self.assertEqual(repository.saved_rows[0]["effective_category_code"], "custom_netbank_certificate_service_fee")
         self.assertEqual(repository.saved_rows[0]["effective_category_label"], "网银证书服务费")
+        self.assertEqual(repository.saved_rows[0]["source_versions"]["bank_auto_tag_rules_version"], 2)
 
     def test_relation_tags_use_pair_relation_row_types_for_oa_attachment_invoices(self) -> None:
         connection = FakeConnection(
