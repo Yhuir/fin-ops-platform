@@ -458,7 +458,9 @@ class Application:
             ),
             transaction_exists=self._bank_transaction_exists,
         )
-        self._bank_transaction_auto_category_service = BankTransactionAutoCategoryService()
+        self._bank_transaction_auto_category_service = BankTransactionAutoCategoryService(
+            category_service=self._bank_transaction_category_service
+        )
         self._bank_transaction_effective_category_provider = BankTransactionEffectiveCategoryProvider(
             category_service=self._bank_transaction_category_service,
             auto_category_service=self._bank_transaction_auto_category_service,

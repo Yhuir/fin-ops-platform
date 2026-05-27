@@ -103,6 +103,54 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertTrue(metadata["priority_changes"])
         self.assertTrue(metadata["rule_changes"])
 
+    def test_put_updates_auto_category_engine_rule_source(self) -> None:
+        app = build_application()
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        active = [
+            *current["active_rules"],
+            {
+                "label": "网银证书服务费",
+                "rules": {
+                    "match_fields": ["all_text"],
+                    "exact_any": [],
+                    "contains_any": [],
+                    "contains_all": ["网银", "服务费"],
+                    "none_of": [],
+                    "regex_any": [],
+                },
+            },
+        ]
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_details_auto_tag_rules_update(
+                json.dumps(
+                    {
+                        "expected_version": current["version"],
+                        "active_rules": active,
+                        "archived_rules": current["archived_rules"],
+                    },
+                    ensure_ascii=False,
+                ),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        custom_rule = next(rule for rule in payload["active_rules"] if rule["label"] == "网银证书服务费")
+        suggestions = app._bank_transaction_auto_category_service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-online-banking-certificate-fee",
+                    "debit_amount": "100.00",
+                    "summary": "网银证书服务费",
+                }
+            ]
+        )
+
+        suggestion = suggestions["txn-online-banking-certificate-fee"]
+        self.assertEqual(suggestion["category_code"], custom_rule["code"])
+        self.assertEqual(suggestion["auto_category_evidence"]["condition_type"], "contains_all")
+
     def test_put_rejects_invalid_payloads_with_structured_errors(self) -> None:
         app = build_application()
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()

@@ -71,10 +71,13 @@ class BankTransactionAutoCategoryService:
         self,
         *,
         internal_transfer_detector: BankInternalTransferDetector | None = None,
+        category_service: BankTransactionCategoryService | None = None,
         tag_dictionary: dict[str, Any] | None = None,
     ) -> None:
         self._internal_transfer_detector = internal_transfer_detector or BankInternalTransferDetector()
-        self._category_service = BankTransactionCategoryService(tag_dictionary=tag_dictionary)
+        self._category_service = category_service or BankTransactionCategoryService(tag_dictionary=tag_dictionary)
+        if category_service is not None and tag_dictionary is not None:
+            self._category_service.configure_tag_dictionary(tag_dictionary)
 
     def configure_tag_dictionary(self, payload: dict[str, Any] | None) -> None:
         self._category_service.configure_tag_dictionary(
