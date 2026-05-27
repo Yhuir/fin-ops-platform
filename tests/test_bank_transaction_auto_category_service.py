@@ -152,7 +152,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(evidence["tag_label"], "人员薪酬")
         self.assertEqual(evidence["rule_code"], "salary_text_keyword")
         self.assertEqual(evidence["rule_version"], BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION)
-        self.assertEqual(evidence["condition_type"], "contains")
+        self.assertEqual(evidence["condition_type"], "contains_any")
         self.assertEqual(evidence["semantic_field"], "note_text")
         self.assertEqual(evidence["semantic_field_label"], "备注/附言/客户附言")
         self.assertEqual(evidence["raw_field_key"], "customer_note")
@@ -160,6 +160,97 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(evidence["matched_text"], "工资")
         self.assertEqual(suggestions["txn-excluded"]["category_code"], "bonus")
         self.assertEqual(suggestions["txn-exact"]["category_code"], "bonus")
+
+    def test_rule_engine_supports_direction_combined_conditions_regex_and_normalized_text(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 13,
+                "definitions": [
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["自动识别", "手续费"],
+                        "source": "system",
+                        "status": "active",
+                        "priority": 10,
+                        "direction": "expense",
+                        "rules": {
+                            "match_fields": ["summary_text", "note_text"],
+                            "exact_any": [],
+                            "contains_any": ["手续费"],
+                            "contains_all": ["对公人民币转账", "跨行"],
+                            "none_of": ["退手续费"],
+                            "regex_any": ["短信\\s*服务费"],
+                        },
+                    }
+                ],
+            }
+        )
+
+        suggestions = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-normalized-fee",
+                    "debit_amount": "9.00",
+                    "summary": " 手 续 费 ",
+                    "remark": "对公人民币转账、汇款（含退汇）-跨行异地",
+                },
+                {
+                    "id": "txn-regex-fee",
+                    "debit_amount": "10.00",
+                    "summary": "短信　服务费",
+                    "remark": "对公人民币转账-跨行",
+                },
+                {
+                    "id": "txn-income-not-fee",
+                    "credit_amount": "9.00",
+                    "summary": "手续费",
+                    "remark": "对公人民币转账-跨行",
+                },
+                {
+                    "id": "txn-excluded-fee",
+                    "debit_amount": "9.00",
+                    "summary": "手续费",
+                    "remark": "退手续费 对公人民币转账-跨行",
+                },
+            ]
+        )
+
+        self.assertEqual(suggestions["txn-normalized-fee"]["category_code"], "fee")
+        self.assertEqual(suggestions["txn-normalized-fee"]["auto_category_evidence"]["condition_type"], "contains_any")
+        self.assertEqual(suggestions["txn-regex-fee"]["category_code"], "fee")
+        self.assertEqual(suggestions["txn-regex-fee"]["auto_category_evidence"]["condition_type"], "regex_any")
+        self.assertNotIn("txn-income-not-fee", suggestions)
+        self.assertNotIn("txn-excluded-fee", suggestions)
+
+    def test_external_turnover_candidate_runs_after_specific_business_rules(self) -> None:
+        suggestions = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-tax-refund",
+                    "credit_amount": "472.71",
+                    "summary": "电子退库[纳税人编码=",
+                    "note": "电子退库[纳税人编码=915300007194052520]",
+                },
+                {
+                    "id": "txn-bank-loan",
+                    "debit_amount": "5833.33",
+                    "summary": "贷款扣款",
+                    "purpose": "批量还款",
+                },
+                {
+                    "id": "txn-bid-bond",
+                    "debit_amount": "30000.00",
+                    "remark": "投标保证金（招标代理机构项目编号：TC260H00H）",
+                },
+            ]
+        )
+
+        self.assertEqual(suggestions["txn-bank-loan"]["category_code"], "external_turnover")
+        self.assertEqual(suggestions["txn-bank-loan"]["auto_category_evidence"]["route_to"], "turnover_ledger_pending")
+        self.assertTrue(suggestions["txn-bank-loan"]["auto_category_evidence"]["review_required"])
+        self.assertEqual(suggestions["txn-bid-bond"]["category_code"], "external_turnover")
+        self.assertNotEqual(suggestions.get("txn-tax-refund", {}).get("category_code"), "external_turnover")
 
     def test_detects_holiday_bonus_from_keywords(self) -> None:
         suggestions = self.service.suggest_for_rows(

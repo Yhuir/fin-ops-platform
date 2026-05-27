@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
+import unicodedata
 
 from fin_ops_platform.services.bank_internal_transfer_detector import BankInternalTransferDetector
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -96,10 +98,15 @@ class BankTransactionAutoCategoryService:
 
     def _text_suggestion(self, row: dict[str, Any], *, transaction_id: str) -> dict[str, Any] | None:
         semantic_fields = self._semantic_text_fields(row)
-        rules_payload = BankTransactionCategoryService.auto_tag_rules_payload(
-            self._category_service.tag_dictionary_payload()
-        )
-        for rule in list(rules_payload.get("active_rules") or []):
+        rules = [
+            dict(definition)
+            for definition in list(self._category_service.tag_dictionary_payload().get("definitions") or [])
+            if isinstance(definition, dict)
+            and str(definition.get("status") or "active") == "active"
+            and isinstance(definition.get("rules"), dict)
+        ]
+        rules.sort(key=lambda definition: (int(definition.get("priority") or 10_000), str(definition.get("code") or "")))
+        for rule in rules:
             match = self._rule_match(semantic_fields, rule)
             if match is None:
                 continue
@@ -117,14 +124,36 @@ class BankTransactionAutoCategoryService:
     def _semantic_text_fields(cls, row: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
         fields: dict[str, list[dict[str, Any]]] = {
             "counterparty_name": cls._semantic_values(row, "counterparty_name", ("counterparty_name",)),
+            "counterparty_account": cls._semantic_values(
+                row,
+                "counterparty_account",
+                ("counterparty_account", "counterparty_account_no", "counterparty_account_number", "counterparty_no"),
+            ),
+            "counterparty_bank": cls._semantic_values(
+                row,
+                "counterparty_bank",
+                ("counterparty_bank", "counterparty_bank_name", "counterparty_opening_bank"),
+            ),
             "purpose_text": cls._semantic_values(row, "purpose_text", ("purpose_text", "purpose")),
             "summary_text": cls._semantic_values(row, "summary_text", ("summary_text", "summary")),
             "note_text": cls._semantic_values(row, "note_text", ("note_text", "remark", "note", "customer_note")),
             "detail_text": cls._detail_semantic_values(row),
+            "__direction__": [{"text": cls._row_direction(row), "semantic_field": "__direction__"}],
+            "__account_key__": cls._semantic_values(row, "__account_key__", ("account_key", "account_no", "account_number")),
+            "__account_type__": cls._semantic_values(row, "__account_type__", ("account_type",)),
+            "__bank_name__": cls._semantic_values(row, "__bank_name__", ("bank_name", "bank")),
         }
         all_values: list[dict[str, Any]] = []
         seen_texts: set[str] = set()
-        for field in ("counterparty_name", "purpose_text", "summary_text", "note_text", "detail_text"):
+        for field in (
+            "counterparty_name",
+            "counterparty_account",
+            "counterparty_bank",
+            "purpose_text",
+            "summary_text",
+            "note_text",
+            "detail_text",
+        ):
             for entry in fields[field]:
                 text = str(entry.get("text") or "").strip()
                 if not text or text in seen_texts:
@@ -133,6 +162,25 @@ class BankTransactionAutoCategoryService:
                 all_values.append({**entry, "semantic_field": "all_text"})
         fields["all_text"] = all_values
         return fields
+
+    @staticmethod
+    def _row_direction(row: dict[str, Any]) -> str:
+        def amount(value: Any) -> float:
+            try:
+                return float(str(value or "").replace(",", ""))
+            except ValueError:
+                return 0.0
+
+        if amount(row.get("credit_amount") or row.get("income_amount") or row.get("income")) > 0:
+            return "income"
+        if amount(row.get("debit_amount") or row.get("expense_amount") or row.get("expense")) > 0:
+            return "expense"
+        raw = str(row.get("direction") or row.get("income_expense_type") or "").strip()
+        if raw in {"收入", "收款", "贷方", "income", "credit"}:
+            return "income"
+        if raw in {"支出", "付款", "借方", "expense", "debit"}:
+            return "expense"
+        return "any"
 
     @staticmethod
     def _semantic_values(row: dict[str, Any], semantic_field: str, keys: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -181,6 +229,10 @@ class BankTransactionAutoCategoryService:
         semantic_fields: dict[str, list[dict[str, Any]]],
         rule: dict[str, Any],
     ) -> dict[str, Any] | None:
+        if not BankTransactionAutoCategoryService._direction_matches(rule, semantic_fields):
+            return None
+        if not BankTransactionAutoCategoryService._account_scope_matches(rule, semantic_fields):
+            return None
         conditions = rule.get("rules") if isinstance(rule.get("rules"), dict) else {}
         match_fields = [
             str(field)
@@ -194,25 +246,62 @@ class BankTransactionAutoCategoryService:
         ]
         if not candidates:
             return None
-        excludes = [str(item) for item in list(conditions.get("excludes") or []) if str(item)]
-        for entry in candidates:
-            text = str(entry.get("text") or "").strip()
-            if any(exclude in text for exclude in excludes):
+        normalized_entries = [
+            {
+                **entry,
+                "normalized_text": BankTransactionAutoCategoryService._normalize_match_text(entry.get("text")),
+            }
+            for entry in candidates
+        ]
+        none_of = [
+            BankTransactionAutoCategoryService._normalize_match_text(item)
+            for item in list(conditions.get("none_of") or conditions.get("excludes") or [])
+            if str(item)
+        ]
+        for entry in normalized_entries:
+            text = str(entry.get("normalized_text") or "")
+            if any(exclude and exclude in text for exclude in none_of):
                 return None
-        for token in [str(item) for item in list(conditions.get("exact") or []) if str(item)]:
+        contains_all = [
+            BankTransactionAutoCategoryService._normalize_match_text(item)
+            for item in list(conditions.get("contains_all") or [])
+            if str(item)
+        ]
+        if contains_all:
+            joined_text = " ".join(str(entry.get("normalized_text") or "") for entry in normalized_entries)
+            if any(token not in joined_text for token in contains_all):
+                return None
+        for token in [str(item) for item in list(conditions.get("exact_any") or conditions.get("exact") or []) if str(item)]:
+            normalized_token = BankTransactionAutoCategoryService._normalize_match_text(token)
             for entry in candidates:
-                if str(entry.get("text") or "").strip() == token:
-                    return BankTransactionAutoCategoryService._evidence("exact", token, entry)
-        for token in [str(item) for item in list(conditions.get("contains") or []) if str(item)]:
+                if BankTransactionAutoCategoryService._normalize_match_text(entry.get("text")) == normalized_token:
+                    return BankTransactionAutoCategoryService._evidence("exact_any", token, entry, rule=rule)
+        for token in [str(item) for item in list(conditions.get("contains_any") or conditions.get("contains") or []) if str(item)]:
+            normalized_token = BankTransactionAutoCategoryService._normalize_match_text(token)
             for entry in candidates:
-                if token in str(entry.get("text") or ""):
-                    return BankTransactionAutoCategoryService._evidence("contains", token, entry)
+                if normalized_token in BankTransactionAutoCategoryService._normalize_match_text(entry.get("text")):
+                    return BankTransactionAutoCategoryService._evidence("contains_any", token, entry, rule=rule)
+        for pattern in [str(item) for item in list(conditions.get("regex_any") or []) if str(item)]:
+            try:
+                compiled = re.compile(pattern, re.IGNORECASE)
+            except re.error:
+                continue
+            for entry in candidates:
+                text = BankTransactionAutoCategoryService._normalize_regex_text(entry.get("text"))
+                if compiled.search(text):
+                    return BankTransactionAutoCategoryService._evidence("regex_any", pattern, entry, rule=rule)
         return None
 
     @staticmethod
-    def _evidence(condition_type: str, matched_text: str, entry: dict[str, Any]) -> dict[str, Any]:
+    def _evidence(
+        condition_type: str,
+        matched_text: str,
+        entry: dict[str, Any],
+        *,
+        rule: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         semantic_field = str(entry.get("semantic_field") or "")
-        return {
+        evidence = {
             "condition_type": condition_type,
             "semantic_field": semantic_field,
             "semantic_field_label": BANK_AUTO_TAG_FIELD_LABELS.get(semantic_field, semantic_field),
@@ -220,12 +309,79 @@ class BankTransactionAutoCategoryService:
             "raw_field_label": entry.get("raw_field_label"),
             "matched_text": matched_text,
         }
+        if isinstance(rule, dict):
+            if "review_required" in rule:
+                evidence["review_required"] = bool(rule.get("review_required"))
+            if rule.get("route_to"):
+                evidence["route_to"] = str(rule.get("route_to"))
+        return evidence
 
     @staticmethod
     def _rule_reason(rule: dict[str, Any], evidence: dict[str, Any]) -> str:
         label = str(evidence.get("semantic_field_label") or evidence.get("semantic_field") or "文本")
-        condition = "精确命中" if evidence.get("condition_type") == "exact" else "包含"
+        condition_labels = {
+            "exact_any": "精确命中",
+            "contains_any": "包含",
+            "regex_any": "正则命中",
+        }
+        condition = condition_labels.get(str(evidence.get("condition_type") or ""), "命中")
         return f"{label}{condition}{evidence.get('matched_text')}，命中标签 {rule.get('label')}"
+
+    @staticmethod
+    def _direction_matches(rule: dict[str, Any], semantic_fields: dict[str, list[dict[str, Any]]]) -> bool:
+        direction = str(rule.get("direction") or "any").strip()
+        if direction in ("", "any"):
+            return True
+        row_direction = str((semantic_fields.get("__direction__") or [{}])[0].get("text") or "any")
+        if row_direction == "any":
+            return True
+        return row_direction == direction
+
+    @staticmethod
+    def _account_scope_matches(rule: dict[str, Any], semantic_fields: dict[str, list[dict[str, Any]]]) -> bool:
+        scope = rule.get("account_scope") if isinstance(rule.get("account_scope"), dict) else {}
+        scope_type = str(scope.get("type") or "any")
+        if scope_type == "any":
+            return True
+        values = [
+            BankTransactionAutoCategoryService._normalize_match_text(item)
+            for item in list(scope.get("values") or [])
+            if str(item)
+        ]
+        if not values:
+            return True
+        field_by_scope = {
+            "bank_account": "__account_key__",
+            "account_type": "__account_type__",
+            "bank": "__bank_name__",
+        }.get(scope_type)
+        if not field_by_scope:
+            return True
+        row_values = [
+            BankTransactionAutoCategoryService._normalize_match_text(entry.get("text"))
+            for entry in list(semantic_fields.get(field_by_scope) or [])
+        ]
+        return any(value in row_values for value in values)
+
+    @staticmethod
+    def _normalize_match_text(value: Any) -> str:
+        text = unicodedata.normalize("NFKC", str(value or "")).strip()
+        if text in {"--", "_"}:
+            return ""
+        text = text.replace("帐户", "账户")
+        text = text.replace("（", "(").replace("）", ")")
+        text = re.sub(r"\s+", "", text)
+        return text.casefold()
+
+    @staticmethod
+    def _normalize_regex_text(value: Any) -> str:
+        text = unicodedata.normalize("NFKC", str(value or "")).strip()
+        if text in {"--", "_"}:
+            return ""
+        text = text.replace("帐户", "账户")
+        text = text.replace("（", "(").replace("）", ")")
+        text = re.sub(r"\s+", " ", text)
+        return text.casefold()
 
     def _suggestion(
         self,

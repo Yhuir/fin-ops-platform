@@ -42,6 +42,8 @@ EXPECTED_MIGRATION_FILES = [
     "0028_workbench_reconciliation_decisions.sql",
     "0029_workbench_reconciliation_runtime_grants.sql",
     "0030_bank_detail_read_model.sql",
+    "0031_bank_transaction_auto_category_context_index.sql",
+    "0032_bank_detail_runtime_grants.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

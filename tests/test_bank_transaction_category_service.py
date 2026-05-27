@@ -107,6 +107,24 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertNotIn("rules", definitions_by_code["internal_transfer"])
         self.assertIn("internal_transfer", definitions_by_code)
 
+    def test_auto_tag_rules_payload_exposes_production_rule_fields_without_hidden_system_controls(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(None)
+
+        payload = service.auto_tag_rules_payload(service.tag_dictionary_payload())
+        external_turnover = next(rule for rule in payload["active_rules"] if rule["code"] == "external_turnover")
+
+        self.assertEqual(external_turnover["direction"], "any")
+        self.assertEqual(external_turnover["account_scope"], {"type": "any", "values": []})
+        self.assertEqual(external_turnover["sort_order"], len(payload["active_rules"]))
+        self.assertIn("contains_any", external_turnover["rules"])
+        self.assertIn("contains_all", external_turnover["rules"])
+        self.assertIn("none_of", external_turnover["rules"])
+        self.assertIn("regex_any", external_turnover["rules"])
+        self.assertNotIn("stop_on_match", external_turnover)
+        self.assertNotIn("review_required", external_turnover)
+        self.assertNotIn("route_to", external_turnover)
+        self.assertNotIn("audit", external_turnover)
+
     def test_auto_tag_rules_update_validates_identity_labels_and_rules(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(None)
         current = service.auto_tag_rules_payload(service.tag_dictionary_payload())
@@ -164,6 +182,49 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(updated_salary["code"], "salary")
         self.assertEqual(updated_salary["label"], "人员薪酬")
         self.assertEqual(result["changes"]["renamed_tags"][0]["code"], "salary")
+
+    def test_auto_tag_rules_update_accepts_direction_account_scope_combined_conditions_and_regex(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(None)
+        current = service.auto_tag_rules_payload(service.tag_dictionary_payload())
+        fee = next(rule for rule in current["active_rules"] if rule["code"] == "fee")
+        next_active = [
+            (
+                {
+                    **rule,
+                    "direction": "expense",
+                    "account_scope": {"type": "bank", "values": ["建行"]},
+                    "rules": {
+                        "match_fields": ["summary_text", "note_text"],
+                        "exact_any": [],
+                        "contains_any": ["手续费"],
+                        "contains_all": ["对公人民币转账", "跨行"],
+                        "none_of": ["退手续费"],
+                        "regex_any": ["短信\\s*服务费"],
+                    },
+                }
+                if rule["code"] == "fee"
+                else rule
+            )
+            for rule in current["active_rules"]
+        ]
+
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_update(
+            {
+                "expected_version": current["version"],
+                "active_rules": next_active,
+                "archived_rules": [],
+            },
+            previous_tag_dictionary=service.tag_dictionary_payload(),
+        )
+
+        updated = BankTransactionCategoryService.auto_tag_rules_payload(result["tag_dictionary"])
+        updated_fee = next(rule for rule in updated["active_rules"] if rule["code"] == "fee")
+        self.assertEqual(updated_fee["direction"], "expense")
+        self.assertEqual(updated_fee["account_scope"], {"type": "bank", "values": ["建行"]})
+        self.assertEqual(updated_fee["rules"]["contains_any"], ["手续费"])
+        self.assertEqual(updated_fee["rules"]["contains_all"], ["对公人民币转账", "跨行"])
+        self.assertEqual(updated_fee["rules"]["none_of"], ["退手续费"])
+        self.assertEqual(updated_fee["rules"]["regex_any"], ["短信\\s*服务费"])
 
     def test_configured_custom_tag_is_valid_manual_choice(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(

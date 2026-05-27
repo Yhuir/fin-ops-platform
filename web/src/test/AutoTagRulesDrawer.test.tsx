@@ -72,6 +72,60 @@ describe("AutoTagRulesDrawer", () => {
     expect(feeCard?.querySelector(".bank-auto-tag-condition-grid")).toBeInTheDocument();
   });
 
+  test("shows production rule controls without exposing hidden system fields", async () => {
+    installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+
+    expect(within(drawer).getByLabelText("适用方向")).toBeInTheDocument();
+    expect(within(drawer).getByLabelText("适用账户范围")).toBeInTheDocument();
+    expect(within(drawer).getByLabelText("必须同时包含", { selector: "textarea" })).toBeInTheDocument();
+    expect(within(drawer).getByLabelText("不包含字样", { selector: "textarea" })).toBeInTheDocument();
+    expect(within(drawer).getByLabelText("正则命中", { selector: "textarea" })).toBeInTheDocument();
+    expect(within(drawer).queryByText("stop_on_match")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("review_required")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("route_to")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("规则ID")).not.toBeInTheDocument();
+  });
+
+  test("serializes direction, account scope, combined conditions, and regex conditions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
+
+    const labelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
+    await user.type(labelInputs[labelInputs.length - 1], "外部往来候选");
+    const containsInputs = within(drawer).getAllByLabelText("包含任一", { selector: "textarea" });
+    await user.type(containsInputs[containsInputs.length - 1], "借据号");
+    const allInputs = within(drawer).getAllByLabelText("必须同时包含", { selector: "textarea" });
+    await user.type(allInputs[allInputs.length - 1], "还款");
+    const regexInputs = within(drawer).getAllByLabelText("正则命中", { selector: "textarea" });
+    await user.click(regexInputs[regexInputs.length - 1]);
+    await user.paste("借据号[:：]?[A-Z0-9]+");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    expect(payload?.active_rules).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "外部往来候选",
+        direction: "any",
+        account_scope: { type: "any", values: [] },
+        rules: expect.objectContaining({
+          contains_any: ["借据号"],
+          contains_all: ["还款"],
+          none_of: [],
+          regex_any: ["借据号[:：]?[A-Z0-9]+"],
+        }),
+      }),
+    ]));
+  });
+
   test("keeps automatic tag rule drawer styling simple and non-truncating", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
@@ -115,7 +169,7 @@ describe("AutoTagRulesDrawer", () => {
 
     const labelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
     await user.type(labelInputs[labelInputs.length - 1], "银行利息");
-    const containsInputs = within(drawer).getAllByLabelText("包含字样", { selector: "textarea" });
+    const containsInputs = within(drawer).getAllByLabelText("包含任一", { selector: "textarea" });
     await user.type(containsInputs[containsInputs.length - 1], "利息");
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 

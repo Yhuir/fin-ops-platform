@@ -208,9 +208,12 @@ BANK_AUTO_TAG_EDITABLE_CODES = (
     "treasury_tax_collection",
     "social_security",
     "tax_payment",
+    "external_turnover",
 )
 BANK_AUTO_TAG_FIELD_OPTIONS: tuple[dict[str, str], ...] = (
     {"value": "counterparty_name", "label": "对方户名"},
+    {"value": "counterparty_account", "label": "对方账号"},
+    {"value": "counterparty_bank", "label": "对方开户行"},
     {"value": "purpose_text", "label": "用途/交易用途"},
     {"value": "summary_text", "label": "摘要"},
     {"value": "note_text", "label": "备注/附言/客户附言"},
@@ -223,6 +226,10 @@ BANK_AUTO_TAG_FIELD_LABELS = {
 }
 BANK_AUTO_TAG_ALLOWED_FIELDS = set(BANK_AUTO_TAG_FIELD_LABELS)
 BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS = ("summary_text", "purpose_text", "note_text", "detail_text")
+BANK_AUTO_TAG_ALLOWED_DIRECTIONS = {"income", "expense", "any"}
+BANK_AUTO_TAG_ALLOWED_ACCOUNT_SCOPE_TYPES = {"any", "bank_account", "account_type", "bank"}
+DEFAULT_BANK_AUTO_TAG_DIRECTION = "any"
+DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE = {"type": "any", "values": []}
 DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
     "fee": {
         "priority": 10,
@@ -287,11 +294,72 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
     "tax_payment": {
         "priority": 70,
         "rule_code": "tax_payment_text_keyword",
+        "direction": "expense",
         "rules": {
             "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
             "exact": [],
             "contains": ["税款", "缴纳税款", "电子缴税", "税库银", "税务局", "完税"],
             "excludes": ["社保及税款", "社保和税款", "社保税款", "社保、税款"],
+        },
+    },
+    "external_turnover": {
+        "priority": 900,
+        "rule_code": "external_turnover_candidate_text_keyword",
+        "direction": "any",
+        "account_scope": DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE,
+        "stop_on_match": True,
+        "review_required": True,
+        "route_to": "turnover_ledger_pending",
+        "rules": {
+            "match_fields": ["purpose_text", "summary_text", "note_text"],
+            "exact_any": [],
+            "contains_any": [
+                "往来款",
+                "暂借款",
+                "借款",
+                "还暂借款",
+                "归还借款",
+                "还借款",
+                "保证金",
+                "投标保证金",
+                "履约保证金",
+                "质量保证金",
+                "押金",
+                "退款",
+                "退回",
+                "返还",
+                "代垫",
+                "垫付",
+                "代付",
+                "代购",
+                "贷款扣款",
+                "批量还款",
+                "借据号",
+                "还息",
+                "贷款本息",
+                "收回贷款本息",
+                "本息",
+            ],
+            "contains_all": [],
+            "none_of": [
+                "本公司帐户",
+                "本公司账户",
+                "货款",
+                "预付货款",
+                "工程款",
+                "劳务费",
+                "技术服务费",
+                "工资",
+                "社保",
+                "公积金",
+                "税款",
+                "纳税",
+                "电子退库",
+                "结息",
+                "活期利息",
+                "存款利息",
+            ],
+            "regex_any": [],
         },
     },
 }
@@ -336,11 +404,15 @@ def _default_auto_tag_rule_fields(code: str) -> dict[str, Any]:
     default = DEFAULT_BANK_AUTO_TAG_RULES.get(code)
     if not isinstance(default, dict):
         return {}
-    return {
+    fields = {
         "priority": int(default["priority"]),
         "rule_code": str(default["rule_code"]),
         "rules": deepcopy(default["rules"]),
     }
+    for key in ("direction", "account_scope", "stop_on_match", "review_required", "route_to"):
+        if key in default:
+            fields[key] = deepcopy(default[key])
+    return fields
 
 
 def default_bank_transaction_tag_dictionary_payload() -> dict[str, Any]:
@@ -796,6 +868,10 @@ class BankTransactionCategoryService:
             "label": str(definition.get("label") or code),
             "status": str(definition.get("status") or "active"),
             "source": str(definition.get("source") or "custom"),
+            "direction": cls._normalize_auto_tag_direction(definition.get("direction")),
+            "account_scope": cls._normalize_auto_tag_account_scope(definition.get("account_scope")),
+            "output_primary_label": str(definition.get("label") or code),
+            "output_sub_label": str(definition.get("output_sub_label") or "").strip(),
             "rules": rules,
             "rule_code": str(definition.get("rule_code") or code),
             "rule_summary": cls._auto_tag_rule_summary(rules, archived=priority_index is None),
@@ -806,6 +882,7 @@ class BankTransactionCategoryService:
         if priority_index is not None:
             payload["priority"] = cls._normalize_optional_priority(definition.get("priority")) or priority_index * 10
             payload["priority_label"] = f"优先级 {priority_index}"
+            payload["sort_order"] = priority_index
         return payload
 
     @classmethod
@@ -839,6 +916,8 @@ class BankTransactionCategoryService:
             label = code or "未命名标签"
 
         rules = cls._normalize_auto_tag_rule_conditions(item.get("rules"), allow_invalid=False)
+        direction = cls._normalize_auto_tag_direction(item.get("direction"))
+        account_scope = cls._normalize_auto_tag_account_scope(item.get("account_scope"))
         raw_match_fields = item.get("rules", {}).get("match_fields") if isinstance(item.get("rules"), dict) else []
         invalid_fields = [
             str(field or "").strip()
@@ -850,7 +929,7 @@ class BankTransactionCategoryService:
         if status == "active":
             if not rules["match_fields"]:
                 field_errors.append({"path": f"{path_prefix}.rules.match_fields", "message": "匹配字段不能为空。"})
-            if not rules["exact"] and not rules["contains"]:
+            if not (rules["exact_any"] or rules["contains_any"] or rules["contains_all"] or rules["regex_any"]):
                 field_errors.append({"path": f"{path_prefix}.rules.contains", "message": "精确命中字样和包含字样不能同时为空。"})
         if not rules["match_fields"]:
             rules["match_fields"] = ["all_text"] if status == "active" else []
@@ -874,9 +953,17 @@ class BankTransactionCategoryService:
             "path": path,
             "source": source if source in {"system", "custom"} else "custom",
             "status": status,
+            "direction": direction,
+            "account_scope": account_scope,
+            "output_primary_label": label,
+            "output_sub_label": str(item.get("output_sub_label") or "").strip(),
             "rules": rules,
             "rule_code": rule_code,
         }
+        for system_key in ("stop_on_match", "review_required", "route_to"):
+            previous_value = previous_definitions_by_code.get(code, {}).get(system_key)
+            if previous_value is not None:
+                definition[system_key] = deepcopy(previous_value)
         if priority is not None:
             definition["priority"] = priority
         return definition
@@ -922,7 +1009,7 @@ class BankTransactionCategoryService:
 
     @classmethod
     def _auto_tag_rule_summary(cls, rules: dict[str, list[str]], *, archived: bool) -> str:
-        if archived and not (rules.get("exact") or rules.get("contains") or rules.get("excludes")):
+        if archived and not (rules.get("exact_any") or rules.get("contains_any") or rules.get("contains_all") or rules.get("none_of") or rules.get("regex_any")):
             return "已停用"
         field_labels = [
             BANK_AUTO_TAG_FIELD_LABELS.get(field, field)
@@ -930,12 +1017,16 @@ class BankTransactionCategoryService:
         ]
         prefix = "、".join(field_labels) if field_labels else "未选择字段"
         parts: list[str] = []
-        if rules.get("exact"):
-            parts.append(f"{prefix}精确命中：{'、'.join(rules['exact'])}")
-        if rules.get("contains"):
-            parts.append(f"{prefix}包含：{'、'.join(rules['contains'])}")
-        if rules.get("excludes"):
-            parts.append(f"排除：{'、'.join(rules['excludes'])}")
+        if rules.get("exact_any"):
+            parts.append(f"{prefix}精确命中：{'、'.join(rules['exact_any'])}")
+        if rules.get("contains_any"):
+            parts.append(f"{prefix}包含任一：{'、'.join(rules['contains_any'])}")
+        if rules.get("contains_all"):
+            parts.append(f"同时包含：{'、'.join(rules['contains_all'])}")
+        if rules.get("none_of"):
+            parts.append(f"排除：{'、'.join(rules['none_of'])}")
+        if rules.get("regex_any"):
+            parts.append(f"正则：{'、'.join(rules['regex_any'])}")
         return "；".join(parts) if parts else ("已停用" if archived else "未配置规则")
 
     @classmethod
@@ -1038,6 +1129,9 @@ class BankTransactionCategoryService:
                         next_definition["rules"] = deepcopy(definition["rules"])
                     if definition.get("rule_code"):
                         next_definition["rule_code"] = definition["rule_code"]
+                    for key in ("direction", "account_scope", "output_primary_label", "output_sub_label", "stop_on_match", "review_required", "route_to"):
+                        if key in definition:
+                            next_definition[key] = deepcopy(definition[key])
                 definitions_by_code[code] = next_definition
                 continue
             if code in definitions_by_code and definitions_by_code[code]["source"] == "system":
@@ -1085,22 +1179,64 @@ class BankTransactionCategoryService:
         if not isinstance(rules, dict) and default_fields:
             rules = default_fields["rules"]
         if isinstance(rules, dict):
+            definition["direction"] = cls._normalize_auto_tag_direction(item.get("direction", default_fields.get("direction")))
+            definition["account_scope"] = cls._normalize_auto_tag_account_scope(
+                item.get("account_scope", default_fields.get("account_scope"))
+            )
+            output_primary_label = str(item.get("output_primary_label") or label or code).strip()
+            if output_primary_label:
+                definition["output_primary_label"] = output_primary_label
+            output_sub_label = str(item.get("output_sub_label") or "").strip()
+            if output_sub_label:
+                definition["output_sub_label"] = output_sub_label
             definition["rules"] = cls._normalize_auto_tag_rule_conditions(rules, allow_invalid=True)
-        rule_code = str(item.get("rule_code") or default_fields.get("rule_code") or "").strip()
-        if rule_code:
-            definition["rule_code"] = rule_code
+            rule_code = str(item.get("rule_code") or default_fields.get("rule_code") or "").strip()
+            if rule_code:
+                definition["rule_code"] = rule_code
+            for key in ("stop_on_match", "review_required", "route_to"):
+                if key in item:
+                    definition[key] = deepcopy(item[key])
+                elif key in default_fields:
+                    definition[key] = deepcopy(default_fields[key])
         return definition
 
     @classmethod
     def _normalize_auto_tag_rule_conditions(cls, value: Any, *, allow_invalid: bool = False) -> dict[str, list[str]]:
         raw = value if isinstance(value, dict) else {}
         match_fields = cls._normalize_match_fields(raw.get("match_fields"), allow_invalid=allow_invalid)
+        exact_any = cls._normalize_term_list(raw.get("exact_any", raw.get("exact")))
+        contains_any = cls._normalize_term_list(raw.get("contains_any", raw.get("contains")))
+        none_of = cls._normalize_term_list(raw.get("none_of", raw.get("excludes")))
+        contains_all = cls._normalize_term_list(raw.get("contains_all"))
+        regex_any = cls._normalize_term_list(raw.get("regex_any"))
         return {
             "match_fields": match_fields,
-            "exact": cls._normalize_term_list(raw.get("exact")),
-            "contains": cls._normalize_term_list(raw.get("contains")),
-            "excludes": cls._normalize_term_list(raw.get("excludes")),
+            "exact_any": exact_any,
+            "contains_any": contains_any,
+            "contains_all": contains_all,
+            "none_of": none_of,
+            "regex_any": regex_any,
+            # Backward-compatible aliases for older clients and persisted payloads.
+            "exact": exact_any,
+            "contains": contains_any,
+            "excludes": none_of,
         }
+
+    @staticmethod
+    def _normalize_auto_tag_direction(value: Any) -> str:
+        direction = str(value or DEFAULT_BANK_AUTO_TAG_DIRECTION).strip()
+        return direction if direction in BANK_AUTO_TAG_ALLOWED_DIRECTIONS else DEFAULT_BANK_AUTO_TAG_DIRECTION
+
+    @staticmethod
+    def _normalize_auto_tag_account_scope(value: Any) -> dict[str, Any]:
+        raw = value if isinstance(value, dict) else {}
+        scope_type = str(raw.get("type") or raw.get("mode") or "any").strip()
+        if scope_type not in BANK_AUTO_TAG_ALLOWED_ACCOUNT_SCOPE_TYPES:
+            scope_type = "any"
+        values = BankTransactionCategoryService._normalize_term_list(raw.get("values"))
+        if scope_type == "any":
+            values = []
+        return {"type": scope_type, "values": values}
 
     @staticmethod
     def _normalize_term_list(value: Any) -> list[str]:

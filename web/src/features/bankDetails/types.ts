@@ -132,9 +132,18 @@ export type BankAutoTagFieldOption = {
 
 export type BankAutoTagRuleConditions = {
   matchFields: string[];
-  exact: string[];
-  contains: string[];
-  excludes: string[];
+  exactAny: string[];
+  containsAny: string[];
+  containsAll: string[];
+  noneOf: string[];
+  regexAny: string[];
+};
+
+export type BankAutoTagDirection = "income" | "expense" | "any";
+
+export type BankAutoTagAccountScope = {
+  type: "any" | "bank_account" | "account_type" | "bank";
+  values: string[];
 };
 
 export type BankAutoTagSystemRule = {
@@ -155,6 +164,8 @@ export type BankAutoTagEditableRule = {
   source: "system" | "custom";
   priority?: number;
   priorityLabel?: string;
+  direction: BankAutoTagDirection;
+  accountScope: BankAutoTagAccountScope;
   rules: BankAutoTagRuleConditions;
   ruleSummary: string;
   editable: boolean;
@@ -177,6 +188,8 @@ export type BankAutoTagRulesResponse = {
 export type SaveBankAutoTagRule = {
   code?: string;
   label: string;
+  direction: BankAutoTagDirection;
+  accountScope: BankAutoTagAccountScope;
   rules: BankAutoTagRuleConditions;
 };
 

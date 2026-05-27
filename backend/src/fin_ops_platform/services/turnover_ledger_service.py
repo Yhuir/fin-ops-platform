@@ -246,7 +246,7 @@ class TurnoverLedgerService:
         }
         for transaction_id in transaction_ids:
             record = records.get(transaction_id) or {}
-            if record.get("category_code"):
+            if record.get("category_code") in BANK_TRANSACTION_CATEGORY_DEFINITIONS:
                 continue
             manual = self._category_service.get(transaction_id)
             manual_code = str(manual.get("category_code") or "").strip()

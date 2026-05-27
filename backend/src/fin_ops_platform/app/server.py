@@ -817,14 +817,14 @@ class Application:
         for payload in transaction_payloads:
             transaction_id = str(payload.get("id") or "").strip()
             category = categories_by_transaction_id.get(transaction_id, {})
-            category_code = category.get("category_code")
-            if not category_code:
+            category_code = str(category.get("category_code") or "").strip()
+            if category_code not in TURNOVER_CATEGORY_RULES:
                 manual_category = self._bank_transaction_category_service.get(transaction_id)
                 manual_category_code = str(manual_category.get("category_code") or "").strip()
                 if manual_category_code in TURNOVER_CATEGORY_RULES:
                     category = manual_category
                     category_code = manual_category_code
-            if not category_code:
+            if category_code not in TURNOVER_CATEGORY_RULES:
                 continue
             row = dict(payload)
             row["category_code"] = category_code

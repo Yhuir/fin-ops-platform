@@ -8,6 +8,7 @@ import type {
   BankDetailTransactionsRequest,
   BankDetailTransactionsResponse,
   BankAutoTagEditableRule,
+  BankAutoTagAccountScope,
   BankAutoTagRuleConditions,
   BankAutoTagRulesResponse,
   BankAutoTagSystemRule,
@@ -110,6 +111,16 @@ type ApiBankAutoTagRuleConditions = {
   exact?: unknown[];
   contains?: unknown[];
   excludes?: unknown[];
+  exact_any?: unknown[];
+  contains_any?: unknown[];
+  contains_all?: unknown[];
+  none_of?: unknown[];
+  regex_any?: unknown[];
+};
+
+type ApiBankAutoTagAccountScope = {
+  type?: string;
+  values?: unknown[];
 };
 
 type ApiBankAutoTagEditableRule = {
@@ -119,6 +130,8 @@ type ApiBankAutoTagEditableRule = {
   source?: "system" | "custom";
   priority?: number;
   priority_label?: string;
+  direction?: string;
+  account_scope?: ApiBankAutoTagAccountScope;
   rules?: ApiBankAutoTagRuleConditions;
   rule_summary?: string;
   editable?: boolean;
@@ -357,9 +370,23 @@ function stringList(values: unknown[] | undefined) {
 function mapAutoTagRuleConditions(rules: ApiBankAutoTagRuleConditions | undefined): BankAutoTagRuleConditions {
   return {
     matchFields: stringList(rules?.match_fields),
-    exact: stringList(rules?.exact),
-    contains: stringList(rules?.contains),
-    excludes: stringList(rules?.excludes),
+    exactAny: stringList(rules?.exact_any ?? rules?.exact),
+    containsAny: stringList(rules?.contains_any ?? rules?.contains),
+    containsAll: stringList(rules?.contains_all),
+    noneOf: stringList(rules?.none_of ?? rules?.excludes),
+    regexAny: stringList(rules?.regex_any),
+  };
+}
+
+function mapAutoTagDirection(value: unknown) {
+  return value === "income" || value === "expense" ? value : "any";
+}
+
+function mapAutoTagAccountScope(scope: ApiBankAutoTagAccountScope | undefined): BankAutoTagAccountScope {
+  const type = scope?.type === "bank_account" || scope?.type === "account_type" || scope?.type === "bank" ? scope.type : "any";
+  return {
+    type,
+    values: type === "any" ? [] : stringList(scope?.values),
   };
 }
 
@@ -371,6 +398,8 @@ function mapAutoTagEditableRule(rule: ApiBankAutoTagEditableRule): BankAutoTagEd
     source: rule.source === "system" ? "system" : "custom",
     priority: typeof rule.priority === "number" ? rule.priority : undefined,
     priorityLabel: String(rule.priority_label ?? "").trim() || undefined,
+    direction: mapAutoTagDirection(rule.direction),
+    accountScope: mapAutoTagAccountScope(rule.account_scope),
     rules: mapAutoTagRuleConditions(rule.rules),
     ruleSummary: String(rule.rule_summary ?? "").trim(),
     editable: rule.editable !== false,
@@ -412,9 +441,11 @@ function mapAutoTagRulesResponse(payload: ApiBankAutoTagRulesResponse): BankAuto
 function serializeAutoTagRuleConditions(rules: BankAutoTagRuleConditions) {
   return {
     match_fields: rules.matchFields,
-    exact: rules.exact,
-    contains: rules.contains,
-    excludes: rules.excludes,
+    exact_any: rules.exactAny,
+    contains_any: rules.containsAny,
+    contains_all: rules.containsAll,
+    none_of: rules.noneOf,
+    regex_any: rules.regexAny,
   };
 }
 
@@ -424,11 +455,15 @@ function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) 
     active_rules: payload.activeRules.map((rule) => ({
       ...(rule.code ? { code: rule.code } : {}),
       label: rule.label,
+      direction: rule.direction,
+      account_scope: rule.accountScope,
       rules: serializeAutoTagRuleConditions(rule.rules),
     })),
     archived_rules: payload.archivedRules.map((rule) => ({
       ...(rule.code ? { code: rule.code } : {}),
       label: rule.label,
+      direction: rule.direction,
+      account_scope: rule.accountScope,
       rules: serializeAutoTagRuleConditions(rule.rules),
     })),
   };

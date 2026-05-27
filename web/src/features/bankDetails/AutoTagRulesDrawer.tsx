@@ -32,6 +32,8 @@ import Typography from "@mui/material/Typography";
 
 import { fetchBankAutoTagRules, saveBankAutoTagRules } from "./api";
 import type {
+  BankAutoTagAccountScope,
+  BankAutoTagDirection,
   BankAutoTagEditableRule,
   BankAutoTagRuleConditions,
   BankAutoTagRulesResponse,
@@ -50,20 +52,39 @@ type DraftRule = BankAutoTagEditableRule & { localId: string };
 
 const EMPTY_RULES: BankAutoTagRuleConditions = {
   matchFields: ["all_text"],
-  exact: [],
-  contains: [],
-  excludes: [],
+  exactAny: [],
+  containsAny: [],
+  containsAll: [],
+  noneOf: [],
+  regexAny: [],
 };
+
+const DIRECTION_OPTIONS: { value: BankAutoTagDirection; label: string }[] = [
+  { value: "any", label: "不限" },
+  { value: "income", label: "收入" },
+  { value: "expense", label: "支出" },
+];
+
+const ACCOUNT_SCOPE_OPTIONS: { value: BankAutoTagAccountScope["type"]; label: string }[] = [
+  { value: "any", label: "不限" },
+  { value: "bank_account", label: "指定银行账户" },
+  { value: "account_type", label: "指定账户类型" },
+  { value: "bank", label: "指定银行" },
+];
 
 function cloneRule(rule: BankAutoTagEditableRule, index: number): DraftRule {
   return {
     ...rule,
     localId: rule.code || `new-${index}`,
+    direction: rule.direction,
+    accountScope: { type: rule.accountScope.type, values: [...rule.accountScope.values] },
     rules: {
       matchFields: [...rule.rules.matchFields],
-      exact: [...rule.rules.exact],
-      contains: [...rule.rules.contains],
-      excludes: [...rule.rules.excludes],
+      exactAny: [...rule.rules.exactAny],
+      containsAny: [...rule.rules.containsAny],
+      containsAll: [...rule.rules.containsAll],
+      noneOf: [...rule.rules.noneOf],
+      regexAny: [...rule.rules.regexAny],
     },
   };
 }
@@ -90,11 +111,15 @@ function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
   return {
     ...(rule.code ? { code: rule.code } : {}),
     label: rule.label.trim(),
+    direction: rule.direction,
+    accountScope: rule.accountScope,
     rules: {
       matchFields: [...rule.rules.matchFields],
-      exact: [...rule.rules.exact],
-      contains: [...rule.rules.contains],
-      excludes: [...rule.rules.excludes],
+      exactAny: [...rule.rules.exactAny],
+      containsAny: [...rule.rules.containsAny],
+      containsAll: [...rule.rules.containsAll],
+      noneOf: [...rule.rules.noneOf],
+      regexAny: [...rule.rules.regexAny],
     },
   };
 }
@@ -107,7 +132,10 @@ function normalizedDraft(activeRules: DraftRule[], archivedRules: DraftRule[]) {
 }
 
 function ruleHasPositiveCondition(rule: DraftRule) {
-  return rule.rules.exact.length > 0 || rule.rules.contains.length > 0;
+  return rule.rules.exactAny.length > 0
+    || rule.rules.containsAny.length > 0
+    || rule.rules.containsAll.length > 0
+    || rule.rules.regexAny.length > 0;
 }
 
 function validateDraft(activeRules: DraftRule[]) {
@@ -119,7 +147,7 @@ function validateDraft(activeRules: DraftRule[]) {
       return `${rule.label || `优先级 ${index + 1}`} 至少选择一个匹配字段。`;
     }
     if (!ruleHasPositiveCondition(rule)) {
-      return `${rule.label || `优先级 ${index + 1}`} 需要填写精确命中字样或包含字样。`;
+      return `${rule.label || `优先级 ${index + 1}`} 需要填写精确命中、包含任一、必须同时包含或正则命中。`;
     }
   }
   return "";
@@ -240,6 +268,8 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         label: "",
         status: "active",
         source: "custom",
+        direction: "any",
+        accountScope: { type: "any", values: [] },
         rules: { ...EMPTY_RULES, matchFields: [...EMPTY_RULES.matchFields] },
         ruleSummary: "",
         editable: true,
@@ -527,11 +557,16 @@ function RuleEditor({
           </Stack>
           <Box className="bank-auto-tag-rule-summary">
             <RuleSummaryItem label="字段" value={summarizeFields(rule.rules.matchFields, fieldOptions)} />
-            <RuleSummaryItem label="精确" value={summarizeRuleValues(rule.rules.exact)} />
-            <RuleSummaryItem label="包含" value={summarizeRuleValues(rule.rules.contains)} />
-            {rule.rules.excludes.length > 0 ? (
-              <RuleSummaryItem label="排除" value={summarizeRuleValues(rule.rules.excludes)} tone="warning" />
+            <RuleSummaryItem label="方向" value={DIRECTION_OPTIONS.find((option) => option.value === rule.direction)?.label ?? "不限"} />
+            <RuleSummaryItem label="精确" value={summarizeRuleValues(rule.rules.exactAny)} />
+            <RuleSummaryItem label="包含任一" value={summarizeRuleValues(rule.rules.containsAny)} />
+            {rule.rules.containsAll.length > 0 ? (
+              <RuleSummaryItem label="同时包含" value={summarizeRuleValues(rule.rules.containsAll)} />
             ) : null}
+            {rule.rules.noneOf.length > 0 ? (
+              <RuleSummaryItem label="排除" value={summarizeRuleValues(rule.rules.noneOf)} tone="warning" />
+            ) : null}
+            {rule.rules.regexAny.length > 0 ? <RuleSummaryItem label="正则" value={summarizeRuleValues(rule.rules.regexAny)} /> : null}
           </Box>
         </Box>
         <Stack className="bank-auto-tag-rule-actions" direction="row" spacing={0.5} alignItems="center" onClick={stopHeaderAction}>
@@ -560,6 +595,45 @@ function RuleEditor({
               onChange={(event) => onChange((current) => ({ ...current, label: event.target.value }))}
               disabled={disabled}
             />
+            <FormControl size="small" disabled={disabled}>
+              <InputLabel id={`${rule.localId}-direction-label`}>适用方向</InputLabel>
+              <Select
+                labelId={`${rule.localId}-direction-label`}
+                label="适用方向"
+                value={rule.direction}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onChange((current) => ({
+                    ...current,
+                    direction: value === "income" || value === "expense" ? value : "any",
+                  }));
+                }}
+              >
+                {DIRECTION_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" disabled={disabled}>
+              <InputLabel id={`${rule.localId}-account-scope-label`}>适用账户范围</InputLabel>
+              <Select
+                labelId={`${rule.localId}-account-scope-label`}
+                label="适用账户范围"
+                value={rule.accountScope.type}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  const type = value === "bank_account" || value === "account_type" || value === "bank" ? value : "any";
+                  onChange((current) => ({
+                    ...current,
+                    accountScope: { type, values: type === "any" ? [] : current.accountScope.values },
+                  }));
+                }}
+              >
+                {ACCOUNT_SCOPE_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <FormControl className="bank-auto-tag-rule-field-picker" size="small" disabled={disabled}>
               <InputLabel id={`${rule.localId}-fields-label`}>匹配字段</InputLabel>
               <Select
@@ -581,13 +655,26 @@ function RuleEditor({
                 ))}
               </Select>
             </FormControl>
+            <TextField
+              label="账户范围值"
+              size="small"
+              value={valuesToLines(rule.accountScope.values)}
+              onChange={(event) => {
+                const values = linesToValues(event.target.value);
+                onChange((current) => ({ ...current, accountScope: { ...current.accountScope, values } }));
+              }}
+              disabled={disabled || rule.accountScope.type === "any"}
+              helperText={rule.accountScope.type === "any" ? "不限账户时无需填写" : "一行一个账户、类型或银行名称"}
+              multiline
+              minRows={1}
+            />
           </Box>
           <Box className="bank-auto-tag-condition-grid">
             <TextField
               className="bank-auto-tag-condition-field"
               label="精确命中字样"
-              value={valuesToLines(rule.rules.exact)}
-              onChange={(event) => setRules({ exact: linesToValues(event.target.value) })}
+              value={valuesToLines(rule.rules.exactAny)}
+              onChange={(event) => setRules({ exactAny: linesToValues(event.target.value) })}
               disabled={disabled}
               multiline
               minRows={3}
@@ -596,9 +683,9 @@ function RuleEditor({
             />
             <TextField
               className="bank-auto-tag-condition-field"
-              label="包含字样"
-              value={valuesToLines(rule.rules.contains)}
-              onChange={(event) => setRules({ contains: linesToValues(event.target.value) })}
+              label="包含任一"
+              value={valuesToLines(rule.rules.containsAny)}
+              onChange={(event) => setRules({ containsAny: linesToValues(event.target.value) })}
               disabled={disabled}
               multiline
               minRows={3}
@@ -607,14 +694,36 @@ function RuleEditor({
             />
             <TextField
               className="bank-auto-tag-condition-field"
+              label="必须同时包含"
+              value={valuesToLines(rule.rules.containsAll)}
+              onChange={(event) => setRules({ containsAll: linesToValues(event.target.value) })}
+              disabled={disabled}
+              multiline
+              minRows={3}
+              fullWidth
+              helperText="每一行都必须在选中字段中出现"
+            />
+            <TextField
+              className="bank-auto-tag-condition-field"
               label="不包含字样"
-              value={valuesToLines(rule.rules.excludes)}
-              onChange={(event) => setRules({ excludes: linesToValues(event.target.value) })}
+              value={valuesToLines(rule.rules.noneOf)}
+              onChange={(event) => setRules({ noneOf: linesToValues(event.target.value) })}
               disabled={disabled}
               multiline
               minRows={3}
               fullWidth
               helperText="命中后排除该规则"
+            />
+            <TextField
+              className="bank-auto-tag-condition-field"
+              label="正则命中"
+              value={valuesToLines(rule.rules.regexAny)}
+              onChange={(event) => setRules({ regexAny: linesToValues(event.target.value) })}
+              disabled={disabled}
+              multiline
+              minRows={3}
+              fullWidth
+              helperText="高级条件，一行一个正则表达式"
             />
           </Box>
         </Box>
