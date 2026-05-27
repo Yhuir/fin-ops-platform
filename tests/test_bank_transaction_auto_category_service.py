@@ -223,6 +223,53 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertNotIn("txn-income-not-fee", suggestions)
         self.assertNotIn("txn-excluded-fee", suggestions)
 
+    def test_contains_all_can_be_the_only_positive_condition(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 14,
+                "definitions": [
+                    {
+                        "code": "online_banking_certificate_fee",
+                        "label": "网银证书服务费",
+                        "path": ["自动识别", "网银证书服务费"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 10,
+                        "direction": "any",
+                        "rules": {
+                            "match_fields": ["all_text"],
+                            "exact_any": [],
+                            "contains_any": [],
+                            "contains_all": ["网银", "服务费"],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    }
+                ],
+            }
+        )
+
+        suggestions = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-online-banking-certificate-fee",
+                    "debit_amount": "100.00",
+                    "summary": "网银证书服务费",
+                },
+                {
+                    "id": "txn-only-online-banking",
+                    "debit_amount": "100.00",
+                    "summary": "网银证书",
+                },
+            ]
+        )
+
+        suggestion = suggestions["txn-online-banking-certificate-fee"]
+        self.assertEqual(suggestion["category_code"], "online_banking_certificate_fee")
+        self.assertEqual(suggestion["auto_category_evidence"]["condition_type"], "contains_all")
+        self.assertEqual(suggestion["auto_category_evidence"]["matched_text"], "网银、服务费")
+        self.assertNotIn("txn-only-online-banking", suggestions)
+
     def test_external_turnover_candidate_runs_after_specific_business_rules(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [

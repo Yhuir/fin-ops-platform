@@ -262,10 +262,14 @@ class BankTransactionAutoCategoryService:
             text = str(entry.get("normalized_text") or "")
             if any(exclude and exclude in text for exclude in none_of):
                 return None
-        contains_all = [
-            BankTransactionAutoCategoryService._normalize_match_text(item)
+        contains_all_tokens = [
+            str(item)
             for item in list(conditions.get("contains_all") or [])
             if str(item)
+        ]
+        contains_all = [
+            BankTransactionAutoCategoryService._normalize_match_text(item)
+            for item in contains_all_tokens
         ]
         if contains_all:
             joined_text = " ".join(str(entry.get("normalized_text") or "") for entry in normalized_entries)
@@ -290,6 +294,17 @@ class BankTransactionAutoCategoryService:
                 text = BankTransactionAutoCategoryService._normalize_regex_text(entry.get("text"))
                 if compiled.search(text):
                     return BankTransactionAutoCategoryService._evidence("regex_any", pattern, entry, rule=rule)
+        if contains_all_tokens:
+            matched_entry = BankTransactionAutoCategoryService._contains_all_evidence_entry(
+                normalized_entries,
+                contains_all,
+            )
+            return BankTransactionAutoCategoryService._evidence(
+                "contains_all",
+                "、".join(contains_all_tokens),
+                matched_entry,
+                rule=rule,
+            )
         return None
 
     @staticmethod
@@ -317,11 +332,23 @@ class BankTransactionAutoCategoryService:
         return evidence
 
     @staticmethod
+    def _contains_all_evidence_entry(
+        normalized_entries: list[dict[str, Any]],
+        contains_all: list[str],
+    ) -> dict[str, Any]:
+        for entry in normalized_entries:
+            text = str(entry.get("normalized_text") or "")
+            if any(token and token in text for token in contains_all):
+                return entry
+        return normalized_entries[0] if normalized_entries else {"semantic_field": "all_text"}
+
+    @staticmethod
     def _rule_reason(rule: dict[str, Any], evidence: dict[str, Any]) -> str:
         label = str(evidence.get("semantic_field_label") or evidence.get("semantic_field") or "文本")
         condition_labels = {
             "exact_any": "精确命中",
             "contains_any": "包含",
+            "contains_all": "同时包含",
             "regex_any": "正则命中",
         }
         condition = condition_labels.get(str(evidence.get("condition_type") or ""), "命中")
