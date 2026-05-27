@@ -272,6 +272,56 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
 
 class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
+    def test_relation_tags_use_pair_relation_row_types_for_oa_attachment_invoices(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [
+                    {
+                        "case_id": "CASE-AUTO-0003",
+                        "row_ids": [
+                            "txn_imported_1242",
+                            "oa-exp-1964",
+                            "oa-att-inv-oa-exp-1964-96685fdf79d36cc6",
+                        ],
+                        "row_types": ["bank", "oa", "invoice"],
+                    }
+                ],
+                [],
+            ]
+        )
+        builder = BankDetailSqlProjectionBuilder(connection=connection)
+
+        tags = builder._load_relation_tags(["txn_imported_1242"])  # noqa: SLF001
+
+        self.assertEqual(tags["txn_imported_1242"]["oa_relation_tag"], "有oa")
+        self.assertEqual(tags["txn_imported_1242"]["invoice_relation_tag"], "有发票")
+        self.assertEqual(tags["txn_imported_1242"]["relation_case_id"], "CASE-AUTO-0003")
+
+    def test_relation_tags_use_candidate_payload_invoice_row_ids_for_non_prefixed_invoice_rows(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [],
+                [
+                    {
+                        "case_id": "candidate:oa-bank-invoice",
+                        "row_ids": ["txn-oa-bank", "oa-exp-2001", "oa-att-inv-2001-a"],
+                        "payload": {
+                            "bank_row_ids": ["txn-oa-bank"],
+                            "oa_row_ids": ["oa-exp-2001"],
+                            "invoice_row_ids": ["oa-att-inv-2001-a"],
+                        },
+                    }
+                ],
+            ]
+        )
+        builder = BankDetailSqlProjectionBuilder(connection=connection)
+
+        tags = builder._load_relation_tags(["txn-oa-bank"])  # noqa: SLF001
+
+        self.assertEqual(tags["txn-oa-bank"]["oa_relation_tag"], "有oa")
+        self.assertEqual(tags["txn-oa-bank"]["invoice_relation_tag"], "有发票")
+        self.assertEqual(tags["txn-oa-bank"]["relation_case_id"], "candidate:oa-bank-invoice")
+
     def test_normalized_row_splits_bank_text_fields_for_bank_detail_table(self) -> None:
         builder = BankDetailSqlProjectionBuilder(connection=FakeConnection())
 

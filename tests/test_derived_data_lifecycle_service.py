@@ -83,6 +83,14 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertIn("workbench_matching", pair_plan["will_enqueue_jobs"])
         self.assertIn("workbench_matching", exception_plan["will_enqueue_jobs"])
 
+    def test_batch_accounting_relation_changed_refreshes_bank_detail_tags(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("batch_accounting_relation_changed", months=["2026-01"])
+
+        self.assertEqual(plan["affected_scopes"], ["2026-01", "all"])
+        self.assertIn("bank_detail_read_model", [domain["domain"] for domain in plan["domains"]])
+
     def test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill(self) -> None:
         service = DerivedDataLifecycleService()
 
@@ -223,6 +231,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "pair_relation_changed",
                 "exception_case_changed",
                 "bank_transaction_category_changed",
+                "bank_auto_tag_rules_changed",
                 "pending_invoice_manual_invoice_confirmed",
                 "pending_invoice_attach_existing_invoice_confirmed",
                 "no_oa_bank_batch_changed",

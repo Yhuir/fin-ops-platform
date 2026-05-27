@@ -211,6 +211,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "batch_accounting_relation_changed": (
+            "bank_detail_read_model",
             "workbench_read_model",
             "cost_statistics_read_model",
             "search_cache",

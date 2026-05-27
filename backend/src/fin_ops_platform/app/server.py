@@ -10643,14 +10643,14 @@ class Application:
             for case_id in list(repair_result.get("changed_case_ids") or [])
             if str(case_id).strip()
         ]
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=changed_case_ids,
+            action_name="repair_batch_accounting_relation_case_ids",
+        )
         self._execute_derived_data_lifecycle_event(
             "batch_accounting_relation_changed",
             scope_keys=changed_scope_keys,
             metadata={"source": "submit_batch_accounting"},
-        )
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            action_name="repair_batch_accounting_relation_case_ids",
         )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
@@ -10702,11 +10702,6 @@ class Application:
             )
         )
         changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
-        self._execute_derived_data_lifecycle_event(
-            "batch_accounting_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": "withdraw_batch_accounting"},
-        )
         try:
             self._schedule_workbench_pair_relation_persist(
                 changed_case_ids=changed_case_ids,
@@ -10718,6 +10713,11 @@ class Application:
             return self._workbench_persistence_unavailable_response(
                 StatePersistenceError("工作台关联关系暂时无法保存，请稍后重试。")
             )
+        self._execute_derived_data_lifecycle_event(
+            "batch_accounting_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": "submit_batch_accounting"},
+        )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
             action_name="submit_batch_accounting",
@@ -10766,14 +10766,14 @@ class Application:
             )
         )
         changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=changed_case_ids,
+            action_name="withdraw_batch_accounting",
+        )
         self._execute_derived_data_lifecycle_event(
             "batch_accounting_relation_changed",
             scope_keys=changed_scope_keys,
             metadata={"source": "withdraw_batch_accounting"},
-        )
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            action_name="withdraw_batch_accounting",
         )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
@@ -11856,20 +11856,6 @@ class Application:
             *[str(relation.get("case_id", "")) for relation in before_relations if str(relation.get("case_id", "")).strip()],
             resolved_case_id,
         ]
-        invalidate_started_at = monotonic()
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": resolved_case_id},
-        )
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="invalidate_read_model_scopes",
-                duration_ms=self._duration_ms(invalidate_started_at),
-                detail=",".join(changed_scope_keys),
-            )
         schedule_started_at = monotonic()
         try:
             self._schedule_workbench_pair_relation_persist(
@@ -11894,6 +11880,20 @@ class Application:
                     pass
             return self._workbench_persistence_unavailable_response(
                 StatePersistenceError("工作台关联关系暂时无法保存，请稍后重试。")
+            )
+        invalidate_started_at = monotonic()
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name, "case_id": resolved_case_id},
+        )
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="invalidate_read_model_scopes",
+                duration_ms=self._duration_ms(invalidate_started_at),
+                detail=",".join(changed_scope_keys),
             )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
@@ -12035,6 +12035,15 @@ class Application:
                 month_scope=str(active_relation.get("month_scope") or ""),
             )
         )
+        changed_case_ids = []
+        if isinstance(cancelled_relation, dict):
+            changed_case_ids.append(str(cancelled_relation.get("case_id", "")))
+        schedule_started_at = monotonic()
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=changed_case_ids,
+            request_id=request_id,
+            action_name=action_name,
+        )
         invalidate_started_at = monotonic()
         self._execute_derived_data_lifecycle_event(
             "pair_relation_changed",
@@ -12049,15 +12058,6 @@ class Application:
                 duration_ms=self._duration_ms(invalidate_started_at),
                 detail=",".join(changed_scope_keys),
             )
-        changed_case_ids = []
-        if isinstance(cancelled_relation, dict):
-            changed_case_ids.append(str(cancelled_relation.get("case_id", "")))
-        schedule_started_at = monotonic()
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            request_id=request_id,
-            action_name=action_name,
-        )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
             request_id=request_id,
@@ -12130,11 +12130,6 @@ class Application:
                 month_scope=str(active_relation.get("month_scope") or ""),
             )
         )
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
-        )
         changed_case_ids = [
             str(active_relation.get("case_id") or ""),
             *[str(relation.get("case_id") or "") for relation in restored_relations],
@@ -12143,6 +12138,11 @@ class Application:
             changed_case_ids=changed_case_ids,
             request_id=request_id,
             action_name=action_name,
+        )
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
         )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
@@ -12440,11 +12440,6 @@ class Application:
                 {"error": "invalid_personal_advance_repayment_request", "message": str(exc)},
             )
 
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name},
-        )
         self._schedule_workbench_pair_relation_persist(
             changed_case_ids=[
                 *[str(before_relation.get("case_id") or "") for before_relation in before_relations],
@@ -12452,6 +12447,11 @@ class Application:
             ],
             request_id=request_id,
             action_name=action_name,
+        )
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name},
         )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
@@ -16495,12 +16495,12 @@ class Application:
 
         if not changed:
             return
+        self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
         self._execute_derived_data_lifecycle_event(
             "pair_relation_changed",
             scope_keys=list(changed_scope_keys),
             metadata={"source": "repair_active_relations_for_removed_rows"},
         )
-        self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
 
     def _repair_active_relations_with_oa_attachment_context(self, payload: dict[str, object]) -> None:
         rows_by_id = self._raw_workbench_payload_rows_by_id(payload)
@@ -16595,12 +16595,12 @@ class Application:
 
         if not changed_case_ids:
             return
+        self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
         self._execute_derived_data_lifecycle_event(
             "pair_relation_changed",
             scope_keys=list(changed_scope_keys),
             metadata={"source": "repair_active_relations_with_oa_attachment_context"},
         )
-        self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
 
     @staticmethod
     def _raw_workbench_payload_rows_by_id(payload: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -18144,15 +18144,15 @@ class Application:
                 month_scope=str(relation.get("month_scope") or ""),
             )
         )
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": str(relation.get("case_id") or "")},
-        )
         self._schedule_workbench_pair_relation_persist(
             changed_case_ids=[str(relation.get("case_id") or "")],
             request_id=request_id,
             action_name=action_name,
+        )
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name, "case_id": str(relation.get("case_id") or "")},
         )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,

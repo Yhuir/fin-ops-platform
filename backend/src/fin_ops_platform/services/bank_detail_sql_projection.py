@@ -167,7 +167,7 @@ class BankDetailSqlProjectionBuilder:
             return {}
         relation_rows = self._connection.fetch_all(
             """
-            select case_id, row_ids
+            select case_id, row_ids, row_types, special_metadata
             from app.workbench_pair_relations
             where status = 'active'
               and row_ids && %s
@@ -176,30 +176,75 @@ class BankDetailSqlProjectionBuilder:
         )
         candidate_rows = self._connection.fetch_all(
             """
-            select candidate_key as case_id, row_ids
+            select candidate_key as case_id, row_ids, payload
             from read_model.workbench_candidate_matches
-            where status in ('active', 'candidate', 'proposed', 'open')
+            where status in ('auto_closed', 'incomplete', 'active', 'candidate', 'proposed', 'open')
               and row_ids && %s
             """,
             (transaction_ids,),
         )
         result: dict[str, dict[str, Any]] = {}
-        for row in [*relation_rows, *candidate_rows]:
+        transaction_id_set = set(transaction_ids)
+        for row in relation_rows:
             row_ids = text_list(row.get("row_ids"))
-            bank_ids = [row_id for row_id in row_ids if row_id in transaction_ids]
-            has_oa = any(_looks_like_oa_row(row_id) for row_id in row_ids)
-            has_invoice = any(_looks_like_invoice_row(row_id) for row_id in row_ids)
-            for transaction_id in bank_ids:
-                current = result.setdefault(
-                    transaction_id,
-                    {"oa_relation_tag": "无oa", "invoice_relation_tag": "无发票", "relation_case_id": None},
-                )
-                if has_oa:
-                    current["oa_relation_tag"] = "有oa"
-                if has_invoice:
-                    current["invoice_relation_tag"] = "有发票"
-                current["relation_case_id"] = current.get("relation_case_id") or text(row.get("case_id"))
+            row_types = text_list(row.get("row_types"))
+            bank_ids = [row_id for row_id in row_ids if row_id in transaction_id_set]
+            has_oa = _relation_has_row_type(row_types, "oa") or any(_looks_like_oa_row(row_id) for row_id in row_ids)
+            has_invoice = _relation_has_row_type(row_types, "invoice") or any(
+                _looks_like_invoice_row(row_id) for row_id in row_ids
+            )
+            special_metadata = row.get("special_metadata") if isinstance(row.get("special_metadata"), dict) else {}
+            if not has_oa and text_list(special_metadata.get("oa_row_ids")):
+                has_oa = True
+            if not has_invoice and text_list(special_metadata.get("invoice_row_ids")):
+                has_invoice = True
+            self._merge_relation_tags(
+                result,
+                bank_ids=bank_ids,
+                has_oa=has_oa,
+                has_invoice=has_invoice,
+                case_id=text(row.get("case_id")),
+            )
+        for row in candidate_rows:
+            row_ids = text_list(row.get("row_ids"))
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            bank_ids = [row_id for row_id in text_list(payload.get("bank_row_ids")) if row_id in transaction_id_set]
+            if not bank_ids:
+                bank_ids = [row_id for row_id in row_ids if row_id in transaction_id_set]
+            has_oa = bool(text_list(payload.get("oa_row_ids"))) or any(_looks_like_oa_row(row_id) for row_id in row_ids)
+            has_invoice = bool(text_list(payload.get("invoice_row_ids"))) or any(
+                _looks_like_invoice_row(row_id) for row_id in row_ids
+            )
+            self._merge_relation_tags(
+                result,
+                bank_ids=bank_ids,
+                has_oa=has_oa,
+                has_invoice=has_invoice,
+                case_id=text(row.get("case_id")),
+            )
         return result
+
+    @staticmethod
+    def _merge_relation_tags(
+        result: dict[str, dict[str, Any]],
+        *,
+        bank_ids: list[str],
+        has_oa: bool,
+        has_invoice: bool,
+        case_id: str | None,
+    ) -> None:
+        for transaction_id in bank_ids:
+            if not transaction_id:
+                continue
+            current = result.setdefault(
+                transaction_id,
+                {"oa_relation_tag": "无oa", "invoice_relation_tag": "无发票", "relation_case_id": None},
+            )
+            if has_oa:
+                current["oa_relation_tag"] = "有oa"
+            if has_invoice:
+                current["invoice_relation_tag"] = "有发票"
+            current["relation_case_id"] = current.get("relation_case_id") or case_id
 
     def _normalize_transaction_row(self, row: dict[str, Any]) -> dict[str, Any]:
         raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
@@ -434,6 +479,11 @@ def _looks_like_oa_row(row_id: str) -> bool:
 
 def _looks_like_invoice_row(row_id: str) -> bool:
     return str(row_id).startswith(("iv-", "iv_", "invoice-", "invoice_"))
+
+
+def _relation_has_row_type(row_types: list[str], expected: str) -> bool:
+    normalized_expected = str(expected or "").strip()
+    return any(str(row_type or "").strip() == normalized_expected for row_type in row_types)
 
 
 def _search_text(payload: dict[str, Any]) -> str:
