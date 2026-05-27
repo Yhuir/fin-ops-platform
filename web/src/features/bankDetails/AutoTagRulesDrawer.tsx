@@ -43,6 +43,7 @@ type AutoTagRulesDrawerProps = {
   open: boolean;
   onClose: () => void;
   onSaved?: (payload: BankAutoTagRulesResponse) => void;
+  refreshStatus?: "idle" | "refreshing" | "fresh";
 };
 
 type DraftRule = BankAutoTagEditableRule & { localId: string };
@@ -154,7 +155,7 @@ function RuleSummaryItem({ label, value, tone = "default" }: { label: string; va
   );
 }
 
-export default function AutoTagRulesDrawer({ open, onClose, onSaved }: AutoTagRulesDrawerProps) {
+export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStatus = "idle" }: AutoTagRulesDrawerProps) {
   const [tab, setTab] = useState<"active" | "archived">("active");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -203,6 +204,15 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved }: AutoTagRu
       });
     return () => controller.abort();
   }, [open]);
+
+  useEffect(() => {
+    if (refreshStatus === "refreshing") {
+      setFeedback("规则已保存，银行明细正在刷新。");
+    }
+    if (refreshStatus === "fresh") {
+      setFeedback("规则已保存，银行明细已刷新。");
+    }
+  }, [refreshStatus]);
 
   const dirty = useMemo(() => normalizedDraft(activeRules, archivedRules) !== baseline, [activeRules, archivedRules, baseline]);
 
@@ -319,7 +329,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved }: AutoTagRu
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
         setBaseline(normalizedDraft(nextActive, nextArchived));
-        setFeedback("规则已保存，银行明细正在刷新。");
+        setFeedback(payload.readModelStatus === "fresh" ? "规则已保存，银行明细已刷新。" : "规则已保存，银行明细正在刷新。");
         onSaved?.(payload);
       })
       .catch((caught) => {

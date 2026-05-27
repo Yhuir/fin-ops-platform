@@ -40,6 +40,7 @@ import {
   subscribeFinanceDomainEvent,
 } from "../features/domainEvents";
 import type {
+  BankAutoTagRulesResponse,
   BankDateFilter,
   BankDetailAccount,
   BankDetailExportMode,
@@ -51,6 +52,7 @@ import type { BankTransactionTagDefinition } from "../features/pendingInvoices/t
 
 const TODAY = new Date(2026, 4, 2);
 const DEFAULT_PAGE_SIZE = 100;
+const BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS = 1000;
 const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
@@ -426,6 +428,8 @@ export default function BankDetailsPage() {
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [rulesDrawerOpen, setRulesDrawerOpen] = useState(false);
   const [rulesFeedback, setRulesFeedback] = useState<string | null>(null);
+  const [rulesRefreshStatus, setRulesRefreshStatus] = useState<"idle" | "refreshing" | "fresh">("idle");
+  const rulesRefreshPendingRef = useRef(false);
   const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
@@ -445,6 +449,10 @@ export default function BankDetailsPage() {
         });
         if (payload.readModelStatus === "refreshing") {
           setReadModelStatus("refreshing");
+          if (rulesRefreshPendingRef.current) {
+            setRulesRefreshStatus("refreshing");
+            setRulesFeedback("规则已保存，银行明细正在刷新。");
+          }
         }
         setSelectedAccountKey((current) => (
           current && (current === ALL_ACCOUNTS_KEY || payload.accounts.some((account) => account.accountKey === current))
@@ -496,7 +504,18 @@ export default function BankDetailsPage() {
         setRows(payload.rows);
         setRowCount(payload.pagination.total);
         setCategoryCounts(payload.categoryCounts);
-        setReadModelStatus(payload.readModelStatus === "refreshing" ? "refreshing" : "fresh");
+        const nextReadModelStatus = payload.readModelStatus === "refreshing" ? "refreshing" : "fresh";
+        setReadModelStatus(nextReadModelStatus);
+        if (rulesRefreshPendingRef.current) {
+          if (nextReadModelStatus === "refreshing") {
+            setRulesRefreshStatus("refreshing");
+            setRulesFeedback("规则已保存，银行明细正在刷新。");
+          } else {
+            rulesRefreshPendingRef.current = false;
+            setRulesRefreshStatus("fresh");
+            setRulesFeedback("规则已保存，银行明细已刷新。");
+          }
+        }
         if (payload.tagDictionary?.tags) {
           setCategoryOptions(payload.tagDictionary.tags.filter((tag) => tag.status === "active"));
         }
@@ -517,6 +536,16 @@ export default function BankDetailsPage() {
       });
     return () => controller.abort();
   }, [dateFilter.dateFrom, dateFilter.dateTo, paginationModel.page, paginationModel.pageSize, refreshToken, searchKeyword, selectedAccountKey]);
+
+  useEffect(() => {
+    if (readModelStatus !== "refreshing" || loading || rowLoading) {
+      return undefined;
+    }
+    const retryId = window.setTimeout(() => {
+      setRefreshToken((current) => current + 1);
+    }, BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS);
+    return () => window.clearTimeout(retryId);
+  }, [loading, readModelStatus, rowLoading]);
 
   useEffect(() => {
     const handleWorkbenchRelationUpdated = (event: Event) => {
@@ -686,7 +715,7 @@ export default function BankDetailsPage() {
       });
   };
 
-  const handleAutoTagRulesSaved = (payload: { version: number }) => {
+  const handleAutoTagRulesSaved = (payload: BankAutoTagRulesResponse) => {
     persistTagVersion(payload.version);
     tagVersionRef.current = payload.version;
     window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, { detail: { version: payload.version } }));
@@ -695,7 +724,10 @@ export default function BankDetailsPage() {
       channel.postMessage({ version: payload.version });
       channel.close();
     }
+    rulesRefreshPendingRef.current = true;
+    setRulesRefreshStatus("refreshing");
     setRulesFeedback("规则已保存，银行明细正在刷新。");
+    setReadModelStatus("refreshing");
     setRefreshToken((current) => current + 1);
   };
 
@@ -1005,6 +1037,7 @@ export default function BankDetailsPage() {
         open={rulesDrawerOpen}
         onClose={() => setRulesDrawerOpen(false)}
         onSaved={handleAutoTagRulesSaved}
+        refreshStatus={rulesRefreshStatus}
       />
       <Popover
         id="bank-date-filter-popover"

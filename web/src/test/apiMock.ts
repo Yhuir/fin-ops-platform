@@ -73,6 +73,7 @@ type MockApiOptions = {
   includeOaAttachmentPaymentReceipt?: boolean;
   initialImportPreviewFileNames?: string[];
   initialImportPreviewOverrides?: Array<Record<string, string | null | undefined>>;
+  bankDetailTransactionReadModelStatuses?: Array<"fresh" | "refreshing">;
 };
 
 const templateRegistry = [
@@ -4261,6 +4262,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
   let latestEtcDraftInvoiceIds: string[] = [];
   let latestEtcDraftBatchId = "";
+  let bankDetailAutoTagRulesSaved = false;
+  let bankDetailPostSaveTransactionRequestCount = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -5248,6 +5251,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (String(init?.method || "GET").toUpperCase() !== "PUT") {
         return { body: baseRules };
       }
+      bankDetailAutoTagRulesSaved = true;
+      bankDetailPostSaveTransactionRequestCount = 0;
       const activeRules = Array.isArray(jsonBody?.active_rules) ? jsonBody.active_rules as Array<Record<string, unknown>> : [];
       const archivedRules = Array.isArray(jsonBody?.archived_rules) ? jsonBody.archived_rules as Array<Record<string, unknown>> : [];
       return {
@@ -5282,6 +5287,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/bank-details/transactions": ({ url }) => {
+      const readModelStatus = bankDetailAutoTagRulesSaved && options.bankDetailTransactionReadModelStatuses?.length
+        ? options.bankDetailTransactionReadModelStatuses[
+          Math.min(bankDetailPostSaveTransactionRequestCount++, options.bankDetailTransactionReadModelStatuses.length - 1)
+        ]
+        : "fresh";
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
@@ -5452,6 +5462,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               status: "active",
             })),
           },
+          read_model_status: readModelStatus,
         },
       };
     },

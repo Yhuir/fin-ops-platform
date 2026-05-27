@@ -264,7 +264,9 @@ describe("Bank details page", () => {
 
   test("saving automatic tag rules refreshes bank details", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
+    const fetchMock = installMockApiFetch({
+      bankDetailTransactionReadModelStatuses: ["refreshing", "refreshing", "fresh"],
+    });
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
@@ -288,6 +290,9 @@ describe("Bank details page", () => {
     await waitFor(() => {
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
+    await waitFor(() => {
+      expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
+    }, { timeout: 2500 });
     const saveCall = fetchMock.mock.calls.find(([input, init]) => (
       new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
       && init?.method === "PUT"
