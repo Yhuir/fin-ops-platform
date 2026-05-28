@@ -103,12 +103,14 @@ set +a
 /opt/miniconda3/bin/python3 scripts/rehydrate-workbench-read-models.py \
   --scope 2026-01 \
   --scope 2026-02 \
+  --statement-timeout-seconds 300 \
   --json
 ```
 
 脚本行为：
 
 - 调用 SQL projection builder 重建每个 month shard。
+- 默认把本进程 PostgreSQL `statement_timeout` 提升到 300 秒；生产大 scope 可显式调高，但必须保持有界超时。
 - 每个 month shard 发布后读取 `/refresh-status` 同口径的 consistency 状态；失败立即退出。
 - 最后调用 all-scope aggregate-only 发布；如果任一 parent shard 不一致，`all` 标记 failed 并保留旧 active。
 - 输出每个 scope 的 `active_generation_id`、`read_model_status`、`consistency_status` 和错误原因。

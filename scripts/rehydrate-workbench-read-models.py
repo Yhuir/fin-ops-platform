@@ -25,9 +25,18 @@ def main() -> int:
     parser.add_argument("--scope", action="append", default=[], help="Month scope YYYY-MM. Repeatable. Defaults to all fact-backed months.")
     parser.add_argument("--dry-run", action="store_true", help="List scopes and current status without rebuilding.")
     parser.add_argument("--json", action="store_true", help="Print JSON report.")
+    parser.add_argument(
+        "--statement-timeout-seconds",
+        type=int,
+        default=300,
+        help="PostgreSQL statement timeout for rebuild queries. Defaults to 300 seconds.",
+    )
     args = parser.parse_args()
+    if args.statement_timeout_seconds <= 0:
+        raise ValueError("--statement-timeout-seconds must be positive.")
 
     connection = PostgresConnection(PostgresSettings.from_env())
+    connection.set_statement_timeout_ms(args.statement_timeout_seconds * 1000)
     repository = PostgresReadModelRepository(connection)
     builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=repository)
     scopes = _scope_keys(builder, args.scope)
