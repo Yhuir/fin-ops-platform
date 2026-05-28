@@ -1725,6 +1725,27 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(status["last_error"], "projection failed")
         self.assertEqual(status["read_model_version"], "gen-active")
 
+    def test_repository_ignores_older_failed_workbench_generation_after_active_recovery(self) -> None:
+        class RecoveredWorkbenchGenerationConnection(FailedWorkbenchGenerationConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                rows = super().fetch_all(sql, params)
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.workbench_generations" in normalized:
+                    rows[0]["activated_at"] = "2026-05-28T09:02:00+00:00"
+                    rows[0]["source_versions"] = {"source_version": 14}
+                    rows[1]["completed_at"] = "2026-05-28T09:01:00+00:00"
+                    rows[1]["source_versions"] = {"source_version": 13}
+                return rows
+
+        repository = PostgresReadModelRepository(RecoveredWorkbenchGenerationConnection())
+
+        status = repository.get_workbench_refresh_status(scope_key="all")
+
+        self.assertEqual(status["read_model_status"], "fresh")
+        self.assertEqual(status["active_generation_id"], "gen-active")
+        self.assertEqual(status["failed_generation_id"], "gen-failed")
+        self.assertIsNone(status["last_error"])
+
     def test_repository_marks_all_scope_groups_stale_when_aggregate_builder_changes(self) -> None:
         class StaleAggregateBuilderConnection(WorkbenchSummaryGroupsConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:

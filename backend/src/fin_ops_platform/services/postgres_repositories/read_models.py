@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import date
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import json
 import re
@@ -33,6 +34,20 @@ WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggrega
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
+
+
+def _parse_postgres_timestamp(value: str | None) -> datetime | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
 WORKBENCH_ALLOWED_FILTER_COLUMNS = {
     "oa": {"applicant", "projectName", "applicationType", "counterparty", "reconciliationStatus"},
     "bank": {"counterparty", "amount", "direction", "paymentAccount", "invoiceRelationStatus", "loanRepaymentDate"},
@@ -1445,6 +1460,7 @@ class PostgresReadModelRepository:
                 completed_at::text as completed_at,
                 activated_at::text as activated_at,
                 superseded_at::text as superseded_at,
+                updated_at::text as updated_at,
                 last_error,
                 source_versions,
                 row_count,
@@ -1469,6 +1485,7 @@ class PostgresReadModelRepository:
                 "completed_at": text(row.get("completed_at")),
                 "activated_at": text(row.get("activated_at")),
                 "superseded_at": text(row.get("superseded_at")),
+                "updated_at": text(row.get("updated_at")),
                 "last_error": text(row.get("last_error")),
                 "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
                 "row_count": int_value(row.get("row_count"), 0),
@@ -1480,15 +1497,44 @@ class PostgresReadModelRepository:
         active = next((generation for generation in generations if generation.get("status") == "active"), None)
         building = next((generation for generation in generations if generation.get("status") == "building"), None)
         failed = next((generation for generation in generations if generation.get("status") == "failed"), None)
+        failed_is_relevant = PostgresReadModelRepository._workbench_failed_generation_is_relevant(
+            active=active,
+            failed=failed,
+        )
         return {
             "generations": generations,
             "active_generation_id": active.get("generation_id") if active else None,
             "building_generation_id": building.get("generation_id") if building else None,
             "failed_generation_id": failed.get("generation_id") if failed else None,
-            "generation_last_error": failed.get("last_error") if failed else None,
+            "failed_generation_is_relevant": failed_is_relevant,
+            "generation_last_error": failed.get("last_error") if failed and failed_is_relevant else None,
             "read_model_version": active.get("generation_id") if active else None,
             "generated_at": active.get("activated_at") if active else None,
         }
+
+    @staticmethod
+    def _workbench_failed_generation_is_relevant(
+        *,
+        active: dict[str, Any] | None,
+        failed: dict[str, Any] | None,
+    ) -> bool:
+        if failed is None:
+            return False
+        if active is None:
+            return True
+        active_source_version = int_value((active.get("source_versions") or {}).get("source_version"), 0)
+        failed_source_version = int_value((failed.get("source_versions") or {}).get("source_version"), 0)
+        if failed_source_version > active_source_version:
+            return True
+        active_timestamp = _parse_postgres_timestamp(
+            text(active.get("activated_at")) or text(active.get("completed_at")) or text(active.get("updated_at"))
+        )
+        failed_timestamp = _parse_postgres_timestamp(
+            text(failed.get("completed_at")) or text(failed.get("updated_at")) or text(failed.get("started_at"))
+        )
+        if active_timestamp is None or failed_timestamp is None:
+            return False
+        return failed_timestamp > active_timestamp
 
     @staticmethod
     def _workbench_generation_consistency_failures(
@@ -2529,7 +2575,7 @@ class PostgresReadModelRepository:
             read_model_status = "stale"
         elif generation_metadata.get("building_generation_id"):
             read_model_status = "refreshing"
-        elif generation_metadata.get("failed_generation_id"):
+        elif generation_metadata.get("failed_generation_is_relevant"):
             read_model_status = "stale"
         elif groups_schema_status != "fresh":
             read_model_status = "stale"
