@@ -1,9 +1,24 @@
-import { useEffect, useMemo, useState, type FocusEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent } from "react";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import AddIcon from "@mui/icons-material/Add";
-import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
-import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import CloseIcon from "@mui/icons-material/Close";
 import DeleteIcon from "@mui/icons-material/Delete";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import RestoreIcon from "@mui/icons-material/Restore";
@@ -15,6 +30,11 @@ import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Collapse from "@mui/material/Collapse";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
 import FormControl from "@mui/material/FormControl";
@@ -174,6 +194,21 @@ function ruleDisplayLabel(rule: Pick<DraftRule, "label" | "outputPrimaryLabel" |
 
 function priorityLabel(index: number) {
   return `优先级 ${index + 1}`;
+}
+
+export function reorderRulesById<T extends { localId: string }>(rules: T[], activeId: string, overId?: string | null) {
+  if (!overId || activeId === overId) {
+    return rules;
+  }
+  const activeIndex = rules.findIndex((rule) => rule.localId === activeId);
+  const overIndex = rules.findIndex((rule) => rule.localId === overId);
+  if (activeIndex < 0 || overIndex < 0) {
+    return rules;
+  }
+  const next = [...rules];
+  const [movedRule] = next.splice(activeIndex, 1);
+  next.splice(overIndex, 0, movedRule);
+  return next;
 }
 
 type RuleLinesTextFieldProps = {
@@ -361,6 +396,11 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
   const [archivedRules, setArchivedRules] = useState<DraftRule[]>([]);
   const [baseline, setBaseline] = useState("");
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(() => new Set());
+  const [pendingArchiveRule, setPendingArchiveRule] = useState<DraftRule | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   useEffect(() => {
     if (!open) {
@@ -447,18 +487,8 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
     setExpandedRuleIds((current) => new Set(current).add(`new-${createdAt}`));
   };
 
-  const moveRule = (localId: string, direction: -1 | 1) => {
-    setActiveRules((current) => {
-      const index = current.findIndex((rule) => rule.localId === localId);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) {
-        return current;
-      }
-      const next = [...current];
-      const [rule] = next.splice(index, 1);
-      next.splice(nextIndex, 0, rule);
-      return next;
-    });
+  const handleRuleDragEnd = ({ active, over }: DragEndEvent) => {
+    setActiveRules((current) => reorderRulesById(current, String(active.id), over?.id ? String(over.id) : null));
   };
 
   const archiveRule = (localId: string) => {
@@ -621,23 +651,23 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                   </Stack>
                 </Paper>
               ) : null}
-              {activeRules.map((rule, index) => (
-                <RuleEditor
-                  key={rule.localId}
-                  rule={rule}
-                  priorityLabel={priorityLabel(index)}
-                  fieldOptions={fieldOptions}
-                  expanded={expandedRuleIds.has(rule.localId)}
-                  disabled={readonly}
-                  canMoveUp={index > 0}
-                  canMoveDown={index < activeRules.length - 1}
-                  onToggle={() => toggleRuleExpanded(rule.localId)}
-                  onMoveUp={() => moveRule(rule.localId, -1)}
-                  onMoveDown={() => moveRule(rule.localId, 1)}
-                  onArchive={() => archiveRule(rule.localId)}
-                  onChange={(updater) => updateActiveRule(rule.localId, updater)}
-                />
-              ))}
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleRuleDragEnd}>
+                <SortableContext items={activeRules.map((rule) => rule.localId)} strategy={verticalListSortingStrategy}>
+                  {activeRules.map((rule, index) => (
+                    <RuleEditor
+                      key={rule.localId}
+                      rule={rule}
+                      priorityLabel={priorityLabel(index)}
+                      fieldOptions={fieldOptions}
+                      expanded={expandedRuleIds.has(rule.localId)}
+                      disabled={readonly}
+                      onToggle={() => toggleRuleExpanded(rule.localId)}
+                      onRequestArchive={() => setPendingArchiveRule(rule)}
+                      onChange={(updater) => updateActiveRule(rule.localId, updater)}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
             </>
           ) : (
             <>
@@ -662,6 +692,33 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
           )}
         </Stack>
       </Stack>
+      <Dialog
+        open={pendingArchiveRule !== null}
+        onClose={() => setPendingArchiveRule(null)}
+        aria-labelledby="bank-auto-tag-archive-dialog-title"
+      >
+        <DialogTitle id="bank-auto-tag-archive-dialog-title">确认停用标签</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {pendingArchiveRule ? `确定停用「${ruleDisplayLabel(pendingArchiveRule)}」吗？` : ""}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPendingArchiveRule(null)}>取消</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              if (pendingArchiveRule) {
+                archiveRule(pendingArchiveRule.localId);
+              }
+              setPendingArchiveRule(null);
+            }}
+          >
+            确认停用
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Drawer>
   );
 }
@@ -672,12 +729,8 @@ type RuleEditorProps = {
   fieldOptions: BankAutoTagRulesResponse["fieldOptions"];
   expanded: boolean;
   disabled: boolean;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
   onToggle: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onArchive: () => void;
+  onRequestArchive: () => void;
   onChange: (updater: (rule: DraftRule) => DraftRule) => void;
 };
 
@@ -687,12 +740,8 @@ function RuleEditor({
   fieldOptions,
   expanded,
   disabled,
-  canMoveUp,
-  canMoveDown,
   onToggle,
-  onMoveUp,
-  onMoveDown,
-  onArchive,
+  onRequestArchive,
   onChange,
 }: RuleEditorProps) {
   const setRules = (patch: Partial<BankAutoTagRuleConditions>) => {
@@ -700,6 +749,20 @@ function RuleEditor({
   };
   const title = ruleDisplayLabel(rule);
   const panelId = `${rule.localId}-editor-panel`;
+  const sortableDisabled = disabled || !rule.sortable;
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: rule.localId, disabled: sortableDisabled });
+  const sortableStyle: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
   const visibleFieldOptions = fieldOptions.filter((option) => !HIDDEN_MATCH_FIELDS.has(option.value));
   const visibleFieldValues = visibleFieldOptions.map((option) => option.value);
   const panelDisabled = disabled || !expanded;
@@ -723,7 +786,12 @@ function RuleEditor({
   };
 
   return (
-    <Paper className={`bank-auto-tag-rule-card${expanded ? " expanded" : ""}`} elevation={0}>
+    <Paper
+      ref={setNodeRef}
+      style={sortableStyle}
+      className={`bank-auto-tag-rule-card${expanded ? " expanded" : ""}${isDragging ? " dragging" : ""}`}
+      elevation={0}
+    >
       <Stack
         className="bank-auto-tag-rule-header"
         role="button"
@@ -735,6 +803,19 @@ function RuleEditor({
       >
         <Box className="bank-auto-tag-rule-header-main">
           <Stack className="bank-auto-tag-rule-title-row" direction="row" alignItems="center" spacing={1} minWidth={0}>
+            <IconButton
+              className="bank-auto-tag-drag-handle"
+              aria-label={`拖拽排序 ${title}`}
+              size="small"
+              disabled={sortableDisabled}
+              onClick={stopHeaderAction}
+              onKeyDownCapture={(event) => event.stopPropagation()}
+              ref={setActivatorNodeRef}
+              {...attributes}
+              {...listeners}
+            >
+              <DragIndicatorIcon fontSize="small" />
+            </IconButton>
             <Chip size="small" color="primary" variant="outlined" label={priorityLabel} />
             <EditableRuleTitle
               primaryLabel={rule.outputPrimaryLabel}
@@ -766,32 +847,41 @@ function RuleEditor({
                 <ToggleButton key={option.value} value={option.value}>{option.label}</ToggleButton>
               ))}
             </ToggleButtonGroup>
+            <IconButton
+              className="bank-auto-tag-inline-delete-action"
+              aria-label={`停用 ${title}`}
+              size="small"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRequestArchive();
+              }}
+              disabled={disabled}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
             {rule.source === "custom" ? <Chip size="small" label="自定义" /> : null}
           </Stack>
         </Box>
-        <Stack className="bank-auto-tag-rule-actions" direction="row" spacing={0.5} alignItems="center" onClick={stopHeaderAction}>
-          <IconButton aria-label={`${title} 上移`} size="small" onClick={onMoveUp} disabled={disabled || !canMoveUp}>
-            <ArrowUpwardIcon fontSize="small" />
-          </IconButton>
-          <IconButton aria-label={`${title} 下移`} size="small" onClick={onMoveDown} disabled={disabled || !canMoveDown}>
-            <ArrowDownwardIcon fontSize="small" />
-          </IconButton>
-          <IconButton aria-label={`${title} 停用`} size="small" onClick={onArchive} disabled={disabled}>
-            <DeleteIcon fontSize="small" />
-          </IconButton>
-          <IconButton aria-label={`${expanded ? "收起" : "展开"} ${title}`} size="small" onClick={onToggle}>
-            {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-          </IconButton>
-        </Stack>
+        <IconButton
+          className="bank-auto-tag-expand-action"
+          aria-label={`${expanded ? "收起" : "展开"} ${title}`}
+          size="small"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+        </IconButton>
       </Stack>
       <Collapse
-          id={panelId}
-          className="bank-auto-tag-rule-editor-shell"
-          in={expanded}
-          timeout={180}
-          unmountOnExit
-          aria-hidden={!expanded}
-        >
+        id={panelId}
+        className="bank-auto-tag-rule-editor-shell"
+        in={expanded}
+        timeout={180}
+        unmountOnExit
+        aria-hidden={!expanded}
+      >
         <Box className="bank-auto-tag-rule-editor-slide">
           <Box className="bank-auto-tag-rule-editor">
             <Box className="bank-auto-tag-rule-editor-body">

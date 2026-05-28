@@ -6855,11 +6855,18 @@ body.column-layout-dragging {
   box-shadow: inset 5px 0 0 #1d4ed8, 0 12px 24px rgba(37, 99, 235, 0.12);
 }
 
+.bank-auto-tag-rule-card.dragging {
+  z-index: 2;
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  box-shadow: inset 5px 0 0 #1d4ed8, 0 18px 34px rgba(30, 64, 175, 0.24);
+}
+
 .bank-auto-tag-rule-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: start;
+  align-items: center;
   padding: 14px 16px;
   cursor: pointer;
 }
@@ -6933,13 +6940,40 @@ body.column-layout-dragging {
   font-weight: 800;
 }
 
-.bank-auto-tag-rule-actions {
+.bank-auto-tag-drag-handle {
   flex: 0 0 auto;
 }
 
-.bank-auto-tag-rule-actions .MuiIconButton-root {
+.bank-auto-tag-drag-handle.MuiIconButton-root {
   width: 30px;
   height: 30px;
+  color: #475569;
+  cursor: grab;
+}
+
+.bank-auto-tag-drag-handle.MuiIconButton-root:active,
+.bank-auto-tag-rule-card.dragging .bank-auto-tag-drag-handle.MuiIconButton-root {
+  cursor: grabbing;
+}
+
+.bank-auto-tag-inline-delete-action {
+  flex: 0 0 auto;
+}
+
+.bank-auto-tag-inline-delete-action.MuiIconButton-root {
+  width: 30px;
+  height: 30px;
+  color: #7f1d1d;
+}
+
+.bank-auto-tag-expand-action {
+  justify-self: end;
+  align-self: center;
+}
+
+.bank-auto-tag-expand-action.MuiIconButton-root {
+  width: 32px;
+  height: 32px;
 }
 
 .bank-auto-tag-rule-editor-shell {
@@ -7037,7 +7071,6 @@ body.column-layout-dragging {
 }
 
 @media (max-width: 900px) {
-  .bank-auto-tag-rule-header,
   .bank-auto-tag-rule-editor-body {
     grid-template-columns: 1fr;
   }
@@ -7050,7 +7083,7 @@ body.column-layout-dragging {
     justify-content: flex-start;
   }
 
-  .bank-auto-tag-rule-actions {
+  .bank-auto-tag-expand-action {
     justify-self: end;
   }
 }

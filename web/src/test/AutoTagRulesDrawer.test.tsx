@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
-import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
+import AutoTagRulesDrawer, { reorderRulesById } from "../features/bankDetails/AutoTagRulesDrawer";
 import { installMockApiFetch } from "./apiMock";
 
 function renderDrawer(onSaved = vi.fn()) {
@@ -62,6 +62,26 @@ afterEach(() => {
 });
 
 describe("AutoTagRulesDrawer", () => {
+  test("reorders active rules by drag ids without mutating the original list", () => {
+    const rules = [
+      { localId: "fee" },
+      { localId: "salary" },
+      { localId: "tax" },
+    ];
+
+    expect(reorderRulesById(rules, "tax", "fee")).toEqual([
+      { localId: "tax" },
+      { localId: "fee" },
+      { localId: "salary" },
+    ]);
+    expect(rules).toEqual([
+      { localId: "fee" },
+      { localId: "salary" },
+      { localId: "tax" },
+    ]);
+    expect(reorderRulesById(rules, "missing", "fee")).toBe(rules);
+  });
+
   test("loads system, active, and archived rule areas", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
@@ -94,9 +114,51 @@ describe("AutoTagRulesDrawer", () => {
     expect(feeHeader).not.toHaveTextContent("字段");
     expect(feeHeader).not.toHaveTextContent("精确 0");
     expect(feeHeader).not.toHaveTextContent("包含任一 手续费");
+    expect(feeCard?.querySelector(".bank-auto-tag-rule-actions")).not.toBeInTheDocument();
+    expect(feeCard?.querySelector(".bank-auto-tag-expand-action")).toBeInTheDocument();
     expect(feeCard?.querySelector(".bank-auto-tag-rule-editor-shell")).toBeInTheDocument();
     expect(feeCard?.querySelector(".bank-auto-tag-rule-editor-body")).toBeInTheDocument();
     expect(feeCard?.querySelector(".bank-auto-tag-condition-grid")).toBeInTheDocument();
+  });
+
+  test("uses sortable drag handles instead of up and down ordering buttons", async () => {
+    installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "费用 / 手续费");
+
+    expect(within(drawer).queryByRole("button", { name: /上移/ })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: /下移/ })).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "拖拽排序 费用 / 手续费" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "拖拽排序 费用 / 工资" })).toBeInTheDocument();
+  });
+
+  test("opens a confirmation dialog before archiving an active rule", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "费用 / 手续费");
+
+    await user.click(within(drawer).getByRole("button", { name: "停用 费用 / 手续费" }));
+    const dialog = await screen.findByRole("dialog", { name: "确认停用标签" });
+    expect(within(dialog).getByText("确定停用「费用 / 手续费」吗？")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认停用标签" })).not.toBeInTheDocument());
+    expect(within(drawer).getByRole("heading", { name: "费用 / 手续费" })).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "停用 费用 / 手续费" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "确认停用标签" })).getByRole("button", { name: "确认停用" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认停用标签" })).not.toBeInTheDocument());
+    expect(within(drawer).queryByRole("heading", { name: "费用 / 手续费" })).not.toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    expect(payload?.archived_rules).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "fee", label: "手续费" }),
+    ]));
   });
 
   test("shows production rule controls without exposing hidden system fields", async () => {
@@ -242,6 +304,10 @@ describe("AutoTagRulesDrawer", () => {
     expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*overflow:\s*visible/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*border-color:\s*#2563eb/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*box-shadow:\s*inset 5px 0 0 #1d4ed8/s);
+    expect(source).toMatch(/\.bank-auto-tag-drag-handle\s*\{/s);
+    expect(source).toMatch(/\.bank-auto-tag-inline-delete-action\s*\{/s);
+    expect(source).toMatch(/\.bank-auto-tag-expand-action\s*\{/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-card\.dragging\s*\{[^}]*box-shadow:/s);
     expect(source).toMatch(/\.bank-auto-tag-field-actions\s*\{/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-editor-slide\s*\{[^}]*transition:[^}]*transform[^}]*opacity/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-editor-shell\.MuiCollapse-entered\s+\.bank-auto-tag-rule-editor-slide\s*\{[^}]*transform:\s*translateX\(0\)/s);
@@ -258,6 +324,20 @@ describe("AutoTagRulesDrawer", () => {
     expect(source).toContain("<Collapse");
     expect(source).toContain("unmountOnExit");
     expect(source).not.toContain("setEditorMounted");
+  });
+
+  test("uses dnd-kit sortable primitives for active rule ordering", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/features/bankDetails/AutoTagRulesDrawer.tsx"), "utf8");
+
+    expect(source).toContain("@dnd-kit/core");
+    expect(source).toContain("@dnd-kit/sortable");
+    expect(source).toContain("@dnd-kit/utilities");
+    expect(source).toContain("DndContext");
+    expect(source).toContain("SortableContext");
+    expect(source).toContain("useSortable");
+    expect(source).toContain("verticalListSortingStrategy");
+    expect(source).toContain("sortableKeyboardCoordinates");
+    expect(source).toContain("reorderRulesById");
   });
 
   test("validates active rules before save", async () => {
@@ -289,7 +369,9 @@ describe("AutoTagRulesDrawer", () => {
     await editRuleLabel(user, firstCard, "费用", "手续费调整");
     await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
 
-    await user.click(within(drawer).getByRole("button", { name: "未命名标签 停用" }));
+    await user.click(within(drawer).getByRole("button", { name: "停用 未命名标签" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "确认停用标签" })).getByRole("button", { name: "确认停用" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认停用标签" })).not.toBeInTheDocument());
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
