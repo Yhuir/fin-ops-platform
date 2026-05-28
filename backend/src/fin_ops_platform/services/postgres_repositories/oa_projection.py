@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import fields
+import re
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus
@@ -13,6 +14,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
     serialize_value,
     text,
 )
+
+
+OA_PROJECTION_SYNC_VERSION = "2026-05-28-scope-replace-v1"
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -85,6 +89,12 @@ class PostgresOAProjectionRepository:
                     raise RuntimeError(f"OA projection upsert did not return application id for {record.id}.")
                 self._replace_application_items(connection, application_id=application_id, record=record)
                 self._replace_application_attachments(connection, application_id=application_id, record=record)
+            self._migrate_legacy_row_references(connection, self._legacy_row_id_alias_pairs(normalized_records))
+            self._delete_scope_records_not_in(
+                connection,
+                records=normalized_records,
+                scope_key=scope_key,
+            )
             self._record_watermark(
                 scope_key=scope_key,
                 status="succeeded",
@@ -94,6 +104,231 @@ class PostgresOAProjectionRepository:
 
         run_in_transaction(self._connection, write)
         return len(normalized_records)
+
+    def _delete_scope_records_not_in(
+        self,
+        connection: Any,
+        *,
+        records: list[OAApplicationRecord],
+        scope_key: str,
+    ) -> list[str]:
+        incoming_row_ids = sorted({str(record.id or "").strip() for record in records if str(record.id or "").strip()})
+        if not incoming_row_ids:
+            return []
+        normalized_scope_key = text(scope_key) or "all"
+        if normalized_scope_key == "all":
+            months = sorted({
+                month_start(record.month)
+                for record in records
+                if month_start(record.month)
+            })
+            if not months:
+                return []
+            rows = connection.fetch_all(
+                """
+                with stale as (
+                    select oa.id, oa.row_id, oa.scope_month
+                    from app.oa_applications oa
+                    where oa.scope_month = any(%s::date[])
+                      and not (oa.row_id = any(%s::text[]))
+                      and not exists (
+                          select 1
+                          from app.manual_oa_imports manual
+                          where manual.row_id = oa.row_id
+                            and manual.status = 'active'
+                      )
+                ),
+                deleted_items as (
+                    delete from app.oa_application_items item
+                    using stale
+                    where item.oa_application_id = stale.id
+                    returning item.id
+                ),
+                deleted_attachments as (
+                    delete from app.oa_attachments attachment
+                    using stale
+                    where attachment.oa_application_id = stale.id
+                    returning attachment.id
+                )
+                delete from app.oa_applications oa
+                using stale
+                where oa.id = stale.id
+                returning stale.row_id, to_char(stale.scope_month, 'YYYY-MM') as month
+                """,
+                (months, incoming_row_ids),
+            )
+            return [row_id for row in rows if (row_id := text(row.get("row_id")))]
+
+        scope_month = month_start(normalized_scope_key)
+        if not scope_month:
+            return []
+        rows = connection.fetch_all(
+            """
+            with stale as (
+                select oa.id, oa.row_id, oa.scope_month
+                from app.oa_applications oa
+                where oa.scope_month = %s::date
+                  and not (oa.row_id = any(%s::text[]))
+                  and not exists (
+                      select 1
+                      from app.manual_oa_imports manual
+                      where manual.row_id = oa.row_id
+                        and manual.status = 'active'
+                  )
+            ),
+            deleted_items as (
+                delete from app.oa_application_items item
+                using stale
+                where item.oa_application_id = stale.id
+                returning item.id
+            ),
+            deleted_attachments as (
+                delete from app.oa_attachments attachment
+                using stale
+                where attachment.oa_application_id = stale.id
+                returning attachment.id
+            )
+            delete from app.oa_applications oa
+            using stale
+            where oa.id = stale.id
+            returning stale.row_id, to_char(stale.scope_month, 'YYYY-MM') as month
+            """,
+            (scope_month, incoming_row_ids),
+        )
+        return [row_id for row in rows if (row_id := text(row.get("row_id")))]
+
+    def _migrate_legacy_row_references(self, connection: Any, alias_pairs: dict[str, str]) -> None:
+        if not alias_pairs:
+            return
+        old_row_ids = sorted(alias_pairs)
+        new_row_ids = [alias_pairs[old_row_id] for old_row_id in old_row_ids]
+        self._replace_row_id_array_references(
+            connection,
+            table_name="app.workbench_pair_relations",
+            alias_pairs=alias_pairs,
+            where_sql="row_ids && %s::text[]",
+            where_params=(old_row_ids,),
+        )
+        self._replace_row_id_array_references(
+            connection,
+            table_name="app.workbench_exception_cases",
+            alias_pairs=alias_pairs,
+            where_sql="row_ids && %s::text[]",
+            where_params=(old_row_ids,),
+        )
+        connection.execute(
+            """
+            update app.workbench_row_overrides override
+            set row_id = alias.new_row_id,
+                changed_row_ids = array[alias.new_row_id]::text[],
+                override_payload = jsonb_set(
+                    jsonb_set(override.override_payload, '{row_id}', to_jsonb(alias.new_row_id), true),
+                    '{changed_row_ids}', to_jsonb(array[alias.new_row_id]::text[]),
+                    true
+                ),
+                raw_payload = jsonb_set(
+                    jsonb_set(
+                        jsonb_set(
+                            jsonb_set(override.raw_payload, '{normalized_payload,row_id}', to_jsonb(alias.new_row_id), true),
+                            '{normalized_payload,changed_row_ids}',
+                            to_jsonb(array[alias.new_row_id]::text[]),
+                            true
+                        ),
+                        '{row_id}',
+                        to_jsonb(alias.new_row_id),
+                        true
+                    ),
+                    '{changed_row_ids}',
+                    to_jsonb(array[alias.new_row_id]::text[]),
+                    true
+                ),
+                updated_at = now()
+            from (
+                select *
+                from unnest(%s::text[], %s::text[]) as alias(old_row_id, new_row_id)
+            ) alias
+            where override.row_id = alias.old_row_id
+              and not exists (
+                  select 1
+                  from app.workbench_row_overrides existing
+                  where existing.row_id = alias.new_row_id
+                    and existing.row_type = override.row_type
+              )
+            """,
+            (old_row_ids, new_row_ids),
+        )
+
+    @staticmethod
+    def _replace_row_id_array_references(
+        connection: Any,
+        *,
+        table_name: str,
+        alias_pairs: dict[str, str],
+        where_sql: str,
+        where_params: tuple[Any, ...],
+    ) -> None:
+        old_row_ids = sorted(alias_pairs)
+        new_row_ids = [alias_pairs[old_row_id] for old_row_id in old_row_ids]
+        connection.execute(
+            f"""
+            with replacement as (
+                select relation.id,
+                       (
+                           select coalesce(array_agg(deduped.row_id order by deduped.first_position), array[]::text[])
+                           from (
+                               select replaced.row_id, min(replaced.position) as first_position
+                               from (
+                                   select coalesce(alias.new_row_id, row_value.row_id) as row_id,
+                                          row_value.position
+                                   from unnest(relation.row_ids) with ordinality as row_value(row_id, position)
+                                   left join (
+                                       select *
+                                       from unnest(%s::text[], %s::text[]) as alias(old_row_id, new_row_id)
+                                   ) alias on alias.old_row_id = row_value.row_id
+                               ) replaced
+                               group by replaced.row_id
+                           ) deduped
+                       ) as row_ids
+                from {table_name} relation
+                where {where_sql}
+            )
+            update {table_name} relation
+            set row_ids = replacement.row_ids,
+                raw_payload = jsonb_set(
+                    jsonb_set(relation.raw_payload, '{{normalized_payload,row_ids}}', to_jsonb(replacement.row_ids), true),
+                    '{{row_ids}}',
+                    to_jsonb(replacement.row_ids),
+                    true
+                ),
+                updated_at = now()
+            from replacement
+            where relation.id = replacement.id
+            """,
+            (old_row_ids, new_row_ids, *where_params),
+        )
+
+    @staticmethod
+    def _legacy_row_id_alias_pairs(records: list[OAApplicationRecord]) -> dict[str, str]:
+        pairs: dict[str, str] = {}
+        for record in records:
+            row_id = str(getattr(record, "id", "") or "").strip()
+            if not row_id.startswith("oa-exp-"):
+                continue
+            body = row_id.removeprefix("oa-exp-")
+            if not body or re.search(r"-\d+$", body):
+                continue
+            legacy_suffixes: set[int] = set()
+            for index, item in enumerate(list(getattr(record, "expense_items", []) or []), start=1):
+                legacy_suffixes.add(index)
+                if isinstance(item, dict):
+                    row_index = text(item.get("row_index"))
+                    if row_index and row_index.isdigit():
+                        legacy_suffixes.add(int(row_index) + 1)
+            if not legacy_suffixes:
+                legacy_suffixes.add(1)
+            for suffix in sorted(legacy_suffixes):
+                pairs[f"{row_id}-{suffix}"] = row_id
+        return pairs
 
     def _replace_application_items(self, connection: Any, *, application_id: str, record: OAApplicationRecord) -> None:
         connection.execute("delete from app.oa_application_items where oa_application_id = %s::uuid", (application_id,))

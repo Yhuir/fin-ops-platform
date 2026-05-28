@@ -113,6 +113,10 @@ class OAProjectionWriteConnection(OAProjectionConnection):
     def __init__(self) -> None:
         super().__init__(rows=[])
 
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        self.executed.append((" ".join(sql.lower().split()), params))
+        return []
+
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.executed.append((" ".join(sql.lower().split()), params))
         if "returning id::text" in self.executed[-1][0]:
@@ -182,6 +186,52 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(attachment_inserts[0][4], "oa-exp-files:attachment:oa-exp-files:item:1:0:交通发票.pdf")
         self.assertEqual(attachment_inserts[0][7], None)
         self.assertEqual(attachment_inserts[0][9].obj["source_expense_item_id"], "oa-exp-files:item:1")
+
+    def test_postgres_oa_projection_repository_replaces_month_scope_and_migrates_legacy_expense_relations(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        connection = OAProjectionWriteConnection()
+        repository = PostgresOAProjectionRepository(connection)
+        record = oa_record(row_id="oa-exp-2007", month="2026-03")
+        record.expense_items = [
+            {"row_index": "0", "expense_item_id": "oa-exp-2007:item:0"},
+            {"row_index": "1", "expense_item_id": "oa-exp-2007:item:1"},
+        ]
+
+        count = repository.upsert_application_records(
+            [record],
+            scope_key="2026-03",
+        )
+
+        self.assertEqual(count, 1)
+        relation_update = [
+            (sql, params)
+            for sql, params in connection.executed
+            if "update app.workbench_pair_relations relation" in sql
+        ]
+        self.assertEqual(len(relation_update), 1)
+        self.assertEqual(
+            relation_update[0][1],
+            (["oa-exp-2007-1", "oa-exp-2007-2"], ["oa-exp-2007", "oa-exp-2007"], ["oa-exp-2007-1", "oa-exp-2007-2"]),
+        )
+        self.assertIn("raw_payload = jsonb_set", relation_update[0][0])
+        self.assertIn("normalized_payload,row_ids", relation_update[0][0])
+        override_update = [
+            (sql, params)
+            for sql, params in connection.executed
+            if "update app.workbench_row_overrides override" in sql
+        ]
+        self.assertEqual(len(override_update), 1)
+        self.assertIn("override_payload = jsonb_set", override_update[0][0])
+        self.assertIn("normalized_payload,row_id", override_update[0][0])
+        stale_delete = [
+            (sql, params)
+            for sql, params in connection.executed
+            if "delete from app.oa_applications oa" in sql and "stale" in sql
+        ]
+        self.assertEqual(len(stale_delete), 1)
+        self.assertIn("oa.scope_month = %s::date", stale_delete[0][0])
+        self.assertEqual(stale_delete[0][1], ("2026-03-01", ["oa-exp-2007"]))
 
     def test_workbench_query_service_reads_oa_rows_from_sql_projection_adapter(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter

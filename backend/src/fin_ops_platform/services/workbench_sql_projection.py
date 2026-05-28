@@ -12,6 +12,7 @@ from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
     PostgresOAProjectionRepository,
 )
@@ -143,6 +144,7 @@ class WorkbenchSqlProjectionBuilder:
                         "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
                         "source_version": resolved_source_version,
                         "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+                        "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
                     },
                 }
             }
@@ -1044,6 +1046,7 @@ class WorkbenchSqlProjectionBuilder:
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
         grouped["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
         grouped["oa_attachment_invoice_parser_version"] = MongoOAAdapter._attachment_invoice_cache_parser_version()
+        grouped["oa_projection_sync_version"] = OA_PROJECTION_SYNC_VERSION
         return grouped
 
     def _apply_reconciliation_decisions_to_rows(

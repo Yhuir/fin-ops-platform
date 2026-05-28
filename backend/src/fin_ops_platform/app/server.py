@@ -157,7 +157,10 @@ from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceQueryService,
     VALID_FILTERS as PENDING_INVOICE_VALID_FILTERS,
 )
-from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter
+from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    OA_PROJECTION_SYNC_VERSION,
+    PostgresOAProjectionAdapter,
+)
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
@@ -1791,17 +1794,21 @@ class Application:
                 },
             )
         payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
-        if self._workbench_sql_view_needs_oa_attachment_parser_resync(view):
-            self._enqueue_oa_attachment_parser_resync(
+        oa_sync_refresh_reason = self._workbench_sql_view_oa_sync_refresh_reason(view)
+        if oa_sync_refresh_reason:
+            self._enqueue_oa_projection_sync_refresh(
                 scope_key,
-                reason="oa_attachment_invoice_parser_version_changed",
+                reason=oa_sync_refresh_reason,
             )
             payload["read_model_status"] = "refreshing"
             payload["read_model_scope_key"] = scope_key
-            payload["read_model_refresh_reason"] = "oa_attachment_invoice_parser_version_changed"
+            payload["read_model_refresh_reason"] = oa_sync_refresh_reason
             current_parser_version = self._current_oa_attachment_invoice_parser_version()
             if current_parser_version:
                 payload["oa_attachment_invoice_parser_version"] = current_parser_version
+            current_projection_version = self._current_oa_projection_sync_version()
+            if current_projection_version:
+                payload["oa_projection_sync_version"] = current_projection_version
             if view.get("generated_at"):
                 payload["read_model_generated_at"] = view.get("generated_at")
             if isinstance(view.get("rows_page"), dict):
@@ -14511,6 +14518,7 @@ class Application:
 
     def _workbench_matching_source_versions(self) -> dict[str, object]:
         parser_version = self._current_oa_attachment_invoice_parser_version()
+        projection_sync_version = self._current_oa_projection_sync_version()
         payload: dict[str, object] = {
             "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
             "workbench_candidate_match_schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
@@ -14520,6 +14528,8 @@ class Application:
         }
         if parser_version:
             payload["oa_attachment_invoice_parser_version"] = parser_version
+        if projection_sync_version:
+            payload["oa_projection_sync_version"] = projection_sync_version
         return payload
 
     def _workbench_read_model_source_versions(self) -> dict[str, object]:
@@ -14543,6 +14553,9 @@ class Application:
         parser_version = self._current_oa_attachment_invoice_parser_version()
         if parser_version:
             payload["oa_attachment_invoice_parser_version"] = parser_version
+        projection_sync_version = self._current_oa_projection_sync_version()
+        if projection_sync_version:
+            payload["oa_projection_sync_version"] = projection_sync_version
         return payload
 
     def _turnover_relation_snapshot_for_workbench(self) -> dict[str, object]:
@@ -15821,20 +15834,33 @@ class Application:
     def _current_oa_attachment_invoice_parser_version(self) -> str:
         return MongoOAAdapter._attachment_invoice_cache_parser_version()
 
-    def _workbench_sql_view_needs_oa_attachment_parser_resync(self, view: dict[str, object]) -> bool:
+    def _current_oa_projection_sync_version(self) -> str:
+        return OA_PROJECTION_SYNC_VERSION
+
+    def _workbench_sql_view_oa_sync_refresh_reason(self, view: dict[str, object]) -> str:
         expected_parser_version = self._current_oa_attachment_invoice_parser_version()
-        if not expected_parser_version:
-            return False
         source_versions = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
         payload = view.get("payload") if isinstance(view.get("payload"), dict) else {}
-        cached_parser_version = str(
-            source_versions.get("oa_attachment_invoice_parser_version")
-            or payload.get("oa_attachment_invoice_parser_version")
-            or ""
-        ).strip()
-        return cached_parser_version != expected_parser_version
+        if expected_parser_version:
+            cached_parser_version = str(
+                source_versions.get("oa_attachment_invoice_parser_version")
+                or payload.get("oa_attachment_invoice_parser_version")
+                or ""
+            ).strip()
+            if cached_parser_version != expected_parser_version:
+                return "oa_attachment_invoice_parser_version_changed"
+        expected_projection_sync_version = self._current_oa_projection_sync_version()
+        if expected_projection_sync_version:
+            cached_projection_sync_version = str(
+                source_versions.get("oa_projection_sync_version")
+                or payload.get("oa_projection_sync_version")
+                or ""
+            ).strip()
+            if cached_projection_sync_version != expected_projection_sync_version:
+                return "oa_projection_sync_version_changed"
+        return ""
 
-    def _enqueue_oa_attachment_parser_resync(self, scope_key: str, *, reason: str) -> bool:
+    def _enqueue_oa_projection_sync_refresh(self, scope_key: str, *, reason: str) -> bool:
         parser_version = self._current_oa_attachment_invoice_parser_version()
         if not parser_version:
             return False
@@ -15847,21 +15873,30 @@ class Application:
         enqueue = getattr(queue_repository, "enqueue", None)
         if not callable(enqueue):
             return False
+        projection_sync_version = self._current_oa_projection_sync_version()
+        if reason == "oa_projection_sync_version_changed":
+            dedupe_key = f"oa.sync:{normalized_scope_key}:projection:{projection_sync_version}"
+        else:
+            dedupe_key = f"oa.sync:{normalized_scope_key}:attachment-parser:{parser_version}"
         enqueue(
             event_type="oa.sync",
             aggregate_type="oa",
             aggregate_id=normalized_scope_key,
             scope_type="oa",
             scope_key=normalized_scope_key,
-            dedupe_key=f"oa.sync:{normalized_scope_key}:attachment-parser:{parser_version}",
+            dedupe_key=dedupe_key,
             payload={
                 "scope_key": normalized_scope_key,
                 "triggered_by": "system",
                 "reason": reason,
                 "oa_attachment_invoice_parser_version": parser_version,
+                "oa_projection_sync_version": projection_sync_version,
             },
         )
         return True
+
+    def _enqueue_oa_attachment_parser_resync(self, scope_key: str, *, reason: str) -> bool:
+        return self._enqueue_oa_projection_sync_refresh(scope_key, reason=reason)
 
     def _build_api_workbench_ignored_rows_payload(self, month: str, *, visibility_key: str = "global") -> list[dict[str, object]]:
         read_repository = getattr(self, "_workbench_sql_read_repository", None)
