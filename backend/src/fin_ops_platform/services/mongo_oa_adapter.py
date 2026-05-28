@@ -2004,10 +2004,13 @@ class MongoOAAdapter(OAAdapter):
         file_entry: dict[str, object],
         *,
         evidences: list[dict[str, str]],
+        parse_status: str | None = None,
+        parse_error: str | None = None,
     ) -> dict[str, str]:
         source_fields = cls._attachment_invoice_source_fields(file_entry)
         source_attachment_name = source_fields["source_attachment_name"]
         source_attachment_key = source_fields["source_attachment_key"]
+        status = clean_string(parse_status or "") or ("parsed" if evidences else "no_evidence")
         return {
             **source_fields,
             "source_attachment_name": source_attachment_name,
@@ -2021,6 +2024,27 @@ class MongoOAAdapter(OAAdapter):
                 or ""
             ),
             "suffix": clean_string(file_entry.get("suffix") or Path(source_attachment_name).suffix.lstrip(".")).lower(),
+            "parse_status": status,
+            "parse_error": clean_string(parse_error or ""),
+        }
+
+    def _parse_attachment_file_result_from_service(self, file_entry: dict[str, object]) -> dict[str, object]:
+        parse_evidences = getattr(self._attachment_invoice_service, "parse_evidences", None)
+        default_parse_evidences = getattr(type(self._attachment_invoice_service), "parse_evidences", None)
+        if callable(parse_evidences) and getattr(parse_evidences, "__func__", None) is not default_parse_evidences:
+            evidences = self._parse_attachment_evidences_from_service([file_entry])
+            return {
+                "evidences": evidences,
+                "parse_status": "parsed" if evidences else "no_evidence",
+                "parse_error": "",
+            }
+        parse_file_result = getattr(self._attachment_invoice_service, "parse_file_result", None)
+        if callable(parse_file_result):
+            result = parse_file_result(file_entry)
+            return dict(result) if isinstance(result, dict) else {"evidences": [], "parse_status": "parse_failed"}
+        evidences = self._parse_attachment_evidences_from_service([file_entry])
+        return {
+            "evidences": evidences,
             "parse_status": "parsed" if evidences else "no_evidence",
             "parse_error": "",
         }
@@ -2103,13 +2127,21 @@ class MongoOAAdapter(OAAdapter):
         parsed_artifacts: list[dict[str, str]] = []
         updated = False
         for cache_key, file_entry in files:
+            file_result = self._parse_attachment_file_result_from_service(file_entry)
             evidences = [
                 self._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
-                for evidence in self._parse_attachment_evidences_from_service([file_entry])
+                for evidence in list(file_result.get("evidences") or [])
                 if isinstance(evidence, dict)
             ]
             invoices = self._dedupe_attachment_invoices(self._attachment_invoices_from_evidences(evidences))
-            artifacts = [self._attachment_artifact_for_file(file_entry, evidences=evidences)]
+            artifacts = [
+                self._attachment_artifact_for_file(
+                    file_entry,
+                    evidences=evidences,
+                    parse_status=clean_string(file_result.get("parse_status") or ""),
+                    parse_error=clean_string(file_result.get("parse_error") or ""),
+                )
+            ]
             cache.save_oa_attachment_invoice_cache_entry(
                 cache_key,
                 {
@@ -2150,13 +2182,21 @@ class MongoOAAdapter(OAAdapter):
         updated = False
         try:
             for cache_key, file_entry in files:
+                file_result = self._parse_attachment_file_result_from_service(file_entry)
                 evidences = [
                     self._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
-                    for evidence in self._parse_attachment_evidences_from_service([file_entry])
+                    for evidence in list(file_result.get("evidences") or [])
                     if isinstance(evidence, dict)
                 ]
                 invoices = self._dedupe_attachment_invoices(self._attachment_invoices_from_evidences(evidences))
-                artifacts = [self._attachment_artifact_for_file(file_entry, evidences=evidences)]
+                artifacts = [
+                    self._attachment_artifact_for_file(
+                        file_entry,
+                        evidences=evidences,
+                        parse_status=clean_string(file_result.get("parse_status") or ""),
+                        parse_error=clean_string(file_result.get("parse_error") or ""),
+                    )
+                ]
                 cache.save_oa_attachment_invoice_cache_entry(
                     cache_key,
                     {

@@ -10133,16 +10133,23 @@ class Application:
             )
         scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
         scope_summary = self._bank_detail_scope_summary(scope_keys)
-        if scope_summary.get("read_model_status") != "fresh":
+        read_model_status = str(scope_summary.get("read_model_status") or "missing")
+        if read_model_status == "missing":
             self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
                 scope_keys,
-                reason=f"api_{scope_summary.get('read_model_status') or 'stale'}",
+                reason="api_missing",
                 scope_summary=scope_summary,
             )
             return self._bank_detail_accounts_refreshing_payload(
                 scope_keys=scope_keys,
                 date_from=date_from,
                 date_to=date_to,
+                scope_summary=scope_summary,
+            )
+        if read_model_status != "fresh":
+            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
+                scope_keys,
+                reason=f"api_{read_model_status}",
                 scope_summary=scope_summary,
             )
         cache_key = self._bank_detail_redis_cache_key(
@@ -10153,7 +10160,7 @@ class Application:
             },
             scope_summary=scope_summary,
         )
-        cached = self._get_bank_detail_cached_payload(cache_key)
+        cached = self._get_bank_detail_cached_payload(cache_key) if read_model_status == "fresh" else None
         if cached is not None:
             cached["cache_status"] = "hit"
             return cached
@@ -10165,10 +10172,14 @@ class Application:
         if not isinstance(payload, dict):
             self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="api_miss")
             return self._bank_detail_accounts_refreshing_payload(scope_keys=scope_keys, date_from=date_from, date_to=date_to)
-        if str(payload.get("read_model_status") or "fresh") != "fresh":
+        payload_status = str(payload.get("read_model_status") or read_model_status or "fresh")
+        if read_model_status != "fresh":
+            payload = {**payload, **scope_summary, "read_model_status": read_model_status}
+            payload_status = read_model_status
+        if payload_status != "fresh" and not (payload.get("accounts") or []):
             self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
                 scope_keys,
-                reason="api_stale",
+                reason=f"api_{payload_status or 'stale'}",
                 scope_summary=payload,
             )
             return self._bank_detail_accounts_refreshing_payload(
@@ -10178,9 +10189,10 @@ class Application:
                 scope_summary=payload,
             )
         result = dict(payload)
-        result["read_model_status"] = "fresh"
-        result["cache_status"] = "miss"
-        self._set_bank_detail_cached_payload(cache_key, result)
+        result["read_model_status"] = payload_status
+        result["cache_status"] = "miss" if payload_status == "fresh" else "stale"
+        if payload_status == "fresh":
+            self._set_bank_detail_cached_payload(cache_key, result)
         return result
 
     def _get_bank_detail_transactions_from_sql_read_model(
@@ -10211,10 +10223,11 @@ class Application:
             )
         scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
         scope_summary = self._bank_detail_scope_summary(scope_keys)
-        if scope_summary.get("read_model_status") != "fresh":
+        read_model_status = str(scope_summary.get("read_model_status") or "missing")
+        if read_model_status == "missing":
             self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
                 scope_keys,
-                reason=f"api_{scope_summary.get('read_model_status') or 'stale'}",
+                reason="api_missing",
                 scope_summary=scope_summary,
             )
             return self._bank_detail_transactions_refreshing_payload(
@@ -10224,6 +10237,12 @@ class Application:
                 date_to=date_to,
                 page=normalized_page,
                 page_size=normalized_page_size,
+                scope_summary=scope_summary,
+            )
+        if read_model_status != "fresh":
+            self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
+                scope_keys,
+                reason=f"api_{read_model_status}",
                 scope_summary=scope_summary,
             )
         cache_key = self._bank_detail_redis_cache_key(
@@ -10241,7 +10260,7 @@ class Application:
             },
             scope_summary=scope_summary,
         )
-        cached = self._get_bank_detail_cached_payload(cache_key)
+        cached = self._get_bank_detail_cached_payload(cache_key) if read_model_status == "fresh" else None
         if cached is not None:
             cached["cache_status"] = "hit"
             return self._with_bank_detail_tag_dictionary(cached)
@@ -10277,10 +10296,14 @@ class Application:
                 page=normalized_page,
                 page_size=normalized_page_size,
             )
-        if str(payload.get("read_model_status") or "fresh") != "fresh":
+        payload_status = str(payload.get("read_model_status") or read_model_status or "fresh")
+        if read_model_status != "fresh":
+            payload = {**payload, **scope_summary, "read_model_status": read_model_status}
+            payload_status = read_model_status
+        if payload_status != "fresh" and not (payload.get("rows") or []):
             self._enqueue_bank_detail_read_model_refreshes_unless_refreshing(
                 scope_keys,
-                reason="api_stale",
+                reason=f"api_{payload_status or 'stale'}",
                 scope_summary=payload,
             )
             return self._bank_detail_transactions_refreshing_payload(
@@ -10293,9 +10316,10 @@ class Application:
                 scope_summary=payload,
             )
         result = self._with_bank_detail_tag_dictionary(dict(payload))
-        result["read_model_status"] = "fresh"
-        result["cache_status"] = "miss"
-        self._set_bank_detail_cached_payload(cache_key, result)
+        result["read_model_status"] = payload_status
+        result["cache_status"] = "miss" if payload_status == "fresh" else "stale"
+        if payload_status == "fresh":
+            self._set_bank_detail_cached_payload(cache_key, result)
         return result
 
     def _bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:

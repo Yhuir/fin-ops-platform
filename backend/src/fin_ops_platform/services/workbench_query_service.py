@@ -365,6 +365,8 @@ class WorkbenchQueryService:
             existing_tags=list(source_metadata.get("tags") or []),
             attachment_invoice_count=len(attachment_invoices),
             attachment_file_count=attachment_file_count,
+            attachment_evidence_count=len(attachment_evidences),
+            has_attachment_parse_failure=self._has_attachment_parse_failure(attachment_artifacts),
             has_multiple_expense_items=len(self._expense_items(record)) > 1,
             has_amount_mismatch=self._amount_mismatch(record) is not None,
         )
@@ -463,6 +465,8 @@ class WorkbenchQueryService:
         existing_tags: object,
         attachment_invoice_count: int,
         attachment_file_count: int,
+        attachment_evidence_count: int = 0,
+        has_attachment_parse_failure: bool = False,
         has_multiple_expense_items: bool = False,
         has_amount_mismatch: bool = False,
     ) -> list[str]:
@@ -471,13 +475,23 @@ class WorkbenchQueryService:
             for tag in list(existing_tags or [])
             if str(tag).strip()
         ] if isinstance(existing_tags, list) else []
-        if attachment_file_count > 0 and attachment_invoice_count == 0 and "未解析发票" not in tags:
+        has_unparsed_invoice_risk = (
+            attachment_file_count > 0
+            and attachment_invoice_count == 0
+            and (attachment_evidence_count == 0 or has_attachment_parse_failure)
+        )
+        if has_unparsed_invoice_risk and "未解析发票" not in tags:
             tags.append("未解析发票")
         if has_multiple_expense_items and "多明细" not in tags:
             tags.append("多明细")
         if has_amount_mismatch and "金额差异" not in tags:
             tags.append("金额差异")
         return tags
+
+    @staticmethod
+    def _has_attachment_parse_failure(attachment_artifacts: list[dict[str, Any]]) -> bool:
+        failure_statuses = {"download_failed", "parse_failed"}
+        return any(str(artifact.get("parse_status") or "").strip() in failure_statuses for artifact in attachment_artifacts)
 
     @staticmethod
     def _expense_items(record: OAApplicationRecord | object) -> list[dict[str, str]]:

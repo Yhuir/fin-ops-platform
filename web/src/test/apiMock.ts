@@ -73,8 +73,10 @@ type MockApiOptions = {
   includeOaAttachmentPaymentReceipt?: boolean;
   initialImportPreviewFileNames?: string[];
   initialImportPreviewOverrides?: Array<Record<string, string | null | undefined>>;
-  bankDetailAccountReadModelStatuses?: Array<"fresh" | "refreshing">;
-  bankDetailTransactionReadModelStatuses?: Array<"fresh" | "refreshing">;
+  bankDetailAccountReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
+  bankDetailTransactionReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
+  bankDetailInitialAccountReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
+  bankDetailInitialTransactionReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
   bankDetailRefreshingTransactionsEmpty?: boolean;
 };
 
@@ -5152,7 +5154,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ? options.bankDetailAccountReadModelStatuses[
           Math.min(bankDetailPostSaveAccountRequestCount++, options.bankDetailAccountReadModelStatuses.length - 1)
         ]
-        : "fresh";
+        : options.bankDetailInitialAccountReadModelStatus ?? "fresh";
       return {
         body: {
           total_balance: "130500.50",
@@ -5301,7 +5303,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ? options.bankDetailTransactionReadModelStatuses[
           Math.min(bankDetailPostSaveTransactionRequestCount++, options.bankDetailTransactionReadModelStatuses.length - 1)
         ]
-        : "fresh";
+        : options.bankDetailInitialTransactionReadModelStatus ?? "fresh";
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");

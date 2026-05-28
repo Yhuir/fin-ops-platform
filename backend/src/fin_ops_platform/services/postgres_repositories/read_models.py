@@ -374,15 +374,8 @@ class PostgresReadModelRepository:
             scope_summary = self.bank_detail_scope_summary(scope_keys=scope_keys, tenant_id=tenant_id, connection=connection)
             if scope_summary["read_model_status"] == "missing":
                 return None
-            if scope_summary["read_model_status"] != "fresh":
-                return _bank_detail_refreshing_payload(
-                    scope_summary=scope_summary,
-                    account_key=account_key,
-                    date_from=date_from,
-                    date_to=date_to,
-                    page=page_number,
-                    page_size=page_limit,
-                )
+            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
+            require_current_schema = read_model_status == "fresh"
             where_sql, params = _bank_detail_filter_sql(
                 tenant_id=tenant_id,
                 scope_keys=scope_keys,
@@ -393,6 +386,7 @@ class PostgresReadModelRepository:
                 category_code=category_code,
                 category_primary_label=category_primary_label,
                 category_sub_label=category_sub_label,
+                require_current_schema=require_current_schema,
             )
             total_row = connection.fetch_one(
                 f"select count(*)::bigint as total from read_model.bank_detail_rows where {where_sql}",
@@ -444,19 +438,14 @@ class PostgresReadModelRepository:
             scope_summary = self.bank_detail_scope_summary(scope_keys=scope_keys, tenant_id=tenant_id, connection=connection)
             if scope_summary["read_model_status"] == "missing":
                 return None
-            if scope_summary["read_model_status"] != "fresh":
-                return {
-                    "accounts": [],
-                    "total_balance": None,
-                    "balance_account_count": 0,
-                    "missing_balance_account_count": 0,
-                    **scope_summary,
-                }
+            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
+            require_current_schema = read_model_status == "fresh"
             where_sql, params = _bank_detail_filter_sql(
                 tenant_id=tenant_id,
                 scope_keys=scope_keys,
                 date_from=date_from,
                 date_to=date_to,
+                require_current_schema=require_current_schema,
             )
             rows = connection.fetch_all(
                 f"""
@@ -6194,9 +6183,13 @@ def _bank_detail_filter_sql(
     category_code: str | None = None,
     category_primary_label: str | None = None,
     category_sub_label: str | None = None,
+    require_current_schema: bool = True,
 ) -> tuple[str, list[Any]]:
-    where = ["tenant_id = %s", "scope_key = any(%s)", "schema_version = %s"]
-    params: list[Any] = [tenant_id, list(scope_keys or ["all"]), BANK_DETAIL_READ_MODEL_SCHEMA_VERSION]
+    where = ["tenant_id = %s", "scope_key = any(%s)"]
+    params: list[Any] = [tenant_id, list(scope_keys or ["all"])]
+    if require_current_schema:
+        where.append("schema_version = %s")
+        params.append(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION)
     if normalized_account_key := text(account_key):
         where.append("account_key = %s")
         params.append(normalized_account_key)
@@ -6212,6 +6205,8 @@ def _bank_detail_filter_sql(
     if normalized_category_code := text(category_code):
         where.append("effective_category_code = %s")
         params.append(normalized_category_code)
+    if not require_current_schema and text(category_code):
+        return " and ".join(where), params
     if normalized_category_primary_label := text(category_primary_label):
         where.append("effective_category_primary_label = %s")
         params.append(normalized_category_primary_label)

@@ -11,12 +11,14 @@ export type BankDetailAccount = {
   transactionCount: number;
 };
 
+export type BankDetailReadModelStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
+
 export type BankDetailAccountsResponse = {
   accounts: BankDetailAccount[];
   totalBalance: string | null;
   balanceAccountCount: number;
   missingBalanceAccountCount: number;
-  readModelStatus?: "fresh" | "refreshing";
+  readModelStatus?: BankDetailReadModelStatus;
   cacheStatus?: string | null;
 };
 
@@ -104,7 +106,7 @@ export type BankDetailTransactionsResponse = {
   };
   categoryCounts: BankTransactionCategoryCounts;
   tagDictionary?: BankTransactionTagDictionary;
-  readModelStatus?: "fresh" | "refreshing";
+  readModelStatus?: BankDetailReadModelStatus;
   cacheStatus?: string | null;
 };
 

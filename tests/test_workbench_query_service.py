@@ -834,6 +834,38 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertEqual(oa_row["detail_fields"]["附件发票数量"], "0")
         self.assertEqual(oa_row["detail_fields"]["附件发票识别情况"], "已解析 0 / 2")
 
+    def test_payment_receipt_only_oa_row_does_not_get_unparsed_invoice_tag(self) -> None:
+        record = UnparsedAttachmentRecord()
+        record.attachment_evidences = [
+            {
+                "evidence_type": "payment_receipt",
+                "document_kind": "wechat_etc_payment",
+                "amount": "23.00",
+                "source_attachment_key": "payment-1",
+                "source_attachment_name": "微信支付凭证.jpg",
+            }
+        ]
+        record.attachment_artifacts = [
+            {
+                "parse_status": "parsed",
+                "document_kind": "wechat_etc_payment",
+                "source_attachment_key": "payment-1",
+                "source_attachment_name": "微信支付凭证.jpg",
+            }
+        ]
+        class PaymentReceiptOnlyOAAdapter:
+            def list_application_records(self, month: str) -> list[object]:
+                return [record] if month == "2026-03" else []
+
+        service = WorkbenchQueryService(oa_adapter=PaymentReceiptOnlyOAAdapter())
+
+        payload = service.get_workbench("2026-03")
+
+        oa_row = payload["open"]["oa"][0]
+        self.assertNotIn("未解析发票", oa_row["tags"])
+        self.assertEqual(oa_row["detail_fields"]["附件发票数量"], "0")
+        self.assertEqual(oa_row["detail_fields"]["付款凭证数量"], "1")
+
     def test_etc_batch_oa_row_keeps_source_and_waits_only_for_bank(self) -> None:
         service = WorkbenchQueryService(oa_adapter=EtcBatchOAAdapter())
 

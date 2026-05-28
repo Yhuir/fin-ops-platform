@@ -30,6 +30,7 @@ from fin_ops_platform.services.invoice_usage_collection_sql_projection import In
 from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_state_store import LegacyGridFSFileReader
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
@@ -122,7 +123,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         oa_settings = load_mongo_oa_settings(default_data_dir())
         if oa_settings is None:
             raise RuntimeError("OA sync worker requires FIN_OPS_OA_MONGO_* configuration or oa_mongo_config.json.")
-        source_adapter = MongoOAAdapter(settings=oa_settings)
+        ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
+        source_adapter = _build_oa_sync_source_adapter(
+            settings=oa_settings,
+            attachment_invoice_cache=ops_tax_etc_repository,
+        )
         oa_runtime_settings = _load_oa_runtime_settings(connection)
         source_adapter.set_import_settings_provider(lambda: dict(oa_runtime_settings["oa_import"]))
         projection_repository = PostgresOAProjectionRepository(connection)
@@ -347,6 +352,14 @@ def _infer_worker_kind(args: argparse.Namespace) -> str:
         if enabled_flag
     ]
     return enabled[0] if len(enabled) == 1 else "runtime"
+
+
+def _build_oa_sync_source_adapter(
+    *,
+    settings: Any,
+    attachment_invoice_cache: Any,
+) -> MongoOAAdapter:
+    return MongoOAAdapter(settings=settings, attachment_invoice_cache=attachment_invoice_cache)
 
 
 def _load_oa_runtime_settings(connection: PostgresConnection) -> dict[str, Any]:

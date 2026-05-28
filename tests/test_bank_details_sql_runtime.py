@@ -142,10 +142,36 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
 
-    def test_transactions_treat_previous_bank_detail_schema_as_refreshing(self) -> None:
+    def test_transactions_serve_previous_schema_rows_while_refreshing(self) -> None:
         connection = FakeConnection(
             rows=[
                 [scope_row("2026-05", schema_version=BANK_DETAIL_READ_MODEL_SCHEMA_VERSION - 1)],
+                {"total": 1},
+                [{"category_code": "fee", "count": 1}],
+                [
+                    {
+                        "payload": {
+                            "id": "txn-old-schema",
+                            "trade_time": "2026-05-01 10:00:00",
+                            "counterparty_name": "银行",
+                            "direction": "expense",
+                            "direction_label": "支",
+                            "amount": "10.00",
+                            "balance": "90.00",
+                            "summary": "手续费",
+                            "purpose": "",
+                            "bank_name": "工商银行",
+                            "account_last4": "6386",
+                            "auto_category_code": "fee",
+                            "auto_category_label": "手续费",
+                            "effective_category_code": "fee",
+                            "effective_category_label": "手续费",
+                        },
+                        "raw_payload": {},
+                        "summary": "手续费",
+                        "purpose": "",
+                    }
+                ],
             ]
         )
         repository = PostgresReadModelRepository(connection)
@@ -160,14 +186,74 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(payload)
         self.assertEqual(payload["read_model_status"], "schema_mismatch")
         self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
-        self.assertEqual(len(connection.calls), 2)
+        self.assertEqual(payload["rows"][0]["id"], "txn-old-schema")
+        self.assertEqual(payload["category_counts"]["fee"], 1)
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 1})
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("from read_model.bank_detail_rows", sql_text)
+        self.assertNotIn("schema_version = %s", sql_text)
+
+    def test_accounts_serve_previous_schema_rows_while_refreshing(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-05", schema_version=BANK_DETAIL_READ_MODEL_SCHEMA_VERSION - 1)],
+                [
+                    {
+                        "account_key": "icbc:6386",
+                        "bank_name": "工商银行",
+                        "account_last4": "6386",
+                        "transaction_count": 1,
+                        "latest_balance": "90.00",
+                        "latest_balance_at": "2026-05-01 10:00:00",
+                    }
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_accounts(
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["read_model_status"], "schema_mismatch")
+        self.assertEqual(payload["accounts"][0]["account_key"], "icbc:6386")
+        self.assertEqual(payload["total_balance"], "90.00")
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("from read_model.bank_detail_rows", sql_text)
+        self.assertNotIn("schema_version = %s", sql_text)
 
     def test_transactions_treat_pending_bank_detail_dirty_scope_as_refreshing(self) -> None:
         connection = FakeConnection(
             rows=[
                 [scope_row("2026-05", row_count=1)],
+                {"total": 1},
+                [{"category_code": "fee", "count": 1}],
+                [
+                    {
+                        "payload": {
+                            "id": "txn-refreshing",
+                            "trade_time": "2026-05-01 10:00:00",
+                            "counterparty_name": "银行",
+                            "direction": "expense",
+                            "direction_label": "支",
+                            "amount": "10.00",
+                            "balance": "90.00",
+                            "summary": "手续费",
+                            "purpose": "",
+                            "bank_name": "工商银行",
+                            "account_last4": "6386",
+                            "auto_category_code": "fee",
+                            "auto_category_label": "手续费",
+                            "effective_category_code": "fee",
+                            "effective_category_label": "手续费",
+                        },
+                        "raw_payload": {},
+                        "summary": "手续费",
+                        "purpose": "",
+                    }
+                ],
             ],
             dirty_scope_rows=[
                 {
@@ -190,13 +276,13 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         self.assertIsNotNone(payload)
         self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
+        self.assertEqual(payload["rows"][0]["id"], "txn-refreshing")
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 1})
         self.assertEqual(payload["dirty_scopes"][0]["scope_key"], "2026-05")
         self.assertEqual(payload["read_model_scope_signatures"]["2026-05"]["dirty_status"], "pending")
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertIn("from job.read_model_dirty_scopes", sql_text)
-        self.assertNotIn("from read_model.bank_detail_rows", sql_text)
+        self.assertIn("from read_model.bank_detail_rows", sql_text)
 
     def test_transactions_rebuild_bank_text_columns_from_raw_payload_or_sql_columns(self) -> None:
         connection = FakeConnection(

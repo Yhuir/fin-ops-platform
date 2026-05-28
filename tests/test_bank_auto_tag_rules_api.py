@@ -27,6 +27,8 @@ class _BankDetailStatusRepository:
     def __init__(self, *, status: str, bank_auto_tag_rules_version: int | None = 1) -> None:
         self.status = status
         self.bank_auto_tag_rules_version = bank_auto_tag_rules_version
+        self.transaction_reads = 0
+        self.account_reads = 0
 
     def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
         return [str(date_from or "")[:7] or "2026-01"]
@@ -51,10 +53,55 @@ class _BankDetailStatusRepository:
         }
 
     def list_bank_detail_transactions(self, **_kwargs: object) -> dict[str, object]:
-        raise AssertionError("refreshing or stale scopes must not read bank detail rows")
+        self.transaction_reads += 1
+        return {
+            "account_key": None,
+            "date_from": _kwargs.get("date_from"),
+            "date_to": _kwargs.get("date_to"),
+            "rows": [
+                {
+                    "id": "txn-existing-read-model",
+                    "trade_time": "2026-01-02 10:00:00",
+                    "counterparty_name": "银行",
+                    "direction": "expense",
+                    "direction_label": "支",
+                    "amount": "10.00",
+                    "balance": "90.00",
+                    "summary": "手续费",
+                    "purpose": "",
+                    "bank_name": "工商银行",
+                    "account_last4": "6386",
+                    "auto_category_code": "fee",
+                    "auto_category_label": "手续费",
+                    "effective_category_code": "fee",
+                    "effective_category_label": "手续费",
+                }
+            ],
+            "category_counts": {"fee": 1, "uncategorized": 0},
+            "pagination": {"page": 1, "page_size": 100, "total": 1},
+            "read_model_status": self.status,
+        }
 
     def list_bank_detail_accounts(self, **_kwargs: object) -> dict[str, object]:
-        raise AssertionError("refreshing or stale scopes must not read bank detail rows")
+        self.account_reads += 1
+        return {
+            "accounts": [
+                {
+                    "account_key": "icbc:6386",
+                    "bank_name": "工商银行",
+                    "account_last4": "6386",
+                    "display_name": "工商银行 6386",
+                    "latest_balance": "90.00",
+                    "latest_balance_at": "2026-01-02 10:00:00",
+                    "has_balance": True,
+                    "transaction_count": 1,
+                }
+            ],
+            "total_balance": "90.00",
+            "balance_account_count": 1,
+            "missing_balance_account_count": 0,
+            "read_model_status": self.status,
+        }
 
 
 class BankAutoTagRulesApiTests(unittest.TestCase):
@@ -255,7 +302,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        app._bank_detail_sql_read_repository = _BankDetailStatusRepository(status="refreshing")
+        repository = _BankDetailStatusRepository(status="refreshing")
+        app._bank_detail_sql_read_repository = repository
 
         transactions = app._get_bank_detail_transactions_from_sql_read_model(
             account_key=None,
@@ -275,13 +323,18 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
 
         self.assertEqual(transactions["read_model_status"], "refreshing")
         self.assertEqual(accounts["read_model_status"], "refreshing")
+        self.assertEqual(transactions["rows"][0]["id"], "txn-existing-read-model")
+        self.assertEqual(accounts["accounts"][0]["account_key"], "icbc:6386")
+        self.assertEqual(repository.transaction_reads, 1)
+        self.assertEqual(repository.account_reads, 1)
         self.assertEqual(queue.enqueued, [])
 
     def test_bank_detail_api_reenqueues_stale_scopes_once(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        app._bank_detail_sql_read_repository = _BankDetailStatusRepository(status="stale")
+        repository = _BankDetailStatusRepository(status="stale")
+        app._bank_detail_sql_read_repository = repository
 
         payload = app._get_bank_detail_transactions_from_sql_read_model(
             account_key=None,
@@ -295,17 +348,20 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             page_size=100,
         )
 
-        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertEqual(payload["rows"][0]["id"], "txn-existing-read-model")
+        self.assertEqual(repository.transaction_reads, 1)
         self.assertEqual(queue.enqueued, [("bank_detail", "2026-01", "api_stale")])
 
     def test_bank_detail_api_treats_old_auto_tag_rule_version_as_stale(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        app._bank_detail_sql_read_repository = _BankDetailStatusRepository(
+        repository = _BankDetailStatusRepository(
             status="fresh",
             bank_auto_tag_rules_version=None,
         )
+        app._bank_detail_sql_read_repository = repository
 
         payload = app._get_bank_detail_transactions_from_sql_read_model(
             account_key=None,
@@ -319,7 +375,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             page_size=100,
         )
 
-        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertEqual(payload["rows"][0]["id"], "txn-existing-read-model")
+        self.assertEqual(repository.transaction_reads, 1)
         self.assertEqual(queue.enqueued, [("bank_detail", "2026-01", "api_stale")])
 
     def test_put_rejects_invalid_payloads_with_structured_errors(self) -> None:

@@ -371,6 +371,37 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
 
         self.assertEqual(invoices, [])
 
+    def test_parse_file_result_reports_ocr_empty_status(self) -> None:
+        service = OAAttachmentInvoiceService()
+        file_entry = {
+            "fileName": "invoice-image.jpg",
+            "filePath": "/invoice-image.jpg",
+            "suffix": "jpg",
+        }
+
+        with (
+            patch.object(service, "_download_content", return_value=b"fake-jpg-bytes"),
+            patch.object(service, "_extract_image_text", return_value=""),
+        ):
+            result = service.parse_file_result(file_entry)
+
+        self.assertEqual(result["parse_status"], "ocr_empty")
+        self.assertEqual(result["evidences"], [])
+
+    def test_parse_file_result_reports_download_failed_status(self) -> None:
+        service = OAAttachmentInvoiceService()
+        file_entry = {
+            "fileName": "invoice.pdf",
+            "filePath": "/invoice.pdf",
+            "suffix": "pdf",
+        }
+
+        with patch.object(service, "_download_content", return_value=None):
+            result = service.parse_file_result(file_entry)
+
+        self.assertEqual(result["parse_status"], "download_failed")
+        self.assertEqual(result["evidences"], [])
+
     def test_parse_invoice_text_accepts_ocr_style_amount_and_name_layout(self) -> None:
         service = OAAttachmentInvoiceService()
 

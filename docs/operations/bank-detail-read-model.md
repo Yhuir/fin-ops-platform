@@ -75,5 +75,5 @@ order by heartbeat_at desc;
 - RabbitMQ 只投递 envelope，不携带业务 payload。
 - Redis 只做短 TTL page cache；Redis miss/error 必须回 SQL read model。
 - 分类保存、银行导入、pair relation/candidate/exception、标签字典变更都必须入队受影响月份或 `all`。
-- 银行明细 API 持续返回 `read_model_status=refreshing` 超过一个 worker 轮询周期时，不视为正常完成态；必须检查 `bank_detail.read_model.refresh` 是否有 pending/failed 事件、`worker-bank-detail` 是否有心跳、以及 `read_model.bank_detail_scopes.last_error`。
+- 银行明细 API 在 `read_model_status=refreshing`、`stale` 或 `schema_mismatch` 时应继续返回最后一版 SQL 投影供页面展示，同时入队刷新；持续超过一个 worker 轮询周期仍不视为正常完成态，必须检查 `bank_detail.read_model.refresh` 是否有 pending/failed 事件、`worker-bank-detail` 是否有心跳、以及 `read_model.bank_detail_scopes.last_error`。
 - 年度视图会同时依赖 12 个 `bank_detail` 月度 scope。生产 `worker-bank-detail` 必须使用批量 drain 参数，例如 `--max-events-per-iteration 24 --poll-interval-seconds 0.5`，避免每 5 秒只处理一个月导致刷新体验退化。

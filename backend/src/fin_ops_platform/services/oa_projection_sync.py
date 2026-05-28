@@ -218,10 +218,13 @@ def _is_invoice_attachment_payload(value: Any) -> bool:
         str(value.get(field) or "").strip().lower()
         for field in ("source_kind", "evidence_type", "document_kind", "attachment_type", "file_type")
     )
-    if any(token in kind_text for token in ("invoice", "发票")):
+    if any(token in kind_text for token in ("invoice", "发票", "payment_receipt", "payment", "receipt")):
+        return True
+    parse_status = str(value.get("parse_status") or "").strip()
+    if parse_status:
         return True
     name_text = " ".join(
         str(value.get(field) or "").strip().lower()
         for field in ("source_attachment_name", "attachment_name", "filename", "name")
     )
-    return "发票" in name_text or "invoice" in name_text
+    return any(token in name_text for token in ("发票", "invoice", "付款", "支付", "payment", "receipt"))

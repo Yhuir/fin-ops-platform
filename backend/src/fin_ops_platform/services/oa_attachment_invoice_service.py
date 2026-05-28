@@ -60,7 +60,7 @@ INVOICE_EVIDENCE_TYPES = {"tax_invoice", "machine_invoice", "non_tax_receipt"}
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-05-11-evidence-machine-payment"
+    PARSER_VERSION = "2026-05-28-attachment-status-v1"
 
     def __init__(
         self,
@@ -88,12 +88,81 @@ class OAAttachmentInvoiceService:
         for file_entry in files:
             if not isinstance(file_entry, dict):
                 continue
-            try:
-                parsed_evidences = self._parse_single_file_evidences(file_entry)
-            except Exception:
-                parsed_evidences = []
+            parsed_evidences = [
+                dict(evidence)
+                for evidence in list(self.parse_file_result(file_entry).get("evidences") or [])
+                if isinstance(evidence, dict)
+            ]
             evidences.extend(parsed_evidences)
         return evidences
+
+    def parse_file_result(self, file_entry: dict[str, object]) -> dict[str, object]:
+        file_name = clean_string(file_entry.get("fileName") or file_entry.get("name") or "")
+        file_path = clean_string(file_entry.get("filePath") or file_entry.get("url") or "")
+        suffix = clean_string(file_entry.get("suffix") or Path(file_name or file_path).suffix.lstrip(".")).lower()
+        base_result: dict[str, object] = {
+            "attachment_name": file_name or Path(file_path).name,
+            "file_path": file_path,
+            "suffix": suffix,
+            "parse_status": "no_evidence",
+            "parse_error": "",
+            "evidences": [],
+        }
+        if suffix not in SUPPORTED_SUFFIXES:
+            base_result["parse_status"] = "unsupported_file"
+            return base_result
+        if not file_path:
+            base_result["parse_status"] = "download_failed"
+            base_result["parse_error"] = "missing_file_path"
+            return base_result
+
+        try:
+            content = self._download_content(self.build_download_url(file_path))
+        except Exception as exc:
+            base_result["parse_status"] = "download_failed"
+            base_result["parse_error"] = type(exc).__name__
+            return base_result
+        if content is None:
+            base_result["parse_status"] = "download_failed"
+            return base_result
+
+        try:
+            extracted_segments = self._extract_text_segments(content, suffix)
+        except Exception as exc:
+            base_result["parse_status"] = "parse_failed"
+            base_result["parse_error"] = type(exc).__name__
+            return base_result
+
+        parsed_evidences: list[dict[str, str]] = []
+        seen_keys: set[str] = set()
+        attachment_name = clean_string(base_result.get("attachment_name") or "")
+        for extracted_text in extracted_segments:
+            if not clean_string(extracted_text):
+                continue
+            try:
+                evidences = self._parse_evidences_from_text(extracted_text)
+            except Exception as exc:
+                base_result["parse_status"] = "parse_failed"
+                base_result["parse_error"] = type(exc).__name__
+                base_result["evidences"] = parsed_evidences
+                return base_result
+            for evidence in evidences:
+                evidence["attachment_name"] = attachment_name
+                dedupe_key = self._evidence_dedupe_key(evidence)
+                if dedupe_key and dedupe_key in seen_keys:
+                    continue
+                if dedupe_key:
+                    seen_keys.add(dedupe_key)
+                parsed_evidences.append(evidence)
+
+        base_result["evidences"] = parsed_evidences
+        if parsed_evidences:
+            base_result["parse_status"] = "parsed"
+        elif suffix in {"jpg", "jpeg", "png"}:
+            base_result["parse_status"] = "ocr_empty"
+        else:
+            base_result["parse_status"] = "no_evidence"
+        return base_result
 
     def build_download_url(self, file_path: str) -> str:
         normalized_path = clean_string(file_path)
@@ -123,33 +192,11 @@ class OAAttachmentInvoiceService:
         ]
 
     def _parse_single_file_evidences(self, file_entry: dict[str, object]) -> list[dict[str, str]]:
-        file_name = clean_string(file_entry.get("fileName") or file_entry.get("name") or "")
-        file_path = clean_string(file_entry.get("filePath") or file_entry.get("url") or "")
-        suffix = clean_string(file_entry.get("suffix") or Path(file_name or file_path).suffix.lstrip(".")).lower()
-        if suffix not in SUPPORTED_SUFFIXES:
-            return []
-        if not file_path:
-            return []
-
-        content = self._download_content(self.build_download_url(file_path))
-        if content is None:
-            return []
-
-        attachment_name = file_name or Path(file_path).name
-        parsed_evidences: list[dict[str, str]] = []
-        seen_keys: set[str] = set()
-        for extracted_text in self._extract_text_segments(content, suffix):
-            if not extracted_text:
-                continue
-            for evidence in self._parse_evidences_from_text(extracted_text):
-                evidence["attachment_name"] = attachment_name
-                dedupe_key = self._evidence_dedupe_key(evidence)
-                if dedupe_key and dedupe_key in seen_keys:
-                    continue
-                if dedupe_key:
-                    seen_keys.add(dedupe_key)
-                parsed_evidences.append(evidence)
-        return parsed_evidences
+        return [
+            dict(evidence)
+            for evidence in list(self.parse_file_result(file_entry).get("evidences") or [])
+            if isinstance(evidence, dict)
+        ]
 
     def _parse_evidences_from_text(self, extracted_text: str) -> list[dict[str, str]]:
         payment_receipt = self._parse_payment_receipt_text(extracted_text)

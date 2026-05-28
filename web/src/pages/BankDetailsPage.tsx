@@ -44,6 +44,7 @@ import type {
   BankDateFilter,
   BankDetailAccount,
   BankDetailExportMode,
+  BankDetailReadModelStatus,
   BankDetailTransaction,
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
@@ -66,6 +67,44 @@ type CategorySummaryItem = {
   code: BankTransactionCategoryCode;
   label: string;
 };
+
+function normalizeReadModelStatus(value: BankDetailReadModelStatus | null | undefined): BankDetailReadModelStatus {
+  return value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing"
+    ? value
+    : "fresh";
+}
+
+function combinedReadModelStatus(
+  accountsStatus: BankDetailReadModelStatus,
+  transactionsStatus: BankDetailReadModelStatus,
+): BankDetailReadModelStatus {
+  if (accountsStatus === "refreshing" || transactionsStatus === "refreshing") {
+    return "refreshing";
+  }
+  if (accountsStatus === "schema_mismatch" || transactionsStatus === "schema_mismatch") {
+    return "schema_mismatch";
+  }
+  if (accountsStatus === "stale" || transactionsStatus === "stale") {
+    return "stale";
+  }
+  if (accountsStatus === "missing" || transactionsStatus === "missing") {
+    return "missing";
+  }
+  return "fresh";
+}
+
+function readModelStatusMessage(status: BankDetailReadModelStatus) {
+  if (status === "schema_mismatch") {
+    return "银行明细读模型版本正在升级，已显示当前可用数据。";
+  }
+  if (status === "stale") {
+    return "银行明细读模型待刷新，已显示当前可用数据。";
+  }
+  if (status === "missing") {
+    return "银行明细读模型正在初始化。";
+  }
+  return "银行明细读模型正在刷新，已显示当前可用数据。";
+}
 
 type BankDetailsTableToolbarProps = {
   effectiveCategoryCounts: BankTransactionCategoryCounts;
@@ -437,8 +476,8 @@ export default function BankDetailsPage() {
   });
   const [searchInput, setSearchInput] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [accountsReadModelStatus, setAccountsReadModelStatus] = useState<"fresh" | "refreshing">("fresh");
-  const [transactionsReadModelStatus, setTransactionsReadModelStatus] = useState<"fresh" | "refreshing">("fresh");
+  const [accountsReadModelStatus, setAccountsReadModelStatus] = useState<BankDetailReadModelStatus>("fresh");
+  const [transactionsReadModelStatus, setTransactionsReadModelStatus] = useState<BankDetailReadModelStatus>("fresh");
   const [loading, setLoading] = useState(true);
   const [rowLoading, setRowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -458,14 +497,15 @@ export default function BankDetailsPage() {
   const [rulesFeedback, setRulesFeedback] = useState<string | null>(null);
   const [rulesRefreshStatus, setRulesRefreshStatus] = useState<"idle" | "refreshing" | "fresh">("idle");
   const rulesRefreshPendingRef = useRef(false);
+  const hasAccountPayloadRef = useRef(false);
+  const hasTransactionPayloadRef = useRef(false);
   const [refreshToken, setRefreshToken] = useState(0);
-  const readModelStatus = accountsReadModelStatus === "refreshing" || transactionsReadModelStatus === "refreshing"
-    ? "refreshing"
-    : "fresh";
+  const readModelStatus = combinedReadModelStatus(accountsReadModelStatus, transactionsReadModelStatus);
+  const readModelNeedsRefresh = readModelStatus !== "fresh";
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
+    setLoading(!hasAccountPayloadRef.current);
     setError(null);
     fetchBankDetailAccounts({
       dateFrom: dateFilter.dateFrom,
@@ -473,11 +513,12 @@ export default function BankDetailsPage() {
       signal: controller.signal,
     })
       .then((payload) => {
-        const nextReadModelStatus = payload.readModelStatus === "refreshing" ? "refreshing" : "fresh";
+        const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
         setAccountsReadModelStatus(nextReadModelStatus);
-        if (nextReadModelStatus === "refreshing") {
+        if (nextReadModelStatus !== "fresh" && payload.accounts.length === 0) {
           return;
         }
+        hasAccountPayloadRef.current = true;
         setAccountsData({
           accounts: payload.accounts,
           totalBalance: payload.totalBalance,
@@ -517,7 +558,7 @@ export default function BankDetailsPage() {
       return;
     }
     const controller = new AbortController();
-    setRowLoading(true);
+    setRowLoading(!hasTransactionPayloadRef.current);
     setError(null);
     const accountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey;
     fetchBankDetailTransactions({
@@ -533,11 +574,12 @@ export default function BankDetailsPage() {
       signal: controller.signal,
     })
       .then((payload) => {
-        const nextReadModelStatus = payload.readModelStatus === "refreshing" ? "refreshing" : "fresh";
+        const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
         setTransactionsReadModelStatus(nextReadModelStatus);
-        if (nextReadModelStatus === "refreshing") {
+        if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
           return;
         }
+        hasTransactionPayloadRef.current = true;
         setRows(payload.rows);
         setRowCount(payload.pagination.total);
         setCategoryCounts(payload.categoryCounts);
@@ -577,7 +619,7 @@ export default function BankDetailsPage() {
     if (!rulesRefreshPendingRef.current) {
       return;
     }
-    if (readModelStatus === "refreshing") {
+    if (readModelNeedsRefresh) {
       setRulesRefreshStatus("refreshing");
       setRulesFeedback("规则已保存，银行明细正在刷新。");
       return;
@@ -585,17 +627,17 @@ export default function BankDetailsPage() {
     rulesRefreshPendingRef.current = false;
     setRulesRefreshStatus("fresh");
     setRulesFeedback("规则已保存，银行明细已刷新。");
-  }, [readModelStatus]);
+  }, [readModelNeedsRefresh]);
 
   useEffect(() => {
-    if (readModelStatus !== "refreshing" || loading || rowLoading) {
+    if (!readModelNeedsRefresh || loading || rowLoading) {
       return undefined;
     }
     const retryId = window.setTimeout(() => {
       setRefreshToken((current) => current + 1);
     }, BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
-  }, [loading, readModelStatus, rowLoading]);
+  }, [loading, readModelNeedsRefresh, rowLoading]);
 
   useEffect(() => {
     const handleWorkbenchRelationUpdated = (event: Event) => {
@@ -819,11 +861,11 @@ export default function BankDetailsPage() {
       <Stack className="bank-details-workbench" spacing={1}>
         {error ? <StatePanel tone="error">{error}</StatePanel> : null}
         {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
-        {readModelStatus === "refreshing" && !error ? (
-          <StatePanel tone="loading" compact>银行明细读模型正在刷新。</StatePanel>
+        {readModelNeedsRefresh && !error ? (
+          <StatePanel tone="loading" compact>{readModelStatusMessage(readModelStatus)}</StatePanel>
         ) : null}
         {rulesFeedback ? <StatePanel tone="success" compact>{rulesFeedback}</StatePanel> : null}
-        {!loading && readModelStatus !== "refreshing" && accountsData.accounts.length === 0 ? (
+        {!loading && !readModelNeedsRefresh && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}
 

@@ -435,11 +435,29 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         service.handle_runtime_event(event)
 
         self.assertEqual(repository.records[0].attachment_invoices, source_record.attachment_invoices)
-        self.assertEqual(repository.records[0].attachment_evidences, [source_record.attachment_evidences[0]])
-        self.assertEqual(repository.records[0].attachment_artifacts, [source_record.attachment_artifacts[0]])
+        self.assertEqual(
+            repository.records[0].attachment_evidences,
+            [source_record.attachment_evidences[0], source_record.attachment_evidences[1]],
+        )
+        self.assertEqual(
+            repository.records[0].attachment_artifacts,
+            [source_record.attachment_artifacts[0], source_record.attachment_artifacts[1]],
+        )
         self.assertEqual(repository.records[0].expense_items[0]["attachment_invoices"], source_record.expense_items[0]["attachment_invoices"])
-        self.assertEqual(repository.records[0].expense_items[0]["attachment_evidences"], [source_record.expense_items[0]["attachment_evidences"][0]])
-        self.assertEqual(repository.records[0].expense_items[0]["attachment_artifacts"], [source_record.expense_items[0]["attachment_artifacts"][0]])
+        self.assertEqual(
+            repository.records[0].expense_items[0]["attachment_evidences"],
+            [
+                source_record.expense_items[0]["attachment_evidences"][0],
+                source_record.expense_items[0]["attachment_evidences"][1],
+            ],
+        )
+        self.assertEqual(
+            repository.records[0].expense_items[0]["attachment_artifacts"],
+            [
+                source_record.expense_items[0]["attachment_artifacts"][0],
+                source_record.expense_items[0]["attachment_artifacts"][1],
+            ],
+        )
 
     def test_manual_oa_sync_api_enqueues_worker_job_without_running_sync_inline(self) -> None:
         app = object.__new__(server_module.Application)

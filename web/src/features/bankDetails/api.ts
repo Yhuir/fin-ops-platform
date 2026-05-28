@@ -2,6 +2,7 @@ import type {
   BankDetailAccount,
   BankDetailAccountsRequest,
   BankDetailAccountsResponse,
+  BankDetailReadModelStatus,
   BankDetailExportRequest,
   BankDetailExportResponse,
   BankDetailTransaction,
@@ -38,7 +39,7 @@ type ApiBankDetailAccountsResponse = {
   total_balance: string | null;
   balance_account_count: number;
   missing_balance_account_count: number;
-  read_model_status?: "fresh" | "refreshing";
+  read_model_status?: string | null;
   cache_status?: string | null;
 };
 
@@ -111,7 +112,7 @@ type ApiBankDetailTransactionsResponse = {
   category_counts?: Record<string, number>;
   tag_dictionary?: Parameters<typeof mapBankTransactionTagDictionary>[0];
   bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
-  read_model_status?: "fresh" | "refreshing";
+  read_model_status?: string | null;
   cache_status?: string | null;
 };
 
@@ -185,6 +186,13 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   bank_detail_export_account_not_found: "当前银行账户不存在或不在当前筛选范围内。",
   bank_detail_export_row_limit_exceeded: "当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。",
 };
+
+function normalizeBankDetailReadModelStatus(value: unknown): BankDetailReadModelStatus {
+  if (value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing") {
+    return value;
+  }
+  return "fresh";
+}
 
 function fieldErrorMessagesFromPayload(payload: unknown) {
   if (!payload || typeof payload !== "object" || !Array.isArray((payload as { field_errors?: unknown }).field_errors)) {
@@ -485,7 +493,7 @@ function mapAutoTagRulesResponse(payload: ApiBankAutoTagRulesResponse): BankAuto
       })).filter((option) => option.value && option.label)
       : [],
     permissions: { canSave: payload.permissions?.can_save !== false },
-    readModelStatus: payload.read_model_status,
+    readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
   };
 }
 
@@ -552,7 +560,7 @@ export async function fetchBankDetailAccounts({
     totalBalance: payload.total_balance,
     balanceAccountCount: payload.balance_account_count,
     missingBalanceAccountCount: payload.missing_balance_account_count,
-    readModelStatus: payload.read_model_status,
+    readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
     cacheStatus: payload.cache_status ?? null,
   };
 }
@@ -615,7 +623,7 @@ export async function fetchBankDetailTransactions({
     },
     categoryCounts: mapCategoryCounts(payload.category_counts),
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
-    readModelStatus: payload.read_model_status,
+    readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
     cacheStatus: payload.cache_status ?? null,
   };
 }

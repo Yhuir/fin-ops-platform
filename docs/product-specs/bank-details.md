@@ -68,6 +68,7 @@
 - 自动命中结果：`category_primary_label`、`category_sub_label`、`category_label_path`。
 - 银行明细行：`auto_category_primary_label`、`auto_category_sub_label`、`auto_category_label_path`，以及同口径的 `effective_*` 和兼容别名 `category_*`。
 - 旧字段 `category_code`、`category_label`、`category_path`、`auto_category_label`、`effective_category_label` 必须保留，供旧页面、导出和下游兼容消费。
+- SQL 读模型处于 `refreshing`、`stale` 或 `schema_mismatch` 时，接口仍应返回 `read_model.bank_detail_rows` 中最后一版可用投影，并保留非 fresh 状态触发后台刷新；只有 scope 缺失或读模型仓库不可用时才返回空刷新态。页面展示刷新/升级提示时不能清空已有账户和流水。
 
 命中逻辑为：先检查适用方向和账户范围，再在选中语义字段上执行 `(精确命中任一 OR 包含任一 OR 必须同时包含 OR 正则命中任一) AND NOT 不包含`。可用标签必须至少填写一种正向条件；停用标签可保留空规则用于历史展示。规则匹配不使用置信度分数；不确定流水应进入明确的复核或待确认状态，而不是生成不可审计的 confidence。
 

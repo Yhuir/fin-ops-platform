@@ -332,9 +332,23 @@ describe("Bank details page", () => {
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
 
-    expect(screen.getByText("银行明细读模型正在刷新。")).toBeInTheDocument();
+    expect(screen.getByText("银行明细读模型正在刷新，已显示当前可用数据。")).toBeInTheDocument();
     expect(screen.queryByText("规则已保存，银行明细已刷新。")).not.toBeInTheDocument();
     expect(within(page).getByText("云南溯源科技有限公司")).toBeInTheDocument();
+    expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
+  });
+
+  test("shows existing bank rows while the read-model schema is being upgraded", async () => {
+    installMockApiFetch({
+      bankDetailInitialAccountReadModelStatus: "schema_mismatch",
+      bankDetailInitialTransactionReadModelStatus: "schema_mismatch",
+    });
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+
+    expect(await within(page).findByText("云南溯源科技有限公司")).toBeInTheDocument();
+    expect(within(page).getByText("银行明细读模型版本正在升级，已显示当前可用数据。")).toBeInTheDocument();
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
