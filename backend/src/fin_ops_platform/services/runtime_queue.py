@@ -983,7 +983,7 @@ class RuntimeQueueRepository:
                     raw_payload = jsonb_set(
                         coalesce(raw_payload, '{}'::jsonb),
                         '{manual_requeue}',
-                        jsonb_build_object('reason', %s, 'requeued_at', now()),
+                        jsonb_build_object('reason', %s::text, 'requeued_at', now()),
                         true
                     )
                 where id = %s

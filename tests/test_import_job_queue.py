@@ -239,11 +239,29 @@ class ImportJobRepositoryTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["worker_kind"], "import-job")
         self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT])
-        self.assertEqual(payload["handlers"], [IMPORT_PROCESS_REQUESTED_EVENT])
+        self.assertEqual(payload["handlers"], ["import.fact.changed", IMPORT_PROCESS_REQUESTED_EVENT])
         self.assertEqual(
             payload["rabbitmq_event_routes"][IMPORT_PROCESS_REQUESTED_EVENT]["queue"],
             "finops.import.process.requested",
         )
+
+    def test_worker_check_claims_import_fact_changed_in_postgres_mode(self) -> None:
+        stdout = StringIO()
+        with patch.dict(
+            os.environ,
+            {
+                "DATABASE_URL": "postgresql://fin_ops:secret@127.0.0.1:5432/fin_ops",
+                "FIN_OPS_QUEUE_BACKEND": "postgres",
+            },
+            clear=True,
+        ), redirect_stdout(stdout):
+            exit_code = worker_app.main(["--check", "--enable-import-job-processing"])
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["worker_kind"], "import-job")
+        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT, "import.fact.changed"])
+        self.assertEqual(payload["handlers"], ["import.fact.changed", IMPORT_PROCESS_REQUESTED_EVENT])
 
     def test_general_import_confirm_queues_import_job_in_rabbitmq_mode(self) -> None:
         app = build_application()

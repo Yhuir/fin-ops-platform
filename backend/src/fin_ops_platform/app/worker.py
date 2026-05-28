@@ -48,6 +48,7 @@ from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProje
 APP_SETTINGS_KEY = "app_settings"
 OA_IMPORT_FORM_TYPES = {"payment_request", "expense_claim"}
 OA_IMPORT_STATUSES = {"completed", "in_progress"}
+IMPORT_FACT_CHANGED_EVENT = "import.fact.changed"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -209,8 +210,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             processors=import_application.build_import_job_processors(),
         )
         handlers[IMPORT_PROCESS_REQUESTED_EVENT] = import_job_worker.handle_runtime_event
+        handlers[IMPORT_FACT_CHANGED_EVENT] = _handle_import_fact_changed_event
         if IMPORT_PROCESS_REQUESTED_EVENT not in config.event_types:
             config.event_types.append(IMPORT_PROCESS_REQUESTED_EVENT)
+        if queue_settings.backend == "postgres" and IMPORT_FACT_CHANGED_EVENT not in config.event_types:
+            config.event_types.append(IMPORT_FACT_CHANGED_EVENT)
 
     if args.check:
         print(
@@ -330,6 +334,18 @@ def _run_workbench_matching_dirty_queue_loop(
         if max_iterations is not None and iterations >= max(0, int(max_iterations)):
             return
         sleep(max(float(poll_interval_seconds), 0.1))
+
+
+def _handle_import_fact_changed_event(event: Any) -> dict[str, Any]:
+    scope_type = str(getattr(event, "scope_type", None) or event.payload.get("scope_type") or "").strip()
+    scope_key = str(getattr(event, "scope_key", None) or event.payload.get("scope_key") or "").strip()
+    return {
+        "status": "acknowledged",
+        "event_type": IMPORT_FACT_CHANGED_EVENT,
+        "scope_type": scope_type,
+        "scope_key": scope_key,
+        "note": "import fact dirty scopes are persisted by the import fact writer",
+    }
 
 
 def _infer_worker_kind(args: argparse.Namespace) -> str:

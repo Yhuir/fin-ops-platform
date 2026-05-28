@@ -154,6 +154,8 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `deploy/oa/env/fin-ops.common.env.example`
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`
+- `deploy/oa/env/fin-ops.worker.oa-sync.env.example`
+- `deploy/oa/env/fin-ops.worker.workbench.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
 systemd 模板位于：
@@ -190,6 +192,26 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 
 RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、发票使用/收款、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。完整步骤见 `docs/operations/runtime-read-model-hardening.md`。
 
+最小生产正确性不依赖 RabbitMQ。标准 release 发布会自动运行
+`deploy/oa/bin/finops-ensure-runtime-workers.sh`，安装/更新 worker systemd 模板，补齐缺失的
+worker env，并启用、重启以下 PostgreSQL polling worker：
+
+```bash
+sudo systemctl enable --now fin-ops-worker@oa-sync.service
+sudo systemctl enable --now fin-ops-worker@workbench.service
+sudo systemctl enable --now fin-ops-worker@workbench-matching.service
+sudo systemctl enable --now fin-ops-worker@bank-detail.service
+sudo systemctl enable --now fin-ops-worker@search-pending.service
+sudo systemctl enable --now fin-ops-worker@invoice-usage-collection.service
+sudo systemctl enable --now fin-ops-worker@cost-tax.service
+sudo systemctl enable --now fin-ops-worker@import.service
+```
+
+这些实例分别加载 `/etc/fin-ops/fin-ops.worker.<instance>.env`。如果仍使用
+PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。
+`file-migration` 是可选迁移 worker，只有 legacy GridFS 和对象存储 secret 已配置时才加入
+`FINOPS_OPTIONAL_WORKERS=file-migration`。
+
 ## 一键发布脚本
 
 仓库根目录已提供一套只发布 `fin-ops`、不触碰 OA 源码的一键发布脚本。默认路径是 release-based 部署：
@@ -209,6 +231,8 @@ RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_B
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control activate <release-name>`
 - 激活 API、RabbitMQ worker 和 dispatcher 指向该 release
+- 自动执行 `deploy/oa/bin/finops-ensure-runtime-workers.sh`，确保常驻 worker 矩阵
+  已安装、开机自启并重启到当前 release
 - 验证前端 `index.html` 与激活 release 的 `web/dist/index.html` 哈希一致
 - 清理可删除的旧 release，默认保留最近 8 个，并始终保护当前 active release
 

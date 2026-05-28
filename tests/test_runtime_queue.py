@@ -648,6 +648,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("status in ('failed', 'dead_lettered', 'pending')", normalized_sql)
         self.assertIn("manual_requeue", normalized_sql)
         self.assertIn("publish_status = 'unpublished'", normalized_sql)
+        self.assertIn("jsonb_build_object('reason', %s::text, 'requeued_at', now())", normalized_sql)
         self.assertEqual(params, ("operator_repair", "event-1"))
 
     def test_retry_is_explicit_alias_for_retryable_failure(self) -> None:

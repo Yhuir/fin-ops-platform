@@ -40,7 +40,10 @@ sudo -n /usr/local/sbin/finops-deploy-control check-release <release-name>
 sudo -n /usr/local/sbin/finops-deploy-control activate <release-name>
 ```
 
-`activate` 负责让 API、RabbitMQ worker 和 dispatcher 指向该 release 并重启 active services。发布后脚本会检查 live 前端 `index.html` 与 release 内 `web/dist/index.html` 的哈希一致，避免后端和前端版本漂移。
+`activate` 负责让 API、RabbitMQ worker 和 dispatcher 指向该 release 并重启 active services。发布脚本随后会执行
+`deploy/oa/bin/finops-ensure-runtime-workers.sh`，幂等安装 runtime worker systemd 模板、补齐缺失的 worker env、并
+`enable/restart` 最小生产正确性必须长期运行的 worker 矩阵。最后脚本会检查 live 前端 `index.html` 与 release 内
+`web/dist/index.html` 的哈希一致，避免后端和前端版本漂移。
 
 `git push main` 不是部署动作。标准顺序是：本地验证、提交、推送、执行 release 发布、发布后 smoke check。默认脚本会拒绝 dirty worktree；生产发布必须能追溯到具体 commit。
 
@@ -65,11 +68,12 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 | `worker-oa-sync` | `oa.sync` | `--enable-oa-sync --event-type oa.sync` |
 | `worker-workbench` | `workbench.read_model.refresh` | `--enable-workbench-read-model-refresh --event-type workbench.read_model.refresh` |
 | `worker-bank-detail` | `bank_detail.read_model.refresh` | `--enable-bank-detail-read-model-refresh --event-type bank_detail.read_model.refresh --max-events-per-iteration 24` |
-| `worker-search` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
-| `worker-pending-invoice` | `pending_invoice.read_model.refresh` | `--enable-pending-invoice-read-model-refresh --event-type pending_invoice.read_model.refresh` |
+| `worker-search-pending` | `search.read_model.refresh`, `pending_invoice.read_model.refresh` | `--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh` |
+| `worker-invoice-usage-collection` | `input_invoice_usage.read_model.refresh`, `output_invoice_collection.read_model.refresh` | `--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh` |
 | `worker-cost-tax` | `cost_statistics.read_model.refresh`, `tax_offset.read_model.refresh` | `--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh` |
-| `worker-file-migration` | `file_object.gridfs_migration` | `--enable-file-object-migration --event-type file_object.gridfs_migration` |
 | `worker-import` | `import.process.requested` | `--enable-import-job-processing --event-type import.process.requested` |
+| `worker-workbench-matching` | `job.workbench_matching_dirty_scopes` | `--enable-workbench-matching` |
+| `worker-file-migration` | `file_object.gridfs_migration` | 可选迁移 worker；只有 legacy GridFS 与对象存储 secret 已配置时才启用 |
 
 不要部署 `fin-ops-worker@oa-rabbitmq.service` 这类没有匹配 handler 的实例。OA worker 的实例名应指向 `oa.sync`，例如 `fin-ops-worker@oa-sync-rabbitmq.service`，并配置 `--enable-oa-sync --event-type oa.sync`。
 
@@ -82,33 +86,59 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/env/fin-ops.common.env.example`
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`
+- `deploy/oa/env/fin-ops.worker.oa-sync.env.example`
+- `deploy/oa/env/fin-ops.worker.workbench.env.example`
+- `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
+- `deploy/oa/env/fin-ops.worker.bank-detail.env.example`
+- `deploy/oa/env/fin-ops.worker.search-pending.env.example`
+- `deploy/oa/env/fin-ops.worker.invoice-usage-collection.env.example`
+- `deploy/oa/env/fin-ops.worker.cost-tax.env.example`
+- `deploy/oa/env/fin-ops.worker.import.env.example`
+- `deploy/oa/env/fin-ops.worker.file-migration.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
 生产 secret 只能放在 `/etc/fin-ops/*.env` 这类 root-only `EnvironmentFile` 中。`RABBITMQ_URL`、`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、Redis、MinIO/S3、OA role sync 密码都不能写入 systemd inline `Environment=` 或仓库文件。migrator DSN 应单独放在 `/etc/fin-ops/fin-ops.postgres-migrator.env`，仅在执行 schema migration 时手动加载，不要加入 API/worker unit。
 
-示例：
+最小生产正确性不需要 RabbitMQ，也不应依赖人工长期手动启动。标准 release 发布会自动运行：
 
 ```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
-  --worker-id worker-workbench-1 \
-  --enable-workbench-read-model-refresh \
-  --event-type workbench.read_model.refresh \
-  --poll-interval-seconds 2 \
-  --lock-timeout-seconds 300 \
-  --task-timeout-seconds 60 \
-  --statement-timeout-seconds 30
+sudo -n /bin/bash "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" "$RELEASE_DIR/src"
+```
+
+该脚本只在目标 env 文件缺失时从模板创建，不覆盖已有 secret 或 worker 配置；它会安装/更新
+`fin-ops-worker@.service`，并启用、重启：
+
+```bash
+fin-ops-worker@oa-sync.service
+fin-ops-worker@workbench.service
+fin-ops-worker@workbench-matching.service
+fin-ops-worker@bank-detail.service
+fin-ops-worker@search-pending.service
+fin-ops-worker@invoice-usage-collection.service
+fin-ops-worker@cost-tax.service
+fin-ops-worker@import.service
+```
+
+如果需要手动修复一台历史服务器，可以执行等价命令：
+
+```bash
+sudo /bin/bash deploy/oa/bin/finops-ensure-runtime-workers.sh "$(pwd)"
 ```
 
 `--check` 应在发布前对每类 worker 跑一次，确认 handler、PostgreSQL 和 Redis 状态：
 
 ```bash
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
+  --enable-oa-sync \
   --enable-workbench-read-model-refresh \
   --enable-bank-detail-read-model-refresh \
   --enable-search-read-model-refresh \
   --enable-pending-invoice-read-model-refresh \
+  --enable-input-invoice-usage-read-model-refresh \
+  --enable-output-invoice-collection-read-model-refresh \
   --enable-cost-statistics-read-model-refresh \
   --enable-tax-offset-read-model-refresh \
+  --enable-import-job-processing \
   --check
 ```
 

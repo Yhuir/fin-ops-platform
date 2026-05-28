@@ -202,6 +202,7 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
             [
                 f"sudo -n {quoted_deploy_control} activate {quoted_release_name}",
                 f"sudo -n {quoted_deploy_control} status",
+                'sudo -n /bin/bash "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" "$RELEASE_DIR/src"',
                 build_frontend_hash_check(config),
             ]
         )

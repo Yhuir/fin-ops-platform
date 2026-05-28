@@ -7,6 +7,9 @@ import unittest
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "deploy_oa.py"
+ENSURE_WORKERS_SCRIPT_PATH = (
+    Path(__file__).resolve().parents[1] / "deploy" / "oa" / "bin" / "finops-ensure-runtime-workers.sh"
+)
 
 
 def load_deploy_module():
@@ -73,6 +76,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control activate main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
+        self.assertIn(
+            'sudo -n /bin/bash "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" "$RELEASE_DIR/src"',
+            remote_script,
+        )
         self.assertIn("KEEP_RELEASES=8", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control cleanup-releases --keep 8", remote_script)
         self.assertNotIn("/opt/fin-ops/current/backend", remote_script)
@@ -109,6 +116,7 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertIn("check-release main-abcdef1-20260524170000", remote_script)
         self.assertNotIn("activate main-abcdef1-20260524170000", remote_script)
+        self.assertNotIn("finops-ensure-runtime-workers.sh", remote_script)
         self.assertNotIn("cleanup-releases", remote_script)
 
     def test_remote_command_quotes_multiline_script_for_ssh(self) -> None:
@@ -175,6 +183,26 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("nginx -s reload", remote_script)
         self.assertIn("systemctl restart fin-ops.service", remote_script)
         self.assertIn("/opt/fin-ops/current/backend", remote_script)
+
+    def test_runtime_worker_ensure_script_defaults_to_full_postgres_worker_matrix(self) -> None:
+        script = ENSURE_WORKERS_SCRIPT_PATH.read_text()
+
+        self.assertIn(
+            "oa-sync workbench workbench-matching bank-detail search-pending invoice-usage-collection cost-tax import",
+            script,
+        )
+        for instance_name in (
+            "oa-sync",
+            "workbench",
+            "workbench-matching",
+            "bank-detail",
+            "search-pending",
+            "invoice-usage-collection",
+            "cost-tax",
+            "import",
+        ):
+            self.assertIn(f"fin-ops.worker.{instance_name}.env.example", script)
+            self.assertIn(f"fin-ops-worker@${{worker}}.service", script)
 
 
 if __name__ == "__main__":
