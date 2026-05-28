@@ -79,7 +79,7 @@ describe("AutoTagRulesDrawer", () => {
     expect(await within(drawer).findByText("费用 / 旧奖金")).toBeInTheDocument();
   });
 
-  test("uses a structured rule layout with separate summary and editor areas", async () => {
+  test("uses a compact rule header with editor content in a sliding panel", async () => {
     installMockApiFetch();
     renderDrawer();
 
@@ -88,9 +88,13 @@ describe("AutoTagRulesDrawer", () => {
 
     const feeHeading = within(drawer).getByRole("heading", { name: "费用 / 手续费" });
     const feeCard = feeHeading.closest(".bank-auto-tag-rule-card");
+    const feeHeader = feeCard?.querySelector(".bank-auto-tag-rule-header");
     expect(feeCard).not.toBeNull();
-    expect(feeCard?.querySelector(".bank-auto-tag-rule-summary")).toHaveTextContent("字段");
-    expect(feeCard?.querySelector(".bank-auto-tag-rule-summary")).toHaveTextContent("包含");
+    expect(feeCard?.querySelector(".bank-auto-tag-rule-summary")).not.toBeInTheDocument();
+    expect(feeHeader).not.toHaveTextContent("字段");
+    expect(feeHeader).not.toHaveTextContent("精确 0");
+    expect(feeHeader).not.toHaveTextContent("包含任一 手续费");
+    expect(feeCard?.querySelector(".bank-auto-tag-rule-editor-shell")).toBeInTheDocument();
     expect(feeCard?.querySelector(".bank-auto-tag-rule-editor-body")).toBeInTheDocument();
     expect(feeCard?.querySelector(".bank-auto-tag-condition-grid")).toBeInTheDocument();
   });
@@ -117,6 +121,50 @@ describe("AutoTagRulesDrawer", () => {
     expect(within(drawer).queryByText("review_required")).not.toBeInTheDocument();
     expect(within(drawer).queryByText("route_to")).not.toBeInTheDocument();
     expect(within(drawer).queryByText("规则ID")).not.toBeInTheDocument();
+  });
+
+  test("manages match fields with select all and clear actions without showing all text as an option", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "费用 / 手续费");
+    const card = drawer.querySelector(".bank-auto-tag-rule-card");
+    if (!(card instanceof HTMLElement)) {
+      throw new Error("rule card not found");
+    }
+    await editRuleLabel(user, card, "往来款", "外部往来候选");
+    await user.type(within(card).getByLabelText("包含任一", { selector: "textarea" }), "借据号");
+
+    await user.click(within(card).getByRole("button", { name: "清空匹配字段" }));
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    expect(await within(drawer).findByText("往来款 / 外部往来候选 至少选择一个匹配字段。")).toBeInTheDocument();
+    expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
+
+    await user.click(within(card).getByRole("button", { name: "全选匹配字段" }));
+    await user.click(within(card).getByLabelText("匹配字段"));
+    const listbox = await screen.findByRole("listbox");
+    expect(within(listbox).queryByRole("option", { name: /全部文本/ })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    expect(payload?.active_rules).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "外部往来候选",
+        rules: expect.objectContaining({
+          match_fields: [
+            "counterparty_name",
+            "purpose_text",
+            "summary_text",
+            "note_text",
+            "detail_text",
+          ],
+        }),
+      }),
+    ]));
   });
 
   test("edits labels inline, toggles direction, and normalizes hidden account and regex fields", async () => {
@@ -189,10 +237,14 @@ describe("AutoTagRulesDrawer", () => {
   test("keeps automatic tag rule drawer styling simple and non-truncating", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
-    expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*border:\s*1px solid var\(--bank-border-subtle\)/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-list\s*\{[^}]*background:\s*#dbe5f2/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*border:\s*1px solid #9fb4cf/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*overflow:\s*visible/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*border-color:\s*#8bb7f0/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-summary\s*\{[^}]*flex-wrap:\s*wrap/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*border-color:\s*#2563eb/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*box-shadow:\s*inset 5px 0 0 #1d4ed8/s);
+    expect(source).toMatch(/\.bank-auto-tag-field-actions\s*\{/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-editor-shell\s*\{[^}]*transition:[^}]*grid-template-rows[^}]*transform[^}]*opacity/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-editor-shell\.open\s*\{[^}]*transform:\s*translateX\(0\)/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-editor-body\s*\{[^}]*grid-template-columns:\s*minmax\(240px,\s*360px\) minmax\(0,\s*1fr\)/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/@media \(max-width:\s*1200px\)[\s\S]*\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);

@@ -66,6 +66,8 @@ const DIRECTION_OPTIONS: { value: BankAutoTagDirection; label: string }[] = [
   { value: "expense", label: "支出" },
 ];
 
+const HIDDEN_MATCH_FIELDS = new Set(["all_text"]);
+
 function cloneRule(rule: BankAutoTagEditableRule, index: number): DraftRule {
   return {
     ...rule,
@@ -171,32 +173,6 @@ function ruleDisplayLabel(rule: Pick<DraftRule, "label" | "outputPrimaryLabel" |
 
 function priorityLabel(index: number) {
   return `优先级 ${index + 1}`;
-}
-
-function summarizeRuleValues(values: string[]) {
-  if (values.length === 0) {
-    return "0";
-  }
-  const preview = values.slice(0, 2).join("、");
-  return values.length > 2 ? `${values.length}：${preview}…` : preview;
-}
-
-function summarizeFields(fields: string[], fieldOptions: BankAutoTagRulesResponse["fieldOptions"]) {
-  if (fields.length === 0) {
-    return "未选择匹配字段";
-  }
-  return fields
-    .map((field) => fieldOptions.find((option) => option.value === field)?.label ?? field)
-    .join("、");
-}
-
-function RuleSummaryItem({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "warning" }) {
-  return (
-    <Box component="span" className={`bank-auto-tag-summary-item ${tone}`}>
-      <Typography component="span" className="bank-auto-tag-summary-label" variant="caption">{label}</Typography>
-      <Typography component="span" className="bank-auto-tag-summary-value" variant="caption">{value}</Typography>
-    </Box>
-  );
 }
 
 type RuleLinesTextFieldProps = {
@@ -723,6 +699,10 @@ function RuleEditor({
   };
   const title = ruleDisplayLabel(rule);
   const panelId = `${rule.localId}-editor-panel`;
+  const [editorMounted, setEditorMounted] = useState(expanded);
+  const visibleFieldOptions = fieldOptions.filter((option) => !HIDDEN_MATCH_FIELDS.has(option.value));
+  const visibleFieldValues = visibleFieldOptions.map((option) => option.value);
+  const panelDisabled = disabled || !expanded;
   const stopHeaderAction = (event: MouseEvent) => {
     event.stopPropagation();
   };
@@ -732,6 +712,27 @@ function RuleEditor({
       onToggle();
     }
   };
+  const renderSelectedFields = (selected: string[]) => {
+    const selectedLabels = selected
+      .filter((value) => !HIDDEN_MATCH_FIELDS.has(value))
+      .map((value) => fieldOptions.find((option) => option.value === value)?.label ?? value);
+    if (selectedLabels.length > 0) {
+      return selectedLabels.join("、");
+    }
+    return selected.length > 0 ? `已选 ${selected.length} 项` : "";
+  };
+
+  useEffect(() => {
+    if (expanded) {
+      setEditorMounted(true);
+      return undefined;
+    }
+    if (!editorMounted) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => setEditorMounted(false), 180);
+    return () => window.clearTimeout(timeoutId);
+  }, [editorMounted, expanded]);
 
   return (
     <Paper className={`bank-auto-tag-rule-card${expanded ? " expanded" : ""}`} elevation={0}>
@@ -779,17 +780,6 @@ function RuleEditor({
             </ToggleButtonGroup>
             {rule.source === "custom" ? <Chip size="small" label="自定义" /> : null}
           </Stack>
-          <Box className="bank-auto-tag-rule-summary">
-            <RuleSummaryItem label="字段" value={summarizeFields(rule.rules.matchFields, fieldOptions)} />
-            <RuleSummaryItem label="精确" value={summarizeRuleValues(rule.rules.exactAny)} />
-            <RuleSummaryItem label="包含任一" value={summarizeRuleValues(rule.rules.containsAny)} />
-            {rule.rules.containsAll.length > 0 ? (
-              <RuleSummaryItem label="同时包含" value={summarizeRuleValues(rule.rules.containsAll)} />
-            ) : null}
-            {rule.rules.noneOf.length > 0 ? (
-              <RuleSummaryItem label="排除" value={summarizeRuleValues(rule.rules.noneOf)} tone="warning" />
-            ) : null}
-          </Box>
         </Box>
         <Stack className="bank-auto-tag-rule-actions" direction="row" spacing={0.5} alignItems="center" onClick={stopHeaderAction}>
           <IconButton aria-label={`${title} 上移`} size="small" onClick={onMoveUp} disabled={disabled || !canMoveUp}>
@@ -806,68 +796,98 @@ function RuleEditor({
           </IconButton>
         </Stack>
       </Stack>
-      {expanded ? (
-        <Box id={panelId} className="bank-auto-tag-rule-editor">
-          <Box className="bank-auto-tag-rule-editor-body">
-            <FormControl className="bank-auto-tag-rule-field-picker" size="small" disabled={disabled}>
-              <InputLabel id={`${rule.localId}-fields-label`}>匹配字段</InputLabel>
-              <Select
-                labelId={`${rule.localId}-fields-label`}
-                multiple
-                value={rule.rules.matchFields}
-                input={<OutlinedInput label="匹配字段" />}
-                renderValue={(selected) => selected.map((value) => fieldOptions.find((option) => option.value === value)?.label ?? value).join("、")}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setRules({ matchFields: typeof value === "string" ? value.split(",") : value });
-                }}
-              >
-                {fieldOptions.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    <Checkbox checked={rule.rules.matchFields.includes(option.value)} />
-                    <ListItemText primary={option.label} />
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-          <Box className="bank-auto-tag-condition-grid">
-            <RuleLinesTextField
-              className="bank-auto-tag-condition-field"
-              label="精确命中字样"
-              values={rule.rules.exactAny}
-              onValuesChange={(values) => setRules({ exactAny: values })}
-              disabled={disabled}
-              minRows={3}
-              fullWidth
-            />
-            <RuleLinesTextField
-              className="bank-auto-tag-condition-field"
-              label="包含任一"
-              values={rule.rules.containsAny}
-              onValuesChange={(values) => setRules({ containsAny: values })}
-              disabled={disabled}
-              minRows={3}
-              fullWidth
-            />
-            <RuleLinesTextField
-              className="bank-auto-tag-condition-field"
-              label="必须同时包含"
-              values={rule.rules.containsAll}
-              onValuesChange={(values) => setRules({ containsAll: values })}
-              disabled={disabled}
-              minRows={3}
-              fullWidth
-            />
-            <RuleLinesTextField
-              className="bank-auto-tag-condition-field"
-              label="不包含字样"
-              values={rule.rules.noneOf}
-              onValuesChange={(values) => setRules({ noneOf: values })}
-              disabled={disabled}
-              minRows={3}
-              fullWidth
-            />
+      {editorMounted ? (
+        <Box
+          id={panelId}
+          className={`bank-auto-tag-rule-editor-shell${expanded ? " open" : ""}`}
+          aria-hidden={!expanded}
+        >
+          <Box className="bank-auto-tag-rule-editor">
+            <Box className="bank-auto-tag-rule-editor-body">
+              <Box className="bank-auto-tag-rule-field-row">
+                <FormControl className="bank-auto-tag-rule-field-picker" size="small" disabled={panelDisabled}>
+                  <InputLabel id={`${rule.localId}-fields-label`}>匹配字段</InputLabel>
+                  <Select
+                    labelId={`${rule.localId}-fields-label`}
+                    multiple
+                    value={rule.rules.matchFields}
+                    input={<OutlinedInput label="匹配字段" />}
+                    renderValue={(selected) => renderSelectedFields(selected)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      const selectedValues = typeof value === "string" ? value.split(",") : value;
+                      setRules({ matchFields: selectedValues.filter((field) => !HIDDEN_MATCH_FIELDS.has(field)) });
+                    }}
+                  >
+                    {visibleFieldOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        <Checkbox checked={rule.rules.matchFields.includes(option.value)} />
+                        <ListItemText primary={option.label} />
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Stack className="bank-auto-tag-field-actions" direction="row" spacing={0.75}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    aria-label="全选匹配字段"
+                    disabled={panelDisabled || visibleFieldValues.length === 0}
+                    onClick={() => setRules({ matchFields: visibleFieldValues })}
+                  >
+                    全选
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="inherit"
+                    aria-label="清空匹配字段"
+                    disabled={panelDisabled}
+                    onClick={() => setRules({ matchFields: [] })}
+                  >
+                    清空
+                  </Button>
+                </Stack>
+              </Box>
+            </Box>
+            <Box className="bank-auto-tag-condition-grid">
+              <RuleLinesTextField
+                className="bank-auto-tag-condition-field"
+                label="精确命中字样"
+                values={rule.rules.exactAny}
+                onValuesChange={(values) => setRules({ exactAny: values })}
+                disabled={panelDisabled}
+                minRows={3}
+                fullWidth
+              />
+              <RuleLinesTextField
+                className="bank-auto-tag-condition-field"
+                label="包含任一"
+                values={rule.rules.containsAny}
+                onValuesChange={(values) => setRules({ containsAny: values })}
+                disabled={panelDisabled}
+                minRows={3}
+                fullWidth
+              />
+              <RuleLinesTextField
+                className="bank-auto-tag-condition-field"
+                label="必须同时包含"
+                values={rule.rules.containsAll}
+                onValuesChange={(values) => setRules({ containsAll: values })}
+                disabled={panelDisabled}
+                minRows={3}
+                fullWidth
+              />
+              <RuleLinesTextField
+                className="bank-auto-tag-condition-field"
+                label="不包含字样"
+                values={rule.rules.noneOf}
+                onValuesChange={(values) => setRules({ noneOf: values })}
+                disabled={panelDisabled}
+                minRows={3}
+                fullWidth
+              />
+            </Box>
           </Box>
         </Box>
       ) : null}
