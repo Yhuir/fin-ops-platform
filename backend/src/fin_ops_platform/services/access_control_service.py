@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
 from typing import Callable, Iterable, Literal
 
@@ -9,6 +10,7 @@ from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 
 DEFAULT_ADMIN_USERNAME = "YNSYLP005"
 AccessTier = Literal["denied", "read_export_only", "full_access", "admin"]
+logger = logging.getLogger(__name__)
 
 
 def _normalize_values(values: Iterable[str]) -> list[str]:
@@ -28,6 +30,16 @@ def _parse_csv_environment(name: str) -> list[str]:
     if not raw.strip():
         return []
     return _normalize_values(part.strip() for part in raw.split(","))
+
+
+def _provider_values(provider: Callable[[], list[str]] | None, *, provider_name: str) -> list[str]:
+    if provider is None:
+        return []
+    try:
+        return _normalize_values(provider())
+    except Exception as exc:
+        logger.warning("Access control dynamic provider failed: %s", provider_name, exc_info=True)
+        return []
 
 
 @dataclass(slots=True)
@@ -70,15 +82,9 @@ class AccessControlService:
         username = identity.username.strip()
 
         allowed_usernames = set(_normalize_values(self.allowed_usernames or []))
-        if self.dynamic_allowed_usernames_provider is not None:
-            allowed_usernames.update(_normalize_values(self.dynamic_allowed_usernames_provider()))
         readonly_export_usernames = set(_normalize_values(self.readonly_export_usernames or []))
-        if self.dynamic_readonly_export_usernames_provider is not None:
-            readonly_export_usernames.update(_normalize_values(self.dynamic_readonly_export_usernames_provider()))
         admin_usernames = {DEFAULT_ADMIN_USERNAME}
         admin_usernames.update(_normalize_values(self.admin_usernames or []))
-        if self.dynamic_admin_usernames_provider is not None:
-            admin_usernames.update(_normalize_values(self.dynamic_admin_usernames_provider()))
 
         if self.required_permission and self.required_permission in permissions:
             can_access_app = True
@@ -87,7 +93,9 @@ class AccessControlService:
         elif self.allowed_roles and roles.intersection(self.allowed_roles):
             can_access_app = True
         else:
-            can_access_app = False
+            can_access_app = username in set(
+                _provider_values(self.dynamic_allowed_usernames_provider, provider_name="allowed_usernames")
+            )
 
         if not can_access_app:
             return AccessDecision(
@@ -96,6 +104,19 @@ class AccessControlService:
                 can_mutate_data=False,
                 can_admin_access=False,
             )
+
+        readonly_export_usernames.update(
+            _provider_values(
+                self.dynamic_readonly_export_usernames_provider,
+                provider_name="readonly_export_usernames",
+            )
+        )
+        admin_usernames.update(
+            _provider_values(
+                self.dynamic_admin_usernames_provider,
+                provider_name="admin_usernames",
+            )
+        )
 
         if username in admin_usernames:
             return AccessDecision(

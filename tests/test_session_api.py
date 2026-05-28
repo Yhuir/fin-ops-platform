@@ -61,6 +61,43 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(payload["can_mutate_data"])
         self.assertFalse(payload["can_admin_access"])
 
+    def test_get_session_me_does_not_fail_when_dynamic_settings_provider_is_unavailable_for_permitted_user(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._access_control_service.dynamic_allowed_usernames_provider = lambda: (_ for _ in ()).throw(
+                RuntimeError("settings store unavailable")
+            )
+            app._access_control_service.dynamic_readonly_export_usernames_provider = lambda: (_ for _ in ()).throw(
+                RuntimeError("settings store unavailable")
+            )
+            app._access_control_service.dynamic_admin_usernames_provider = lambda: (_ for _ in ()).throw(
+                RuntimeError("settings store unavailable")
+            )
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="101",
+                username="liuji",
+                nickname="刘际涛",
+                display_name="刘际涛",
+                dept_id="88",
+                dept_name="财务部",
+                roles=["finance"],
+                permissions=["finops:app:view"],
+            )
+
+            with self.assertLogs("fin_ops_platform.services.access_control_service", level="WARNING") as logs:
+                response = app.handle_request(
+                    "GET",
+                    "/api/session/me",
+                    headers={"Authorization": "Bearer mock-oa-token"},
+                )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["allowed"])
+        self.assertEqual(payload["access_tier"], "full_access")
+        self.assertTrue(payload["can_access_app"])
+        self.assertTrue(any("dynamic provider failed" in message for message in logs.output))
+
     def test_get_session_me_accepts_admin_token_cookie(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
