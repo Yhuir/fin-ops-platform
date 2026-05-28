@@ -316,6 +316,61 @@ class ActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
         return super().fetch_all(sql, params)
 
 
+class WorkbenchGenerationStatsConnection(ActiveWorkbenchGenerationConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_generation_stats" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            return {
+                "total_groups": 2,
+                "oa_count": 3,
+                "bank_count": 4,
+                "invoice_count": 5,
+                "row_count_total": 12,
+            }
+        return super().fetch_one(sql, params)
+
+
+class WorkbenchGenerationRetentionConnection(WorkbenchSqlReadConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.execute_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.workbench_generations" in normalized and "status <> 'active'" in normalized:
+            return [
+                {
+                    "generation_id": "old-gen",
+                    "scope_key": "2026-01",
+                    "status": "superseded",
+                    "activated_at": "2026-05-01T00:00:00+00:00",
+                    "completed_at": "2026-05-01T00:00:00+00:00",
+                    "updated_at": "2026-05-01T00:00:00+00:00",
+                }
+            ]
+        return []
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        normalized = " ".join(sql.lower().split())
+        self.execute_calls.append((normalized, params))
+        return 1
+
+    def transaction(self):
+        class Transaction:
+            def __init__(self, connection: WorkbenchGenerationRetentionConnection) -> None:
+                self.connection = connection
+
+            def __enter__(self):
+                return self.connection
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+        return Transaction(self)
+
+
 class FailedWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -1081,6 +1136,24 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(any("g.generation_id = %s" in sql and "gen-active" in params for sql, params in all_queries))
         self.assertTrue(any("r.generation_id = g.generation_id" in sql for sql, _params in all_queries))
 
+    def test_repository_uses_materialized_generation_stats_for_default_groups_counts(self) -> None:
+        connection = WorkbenchGenerationStatsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
+
+        self.assertEqual(page["total"], 2)
+        self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
+        self.assertTrue(
+            any("from read_model.workbench_generation_stats" in sql for sql, _params in connection.fetch_one_calls)
+        )
+        self.assertFalse(
+            any(
+                "count(distinct r.row_id) filter" in sql
+                for sql, _params in connection.fetch_one_calls
+            )
+        )
+
     def test_repository_workbench_groups_cache_version_uses_active_generation(self) -> None:
         connection = ActiveWorkbenchGenerationConnection()
         repository = PostgresReadModelRepository(connection)
@@ -1092,6 +1165,26 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             any(
                 "max((source_versions->>'source_version')::bigint)" in sql
                 for sql, _params in connection.fetch_one_calls
+            )
+        )
+
+    def test_repository_workbench_generation_retention_never_deletes_active_generations(self) -> None:
+        connection = WorkbenchGenerationRetentionConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        result = repository.prune_workbench_generations(
+            keep_recent_generations_per_scope=2,
+            keep_days=7,
+            dry_run=False,
+        )
+
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertTrue(connection.execute_calls)
+        self.assertTrue(
+            any(
+                "delete from read_model.workbench_generations" in sql
+                and "status <> 'active'" in sql
+                for sql, _params in connection.execute_calls
             )
         )
 

@@ -144,6 +144,25 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["workbench_read_model"]["active_generation_id"], "gen-all")
         self.assertIn("generation_metadata_actual_mismatch", payload["workbench_read_model"]["last_error"])
 
+    def test_app_health_caches_workbench_refresh_status_briefly(self) -> None:
+        app = build_application()
+
+        class CountingWorkbenchRepository:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get_workbench_refresh_status(self, *, scope_key: str):
+                self.calls += 1
+                return {"scope_key": scope_key, "read_model_status": "fresh", "consistency_status": "fresh"}
+
+        repository = CountingWorkbenchRepository()
+        app._workbench_sql_read_repository = repository
+
+        app.handle_request("GET", "/api/app-health")
+        app.handle_request("GET", "/api/app-health")
+
+        self.assertEqual(repository.calls, 1)
+
     def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
         app = build_application()
         app._oa_sync_service.mark_changed(["all"], reason="OA Mongo changed")

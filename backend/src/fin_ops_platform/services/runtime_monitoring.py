@@ -268,22 +268,47 @@ class RuntimeMonitoringRepository:
         event_types = tuple(READ_MODEL_EVENT_TYPES.keys())
         duration_rows = self._connection.fetch_all(
             """
+            with refresh_events as (
+              select
+                event_type,
+                updated_at,
+                case
+                  when coalesce(aggregate_id, raw_payload->>'scope_key', raw_payload->'runtime_result'->>'scope_key', '') = 'all'
+                    then 'full'
+                  when coalesce(raw_payload->>'scope_key', raw_payload->'runtime_result'->>'scope_key', '') ~ '^\\d{4}-\\d{2}$'
+                    then 'incremental'
+                  else 'unknown'
+                end as refresh_kind,
+                ((raw_payload->'runtime_result'->>'duration_ms')::numeric) as duration_ms
+              from job.outbox_events
+              where event_type = any(%s)
+                and status = 'done'
+                and raw_payload->'runtime_result' ? 'duration_ms'
+            ),
+            metric_windows(window_name, started_at) as (
+              values
+                ('recent_15m', now() - interval '15 minutes'),
+                ('recent_1h', now() - interval '1 hour'),
+                ('all_time', '-infinity'::timestamptz)
+            )
             select
               event_type,
+              window_name,
+              refresh_kind,
+              count(*)::bigint as sample_count,
+              max(updated_at)::text as last_completed_at,
               percentile_cont(0.5) within group (
-                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
+                order by duration_ms
               )::float as p50_ms,
               percentile_cont(0.95) within group (
-                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
+                order by duration_ms
               )::float as p95_ms,
               percentile_cont(0.99) within group (
-                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
+                order by duration_ms
               )::float as p99_ms
-            from job.outbox_events
-            where event_type = any(%s)
-              and status = 'done'
-              and raw_payload->'runtime_result' ? 'duration_ms'
-            group by event_type
+            from refresh_events
+            join metric_windows on refresh_events.updated_at >= metric_windows.started_at
+            group by event_type, window_name, refresh_kind
             """,
             (list(event_types),),
         )
@@ -315,11 +340,47 @@ class RuntimeMonitoringRepository:
             ) or 0
         except Exception:
             workbench_consistency_warning = "workbench_generation_consistency_unavailable"
-        duration_by_event_type = {str(row.get("event_type")): row for row in duration_rows}
+        durations_by_event_type: dict[str, dict[str, Any]] = {}
+        for row in duration_rows:
+            event_type = str(row.get("event_type") or "")
+            if not event_type:
+                continue
+            window_name = str(row.get("window_name") or "all_time")
+            refresh_kind = str(row.get("refresh_kind") or "unknown")
+            event_payload = durations_by_event_type.setdefault(event_type, {"windows": {}, "kinds": {}})
+            window_payload = event_payload["windows"].setdefault(
+                window_name,
+                {
+                    "sample_count": 0,
+                    "last_completed_at": None,
+                    "duration_ms": dict(EMPTY_PERCENTILES),
+                },
+            )
+            sample_count = _optional_int(row.get("sample_count")) or 0
+            if sample_count > int(window_payload["sample_count"]):
+                window_payload["sample_count"] = sample_count
+                window_payload["last_completed_at"] = row.get("last_completed_at")
+                window_payload["duration_ms"] = {
+                    "p50": _optional_float(row.get("p50_ms")),
+                    "p95": _optional_float(row.get("p95_ms")),
+                    "p99": _optional_float(row.get("p99_ms")),
+                }
+            event_payload["kinds"].setdefault(refresh_kind, {})[window_name] = {
+                "sample_count": sample_count,
+                "last_completed_at": row.get("last_completed_at"),
+                "duration_ms": {
+                    "p50": _optional_float(row.get("p50_ms")),
+                    "p95": _optional_float(row.get("p95_ms")),
+                    "p99": _optional_float(row.get("p99_ms")),
+                },
+            }
         dirty_by_scope_type = {str(row.get("scope_type")): row for row in dirty_rows}
         rows: list[dict[str, Any]] = []
         for event_type, (key, scope_type) in READ_MODEL_EVENT_TYPES.items():
-            duration = duration_by_event_type.get(event_type, {})
+            duration = durations_by_event_type.get(event_type, {})
+            windows = duration.get("windows") if isinstance(duration.get("windows"), dict) else {}
+            recent_15m = windows.get("recent_15m") if isinstance(windows.get("recent_15m"), dict) else {}
+            all_time = windows.get("all_time") if isinstance(windows.get("all_time"), dict) else {}
             dirty = dirty_by_scope_type.get(scope_type, {})
             unavailable_count = _optional_int(dirty.get("unavailable_count")) or 0
             warning_code = None
@@ -329,11 +390,15 @@ class RuntimeMonitoringRepository:
             rows.append(
                 {
                     "key": key,
-                    "refresh_duration_ms": {
-                        "p50": _optional_float(duration.get("p50_ms")),
-                        "p95": _optional_float(duration.get("p95_ms")),
-                        "p99": _optional_float(duration.get("p99_ms")),
+                    "refresh_duration_ms": recent_15m.get("duration_ms") or dict(EMPTY_PERCENTILES),
+                    "refresh_duration_windows": {
+                        "recent_15m": recent_15m
+                        or {"sample_count": 0, "last_completed_at": None, "duration_ms": dict(EMPTY_PERCENTILES)},
+                        "recent_1h": windows.get("recent_1h")
+                        or {"sample_count": 0, "last_completed_at": None, "duration_ms": dict(EMPTY_PERCENTILES)},
                     },
+                    "historical_refresh_duration_ms": all_time.get("duration_ms") or dict(EMPTY_PERCENTILES),
+                    "refresh_duration_by_kind": duration.get("kinds") if isinstance(duration.get("kinds"), dict) else {},
                     "stale_count": _optional_int(dirty.get("stale_count")) or 0,
                     "unavailable_count": unavailable_count,
                     "status": "available",

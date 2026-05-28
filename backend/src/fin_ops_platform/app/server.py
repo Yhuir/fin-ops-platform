@@ -2346,8 +2346,8 @@ class Application:
         repository: object,
         scope_key: str,
         zone: str,
-        page: str | None,
-        page_size: str | None,
+        page: str | None = None,
+        page_size: str | None = None,
         status: str | None,
         source_kind: str | None,
         search: str | None,
@@ -2476,7 +2476,19 @@ class Application:
 
     @staticmethod
     def _workbench_groups_redis_ttl_seconds() -> int:
-        return 20
+        raw_value = os.getenv("FIN_OPS_WORKBENCH_GROUPS_REDIS_TTL_SECONDS", "600").strip()
+        try:
+            return min(900, max(60, int(raw_value)))
+        except ValueError:
+            return 600
+
+    @staticmethod
+    def _app_health_workbench_status_cache_ttl_seconds() -> float:
+        raw_value = os.getenv("FIN_OPS_APP_HEALTH_WORKBENCH_STATUS_CACHE_TTL_SECONDS", "2").strip()
+        try:
+            return min(10.0, max(0.0, float(raw_value)))
+        except ValueError:
+            return 2.0
 
     def _enqueue_workbench_read_model_refresh(self, scope_key: str, *, reason: str) -> None:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
@@ -2639,11 +2651,10 @@ class Application:
 
     def _apply_workbench_generation_health(self, snapshot: dict[str, object]) -> None:
         repository = getattr(self, "_workbench_sql_read_repository", None)
-        get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
-        if not callable(get_refresh_status):
+        if not callable(getattr(repository, "get_workbench_refresh_status", None)):
             return
         try:
-            status_payload = get_refresh_status(scope_key="all")
+            status_payload = self._cached_workbench_refresh_status(repository, scope_key="all")
         except Exception as exc:
             workbench_payload = snapshot.get("workbench_read_model")
             if not isinstance(workbench_payload, dict):
@@ -2683,6 +2694,30 @@ class Application:
                 "message": status_payload.get("last_error") or "Workbench read model generation consistency failed.",
             }
         snapshot["status"] = "blocked"
+
+    def _cached_workbench_refresh_status(self, repository: object, *, scope_key: str) -> dict[str, object]:
+        ttl_seconds = self._app_health_workbench_status_cache_ttl_seconds()
+        get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
+        if not callable(get_refresh_status):
+            return {}
+        if ttl_seconds <= 0:
+            payload = get_refresh_status(scope_key=scope_key)
+            return dict(payload) if isinstance(payload, dict) else {}
+        cache_key = f"workbench_refresh_status:{scope_key}"
+        cache = getattr(self, "_app_health_workbench_status_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(self, "_app_health_workbench_status_cache", cache)
+        now = monotonic()
+        cached = cache.get(cache_key)
+        if isinstance(cached, tuple) and len(cached) == 2:
+            expires_at, payload = cached
+            if isinstance(expires_at, (int, float)) and now < float(expires_at) and isinstance(payload, dict):
+                return dict(payload)
+        payload = get_refresh_status(scope_key=scope_key)
+        normalized = dict(payload) if isinstance(payload, dict) else {}
+        cache[cache_key] = (now + ttl_seconds, normalized)
+        return normalized
 
     @staticmethod
     def _emit_app_health_timing(snapshot: dict[str, object]) -> None:
@@ -10159,9 +10194,9 @@ class Application:
         date_from: str | None,
         date_to: str | None,
         keyword: str | None,
-        category_code: str | None,
-        category_primary_label: str | None,
-        category_sub_label: str | None,
+        category_code: str | None = None,
+        category_primary_label: str | None = None,
+        category_sub_label: str | None = None,
         page: str | None,
         page_size: str | None,
     ) -> Response:

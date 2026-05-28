@@ -168,6 +168,20 @@ export type OperationsDashboardQueueMetric = {
 export type OperationsDashboardReadModelMetric = {
   key: string;
   refresh_duration_ms: OperationsDashboardPercentiles;
+  historical_refresh_duration_ms?: OperationsDashboardPercentiles;
+  refresh_duration_windows?: {
+    recent_15m?: {
+      sample_count: number;
+      last_completed_at: string | null;
+      duration_ms: OperationsDashboardPercentiles;
+    };
+    recent_1h?: {
+      sample_count: number;
+      last_completed_at: string | null;
+      duration_ms: OperationsDashboardPercentiles;
+    };
+  };
+  refresh_duration_by_kind?: Record<string, unknown>;
   stale_count: number | null;
   unavailable_count: number | null;
   status: OperationsDashboardAvailability;

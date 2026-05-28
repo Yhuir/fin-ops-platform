@@ -181,6 +181,53 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(queue_rows[0]["status"], "unknown")
         self.assertEqual(queue_rows[0]["warning_code"], "rabbitmq_metrics_unavailable")
 
+    def test_runtime_repository_uses_recent_window_for_read_model_health_duration(self) -> None:
+        class WindowedConnection:
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "workbench_generation_consistency" in normalized:
+                    return {"inconsistent_count": 0}
+                raise AssertionError(sql)
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "metric_windows(window_name" in normalized:
+                    return [
+                        {
+                            "event_type": "workbench.read_model.refresh",
+                            "window_name": "recent_15m",
+                            "refresh_kind": "incremental",
+                            "sample_count": 2,
+                            "last_completed_at": "2026-05-28T10:00:00+00:00",
+                            "p50_ms": 100.0,
+                            "p95_ms": 120.0,
+                            "p99_ms": 125.0,
+                        },
+                        {
+                            "event_type": "workbench.read_model.refresh",
+                            "window_name": "all_time",
+                            "refresh_kind": "full",
+                            "sample_count": 100,
+                            "last_completed_at": "2026-05-28T09:00:00+00:00",
+                            "p50_ms": 4000.0,
+                            "p95_ms": 24000.0,
+                            "p99_ms": 30000.0,
+                        },
+                    ]
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                raise AssertionError(sql)
+
+        repository = RuntimeMonitoringRepository(WindowedConnection())
+
+        rows = repository.dashboard_read_model_metrics()
+
+        workbench = next(row for row in rows if row["key"] == "workbench")
+        self.assertEqual(workbench["refresh_duration_ms"]["p95"], 120.0)
+        self.assertEqual(workbench["historical_refresh_duration_ms"]["p95"], 24000.0)
+        self.assertEqual(workbench["refresh_duration_windows"]["recent_15m"]["sample_count"], 2)
+        self.assertIn("full", workbench["refresh_duration_by_kind"])
+
 
 if __name__ == "__main__":
     unittest.main()

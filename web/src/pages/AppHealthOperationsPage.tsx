@@ -176,6 +176,14 @@ function PercentileCells({ value }: { value: OperationsDashboardPercentiles }) {
   );
 }
 
+function sampleLabel(row: OperationsDashboardReadModelMetric) {
+  const sampleCount = row.refresh_duration_windows?.recent_15m?.sample_count;
+  if (sampleCount === null || sampleCount === undefined) {
+    return EMPTY_VALUE;
+  }
+  return formatNumber(sampleCount);
+}
+
 function InventorySummary({ title, block }: { title: string; block: OperationsDashboardInventoryBlock }) {
   return (
     <Box sx={{ border: `1px solid ${settingsTokens.borderSubtle}`, borderRadius: "8px", minWidth: 0, p: 1.5 }}>
@@ -347,8 +355,10 @@ function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }
         <TableHead>
           <TableRow>
             <TableCell>Read Model</TableCell>
-            <TableCell>p95</TableCell>
-            <TableCell>p99</TableCell>
+            <TableCell>15m p95</TableCell>
+            <TableCell>15m p99</TableCell>
+            <TableCell>历史 p95</TableCell>
+            <TableCell align="right">15m 样本</TableCell>
             <TableCell align="right">stale</TableCell>
             <TableCell align="right">unavailable</TableCell>
           </TableRow>
@@ -358,6 +368,8 @@ function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }
             <TableRow key={row.key}>
               <TableCell>{row.key}</TableCell>
               <PercentileCells value={row.refresh_duration_ms} />
+              <PerformanceCell value={row.historical_refresh_duration_ms?.p95} kind="p95" />
+              <TableCell align="right">{sampleLabel(row)}</TableCell>
               <TableCell align="right">{formatNumber(row.stale_count)}</TableCell>
               <TableCell align="right">{formatNumber(row.unavailable_count)}</TableCell>
             </TableRow>

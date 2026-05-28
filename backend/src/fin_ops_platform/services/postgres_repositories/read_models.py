@@ -2265,6 +2265,106 @@ class PostgresReadModelRepository:
             "source_versions": source_versions,
         }
 
+    @staticmethod
+    def _upsert_workbench_generation_stats(
+        connection: Any,
+        *,
+        generation_id: str,
+        scope_key: str,
+        summary_payload: dict[str, Any],
+    ) -> None:
+        summary = summary_payload.get("summary") if isinstance(summary_payload.get("summary"), dict) else {}
+        normalized_summary = _normalize_workbench_summary_counts(summary)
+        zone_counts = normalized_summary.get("zone_counts")
+        if not isinstance(zone_counts, dict):
+            zone_counts = _empty_workbench_zone_counts()
+        for zone in ("paired", "open"):
+            counts = zone_counts.get(zone) if isinstance(zone_counts.get(zone), dict) else {}
+            oa_count = int_value(counts.get("oa"), 0)
+            bank_count = int_value(counts.get("bank"), 0)
+            invoice_count = int_value(counts.get("invoice"), 0)
+            row_count_total = int_value(counts.get("rows"), oa_count + bank_count + invoice_count)
+            connection.execute(
+                """
+                insert into read_model.workbench_generation_stats(
+                    generation_id, scope_key, zone, status_bucket, total_groups,
+                    oa_count, bank_count, invoice_count, row_count_total, payload, raw_payload
+                )
+                values (%s, %s, %s, 'all', %s, %s, %s, %s, %s, %s, %s)
+                on conflict (generation_id, scope_key, zone, status_bucket) do update set
+                    total_groups = excluded.total_groups,
+                    oa_count = excluded.oa_count,
+                    bank_count = excluded.bank_count,
+                    invoice_count = excluded.invoice_count,
+                    row_count_total = excluded.row_count_total,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    computed_at = now(),
+                    updated_at = now()
+                """,
+                (
+                    generation_id,
+                    scope_key,
+                    zone,
+                    int_value(counts.get("groups"), 0),
+                    oa_count,
+                    bank_count,
+                    invoice_count,
+                    row_count_total,
+                    jsonb(counts if isinstance(counts, dict) else {}),
+                    jsonb({"summary_zone_counts": counts if isinstance(counts, dict) else {}}),
+                ),
+            )
+
+    def _workbench_generation_stats_for_groups_page(
+        self,
+        *,
+        scope_key: str,
+        generation_id: str | None,
+        zone: str,
+        status: str | None,
+        source_kind: str | None,
+        search: str | None,
+        search_mode: str | None,
+        search_by_pane: dict[str, Any],
+        column_filters: dict[str, Any],
+        time_filters: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not generation_id:
+            return None
+        if text(status) or text(source_kind) or text(search):
+            return None
+        if search_mode == "linked_context" or search_by_pane or column_filters or time_filters:
+            return None
+        row = self._connection.fetch_one(
+            """
+            select total_groups, oa_count, bank_count, invoice_count, row_count_total
+            from read_model.workbench_generation_stats
+            where generation_id = %s
+              and scope_key = %s
+              and zone = %s
+              and status_bucket = 'all'
+            limit 1
+            """,
+            (generation_id, scope_key, zone),
+        )
+        if not isinstance(row, dict):
+            return None
+        return {
+            "total": int_value(row.get("total_groups"), 0),
+            "row_counts": {
+                "oa": int_value(row.get("oa_count"), 0),
+                "bank": int_value(row.get("bank_count"), 0),
+                "invoice": int_value(row.get("invoice_count"), 0),
+                "rows": int_value(
+                    row.get("row_count_total"),
+                    int_value(row.get("oa_count"), 0)
+                    + int_value(row.get("bank_count"), 0)
+                    + int_value(row.get("invoice_count"), 0),
+                ),
+            },
+        }
+
     def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         if normalized_scope_key == "all":
@@ -2378,50 +2478,70 @@ class PostgresReadModelRepository:
             search_by_pane=normalized_search_by_pane,
             fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
-        count_row = self._connection.fetch_one(
-            f"""
-            select count(*) as total_count
-            from read_model.workbench_groups g
-            where {where_sql}
-            """,
-            tuple(params),
+        materialized_counts = self._workbench_generation_stats_for_groups_page(
+            scope_key=normalized_scope_key,
+            generation_id=active_generation_id,
+            zone=normalized_zone,
+            status=status,
+            source_kind=source_kind,
+            search=normalized_search,
+            search_mode=normalized_search_mode,
+            search_by_pane=normalized_search_by_pane,
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
         )
-        row_count_row = self._connection.fetch_one(
-            f"""
-            select
-                count(distinct r.row_id) filter (
-                    where r.pane = 'oa'
-                      and coalesce(r.row_role, '') <> 'summary'
-                      {oa_row_filter_sql}
-                )::bigint as oa_count,
-                count(distinct r.row_id) filter (
-                    where r.pane = 'bank'
-                      and coalesce(r.row_role, '') <> 'summary'
-                      and coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'
-                      {bank_row_filter_sql}
-                )::bigint as bank_count,
-                count(distinct r.row_id) filter (
-                    where r.pane = 'invoice'
-                      and coalesce(r.row_role, '') <> 'summary'
-                      {invoice_row_filter_sql}
-                )::bigint as invoice_count
-            from read_model.workbench_groups g
-            left join read_model.workbench_group_rows r
-              on r.scope_key = g.scope_key
-             and r.generation_id = g.generation_id
-             and r.zone = g.zone
-             and r.group_id = g.group_id
-            where {where_sql}
-            """,
-            tuple(
-                [
-                    *oa_row_filter_params,
-                    *bank_row_filter_params,
-                    *invoice_row_filter_params,
-                    *params,
-                ]
-            ),
-        )
+        if materialized_counts is None:
+            count_row = self._connection.fetch_one(
+                f"""
+                select count(*) as total_count
+                from read_model.workbench_groups g
+                where {where_sql}
+                """,
+                tuple(params),
+            )
+            row_count_row = self._connection.fetch_one(
+                f"""
+                select
+                    count(distinct r.row_id) filter (
+                        where r.pane = 'oa'
+                          and coalesce(r.row_role, '') <> 'summary'
+                          {oa_row_filter_sql}
+                    )::bigint as oa_count,
+                    count(distinct r.row_id) filter (
+                        where r.pane = 'bank'
+                          and coalesce(r.row_role, '') <> 'summary'
+                          and coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'
+                          {bank_row_filter_sql}
+                    )::bigint as bank_count,
+                    count(distinct r.row_id) filter (
+                        where r.pane = 'invoice'
+                          and coalesce(r.row_role, '') <> 'summary'
+                          {invoice_row_filter_sql}
+                    )::bigint as invoice_count
+                from read_model.workbench_groups g
+                left join read_model.workbench_group_rows r
+                  on r.scope_key = g.scope_key
+                 and r.generation_id = g.generation_id
+                 and r.zone = g.zone
+                 and r.group_id = g.group_id
+                where {where_sql}
+                """,
+                tuple(
+                    [
+                        *oa_row_filter_params,
+                        *bank_row_filter_params,
+                        *invoice_row_filter_params,
+                        *params,
+                    ]
+                ),
+            )
+            total = int_value((count_row or {}).get("total_count"), 0)
+            row_counts = _workbench_group_page_row_counts(row_count_row)
+        else:
+            total = int_value(materialized_counts.get("total"), 0)
+            row_counts = materialized_counts.get("row_counts")
+            if not isinstance(row_counts, dict):
+                row_counts = _workbench_group_page_row_counts(None)
         page_params = [*params, normalized_page_size + 1, offset]
         rows = self._connection.fetch_all(
             f"""
@@ -2451,7 +2571,7 @@ class PostgresReadModelRepository:
                 )
                 group = _compact_workbench_group_for_summary_page(group)
             groups.append(group)
-        refresh_status = self.get_workbench_refresh_status(scope_key=normalized_scope_key)
+        read_model_status = self._workbench_read_model_status_for_groups_page(scope_key=normalized_scope_key)
         return {
             "month": normalized_scope_key,
             "scope_key": normalized_scope_key,
@@ -2459,11 +2579,11 @@ class PostgresReadModelRepository:
             "page": normalized_page,
             "page_size": normalized_page_size,
             "detail_level": normalized_detail_level,
-            "total": int_value((count_row or {}).get("total_count"), 0),
-            "row_counts": _workbench_group_page_row_counts(row_count_row),
+            "total": total,
+            "row_counts": row_counts,
             "has_more": len(rows) > normalized_page_size,
             "groups": groups,
-            "read_model_status": refresh_status["read_model_status"],
+            "read_model_status": read_model_status,
             "active_generation_id": active_generation_id,
             "read_model_version": active_generation_id,
         }
@@ -2503,6 +2623,32 @@ class PostgresReadModelRepository:
         result["active_generation_id"] = active_generation_id
         result["read_model_version"] = active_generation_id
         return result
+
+    def _workbench_read_model_status_for_groups_page(self, *, scope_key: str) -> str:
+        normalized_scope_key = str(scope_key or "all").strip() or "all"
+        scope_clause = ""
+        params: list[Any] = []
+        if normalized_scope_key != "all":
+            scope_clause = "and scope_key = %s"
+            params.append(normalized_scope_key)
+        rows = self._connection.fetch_all(
+            f"""
+            select status
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'workbench'
+              and status in ('pending', 'processing', 'failed')
+              {scope_clause}
+            limit 20
+            """,
+            tuple(params),
+        )
+        statuses = {text(row.get("status")) for row in rows if isinstance(row, dict)}
+        if statuses.intersection({"pending", "processing"}):
+            return "refreshing"
+        if "failed" in statuses:
+            return "stale"
+        return "fresh"
 
     def get_workbench_refresh_status(self, *, scope_key: str | None = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
@@ -2652,6 +2798,101 @@ class PostgresReadModelRepository:
         if generated_at:
             return f"g{generated_at}"
         return None
+
+    def preview_workbench_generation_retention(
+        self,
+        *,
+        keep_recent_generations_per_scope: int = 3,
+        keep_days: int = 14,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        keep_recent = max(1, int_value(keep_recent_generations_per_scope, 3))
+        keep_days_value = max(1, int_value(keep_days, 14))
+        limit_value = min(5000, max(1, int_value(limit, 500)))
+        rows = self._connection.fetch_all(
+            """
+            with ranked as (
+              select
+                generation_id,
+                scope_key,
+                status,
+                activated_at,
+                completed_at,
+                updated_at,
+                row_number() over (
+                  partition by tenant_id, scope_key
+                  order by coalesce(activated_at, completed_at, updated_at) desc, updated_at desc
+                ) as scope_rank
+              from read_model.workbench_generations
+              where tenant_id = 'default'
+                and status <> 'active'
+            )
+            select generation_id, scope_key, status, activated_at::text as activated_at,
+                   completed_at::text as completed_at, updated_at::text as updated_at
+            from ranked
+            where scope_rank > %s
+              and coalesce(activated_at, completed_at, updated_at) < now() - (%s * interval '1 day')
+            order by scope_key, coalesce(activated_at, completed_at, updated_at)
+            limit %s
+            """,
+            (keep_recent, keep_days_value, limit_value),
+        )
+        return {
+            "dry_run": True,
+            "keep_recent_generations_per_scope": keep_recent,
+            "keep_days": keep_days_value,
+            "limit": limit_value,
+            "candidate_count": len(rows),
+            "generations": [dict(row) for row in rows],
+        }
+
+    def prune_workbench_generations(
+        self,
+        *,
+        keep_recent_generations_per_scope: int = 3,
+        keep_days: int = 14,
+        limit: int = 500,
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        preview = self.preview_workbench_generation_retention(
+            keep_recent_generations_per_scope=keep_recent_generations_per_scope,
+            keep_days=keep_days,
+            limit=limit,
+        )
+        generation_ids = [
+            text(row.get("generation_id"))
+            for row in preview["generations"]
+            if isinstance(row, dict) and text(row.get("generation_id"))
+        ]
+        if dry_run or not generation_ids:
+            result = dict(preview)
+            result["dry_run"] = dry_run
+            result["deleted_count"] = 0
+            return result
+
+        def delete(connection: Any) -> None:
+            params = (generation_ids,)
+            connection.execute("delete from read_model.workbench_generation_stats where generation_id = any(%s)", params)
+            connection.execute("delete from read_model.workbench_group_rows where generation_id = any(%s)", params)
+            connection.execute("delete from read_model.workbench_groups where generation_id = any(%s)", params)
+            connection.execute("delete from read_model.workbench_rows where generation_id = any(%s)", params)
+            connection.execute("delete from read_model.workbench_summary where generation_id = any(%s)", params)
+            connection.execute("delete from read_model.workbench_snapshots where generation_id = any(%s)", params)
+            connection.execute(
+                """
+                delete from read_model.workbench_generations
+                where generation_id = any(%s)
+                  and tenant_id = 'default'
+                  and status <> 'active'
+                """,
+                params,
+            )
+
+        run_in_transaction(self._connection, delete)
+        result = dict(preview)
+        result["dry_run"] = False
+        result["deleted_count"] = len(generation_ids)
+        return result
 
     @staticmethod
     def _workbench_scope_filter(scope_key: str) -> tuple[str, list[Any]]:
@@ -2967,6 +3208,12 @@ class PostgresReadModelRepository:
                         jsonb(summary_payload),
                         jsonb({"normalized_payload": summary_payload}),
                     ),
+                )
+                self._upsert_workbench_generation_stats(
+                    connection,
+                    generation_id=generation_id,
+                    scope_key=scope_key,
+                    summary_payload=summary_payload,
                 )
                 for row in workbench_rows:
                     row_id = text(row.get("id") or row.get("row_id"))
@@ -3313,6 +3560,12 @@ class PostgresReadModelRepository:
                 jsonb({"normalized_payload": summary_payload}),
             ),
         )
+        self._upsert_workbench_generation_stats(
+            connection,
+            generation_id=generation_id,
+            scope_key="all",
+            summary_payload=summary_payload,
+        )
         for row in workbench_rows:
             row_id = text(row.get("id") or row.get("row_id"))
             if row_id is None:
@@ -3498,6 +3751,12 @@ class PostgresReadModelRepository:
                 jsonb(final_summary_payload),
                 jsonb({"normalized_payload": final_summary_payload}),
             ),
+        )
+        self._upsert_workbench_generation_stats(
+            connection,
+            generation_id=generation_id,
+            scope_key="all",
+            summary_payload=final_summary_payload,
         )
         self._activate_workbench_generation(
             connection,
