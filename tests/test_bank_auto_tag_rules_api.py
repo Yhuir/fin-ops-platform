@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -439,6 +441,54 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "txn-existing-read-model")
         self.assertEqual(repository.transaction_reads, 1)
         self.assertEqual(queue.enqueued, [("bank_detail", "2026-01", "api_stale")])
+
+    def test_bank_detail_freshness_uses_latest_auto_tag_rules_from_shared_store(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            reader_app = build_application(data_dir=data_dir)
+            writer_app = build_application(data_dir=data_dir)
+            current = writer_app._app_settings_service.get_bank_auto_tag_rules_payload()
+            active_rules = []
+            for rule in current["active_rules"]:
+                if rule["code"] == "fee":
+                    rules = {**rule["rules"]}
+                    rules["contains_any"] = [*list(rules.get("contains_any") or []), "跨进程版本测试"]
+                    rules["contains"] = [*list(rules.get("contains") or []), "跨进程版本测试"]
+                    active_rules.append({**rule, "rules": rules})
+                else:
+                    active_rules.append(rule)
+            saved = writer_app._app_settings_service.update_bank_auto_tag_rules(
+                {
+                    "expected_version": current["version"],
+                    "active_rules": active_rules,
+                    "archived_rules": current["archived_rules"],
+                },
+                actor_id="settings-owner",
+            )
+            self.assertGreater(saved["version"], current["version"])
+            queue = _ReadModelQueue()
+            reader_app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+            repository = _BankDetailStatusRepository(
+                status="fresh",
+                bank_auto_tag_rules_version=int(saved["version"]),
+            )
+            reader_app._bank_detail_sql_read_repository = repository
+
+            payload = reader_app._get_bank_detail_transactions_from_sql_read_model(
+                account_key=None,
+                date_from="2026-01-01",
+                date_to="2026-12-31",
+                keyword="网银证书服务费",
+                category_code=None,
+                category_primary_label=None,
+                category_sub_label=None,
+                page=1,
+                page_size=100,
+            )
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(repository.transaction_reads, 1)
+        self.assertEqual(queue.enqueued, [])
 
     def test_put_rejects_invalid_payloads_with_structured_errors(self) -> None:
         app = build_application()

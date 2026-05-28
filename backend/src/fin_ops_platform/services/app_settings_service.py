@@ -69,7 +69,21 @@ class AppSettingsService:
         self._configure_category_service(self._snapshot)
         self._restore_manual_projects()
 
+    def _refresh_snapshot_from_state_store(self) -> None:
+        if self._state_store is None:
+            return
+        normalized_snapshot = self._normalize_settings(
+            self._state_store.load_app_settings(),
+            validate_pending_invoice_tag_groups=False,
+        )
+        if normalized_snapshot == self._snapshot:
+            return
+        self._snapshot = normalized_snapshot
+        self._configure_category_service(normalized_snapshot)
+        self._restore_manual_projects()
+
     def get_settings_payload(self) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
         completed_ids = set(self._snapshot["completed_project_ids"])
         manual_project_ids = {
             str(project["id"])
@@ -151,6 +165,7 @@ class AppSettingsService:
         actor_id: str | None = None,
         after_bank_transaction_tag_settings_saved: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
         previous_snapshot = dict(self._snapshot)
         self._validate_bank_transaction_tag_settings_update(
             previous_snapshot,
@@ -225,6 +240,7 @@ class AppSettingsService:
         can_save: bool = True,
         read_model_status: str | None = None,
     ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
         return BankTransactionCategoryService.auto_tag_rules_payload(
             self._snapshot["bank_transaction_tags"],
             can_save=can_save,
@@ -238,6 +254,7 @@ class AppSettingsService:
         actor_id: str,
         after_bank_auto_tag_rules_saved: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
         previous_snapshot = dict(self._snapshot)
         previous_tags = previous_snapshot["bank_transaction_tags"]
         normalized = BankTransactionCategoryService.normalize_auto_tag_rules_update(
@@ -278,6 +295,7 @@ class AppSettingsService:
         return self.get_bank_auto_tag_rules_payload(can_save=True)
 
     def sync_oa_projects(self, *, actor_id: str) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
         self._project_costing_service.sync_projects_from_oa(actor_id=actor_id)
         next_snapshot = dict(self._snapshot)
         next_snapshot["synced_projects"] = self._serialize_synced_projects()
@@ -293,6 +311,7 @@ class AppSettingsService:
         department_name: str | None = None,
         owner_name: str | None = None,
     ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
         project = self._project_costing_service.create_project(
             actor_id=actor_id,
             project_code=project_code,
@@ -314,6 +333,7 @@ class AppSettingsService:
         return self.get_settings_payload()
 
     def delete_project(self, project_id: str) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
         normalized_project_id = str(project_id).strip()
         next_snapshot = dict(self._snapshot)
         next_snapshot["completed_project_ids"] = [
@@ -398,12 +418,14 @@ class AppSettingsService:
         }
 
     def get_bank_account_mapping_dict(self) -> dict[str, str]:
+        self._refresh_snapshot_from_state_store()
         return {
             item["last4"]: item["bank_name"]
             for item in self._snapshot["bank_account_mappings"]
         }
 
     def get_completed_project_ids(self) -> set[str]:
+        self._refresh_snapshot_from_state_store()
         return set(self._snapshot["completed_project_ids"])
 
     def is_project_active(self, project_id: str | None, project_name: str) -> bool:
@@ -424,9 +446,11 @@ class AppSettingsService:
         return True
 
     def get_oa_retention_cutoff_date(self) -> str:
+        self._refresh_snapshot_from_state_store()
         return str(self._snapshot["oa_retention"]["cutoff_date"])
 
     def get_oa_import_settings(self) -> dict[str, list[str]]:
+        self._refresh_snapshot_from_state_store()
         return {
             "form_types": list(self._snapshot["oa_import"]["form_types"]),
             "statuses": list(self._snapshot["oa_import"]["statuses"]),
@@ -458,15 +482,19 @@ class AppSettingsService:
         }
 
     def get_oa_invoice_offset_applicant_names(self) -> list[str]:
+        self._refresh_snapshot_from_state_store()
         return list(self._snapshot["oa_invoice_offset"]["applicant_names"])
 
     def get_allowed_usernames(self) -> list[str]:
+        self._refresh_snapshot_from_state_store()
         return list(self._snapshot["allowed_usernames"])
 
     def get_readonly_export_usernames(self) -> list[str]:
+        self._refresh_snapshot_from_state_store()
         return list(self._snapshot["readonly_export_usernames"])
 
     def get_admin_usernames(self) -> list[str]:
+        self._refresh_snapshot_from_state_store()
         return list(self._snapshot["admin_usernames"])
 
     @staticmethod
