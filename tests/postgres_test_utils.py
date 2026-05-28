@@ -49,6 +49,7 @@ EXPECTED_MIGRATION_FILES = [
     "0035_workbench_generation_runtime_grants.sql",
     "0036_workbench_generation_consistency.sql",
     "0037_workbench_generation_stats_retention.sql",
+    "0038_workbench_generation_stats_runtime_grants.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
