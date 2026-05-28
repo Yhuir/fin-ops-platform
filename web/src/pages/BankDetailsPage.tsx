@@ -535,6 +535,9 @@ export default function BankDetailsPage() {
       .then((payload) => {
         const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
         setAccountsReadModelStatus(nextReadModelStatus);
+        if (nextReadModelStatus !== "fresh" && hasAccountPayloadRef.current) {
+          return;
+        }
         if (nextReadModelStatus !== "fresh" && payload.accounts.length === 0) {
           return;
         }

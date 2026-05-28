@@ -152,7 +152,8 @@ limit 20;
 - `/api/workbench/groups?...&detail_level=summary`：列表和分页使用，响应不得包含行级 `detail_fields`、`raw_payload`、OCR 正文或附件全文。
 - `/api/workbench/groups/detail?...&group_id=...`：单个 group 的完整详情，按用户动作懒加载。
 - Redis page cache key 必须包含 `detail_level`，避免 summary 和 full payload 互相污染。
-- Redis page cache key 必须随 read model 版本变化而失效；如果页面显示旧数据，先看 `read_model_version/generated_at` 是否变化，再看 Redis hit/miss 和版本 key。
+- Redis page cache key 必须随 active generation 变化而失效；如果页面显示旧数据，先看 `active_generation_id/read_model_version/generated_at` 是否变化，再看 Redis hit/miss 和版本 key。
+- `read_model.workbench_generations` 中同一 `scope_key` 只能有一个 `status='active'`。如果存在 `building_generation_id` 但页面仍显示旧数据，这是正常刷新中；如果存在 `failed_generation_id`，页面仍读取 active generation，同时运维需要处理 `last_error`。
 - `/api/workbench/groups` 不带 `detail_level` 时保持 `full`，只作为兼容契约，不作为前端首屏路径。
 
 实时加载判读：
@@ -175,6 +176,14 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.server
 # duration_ms、connection_acquire_ms、sql_execute_fetch_ms、database_query_count。
 
 # 4. 对慢 SQL 单独跑 EXPLAIN (ANALYZE, BUFFERS)，再用 pg_stat_statements 看生产 top SQL。
+
+# 5. 验证同一 generation 下 summary 和 groups 计数稳定，不再随刷新漂移。
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.validate_workbench_generation_convergence \
+  --base-url http://localhost:8000 \
+  --month all \
+  --zone paired \
+  --iterations 10 \
+  --delay-seconds 1
 ```
 
 是否进入 Go read API sidecar 只按结果判断。第一阶段和 Phase 1.5 后同时满足以下任意 2 到 3 条，才进入 sidecar 设计：

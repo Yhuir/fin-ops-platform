@@ -151,7 +151,11 @@
 | `scope_key` | 当前 read model scope，例如 `all` 或 `2026-05`。 |
 | `read_model_status` | `fresh`、`refreshing`、`stale`、`failed`、`unavailable`。 |
 | `generated_at` | 最近稳定投影生成时间；未知为 `null`。 |
-| `read_model_version` | 可用于前端去重的版本；未知为 `null`。 |
+| `active_generation_id` | 当前稳定可读 generation。未知为 `null`。 |
+| `building_generation_id` | 正在构建但不可读的 generation。没有后台构建时为 `null`。 |
+| `failed_generation_id` | 最近失败 generation。没有失败时为 `null`。 |
+| `read_model_version` | 可用于前端去重的版本，优先等于 `active_generation_id`；未知为 `null`。 |
+| `generations` | 最近 generation 摘要，仅包含元数据、计数和错误摘要，不包含业务 payload。 |
 | `dirty_scopes` | dirty scope 摘要，包含 `scope_key`、`status`、`updated_at`、`last_error`、`source_version`。 |
 | `running_scopes` | 正在执行的 scope 列表；未知或无执行为 `[]`。 |
 | `processed_count` / `total_count` | 后台进度。无法可靠计算时返回 `null`，不得返回伪造的 `0`。 |
@@ -171,7 +175,7 @@ SSE 事件流。支持事件：
 - `workbench.read_model.failed`
 - `heartbeat`
 
-事件 payload 与 `/api/workbench/refresh-status` 使用同一状态结构。前端收到完成或版本变化事件后，只重新读取当前查询上下文的 `summary` 与 `groups` 分页；SSE 不可用时轮询 `/api/workbench/refresh-status`。
+事件 payload 与 `/api/workbench/refresh-status` 使用同一状态结构。前端收到完成或 `read_model_version`/`active_generation_id` 变化事件后，只重新读取当前查询上下文的 `summary` 与 `groups` 分页；SSE 不可用时轮询 `/api/workbench/refresh-status`。
 
 ## ETC 业务批次 API
 

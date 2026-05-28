@@ -290,6 +290,59 @@ class MaterializedWorkbenchSummaryConnection(WorkbenchSummaryGroupsConnection):
         return super().fetch_all(sql, params)
 
 
+class ActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_generations" in normalized and "status = 'active'" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            return {"generation_id": "gen-active"}
+        return super().fetch_one(sql, params)
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_generations" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [
+                {
+                    "generation_id": "gen-active",
+                    "status": "active",
+                    "activated_at": "2026-05-28T09:00:00+00:00",
+                    "source_versions": {"source_version": 12},
+                    "row_count": 100,
+                    "group_count": 20,
+                    "build_metadata": {},
+                }
+            ]
+        return super().fetch_all(sql, params)
+
+
+class FailedWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_generations" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [
+                {
+                    "generation_id": "gen-active",
+                    "status": "active",
+                    "activated_at": "2026-05-28T09:00:00+00:00",
+                    "source_versions": {"source_version": 12},
+                    "row_count": 100,
+                    "group_count": 20,
+                    "build_metadata": {},
+                },
+                {
+                    "generation_id": "gen-failed",
+                    "status": "failed",
+                    "completed_at": "2026-05-28T09:01:00+00:00",
+                    "last_error": "projection failed",
+                    "source_versions": {"source_version": 13},
+                    "build_metadata": {},
+                },
+            ]
+        return super().fetch_all(sql, params)
+
+
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str]] = []
@@ -1016,6 +1069,32 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_repository_pins_workbench_groups_page_to_active_generation(self) -> None:
+        connection = ActiveWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        self.assertEqual(page["active_generation_id"], "gen-active")
+        self.assertEqual(page["read_model_version"], "gen-active")
+        self.assertTrue(any("g.generation_id = %s" in sql and "gen-active" in params for sql, params in all_queries))
+        self.assertTrue(any("r.generation_id = g.generation_id" in sql for sql, _params in all_queries))
+
+    def test_repository_workbench_groups_cache_version_uses_active_generation(self) -> None:
+        connection = ActiveWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        version = repository.workbench_groups_cache_version(scope_key="all")
+
+        self.assertEqual(version, "gen-active")
+        self.assertFalse(
+            any(
+                "max((source_versions->>'source_version')::bigint)" in sql
+                for sql, _params in connection.fetch_one_calls
+            )
+        )
+
     def test_repository_filters_workbench_groups_page_from_structured_group_rows(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
@@ -1634,6 +1713,18 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(status["worker_lag_seconds"], 12.0)
         self.assertEqual(status["outbox_backlog"]["failed"], 1)
 
+    def test_repository_reports_failed_workbench_generation_without_promoting_it(self) -> None:
+        connection = FailedWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        status = repository.get_workbench_refresh_status(scope_key="all")
+
+        self.assertEqual(status["read_model_status"], "stale")
+        self.assertEqual(status["active_generation_id"], "gen-active")
+        self.assertEqual(status["failed_generation_id"], "gen-failed")
+        self.assertEqual(status["last_error"], "projection failed")
+        self.assertEqual(status["read_model_version"], "gen-active")
+
     def test_repository_marks_all_scope_groups_stale_when_aggregate_builder_changes(self) -> None:
         class StaleAggregateBuilderConnection(WorkbenchSummaryGroupsConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
@@ -1697,11 +1788,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
 
         sql = "\n".join(statement for statement, _params in connection.executed)
-        self.assertIn("delete from read_model.workbench_groups", sql)
-        self.assertIn("delete from read_model.workbench_group_rows", sql)
+        self.assertNotIn("delete from read_model.workbench_groups", sql)
+        self.assertNotIn("delete from read_model.workbench_group_rows", sql)
+        self.assertIn("insert into read_model.workbench_generations", sql)
         self.assertIn("insert into read_model.workbench_groups", sql)
         self.assertIn("insert into read_model.workbench_group_rows", sql)
         self.assertIn("insert into read_model.workbench_summary", sql)
+        self.assertIn("on conflict (generation_id, scope_key, zone, group_id)", sql)
+        self.assertIn("status = 'active'", sql)
 
     def test_repository_rebuilds_all_scope_from_month_group_shards(self) -> None:
         class AggregateAllWorkbenchConnection(WorkbenchWriteConnection):
@@ -1767,9 +1861,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         aggregate_group_insert = next(
             params
             for sql, params in connection.executed
-            if "insert into read_model.workbench_groups" in sql and "values ( %s, 'all'" in sql
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
         )
-        group_payload = aggregate_group_insert[15].obj
+        group_payload = aggregate_group_insert[16].obj
         self.assertEqual(group_payload["row_count"], 4)
         self.assertEqual([row["id"] for row in group_payload["oa_rows"]], ["oa-1"])
         self.assertEqual([row["id"] for row in group_payload["bank_rows"]], ["bank-1"])
@@ -1781,9 +1875,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(group_payload["display_row_counts"], {"oa": 1, "bank": 1, "invoice": 2, "rows": 4})
         self.assertNotIn("collapsed_row_counts", group_payload)
         aggregate_source_versions = next(
-            params[13].obj
+            params[14].obj
             for sql, params in connection.executed
-            if "insert into read_model.workbench_groups" in sql and "values ( %s, 'all'" in sql
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
         )
         self.assertEqual(aggregate_source_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
 
@@ -1836,17 +1930,17 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group_insert = next(
             params
             for sql, params in connection.executed
-            if "insert into read_model.workbench_groups" in sql and params[0] == "case:NO-OA-BATCH"
+            if "insert into read_model.workbench_groups" in sql and params[1] == "case:NO-OA-BATCH"
         )
-        group_payload = group_insert[18].obj
-        self.assertEqual(group_insert[7], 3)
+        group_payload = group_insert[19].obj
+        self.assertEqual(group_insert[8], 3)
         self.assertEqual(group_payload["row_counts"], {"oa": 0, "bank": 3, "invoice": 0, "rows": 3})
         self.assertEqual(group_payload["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
 
         group_row_roles = [
-            (params[4], params[5], params[6], params[8])
+            (params[5], params[6], params[7], params[9])
             for sql, params in connection.executed
-            if "insert into read_model.workbench_group_rows" in sql and params[3] == "case:NO-OA-BATCH"
+            if "insert into read_model.workbench_group_rows" in sql and params[4] == "case:NO-OA-BATCH"
         ]
         self.assertIn(("bank", "no_oa_summary:batch-1", "summary", "no_oa_bank_batch_summary"), group_row_roles)
         self.assertIn(("bank", "bank-1", "collapsed", "bank"), group_row_roles)
@@ -1897,16 +1991,16 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group_insert = next(
             params
             for sql, params in connection.executed
-            if "insert into read_model.workbench_groups" in sql and params[0] == "case:ROLE-SUMMARY"
+            if "insert into read_model.workbench_groups" in sql and params[1] == "case:ROLE-SUMMARY"
         )
-        group_payload = group_insert[18].obj
+        group_payload = group_insert[19].obj
         self.assertEqual(group_payload["row_counts"], {"oa": 0, "bank": 2, "invoice": 0, "rows": 2})
         self.assertEqual(group_payload["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
 
         group_row_roles = [
-            (params[4], params[5], params[6], params[8])
+            (params[5], params[6], params[7], params[9])
             for sql, params in connection.executed
-            if "insert into read_model.workbench_group_rows" in sql and params[3] == "case:ROLE-SUMMARY"
+            if "insert into read_model.workbench_group_rows" in sql and params[4] == "case:ROLE-SUMMARY"
         ]
         self.assertIn(("bank", "summary-bank-source-kind", "summary", "bank"), group_row_roles)
 
@@ -1983,9 +2077,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
 
         aggregate_group_payloads = [
-            params[15].obj
+            params[16].obj
             for sql, params in connection.executed
-            if "insert into read_model.workbench_groups" in sql and "values ( %s, 'all'" in sql
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
         ]
 
         self.assertEqual(
@@ -2560,8 +2654,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
 
         sql = "\n".join(statement for statement, _params in connection.executed)
-        self.assertIn("delete from read_model.workbench_rows", sql)
+        self.assertNotIn("delete from read_model.workbench_rows", sql)
+        self.assertIn("insert into read_model.workbench_generations", sql)
         self.assertIn("insert into read_model.workbench_rows", sql)
+        self.assertIn("on conflict (generation_id, scope_key, row_id)", sql)
 
     def test_repository_deletes_workbench_rows_when_scope_snapshot_is_removed(self) -> None:
         connection = WorkbenchWriteConnection()

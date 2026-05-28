@@ -2285,7 +2285,8 @@ class Application:
                 None,
             )
         read_model_version = (
-            payload.get("read_model_version")
+            payload.get("active_generation_id")
+            or payload.get("read_model_version")
             or payload.get("source_version")
             or payload.get("version")
             or next(
@@ -2303,6 +2304,9 @@ class Application:
             "scope_key": str(payload.get("scope_key") or scope_key or "all"),
             "read_model_status": read_model_status,
             "generated_at": generated_at,
+            "active_generation_id": payload.get("active_generation_id"),
+            "building_generation_id": payload.get("building_generation_id"),
+            "failed_generation_id": payload.get("failed_generation_id"),
             "read_model_version": read_model_version,
             "dirty_scopes": dirty_scopes,
             "running_scopes": running_scopes,
@@ -2328,7 +2332,11 @@ class Application:
     def _is_missing_workbench_groups_read_model_error(error: Exception) -> bool:
         message = str(error).lower()
         return (
-            ("read_model.workbench_groups" in message or "read_model.workbench_summary" in message)
+            (
+                "read_model.workbench_groups" in message
+                or "read_model.workbench_summary" in message
+                or "read_model.workbench_generations" in message
+            )
             and ("does not exist" in message or "undefinedtable" in error.__class__.__name__.lower())
         )
 

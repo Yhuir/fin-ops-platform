@@ -77,6 +77,7 @@ type MockApiOptions = {
   bankDetailTransactionReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
   bankDetailInitialAccountReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
   bankDetailInitialTransactionReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
+  bankDetailPostSaveAccountsTotalBalance?: string;
   bankDetailRefreshingTransactionsEmpty?: boolean;
 };
 
@@ -5155,9 +5156,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           Math.min(bankDetailPostSaveAccountRequestCount++, options.bankDetailAccountReadModelStatuses.length - 1)
         ]
         : options.bankDetailInitialAccountReadModelStatus ?? "fresh";
+      const totalBalance = bankDetailAutoTagRulesSaved && options.bankDetailPostSaveAccountsTotalBalance
+        ? options.bankDetailPostSaveAccountsTotalBalance
+        : "130500.50";
       return {
         body: {
-          total_balance: "130500.50",
+          total_balance: totalBalance,
           balance_account_count: 1,
           missing_balance_account_count: 1,
           accounts: [
@@ -5166,7 +5170,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               bank_name: "工商银行",
               account_last4: "6386",
               display_name: "工商银行 6386",
-              latest_balance: "130500.50",
+              latest_balance: totalBalance,
               latest_balance_at: "2026-05-01 16:30:00",
               has_balance: true,
               transaction_count: isCurrentYear ? 299 : 1,

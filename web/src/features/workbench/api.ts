@@ -249,6 +249,8 @@ type ApiWorkbenchRefreshStatus = {
   status?: string | null;
   generated_at?: string | null;
   generatedAt?: string | null;
+  active_generation_id?: string | null;
+  activeGenerationId?: string | null;
   read_model_version?: string | number | null;
   readModelVersion?: string | number | null;
   source_version?: string | number | null;
@@ -2205,7 +2207,16 @@ function mapWorkbenchRefreshStatus(payload: ApiWorkbenchRefreshStatus): Workbenc
     scopeKey: String(payload.scopeKey ?? payload.scope_key ?? "all").trim() || "all",
     readModelStatus: rawStatus as WorkbenchReadModelStatus,
     generatedAt: payload.generatedAt ?? payload.generated_at ?? null,
-    readModelVersion: payload.readModelVersion ?? payload.read_model_version ?? payload.sourceVersion ?? payload.source_version ?? payload.version ?? null,
+    activeGenerationId: payload.activeGenerationId ?? payload.active_generation_id ?? null,
+    readModelVersion:
+      payload.readModelVersion ??
+      payload.read_model_version ??
+      payload.activeGenerationId ??
+      payload.active_generation_id ??
+      payload.sourceVersion ??
+      payload.source_version ??
+      payload.version ??
+      null,
     dirtyScopes: cleanRefreshScopeList(payload.dirtyScopes ?? payload.dirty_scopes),
     runningScopes: cleanOaSyncScopeList((payload.runningScopes ?? payload.running_scopes) as unknown[] | undefined),
     processedCount: nullableNumber(payload.processedCount ?? payload.processed_count),

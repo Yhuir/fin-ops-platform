@@ -71,10 +71,13 @@
 
 热路径基于结构化 SQL read model：
 
+- 工作台 read model 使用版本化 generation。worker 先写入 `building` generation，只有 summary、groups、group_rows、rows 和 snapshot 全部写入成功后，才在同一事务内把该 generation 切为 `active`；页面和 API 只读 `active_generation_id`。刷新期间不得先删除旧 active 数据，也不得把 building/failed generation 暴露给列表页。
+- `read_model.workbench_generations` 是 generation 元数据表，状态包括 `building`、`active`、`failed`、`superseded`。同一 scope 只能有一个 active generation；failed generation 只用于诊断和告警，不能被读路径晋级。
 - `read_model.workbench_rows` 保存行级投影，用于详情定位、搜索和行级统计。
 - `read_model.workbench_groups` 保存组级投影，用于首屏分页、区域分页、服务端筛选、搜索、排序和短 TTL page cache。
 - `read_model.workbench_group_rows` 保存 group 内三栏行级筛选投影，用于列筛选和时间筛选；API 不得为了筛选读取 snapshot 大 JSON。
 - `read_model.workbench_snapshots` 保留审计、导出、对账和兼容期用途，不作为首屏查询的数据源。
+- Redis page cache key 必须包含当前 active generation；generation 切换后旧 key 只能自然 TTL 过期，不能污染新读模型。
 
 SQL 读模型只消费手工关系事实和自动决策结果，不在投影阶段重新生成或晋级配对。
 

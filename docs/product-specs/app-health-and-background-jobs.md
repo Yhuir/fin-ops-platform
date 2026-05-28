@@ -27,6 +27,7 @@ App Health 状态栏和后台任务体系用于暴露 OA 同步、工作台 read
 - OA 连接和同步状态。
 - 工作台匹配 dirty scopes。
 - 工作台 read model 刷新状态，包括 `fresh`、`refreshing`、`stale`、`failed`、`unavailable`、worker lag、最近错误和可重试性。
+- 工作台状态必须暴露 `active_generation_id`、`building_generation_id`、`failed_generation_id` 和 `read_model_version`。`read_model_version` 优先等于 active generation，用于前端判断是否需要无刷新重读当前分页窗口。
 - 成本统计缓存预热。
 - 后台任务失败或需关注项。
 - Mongo/app state 连接状态。
@@ -56,6 +57,7 @@ Dashboard 读取 `GET /api/operations/app-health-dashboard`，仅管理员可访
 
 - 页面不因长任务阻塞。
 - 关联工作台刷新期间保留最近稳定数据，不出现空白页，不要求用户手动刷新。
+- worker lag 持续高于告警阈值、存在 failed generation、或 dirty scope 长时间停留在 `pending/processing` 时，App Health 必须提示刷新异常；页面继续读取最近 active generation，避免半成品数据进入用户视图。
 - 全局健康状态中的失败任务能被用户识别和重试。
 - AppHealth 运维状态页不出现 retry、acknowledge 或其它写操作。
 - Dashboard 能展示流水、发票、OA 数量和最近同步时间。

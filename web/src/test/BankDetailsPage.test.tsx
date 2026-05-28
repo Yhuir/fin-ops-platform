@@ -338,6 +338,36 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
+  test("does not replace a fresh total balance with a stale post-rule-save account payload", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      bankDetailAccountReadModelStatuses: ["stale"],
+      bankDetailPostSaveAccountsTotalBalance: "116395.83",
+      bankDetailTransactionReadModelStatuses: ["stale"],
+    });
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findAllByText("130,500.50");
+
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await user.click(await within(drawer).findByRole("button", { name: "展开 费用 / 工资" }));
+    await waitFor(() => {
+      expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
+    });
+    const subLabelInputs = within(drawer).getAllByLabelText("子标签名称", { selector: "input" });
+    await user.clear(subLabelInputs[1]);
+    await user.type(subLabelInputs[1], "人员薪酬");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("银行明细读模型待刷新，已显示当前可用数据。")).toBeInTheDocument();
+    });
+    expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
+    expect(within(page).queryAllByText("116,395.83")).toHaveLength(0);
+  });
+
   test("shows existing bank rows while the read-model schema is being upgraded", async () => {
     installMockApiFetch({
       bankDetailInitialAccountReadModelStatus: "schema_mismatch",

@@ -277,6 +277,7 @@ export type WorkbenchRefreshStatus = {
   scopeKey: string;
   readModelStatus: WorkbenchReadModelStatus;
   generatedAt: string | null;
+  activeGenerationId: string | null;
   readModelVersion: string | number | null;
   dirtyScopes: WorkbenchRefreshScopeStatus[];
   runningScopes: string[];

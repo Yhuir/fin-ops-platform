@@ -46,6 +46,8 @@ EXPECTED_MIGRATIONS = [
     "0031_bank_transaction_auto_category_context_index.sql",
     "0032_bank_detail_runtime_grants.sql",
     "0033_bank_detail_primary_sub_labels.sql",
+    "0034_workbench_generation_convergence.sql",
+    "0035_workbench_generation_runtime_grants.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -104,6 +106,7 @@ EXPECTED_TABLES = [
     "read_model.workbench_rows",
     "read_model.workbench_groups",
     "read_model.workbench_group_rows",
+    "read_model.workbench_generations",
     "read_model.workbench_summary",
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
@@ -139,7 +142,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 34)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 36)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -359,6 +362,16 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_worker",
             "grant select on read_model.workbench_summary to fin_ops_readonly",
             "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_migrator",
+            "create table if not exists read_model.workbench_generations",
+            "workbench_generations_status_check",
+            "add column if not exists generation_id text",
+            "workbench_generations_active_scope_uidx",
+            "workbench_snapshots_generation_scope_uidx",
+            "workbench_summary_generation_scope_uidx",
+            "workbench_rows_generation_scope_row_uidx",
+            "workbench_groups_generation_scope_zone_group_uidx",
+            "workbench_group_rows_generation_scope_zone_group_pane_role_row_uidx",
+            "grant select on read_model.workbench_generations to fin_ops_api",
             "workbench_reconciliation_decisions_tenant_key_uidx",
             "workbench_reconciliation_decisions_scope_status_idx",
             "workbench_reconciliation_decisions_row_ids_gin",
@@ -483,6 +496,12 @@ class PostgresMigrationSqlTests(unittest.TestCase):
     def test_sql_does_not_contain_forbidden_operations_or_secrets(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
         sql = re.sub(r"\binsert\s+into\s+app\.oa_attachment_invoice_cache_sources\b", "insert into allowed_lookup_backfill", sql)
+        sql = re.sub(
+            r"\binsert\s+into\s+read_model\.workbench_generations\s*\(.*?on\s+conflict\s*\(generation_id\)\s+do\s+nothing;",
+            "insert into allowed_workbench_generation_backfill",
+            sql,
+            flags=re.S,
+        )
         forbidden_patterns = [
             r"\bdrop\s+(database|schema|table)\b",
             r"\btruncate\b",

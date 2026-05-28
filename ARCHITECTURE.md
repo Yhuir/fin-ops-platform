@@ -49,7 +49,7 @@ OA Adapter       Import/File Services
 ## 架构原则
 
 - 核销事实必须落到结构化模型，不靠备注表达业务状态。
-- 写模型和读模型分离：确认、撤回、异常处理只改最小事实；页面读取优先走物化读模型。
+- 写模型和读模型分离：确认、撤回、异常处理只改最小事实；页面读取优先走物化读模型。工作台读模型采用 generation 原子发布，刷新期间只暴露最近 active generation，不读取 building/failed 中间状态。
 - 外部系统只通过适配层接入，OA 原始库保持只读。
 - 导入必须先预览后确认，确认动作必须幂等并可审计。
 - 生产操作必须有权限、审计、状态反馈和回滚路径。
@@ -60,7 +60,7 @@ OA Adapter       Import/File Services
 
 1. 完成 PostgreSQL primary 的观察期，保留 app Mongo 回滚路径直到 contract 阶段。
 2. 继续把 `ApplicationStateStore` 中的兼容 snapshot 语义收敛成明确 repository。
-3. 将工作台、搜索、成本统计、税金抵扣的高频查询进一步优化为数据库可索引查询和物化读模型。
+3. 将工作台、搜索、成本统计、税金抵扣的高频查询进一步优化为数据库可索引查询和物化读模型；工作台 Redis page cache 以 active generation 作为版本边界。
 4. 将导入、OCR、OA 同步、统计预热迁入后台任务。
 5. 对核心接口建立压测基线和 `EXPLAIN ANALYZE` 调优闭环。
 

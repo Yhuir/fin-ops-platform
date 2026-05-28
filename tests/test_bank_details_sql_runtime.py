@@ -445,6 +445,40 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn("from read_model.bank_detail_rows", sql_text)
         self.assertNotIn("from app.bank_transactions", sql_text)
 
+    def test_accounts_use_all_available_rows_for_latest_balances_and_date_range_only_for_counts(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-03", row_count=1)],
+                [
+                    {
+                        "account_key": "工商银行:6386",
+                        "bank_name": "工商银行",
+                        "account_last4": "6386",
+                        "transaction_count": 1,
+                        "latest_balance": "117644.93",
+                        "latest_balance_at": "2026-05-02 09:00:00",
+                    }
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_accounts(date_from="2026-03-01", date_to="2026-03-31")
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["accounts"][0]["transaction_count"], 1)
+        self.assertEqual(payload["accounts"][0]["latest_balance"], "117644.93")
+        self.assertEqual(payload["total_balance"], "117644.93")
+        account_sql = next(
+            " ".join(call[1].lower().split())
+            for call in connection.calls
+            if "latest_balances" in call[1].lower()
+        )
+        self.assertIn("filtered as", account_sql)
+        self.assertIn("all_rows as", account_sql)
+        self.assertIn("from all_rows", account_sql)
+        self.assertIn("from filtered", account_sql)
+
 
 class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
     def test_rebuild_loads_custom_auto_tag_rules_from_app_settings(self) -> None:
