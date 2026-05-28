@@ -30,6 +30,7 @@ from fin_ops_platform.services.workbench_query_service import (
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     WorkbenchQueryService,
 )
+from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     OA_INVOICE_OFFSET_AUTO_MATCH,
 )
@@ -141,6 +142,7 @@ class WorkbenchSqlProjectionBuilder:
                     "source_versions": {
                         "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
                         "source_version": resolved_source_version,
+                        "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
                     },
                 }
             }
@@ -1041,6 +1043,7 @@ class WorkbenchSqlProjectionBuilder:
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
         grouped["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
+        grouped["oa_attachment_invoice_parser_version"] = MongoOAAdapter._attachment_invoice_cache_parser_version()
         return grouped
 
     def _apply_reconciliation_decisions_to_rows(

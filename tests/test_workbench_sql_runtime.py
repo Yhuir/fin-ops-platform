@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from http import HTTPStatus
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -291,9 +292,26 @@ class MaterializedWorkbenchSummaryConnection(WorkbenchSummaryGroupsConnection):
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str]] = []
+        self.enqueued: list[dict[str, object]] = []
 
     def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+
+    def enqueue(self, **kwargs):
+        self.enqueued.append(dict(kwargs))
+        return RuntimeQueueEvent(
+            event_id=f"event-{len(self.enqueued)}",
+            tenant_id="default",
+            event_type=str(kwargs.get("event_type") or ""),
+            aggregate_type=kwargs.get("aggregate_type"),
+            aggregate_id=kwargs.get("aggregate_id"),
+            scope_type=kwargs.get("scope_type"),
+            scope_key=kwargs.get("scope_key"),
+            dedupe_key=kwargs.get("dedupe_key"),
+            payload=dict(kwargs.get("payload") or {}),
+            attempts=0,
+            status="pending",
+        )
 
 
 class RedisRecorder:
@@ -530,6 +548,64 @@ class FakeWorkbenchReadModelService:
 
 
 class WorkbenchSqlRuntimeTests(unittest.TestCase):
+    def test_workbench_api_queues_oa_sync_when_sql_snapshot_parser_version_is_stale(self) -> None:
+        app = object.__new__(Application)
+        queue = QueueRecorder()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._workbench_query_service = SimpleNamespace(_oa_adapter=object())
+        app._workbench_sql_read_repository = PostgresReadModelRepository(
+            WorkbenchSqlReadConnection(
+                snapshot_row={
+                    "scope_key": "2026-03",
+                    "scope_month": "2026-03-01",
+                    "source_versions": {
+                        "builder": "old-builder",
+                        "oa_attachment_invoice_parser_version": "old-parser",
+                    },
+                    "generated_at": "2026-05-28T10:00:00+08:00",
+                    "cache_status": "fresh",
+                    "row_count": 1,
+                    "payload": {
+                        "month": "2026-03",
+                        "oa_status": {"code": "ready", "message": "OA projection ready"},
+                        "summary": {
+                            "oa_count": 1,
+                            "bank_count": 0,
+                            "invoice_count": 0,
+                            "paired_count": 0,
+                            "open_count": 1,
+                            "exception_count": 0,
+                        },
+                        "paired": {"groups": []},
+                        "open": {"groups": []},
+                    },
+                }
+            )
+        )
+
+        response = app._handle_api_workbench("2026-03")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_refresh_reason"], "oa_attachment_invoice_parser_version_changed")
+        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(len(queue.enqueued), 1)
+        event = queue.enqueued[0]
+        expected_parser_version = app._current_oa_attachment_invoice_parser_version()
+        self.assertEqual(event["event_type"], "oa.sync")
+        self.assertEqual(event["scope_key"], "2026-03")
+        self.assertEqual(event["dedupe_key"], f"oa.sync:2026-03:attachment-parser:{expected_parser_version}")
+        self.assertEqual(
+            event["payload"],
+            {
+                "scope_key": "2026-03",
+                "triggered_by": "system",
+                "reason": "oa_attachment_invoice_parser_version_changed",
+                "oa_attachment_invoice_parser_version": expected_parser_version,
+            },
+        )
+
     def test_sql_projection_manual_invoice_rows_include_tax_meta_for_amount_cell(self) -> None:
         connection = InvoiceRowsProjectionConnection()
         builder = WorkbenchSqlProjectionBuilder(connection=connection)
@@ -1887,7 +1963,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         app._workbench_sql_read_repository = type(
             "SqlWorkbench",
             (),
-            {"get_workbench_view": lambda _self, **_kwargs: {"payload": {"open": {"groups": []}}, "refresh_status": "fresh"}},
+            {
+                "get_workbench_view": lambda _self, **_kwargs: {
+                    "payload": {"open": {"groups": []}},
+                    "refresh_status": "fresh",
+                    "source_versions": {
+                        "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version()
+                    },
+                }
+            },
         )()
 
         def explode_builder(_month: str):
@@ -2299,6 +2383,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 return {
                     "payload": {"open": {"groups": []}},
                     "refresh_status": "fresh",
+                    "source_versions": {
+                        "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version()
+                    },
                     "rows_page": {"page": 3, "page_size": 10, "rows": [{"id": "bank-row-1"}], "has_more": False},
                 }
 

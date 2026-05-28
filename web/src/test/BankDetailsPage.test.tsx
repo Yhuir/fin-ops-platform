@@ -215,11 +215,11 @@ describe("Bank details page", () => {
     const page = await screen.findByTestId("bank-details-page");
     const table = await within(page).findByRole("table", { name: "交易流水" });
     expect(within(table).getByRole("columnheader", { name: "类型" })).toBeInTheDocument();
-    expect(await within(table).findByText("工资")).toBeInTheDocument();
+    expect(await within(table).findByText("费用 / 工资")).toBeInTheDocument();
     expect(within(table).queryByLabelText("bank-detail-001 类型")).not.toBeInTheDocument();
     expect(within(table).queryByText("自动")).not.toBeInTheDocument();
     expect(await within(page).findByText(exactTextContent("公司暂借款：待还款 2"))).toBeInTheDocument();
-    expect(within(page).getByText("工资 1")).toBeInTheDocument();
+    expect(within(page).getByText("费用 / 工资 1")).toBeInTheDocument();
     expect(within(page).getByText("内部往来款 2")).toBeInTheDocument();
     expect(within(page).getByText(exactTextContent("质保金：待收款 1"))).toBeInTheDocument();
     expect(within(page).queryByText(/未保存/)).not.toBeInTheDocument();
@@ -275,13 +275,13 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await user.click(await within(drawer).findByRole("button", { name: "展开 工资" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开 费用 / 工资" }));
     await waitFor(() => {
       expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
     });
-    const labelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
-    await user.clear(labelInputs[1]);
-    await user.type(labelInputs[1], "人员薪酬");
+    const subLabelInputs = within(drawer).getAllByLabelText("子标签名称", { selector: "input" });
+    await user.clear(subLabelInputs[1]);
+    await user.type(subLabelInputs[1], "人员薪酬");
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
@@ -319,13 +319,13 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await user.click(await within(drawer).findByRole("button", { name: "展开 工资" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开 费用 / 工资" }));
     await waitFor(() => {
       expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
     });
-    const labelInputs = within(drawer).getAllByLabelText("标签名称", { selector: "input" });
-    await user.clear(labelInputs[1]);
-    await user.type(labelInputs[1], "人员薪酬");
+    const subLabelInputs = within(drawer).getAllByLabelText("子标签名称", { selector: "input" });
+    await user.clear(subLabelInputs[1]);
+    await user.type(subLabelInputs[1], "人员薪酬");
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
@@ -358,7 +358,7 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
-    await within(page).findByText("工资");
+    await within(page).findByText("费用 / 工资");
     expect(within(page).getByText("未分类 295")).toBeInTheDocument();
     expect(within(page).queryByText("无 295")).not.toBeInTheDocument();
 
@@ -368,6 +368,16 @@ describe("Bank details page", () => {
     expect(table.querySelector(".bank-auto-type-empty")).toHaveTextContent("-");
     expect(within(page).getByText("未分类 1")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
+  });
+
+  test("shows primary and sub tag labels in bank transaction rows", async () => {
+    installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    const table = await within(page).findByRole("table", { name: "交易流水" });
+
+    expect(await within(table).findByText("费用 / 工资")).toBeInTheDocument();
   });
 
   test("switches accounts without dirty-category prompts", async () => {
@@ -495,8 +505,8 @@ describe("Bank details page", () => {
     });
     expect(await within(page).findByText("跨页目标供应商")).toBeInTheDocument();
     expect(within(page).getByText("1-1 / 1")).toBeInTheDocument();
-    expect(within(page).getByText("手续费 1")).toBeInTheDocument();
-    expect(within(page).queryByText("工资 1")).not.toBeInTheDocument();
+    expect(within(page).getByText("费用 / 手续费 1")).toBeInTheDocument();
+    expect(within(page).queryByText("费用 / 工资 1")).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /工商银行 6386.*299 条/ })).toBeInTheDocument();
   });
 

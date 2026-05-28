@@ -110,11 +110,14 @@ function valuesToLines(values: string[]) {
 }
 
 function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
+  const outputPrimaryLabel = rule.outputPrimaryLabel.trim();
+  const outputSubLabel = rule.outputSubLabel.trim();
+  const label = outputSubLabel || outputPrimaryLabel;
   return {
     ...(rule.code ? { code: rule.code } : {}),
-    label: rule.label.trim(),
-    outputPrimaryLabel: rule.outputPrimaryLabel.trim() || rule.label.trim(),
-    outputSubLabel: rule.outputSubLabel.trim(),
+    label,
+    outputPrimaryLabel,
+    outputSubLabel,
     direction: rule.direction,
     accountScope: rule.accountScope,
     rules: {
@@ -143,21 +146,36 @@ function ruleHasPositiveCondition(rule: DraftRule) {
 }
 
 function validateDraft(activeRules: DraftRule[]) {
+  const seenLabelPaths = new Map<string, number>();
   for (const [index, rule] of activeRules.entries()) {
-    if (!rule.label.trim()) {
-      return `优先级 ${index + 1} 的标签名称不能为空。`;
+    const outputPrimaryLabel = rule.outputPrimaryLabel.trim();
+    const outputSubLabel = rule.outputSubLabel.trim();
+    const displayLabel = outputSubLabel ? `${outputPrimaryLabel} / ${outputSubLabel}` : outputPrimaryLabel;
+    if (!outputPrimaryLabel) {
+      return `优先级 ${index + 1} 的主标签名称不能为空。`;
     }
-    if (!rule.outputPrimaryLabel.trim()) {
-      return `${rule.label || `优先级 ${index + 1}`} 的输出主标签不能为空。`;
+    const labelPathKey = `${outputPrimaryLabel}\u0000${outputSubLabel}`;
+    if (seenLabelPaths.has(labelPathKey)) {
+      return `${displayLabel} 的主标签名称和子标签名称组合不能重复。`;
     }
+    seenLabelPaths.set(labelPathKey, index);
     if (rule.rules.matchFields.length === 0) {
-      return `${rule.label || `优先级 ${index + 1}`} 至少选择一个匹配字段。`;
+      return `${displayLabel || `优先级 ${index + 1}`} 至少选择一个匹配字段。`;
     }
     if (!ruleHasPositiveCondition(rule)) {
-      return `${rule.label || `优先级 ${index + 1}`} 需要填写精确命中、包含任一、必须同时包含或正则命中。`;
+      return `${displayLabel || `优先级 ${index + 1}`} 需要填写精确命中、包含任一、必须同时包含或正则命中。`;
     }
   }
   return "";
+}
+
+function ruleDisplayLabel(rule: Pick<DraftRule, "label" | "outputPrimaryLabel" | "outputSubLabel">) {
+  const primary = rule.outputPrimaryLabel.trim();
+  const sub = rule.outputSubLabel.trim();
+  if (primary && sub) {
+    return `${primary} / ${sub}`;
+  }
+  return primary || rule.label.trim() || "未命名标签";
 }
 
 function priorityLabel(index: number) {
@@ -553,7 +571,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                     <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="center">
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Chip size="small" label="已停用" />
-                        <Typography fontWeight={850}>{rule.label}</Typography>
+                        <Typography fontWeight={850}>{ruleDisplayLabel(rule)}</Typography>
                       </Stack>
                       <Button startIcon={<RestoreIcon />} size="small" onClick={() => restoreRule(rule.localId)} disabled={readonly}>
                         重新启用
@@ -603,7 +621,7 @@ function RuleEditor({
   const setRules = (patch: Partial<BankAutoTagRuleConditions>) => {
     onChange((current) => ({ ...current, rules: { ...current.rules, ...patch } }));
   };
-  const title = rule.label.trim() || "未命名标签";
+  const title = ruleDisplayLabel(rule);
   const panelId = `${rule.localId}-editor-panel`;
   const stopHeaderAction = (event: MouseEvent) => {
     event.stopPropagation();
@@ -666,19 +684,7 @@ function RuleEditor({
           <Box className="bank-auto-tag-rule-editor-body">
             <TextField
               className="bank-auto-tag-rule-name-field"
-              label="标签名称"
-              size="small"
-              value={rule.label}
-              onChange={(event) => onChange((current) => ({
-                ...current,
-                label: event.target.value,
-                outputPrimaryLabel: current.outputPrimaryLabel || event.target.value,
-              }))}
-              disabled={disabled}
-            />
-            <TextField
-              className="bank-auto-tag-rule-name-field"
-              label="输出主标签"
+              label="主标签名称"
               size="small"
               value={rule.outputPrimaryLabel}
               onChange={(event) => onChange((current) => ({ ...current, outputPrimaryLabel: event.target.value }))}
@@ -686,7 +692,7 @@ function RuleEditor({
             />
             <TextField
               className="bank-auto-tag-rule-name-field"
-              label="输出子标签"
+              label="子标签名称"
               size="small"
               value={rule.outputSubLabel}
               onChange={(event) => onChange((current) => ({ ...current, outputSubLabel: event.target.value }))}

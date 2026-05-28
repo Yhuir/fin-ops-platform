@@ -922,10 +922,12 @@ class BankTransactionCategoryService:
         if status == "archived" and is_new:
             field_errors.append({"path": f"{path_prefix}.code", "message": "停用规则必须包含已有标签 code。"})
 
-        label = str(item.get("label") or "").strip()
-        if not label:
-            field_errors.append({"path": f"{path_prefix}.label", "message": "标签名称不能为空。"})
-            label = code or "未命名标签"
+        output_primary_label = str(item.get("output_primary_label") or "").strip()
+        output_sub_label = str(item.get("output_sub_label") or "").strip()
+        if not output_primary_label:
+            field_errors.append({"path": f"{path_prefix}.output_primary_label", "message": "主标签名称不能为空。"})
+            output_primary_label = str(item.get("label") or code or "未命名标签").strip()
+        label = output_sub_label or output_primary_label
 
         rules = cls._normalize_auto_tag_rule_conditions(item.get("rules"), allow_invalid=False)
         direction = cls._normalize_auto_tag_direction(item.get("direction"))
@@ -967,8 +969,8 @@ class BankTransactionCategoryService:
             "status": status,
             "direction": direction,
             "account_scope": account_scope,
-            "output_primary_label": str(item.get("output_primary_label") or label).strip(),
-            "output_sub_label": str(item.get("output_sub_label") or "").strip(),
+            "output_primary_label": output_primary_label,
+            "output_sub_label": output_sub_label,
             "rules": rules,
             "rule_code": rule_code,
         }
@@ -1006,18 +1008,22 @@ class BankTransactionCategoryService:
         *,
         field_errors: list[dict[str, str]],
     ) -> None:
-        seen_active_labels: dict[str, int] = {}
+        seen_active_label_paths: dict[tuple[str, str], int] = {
+            (str(BANK_AUTO_TAG_SYSTEM_RULE.get("label") or BANK_AUTO_TAG_INTERNAL_TRANSFER_LABEL).strip(), ""): -1
+        }
         for index, definition in enumerate(definitions):
             status = str(definition.get("status") or "active")
             if status != "active":
                 continue
-            label = str(definition.get("label") or "").strip()
-            if not label:
+            primary_label = str(definition.get("output_primary_label") or "").strip()
+            sub_label = str(definition.get("output_sub_label") or "").strip()
+            if not primary_label:
                 continue
-            if label in seen_active_labels:
-                field_errors.append({"path": f"active_rules[{index}].label", "message": "同一状态下标签名称不能重复。"})
+            label_path = (primary_label, sub_label)
+            if label_path in seen_active_label_paths:
+                field_errors.append({"path": f"active_rules[{index}].output_sub_label", "message": "主标签名称和子标签名称组合不能重复。"})
                 continue
-            seen_active_labels[label] = index
+            seen_active_label_paths[label_path] = index
 
     @classmethod
     def _auto_tag_rule_summary(cls, rules: dict[str, list[str]], *, archived: bool) -> str:
@@ -1201,6 +1207,11 @@ class BankTransactionCategoryService:
             output_sub_label = str(item.get("output_sub_label") or "").strip()
             if output_sub_label:
                 definition["output_sub_label"] = output_sub_label
+            derived_label = output_sub_label or output_primary_label
+            if derived_label:
+                definition["label"] = derived_label
+                if not path or (len(path) >= 2 and path[0] == "自动识别"):
+                    definition["path"] = ["自动识别", derived_label]
             definition["rules"] = cls._normalize_auto_tag_rule_conditions(rules, allow_invalid=True)
             rule_code = str(item.get("rule_code") or default_fields.get("rule_code") or "").strip()
             if rule_code:

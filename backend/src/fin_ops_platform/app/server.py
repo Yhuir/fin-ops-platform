@@ -1791,6 +1791,22 @@ class Application:
                 },
             )
         payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
+        if self._workbench_sql_view_needs_oa_attachment_parser_resync(view):
+            self._enqueue_oa_attachment_parser_resync(
+                scope_key,
+                reason="oa_attachment_invoice_parser_version_changed",
+            )
+            payload["read_model_status"] = "refreshing"
+            payload["read_model_scope_key"] = scope_key
+            payload["read_model_refresh_reason"] = "oa_attachment_invoice_parser_version_changed"
+            current_parser_version = self._current_oa_attachment_invoice_parser_version()
+            if current_parser_version:
+                payload["oa_attachment_invoice_parser_version"] = current_parser_version
+            if view.get("generated_at"):
+                payload["read_model_generated_at"] = view.get("generated_at")
+            if isinstance(view.get("rows_page"), dict):
+                payload["rows_page"] = view.get("rows_page")
+            return self._json_response(HTTPStatus.ACCEPTED, payload)
         refresh_status = str(view.get("refresh_status") or view.get("cache_status") or "fresh")
         if refresh_status != "fresh":
             self._enqueue_workbench_read_model_refresh(scope_key, reason="api_stale")
@@ -14507,7 +14523,7 @@ class Application:
         return payload
 
     def _workbench_read_model_source_versions(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
             "exception_projection_version": EXCEPTION_PROJECTION_VERSION,
             "case_snapshot_version": WorkbenchReadModelService.snapshot_version(
@@ -14524,6 +14540,10 @@ class Application:
             ),
             "matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
         }
+        parser_version = self._current_oa_attachment_invoice_parser_version()
+        if parser_version:
+            payload["oa_attachment_invoice_parser_version"] = parser_version
+        return payload
 
     def _turnover_relation_snapshot_for_workbench(self) -> dict[str, object]:
         active_relations = self._active_turnover_relations_for_workbench()
@@ -15799,9 +15819,49 @@ class Application:
         return hashlib.sha256(encoded).hexdigest()
 
     def _current_oa_attachment_invoice_parser_version(self) -> str:
-        if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
-            return MongoOAAdapter._attachment_invoice_cache_parser_version()
-        return ""
+        return MongoOAAdapter._attachment_invoice_cache_parser_version()
+
+    def _workbench_sql_view_needs_oa_attachment_parser_resync(self, view: dict[str, object]) -> bool:
+        expected_parser_version = self._current_oa_attachment_invoice_parser_version()
+        if not expected_parser_version:
+            return False
+        source_versions = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
+        payload = view.get("payload") if isinstance(view.get("payload"), dict) else {}
+        cached_parser_version = str(
+            source_versions.get("oa_attachment_invoice_parser_version")
+            or payload.get("oa_attachment_invoice_parser_version")
+            or ""
+        ).strip()
+        return cached_parser_version != expected_parser_version
+
+    def _enqueue_oa_attachment_parser_resync(self, scope_key: str, *, reason: str) -> bool:
+        parser_version = self._current_oa_attachment_invoice_parser_version()
+        if not parser_version:
+            return False
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        if normalized_scope_key != "all" and not SEARCH_MONTH_RE.match(normalized_scope_key):
+            normalized_scope_key = self._workbench_read_model_base_scope_key(normalized_scope_key)
+        if normalized_scope_key != "all" and not SEARCH_MONTH_RE.match(normalized_scope_key):
+            return False
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue", None)
+        if not callable(enqueue):
+            return False
+        enqueue(
+            event_type="oa.sync",
+            aggregate_type="oa",
+            aggregate_id=normalized_scope_key,
+            scope_type="oa",
+            scope_key=normalized_scope_key,
+            dedupe_key=f"oa.sync:{normalized_scope_key}:attachment-parser:{parser_version}",
+            payload={
+                "scope_key": normalized_scope_key,
+                "triggered_by": "system",
+                "reason": reason,
+                "oa_attachment_invoice_parser_version": parser_version,
+            },
+        )
+        return True
 
     def _build_api_workbench_ignored_rows_payload(self, month: str, *, visibility_key: str = "global") -> list[dict[str, object]]:
         read_repository = getattr(self, "_workbench_sql_read_repository", None)

@@ -134,13 +134,14 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 **salary,
                 "label": "薪酬发放",
                 "output_primary_label": "费用",
-                "output_sub_label": "工资",
-                "rules": {**salary["rules"], "contains": ["工资", "薪酬"]},
+                "output_sub_label": "薪酬发放",
+                "rules": {**salary["rules"], "contains_any": ["工资", "薪酬"], "contains": ["工资", "薪酬"]},
             },
             {**fee, "rules": fee["rules"]},
             *[rule for rule in current["active_rules"] if rule["code"] not in {"salary", "fee", "bonus"}],
             {
-                "label": "银行利息",
+                "output_primary_label": "收入",
+                "output_sub_label": "银行利息",
                 "rules": {
                     "match_fields": ["all_text"],
                     "exact": [],
@@ -153,6 +154,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             {
                 "code": "bonus",
                 "label": "奖金",
+                "output_primary_label": "费用",
+                "output_sub_label": "奖金",
                 "rules": {
                     "match_fields": [],
                     "exact": [],
@@ -187,7 +190,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(payload["active_rules"][0]["code"], "salary")
         self.assertEqual(payload["active_rules"][0]["label"], "薪酬发放")
         self.assertEqual(payload["active_rules"][0]["output_primary_label"], "费用")
-        self.assertEqual(payload["active_rules"][0]["output_sub_label"], "工资")
+        self.assertEqual(payload["active_rules"][0]["output_sub_label"], "薪酬发放")
         self.assertTrue(any(rule["label"] == "银行利息" and rule["code"].startswith("custom_") for rule in payload["active_rules"]))
         self.assertEqual([rule["code"] for rule in payload["archived_rules"]], ["bonus"])
         self.assertEqual(lifecycle_calls[0][0], "bank_auto_tag_rules_changed")
@@ -209,7 +212,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         active = [
             *current["active_rules"],
             {
-                "label": "网银证书服务费",
+                "output_primary_label": "费用",
+                "output_sub_label": "网银证书服务费",
                 "rules": {
                     "match_fields": ["all_text"],
                     "exact_any": [],
@@ -238,6 +242,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
         custom_rule = next(rule for rule in payload["active_rules"] if rule["label"] == "网银证书服务费")
+        self.assertEqual(custom_rule["output_primary_label"], "费用")
+        self.assertEqual(custom_rule["output_sub_label"], "网银证书服务费")
         suggestions = app._bank_transaction_auto_category_service.suggest_for_rows(
             [
                 {
@@ -251,6 +257,59 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         suggestion = suggestions["txn-online-banking-certificate-fee"]
         self.assertEqual(suggestion["category_code"], custom_rule["code"])
         self.assertEqual(suggestion["auto_category_evidence"]["condition_type"], "contains_all")
+
+    def test_put_derives_label_from_required_primary_and_optional_sub_label(self) -> None:
+        app = build_application()
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        active = [
+            *current["active_rules"],
+            {
+                "output_primary_label": "收入",
+                "output_sub_label": "",
+                "rules": {
+                    "match_fields": ["all_text"],
+                    "exact_any": [],
+                    "contains_any": ["利息"],
+                    "contains_all": [],
+                    "none_of": [],
+                    "regex_any": [],
+                },
+            },
+            {
+                "output_primary_label": "费用",
+                "output_sub_label": "网银证书服务费",
+                "rules": {
+                    "match_fields": ["all_text"],
+                    "exact_any": [],
+                    "contains_any": ["网银证书"],
+                    "contains_all": [],
+                    "none_of": [],
+                    "regex_any": [],
+                },
+            },
+        ]
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_details_auto_tag_rules_update(
+                json.dumps(
+                    {
+                        "expected_version": current["version"],
+                        "active_rules": active,
+                        "archived_rules": current["archived_rules"],
+                    },
+                    ensure_ascii=False,
+                ),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        income = next(rule for rule in payload["active_rules"] if rule["output_primary_label"] == "收入")
+        cert_fee = next(rule for rule in payload["active_rules"] if rule["output_sub_label"] == "网银证书服务费")
+        self.assertEqual(income["label"], "收入")
+        self.assertEqual(income["output_sub_label"], "")
+        self.assertEqual(cert_fee["label"], "网银证书服务费")
+        self.assertEqual(cert_fee["output_primary_label"], "费用")
 
     def test_put_enqueues_bank_detail_month_shards_for_rule_changes(self) -> None:
         app = build_application()
@@ -266,7 +325,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         active = [
             *current["active_rules"],
             {
-                "label": "网银证书服务费",
+                "output_primary_label": "费用",
+                "output_sub_label": "网银证书服务费",
                 "rules": {
                     "match_fields": ["all_text"],
                     "exact_any": [],
@@ -408,7 +468,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             (
                 {
                     "expected_version": current["version"],
-                    "active_rules": [{**salary, "label": "  "}],
+                    "active_rules": [{**salary, "output_primary_label": "  "}],
                     "archived_rules": [],
                 },
                 400,
@@ -418,8 +478,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 {
                     "expected_version": current["version"],
                     "active_rules": [
-                        salary,
-                        {**next(rule for rule in current["active_rules"] if rule["code"] == "fee"), "label": salary["label"]},
+                        {**salary, "output_primary_label": "费用", "output_sub_label": "手续费"},
+                        next(rule for rule in current["active_rules"] if rule["code"] == "fee"),
                         *[rule for rule in current["active_rules"] if rule["code"] not in {"salary", "fee"}],
                     ],
                     "archived_rules": [],

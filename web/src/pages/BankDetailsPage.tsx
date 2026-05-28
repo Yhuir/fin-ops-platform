@@ -68,6 +68,16 @@ type CategorySummaryItem = {
   label: string;
 };
 
+function tagDefinitionDisplayLabel(tag: BankTransactionTagDefinition) {
+  const path = [tag.outputPrimaryLabel, tag.outputSubLabel]
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (path.length > 0) {
+    return path.join(" / ");
+  }
+  return tag.label;
+}
+
 function normalizeReadModelStatus(value: BankDetailReadModelStatus | null | undefined): BankDetailReadModelStatus {
   return value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing"
     ? value
@@ -377,8 +387,18 @@ function TypeCell({ row }: { row: BankDetailTransaction }) {
   if (!row.autoCategoryCode || !row.autoCategoryLabel) {
     return <Typography className="bank-auto-type-empty" component="span">-</Typography>;
   }
-  const displayLabel = row.autoCategoryLabelPath.length > 0
+  const structuredLabelPath = [row.autoCategoryPrimaryLabel, row.autoCategorySubLabel]
+    .map((value) => value?.trim() ?? "")
+    .filter(Boolean);
+  const effectiveStructuredLabelPath = [row.effectiveCategoryPrimaryLabel, row.effectiveCategorySubLabel]
+    .map((value) => value?.trim() ?? "")
+    .filter(Boolean);
+  const displayLabel = structuredLabelPath.length > 0
+    ? structuredLabelPath.join(" / ")
+    : row.autoCategoryLabelPath.length > 0
     ? row.autoCategoryLabelPath.join(" / ")
+    : effectiveStructuredLabelPath.length > 0
+    ? effectiveStructuredLabelPath.join(" / ")
     : row.autoCategoryLabel;
   const categoryTag = (
     <BankCategoryTag
@@ -690,7 +710,7 @@ export default function BankDetailsPage() {
 
   const effectiveCategoryCounts = categoryCounts;
   const visibleCategorySummary = useMemo<CategorySummaryItem[]>(() => {
-    const labelByCode = new Map(categoryOptions.map((option) => [option.code, option.label]));
+    const labelByCode = new Map(categoryOptions.map((option) => [option.code, tagDefinitionDisplayLabel(option)]));
     const featured = FEATURED_CATEGORY_CODES.map((code) => ({
       code,
       label: labelByCode.get(code) ?? code,
@@ -702,7 +722,7 @@ export default function BankDetailsPage() {
       ))
       .map((option) => ({
         code: option.code,
-        label: option.label,
+        label: tagDefinitionDisplayLabel(option),
       }));
     return [...featured, ...active];
   }, [categoryOptions, effectiveCategoryCounts]);

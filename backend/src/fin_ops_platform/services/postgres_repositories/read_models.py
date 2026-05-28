@@ -1444,12 +1444,14 @@ class PostgresReadModelRepository:
         refresh_status = "fresh"
         if dirty_row is not None:
             refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+        payload_source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
         result = {
             "scope_key": normalized_scope_key,
             "payload": payload.get("payload") if isinstance(payload.get("payload"), dict) else payload,
             "cache_status": text(row.get("cache_status") or payload.get("cache_status")) or "fresh",
             "generated_at": text(row.get("generated_at") or payload.get("generated_at")),
-            "source_versions": payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+            "source_versions": payload_source_versions or row_source_versions,
             "row_count": int_value(row.get("row_count"), 0),
             "refresh_status": refresh_status,
             "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
@@ -2620,10 +2622,18 @@ class PostgresReadModelRepository:
         groups = []
         max_generated_at = ""
         max_source_version: int | None = None
+        parser_versions: set[str] = set()
+        has_group_without_parser_version = False
         for row in group_rows:
             group = _read_model_payload(row)
             if not isinstance(group, dict):
                 continue
+            row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+            parser_version = text(row_source_versions.get("oa_attachment_invoice_parser_version"))
+            if parser_version:
+                parser_versions.add(parser_version)
+            else:
+                has_group_without_parser_version = True
             normalized_group = deepcopy(group)
             normalized_group["_source_scope_key"] = text(row.get("scope_key"))
             normalized_group["_source_scope_month"] = text(row.get("scope_month"))
@@ -2647,6 +2657,8 @@ class PostgresReadModelRepository:
             "builder": WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
             "source_version": max_source_version or 0,
         }
+        if len(parser_versions) == 1 and not has_group_without_parser_version:
+            aggregate_source_versions["oa_attachment_invoice_parser_version"] = next(iter(parser_versions))
         generated_at = max_generated_at or None
         workbench_rows = list(self._iter_workbench_rows(aggregate_payload))
         workbench_groups = list(self._iter_workbench_groups(aggregate_payload))
