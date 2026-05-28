@@ -90,6 +90,14 @@ PostgreSQL store 默认不会自动从 data dir 探测 legacy GridFS reader；Gr
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh` claim PostgreSQL durable queue 后重建对应 scope，并写回 `read_model.workbench_snapshots`、`read_model.workbench_rows` 和 candidate tables。
 - Pair relations、row overrides、exception cases 等写路径只标记受影响 scope dirty，并由 worker 收敛；生产读取不再使用 `state:workbench_read_models` 或 `state:workbench_candidate_matches` fallback。
 
+工作台 generation 发布契约：
+
+- 每个 scope 只有一个 active generation；页面和 Redis page cache 都以 active `generation_id` 作为版本边界。
+- active generation 的 metadata 必须和 `workbench_groups` / `workbench_group_rows` / `workbench_summary` 中同 generation 的实际数据一致。
+- 旧兼容 snapshot 的 `changed_scope_keys` 不能触发按 `scope_key` 删除 active generation 底层数据。缺失 scope 表示未提供新 payload，不表示可以清空已发布 generation。
+- `all` scope 只能从一致的 active month shards 聚合；任一 parent shard 不一致时，新 all generation 进入 failed，旧 active all 继续服务读请求。
+- `read_model.workbench_generation_consistency` 是生产健康检查和运维排障的事实入口。
+
 对账工具：
 
 ```bash

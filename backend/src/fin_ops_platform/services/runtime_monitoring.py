@@ -299,12 +299,33 @@ class RuntimeMonitoringRepository:
             """,
             (list({scope_type for _, scope_type in READ_MODEL_EVENT_TYPES.values()}),),
         )
+        workbench_consistency_unavailable_count = 0
+        workbench_consistency_warning: str | None = None
+        try:
+            consistency_row = self._connection.fetch_one(
+                """
+                select count(*)::bigint as inconsistent_count
+                from read_model.workbench_generation_consistency
+                where status = 'active'
+                  and consistency_status = 'inconsistent'
+                """
+            )
+            workbench_consistency_unavailable_count = _optional_int(
+                (consistency_row or {}).get("inconsistent_count")
+            ) or 0
+        except Exception:
+            workbench_consistency_warning = "workbench_generation_consistency_unavailable"
         duration_by_event_type = {str(row.get("event_type")): row for row in duration_rows}
         dirty_by_scope_type = {str(row.get("scope_type")): row for row in dirty_rows}
         rows: list[dict[str, Any]] = []
         for event_type, (key, scope_type) in READ_MODEL_EVENT_TYPES.items():
             duration = duration_by_event_type.get(event_type, {})
             dirty = dirty_by_scope_type.get(scope_type, {})
+            unavailable_count = _optional_int(dirty.get("unavailable_count")) or 0
+            warning_code = None
+            if key == "workbench":
+                unavailable_count += workbench_consistency_unavailable_count
+                warning_code = workbench_consistency_warning
             rows.append(
                 {
                     "key": key,
@@ -314,8 +335,9 @@ class RuntimeMonitoringRepository:
                         "p99": _optional_float(duration.get("p99_ms")),
                     },
                     "stale_count": _optional_int(dirty.get("stale_count")) or 0,
-                    "unavailable_count": _optional_int(dirty.get("unavailable_count")) or 0,
+                    "unavailable_count": unavailable_count,
                     "status": "available",
+                    **({"warning_code": warning_code} if warning_code else {}),
                 }
             )
         return rows

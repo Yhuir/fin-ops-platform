@@ -2619,6 +2619,7 @@ class Application:
             attention_jobs=attention_jobs,
             alerts={"active": [], "recent_recovered": []},
         )
+        self._apply_workbench_generation_health(snapshot_without_alerts)
         alerts = self._app_health_alert_service.evaluate(snapshot_without_alerts)
         if self._state_store is not None:
             self._state_store.save_app_health_alerts(self._app_health_alert_service.snapshot())
@@ -2632,8 +2633,56 @@ class Application:
             attention_jobs=attention_jobs,
             alerts=alerts,
         )
+        self._apply_workbench_generation_health(snapshot)
         self._emit_app_health_timing(snapshot)
         return snapshot
+
+    def _apply_workbench_generation_health(self, snapshot: dict[str, object]) -> None:
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
+        if not callable(get_refresh_status):
+            return
+        try:
+            status_payload = get_refresh_status(scope_key="all")
+        except Exception as exc:
+            workbench_payload = snapshot.get("workbench_read_model")
+            if not isinstance(workbench_payload, dict):
+                workbench_payload = {}
+                snapshot["workbench_read_model"] = workbench_payload
+            workbench_payload["status"] = "error"
+            workbench_payload["last_error"] = str(exc) or exc.__class__.__name__
+            snapshot["status"] = "blocked"
+            return
+        if not isinstance(status_payload, dict):
+            return
+        read_model_status = str(status_payload.get("read_model_status") or "").strip().lower()
+        consistency_status = str(status_payload.get("consistency_status") or "").strip().lower()
+        if read_model_status != "failed" and consistency_status != "failed":
+            return
+        workbench_payload = snapshot.get("workbench_read_model")
+        if not isinstance(workbench_payload, dict):
+            workbench_payload = {}
+            snapshot["workbench_read_model"] = workbench_payload
+        workbench_payload.update(
+            {
+                "status": "error",
+                "read_model_status": read_model_status or "failed",
+                "consistency_status": consistency_status or "failed",
+                "active_generation_id": status_payload.get("active_generation_id"),
+                "failed_generation_id": status_payload.get("failed_generation_id"),
+                "last_error": status_payload.get("last_error"),
+                "consistency_failures": status_payload.get("consistency_failures")
+                if isinstance(status_payload.get("consistency_failures"), list)
+                else [],
+            }
+        )
+        dependencies = snapshot.get("dependencies")
+        if isinstance(dependencies, dict):
+            dependencies["workbench_read_model"] = {
+                "status": "unavailable",
+                "message": status_payload.get("last_error") or "Workbench read model generation consistency failed.",
+            }
+        snapshot["status"] = "blocked"
 
     @staticmethod
     def _emit_app_health_timing(snapshot: dict[str, object]) -> None:

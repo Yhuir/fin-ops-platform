@@ -533,7 +533,7 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(self.store.load_historical_etc_repair_states()["ETC-HIST-TEST"]["status"], "ok")
 
-    def test_changed_scope_deletes_stale_read_models_and_candidates(self) -> None:
+    def test_changed_scope_preserves_absent_workbench_generation_rows_and_updates_candidates(self) -> None:
         self.store.save_workbench_read_models(
             {
                 "read_models": {
@@ -547,8 +547,9 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             changed_scope_keys={"2026-03", "2026-04"},
         )
 
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from read_model.workbench_snapshots where scope_key = '2026-03';"), "1")
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from read_model.workbench_snapshots where scope_key = '2026-04';"), "0")
+        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from read_model.workbench_snapshots where scope_key = '2026-03';"), "2")
+        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from read_model.workbench_snapshots where scope_key = '2026-04';"), "1")
+        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from read_model.workbench_rows where scope_key = '2026-04';"), "1")
 
         self.store.save_workbench_candidate_matches(
             {

@@ -55,6 +55,12 @@ export type ApiAppHealthPayload = {
   oa_sync?: ApiOaSyncStatus;
   workbench_read_model?: {
     status?: string;
+    read_model_status?: string;
+    consistency_status?: string;
+    active_generation_id?: string | null;
+    failed_generation_id?: string | null;
+    last_error?: string | null;
+    consistency_failures?: Array<Record<string, unknown>>;
     dirty_scopes?: string[];
     matching_dirty_scopes?: Array<Record<string, unknown>>;
     matching_running_scopes?: string[];

@@ -25,12 +25,15 @@ class WorkbenchReadModelRefreshService:
         if scope_type != "workbench" or not scope_key:
             raise ValueError("Workbench read model refresh requires scope_type='workbench' and scope_key.")
 
-        if scope_key == "all":
+        if scope_key == "all" and not _truthy(event.payload.get("aggregate_only")):
             shard_result = self._enqueue_all_scope_shards(event, scope_key)
             if shard_result is not None:
                 return shard_result
 
-        rebuild = getattr(self._projection_builder, "rebuild_workbench_read_model_scope", None)
+        if scope_key == "all" and _truthy(event.payload.get("aggregate_only")):
+            rebuild = getattr(self._projection_builder, "refresh_workbench_all_scope_from_active_shards", None)
+        else:
+            rebuild = getattr(self._projection_builder, "rebuild_workbench_read_model_scope", None)
         if not callable(rebuild):
             raise RuntimeError("Application does not expose rebuild_workbench_read_model_scope.")
         source_version = event.payload.get("source_version")
@@ -58,12 +61,32 @@ class WorkbenchReadModelRefreshService:
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
         for shard_key in shard_keys:
             enqueue(scope_type="workbench", scope_key=shard_key, reason="workbench_all_shard")
-        complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
-        if callable(complete_dirty_scope):
-            complete_dirty_scope(
-                tenant_id=event.tenant_id,
+        enqueue_event = getattr(self._queue_repository, "enqueue", None)
+        if callable(enqueue_event):
+            source_version = event.source_version or event.payload.get("source_version")
+            enqueue_event(
+                event_type="workbench.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="all",
                 scope_type="workbench",
                 scope_key=scope_key,
-                source_version=event.source_version or event.payload.get("source_version"),
+                dedupe_key=f"workbench.read_model.refresh:workbench:all:aggregate:{source_version or 'latest'}",
+                payload={
+                    "scope_type": "workbench",
+                    "scope_key": scope_key,
+                    "aggregate_only": True,
+                    "source_version": source_version,
+                    "parent_scope_keys": shard_keys,
+                },
+                tenant_id=event.tenant_id,
+                source_version=source_version,
+                priority="low",
+                trace_id=event.trace_id,
             )
-        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}
+        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "aggregate_enqueued": callable(enqueue_event), "row_count": 0}
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}

@@ -251,6 +251,8 @@ type ApiWorkbenchRefreshStatus = {
   generatedAt?: string | null;
   active_generation_id?: string | null;
   activeGenerationId?: string | null;
+  consistency_status?: string | null;
+  consistencyStatus?: string | null;
   read_model_version?: string | number | null;
   readModelVersion?: string | number | null;
   source_version?: string | number | null;
@@ -2206,6 +2208,7 @@ function mapWorkbenchRefreshStatus(payload: ApiWorkbenchRefreshStatus): Workbenc
   return {
     scopeKey: String(payload.scopeKey ?? payload.scope_key ?? "all").trim() || "all",
     readModelStatus: rawStatus as WorkbenchReadModelStatus,
+    consistencyStatus: payload.consistencyStatus ?? payload.consistency_status ?? null,
     generatedAt: payload.generatedAt ?? payload.generated_at ?? null,
     activeGenerationId: payload.activeGenerationId ?? payload.active_generation_id ?? null,
     readModelVersion:
