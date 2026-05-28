@@ -243,16 +243,19 @@ class AppSettingsService:
         normalized = BankTransactionCategoryService.normalize_auto_tag_rules_update(
             payload,
             previous_tag_dictionary=previous_tags,
-            references_by_code=self._pending_invoice_reference_map(previous_snapshot["pending_invoice_tag_groups"]),
         )
         next_tags = normalized["tag_dictionary"]
-        if not normalized["changes"]["changed"]:
+        next_pending_invoice_groups, detached_pending_invoice_references = self._detach_pending_invoice_tag_references(
+            previous_snapshot["pending_invoice_tag_groups"],
+            tag_codes=set(normalized["changes"].get("archived_codes") or []),
+        )
+        if not normalized["changes"]["changed"] and not detached_pending_invoice_references:
             return self.get_bank_auto_tag_rules_payload(can_save=True)
 
         next_snapshot = dict(self._snapshot)
         next_snapshot["bank_transaction_tags"] = next_tags
         next_snapshot["pending_invoice_tag_groups"] = {
-            **self._snapshot["pending_invoice_tag_groups"],
+            **next_pending_invoice_groups,
             "version": int(next_tags["version"]),
         }
         try:
@@ -267,6 +270,7 @@ class AppSettingsService:
             "old_version": int(normalized["old_version"]),
             "new_version": int(normalized["new_version"]),
             **normalized["changes"],
+            "detached_pending_invoice_tag_references": detached_pending_invoice_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
         if after_bank_auto_tag_rules_saved is not None:
@@ -923,6 +927,9 @@ class AppSettingsService:
                 "reenabled_codes": list(event.get("reenabled_codes") or []),
                 "priority_changes": list(event.get("priority_changes") or []),
                 "rule_changes": list(event.get("rule_changes") or []),
+                "detached_pending_invoice_tag_references": list(
+                    event.get("detached_pending_invoice_tag_references") or []
+                ),
             },
         )
 
@@ -1037,6 +1044,46 @@ class AppSettingsService:
                     }
                 )
         return references
+
+    @staticmethod
+    def _detach_pending_invoice_tag_references(
+        value: Any,
+        *,
+        tag_codes: set[str],
+    ) -> tuple[dict[str, Any], list[dict[str, str]]]:
+        normalized_codes = {str(code or "").strip() for code in tag_codes if str(code or "").strip()}
+        raw_payload = value if isinstance(value, dict) else {}
+        raw_groups = raw_payload.get("groups") if isinstance(raw_payload.get("groups"), dict) else raw_payload
+        if not isinstance(raw_groups, dict) or not normalized_codes:
+            return dict(raw_payload), []
+
+        next_groups: dict[str, dict[str, Any]] = {}
+        detached: list[dict[str, str]] = []
+        for group_id, default_label in PENDING_INVOICE_TAG_GROUP_LABELS.items():
+            raw_group = raw_groups.get(group_id)
+            if isinstance(raw_group, dict):
+                label = str(raw_group.get("label") or default_label)
+                raw_codes = raw_group.get("tag_codes")
+            elif isinstance(raw_group, list):
+                label = default_label
+                raw_codes = raw_group
+            else:
+                label = default_label
+                raw_codes = []
+            next_codes: list[str] = []
+            seen_codes: set[str] = set()
+            for item in list(raw_codes or []):
+                tag_code = str(item or "").strip()
+                if not tag_code or tag_code in seen_codes:
+                    continue
+                seen_codes.add(tag_code)
+                if tag_code in normalized_codes:
+                    detached.append({"group_id": group_id, "label": label, "tag_code": tag_code})
+                    continue
+                next_codes.append(tag_code)
+            next_groups[group_id] = {"label": label, "tag_codes": next_codes}
+
+        return {**dict(raw_payload), "groups": next_groups}, detached
 
     @staticmethod
     def _normalize_option_list(

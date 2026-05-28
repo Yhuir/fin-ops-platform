@@ -504,7 +504,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             ["custom_online_cert_fee_new", "custom_online_cert_fee_old"],
         )
 
-    def test_put_rejects_archiving_pending_invoice_referenced_tag(self) -> None:
+    def test_put_archives_referenced_tag_and_detaches_pending_invoice_rules_atomically(self) -> None:
         app = build_application()
         settings = app._app_settings_service.get_settings_payload()
         app._app_settings_service.update_settings(
@@ -541,10 +541,22 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             )
 
         payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "bank_transaction_tag_in_use_by_pending_invoice_filter")
-        self.assertEqual(payload["references"][0]["tag_code"], "salary")
-        self.assertIn("待找发票规则：需要开票", payload["references"][0]["label"])
+        self.assertEqual(response.status_code, 200)
+        archived_salary = next(rule for rule in payload["archived_rules"] if rule["code"] == "salary")
+        self.assertEqual(archived_salary["status"], "archived")
+        updated_settings = app._app_settings_service.get_settings_payload()
+        pending_groups = updated_settings["pending_invoice_tag_groups"]["groups"]
+        self.assertEqual(pending_groups["requires_invoice"]["tag_codes"], [])
+        self.assertEqual(
+            updated_settings["pending_invoice_tag_groups"]["version"],
+            updated_settings["bank_transaction_tags"]["version"],
+        )
+        audit = app._audit_service.as_dicts()[-1]
+        self.assertEqual(audit["action"], "bank_auto_tag_rules_updated")
+        self.assertEqual(
+            audit["metadata"]["detached_pending_invoice_tag_references"],
+            [{"group_id": "requires_invoice", "label": "需要开票", "tag_code": "salary"}],
+        )
 
     def test_put_requires_save_permission(self) -> None:
         app = build_application()
