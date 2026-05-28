@@ -70,6 +70,8 @@ type CategorySummaryItem = {
 type BankDetailsTableToolbarProps = {
   effectiveCategoryCounts: BankTransactionCategoryCounts;
   visibleCategorySummary: CategorySummaryItem[];
+  selectedCategoryCode: string | null;
+  onCategoryFilterChange: (categoryCode: string | null) => void;
   searchKeyword: string;
   onSearchKeywordChange: (value: string) => void;
   exportMenuAnchorEl: HTMLElement | null;
@@ -236,6 +238,8 @@ function EmptyTransactionOverlay() {
 function BankDetailsTableToolbar({
   effectiveCategoryCounts = EMPTY_CATEGORY_COUNTS,
   visibleCategorySummary = [],
+  selectedCategoryCode = null,
+  onCategoryFilterChange = () => undefined,
   searchKeyword = "",
   onSearchKeywordChange = () => undefined,
   exportMenuAnchorEl = null,
@@ -251,15 +255,30 @@ function BankDetailsTableToolbar({
     <Box className="bank-grid-toolbar">
       <Stack className="bank-grid-toolbar-content" spacing={1}>
         <Stack className="bank-grid-category-summary" direction="row" gap={0.4}>
+          <Button
+            className="bank-category-filter-button"
+            size="small"
+            variant={selectedCategoryCode === null ? "contained" : "text"}
+            onClick={() => onCategoryFilterChange(null)}
+          >
+            全部
+          </Button>
           <BankCategoryTag categoryCode={null} compact label="未分类" count={effectiveCategoryCounts.uncategorized} />
           {visibleCategorySummary.map((option) => (
-            <BankCategoryTag
+            <Button
               key={option.code}
-              categoryCode={option.code}
-              compact
-              label={option.label}
-              count={effectiveCategoryCounts[option.code] ?? 0}
-            />
+              className="bank-category-filter-button"
+              size="small"
+              variant={selectedCategoryCode === option.code ? "contained" : "text"}
+              onClick={() => onCategoryFilterChange(option.code)}
+            >
+              <BankCategoryTag
+                categoryCode={option.code}
+                compact
+                label={option.label}
+                count={effectiveCategoryCounts[option.code] ?? 0}
+              />
+            </Button>
           ))}
         </Stack>
         <Stack className="bank-grid-toolbar-actions" direction="row" spacing={0.5} alignItems="center">
@@ -319,11 +338,14 @@ function TypeCell({ row }: { row: BankDetailTransaction }) {
   if (!row.autoCategoryCode || !row.autoCategoryLabel) {
     return <Typography className="bank-auto-type-empty" component="span">-</Typography>;
   }
+  const displayLabel = row.autoCategoryLabelPath.length > 0
+    ? row.autoCategoryLabelPath.join(" / ")
+    : row.autoCategoryLabel;
   const categoryTag = (
     <BankCategoryTag
       categoryCode={row.autoCategoryCode}
       compact
-      label={row.autoCategoryLabel}
+      label={displayLabel}
     />
   );
   const counterpart = row.autoCategoryCode === "internal_transfer" ? row.internalTransferCounterpart : null;
@@ -422,6 +444,11 @@ export default function BankDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [categoryCounts, setCategoryCounts] = useState<BankTransactionCategoryCounts>(EMPTY_CATEGORY_COUNTS);
   const [categoryOptions, setCategoryOptions] = useState<BankTransactionTagDefinition[]>([]);
+  const [selectedCategoryCode, setSelectedCategoryCode] = useState<string | null>(null);
+  const selectedCategoryOption = useMemo(
+    () => categoryOptions.find((option) => option.code === selectedCategoryCode) ?? null,
+    [categoryOptions, selectedCategoryCode],
+  );
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
   const [dateFilterAnchorEl, setDateFilterAnchorEl] = useState<HTMLElement | null>(null);
   const [exportMenuAnchorEl, setExportMenuAnchorEl] = useState<HTMLElement | null>(null);
@@ -498,6 +525,9 @@ export default function BankDetailsPage() {
       dateFrom: dateFilter.dateFrom,
       dateTo: dateFilter.dateTo,
       keyword: searchKeyword,
+      categoryCode: selectedCategoryOption?.code ?? null,
+      categoryPrimaryLabel: selectedCategoryOption?.outputPrimaryLabel ?? null,
+      categorySubLabel: selectedCategoryOption?.outputSubLabel ?? null,
       page: paginationModel.page + 1,
       pageSize: paginationModel.pageSize,
       signal: controller.signal,
@@ -530,7 +560,18 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, [dateFilter.dateFrom, dateFilter.dateTo, paginationModel.page, paginationModel.pageSize, refreshToken, searchKeyword, selectedAccountKey]);
+  }, [
+    dateFilter.dateFrom,
+    dateFilter.dateTo,
+    paginationModel.page,
+    paginationModel.pageSize,
+    refreshToken,
+    searchKeyword,
+    selectedAccountKey,
+    selectedCategoryOption?.code,
+    selectedCategoryOption?.outputPrimaryLabel,
+    selectedCategoryOption?.outputSubLabel,
+  ]);
 
   useEffect(() => {
     if (!rulesRefreshPendingRef.current) {
@@ -660,6 +701,11 @@ export default function BankDetailsPage() {
     setSearchInput(value);
   };
 
+  const handleCategoryFilterChange = (categoryCode: string | null) => {
+    resetToFirstPage();
+    setSelectedCategoryCode((current) => (current === categoryCode ? null : categoryCode));
+  };
+
   const applyPreset = (preset: BankDateFilter["preset"]) => {
     applyDateFilter(createDateFilter(preset, monthValue));
   };
@@ -701,6 +747,9 @@ export default function BankDetailsPage() {
       dateFrom: dateFilter.dateFrom,
       dateTo: dateFilter.dateTo,
       keyword: searchKeyword,
+      categoryCode: selectedCategoryOption?.code ?? null,
+      categoryPrimaryLabel: selectedCategoryOption?.outputPrimaryLabel ?? null,
+      categorySubLabel: selectedCategoryOption?.outputSubLabel ?? null,
     })
       .then(({ blob, fileName }) => {
         const objectUrl = window.URL.createObjectURL(blob);
@@ -921,6 +970,8 @@ export default function BankDetailsPage() {
               <BankDetailsTableToolbar
                 effectiveCategoryCounts={effectiveCategoryCounts}
                 visibleCategorySummary={visibleCategorySummary}
+                selectedCategoryCode={selectedCategoryCode}
+                onCategoryFilterChange={handleCategoryFilterChange}
                 searchKeyword={searchInput}
                 onSearchKeywordChange={handleSearchKeywordChange}
                 exportMenuAnchorEl={exportMenuAnchorEl}

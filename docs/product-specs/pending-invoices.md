@@ -71,8 +71,16 @@ OA 详情点击后展示 OA 系统中的原始支付申请信息，支付申请�
 - 只读导出用户不能保存规则。
 - 银行明细标签由 app 自动分配，设置页不提供新增、改名或停用银行标签入口；标签管理入口在银行明细页 `自动标签规则` 抽屉。
 - 规则只保存银行明细标签 `code`，展示时实时从 `bank_transaction_tags` 解析当前名称。银行标签改名后，待找发票规则设置、列表依据和关联台等当前页面都显示新名称。
+- 规则选择器和列表依据需要展示银行明细标签的 `输出主标签 / 输出子标签`，但保存事实仍只能是 `tag_codes`。不得把主/子标签中文名写入 `pending_invoice_tag_groups` 作为匹配依据。
 - 通过银行明细 `自动标签规则` 抽屉停用标签时，后端必须在同一保存事务中自动从待找发票规则组移除该标签、同步版本并写审计，避免跨页面手工解引用。
 - 设置页或接口直接提交“待找发票规则继续引用已停用标签”的配置仍必须失败，防止产生悬挂规则。
+
+待找发票行中的银行标签字段需要结构化暴露：
+
+- `bank_transaction.effective_tag_code`：稳定标签 code，用于规则匹配。
+- `bank_transaction.effective_tag_label`：兼容展示名。
+- `bank_transaction.effective_tag_primary_label`、`bank_transaction.effective_tag_sub_label`、`bank_transaction.effective_tag_label_path`：主/子标签展示、搜索和筛选维度。
+- `invoice_acquisition_status.matched_rule` 同步返回 `tag_code`、`tag_label`、`tag_primary_label`、`tag_sub_label` 和 `tag_label_path`。
 
 ## 选择已有发票
 

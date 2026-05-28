@@ -292,6 +292,45 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(row["summary_text"], "")
         self.assertEqual(row["note_text"], "客户附言内容")
 
+    def test_transactions_filter_by_effective_primary_and_sub_category_labels(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-04", row_count=1)],
+                {"total": 1},
+                [{"category_code": "fee", "count": 1}],
+                [
+                    {
+                        "payload": {
+                            "id": "txn-fee",
+                            "effective_category_code": "fee",
+                            "effective_category_primary_label": "费用",
+                            "effective_category_sub_label": "手续费",
+                        },
+                        "raw_payload": {},
+                        "summary": "",
+                        "purpose": "",
+                    }
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_transactions(
+            date_from="2026-04-01",
+            date_to="2026-04-30",
+            category_primary_label="费用",
+            category_sub_label="手续费",
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["rows"][0]["id"], "txn-fee")
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("effective_category_primary_label = %s", sql_text)
+        self.assertIn("effective_category_sub_label = %s", sql_text)
+        flattened_params = [param for _kind, _sql, params in connection.calls for param in params]
+        self.assertIn("费用", flattened_params)
+        self.assertIn("手续费", flattened_params)
+
     def test_accounts_aggregate_from_bank_detail_rows_only_when_scopes_are_fresh(self) -> None:
         connection = FakeConnection(
             rows=[
@@ -333,6 +372,8 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
                             "code": "custom_netbank_certificate_service_fee",
                             "label": "网银证书服务费",
                             "path": ["自动识别", "网银证书服务费"],
+                            "output_primary_label": "费用",
+                            "output_sub_label": "手续费",
                             "source": "custom",
                             "status": "active",
                             "priority": 80,
@@ -392,8 +433,17 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 1)
         self.assertEqual(repository.saved_rows[0]["auto_category_code"], "custom_netbank_certificate_service_fee")
         self.assertEqual(repository.saved_rows[0]["auto_category_label"], "网银证书服务费")
+        self.assertEqual(repository.saved_rows[0]["auto_category_primary_label"], "费用")
+        self.assertEqual(repository.saved_rows[0]["auto_category_sub_label"], "手续费")
+        self.assertEqual(repository.saved_rows[0]["auto_category_label_path"], ["费用", "手续费"])
         self.assertEqual(repository.saved_rows[0]["effective_category_code"], "custom_netbank_certificate_service_fee")
         self.assertEqual(repository.saved_rows[0]["effective_category_label"], "网银证书服务费")
+        self.assertEqual(repository.saved_rows[0]["effective_category_primary_label"], "费用")
+        self.assertEqual(repository.saved_rows[0]["effective_category_sub_label"], "手续费")
+        self.assertEqual(repository.saved_rows[0]["effective_category_label_path"], ["费用", "手续费"])
+        self.assertEqual(repository.saved_rows[0]["category_primary_label"], "费用")
+        self.assertEqual(repository.saved_rows[0]["category_sub_label"], "手续费")
+        self.assertEqual(repository.saved_rows[0]["category_label_path"], ["费用", "手续费"])
         self.assertEqual(repository.saved_rows[0]["source_versions"]["bank_auto_tag_rules_version"], 2)
 
     def test_relation_tags_use_pair_relation_row_types_for_oa_attachment_invoices(self) -> None:

@@ -8,6 +8,7 @@
 
 - OA 栏：付款申请、报销单、项目或审批来源。
 - 银行流水栏：收入、支出、账号、银行、对方户名、摘要、有效分类。
+- 银行流水有效分类以稳定 `category_code` 作为业务身份。读模型和页面展示需要保留兼容的 `category_label`，并加性携带 `category_primary_label`、`category_sub_label` 和 `category_label_path`，用于展示、搜索和筛选；特殊规则仍按 `category_code` 判断。
 - 发票栏：销项、进项、ETC 附件发票、已认证发票等。
 - OA 对应的发票栏只允许正式发票行，例如 `source_kind=oa_attachment_invoice`。付款凭证、未知附件、解析失败附件只能留在 OA 附件审计证据里，不进入发票栏、不进入配对关系。
 

@@ -427,6 +427,7 @@ class BankTransactionAutoCategoryService:
             "transaction_id": transaction_id,
             "category_code": category_code,
             "category_label": self._category_service._label_for(category_code),
+            **self._category_service._label_fields_for(category_code),
             "category_path": self._category_service._path_for(category_code),
             "source": "auto",
             "rule_code": rule_code,
@@ -513,12 +514,18 @@ def resolve_effective_category(
         return {
             "effective_category_code": auto_code,
             "effective_category_label": auto.get("category_label"),
+            "effective_category_primary_label": auto.get("category_primary_label"),
+            "effective_category_sub_label": auto.get("category_sub_label"),
+            "effective_category_label_path": list(auto.get("category_label_path") or []),
             "effective_category_path": list(auto.get("category_path") or []),
             "effective_category_source": "auto",
         }
     return {
         "effective_category_code": None,
         "effective_category_label": None,
+        "effective_category_primary_label": None,
+        "effective_category_sub_label": None,
+        "effective_category_label_path": [],
         "effective_category_path": [],
         "effective_category_source": "",
     }

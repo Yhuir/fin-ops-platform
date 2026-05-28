@@ -345,6 +345,9 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
                     row.id: {
                         "category_code": "tax_payment",
                         "category_label": "税款支出",
+                        "category_primary_label": "税费",
+                        "category_sub_label": "税款支出",
+                        "category_label_path": ["税费", "税款支出"],
                         "category_source": "auto",
                     }
                     for row in rows
@@ -361,6 +364,13 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in payload["rows"]], ["txn_auto_no_invoice"])
         self.assertFalse(payload["rows"][0]["can_create_invoice"])
         self.assertEqual(payload["rows"][0]["bank_transaction"]["effective_tag_code"], "tax_payment")
+        self.assertEqual(payload["rows"][0]["bank_transaction"]["effective_tag_primary_label"], "税费")
+        self.assertEqual(payload["rows"][0]["bank_transaction"]["effective_tag_sub_label"], "税款支出")
+        self.assertEqual(payload["rows"][0]["bank_transaction"]["effective_tag_label_path"], ["税费", "税款支出"])
+        matched_rule = payload["rows"][0]["invoice_acquisition_status"]["matched_rule"]
+        self.assertEqual(matched_rule["tag_primary_label"], "税费")
+        self.assertEqual(matched_rule["tag_sub_label"], "税款支出")
+        self.assertEqual(matched_rule["tag_label_path"], ["税费", "税款支出"])
 
     def test_bank_account_label_uses_bank_mapping_not_company_account_name(self) -> None:
         txn = BankTransaction(

@@ -103,6 +103,9 @@ export type WorkbenchRecord = {
   categoryCode?: string;
   categoryLabel?: string;
   categoryPath?: string[];
+  categoryPrimaryLabel?: string;
+  categorySubLabel?: string;
+  categoryLabelPath?: string[];
   categorySource?: string;
   bankTextFields?: WorkbenchBankTextField[];
   relationNote?: string;

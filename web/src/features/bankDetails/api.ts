@@ -60,11 +60,17 @@ type ApiBankDetailTransaction = {
   category_code?: BankTransactionCategoryCode | null;
   category_label?: string | null;
   category_path?: string[];
+  category_primary_label?: string | null;
+  category_sub_label?: string | null;
+  category_label_path?: string[];
   category_source?: string | null;
   category_version?: number | null;
   auto_category_code?: BankTransactionCategoryCode | null;
   auto_category_label?: string | null;
   auto_category_path?: string[];
+  auto_category_primary_label?: string | null;
+  auto_category_sub_label?: string | null;
+  auto_category_label_path?: string[];
   auto_category_source?: string | null;
   auto_category_reason?: string | null;
   auto_category_confidence?: string | null;
@@ -72,6 +78,9 @@ type ApiBankDetailTransaction = {
   effective_category_code?: BankTransactionCategoryCode | null;
   effective_category_label?: string | null;
   effective_category_path?: string[];
+  effective_category_primary_label?: string | null;
+  effective_category_sub_label?: string | null;
+  effective_category_label_path?: string[];
   effective_category_source?: string | null;
   oa_relation_tag?: string | null;
   invoice_relation_tag?: string | null;
@@ -130,6 +139,8 @@ type ApiBankAutoTagEditableRule = {
   source?: "system" | "custom";
   priority?: number;
   priority_label?: string;
+  output_primary_label?: string;
+  output_sub_label?: string;
   direction?: string;
   account_scope?: ApiBankAutoTagAccountScope;
   rules?: ApiBankAutoTagRuleConditions;
@@ -359,11 +370,17 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     categoryCode: row.category_code ?? null,
     categoryLabel: row.category_label ?? null,
     categoryPath: Array.isArray(row.category_path) ? row.category_path.map(String).filter(Boolean) : [],
+    categoryPrimaryLabel: row.category_primary_label ?? null,
+    categorySubLabel: row.category_sub_label ?? null,
+    categoryLabelPath: Array.isArray(row.category_label_path) ? row.category_label_path.map(String).filter(Boolean) : [],
     categorySource: row.category_source ?? "",
     categoryVersion: row.category_version ?? null,
     autoCategoryCode: row.auto_category_code ?? null,
     autoCategoryLabel: row.auto_category_label ?? null,
     autoCategoryPath: Array.isArray(row.auto_category_path) ? row.auto_category_path.map(String).filter(Boolean) : [],
+    autoCategoryPrimaryLabel: row.auto_category_primary_label ?? null,
+    autoCategorySubLabel: row.auto_category_sub_label ?? null,
+    autoCategoryLabelPath: Array.isArray(row.auto_category_label_path) ? row.auto_category_label_path.map(String).filter(Boolean) : [],
     autoCategorySource: row.auto_category_source ?? "",
     autoCategoryReason: row.auto_category_reason ?? null,
     autoCategoryConfidence: row.auto_category_confidence ?? null,
@@ -371,6 +388,9 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     effectiveCategoryCode: row.effective_category_code ?? null,
     effectiveCategoryLabel: row.effective_category_label ?? null,
     effectiveCategoryPath: Array.isArray(row.effective_category_path) ? row.effective_category_path.map(String).filter(Boolean) : [],
+    effectiveCategoryPrimaryLabel: row.effective_category_primary_label ?? null,
+    effectiveCategorySubLabel: row.effective_category_sub_label ?? null,
+    effectiveCategoryLabelPath: Array.isArray(row.effective_category_label_path) ? row.effective_category_label_path.map(String).filter(Boolean) : [],
     effectiveCategorySource: row.effective_category_source ?? "",
     oaRelationTag,
     invoiceRelationTag,
@@ -427,6 +447,8 @@ function mapAutoTagEditableRule(rule: ApiBankAutoTagEditableRule): BankAutoTagEd
     source: rule.source === "system" ? "system" : "custom",
     priority: typeof rule.priority === "number" ? rule.priority : undefined,
     priorityLabel: String(rule.priority_label ?? "").trim() || undefined,
+    outputPrimaryLabel: String(rule.output_primary_label ?? rule.label ?? "").trim(),
+    outputSubLabel: String(rule.output_sub_label ?? "").trim(),
     direction: mapAutoTagDirection(rule.direction),
     accountScope: mapAutoTagAccountScope(rule.account_scope),
     rules: mapAutoTagRuleConditions(rule.rules),
@@ -490,6 +512,8 @@ function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) 
     active_rules: payload.activeRules.map((rule) => ({
       ...(rule.code ? { code: rule.code } : {}),
       label: rule.label,
+      output_primary_label: rule.outputPrimaryLabel,
+      output_sub_label: rule.outputSubLabel,
       direction: rule.direction,
       account_scope: rule.accountScope,
       rules: serializeAutoTagRuleConditions(rule.rules),
@@ -497,6 +521,8 @@ function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) 
     archived_rules: payload.archivedRules.map((rule) => ({
       ...(rule.code ? { code: rule.code } : {}),
       label: rule.label,
+      output_primary_label: rule.outputPrimaryLabel,
+      output_sub_label: rule.outputSubLabel,
       direction: rule.direction,
       account_scope: rule.accountScope,
       rules: serializeAutoTagRuleConditions(rule.rules),
@@ -536,6 +562,9 @@ export async function fetchBankDetailTransactions({
   dateFrom,
   dateTo,
   keyword,
+  categoryCode,
+  categoryPrimaryLabel,
+  categorySubLabel,
   page,
   pageSize,
   signal,
@@ -553,6 +582,15 @@ export async function fetchBankDetailTransactions({
   const normalizedKeyword = keyword?.trim();
   if (normalizedKeyword) {
     params.set("keyword", normalizedKeyword);
+  }
+  if (categoryCode) {
+    params.set("category_code", categoryCode);
+  }
+  if (categoryPrimaryLabel) {
+    params.set("category_primary_label", categoryPrimaryLabel);
+  }
+  if (categorySubLabel) {
+    params.set("category_sub_label", categorySubLabel);
   }
   if (page) {
     params.set("page", String(page));
@@ -609,6 +647,9 @@ export async function downloadBankDetailTransactionsExport({
   dateFrom,
   dateTo,
   keyword,
+  categoryCode,
+  categoryPrimaryLabel,
+  categorySubLabel,
   signal,
 }: BankDetailExportRequest): Promise<BankDetailExportResponse> {
   const params = new URLSearchParams();
@@ -625,6 +666,15 @@ export async function downloadBankDetailTransactionsExport({
   const normalizedKeyword = keyword?.trim();
   if (normalizedKeyword) {
     params.set("keyword", normalizedKeyword);
+  }
+  if (categoryCode) {
+    params.set("category_code", categoryCode);
+  }
+  if (categoryPrimaryLabel) {
+    params.set("category_primary_label", categoryPrimaryLabel);
+  }
+  if (categorySubLabel) {
+    params.set("category_sub_label", categorySubLabel);
   }
   return requestBlob(`/api/bank-details/transactions/export?${params.toString()}`, {
     method: "GET",

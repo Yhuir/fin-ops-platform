@@ -171,7 +171,7 @@ class LiveWorkbenchService:
         transaction: BankTransaction,
         result: MatchingResult | None,
         *,
-        category: dict[str, str] | None = None,
+        category: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         relation = relation_from_result(result)
         section = "paired" if result and result.result_type == MatchingResultType.AUTOMATIC_MATCH else "open"
@@ -207,6 +207,9 @@ class LiveWorkbenchService:
             "category_code": category_payload.get("category_code") if category_payload else None,
             "category_label": category_payload.get("category_label") if category_payload else None,
             "category_path": list(category_payload.get("category_path") or []) if category_payload else [],
+            "category_primary_label": category_payload.get("category_primary_label") if category_payload else None,
+            "category_sub_label": category_payload.get("category_sub_label") if category_payload else None,
+            "category_label_path": list(category_payload.get("category_label_path") or []) if category_payload else [],
             "category_source": category_payload.get("category_source") if category_payload else None,
             "tags": tags,
             "bank_text_fields": bank_text_fields,
@@ -479,7 +482,7 @@ class LiveWorkbenchService:
             return base_remark
         return f"{base_remark}；{counterpart_text}"
 
-    def _category_for_transaction(self, transaction: BankTransaction) -> dict[str, str] | None:
+    def _category_for_transaction(self, transaction: BankTransaction) -> dict[str, Any] | None:
         return self._categories_for_transactions([transaction]).get(transaction.id)
 
     def _categories_for_transactions(self, transactions: list[Any]) -> dict[str, dict[str, str]]:
@@ -523,7 +526,7 @@ class LiveWorkbenchService:
         return normalized
 
     @staticmethod
-    def _normalize_category_record(record: Any) -> dict[str, str] | None:
+    def _normalize_category_record(record: Any) -> dict[str, Any] | None:
         if record is None:
             return None
         code = str(
@@ -543,6 +546,27 @@ class LiveWorkbenchService:
             or LiveWorkbenchService._record_value(record, "source")
             or "manual"
         ).strip() or "manual"
+        primary_label = str(
+            LiveWorkbenchService._record_value(record, "category_primary_label")
+            or LiveWorkbenchService._record_value(record, "effective_category_primary_label")
+            or ""
+        ).strip()
+        sub_label = str(
+            LiveWorkbenchService._record_value(record, "category_sub_label")
+            or LiveWorkbenchService._record_value(record, "effective_category_sub_label")
+            or ""
+        ).strip()
+        label_path = [
+            str(item).strip()
+            for item in list(
+                LiveWorkbenchService._record_value(record, "category_label_path")
+                or LiveWorkbenchService._record_value(record, "effective_category_label_path")
+                or []
+            )
+            if str(item).strip()
+        ]
+        if not label_path:
+            label_path = [item for item in (primary_label, sub_label) if item]
         return {
             "category_code": code,
             "category_label": label,
@@ -551,6 +575,9 @@ class LiveWorkbenchService:
                 for item in list(LiveWorkbenchService._record_value(record, "category_path") or [])
                 if str(item).strip()
             ],
+            "category_primary_label": primary_label or None,
+            "category_sub_label": sub_label or None,
+            "category_label_path": label_path,
             "category_source": source,
         }
 
@@ -561,10 +588,14 @@ class LiveWorkbenchService:
         return getattr(record, key, None)
 
     @staticmethod
-    def _bank_row_tags(transaction: BankTransaction, category: dict[str, str] | None) -> list[str]:
+    def _bank_row_tags(transaction: BankTransaction, category: dict[str, Any] | None) -> list[str]:
         tags: list[str] = []
         for tag in list(getattr(transaction, "tags", []) or []):
             text = str(tag).strip()
+            if text and text not in tags:
+                tags.append(text)
+        for label in list((category or {}).get("category_label_path") or []):
+            text = str(label).strip()
             if text and text not in tags:
                 tags.append(text)
         category_label = str((category or {}).get("category_label") or "").strip()

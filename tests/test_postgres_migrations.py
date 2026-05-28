@@ -45,6 +45,7 @@ EXPECTED_MIGRATIONS = [
     "0030_bank_detail_read_model.sql",
     "0031_bank_transaction_auto_category_context_index.sql",
     "0032_bank_detail_runtime_grants.sql",
+    "0033_bank_detail_primary_sub_labels.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -138,7 +139,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 33)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 34)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 

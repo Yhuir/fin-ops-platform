@@ -4,6 +4,8 @@
 
 免 OA 流水批量处理用于把不需要 OA 单据参与闭环的银行流水成批提交到关联台，例如手续费、工资、过节费、奖金、税款、代理国库税收收缴、社保款、内部往来款。
 
+免 OA 批次使用银行明细标签的稳定 `category_code` 作为批次类型和业务判断依据。页面展示、搜索和折叠摘要需要携带并展示银行明细标签的 `category_primary_label`、`category_sub_label` 和 `category_label_path`；这些字段只作为结构化展示/搜索维度，不替代 `category_code`。
+
 ## 本期范围
 
 纳入：

@@ -62,6 +62,8 @@ def _row(
     summary_text: str = "",
     note_text: str = "",
     category: str | None = None,
+    category_primary_label: str | None = None,
+    category_sub_label: str | None = None,
     oa_tag: str = "无oa",
     invoice_tag: str = "无发票",
 ) -> dict[str, object]:
@@ -77,7 +79,13 @@ def _row(
         "bank_name": bank_name,
         "account_last4": account_last4,
         "auto_category_label": category,
+        "auto_category_primary_label": category_primary_label,
+        "auto_category_sub_label": category_sub_label,
         "effective_category_label": category,
+        "effective_category_primary_label": category_primary_label,
+        "effective_category_sub_label": category_sub_label,
+        "category_primary_label": category_primary_label,
+        "category_sub_label": category_sub_label,
         "oa_relation_tag": oa_tag,
         "invoice_relation_tag": invoice_tag,
         "purpose_text": purpose_text,
@@ -89,7 +97,7 @@ def _row(
 class BankDetailsExportServiceTests(unittest.TestCase):
     def test_all_bank_export_builds_summary_and_bank_sheets_with_professional_columns(self) -> None:
         rows = [
-            _row("icbc", bank_name="工商银行", account_last4="6386", account_key="工商银行:6386", purpose_text="工行用途", summary_text="工行摘要", note_text="工行附言", category="手续费"),
+            _row("icbc", bank_name="工商银行", account_last4="6386", account_key="工商银行:6386", purpose_text="工行用途", summary_text="工行摘要", note_text="工行附言", category="手续费", category_primary_label="费用", category_sub_label="手续费"),
             _row("internal", bank_name="建设银行", account_last4="1410", account_key="建设银行:1410", direction="income", amount="13000.00", summary_text="内部往来收入", category="内部往来款"),
             _row("bocom", bank_name="交通银行", account_last4="3847", account_key="交通银行:3847", summary_text="交行摘要"),
             _row("ccb", bank_name="建设银行", account_last4="8106", account_key="建设银行:8106", summary_text="建行摘要", note_text="建行备注"),
@@ -107,19 +115,49 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         sheet = workbook["全部流水"]
         self.assertEqual([cell.value for cell in sheet[1]], BANK_DETAIL_EXPORT_COLUMNS)
         self.assertEqual(sheet.freeze_panes, "A2")
-        self.assertEqual(sheet.auto_filter.ref, f"A1:O{sheet.max_row}")
+        self.assertEqual(sheet.auto_filter.ref, f"A1:Q{sheet.max_row}")
         self.assertEqual(sheet["A2"].value, "2026-04-16 11:09:14")
         self.assertIsInstance(sheet["G2"].value, (int, float))
         self.assertIsNone(sheet["F2"].value)
         self.assertEqual(sheet["I2"].value, "手续费")
+        self.assertEqual(sheet["J2"].value, "费用")
+        self.assertEqual(sheet["K2"].value, "手续费")
         self.assertEqual(sheet["I3"].value, "内部往来款")
-        self.assertEqual(sheet["J6"].value, "有oa")
-        self.assertEqual(sheet["K6"].value, "有发票")
-        self.assertEqual(sheet["L2"].value, "工行用途")
-        self.assertEqual(sheet["M4"].value, "交行摘要")
-        self.assertEqual(sheet["N5"].value, "建行备注")
-        self.assertEqual(sheet["N6"].value, "客户附言")
-        self.assertEqual(sheet["L8"].value, "平安交易用途")
+        self.assertEqual(sheet["L6"].value, "有oa")
+        self.assertEqual(sheet["M6"].value, "有发票")
+        self.assertEqual(sheet["N2"].value, "工行用途")
+        self.assertEqual(sheet["O4"].value, "交行摘要")
+        self.assertEqual(sheet["P5"].value, "建行备注")
+        self.assertEqual(sheet["P6"].value, "客户附言")
+        self.assertEqual(sheet["N8"].value, "平安交易用途")
+
+    def test_export_forwards_category_label_filters_to_transaction_loader(self) -> None:
+        loader = _PagedRowsLoader(
+            [
+                _row(
+                    "icbc",
+                    bank_name="工商银行",
+                    account_last4="6386",
+                    account_key="工商银行:6386",
+                    category="手续费",
+                    category_primary_label="费用",
+                    category_sub_label="手续费",
+                )
+            ]
+        )
+        service = BankDetailsExportService(transaction_page_loader=loader, account_loader=lambda **_kwargs: _accounts())
+
+        service.export(
+            mode="all",
+            date_from="2026-04-01",
+            date_to="2026-05-18",
+            keyword=None,
+            category_primary_label="费用",
+            category_sub_label="手续费",
+        )
+
+        self.assertEqual(loader.calls[0]["category_primary_label"], "费用")
+        self.assertEqual(loader.calls[0]["category_sub_label"], "手续费")
 
     def test_account_export_validates_account_metadata_and_allows_empty_filtered_result(self) -> None:
         loader = _PagedRowsLoader([])
@@ -176,9 +214,9 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         sheet = load_workbook(BytesIO(result.content))["全部流水"]
 
         self.assertEqual(sheet["D2"].value, "'=HYPERLINK(\"http://example.com\")")
-        self.assertEqual(sheet["L2"].value, "'+cmd")
-        self.assertEqual(sheet["M2"].value, "'@SUM(A1:A2)")
-        self.assertEqual(sheet["N2"].value, "'-1+2")
+        self.assertEqual(sheet["N2"].value, "'+cmd")
+        self.assertEqual(sheet["O2"].value, "'@SUM(A1:A2)")
+        self.assertEqual(sheet["P2"].value, "'-1+2")
 
     def test_export_rebuilds_text_columns_from_bank_text_fields_or_legacy_fields(self) -> None:
         rows = [
@@ -208,12 +246,12 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         result = service.export(mode="all", date_from="2026-04-01", date_to="2026-05-18", keyword=None)
         sheet = load_workbook(BytesIO(result.content))["全部流水"]
 
-        self.assertEqual(sheet["L2"].value, "工行用途")
-        self.assertEqual(sheet["M2"].value, "工行摘要")
-        self.assertEqual(sheet["N2"].value, "工行附言")
-        self.assertIn(sheet["L3"].value, (None, ""))
-        self.assertEqual(sheet["M3"].value, "旧摘要")
-        self.assertEqual(sheet["N3"].value, "旧备注")
+        self.assertEqual(sheet["N2"].value, "工行用途")
+        self.assertEqual(sheet["O2"].value, "工行摘要")
+        self.assertEqual(sheet["P2"].value, "工行附言")
+        self.assertIn(sheet["N3"].value, (None, ""))
+        self.assertEqual(sheet["O3"].value, "旧摘要")
+        self.assertEqual(sheet["P3"].value, "旧备注")
 
     def test_export_maps_legacy_minsheng_text_to_note_only(self) -> None:
         rows = [
@@ -231,9 +269,9 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         result = service.export(mode="all", date_from="2026-04-01", date_to="2026-05-18", keyword=None)
         sheet = load_workbook(BytesIO(result.content))["全部流水"]
 
-        self.assertIn(sheet["L2"].value, (None, ""))
-        self.assertIn(sheet["M2"].value, (None, ""))
-        self.assertEqual(sheet["N2"].value, "客户附言内容")
+        self.assertIn(sheet["N2"].value, (None, ""))
+        self.assertIn(sheet["O2"].value, (None, ""))
+        self.assertEqual(sheet["P2"].value, "客户附言内容")
 
     def test_row_limit_is_enforced_before_collecting_all_pages(self) -> None:
         rows = [

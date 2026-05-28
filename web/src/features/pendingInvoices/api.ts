@@ -36,6 +36,8 @@ type ApiTagDefinition = {
   code?: string | null;
   label?: string | null;
   path?: unknown[] | null;
+  output_primary_label?: string | null;
+  output_sub_label?: string | null;
   status?: string | null;
   source?: string | null;
 };
@@ -95,6 +97,9 @@ type ApiPendingInvoiceRow = {
     voucher_no: string | null;
     effective_tag_code: string | null;
     effective_tag_label: string | null;
+    effective_tag_primary_label: string | null;
+    effective_tag_sub_label: string | null;
+    effective_tag_label_path: unknown[] | null;
   }> | null;
   invoice_acquisition_status?: Partial<{
     code: string | null;
@@ -107,6 +112,9 @@ type ApiPendingInvoiceRow = {
       group: string | null;
       tag_code: string | null;
       tag_label: string | null;
+      tag_primary_label: string | null;
+      tag_sub_label: string | null;
+      tag_label_path: unknown[] | null;
     }> | null;
   }> | null;
   input_invoices?: Partial<{
@@ -166,7 +174,7 @@ type ApiPendingInvoiceRulesPayload = {
   bank_transaction_tags?: ApiTagDictionary | null;
   groups?: Partial<Record<"requires_invoice" | "bank_statement_as_invoice" | "no_invoice_required", {
     tag_codes?: unknown[] | null;
-    tags?: Array<Partial<{ code: string | null; label: string | null; status: string | null }>> | null;
+    tags?: ApiTagDefinition[] | null;
   }>> | null;
   requires_invoice?: unknown[] | null;
   bank_statement_as_invoice?: unknown[] | null;
@@ -356,6 +364,8 @@ export function mapBankTransactionTagDictionary(value: ApiTagDictionary | null |
       code: stringValue(tag.code),
       label: stringValue(tag.label, stringValue(tag.code)),
       path: stringList(tag.path),
+      outputPrimaryLabel: stringValue(tag.output_primary_label, stringValue(tag.label, stringValue(tag.code))),
+      outputSubLabel: stringValue(tag.output_sub_label),
       status: stringValue(tag.status, "active") as BankTransactionTagDefinition["status"],
       source: stringValue(tag.source, "system") as BankTransactionTagDefinition["source"],
     })).filter((tag) => tag.code.length > 0),
@@ -389,6 +399,9 @@ function mapBankTransaction(value: ApiPendingInvoiceRow["bank_transaction"], fal
     voucherNo: stringValue(value?.voucher_no),
     effectiveTagCode: value?.effective_tag_code ?? null,
     effectiveTagLabel: value?.effective_tag_label ?? null,
+    effectiveTagPrimaryLabel: value?.effective_tag_primary_label ?? null,
+    effectiveTagSubLabel: value?.effective_tag_sub_label ?? null,
+    effectiveTagLabelPath: stringList(value?.effective_tag_label_path),
   };
 }
 
@@ -460,6 +473,9 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
         group: stringValue(matchedRule.group) as NonNullable<PendingInvoiceRow["invoiceAcquisitionStatus"]["matchedRule"]>["group"],
         tagCode: stringValue(matchedRule.tag_code),
         tagLabel: stringValue(matchedRule.tag_label),
+        tagPrimaryLabel: stringValue(matchedRule.tag_primary_label),
+        tagSubLabel: stringValue(matchedRule.tag_sub_label),
+        tagLabelPath: stringList(matchedRule.tag_label_path),
       } : null,
     }),
     inputInvoices: {
@@ -619,6 +635,8 @@ function mapRuleGroup(payload: ApiPendingInvoiceRulesPayload, code: keyof typeof
   const tags = (group?.tags ?? []).map((tag) => ({
     code: stringValue(tag.code),
     label: stringValue(tag.label, stringValue(tag.code)),
+    outputPrimaryLabel: stringValue(tag.output_primary_label, stringValue(tag.label, stringValue(tag.code))),
+    outputSubLabel: stringValue(tag.output_sub_label),
     status: stringValue(tag.status, "active") as PendingInvoiceRuleGroup["tags"][number]["status"],
   })).filter((tag) => tag.code);
   return {
@@ -634,6 +652,8 @@ function mapRulesPayload(payload: ApiPendingInvoiceRulesPayload): PendingInvoice
     .map((tag) => ({
       code: stringValue(tag.code),
       label: stringValue(tag.label, stringValue(tag.code)),
+      outputPrimaryLabel: stringValue(tag.output_primary_label, stringValue(tag.label, stringValue(tag.code))),
+      outputSubLabel: stringValue(tag.output_sub_label),
       status: stringValue(tag.status, "active") as PendingInvoiceRuleGroup["tags"][number]["status"],
     }))
     .filter((tag) => tag.code && tag.status !== "archived");

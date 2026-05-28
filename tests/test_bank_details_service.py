@@ -801,13 +801,22 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["manual_category_source"], "")
         self.assertEqual(row["auto_category_code"], "fee")
         self.assertEqual(row["auto_category_label"], "手续费")
+        self.assertEqual(row["auto_category_primary_label"], "费用")
+        self.assertEqual(row["auto_category_sub_label"], "手续费")
+        self.assertEqual(row["auto_category_label_path"], ["费用", "手续费"])
         self.assertEqual(row["auto_category_source"], "auto")
         self.assertEqual(row["auto_category_confidence"], "high")
         self.assertEqual(row["effective_category_code"], "fee")
         self.assertEqual(row["effective_category_label"], "手续费")
+        self.assertEqual(row["effective_category_primary_label"], "费用")
+        self.assertEqual(row["effective_category_sub_label"], "手续费")
+        self.assertEqual(row["effective_category_label_path"], ["费用", "手续费"])
         self.assertEqual(row["effective_category_source"], "auto")
         self.assertEqual(row["category_code"], "fee")
         self.assertEqual(row["category_label"], "手续费")
+        self.assertEqual(row["category_primary_label"], "费用")
+        self.assertEqual(row["category_sub_label"], "手续费")
+        self.assertEqual(row["category_label_path"], ["费用", "手续费"])
         self.assertEqual(row["category_path"], ["自动识别", "手续费"])
         self.assertEqual(row["category_source"], "auto")
         self.assertEqual(row["category_version"], 0)
@@ -950,6 +959,54 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["category_version"], 1)
         self.assertEqual(payload["category_counts"]["fee"], 1)
         self.assertEqual(payload["category_counts"]["uncategorized"], 0)
+
+    def test_keyword_search_matches_auto_category_primary_label(self) -> None:
+        transactions = [
+            self._transaction(
+                transaction_id="txn-fee",
+                trade_time="2026-04-01 09:00:00",
+                counterparty_name="普通供应商",
+                summary="网银手续费",
+                remark="普通用途",
+            )
+        ]
+        service = BankDetailsService(
+            _ImportServiceStub(transactions),
+            auto_category_service=BankTransactionAutoCategoryService(),
+        )
+
+        payload = service.list_transactions(account_key="工商银行:6386", keyword="费用")
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["txn-fee"])
+        self.assertEqual(payload["category_counts"]["fee"], 1)
+
+    def test_category_filters_match_effective_primary_and_sub_labels(self) -> None:
+        transactions = [
+            self._transaction(
+                transaction_id="txn-fee",
+                trade_time="2026-04-01 09:00:00",
+                summary="网银手续费",
+            ),
+            self._transaction(
+                transaction_id="txn-salary",
+                trade_time="2026-04-02 09:00:00",
+                summary="工资",
+            ),
+        ]
+        service = BankDetailsService(
+            _ImportServiceStub(transactions),
+            auto_category_service=BankTransactionAutoCategoryService(),
+        )
+
+        payload = service.list_transactions(
+            account_key="工商银行:6386",
+            category_primary_label="费用",
+            category_sub_label="手续费",
+        )
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["txn-fee"])
+        self.assertEqual(payload["category_counts"]["fee"], 1)
+        self.assertEqual(payload["category_counts"]["salary"], 0)
 
     def test_category_counts_are_based_on_effective_categories_across_full_filter(self) -> None:
         transactions = [

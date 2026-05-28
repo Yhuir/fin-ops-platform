@@ -95,17 +95,26 @@ describe("bank details API", () => {
             category_code: null,
             category_label: null,
             category_path: [],
+            category_primary_label: null,
+            category_sub_label: null,
+            category_label_path: [],
             category_source: "",
             category_version: null,
             auto_category_code: "fee",
             auto_category_label: "手续费",
             auto_category_path: ["自动识别", "手续费"],
+            auto_category_primary_label: "费用",
+            auto_category_sub_label: "手续费",
+            auto_category_label_path: ["费用", "手续费"],
             auto_category_source: "bank_transaction_auto_category_service",
             auto_category_reason: "摘要包含手续费",
             auto_category_confidence: "high",
             effective_category_code: "fee",
             effective_category_label: "手续费",
             effective_category_path: ["自动识别", "手续费"],
+            effective_category_primary_label: "费用",
+            effective_category_sub_label: "手续费",
+            effective_category_label_path: ["费用", "手续费"],
             effective_category_source: "auto",
           },
         ],
@@ -126,17 +135,26 @@ describe("bank details API", () => {
       categoryCode: null,
       categoryLabel: null,
       categoryPath: [],
+      categoryPrimaryLabel: null,
+      categorySubLabel: null,
+      categoryLabelPath: [],
       categorySource: "",
       categoryVersion: null,
       autoCategoryCode: "fee",
       autoCategoryLabel: "手续费",
       autoCategoryPath: ["自动识别", "手续费"],
+      autoCategoryPrimaryLabel: "费用",
+      autoCategorySubLabel: "手续费",
+      autoCategoryLabelPath: ["费用", "手续费"],
       autoCategorySource: "bank_transaction_auto_category_service",
       autoCategoryReason: "摘要包含手续费",
       autoCategoryConfidence: "high",
       effectiveCategoryCode: "fee",
       effectiveCategoryLabel: "手续费",
       effectiveCategoryPath: ["自动识别", "手续费"],
+      effectiveCategoryPrimaryLabel: "费用",
+      effectiveCategorySubLabel: "手续费",
+      effectiveCategoryLabelPath: ["费用", "手续费"],
       effectiveCategorySource: "auto",
       purposeText: "工行用途",
       summaryText: "工行摘要",
@@ -192,6 +210,9 @@ describe("bank details API", () => {
       dateFrom: "2026-04-01",
       dateTo: "2026-04-30",
       keyword: "跨页目标",
+      categoryCode: "fee",
+      categoryPrimaryLabel: "费用",
+      categorySubLabel: "手续费",
       page: 1,
       pageSize: 100,
     });
@@ -202,6 +223,9 @@ describe("bank details API", () => {
     expect(url.searchParams.get("date_from")).toBe("2026-04-01");
     expect(url.searchParams.get("date_to")).toBe("2026-04-30");
     expect(url.searchParams.get("keyword")).toBe("跨页目标");
+    expect(url.searchParams.get("category_code")).toBe("fee");
+    expect(url.searchParams.get("category_primary_label")).toBe("费用");
+    expect(url.searchParams.get("category_sub_label")).toBe("手续费");
     expect(url.searchParams.get("page")).toBe("1");
     expect(url.searchParams.get("page_size")).toBe("100");
   });
@@ -247,6 +271,9 @@ describe("bank details API", () => {
       dateFrom: "2026-04-01",
       dateTo: "2026-05-18",
       keyword: "手续费",
+      categoryCode: "fee",
+      categoryPrimaryLabel: "费用",
+      categorySubLabel: "手续费",
     });
 
     const url = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
@@ -256,6 +283,9 @@ describe("bank details API", () => {
     expect(url.searchParams.get("date_from")).toBe("2026-04-01");
     expect(url.searchParams.get("date_to")).toBe("2026-05-18");
     expect(url.searchParams.get("keyword")).toBe("手续费");
+    expect(url.searchParams.get("category_code")).toBe("fee");
+    expect(url.searchParams.get("category_primary_label")).toBe("费用");
+    expect(url.searchParams.get("category_sub_label")).toBe("手续费");
     expect(result.fileName).toBe("银行明细.xlsx");
     expect(result.blob).toBeInstanceOf(Blob);
   });
@@ -287,6 +317,42 @@ describe("bank details API", () => {
       activeRules: [],
       archivedRules: [],
     })).rejects.toThrow("自动标签规则校验失败，请检查规则内容：停用规则必须包含已有标签 code。");
+  });
+
+  test("serializes automatic tag rule output primary and sub labels", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      version: 2,
+      active_rules: [],
+      archived_rules: [],
+      permissions: { can_save: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveBankAutoTagRules({
+      expectedVersion: 1,
+      activeRules: [
+        {
+          label: "手续费",
+          outputPrimaryLabel: "费用",
+          outputSubLabel: "手续费",
+          direction: "expense",
+          accountScope: { type: "any", values: [] },
+          rules: {
+            matchFields: ["summary_text"],
+            exactAny: [],
+            containsAny: ["手续费"],
+            containsAll: [],
+            noneOf: [],
+            regexAny: [],
+          },
+        },
+      ],
+      archivedRules: [],
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.active_rules[0].output_primary_label).toBe("费用");
+    expect(body.active_rules[0].output_sub_label).toBe("手续费");
   });
 
   test("rejects successful HTML responses from bank detail export", async () => {

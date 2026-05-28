@@ -59,6 +59,8 @@ export type BankTransactionTagDefinition = {
   code: string;
   label: string;
   path: string[];
+  outputPrimaryLabel: string;
+  outputSubLabel: string;
   status: BankTransactionTagStatus;
   source: BankTransactionTagSource;
 };
@@ -79,6 +81,8 @@ export type PendingInvoiceRuleGroupCode = "requires_invoice" | "bank_statement_a
 export type PendingInvoiceRuleTag = {
   code: string;
   label: string;
+  outputPrimaryLabel: string;
+  outputSubLabel: string;
   status: BankTransactionTagStatus;
 };
 
@@ -127,6 +131,9 @@ export type PendingInvoiceBankTransaction = {
   voucherNo: string;
   effectiveTagCode: string | null;
   effectiveTagLabel: string | null;
+  effectiveTagPrimaryLabel: string | null;
+  effectiveTagSubLabel: string | null;
+  effectiveTagLabelPath: string[];
 };
 
 export type PendingInvoiceMatchedRule = {
@@ -134,6 +141,9 @@ export type PendingInvoiceMatchedRule = {
   group: PendingInvoiceRuleGroupCode | (string & {});
   tagCode: string;
   tagLabel: string;
+  tagPrimaryLabel: string;
+  tagSubLabel: string;
+  tagLabelPath: string[];
 } | null;
 
 export type PendingInvoiceAcquisitionStatus = {

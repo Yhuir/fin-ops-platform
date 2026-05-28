@@ -401,7 +401,11 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
 
         self.assertEqual(bank_row["category_code"], "fee")
         self.assertEqual(bank_row["category_label"], "手续费")
+        self.assertEqual(bank_row["category_primary_label"], "费用")
+        self.assertEqual(bank_row["category_sub_label"], "手续费")
+        self.assertEqual(bank_row["category_label_path"], ["费用", "手续费"])
         self.assertEqual(bank_row["category_source"], "auto")
+        self.assertIn("费用", bank_row["tags"])
         self.assertIn("手续费", bank_row["tags"])
 
     def test_bank_rows_manual_category_history_does_not_override_auto_effective_category(self) -> None:

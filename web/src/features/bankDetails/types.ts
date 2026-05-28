@@ -64,11 +64,17 @@ export type BankDetailTransaction = {
   categoryCode: BankTransactionCategoryCode | null;
   categoryLabel: string | null;
   categoryPath: string[];
+  categoryPrimaryLabel: string | null;
+  categorySubLabel: string | null;
+  categoryLabelPath: string[];
   categorySource: string;
   categoryVersion: number | null;
   autoCategoryCode: BankTransactionCategoryCode | null;
   autoCategoryLabel: string | null;
   autoCategoryPath: string[];
+  autoCategoryPrimaryLabel: string | null;
+  autoCategorySubLabel: string | null;
+  autoCategoryLabelPath: string[];
   autoCategorySource: string;
   autoCategoryReason: string | null;
   autoCategoryConfidence: string | null;
@@ -76,6 +82,9 @@ export type BankDetailTransaction = {
   effectiveCategoryCode: BankTransactionCategoryCode | null;
   effectiveCategoryLabel: string | null;
   effectiveCategoryPath: string[];
+  effectiveCategoryPrimaryLabel: string | null;
+  effectiveCategorySubLabel: string | null;
+  effectiveCategoryLabelPath: string[];
   effectiveCategorySource: string;
   oaRelationTag: OaRelationTag;
   invoiceRelationTag: InvoiceRelationTag;
@@ -104,6 +113,9 @@ export type BankDetailTransactionsRequest = {
   dateFrom?: string | null;
   dateTo?: string | null;
   keyword?: string | null;
+  categoryCode?: string | null;
+  categoryPrimaryLabel?: string | null;
+  categorySubLabel?: string | null;
   page?: number;
   pageSize?: number;
   signal?: AbortSignal;
@@ -117,6 +129,9 @@ export type BankDetailExportRequest = {
   dateFrom?: string | null;
   dateTo?: string | null;
   keyword?: string | null;
+  categoryCode?: string | null;
+  categoryPrimaryLabel?: string | null;
+  categorySubLabel?: string | null;
   signal?: AbortSignal;
 };
 
@@ -166,6 +181,8 @@ export type BankAutoTagEditableRule = {
   priorityLabel?: string;
   direction: BankAutoTagDirection;
   accountScope: BankAutoTagAccountScope;
+  outputPrimaryLabel: string;
+  outputSubLabel: string;
   rules: BankAutoTagRuleConditions;
   ruleSummary: string;
   editable: boolean;
@@ -188,6 +205,8 @@ export type BankAutoTagRulesResponse = {
 export type SaveBankAutoTagRule = {
   code?: string;
   label: string;
+  outputPrimaryLabel: string;
+  outputSubLabel: string;
   direction: BankAutoTagDirection;
   accountScope: BankAutoTagAccountScope;
   rules: BankAutoTagRuleConditions;

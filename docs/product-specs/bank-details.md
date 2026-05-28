@@ -12,6 +12,7 @@
 - 旧的人工分类历史只作为审计/归档事实保留，不参与 `category_code`、`category_label`、`category_counts` 或下游有效分类。
 - 关联台特殊规则不再给银行流水打标签；只保留周洁莹 OA 附件发票“冲”自动闭环，且该规则不是银行流水标签。
 - 标签以稳定 `code` 作为系统身份。改名后银行明细、免 OA 批次、关联台、待找发票规则等当前页面和引用关系都按同一个 `code` 实时显示新名称。
+- 自动标签支持结构化 `输出主标签 / 输出子标签`。`code` 仍是唯一稳定身份；`category_label` 保持兼容的叶子展示名，新增的主/子标签字段用于页面展示、筛选、导出和下游展示，不替代 `code`。
 
 ## 免 OA 自动分类规则
 
@@ -60,6 +61,13 @@
 | 不包含字样 | 可为空；有值时选中语义字段包含任一排除字样则整条规则不命中。 |
 | 正则命中 | 高级条件；用于稳定格式文本，例如借据号、纳税人编码等。 |
 | 输出主标签 / 子标签 | 命中后的银行明细标签。 |
+
+主/子标签字段使用以下合同：
+
+- 规则配置：`output_primary_label`、`output_sub_label`。
+- 自动命中结果：`category_primary_label`、`category_sub_label`、`category_label_path`。
+- 银行明细行：`auto_category_primary_label`、`auto_category_sub_label`、`auto_category_label_path`，以及同口径的 `effective_*` 和兼容别名 `category_*`。
+- 旧字段 `category_code`、`category_label`、`category_path`、`auto_category_label`、`effective_category_label` 必须保留，供旧页面、导出和下游兼容消费。
 
 命中逻辑为：先检查适用方向和账户范围，再在选中语义字段上执行 `(精确命中任一 OR 包含任一 OR 必须同时包含 OR 正则命中任一) AND NOT 不包含`。可用标签必须至少填写一种正向条件；停用标签可保留空规则用于历史展示。规则匹配不使用置信度分数；不确定流水应进入明确的复核或待确认状态，而不是生成不可审计的 confidence。
 
@@ -118,9 +126,9 @@
 
 - `GET /api/bank-details/transactions/export?mode=all`：导出当前筛选命中的全部银行流水。
 - `GET /api/bank-details/transactions/export?mode=account&account_key=...`：导出当前筛选命中的指定账户流水。
-- 筛选参数复用页面查询：`date_from`、`date_to`、`keyword`，当前账户导出还必须携带有效 `account_key`。
+- 筛选参数复用页面查询：`date_from`、`date_to`、`keyword`、`category_code`、`category_primary_label`、`category_sub_label`，当前账户导出还必须携带有效 `account_key`。
 - 全部银行导出包含 `全部流水` sheet 和每个银行单独 sheet；当前账户导出只包含该账户银行 sheet。
-- 导出列使用专业 Excel 字段，不导出 UI chip/tag 样式。列顺序为：交易时间、银行、账号尾号、对方户名、收支方向、收入金额、支出金额、余额、自动分类、OA 关系、发票关系、用途/交易用途、摘要、备注/附言/客户附言、流水 ID。
+- 导出列使用专业 Excel 字段，不导出 UI chip/tag 样式。列顺序为：交易时间、银行、账号尾号、对方户名、收支方向、收入金额、支出金额、余额、自动分类、自动分类主标签、自动分类子标签、OA 关系、发票关系、用途/交易用途、摘要、备注/附言/客户附言、流水 ID。
 - 交易时间导出同样去除 `+08:00` 等时区后缀。金额列为数值格式，表头冻结并启用筛选。
 - 同步导出上限为 `20000` 行；超过时返回 `400 bank_detail_export_row_limit_exceeded`，提示用户缩小日期范围、选择具体银行或增加搜索条件。
 - 导出下载必须写审计动作 `bank_detail_export_downloaded`，记录模式、筛选条件、行数、sheet 名称和文件名。

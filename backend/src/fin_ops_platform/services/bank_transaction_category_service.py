@@ -234,6 +234,8 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
     "fee": {
         "priority": 10,
         "rule_code": "fee_text_keyword",
+        "output_primary_label": "费用",
+        "output_sub_label": "手续费",
         "rules": {
             "match_fields": ["counterparty_name", "summary_text", "note_text"],
             "exact": [],
@@ -409,7 +411,15 @@ def _default_auto_tag_rule_fields(code: str) -> dict[str, Any]:
         "rule_code": str(default["rule_code"]),
         "rules": deepcopy(default["rules"]),
     }
-    for key in ("direction", "account_scope", "stop_on_match", "review_required", "route_to"):
+    for key in (
+        "direction",
+        "account_scope",
+        "output_primary_label",
+        "output_sub_label",
+        "stop_on_match",
+        "review_required",
+        "route_to",
+    ):
         if key in default:
             fields[key] = deepcopy(default[key])
     return fields
@@ -870,7 +880,7 @@ class BankTransactionCategoryService:
             "source": str(definition.get("source") or "custom"),
             "direction": cls._normalize_auto_tag_direction(definition.get("direction")),
             "account_scope": cls._normalize_auto_tag_account_scope(definition.get("account_scope")),
-            "output_primary_label": str(definition.get("label") or code),
+            "output_primary_label": str(definition.get("output_primary_label") or definition.get("label") or code),
             "output_sub_label": str(definition.get("output_sub_label") or "").strip(),
             "rules": rules,
             "rule_code": str(definition.get("rule_code") or code),
@@ -957,7 +967,7 @@ class BankTransactionCategoryService:
             "status": status,
             "direction": direction,
             "account_scope": account_scope,
-            "output_primary_label": label,
+            "output_primary_label": str(item.get("output_primary_label") or label).strip(),
             "output_sub_label": str(item.get("output_sub_label") or "").strip(),
             "rules": rules,
             "rule_code": rule_code,
@@ -1391,6 +1401,35 @@ class BankTransactionCategoryService:
             ]
         return self.path_for(category_code)
 
+    def _label_fields_for(self, category_code: str | None) -> dict[str, Any]:
+        label = self._label_for(category_code)
+        if category_code is None:
+            return {
+                "category_primary_label": None,
+                "category_sub_label": None,
+                "category_label_path": [],
+            }
+        definition = self._tag_definitions_by_code.get(category_code)
+        primary_label = ""
+        sub_label = ""
+        if isinstance(definition, dict):
+            primary_label = str(definition.get("output_primary_label") or "").strip()
+            sub_label = str(definition.get("output_sub_label") or "").strip()
+        if not primary_label:
+            path = self._path_for(category_code)
+            if len(path) >= 2 and path[0] != "自动识别":
+                primary_label = str(path[-2] or "").strip()
+                if not sub_label:
+                    sub_label = str(path[-1] or "").strip()
+            else:
+                primary_label = str(label or "").strip()
+        label_path = [item for item in (primary_label, sub_label) if item]
+        return {
+            "category_primary_label": primary_label or None,
+            "category_sub_label": sub_label or None,
+            "category_label_path": label_path,
+        }
+
     def tag_count_keys(self) -> list[str]:
         with self._lock:
             active_codes = [
@@ -1413,6 +1452,7 @@ class BankTransactionCategoryService:
             "transaction_id": transaction_id,
             "category_code": category_code,
             "category_label": self._label_for(category_code),
+            **self._label_fields_for(category_code),
             "category_path": self._path_for(category_code),
             "category_version": version,
             "source": str(record.get("source") or "") if isinstance(record, dict) else "",

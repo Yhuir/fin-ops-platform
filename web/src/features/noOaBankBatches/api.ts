@@ -118,6 +118,12 @@ type ApiNoOaBankBatchDetailRow = {
   categoryCode?: string | null;
   category_label?: string | null;
   categoryLabel?: string | null;
+  category_primary_label?: string | null;
+  categoryPrimaryLabel?: string | null;
+  category_sub_label?: string | null;
+  categorySubLabel?: string | null;
+  category_label_path?: unknown[] | null;
+  categoryLabelPath?: unknown[] | null;
   category_source?: string | null;
   categorySource?: string | null;
 };
@@ -225,6 +231,7 @@ function mapSummaryCategory(category: ApiNoOaBankBatchSummaryCategory) {
 }
 
 function mapDetailRow(row: ApiNoOaBankBatchDetailRow = {}): NoOaBankBatchDetailRow {
+  const categoryLabelPath = row.category_label_path ?? row.categoryLabelPath;
   return {
     transactionId: text(row.transaction_id ?? row.transactionId ?? row.id),
     tradeTime: text(row.trade_time ?? row.tradeTime),
@@ -240,6 +247,11 @@ function mapDetailRow(row: ApiNoOaBankBatchDetailRow = {}): NoOaBankBatchDetailR
     remark: text(row.remark ?? row.note),
     categoryCode: text(row.category_code ?? row.categoryCode),
     categoryLabel: text(row.category_label ?? row.categoryLabel),
+    categoryPrimaryLabel: text(row.category_primary_label ?? row.categoryPrimaryLabel),
+    categorySubLabel: text(row.category_sub_label ?? row.categorySubLabel),
+    categoryLabelPath: Array.isArray(categoryLabelPath)
+      ? categoryLabelPath.map((item: unknown) => String(item).trim()).filter(Boolean)
+      : [],
     categorySource: text(row.category_source ?? row.categorySource),
   };
 }

@@ -60,6 +60,8 @@ class AppSettingsServiceTests(unittest.TestCase):
             for definition in payload["bank_transaction_tags"]["definitions"]
         }
         self.assertEqual(payload["bank_transaction_tags"]["version"], 1)
+        self.assertEqual(definitions_by_code["fee"]["output_primary_label"], "费用")
+        self.assertEqual(definitions_by_code["fee"]["output_sub_label"], "手续费")
         self.assertEqual(
             definitions_by_code["borrow_in_company_pending_repayment"],
             {
@@ -68,6 +70,8 @@ class AppSettingsServiceTests(unittest.TestCase):
                 "path": ["借入", "公司往来款", "待还款"],
                 "source": "system",
                 "status": "active",
+                "output_primary_label": "公司暂借款：待还款",
+                "output_sub_label": "",
             },
         )
         self.assertEqual(

@@ -184,6 +184,9 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "bank-202603-fee-1")
         self.assertEqual(payload["rows"][0]["category_code"], "fee")
         self.assertEqual(payload["rows"][0]["category_label"], "手续费")
+        self.assertEqual(payload["rows"][0]["category_primary_label"], "费用")
+        self.assertEqual(payload["rows"][0]["category_sub_label"], "手续费")
+        self.assertEqual(payload["rows"][0]["category_label_path"], ["费用", "手续费"])
         self.assertEqual(payload["rows"][0]["category_source"], "auto")
 
     def test_bucket_filter_returns_unsubmitted_and_submitted_after_category_drift(self) -> None:

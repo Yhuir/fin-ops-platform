@@ -9,6 +9,7 @@ tmp/
 rust/**/target/
 .runtime/
 .worktrees/
+.codegraph/
 .impeccable.md
 .superpowers/
 *.tsbuildinfo

@@ -109,12 +109,18 @@ class BankDetailsService:
         date_from: str | None = None,
         date_to: str | None = None,
         keyword: str | None = None,
+        category_code: str | None = None,
+        category_primary_label: str | None = None,
+        category_sub_label: str | None = None,
         page: int = 1,
         page_size: int = 100,
     ) -> dict[str, Any]:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 100), 1), 500)
         normalized_keyword = self._normalize_keyword(keyword)
+        normalized_category_code = self._normalize_keyword(category_code)
+        normalized_category_primary_label = self._normalize_keyword(category_primary_label)
+        normalized_category_sub_label = self._normalize_keyword(category_sub_label)
         sql_page_loader = getattr(self._fact_repository, "list_bank_transactions_page", None)
         if callable(sql_page_loader):
             transactions, total = sql_page_loader(
@@ -122,6 +128,9 @@ class BankDetailsService:
                 date_from=date_from,
                 date_to=date_to,
                 keyword=normalized_keyword,
+                category_code=normalized_category_code,
+                category_primary_label=normalized_category_primary_label,
+                category_sub_label=normalized_category_sub_label,
                 page=normalized_page,
                 page_size=normalized_page_size,
             )
@@ -180,6 +189,15 @@ class BankDetailsService:
         ]
         if normalized_keyword:
             rows = [row for row in rows if self._row_matches_keyword(row, normalized_keyword)]
+        rows = [
+            row for row in rows
+            if self._row_matches_category_filters(
+                row,
+                category_code=normalized_category_code,
+                category_primary_label=normalized_category_primary_label,
+                category_sub_label=normalized_category_sub_label,
+            )
+        ]
         rows.sort(key=lambda item: str(item.get("trade_time") or ""), reverse=True)
         total = len(rows)
         start = (normalized_page - 1) * normalized_page_size
@@ -267,11 +285,17 @@ class BankDetailsService:
             "account_last4": account["account_last4"],
             "manual_category_code": manual_category["category_code"],
             "manual_category_label": manual_category["category_label"],
+            "manual_category_primary_label": manual_category.get("category_primary_label"),
+            "manual_category_sub_label": manual_category.get("category_sub_label"),
+            "manual_category_label_path": list(manual_category.get("category_label_path") or []),
             "manual_category_path": list(manual_category.get("category_path") or []),
             "manual_category_source": str(manual_category.get("source") or ""),
             "manual_category_version": manual_category["category_version"],
             "auto_category_code": auto_category.get("category_code") if isinstance(auto_category, dict) else None,
             "auto_category_label": auto_category.get("category_label") if isinstance(auto_category, dict) else None,
+            "auto_category_primary_label": auto_category.get("category_primary_label") if isinstance(auto_category, dict) else None,
+            "auto_category_sub_label": auto_category.get("category_sub_label") if isinstance(auto_category, dict) else None,
+            "auto_category_label_path": list(auto_category.get("category_label_path") or []) if isinstance(auto_category, dict) else [],
             "auto_category_path": list(auto_category.get("category_path") or []) if isinstance(auto_category, dict) else [],
             "auto_category_source": str(auto_category.get("source") or "") if isinstance(auto_category, dict) else "",
             "auto_category_reason": str(auto_category.get("reason") or "") if isinstance(auto_category, dict) else "",
@@ -279,10 +303,16 @@ class BankDetailsService:
             "auto_category_evidence": dict(auto_category.get("auto_category_evidence") or {}) if isinstance(auto_category, dict) else {},
             "effective_category_code": effective_code,
             "effective_category_label": effective_label,
+            "effective_category_primary_label": effective_category.get("effective_category_primary_label"),
+            "effective_category_sub_label": effective_category.get("effective_category_sub_label"),
+            "effective_category_label_path": list(effective_category.get("effective_category_label_path") or []),
             "effective_category_path": effective_path,
             "effective_category_source": effective_source,
             "category_code": effective_code,
             "category_label": effective_label,
+            "category_primary_label": effective_category.get("effective_category_primary_label"),
+            "category_sub_label": effective_category.get("effective_category_sub_label"),
+            "category_label_path": list(effective_category.get("effective_category_label_path") or []),
             "category_path": effective_path,
             "category_source": effective_source,
             "category_version": manual_category["category_version"],
@@ -411,6 +441,22 @@ class BankDetailsService:
         haystack = " ".join(cls._search_text_values(row)).lower()
         return keyword.lower() in haystack
 
+    @staticmethod
+    def _row_matches_category_filters(
+        row: dict[str, Any],
+        *,
+        category_code: str,
+        category_primary_label: str,
+        category_sub_label: str,
+    ) -> bool:
+        if category_code and str(row.get("effective_category_code") or "").strip() != category_code:
+            return False
+        if category_primary_label and str(row.get("effective_category_primary_label") or "").strip() != category_primary_label:
+            return False
+        if category_sub_label and str(row.get("effective_category_sub_label") or "").strip() != category_sub_label:
+            return False
+        return True
+
     @classmethod
     def _search_text_values(cls, row: dict[str, Any]) -> list[str]:
         values: list[str] = []
@@ -428,9 +474,17 @@ class BankDetailsService:
             "bank_name",
             "account_last4",
             "manual_category_label",
+            "manual_category_primary_label",
+            "manual_category_sub_label",
             "auto_category_label",
+            "auto_category_primary_label",
+            "auto_category_sub_label",
             "effective_category_label",
+            "effective_category_primary_label",
+            "effective_category_sub_label",
             "category_label",
+            "category_primary_label",
+            "category_sub_label",
             "oa_relation_tag",
             "invoice_relation_tag",
         ):
@@ -439,9 +493,13 @@ class BankDetailsService:
                 cls._append_search_value(values, cls._format_money_for_search(row.get(key)))
         for key in (
             "manual_category_path",
+            "manual_category_label_path",
             "auto_category_path",
+            "auto_category_label_path",
             "effective_category_path",
+            "effective_category_label_path",
             "category_path",
+            "category_label_path",
             "relation_tags",
         ):
             cls._append_search_value(values, row.get(key))

@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 
 BANK_DETAIL_EXPORT_ROW_LIMIT = 20000
@@ -23,6 +24,8 @@ BANK_DETAIL_EXPORT_COLUMNS = [
     "支出金额",
     "余额",
     "自动分类",
+    "自动分类主标签",
+    "自动分类子标签",
     "OA 关系",
     "发票关系",
     "用途/交易用途",
@@ -68,6 +71,9 @@ class BankDetailsExportService:
         date_from: str | None = None,
         date_to: str | None = None,
         keyword: str | None = None,
+        category_code: str | None = None,
+        category_primary_label: str | None = None,
+        category_sub_label: str | None = None,
         today: date | None = None,
     ) -> BankDetailsExportResult:
         normalized_mode = str(mode or "").strip().lower()
@@ -84,6 +90,9 @@ class BankDetailsExportService:
             date_from=date_from,
             date_to=date_to,
             keyword=keyword,
+            category_code=category_code,
+            category_primary_label=category_primary_label,
+            category_sub_label=category_sub_label,
         )
         formal_rows = [self._formal_row(row) for row in rows]
         workbook = self._build_workbook(formal_rows, mode=normalized_mode, account_payload=account_payload)
@@ -118,6 +127,9 @@ class BankDetailsExportService:
         date_from: str | None,
         date_to: str | None,
         keyword: str | None,
+        category_code: str | None,
+        category_primary_label: str | None,
+        category_sub_label: str | None,
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         page = 1
@@ -128,6 +140,9 @@ class BankDetailsExportService:
                 date_from=date_from,
                 date_to=date_to,
                 keyword=keyword,
+                category_code=category_code,
+                category_primary_label=category_primary_label,
+                category_sub_label=category_sub_label,
                 page=page,
                 page_size=BANK_DETAIL_EXPORT_PAGE_SIZE,
             )
@@ -160,6 +175,16 @@ class BankDetailsExportService:
             "支出金额": amount if direction != "income" else None,
             "余额": cls._money(row.get("balance")),
             "自动分类": cls._text(row.get("auto_category_label") or row.get("effective_category_label")) or "-",
+            "自动分类主标签": cls._text(
+                row.get("auto_category_primary_label")
+                or row.get("effective_category_primary_label")
+                or row.get("category_primary_label")
+            ) or "-",
+            "自动分类子标签": cls._text(
+                row.get("auto_category_sub_label")
+                or row.get("effective_category_sub_label")
+                or row.get("category_sub_label")
+            ) or "-",
             "OA 关系": cls._text(row.get("oa_relation_tag")) or "无oa",
             "发票关系": cls._text(row.get("invoice_relation_tag")) or "无发票",
             "用途/交易用途": text_fields["purpose_text"],
@@ -194,7 +219,7 @@ class BankDetailsExportService:
         for row in rows:
             sheet.append([cls._excel_cell_value(row.get(column)) for column in BANK_DETAIL_EXPORT_COLUMNS])
         sheet.freeze_panes = "A2"
-        sheet.auto_filter.ref = f"A1:O{max(sheet.max_row, 1)}"
+        sheet.auto_filter.ref = f"A1:{get_column_letter(len(BANK_DETAIL_EXPORT_COLUMNS))}{max(sheet.max_row, 1)}"
         header_fill = PatternFill("solid", fgColor="E8EEF6")
         for cell in sheet[1]:
             cell.font = Font(bold=True, color="1F2937")
@@ -229,6 +254,8 @@ class BankDetailsExportService:
             "支出金额": 14,
             "余额": 14,
             "自动分类": 18,
+            "自动分类主标签": 16,
+            "自动分类子标签": 16,
             "OA 关系": 10,
             "发票关系": 12,
             "用途/交易用途": 24,

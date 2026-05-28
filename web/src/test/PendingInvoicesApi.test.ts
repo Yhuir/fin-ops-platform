@@ -542,7 +542,15 @@ describe("pending invoices and tag settings API mapping", () => {
         bank_transaction_tags: {
           version: 3,
           tags: [
-            { code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" },
+            {
+              code: "fee",
+              label: "手续费",
+              path: ["自动识别", "手续费"],
+              output_primary_label: "费用",
+              output_sub_label: "手续费",
+              status: "active",
+              source: "system",
+            },
             { code: "custom_meal", label: "餐费", path: ["自定义", "餐费"], status: "active", source: "custom" },
           ],
         },
@@ -561,7 +569,15 @@ describe("pending invoices and tag settings API mapping", () => {
     });
     expect(settings.bankTransactionTags.tags).toEqual(
       expect.arrayContaining([
-        { code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" },
+        {
+          code: "fee",
+          label: "手续费",
+          path: ["自动识别", "手续费"],
+          outputPrimaryLabel: "费用",
+          outputSubLabel: "手续费",
+          status: "active",
+          source: "system",
+        },
       ]),
     );
     expect(settings.pendingInvoiceTagGroups).toEqual({

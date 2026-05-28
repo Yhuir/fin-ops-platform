@@ -35,6 +35,9 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         suggestion = suggestions["txn-fee-remark"]
         self.assertEqual(suggestion["category_code"], "fee")
         self.assertEqual(suggestion["category_label"], "手续费")
+        self.assertEqual(suggestion["category_primary_label"], "费用")
+        self.assertEqual(suggestion["category_sub_label"], "手续费")
+        self.assertEqual(suggestion["category_label_path"], ["费用", "手续费"])
         self.assertEqual(suggestion["category_path"], ["自动识别", "手续费"])
         self.assertEqual(suggestion["source"], "auto")
         self.assertEqual(suggestion["rule_code"], "fee_text_keyword")
@@ -515,6 +518,9 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
 
         self.assertEqual(effective["effective_category_code"], "fee")
         self.assertEqual(effective["effective_category_label"], "手续费")
+        self.assertEqual(effective["effective_category_primary_label"], "费用")
+        self.assertEqual(effective["effective_category_sub_label"], "手续费")
+        self.assertEqual(effective["effective_category_label_path"], ["费用", "手续费"])
         self.assertEqual(effective["effective_category_source"], "auto")
 
     def test_effective_category_ignores_manual_clear_when_auto_exists(self) -> None:

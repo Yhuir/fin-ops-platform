@@ -753,6 +753,10 @@ class AppSettingsService:
                     "path": list(definition.get("path") or []),
                     "source": str(definition["source"]),
                     "status": str(definition["status"]),
+                    "output_primary_label": str(
+                        definition.get("output_primary_label") or definition.get("label") or definition["code"]
+                    ),
+                    "output_sub_label": str(definition.get("output_sub_label") or ""),
                 }
                 for definition in list(payload.get("definitions") or [])
                 if isinstance(definition, dict)

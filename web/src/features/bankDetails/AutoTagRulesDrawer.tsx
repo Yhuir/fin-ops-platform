@@ -113,6 +113,8 @@ function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
   return {
     ...(rule.code ? { code: rule.code } : {}),
     label: rule.label.trim(),
+    outputPrimaryLabel: rule.outputPrimaryLabel.trim() || rule.label.trim(),
+    outputSubLabel: rule.outputSubLabel.trim(),
     direction: rule.direction,
     accountScope: rule.accountScope,
     rules: {
@@ -144,6 +146,9 @@ function validateDraft(activeRules: DraftRule[]) {
   for (const [index, rule] of activeRules.entries()) {
     if (!rule.label.trim()) {
       return `优先级 ${index + 1} 的标签名称不能为空。`;
+    }
+    if (!rule.outputPrimaryLabel.trim()) {
+      return `${rule.label || `优先级 ${index + 1}`} 的输出主标签不能为空。`;
     }
     if (rule.rules.matchFields.length === 0) {
       return `${rule.label || `优先级 ${index + 1}`} 至少选择一个匹配字段。`;
@@ -330,6 +335,8 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
       {
         localId: `new-${createdAt}`,
         label: "",
+        outputPrimaryLabel: "",
+        outputSubLabel: "",
         status: "active",
         source: "custom",
         direction: "any",
@@ -662,7 +669,27 @@ function RuleEditor({
               label="标签名称"
               size="small"
               value={rule.label}
-              onChange={(event) => onChange((current) => ({ ...current, label: event.target.value }))}
+              onChange={(event) => onChange((current) => ({
+                ...current,
+                label: event.target.value,
+                outputPrimaryLabel: current.outputPrimaryLabel || event.target.value,
+              }))}
+              disabled={disabled}
+            />
+            <TextField
+              className="bank-auto-tag-rule-name-field"
+              label="输出主标签"
+              size="small"
+              value={rule.outputPrimaryLabel}
+              onChange={(event) => onChange((current) => ({ ...current, outputPrimaryLabel: event.target.value }))}
+              disabled={disabled}
+            />
+            <TextField
+              className="bank-auto-tag-rule-name-field"
+              label="输出子标签"
+              size="small"
+              value={rule.outputSubLabel}
+              onChange={(event) => onChange((current) => ({ ...current, outputSubLabel: event.target.value }))}
               disabled={disabled}
             />
             <FormControl size="small" disabled={disabled}>

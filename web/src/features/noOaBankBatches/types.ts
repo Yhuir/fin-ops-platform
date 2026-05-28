@@ -100,6 +100,9 @@ export type NoOaBankBatchDetailRow = {
   remark: string;
   categoryCode: string;
   categoryLabel: string;
+  categoryPrimaryLabel: string;
+  categorySubLabel: string;
+  categoryLabelPath: string[];
   categorySource: string;
 };
 

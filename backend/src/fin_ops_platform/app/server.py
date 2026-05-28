@@ -1019,6 +1019,9 @@ class Application:
                 date_from=query.get("date_from", [None])[0],
                 date_to=query.get("date_to", [None])[0],
                 keyword=query.get("keyword", [None])[0],
+                category_code=query.get("category_code", [None])[0],
+                category_primary_label=query.get("category_primary_label", [None])[0],
+                category_sub_label=query.get("category_sub_label", [None])[0],
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
@@ -9940,6 +9943,9 @@ class Application:
         date_from: str | None,
         date_to: str | None,
         keyword: str | None,
+        category_code: str | None,
+        category_primary_label: str | None,
+        category_sub_label: str | None,
         page: str | None,
         page_size: str | None,
     ) -> Response:
@@ -9950,6 +9956,9 @@ class Application:
                     date_from=date_from,
                     date_to=date_to,
                     keyword=keyword,
+                    category_code=category_code,
+                    category_primary_label=category_primary_label,
+                    category_sub_label=category_sub_label,
                     page=int(page or 1),
                     page_size=int(page_size or 100),
                 )
@@ -9967,6 +9976,9 @@ class Application:
                 date_from=date_from,
                 date_to=date_to,
                 keyword=keyword,
+                category_code=category_code,
+                category_primary_label=category_primary_label,
+                category_sub_label=category_sub_label,
                 page=int(page or 1),
                 page_size=int(page_size or 100),
             )
@@ -10006,6 +10018,9 @@ class Application:
             date_from: str | None,
             date_to: str | None,
             keyword: str | None,
+            category_code: str | None,
+            category_primary_label: str | None,
+            category_sub_label: str | None,
             page: int,
             page_size: int,
         ) -> dict[str, object]:
@@ -10015,6 +10030,9 @@ class Application:
                     date_from=date_from,
                     date_to=date_to,
                     keyword=keyword,
+                    category_code=category_code,
+                    category_primary_label=category_primary_label,
+                    category_sub_label=category_sub_label,
                     page=page,
                     page_size=page_size,
                 )
@@ -10027,6 +10045,9 @@ class Application:
                 date_from=date_from,
                 date_to=date_to,
                 keyword=keyword,
+                category_code=category_code,
+                category_primary_label=category_primary_label,
+                category_sub_label=category_sub_label,
                 page=page,
                 page_size=page_size,
             )
@@ -10040,6 +10061,9 @@ class Application:
         date_from = query.get("date_from", [None])[0]
         date_to = query.get("date_to", [None])[0]
         keyword = query.get("keyword", [None])[0]
+        category_code = query.get("category_code", [None])[0]
+        category_primary_label = query.get("category_primary_label", [None])[0]
+        category_sub_label = query.get("category_sub_label", [None])[0]
         try:
             result = service.export(
                 mode=mode,
@@ -10047,6 +10071,9 @@ class Application:
                 date_from=date_from,
                 date_to=date_to,
                 keyword=keyword,
+                category_code=category_code,
+                category_primary_label=category_primary_label,
+                category_sub_label=category_sub_label,
             )
         except BankDetailReadModelRefreshing as exc:
             return self._json_response(HTTPStatus.ACCEPTED, exc.payload)
@@ -10073,6 +10100,9 @@ class Application:
                     "date_from": date_from,
                     "date_to": date_to,
                     "keyword": keyword,
+                    "category_code": category_code,
+                    "category_primary_label": category_primary_label,
+                    "category_sub_label": category_sub_label,
                 },
                 "row_count": result.row_count,
                 "sheet_names": result.sheet_names,
@@ -10160,6 +10190,9 @@ class Application:
         date_from: str | None,
         date_to: str | None,
         keyword: str | None,
+        category_code: str | None,
+        category_primary_label: str | None,
+        category_sub_label: str | None,
         page: int,
         page_size: int,
     ) -> dict[str, object] | None:
@@ -10200,6 +10233,9 @@ class Application:
                 "date_from": date_from,
                 "date_to": date_to,
                 "keyword": keyword,
+                "category_code": category_code,
+                "category_primary_label": category_primary_label,
+                "category_sub_label": category_sub_label,
                 "page": normalized_page,
                 "page_size": normalized_page_size,
             },
@@ -10225,6 +10261,9 @@ class Application:
             date_from=date_from,
             date_to=date_to,
             keyword=keyword,
+            category_code=category_code,
+            category_primary_label=category_primary_label,
+            category_sub_label=category_sub_label,
             page=normalized_page,
             page_size=normalized_page_size,
         )
@@ -11108,6 +11147,11 @@ class Application:
                 row["category_code"] = category.get("category_code")
                 row["category_label"] = category.get("category_label")
                 row["category_path"] = list(category.get("category_path") or [])
+                row["category_primary_label"] = category.get("category_primary_label") or category.get("effective_category_primary_label")
+                row["category_sub_label"] = category.get("category_sub_label") or category.get("effective_category_sub_label")
+                row["category_label_path"] = list(
+                    category.get("category_label_path") or category.get("effective_category_label_path") or []
+                )
                 row["category_source"] = category.get("category_source") or category.get("source")
         return rows
 
@@ -11127,9 +11171,28 @@ class Application:
             if isinstance(category, dict):
                 row["category_code"] = row.get("category_code") or category.get("category_code")
                 row["category_label"] = row.get("category_label") or category.get("category_label")
+                row["category_primary_label"] = (
+                    row.get("category_primary_label")
+                    or category.get("category_primary_label")
+                    or category.get("effective_category_primary_label")
+                )
+                row["category_sub_label"] = (
+                    row.get("category_sub_label")
+                    or category.get("category_sub_label")
+                    or category.get("effective_category_sub_label")
+                )
+                row["category_label_path"] = list(
+                    row.get("category_label_path")
+                    or category.get("category_label_path")
+                    or category.get("effective_category_label_path")
+                    or []
+                )
                 row["category_source"] = row.get("category_source") or category.get("category_source") or category.get("source")
             row.setdefault("category_code", "")
             row.setdefault("category_label", "")
+            row.setdefault("category_primary_label", "")
+            row.setdefault("category_sub_label", "")
+            row.setdefault("category_label_path", [])
             row.setdefault("category_source", "")
             rows.append(row)
         return rows

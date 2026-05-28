@@ -424,14 +424,51 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(row["trade_time"], "2026-04-03 09:15:30")
         self.assertEqual(row["auto_category_code"], "fee")
         self.assertEqual(row["auto_category_label"], "手续费")
+        self.assertEqual(row["auto_category_primary_label"], "费用")
+        self.assertEqual(row["auto_category_sub_label"], "手续费")
+        self.assertEqual(row["auto_category_label_path"], ["费用", "手续费"])
         self.assertEqual(row["auto_category_source"], "auto")
         self.assertEqual(row["effective_category_code"], "fee")
         self.assertEqual(row["effective_category_label"], "手续费")
+        self.assertEqual(row["effective_category_primary_label"], "费用")
+        self.assertEqual(row["effective_category_sub_label"], "手续费")
+        self.assertEqual(row["effective_category_label_path"], ["费用", "手续费"])
         self.assertEqual(row["effective_category_source"], "auto")
         self.assertEqual(row["category_code"], "fee")
         self.assertEqual(row["category_label"], "手续费")
+        self.assertEqual(row["category_primary_label"], "费用")
+        self.assertEqual(row["category_sub_label"], "手续费")
+        self.assertEqual(row["category_label_path"], ["费用", "手续费"])
         self.assertEqual(row["category_source"], "auto")
         self.assertEqual(payload["category_counts"]["fee"], 1)
+
+    def test_bank_details_api_filters_by_auto_category_primary_and_sub_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            fee_id = self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-03 09:15:30",
+                summary="网银手续费",
+                remark="转账手续费",
+            )
+            self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-02 09:15:30",
+                summary="工资发放",
+                remark="员工工资",
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions"
+                "?category_primary_label=%E8%B4%B9%E7%94%A8"
+                "&category_sub_label=%E6%89%8B%E7%BB%AD%E8%B4%B9",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual([row["id"] for row in payload["rows"]], [fee_id])
+        self.assertEqual(payload["pagination"]["total"], 1)
 
     def test_bank_details_api_passes_keyword_to_server_side_transaction_search(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -506,8 +543,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(sheet["A2"].value, "2026-04-16 11:09:14")
         self.assertEqual(sheet["D2"].value, "云南溯源科技有限公司")
         self.assertEqual(sheet["I2"].value, "手续费")
-        self.assertEqual(sheet["K2"].value, "无发票")
-        self.assertEqual(sheet["O2"].value, transaction_id)
+        self.assertEqual(sheet["J2"].value, "费用")
+        self.assertEqual(sheet["K2"].value, "手续费")
+        self.assertEqual(sheet["M2"].value, "无发票")
+        self.assertEqual(sheet["Q2"].value, transaction_id)
         self.assertEqual(audit_entries[-1]["action"], "bank_detail_export_downloaded")
         self.assertEqual(audit_entries[-1]["entity_type"], "bank_detail_export")
         self.assertEqual(audit_entries[-1]["metadata"]["row_count"], 1)

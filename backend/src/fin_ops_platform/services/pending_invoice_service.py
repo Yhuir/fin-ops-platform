@@ -427,6 +427,9 @@ class PendingInvoiceQueryService:
                 "voucher_no": transaction.voucher_no or "",
                 "effective_tag_code": category_code,
                 "effective_tag_label": category.get("category_label"),
+                "effective_tag_primary_label": category.get("category_primary_label"),
+                "effective_tag_sub_label": category.get("category_sub_label"),
+                "effective_tag_label_path": list(category.get("category_label_path") or []),
             },
             "invoice_acquisition_status": status_payload,
             "input_invoices": input_invoices,
@@ -473,6 +476,9 @@ class PendingInvoiceQueryService:
             "group": group,
             "tag_code": category.get("category_code"),
             "tag_label": category.get("category_label"),
+            "tag_primary_label": category.get("category_primary_label"),
+            "tag_sub_label": category.get("category_sub_label"),
+            "tag_label_path": list(category.get("category_label_path") or []),
         }
 
     @staticmethod

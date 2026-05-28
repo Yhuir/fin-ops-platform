@@ -71,6 +71,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertFalse(payload["system_rule"]["editable"])
         self.assertIn("salary", [rule["code"] for rule in payload["active_rules"]])
         self.assertEqual(payload["active_rules"][0]["priority_label"], "优先级 1")
+        fee = next(rule for rule in payload["active_rules"] if rule["code"] == "fee")
+        self.assertEqual(fee["output_primary_label"], "费用")
+        self.assertEqual(fee["output_sub_label"], "手续费")
         self.assertEqual(payload["field_options"][0]["value"], "counterparty_name")
         self.assertEqual(payload["permissions"], {"can_save": True})
 
@@ -80,7 +83,13 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         salary = next(rule for rule in current["active_rules"] if rule["code"] == "salary")
         fee = next(rule for rule in current["active_rules"] if rule["code"] == "fee")
         active = [
-            {**salary, "label": "人员薪酬", "rules": {**salary["rules"], "contains": ["工资", "薪酬"]}},
+            {
+                **salary,
+                "label": "薪酬发放",
+                "output_primary_label": "费用",
+                "output_sub_label": "工资",
+                "rules": {**salary["rules"], "contains": ["工资", "薪酬"]},
+            },
             {**fee, "rules": fee["rules"]},
             *[rule for rule in current["active_rules"] if rule["code"] not in {"salary", "fee", "bonus"}],
             {
@@ -129,7 +138,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["version"], current["version"] + 1)
         self.assertEqual(payload["active_rules"][0]["code"], "salary")
-        self.assertEqual(payload["active_rules"][0]["label"], "人员薪酬")
+        self.assertEqual(payload["active_rules"][0]["label"], "薪酬发放")
+        self.assertEqual(payload["active_rules"][0]["output_primary_label"], "费用")
+        self.assertEqual(payload["active_rules"][0]["output_sub_label"], "工资")
         self.assertTrue(any(rule["label"] == "银行利息" and rule["code"].startswith("custom_") for rule in payload["active_rules"]))
         self.assertEqual([rule["code"] for rule in payload["archived_rules"]], ["bonus"])
         self.assertEqual(lifecycle_calls[0][0], "bank_auto_tag_rules_changed")
@@ -251,6 +262,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             date_from="2026-01-01",
             date_to="2026-12-31",
             keyword="网银证书服务费",
+            category_code=None,
+            category_primary_label=None,
+            category_sub_label=None,
             page=1,
             page_size=100,
         )
@@ -274,6 +288,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             date_from="2026-01-01",
             date_to="2026-12-31",
             keyword="网银证书服务费",
+            category_code=None,
+            category_primary_label=None,
+            category_sub_label=None,
             page=1,
             page_size=100,
         )
@@ -295,6 +312,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             date_from="2026-01-01",
             date_to="2026-12-31",
             keyword="网银证书服务费",
+            category_code=None,
+            category_primary_label=None,
+            category_sub_label=None,
             page=1,
             page_size=100,
         )
