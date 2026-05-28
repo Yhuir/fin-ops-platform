@@ -1005,6 +1005,8 @@ class Application:
             return response
         if method == "GET" and route_path == "/api/workbench/refresh-status":
             return self._handle_api_workbench_refresh_status(query.get("month", [None])[0])
+        if method == "GET" and route_path == "/api/workbench/events":
+            return self._handle_api_workbench_events(query.get("month", [None])[0])
         if method == "GET" and route_path == "/api/bank-details/auto-tag-rules":
             return self._handle_api_bank_details_auto_tag_rules(headers)
         if method == "PUT" and route_path == "/api/bank-details/auto-tag-rules":
@@ -2186,7 +2188,141 @@ class Application:
                 },
             )
         payload = get_refresh_status(scope_key=scope_key)
-        return self._json_response(HTTPStatus.OK, payload if isinstance(payload, dict) else {"read_model_status": "unavailable"})
+        return self._json_response(HTTPStatus.OK, self._normalize_workbench_refresh_status_payload(
+            payload if isinstance(payload, dict) else {},
+            scope_key=scope_key,
+            fallback_status="unavailable" if not isinstance(payload, dict) else "fresh",
+        ))
+
+    def _handle_api_workbench_events(self, month: str | None) -> Response:
+        current_month = month or "all"
+        scope_key = self._workbench_read_model_scope_key(current_month)
+
+        def event_stream() -> Iterable[str]:
+            while True:
+                status_payload = self._workbench_refresh_status_payload_for_scope(scope_key)
+                event_name = self._workbench_refresh_status_event_name(status_payload)
+                yield self._app_health_service.serialize_sse_event(event_name, status_payload)
+                yield self._app_health_service.serialize_sse_event(
+                    "heartbeat",
+                    {
+                        "scope_key": scope_key,
+                        "generated_at": status_payload.get("generated_at"),
+                        "read_model_status": status_payload.get("read_model_status"),
+                    },
+                )
+                sleep(5)
+
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=event_stream(),
+            stream=True,
+            headers={
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            },
+        )
+
+    def _workbench_refresh_status_payload_for_scope(self, scope_key: str) -> dict[str, object]:
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
+        if not callable(get_refresh_status):
+            return self._normalize_workbench_refresh_status_payload(
+                {},
+                scope_key=scope_key,
+                fallback_status="unavailable",
+            )
+        payload = get_refresh_status(scope_key=scope_key)
+        return self._normalize_workbench_refresh_status_payload(
+            payload if isinstance(payload, dict) else {},
+            scope_key=scope_key,
+            fallback_status="unavailable" if not isinstance(payload, dict) else "fresh",
+        )
+
+    @staticmethod
+    def _normalize_workbench_refresh_status_payload(
+        payload: dict[str, object],
+        *,
+        scope_key: str,
+        fallback_status: str = "fresh",
+    ) -> dict[str, object]:
+        dirty_scopes = payload.get("dirty_scopes") if isinstance(payload.get("dirty_scopes"), list) else []
+        running_scopes = payload.get("running_scopes") if isinstance(payload.get("running_scopes"), list) else []
+        dirty_statuses = {
+            str(scope.get("status") or "").strip().lower()
+            for scope in dirty_scopes
+            if isinstance(scope, dict)
+        }
+        raw_status = str(payload.get("read_model_status") or payload.get("status") or fallback_status).strip().lower()
+        if dirty_statuses.intersection({"failed", "dead_lettered"}):
+            read_model_status = "failed"
+        elif raw_status in {"failed", "error"}:
+            read_model_status = "failed"
+        elif dirty_statuses.intersection({"pending", "processing", "queued", "running"}):
+            read_model_status = "refreshing"
+        elif raw_status in {"refreshing", "rebuilding", "pending", "processing", "queued", "running"}:
+            read_model_status = "refreshing"
+        elif raw_status in {"stale", "dirty"}:
+            read_model_status = "stale"
+        elif raw_status == "unavailable":
+            read_model_status = "unavailable"
+        else:
+            read_model_status = "fresh"
+
+        last_error = payload.get("last_error")
+        if not last_error:
+            last_error = next(
+                (
+                    scope.get("last_error")
+                    for scope in dirty_scopes
+                    if isinstance(scope, dict) and scope.get("last_error")
+                ),
+                None,
+            )
+        read_model_version = (
+            payload.get("read_model_version")
+            or payload.get("source_version")
+            or payload.get("version")
+            or next(
+                (
+                    scope.get("source_version")
+                    for scope in dirty_scopes
+                    if isinstance(scope, dict) and scope.get("source_version") is not None
+                ),
+                None,
+            )
+        )
+        generated_at = payload.get("generated_at") or payload.get("read_model_generated_at")
+        return {
+            **payload,
+            "scope_key": str(payload.get("scope_key") or scope_key or "all"),
+            "read_model_status": read_model_status,
+            "generated_at": generated_at,
+            "read_model_version": read_model_version,
+            "dirty_scopes": dirty_scopes,
+            "running_scopes": running_scopes,
+            "processed_count": payload.get("processed_count") if payload.get("processed_count") is not None else None,
+            "total_count": payload.get("total_count") if payload.get("total_count") is not None else None,
+            "worker_lag_seconds": payload.get("worker_lag_seconds") if payload.get("worker_lag_seconds") is not None else None,
+            "last_error": last_error,
+            "retryable": bool(read_model_status in {"failed", "stale", "unavailable"}),
+        }
+
+    @staticmethod
+    def _workbench_refresh_status_event_name(payload: dict[str, object]) -> str:
+        status = str(payload.get("read_model_status") or "").strip().lower()
+        if status == "fresh":
+            return "workbench.read_model.completed"
+        if status == "failed":
+            return "workbench.read_model.failed"
+        if status in {"refreshing", "stale"}:
+            return "workbench.read_model.progress"
+        return "workbench.read_model.progress"
 
     @staticmethod
     def _is_missing_workbench_groups_read_model_error(error: Exception) -> bool:

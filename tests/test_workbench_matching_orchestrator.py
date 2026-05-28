@@ -279,6 +279,74 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(summary["decision_count"], 1)
         self.assertEqual(summary["candidate_count"], 0)
 
+    def test_decision_store_mode_uses_source_oa_month_for_attachment_invoice_ownership(self) -> None:
+        decision_store = WorkbenchReconciliationDecisionStore()
+
+        self._orchestrator(
+            row_provider=FakeRowProvider(
+                oa_rows={
+                    "2026-01": [
+                        {
+                            "id": "oa-exp-1989",
+                            "type": "oa",
+                            "month": "2026-01",
+                            "amount": "607.00",
+                            "applicant": "何琛",
+                            "apply_type": "日常报销",
+                            "reason": "何琛 石林复烤住宿费",
+                        }
+                    ]
+                },
+                bank_rows={
+                    "2026-03": [
+                        {
+                            "id": "bank-8106",
+                            "type": "bank",
+                            "month": "2026-03",
+                            "debit_amount": "607.00",
+                            "credit_amount": "",
+                            "counterparty_name": "何琛",
+                            "summary": "报销",
+                        }
+                    ]
+                },
+                invoice_rows={
+                    "2026-01": [
+                        {
+                            "id": "oa-att-inv-160",
+                            "type": "invoice",
+                            "source_kind": "oa_attachment_invoice",
+                            "derived_from_oa_id": "oa-exp-1989",
+                            "invoice_type": "进项发票",
+                            "issue_date": "2025-12-31",
+                            "amount": "158.42",
+                            "total_with_tax": "160.00",
+                            "seller_name": "石林盛泰红酒店",
+                        },
+                        {
+                            "id": "oa-att-inv-447",
+                            "type": "invoice",
+                            "source_kind": "oa_attachment_invoice",
+                            "derived_from_oa_id": "oa-exp-1989",
+                            "invoice_type": "进项发票",
+                            "issue_date": "2026-01-23",
+                            "amount": "447.00",
+                            "total_with_tax": "447.00",
+                            "seller_name": "石林复烤交通住宿汇总",
+                        },
+                    ]
+                },
+            ),
+            decision_store=decision_store,
+            rules=StaticRules([]),
+        ).run(changed_scope_months=["2026-03"], reason="unit-test", request_id="req-source-month")
+
+        decisions = decision_store.list_decisions("2026-03")
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["rule_code"], "oa_attachment_invoice_with_bank")
+        self.assertCountEqual(decisions[0]["invoice_row_ids"], ["oa-att-inv-160", "oa-att-inv-447"])
+        self.assertIn("oa-att-inv-160", decisions[0]["row_ids"])
+
     def _orchestrator(
         self,
         *,

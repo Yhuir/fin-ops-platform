@@ -39,6 +39,9 @@ import type {
   WorkbenchGroupsPageResult,
   WorkbenchInitialPageResult,
   WorkbenchReadModelStatus,
+  WorkbenchRefreshScopeStatus,
+  WorkbenchRefreshStatus,
+  WorkbenchRefreshStatusEvent,
   WorkbenchZoneCounts,
   WorkbenchZoneId,
   WorkbenchZonePageInfo,
@@ -224,6 +227,46 @@ type ApiWorkbenchOaSyncStatus = {
   failed_event_count?: number | null;
   failedEventCount?: number | null;
   version?: number | null;
+};
+
+type ApiWorkbenchRefreshScopeStatus = {
+  scope_key?: string | null;
+  scopeKey?: string | null;
+  status?: string | null;
+  updated_at?: string | null;
+  updatedAt?: string | null;
+  last_error?: string | null;
+  lastError?: string | null;
+  source_version?: number | string | null;
+  sourceVersion?: number | string | null;
+};
+
+type ApiWorkbenchRefreshStatus = {
+  scope_key?: string | null;
+  scopeKey?: string | null;
+  read_model_status?: WorkbenchReadModelStatus | null;
+  readModelStatus?: WorkbenchReadModelStatus | null;
+  status?: string | null;
+  generated_at?: string | null;
+  generatedAt?: string | null;
+  read_model_version?: string | number | null;
+  readModelVersion?: string | number | null;
+  source_version?: string | number | null;
+  sourceVersion?: string | number | null;
+  version?: string | number | null;
+  dirty_scopes?: ApiWorkbenchRefreshScopeStatus[] | null;
+  dirtyScopes?: ApiWorkbenchRefreshScopeStatus[] | null;
+  running_scopes?: unknown[] | null;
+  runningScopes?: unknown[] | null;
+  processed_count?: number | string | null;
+  processedCount?: number | string | null;
+  total_count?: number | string | null;
+  totalCount?: number | string | null;
+  worker_lag_seconds?: number | string | null;
+  workerLagSeconds?: number | string | null;
+  last_error?: string | null;
+  lastError?: string | null;
+  retryable?: boolean | null;
 };
 
 type ApiIgnoredWorkbenchPayload = {
@@ -2129,6 +2172,50 @@ function cleanOaSyncScopeList(value: unknown[] | undefined) {
     : [];
 }
 
+function nullableNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function cleanRefreshScopeList(value: unknown[] | null | undefined): WorkbenchRefreshScopeStatus[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is ApiWorkbenchRefreshScopeStatus => Boolean(item) && typeof item === "object")
+    .map((scope) => ({
+      scopeKey: String(scope.scopeKey ?? scope.scope_key ?? "").trim(),
+      status: String(scope.status ?? "").trim(),
+      updatedAt: scope.updatedAt ?? scope.updated_at ?? null,
+      lastError: scope.lastError ?? scope.last_error ?? null,
+      sourceVersion: nullableNumber(scope.sourceVersion ?? scope.source_version),
+    }))
+    .filter((scope) => scope.scopeKey || scope.status);
+}
+
+function mapWorkbenchRefreshStatus(payload: ApiWorkbenchRefreshStatus): WorkbenchRefreshStatus {
+  const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "fresh").trim() || "fresh";
+  return {
+    scopeKey: String(payload.scopeKey ?? payload.scope_key ?? "all").trim() || "all",
+    readModelStatus: rawStatus as WorkbenchReadModelStatus,
+    generatedAt: payload.generatedAt ?? payload.generated_at ?? null,
+    readModelVersion: payload.readModelVersion ?? payload.read_model_version ?? payload.sourceVersion ?? payload.source_version ?? payload.version ?? null,
+    dirtyScopes: cleanRefreshScopeList(payload.dirtyScopes ?? payload.dirty_scopes),
+    runningScopes: cleanOaSyncScopeList((payload.runningScopes ?? payload.running_scopes) as unknown[] | undefined),
+    processedCount: nullableNumber(payload.processedCount ?? payload.processed_count),
+    totalCount: nullableNumber(payload.totalCount ?? payload.total_count),
+    workerLagSeconds: nullableNumber(payload.workerLagSeconds ?? payload.worker_lag_seconds),
+    lastError: payload.lastError ?? payload.last_error ?? null,
+    retryable: payload.retryable === true,
+  };
+}
+
 export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<WorkbenchOaSyncStatus> {
   const payload = await requestJson<ApiWorkbenchOaSyncStatus>("/api/oa-sync/status", { method: "GET", signal });
   const status = String(payload.status ?? "synced").trim() || "synced";
@@ -2151,6 +2238,73 @@ export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<
         : 0,
     version: typeof payload.version === "number" ? payload.version : null,
   };
+}
+
+export async function fetchWorkbenchRefreshStatus(month: string, signal?: AbortSignal): Promise<WorkbenchRefreshStatus> {
+  const params = new URLSearchParams({ month });
+  const payload = await requestJson<ApiWorkbenchRefreshStatus>(`/api/workbench/refresh-status?${params.toString()}`, {
+    method: "GET",
+    signal,
+  });
+  return mapWorkbenchRefreshStatus(payload);
+}
+
+export type WorkbenchRefreshSubscription = {
+  close: () => void;
+};
+
+export function subscribeWorkbenchRefreshEvents(
+  month: string,
+  onEvent: (event: WorkbenchRefreshStatusEvent) => void,
+  onError: (error: unknown) => void,
+): WorkbenchRefreshSubscription | null {
+  if (typeof globalThis.EventSource !== "function") {
+    return null;
+  }
+
+  const params = new URLSearchParams({ month });
+  const eventSource = new EventSource(apiUrl(`/api/workbench/events?${params.toString()}`), {
+    withCredentials: true,
+  });
+  let closed = false;
+
+  const close = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    eventSource.close();
+  };
+
+  const handleStatusEvent = (eventName: string) => (event: MessageEvent) => {
+    try {
+      onEvent({
+        event: eventName,
+        status: mapWorkbenchRefreshStatus(JSON.parse(event.data) as ApiWorkbenchRefreshStatus),
+      });
+    } catch (error) {
+      close();
+      onError(error);
+    }
+  };
+
+  [
+    "workbench.read_model.refresh_started",
+    "workbench.read_model.progress",
+    "workbench.read_model.page_available",
+    "workbench.read_model.summary_updated",
+    "workbench.read_model.completed",
+    "workbench.read_model.failed",
+  ].forEach((eventName) => {
+    eventSource.addEventListener(eventName, handleStatusEvent(eventName));
+  });
+
+  eventSource.onerror = (event) => {
+    close();
+    onError(event);
+  };
+
+  return { close };
 }
 
 function workbenchGroupsUrl(

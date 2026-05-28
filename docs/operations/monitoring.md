@@ -26,6 +26,7 @@
 - `worker_heartbeat_lag_seconds` 持续超过 worker poll interval 与任务超时阈值。
 - `read_model_refresh_duration_ms.p95/p99` 持续升高。
 - `/api/workbench/summary` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
+- `/api/workbench/refresh-status` 长时间返回 `refreshing`、`stale`、`failed` 或 `unavailable`。
 - `/health.api_performance.endpoints[*].duration_ms.p95` 持续超过页面 SLO。
 - `/health.api_performance.endpoints[*].connection_acquire_ms.p95` 持续升高，表示 PostgreSQL 连接池等待、连接建立或数据库连接资源压力。
 - `/health.api_performance.endpoints[*].sql_execute_fetch_ms.p95` 持续升高，表示 SQL 执行/取数本身变慢。
@@ -41,6 +42,7 @@
 - worker 日志应包含 `queue_event_id`、`event_type`、`attempts`、`trace_id` 和 `source_version`。
 - read model API 指标日志使用 `workbench_api_metric`，生产指标系统按 `endpoint` 聚合 p95。
 - read model stale/unavailable 计数日志使用 `workbench_read_model_status_metric`，按 `endpoint`、`scope_key`、`read_model_status` 和 `reason` 聚合。
+- 工作台实时刷新事件由 `/api/workbench/events` 暴露。SSE 连接失败时前端应回退 `/api/workbench/refresh-status`，运维排障需要同时查看代理是否缓冲 `text/event-stream`、worker lag 和 dirty scope 状态。
 - `/health` 输出 `api_performance` 进程内 rolling window 指标，按 `METHOD path` 聚合 `duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_duration_ms` 和 `database_query_count` 的 p50/p95/p99。
 - 不输出 token、密码、完整附件正文或敏感原始文件内容。
 - 高风险动作需要审计日志，不只依赖应用日志。
@@ -150,7 +152,15 @@ limit 20;
 - `/api/workbench/groups?...&detail_level=summary`：列表和分页使用，响应不得包含行级 `detail_fields`、`raw_payload`、OCR 正文或附件全文。
 - `/api/workbench/groups/detail?...&group_id=...`：单个 group 的完整详情，按用户动作懒加载。
 - Redis page cache key 必须包含 `detail_level`，避免 summary 和 full payload 互相污染。
+- Redis page cache key 必须随 read model 版本变化而失效；如果页面显示旧数据，先看 `read_model_version/generated_at` 是否变化，再看 Redis hit/miss 和版本 key。
 - `/api/workbench/groups` 不带 `detail_level` 时保持 `full`，只作为兼容契约，不作为前端首屏路径。
+
+实时加载判读：
+
+- 页面显示“关联台正在刷新”但已有数据可见：正常，说明前端正在使用最近稳定 read model。
+- 页面显示“关联台刷新失败”：查看 `/api/workbench/refresh-status.last_error`、`job.read_model_dirty_scopes.status=failed` 和 worker 日志。
+- 页面显示“关联台读模型不可用”：优先检查 PostgreSQL migration、read repository 初始化和生产配置，不要回落旧全量 snapshot。
+- 用户只能刷新浏览器才看到新数据：检查 `/api/workbench/events` 是否被代理缓冲或断开，以及前端是否回退轮询 `/api/workbench/refresh-status`。
 
 压测和判定顺序：
 

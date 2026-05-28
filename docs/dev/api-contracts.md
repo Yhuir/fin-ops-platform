@@ -138,6 +138,41 @@
 
 工作台 DTO 的详细结构见 `reconciliation-workbench-v2-data-contracts.md`。
 
+### 工作台 read model 刷新状态
+
+`GET /api/workbench/refresh-status?month=all`
+
+该接口是关联工作台页面判断后台加载是否完成的轻量事实源，不返回 group、行、附件正文或 snapshot payload。
+
+响应字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `scope_key` | 当前 read model scope，例如 `all` 或 `2026-05`。 |
+| `read_model_status` | `fresh`、`refreshing`、`stale`、`failed`、`unavailable`。 |
+| `generated_at` | 最近稳定投影生成时间；未知为 `null`。 |
+| `read_model_version` | 可用于前端去重的版本；未知为 `null`。 |
+| `dirty_scopes` | dirty scope 摘要，包含 `scope_key`、`status`、`updated_at`、`last_error`、`source_version`。 |
+| `running_scopes` | 正在执行的 scope 列表；未知或无执行为 `[]`。 |
+| `processed_count` / `total_count` | 后台进度。无法可靠计算时返回 `null`，不得返回伪造的 `0`。 |
+| `worker_lag_seconds` | 最近 worker heartbeat 延迟；未知为 `null`。 |
+| `last_error` | 最近失败摘要；没有失败为 `null`。 |
+| `retryable` | 当前状态是否可通过后台任务重试或重新排队。 |
+
+`GET /api/workbench/events?month=all`
+
+SSE 事件流。支持事件：
+
+- `workbench.read_model.refresh_started`
+- `workbench.read_model.progress`
+- `workbench.read_model.page_available`
+- `workbench.read_model.summary_updated`
+- `workbench.read_model.completed`
+- `workbench.read_model.failed`
+- `heartbeat`
+
+事件 payload 与 `/api/workbench/refresh-status` 使用同一状态结构。前端收到完成或版本变化事件后，只重新读取当前查询上下文的 `summary` 与 `groups` 分页；SSE 不可用时轮询 `/api/workbench/refresh-status`。
+
 ## ETC 业务批次 API
 
 ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-batches*` 作为新增契约层。它取代前端直接拼接 `EtcImportBatch` 和 `EtcBatch` 的展示口径，旧 `/api/etc/batches*` 只作为过渡兼容入口，不应继续扩展。

@@ -40,7 +40,7 @@ GENERIC_COUNTERPARTY_NAMES = {
 }
 GENERIC_SUMMARY_TERMS = {"报销", "转账", "付款", "支付", "费用", "代付", "批量"}
 TEXT_SPLIT_RE = re.compile(r"[\s,，.。;；:：、/\\|()（）\[\]【】{}<>《》\"'“”‘’+-]+")
-WORKBENCH_MATCHING_RULES_VERSION = "2026-05-26-bank-invoice-free-engine-legacy"
+WORKBENCH_MATCHING_RULES_VERSION = "2026-05-28-oa-attachment-source-month-v1"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 NON_INVOICE_OA_ATTACHMENT_SOURCE_KINDS = {
     "oa_attachment_payment_receipt",

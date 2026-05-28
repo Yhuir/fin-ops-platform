@@ -25,6 +25,7 @@ LOGGER = logging.getLogger(__name__)
 MANUAL_CONFIRMED_RELATION_MODE = "manual_confirmed"
 ACTIVE_RELATION_STATUS = "active"
 WORKBENCH_EXCEPTION_RULES_VERSION = "2026-05-exception-preview-apply-candidate-contract"
+OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 
 
 class WorkbenchMonthlyRowProvider(Protocol):
@@ -298,16 +299,20 @@ class WorkbenchMatchingOrchestrator:
             payload = self._row_provider(scope_month)
             if not isinstance(payload, dict):
                 raise ValueError("callable row_provider must return a dict.")
-            return {
+            rows = {
                 "oa_rows": self._normalize_rows("oa", payload.get("oa_rows", [])),
                 "bank_rows": self._normalize_rows("bank", payload.get("bank_rows", [])),
                 "invoice_rows": self._normalize_rows("invoice", payload.get("invoice_rows", [])),
             }
-        return {
+            self._enrich_source_bound_attachment_invoice_months(rows["oa_rows"], rows["invoice_rows"])
+            return rows
+        rows = {
             "oa_rows": self._rows_for_month("oa", scope_month),
             "bank_rows": self._rows_for_month("bank", scope_month),
             "invoice_rows": self._rows_for_month("invoice", scope_month),
         }
+        self._enrich_source_bound_attachment_invoice_months(rows["oa_rows"], rows["invoice_rows"])
+        return rows
 
     def _rows_for_scope_window(self, scope_month: str) -> dict[str, list[dict[str, Any]]]:
         rows = {
@@ -320,11 +325,75 @@ class WorkbenchMatchingOrchestrator:
             rows["oa_rows"].extend(month_rows["oa_rows"])
             rows["bank_rows"].extend(month_rows["bank_rows"])
             rows["invoice_rows"].extend(month_rows["invoice_rows"])
+        self._enrich_source_bound_attachment_invoice_months(rows["oa_rows"], rows["invoice_rows"])
         return {
             "oa_rows": self._dedupe_rows(rows["oa_rows"]),
             "bank_rows": self._dedupe_rows(rows["bank_rows"]),
             "invoice_rows": self._dedupe_rows(rows["invoice_rows"]),
         }
+
+    @classmethod
+    def _enrich_source_bound_attachment_invoice_months(
+        cls,
+        oa_rows: list[dict[str, Any]],
+        invoice_rows: list[dict[str, Any]],
+    ) -> None:
+        oa_month_by_id = {
+            row_id: month
+            for row in oa_rows
+            if (row_id := cls._row_id(row)) and (month := cls._owner_month("oa", row))
+        }
+        if not oa_month_by_id:
+            return
+        for invoice_row in invoice_rows:
+            if str(invoice_row.get("source_kind") or "").strip() != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
+                continue
+            linked_oa_id = cls._linked_oa_id(invoice_row)
+            source_oa_month = oa_month_by_id.get(linked_oa_id)
+            if not source_oa_month:
+                continue
+            invoice_row["source_oa_month"] = source_oa_month
+            invoice_row["month"] = source_oa_month
+
+    @staticmethod
+    def _linked_oa_id(invoice_row: dict[str, Any]) -> str:
+        for field_name in (
+            "derived_from_oa_id",
+            "derived_from_oa_row_id",
+            "source_oa_row_id",
+            "linked_oa_row_id",
+            "parent_oa_row_id",
+            "oa_row_id",
+            "oa_id",
+        ):
+            value = str(invoice_row.get(field_name) or "").strip()
+            if value:
+                return value
+        metadata = invoice_row.get("metadata")
+        if isinstance(metadata, dict):
+            for field_name in ("derived_from_oa_id", "source_oa_row_id", "oa_row_id", "oa_id"):
+                value = str(metadata.get(field_name) or "").strip()
+                if value:
+                    return value
+        return ""
+
+    @staticmethod
+    def _owner_month(row_type: str, row: dict[str, Any]) -> str:
+        fields = {
+            "oa": ("month", "oa_month", "apply_month", "application_date", "apply_date", "pay_receive_time"),
+            "invoice": ("source_oa_month", "month", "invoice_month", "invoice_date", "issue_date"),
+        }.get(row_type, ("month",))
+        for field_name in fields:
+            value = str(row.get(field_name) or "").strip()
+            if len(value) >= 7:
+                return value[:7]
+        detail_fields = row.get("detail_fields")
+        if row_type == "oa" and isinstance(detail_fields, dict):
+            for field_name in ("申请日期", "申请时间", "提交日期", "提交时间"):
+                value = str(detail_fields.get(field_name) or "").strip()
+                if len(value) >= 7:
+                    return value[:7]
+        return ""
 
     @staticmethod
     def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -336,6 +405,10 @@ class WorkbenchMatchingOrchestrator:
             if row_id not in deduped:
                 deduped[row_id] = deepcopy(row)
         return list(deduped.values())
+
+    @staticmethod
+    def _row_id(row: dict[str, Any]) -> str:
+        return str(row.get("id") or row.get("row_id") or "").strip()
 
     @staticmethod
     def _normalize_rows(row_type: str, rows: Any) -> list[dict[str, Any]]:

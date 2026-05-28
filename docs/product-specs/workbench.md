@@ -56,7 +56,18 @@
 - `detail_level=summary` 可以为了 payload 大小按栏裁剪 group 内预览行，但 OA 栏必须完整返回；`source_kind=oa_attachment_invoice` 的 OA 附件发票也必须完整返回，有多少显示多少，不走展开/收起。summary 响应仍必须返回未裁剪的 `row_counts`；当前端发现银行流水或非 OA 附件发票栏位 `row_counts` 大于已返回行数时，必须明确展示“当前显示/总数”，并通过 `/api/workbench/groups/detail` 读取完整 group。
 - `GET /api/workbench/groups/detail?month=all&zone=open|paired&group_id=...` 返回单个 group 完整详情，用于详情抽屉、审计和需要重字段的交互。
 - `GET /api/workbench/refresh-status` 返回 dirty scope、worker heartbeat/lag、failed backlog 和最近错误。
+- `GET /api/workbench/events?month=all` 使用 SSE 推送 read model 刷新状态。事件只携带状态、scope、版本、进度和错误摘要，不携带 group 或行级业务 payload。页面收到 `workbench.read_model.completed` 或版本变化后，重新读取当前 summary 和当前分页窗口。
 - 旧 `GET /api/workbench?month=all` 只作为兼容期接口，不再作为前端首屏依赖。
+
+刷新状态契约：
+
+- `read_model_status` 只允许 `fresh`、`refreshing`、`stale`、`failed`、`unavailable`。
+- `fresh` 表示当前 scope 有稳定可读投影；合法空结果也必须是 `fresh` 和空列表，不能误判为缺失。
+- `refreshing` 表示 dirty scope 正在排队或执行；页面保留最近稳定数据并显示刷新中。
+- `stale` 表示已有投影可读但版本或 schema 已过期；页面保留数据并等待后台刷新。
+- `failed` 表示后台刷新失败，必须暴露 `last_error`，并在健康状态中提示用户或管理员。
+- `unavailable` 表示 repository、migration 或运行时依赖缺失；生产环境不允许静默回落旧 snapshot。
+- `processed_count`、`total_count` 无法可靠计算时返回 `null`，不得用 `0` 伪装未知。
 
 热路径基于结构化 SQL read model：
 

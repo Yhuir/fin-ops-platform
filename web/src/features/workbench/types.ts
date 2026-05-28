@@ -263,7 +263,34 @@ export type WorkbenchSummary = {
   zoneCounts: Record<WorkbenchZoneId, WorkbenchZoneCounts>;
 };
 
-export type WorkbenchReadModelStatus = "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
+export type WorkbenchReadModelStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable" | (string & {});
+
+export type WorkbenchRefreshScopeStatus = {
+  scopeKey: string;
+  status: string;
+  updatedAt: string | null;
+  lastError: string | null;
+  sourceVersion: number | null;
+};
+
+export type WorkbenchRefreshStatus = {
+  scopeKey: string;
+  readModelStatus: WorkbenchReadModelStatus;
+  generatedAt: string | null;
+  readModelVersion: string | number | null;
+  dirtyScopes: WorkbenchRefreshScopeStatus[];
+  runningScopes: string[];
+  processedCount: number | null;
+  totalCount: number | null;
+  workerLagSeconds: number | null;
+  lastError: string | null;
+  retryable: boolean;
+};
+
+export type WorkbenchRefreshStatusEvent = {
+  event: string;
+  status: WorkbenchRefreshStatus;
+};
 
 export type WorkbenchZoneCounts = {
   groups: number;

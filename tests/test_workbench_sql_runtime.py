@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
     PostgresReadModelRepository,
@@ -2397,6 +2398,63 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["dirty_scopes"][0]["scope_key"], "2026-05")
+
+    def test_workbench_refresh_status_api_normalizes_failed_dirty_scope(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_refresh_status": lambda _self, **_kwargs: {
+                    "read_model_status": "stale",
+                    "dirty_scopes": [
+                        {
+                            "scope_key": "2026-05",
+                            "status": "failed",
+                            "last_error": "projection boom",
+                            "source_version": 12,
+                        }
+                    ],
+                    "worker_lag_seconds": 8.0,
+                }
+            },
+        )()
+
+        response = app._handle_api_workbench_refresh_status("all")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "failed")
+        self.assertEqual(payload["last_error"], "projection boom")
+        self.assertEqual(payload["read_model_version"], 12)
+        self.assertTrue(payload["retryable"])
+
+    def test_workbench_events_stream_emits_refresh_status_event(self) -> None:
+        app = object.__new__(Application)
+        app._app_health_service = AppHealthService()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_refresh_status": lambda _self, **_kwargs: {
+                    "scope_key": "all",
+                    "read_model_status": "fresh",
+                    "generated_at": "2026-05-28T10:00:00+08:00",
+                    "dirty_scopes": [],
+                    "worker_lag_seconds": 1.5,
+                }
+            },
+        )()
+
+        response = app._handle_api_workbench_events("all")
+        stream = iter(response.body)
+        first_event = next(stream)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(response.headers["Content-Type"], "text/event-stream; charset=utf-8")
+        self.assertIn("event: workbench.read_model.completed", first_event)
+        self.assertIn('"read_model_status": "fresh"', first_event)
 
     def test_workbench_api_miss_enqueues_refresh_and_returns_refreshing(self) -> None:
         app = object.__new__(Application)

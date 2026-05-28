@@ -1110,6 +1110,12 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   color: #b42318;
 }
 
+.workbench-refresh-status.pending {
+  border-color: #f4d17a;
+  background: #fff8e6;
+  color: #7a4f00;
+}
+
 .stats-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

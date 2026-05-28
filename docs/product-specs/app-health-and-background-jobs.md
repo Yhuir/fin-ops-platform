@@ -26,11 +26,14 @@ App Health 状态栏和后台任务体系用于暴露 OA 同步、工作台 read
 
 - OA 连接和同步状态。
 - 工作台匹配 dirty scopes。
+- 工作台 read model 刷新状态，包括 `fresh`、`refreshing`、`stale`、`failed`、`unavailable`、worker lag、最近错误和可重试性。
 - 成本统计缓存预热。
 - 后台任务失败或需关注项。
 - Mongo/app state 连接状态。
 
 `/api/app-health` 继续作为全局健康状态事实源，供状态栏、侧边栏、多标签页同步和写操作 gating 使用。不要把该接口改造成运维 Dashboard，也不要让 Dashboard 重构影响全局健康判断。
+
+关联工作台页面还可以订阅 `GET /api/workbench/events?month=all`。该 SSE 流只服务页面级刷新体验：它推送 read model 状态和版本变化，前端据此自动重读当前分页窗口；全局阻塞判断仍以 `/api/app-health` 为准。SSE 不可用时，页面回退轮询 `/api/workbench/refresh-status`，并在窗口重新获得焦点时补偿检查一次。
 
 ## AppHealth 运维状态 Dashboard
 
@@ -52,6 +55,7 @@ Dashboard 读取 `GET /api/operations/app-health-dashboard`，仅管理员可访
 ## 验收标准
 
 - 页面不因长任务阻塞。
+- 关联工作台刷新期间保留最近稳定数据，不出现空白页，不要求用户手动刷新。
 - 全局健康状态中的失败任务能被用户识别和重试。
 - AppHealth 运维状态页不出现 retry、acknowledge 或其它写操作。
 - Dashboard 能展示流水、发票、OA 数量和最近同步时间。

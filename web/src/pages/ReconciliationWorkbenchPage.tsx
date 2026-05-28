@@ -24,12 +24,14 @@ import {
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
+  fetchWorkbenchRefreshStatus,
   fetchWorkbenchRowDetail,
   fetchWorkbenchSettings,
   ignoreWorkbenchRow,
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
+  subscribeWorkbenchRefreshEvents,
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
   WORKBENCH_GROUP_PAGE_SIZE,
@@ -63,6 +65,7 @@ import type {
   WorkbenchGroupsPageQuery,
   WorkbenchOaSyncStatus,
   WorkbenchRecord,
+  WorkbenchRefreshStatus,
   WorkbenchRelationPreview,
   WorkbenchSettings,
   WorkbenchZoneCounts,
@@ -181,6 +184,8 @@ const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能�
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
+const WORKBENCH_REFRESH_POLL_INTERVAL_MS = 5_000;
+const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
 
 function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
   return JSON.stringify(query);
@@ -273,6 +278,47 @@ function actionAffectedRowIds(result: {
   return affectedSnakeRowIds;
 }
 
+function workbenchRefreshStatusVersionKey(status: WorkbenchRefreshStatus) {
+  const version = status.readModelVersion ?? status.generatedAt;
+  return version === null || version === undefined ? "" : String(version);
+}
+
+function workbenchRefreshStatusMessage(status: WorkbenchRefreshStatus | null) {
+  if (!status) {
+    return null;
+  }
+  const progress = status.totalCount !== null && status.totalCount > 0 && status.processedCount !== null
+    ? ` ${status.processedCount}/${status.totalCount}`
+    : "";
+  const lag = status.workerLagSeconds !== null ? `，worker 延迟 ${Math.round(status.workerLagSeconds)} 秒` : "";
+  if (status.readModelStatus === "fresh") {
+    return `数据已最新${lag}`;
+  }
+  if (status.readModelStatus === "failed") {
+    return `关联台刷新失败${status.lastError ? `：${status.lastError}` : ""}`;
+  }
+  if (status.readModelStatus === "unavailable") {
+    return "关联台读模型不可用";
+  }
+  if (status.readModelStatus === "stale") {
+    return `关联台数据已过期，正在刷新${progress}${lag}`;
+  }
+  return `关联台正在刷新${progress}${lag}`;
+}
+
+function workbenchRefreshStatusPanelTone(status: WorkbenchRefreshStatus | null) {
+  if (!status) {
+    return "";
+  }
+  if (status.readModelStatus === "failed" || status.readModelStatus === "unavailable") {
+    return " error";
+  }
+  if (status.readModelStatus === "refreshing" || status.readModelStatus === "stale") {
+    return " pending";
+  }
+  return "";
+}
+
 export default function ReconciliationWorkbenchPage() {
   const { currentMonth } = useMonth();
   const { setWorkbenchStatus } = useAppChrome();
@@ -320,6 +366,7 @@ export default function ReconciliationWorkbenchPage() {
     percent: null,
     indeterminate: true,
   });
+  const [workbenchRefreshStatus, setWorkbenchRefreshStatus] = useState<WorkbenchRefreshStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -360,6 +407,8 @@ export default function ReconciliationWorkbenchPage() {
   const setOpenDisplayState = openDisplaySession.setValue;
   const columnLayoutSaveRequestIdRef = useRef(0);
   const oaSyncRefreshTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const workbenchRefreshReloadTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const lastWorkbenchRefreshVersionRef = useRef<string>("");
   const previousOaSyncStatusRef = useRef<WorkbenchOaSyncStatus | null>(null);
   const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
   const deferredOpenDisplayState = useDeferredValue(openDisplayState);
@@ -792,6 +841,37 @@ export default function ReconciliationWorkbenchPage() {
     }
   }
 
+  const scheduleWorkbenchReadModelReload = useCallback(() => {
+    if (workbenchRefreshReloadTimeoutRef.current !== null) {
+      window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
+    }
+    workbenchRefreshReloadTimeoutRef.current = window.setTimeout(() => {
+      workbenchRefreshReloadTimeoutRef.current = null;
+      void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+        background: true,
+        includeAuxiliary: false,
+        zoneQueries: zoneServerPageQueries,
+      });
+    }, WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS);
+  }, [zoneServerPageQueries]);
+
+  const applyWorkbenchRefreshStatus = useCallback((status: WorkbenchRefreshStatus) => {
+    setWorkbenchRefreshStatus(status);
+    const nextVersionKey = workbenchRefreshStatusVersionKey(status);
+    const previousVersionKey = lastWorkbenchRefreshVersionRef.current;
+    if (nextVersionKey) {
+      lastWorkbenchRefreshVersionRef.current = nextVersionKey;
+    }
+    if (
+      status.readModelStatus === "fresh"
+      && nextVersionKey
+      && previousVersionKey
+      && previousVersionKey !== nextVersionKey
+    ) {
+      scheduleWorkbenchReadModelReload();
+    }
+  }, [scheduleWorkbenchReadModelReload]);
+
   const handleLoadMoreZone = useCallback(async (zone: "paired" | "open") => {
     const pageInfo = zonePages[zone];
     if (!workbenchData || !pageInfo.hasMore || loadingMoreZone) {
@@ -893,6 +973,72 @@ export default function ReconciliationWorkbenchPage() {
 
   useEffect(() => {
     let isActive = true;
+    let pollIntervalId: number | null = null;
+    let pollController: AbortController | null = null;
+    let subscription: { close: () => void } | null = null;
+
+    const pollRefreshStatus = () => {
+      pollController?.abort();
+      const controller = new AbortController();
+      pollController = controller;
+      void fetchWorkbenchRefreshStatus(WORKBENCH_VIEW_MONTH, controller.signal)
+        .then((status) => {
+          if (!isActive || controller.signal.aborted) {
+            return;
+          }
+          applyWorkbenchRefreshStatus(status);
+        })
+        .catch(() => undefined);
+    };
+
+    const startPolling = () => {
+      if (pollIntervalId !== null) {
+        return;
+      }
+      pollRefreshStatus();
+      pollIntervalId = window.setInterval(pollRefreshStatus, WORKBENCH_REFRESH_POLL_INTERVAL_MS);
+    };
+
+    subscription = subscribeWorkbenchRefreshEvents(
+      WORKBENCH_VIEW_MONTH,
+      ({ status }) => {
+        if (isActive) {
+          applyWorkbenchRefreshStatus(status);
+        }
+      },
+      () => {
+        subscription?.close();
+        subscription = null;
+        startPolling();
+      },
+    );
+
+    if (!subscription) {
+      startPolling();
+    }
+
+    const handleFocus = () => {
+      pollRefreshStatus();
+    };
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      isActive = false;
+      subscription?.close();
+      if (pollIntervalId !== null) {
+        window.clearInterval(pollIntervalId);
+      }
+      pollController?.abort();
+      if (workbenchRefreshReloadTimeoutRef.current !== null) {
+        window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
+        workbenchRefreshReloadTimeoutRef.current = null;
+      }
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [applyWorkbenchRefreshStatus]);
+
+  useEffect(() => {
+    let isActive = true;
     let pollController: AbortController | null = null;
 
     const pollOaSyncStatus = () => {
@@ -974,6 +1120,20 @@ export default function ReconciliationWorkbenchPage() {
       setWorkbenchStatus({ level: "error", reason: workbenchData.oaStatus.message });
       return;
     }
+    if (workbenchRefreshStatus?.readModelStatus === "failed" || workbenchRefreshStatus?.readModelStatus === "unavailable") {
+      setWorkbenchStatus({
+        level: "error",
+        reason: workbenchRefreshStatusMessage(workbenchRefreshStatus) ?? "关联台刷新失败",
+      });
+      return;
+    }
+    if (workbenchRefreshStatus?.readModelStatus === "refreshing" || workbenchRefreshStatus?.readModelStatus === "stale") {
+      setWorkbenchStatus({
+        level: "pending",
+        reason: workbenchRefreshStatusMessage(workbenchRefreshStatus) ?? "关联台正在刷新",
+      });
+      return;
+    }
     if (oaSyncShellStatus) {
       setWorkbenchStatus(oaSyncShellStatus);
       return;
@@ -1002,6 +1162,7 @@ export default function ReconciliationWorkbenchPage() {
     loadProgress.percent,
     oaSyncShellStatus,
     setWorkbenchStatus,
+    workbenchRefreshStatus,
     workbenchData?.oaStatus?.code,
     workbenchData?.oaStatus?.message,
   ]);
@@ -1759,6 +1920,8 @@ export default function ReconciliationWorkbenchPage() {
   const isOpenVisible = expandedZoneId === null || expandedZoneId === "open";
   const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
   const openZoneItemCount = resolveZoneItemCount(zonePages.open, workbenchData?.summary.zoneCounts.open);
+  const workbenchRefreshPanelMessage = workbenchRefreshStatusMessage(workbenchRefreshStatus);
+  const workbenchRefreshPanelTone = workbenchRefreshStatusPanelTone(workbenchRefreshStatus);
 
   const pairedZoneElement = (
     <WorkbenchZone
@@ -1853,6 +2016,11 @@ export default function ReconciliationWorkbenchPage() {
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
+        ) : null}
+        {!loadError && workbenchRefreshPanelMessage ? (
+          <div className={`state-panel workbench-refresh-status${workbenchRefreshPanelTone}`}>
+            {workbenchRefreshPanelMessage}
+          </div>
         ) : null}
         {!isLoading && !loadError && isEmpty && isOaReady ? (
           <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>
