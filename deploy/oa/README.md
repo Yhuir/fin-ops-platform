@@ -320,6 +320,7 @@ release 会占用服务器磁盘。生产策略不是无限保留，而是默认
 - 前端还会主动附带 `Authorization`
 - `location ^~ /fin-ops/` 必须放在官网/OA 兜底 location 之前；否则刷新 `/fin-ops/cost-statistics`、`/fin-ops/settings` 这类深层路由会被外层站点接走，浏览器拿到的不是 fin-ops 的 `index.html`，页面会空白或显示错误站点。
 - `/fin-ops/assets/` 必须单独 `try_files $uri =404`，不要 fallback 到 `index.html`。Vite 的 hashed asset 可以长期缓存；HTML shell 必须 `no-store`，确保发布后刷新能拿到最新 asset manifest。
+- `/fin-ops/api/` 必须在 `/fin-ops/` React fallback 之前代理到后端 `/api/`。否则旧标签页或相对 API 路径会拿到 `index.html`，前端会显示“会话校验失败”。
 
 ## OA 菜单配置
 
@@ -387,6 +388,8 @@ curl -s https://www.yn-sourcing.com/fin-ops/ | grep '银企核销工作台'
 curl -s https://www.yn-sourcing.com/fin-ops/cost-statistics | grep '银企核销工作台'
 curl -s https://www.yn-sourcing.com/fin-ops/settings | grep '银企核销工作台'
 curl -sI https://www.yn-sourcing.com/fin-ops/assets/not-exist.js | grep '404'
+curl -sI https://www.yn-sourcing.com/fin-ops-api/api/session/me | grep -Ei '401|application/json'
+curl -sI https://www.yn-sourcing.com/fin-ops/api/session/me | grep -Ei '401|application/json'
 ```
 
 如果 `/fin-ops/cost-statistics` 返回公司官网标题或 `js/app.*.js`、`css/app.*.css`，说明该请求没有命中 fin-ops 的 `location ^~ /fin-ops/`，需要调整 nginx location 优先级后 `nginx -t && nginx -s reload`。

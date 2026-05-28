@@ -33,6 +33,15 @@ class DeployOANginxConfigTests(unittest.TestCase):
         self.assertIn("location /fin-ops-api/ {", config)
         self.assertIn("proxy_pass http://fin_ops_api/;", config)
 
+    def test_fin_ops_relative_api_routes_do_not_fall_back_to_index_html(self) -> None:
+        config = NGINX_CONFIG_PATH.read_text(encoding="utf-8")
+
+        relative_api_index = config.index("location ^~ /fin-ops/api/ {")
+        spa_fallback_index = config.index("location ^~ /fin-ops/ {")
+        self.assertLess(relative_api_index, spa_fallback_index)
+        self.assertIn("rewrite ^/fin-ops/api/(.*)$ /api/$1 break;", config)
+        self.assertIn("proxy_pass http://fin_ops_api;", config)
+
 
 if __name__ == "__main__":
     unittest.main()

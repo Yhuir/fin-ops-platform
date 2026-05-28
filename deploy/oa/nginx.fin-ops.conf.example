@@ -30,6 +30,20 @@ server {
         add_header Cache-Control "no-store";
     }
 
+    # Compatibility guard for stale tabs or older bundles that may resolve API
+    # requests relative to the app mount. This must be before the /fin-ops/
+    # React fallback, otherwise API requests receive index.html and the browser
+    # reports a session validation failure instead of a JSON API error.
+    location ^~ /fin-ops/api/ {
+        rewrite ^/fin-ops/api/(.*)$ /api/$1 break;
+        proxy_pass http://fin_ops_api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # React Router history fallback. Every non-asset /fin-ops/* path must serve
     # the fin-ops HTML shell, not the outer corporate/OA site.
     location ^~ /fin-ops/ {

@@ -212,6 +212,7 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
                 f"sudo -n {quoted_deploy_control} status",
                 f'sudo -n {quoted_runtime_worker_ensure} "$RELEASE_DIR/src"',
                 build_frontend_hash_check(config),
+                build_public_api_route_check(config),
             ]
         )
         if config.keep_releases > 0:
@@ -238,6 +239,31 @@ def build_frontend_hash_check(config: DeploymentConfig) -> str:
                 "exit 65; "
                 "fi"
             ),
+        ]
+    )
+
+
+def build_public_api_route_check(config: DeploymentConfig) -> str:
+    quoted_domain = shlex.quote(config.domain)
+    return "\n".join(
+        [
+            f"PUBLIC_DOMAIN={quoted_domain}",
+            "check_finops_session_route() {",
+            "  route=\"$1\"",
+            "  headers=$(curl -skI --max-time 10 \"https://${PUBLIC_DOMAIN}${route}\" || true)",
+            "  status=$(printf '%s\\n' \"$headers\" | awk '/^HTTP\\// { code=$2 } END { print code }')",
+            (
+                "  content_type=$(printf '%s\\n' \"$headers\" | "
+                "awk 'BEGIN{IGNORECASE=1} /^content-type:/ { sub(/^[^:]+:[[:space:]]*/, \"\"); print; exit }')"
+            ),
+            "  if [ \"$status\" != \"401\" ] || ! printf '%s' \"$content_type\" | grep -qi 'application/json'; then",
+            "    printf 'session API route is not proxied as JSON: %s status=%s content-type=%s\\n' \"$route\" \"$status\" \"$content_type\" >&2",
+            "    printf '%s\\n' \"$headers\" >&2",
+            "    exit 66",
+            "  fi",
+            "}",
+            "check_finops_session_route /fin-ops-api/api/session/me",
+            "check_finops_session_route /fin-ops/api/session/me",
         ]
     )
 
