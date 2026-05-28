@@ -51,18 +51,18 @@
 | `priority` / `priority_label` | 可用区优先级；停用区可为空。 |
 | `sort_order` | 同优先级内排序号；可用区返回。 |
 | `direction` | 适用方向：`income`、`expense`、`any`。 |
-| `account_scope` | 适用账户范围：`{"type":"any","values":[]}`、`bank_account`、`account_type` 或 `bank`。 |
+| `account_scope` | 兼容保留的适用账户范围字段：`{"type":"any","values":[]}`、`bank_account`、`account_type` 或 `bank`。普通维护 UI 不编辑账户范围，保存时固定写 `{"type":"any","values":[]}`。 |
 | `rules.match_fields` | 语义字段列表。 |
 | `rules.exact_any` | 精确命中任一字样列表，可为空。旧字段 `exact` 作为兼容别名读取。 |
 | `rules.contains_any` | 包含任一字样列表，可为空。旧字段 `contains` 作为兼容别名读取。 |
 | `rules.contains_all` | 必须同时包含字样列表，可为空。 |
 | `rules.none_of` | 不包含任一字样列表，可为空。旧字段 `excludes` 作为兼容别名读取。 |
-| `rules.regex_any` | 正则命中任一列表，可为空。 |
+| `rules.regex_any` | 兼容保留的正则命中任一列表，可为空。普通维护 UI 不编辑正则，保存时固定写空数组。 |
 | `output_primary_label` / `output_sub_label` | 输出标签；子标签可为空。 |
 | `rule_summary` | 后端生成的人类可读摘要。 |
 | `editable` / `archivable` / `sortable` | 前端交互能力标志。 |
 
-普通 UI 不展示或编辑 `rule_id`、`version`、`stop_on_match`、`review_required`、`route_to`、命中说明和审计字段。这些系统字段由后端持久化、执行和审计使用。命中解释在结果预览或调试场景展示，不作为规则编辑项。
+普通 UI 不展示或编辑 `rule_id`、`version`、`stop_on_match`、`review_required`、`route_to`、命中说明、审计字段、账户范围和正则条件。这些系统字段由后端持久化、执行和审计使用。命中解释在结果预览或调试场景展示，不作为规则编辑项。
 
 `field_options` 固定暴露语义字段，不暴露银行原始字段名：`counterparty_name`、`counterparty_account`、`counterparty_bank`、`purpose_text`、`summary_text`、`note_text`、`detail_text`、`all_text`。后端导入和自动分类服务负责把工行、建行、民生、平安等不同银行原始字段映射到这些语义字段。
 
@@ -112,7 +112,8 @@
 - 请求提交完整的可用区和停用区文本规则列表。`internal_transfer` 不在请求体中提交。
 - 已存在标签必须携带原 `code`；新建标签不得提交 `code`，由后端生成稳定 `custom_...` code。
 - 可用标签 `label` 去首尾空格后不能为空，同一状态区内不可重复。
-- 可用标签必须至少填写 `exact_any`、`contains_any`、`contains_all` 或 `regex_any` 中的一类；`none_of` 可单独为空或配合正向条件使用。
+- 普通维护 UI 保存时，所有规则固定提交 `account_scope={"type":"any","values":[]}` 和 `rules.regex_any=[]`。后端继续兼容读取旧数据中的账户范围和正则字段，但普通维护 UI 不生成这些高级条件。
+- 可用标签必须至少填写 `exact_any`、`contains_any` 或 `contains_all` 中的一类；`none_of` 只能为空或配合正向条件使用，不能单独构成命中。
 - `match_fields` 只能使用 `field_options` 中的语义字段，且不能为空。
 - 停用已被待找发票规则引用的标签返回 `400 bank_transaction_tag_in_use_by_pending_invoice_filter`，响应 `details.references` 给出引用位置。
 - 成功后返回与 GET 相同结构，并写审计动作 `bank_auto_tag_rules_updated`。

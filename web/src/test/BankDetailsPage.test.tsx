@@ -61,6 +61,19 @@ function exactTextContent(text: string) {
   );
 }
 
+async function editRuleLabelInDrawer(user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement, currentLabel: string, primary: string, sub: string) {
+  await user.click(await within(drawer).findByRole("button", { name: `编辑标签 ${currentLabel}` }));
+  const primaryInput = within(drawer).getByLabelText("主标签名称", { selector: "input" });
+  const subInput = within(drawer).getByLabelText("子标签名称", { selector: "input" });
+  await user.clear(primaryInput);
+  await user.type(primaryInput, primary);
+  await user.clear(subInput);
+  if (sub) {
+    await user.type(subInput, sub);
+  }
+  await user.keyboard("{Enter}");
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -275,13 +288,7 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await user.click(await within(drawer).findByRole("button", { name: "展开 费用 / 工资" }));
-    await waitFor(() => {
-      expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
-    });
-    const subLabelInputs = within(drawer).getAllByLabelText("子标签名称", { selector: "input" });
-    await user.clear(subLabelInputs[1]);
-    await user.type(subLabelInputs[1], "人员薪酬");
+    await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "人员薪酬");
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
@@ -319,13 +326,7 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await user.click(await within(drawer).findByRole("button", { name: "展开 费用 / 工资" }));
-    await waitFor(() => {
-      expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
-    });
-    const subLabelInputs = within(drawer).getAllByLabelText("子标签名称", { selector: "input" });
-    await user.clear(subLabelInputs[1]);
-    await user.type(subLabelInputs[1], "人员薪酬");
+    await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "人员薪酬");
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
@@ -352,13 +353,7 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await user.click(await within(drawer).findByRole("button", { name: "展开 费用 / 工资" }));
-    await waitFor(() => {
-      expect(within(drawer).getAllByDisplayValue("工资").length).toBeGreaterThan(0);
-    });
-    const subLabelInputs = within(drawer).getAllByLabelText("子标签名称", { selector: "input" });
-    await user.clear(subLabelInputs[1]);
-    await user.type(subLabelInputs[1], "人员薪酬");
+    await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "人员薪酬");
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {

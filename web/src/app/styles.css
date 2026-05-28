@@ -6804,7 +6804,7 @@ body.column-layout-dragging {
 .bank-auto-tag-drawer {
   height: 100%;
   min-width: 0;
-  background: #f7f8fa;
+  background: #f3f6fb;
   color: var(--bank-text);
 }
 
@@ -6818,7 +6818,7 @@ body.column-layout-dragging {
   flex: 0 0 auto;
   padding: 12px 20px;
   border-bottom: 1px solid var(--bank-border-subtle);
-  background: #f7f8fa;
+  background: #f8fafc;
 }
 
 .bank-auto-tag-rule-list {
@@ -6826,13 +6826,13 @@ body.column-layout-dragging {
   min-height: 0;
   overflow: auto;
   padding: 18px 20px 22px;
-  background: #f7f8fa;
+  background: #f3f6fb;
 }
 
 .bank-auto-tag-system-card,
 .bank-auto-tag-rule-card {
   border: 1px solid var(--bank-border-subtle);
-  border-radius: 10px;
+  border-radius: 8px;
   background: #ffffff;
   box-shadow: none;
 }
@@ -6844,7 +6844,13 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-rule-card {
+  position: relative;
   overflow: visible;
+}
+
+.bank-auto-tag-rule-card.expanded {
+  border-color: #8bb7f0;
+  box-shadow: inset 3px 0 0 #2f6fed;
 }
 
 .bank-auto-tag-rule-header {
@@ -6857,7 +6863,8 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-rule-card.expanded .bank-auto-tag-rule-header {
-  border-bottom: 1px solid var(--bank-border-subtle);
+  border-bottom: 1px solid #c9ddf7;
+  background: #f4f8ff;
 }
 
 .bank-auto-tag-rule-header:focus-visible {
@@ -6872,13 +6879,56 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-rule-title-row {
+  flex-wrap: wrap;
+  gap: 8px;
   min-width: 0;
 }
 
-.bank-auto-tag-rule-title-row .MuiTypography-root {
+.bank-auto-tag-title-button {
+  min-width: 0;
+  max-width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-align: left;
+}
+
+.bank-auto-tag-title-button:disabled {
+  cursor: default;
+}
+
+.bank-auto-tag-title-button:focus-visible {
+  outline: 2px solid var(--bank-blue);
+  outline-offset: 2px;
+}
+
+.bank-auto-tag-title-button .MuiTypography-root,
+.bank-auto-tag-title-editor .MuiInputBase-input {
   min-width: 0;
   overflow-wrap: anywhere;
   line-height: 1.22;
+}
+
+.bank-auto-tag-title-editor {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) minmax(120px, 220px);
+  gap: 8px;
+  min-width: min(100%, 300px);
+}
+
+.bank-auto-tag-direction-toggle {
+  flex: 0 0 auto;
+}
+
+.bank-auto-tag-direction-toggle .MuiToggleButton-root {
+  min-width: 42px;
+  height: 28px;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .bank-auto-tag-rule-summary {
@@ -6928,12 +6978,12 @@ body.column-layout-dragging {
   display: grid;
   gap: 14px;
   padding: 14px 16px 16px;
-  background: #ffffff;
+  background: #f8fbff;
 }
 
 .bank-auto-tag-rule-editor-body {
   display: grid;
-  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 360px) minmax(0, 1fr);
   gap: 12px;
   align-items: start;
   min-width: 0;
@@ -6947,7 +6997,7 @@ body.column-layout-dragging {
 
 .bank-auto-tag-condition-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   min-width: 0;
 }
@@ -6955,6 +7005,25 @@ body.column-layout-dragging {
 .bank-auto-tag-rule-editor .MuiTextField-root,
 .bank-auto-tag-rule-editor .MuiFormControl-root {
   background: #ffffff;
+}
+
+.bank-auto-tag-condition-field .MuiInputBase-root {
+  min-height: 116px;
+  align-items: flex-start;
+}
+
+.bank-auto-tag-condition-field .MuiInputBase-inputMultiline {
+  min-height: 78px;
+}
+
+.bank-auto-tag-condition-field:nth-child(1) .MuiOutlinedInput-notchedOutline,
+.bank-auto-tag-condition-field:nth-child(2) .MuiOutlinedInput-notchedOutline,
+.bank-auto-tag-condition-field:nth-child(3) .MuiOutlinedInput-notchedOutline {
+  border-color: #bfd3ee;
+}
+
+.bank-auto-tag-condition-field:nth-child(4) .MuiOutlinedInput-notchedOutline {
+  border-color: #e8c9a8;
 }
 
 @media (max-width: 900px) {
@@ -6965,6 +7034,22 @@ body.column-layout-dragging {
 
   .bank-auto-tag-rule-actions {
     justify-self: end;
+  }
+}
+
+@media (max-width: 1200px) {
+  .bank-auto-tag-condition-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .bank-auto-tag-condition-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bank-auto-tag-title-editor {
+    grid-template-columns: 1fr;
   }
 }
 

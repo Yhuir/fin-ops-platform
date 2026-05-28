@@ -10,6 +10,7 @@ rust/**/target/
 .runtime/
 .worktrees/
 .codegraph/
+.understand-anything/
 .impeccable.md
 .superpowers/
 *.tsbuildinfo
