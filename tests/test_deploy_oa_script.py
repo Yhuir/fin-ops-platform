@@ -78,15 +78,57 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control activate main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
         self.assertIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
+        self.assertIn("wait_finops_backend_ready", remote_script)
         self.assertIn("check_finops_session_route /fin-ops-api/api/session/me", remote_script)
         self.assertIn("check_finops_session_route /fin-ops/api/session/me", remote_script)
         self.assertIn("session API route is not proxied as JSON", remote_script)
+        self.assertLess(
+            remote_script.index("wait_finops_backend_ready"),
+            remote_script.index("check_finops_session_route /fin-ops-api/api/session/me"),
+        )
         self.assertNotIn("sudo -n /bin/bash", remote_script)
         self.assertIn("KEEP_RELEASES=8", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control cleanup-releases --keep 8", remote_script)
         self.assertNotIn("/opt/fin-ops/current/backend", remote_script)
         self.assertNotIn("systemctl restart fin-ops.service", remote_script)
         self.assertNotIn("pip install -r", remote_script)
+
+    def test_release_remote_script_waits_for_backend_before_public_route_smoke(self) -> None:
+        config = self.module.DeploymentConfig(
+            mode="release",
+            host="finops-prod",
+            user="finops-deploy",
+            domain="www.yn-sourcing.com",
+            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
+            frontend_base_path="/fin-ops/",
+            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
+            remote_backend_dir="/opt/fin-ops/current/backend",
+            remote_data_dir="/opt/fin-ops/data",
+            remote_service_name="fin-ops.service",
+            remote_extract_root="/tmp/fin-ops-release",
+            remote_releases_dir="/opt/fin-ops/releases",
+            release_name="main-abcdef1-20260524170000",
+            deploy_control_path="/usr/local/sbin/finops-deploy-control",
+            keep_releases=8,
+            skip_build=False,
+            skip_pip=False,
+            reload_nginx=False,
+            activate=True,
+            allow_dirty=False,
+            replace_release=False,
+            dry_run=False,
+        )
+
+        remote_script = self.module.build_release_remote_deploy_script(config)
+
+        self.assertIn("curl -fsS --max-time 5 http://127.0.0.1:18001/health", remote_script)
+        self.assertIn("backend did not become ready after release activation", remote_script)
+        self.assertIn("route_deadline=$((SECONDS + 60))", remote_script)
+        self.assertIn("return 0", remote_script)
+        self.assertLess(
+            remote_script.index("wait_finops_backend_ready"),
+            remote_script.index("check_finops_session_route /fin-ops-api/api/session/me"),
+        )
 
     def test_release_remote_script_can_upload_without_activation(self) -> None:
         config = self.module.DeploymentConfig(
