@@ -276,6 +276,7 @@ export type WorkbenchRefreshScopeStatus = {
 export type WorkbenchRefreshStatus = {
   scopeKey: string;
   readModelStatus: WorkbenchReadModelStatus;
+  consistencyStatus: string | null;
   generatedAt: string | null;
   activeGenerationId: string | null;
   readModelVersion: string | number | null;

@@ -27,6 +27,7 @@
 - `read_model_refresh_duration_ms.p95/p99` 持续升高。
 - `/api/workbench/summary` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
 - `/api/workbench/refresh-status` 长时间返回 `refreshing`、`stale`、`failed` 或 `unavailable`。
+- `/api/workbench/refresh-status.consistency_status=failed`，或 `read_model.workbench_generation_consistency` 中存在 active inconsistent generation。该状态表示 read model 发布契约被阻断，不能靠浏览器刷新恢复。
 - `/health.api_performance.endpoints[*].duration_ms.p95` 持续超过页面 SLO。
 - `/health.api_performance.endpoints[*].connection_acquire_ms.p95` 持续升高，表示 PostgreSQL 连接池等待、连接建立或数据库连接资源压力。
 - `/health.api_performance.endpoints[*].sql_execute_fetch_ms.p95` 持续升高，表示 SQL 执行/取数本身变慢。
@@ -42,6 +43,7 @@
 - worker 日志应包含 `queue_event_id`、`event_type`、`attempts`、`trace_id` 和 `source_version`。
 - read model API 指标日志使用 `workbench_api_metric`，生产指标系统按 `endpoint` 聚合 p95。
 - read model stale/unavailable 计数日志使用 `workbench_read_model_status_metric`，按 `endpoint`、`scope_key`、`read_model_status` 和 `reason` 聚合。
+- workbench generation consistency failure 会把 `/api/app-health.workbench_read_model.status` 提升为 `error`，并在 `last_error` 中保留 `generation_metadata_actual_mismatch` 或 all-scope parent inconsistency 原因。
 - 工作台实时刷新事件由 `/api/workbench/events` 暴露。SSE 连接失败时前端应回退 `/api/workbench/refresh-status`，运维排障需要同时查看代理是否缓冲 `text/event-stream`、worker lag 和 dirty scope 状态。
 - `/health` 输出 `api_performance` 进程内 rolling window 指标，按 `METHOD path` 聚合 `duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_duration_ms` 和 `database_query_count` 的 p50/p95/p99。
 - 不输出 token、密码、完整附件正文或敏感原始文件内容。
@@ -58,6 +60,7 @@
 - `read_model_refresh_duration_ms`：read model refresh p50/p95/p99。
 - `read_model_refresh_failure_rate`：read model refresh failed/dead-lettered 比例。
 - `stale_dirty_scope_count` 和 `stale_dirty_scopes`：超时 dirty scope 摘要。
+- `read_model.workbench_generation_consistency`：active workbench generation 的 metadata 与实际 rows/groups 一致性。`inconsistent` 必须按 read model unavailable 处理。
 - `redis_hit_count` / `redis_miss_count`：进程内 Redis helper 计数。
 
 RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 只能补充投递层健康度，不能代替 outbox/dirty scope 的事实状态。RabbitMQ 相关指标包括：

@@ -62,6 +62,59 @@ set +a
 
 `/api/workbench/groups` 可使用 Redis 短 TTL page cache，key 包含 read model schema version、source version、分页、筛选、搜索、排序和 `detail_level` 参数。Redis miss 回 PostgreSQL；Redis 清空不能改变业务结果。工作台 schema 变更时必须提升 schema version，让旧 Redis page cache 与旧 SQL projection payload 自然失效。
 
+## Workbench Generation 一致性契约
+
+工作台 read model 采用 generation 原子发布。生产运行时必须满足：
+
+- `read_model.workbench_generations` 中同一个 `scope_key` 只能有一个 `status='active'` 的 generation。
+- active generation 的 `group_count` 必须等于 `read_model.workbench_groups` 中同 generation 的实际 group 数。
+- active generation 如果 `row_count > 0`，则同 generation 的 `read_model.workbench_group_rows` 必须存在实际非 summary 行。
+- `save_workbench_read_models()` 不允许因为 `changed_scope_keys` 中某个 scope 不在 snapshot 里，就按 `scope_key` 删除 `workbench_rows`、`workbench_groups`、`workbench_group_rows`、`workbench_summary` 或 `workbench_snapshots`。
+- `all` scope 只能从一致的 active month shards 聚合；任何 month shard metadata 与实际 rows/groups 不一致时，新 `all` generation 必须标记 failed，保留旧 active all generation。
+- Redis page cache key 必须包含 active `generation_id`；Redis 不能作为 read model 正确性的事实源。
+
+迁移 `0036_workbench_generation_consistency.sql` 提供 `read_model.workbench_generation_consistency` view。排障时优先执行：
+
+```sql
+select *
+from read_model.workbench_generation_consistency
+where status = 'active'
+  and consistency_status = 'inconsistent'
+order by scope_key;
+```
+
+只要该查询有结果，页面和 app health 必须显示 failed/error，不能显示“数据已最新”。
+
+## Workbench Rehydrate 命令
+
+当生产 active generation 出现一致性失败，正式恢复动作是重新从 PostgreSQL facts 构建所有 month shards，然后由一致性校验通过后发布 `all`。不要手工 delete/update read model 表。
+
+```bash
+set -a
+source .runtime/fin_ops_platform/local-postgres.env
+set +a
+
+/opt/miniconda3/bin/python3 scripts/rehydrate-workbench-read-models.py --json
+```
+
+仅重建指定月份：
+
+```bash
+/opt/miniconda3/bin/python3 scripts/rehydrate-workbench-read-models.py \
+  --scope 2026-01 \
+  --scope 2026-02 \
+  --statement-timeout-seconds 300 \
+  --json
+```
+
+脚本行为：
+
+- 调用 SQL projection builder 重建每个 month shard。
+- 默认把本进程 PostgreSQL `statement_timeout` 提升到 300 秒；生产大 scope 可显式调高，但必须保持有界超时。
+- 每个 month shard 发布后读取 `/refresh-status` 同口径的 consistency 状态；失败立即退出。
+- 最后调用 all-scope aggregate-only 发布；如果任一 parent shard 不一致，`all` 标记 failed 并保留旧 active。
+- 输出每个 scope 的 `active_generation_id`、`read_model_status`、`consistency_status` 和错误原因。
+
 长期 worker 建议拆分为：
 
 - `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`

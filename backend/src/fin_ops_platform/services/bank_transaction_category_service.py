@@ -922,7 +922,13 @@ class BankTransactionCategoryService:
         if status == "archived" and is_new:
             field_errors.append({"path": f"{path_prefix}.code", "message": "停用规则必须包含已有标签 code。"})
 
+        raw_label = str(item.get("label") or "").strip()
+        previous_label = ""
+        if not is_new:
+            previous_label = str(previous_definitions_by_code.get(code, {}).get("label") or "").strip()
         output_primary_label = str(item.get("output_primary_label") or "").strip()
+        if raw_label and raw_label != previous_label and not str(item.get("output_sub_label") or "").strip():
+            output_primary_label = raw_label
         output_sub_label = str(item.get("output_sub_label") or "").strip()
         if not output_primary_label:
             field_errors.append({"path": f"{path_prefix}.output_primary_label", "message": "主标签名称不能为空。"})

@@ -48,6 +48,8 @@ EXPECTED_MIGRATIONS = [
     "0033_bank_detail_primary_sub_labels.sql",
     "0034_workbench_generation_convergence.sql",
     "0035_workbench_generation_runtime_grants.sql",
+    "0036_workbench_generation_consistency.sql",
+    "0037_workbench_generation_stats_retention.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -107,6 +109,7 @@ EXPECTED_TABLES = [
     "read_model.workbench_groups",
     "read_model.workbench_group_rows",
     "read_model.workbench_generations",
+    "read_model.workbench_generation_stats",
     "read_model.workbench_summary",
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
@@ -142,7 +145,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 36)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 38)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -364,6 +367,12 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_migrator",
             "create table if not exists read_model.workbench_generations",
             "workbench_generations_status_check",
+            "workbench_generations_consistency_status_check",
+            "create or replace view read_model.workbench_generation_consistency",
+            "create table if not exists read_model.workbench_generation_stats",
+            "workbench_generation_stats_scope_zone_status_uidx",
+            "workbench_generations_build_batch_idx",
+            "workbench_generations_consistency_status_idx",
             "add column if not exists generation_id text",
             "workbench_generations_active_scope_uidx",
             "workbench_snapshots_generation_scope_uidx",
