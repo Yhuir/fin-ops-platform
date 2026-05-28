@@ -192,9 +192,11 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 
 RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、发票使用/收款、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。完整步骤见 `docs/operations/runtime-read-model-hardening.md`。
 
-最小生产正确性不依赖 RabbitMQ。标准 release 发布会自动运行
-`deploy/oa/bin/finops-ensure-runtime-workers.sh`，安装/更新 worker systemd 模板，补齐缺失的
-worker env，并启用、重启以下 PostgreSQL polling worker：
+最小生产正确性不依赖 RabbitMQ。标准 release 发布会通过服务器 root-owned helper
+`/usr/local/sbin/finops-ensure-runtime-workers`，安装/更新 worker systemd 模板，补齐缺失的
+worker env，并启用、重启以下 PostgreSQL polling worker。仓库内的
+`deploy/oa/bin/finops-ensure-runtime-workers.sh` 是该 helper 的源文件，不能由 `finops-deploy`
+从 release 目录直接 `sudo /bin/bash` 执行：
 
 ```bash
 sudo systemctl enable --now fin-ops-worker@oa-sync.service
@@ -231,7 +233,7 @@ PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control activate <release-name>`
 - 激活 API、RabbitMQ worker 和 dispatcher 指向该 release
-- 自动执行 `deploy/oa/bin/finops-ensure-runtime-workers.sh`，确保常驻 worker 矩阵
+- 自动执行 `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src`，确保常驻 worker 矩阵
   已安装、开机自启并重启到当前 release
 - 验证前端 `index.html` 与激活 release 的 `web/dist/index.html` 哈希一致
 - 清理可删除的旧 release，默认保留最近 8 个，并始终保护当前 active release
@@ -253,6 +255,18 @@ PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。
 - 也不会自动改 OA 数据库菜单；菜单和角色仍按本文后面的 SQL/菜单配置执行
 - `git push main` 只更新远端仓库，不会自动改变服务器；服务器生效必须执行发布脚本并激活 release
 - 默认拒绝从 dirty worktree 发布；确需发布未提交代码时必须显式加 `--allow-dirty`，但生产发布不建议这样做
+
+历史服务器首次接入 worker 自动化时，需要 root 一次性安装固定 helper 并授权 deploy 用户只允许传入 release `src` 目录：
+
+```bash
+sudo install -m 0755 -o root -g root \
+  deploy/oa/bin/finops-ensure-runtime-workers.sh \
+  /usr/local/sbin/finops-ensure-runtime-workers
+printf '%s\n' \
+  'finops-deploy ALL=(root) NOPASSWD: /usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/*/src' |
+  sudo tee /etc/sudoers.d/finops-runtime-workers >/dev/null
+sudo visudo -cf /etc/sudoers.d/finops-runtime-workers
+```
 - `--reload-nginx` 只对旧 `legacy-current` 模式有意义；默认 release 模式不修改 nginx 配置，静态文件变更不需要 reload nginx
 - 旧覆盖式部署仍保留为显式模式：
 

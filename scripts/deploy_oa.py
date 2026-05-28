@@ -42,6 +42,7 @@ class DeploymentConfig:
     allow_dirty: bool
     replace_release: bool
     dry_run: bool
+    runtime_worker_ensure_path: str = "/usr/local/sbin/finops-ensure-runtime-workers"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--deploy-control-path",
         default="/usr/local/sbin/finops-deploy-control",
         help="Root-owned server helper used to validate and activate releases.",
+    )
+    parser.add_argument(
+        "--runtime-worker-ensure-path",
+        default="/usr/local/sbin/finops-ensure-runtime-workers",
+        help="Root-owned server helper used to install, enable and restart runtime worker units.",
     )
     parser.add_argument(
         "--keep-releases",
@@ -112,6 +118,7 @@ def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfi
         remote_releases_dir=args.remote_releases_dir.rstrip("/") or "/opt/fin-ops/releases",
         release_name=release_name,
         deploy_control_path=args.deploy_control_path,
+        runtime_worker_ensure_path=args.runtime_worker_ensure_path,
         keep_releases=int(args.keep_releases),
         skip_build=bool(args.skip_build),
         skip_pip=bool(args.skip_pip),
@@ -174,6 +181,7 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
     quoted_release_dir = shlex.quote(release_dir)
     quoted_releases_dir = shlex.quote(config.remote_releases_dir)
     quoted_deploy_control = shlex.quote(config.deploy_control_path)
+    quoted_runtime_worker_ensure = shlex.quote(config.runtime_worker_ensure_path)
     commands = [
         "set -euo pipefail",
         f"RELEASE_NAME={quoted_release_name}",
@@ -202,7 +210,7 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
             [
                 f"sudo -n {quoted_deploy_control} activate {quoted_release_name}",
                 f"sudo -n {quoted_deploy_control} status",
-                'sudo -n /bin/bash "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" "$RELEASE_DIR/src"',
+                f'sudo -n {quoted_runtime_worker_ensure} "$RELEASE_DIR/src"',
                 build_frontend_hash_check(config),
             ]
         )

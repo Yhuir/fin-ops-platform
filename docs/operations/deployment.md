@@ -38,10 +38,11 @@
 ```bash
 sudo -n /usr/local/sbin/finops-deploy-control check-release <release-name>
 sudo -n /usr/local/sbin/finops-deploy-control activate <release-name>
+sudo -n /usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src
 ```
 
 `activate` 负责让 API、RabbitMQ worker 和 dispatcher 指向该 release 并重启 active services。发布脚本随后会执行
-`deploy/oa/bin/finops-ensure-runtime-workers.sh`，幂等安装 runtime worker systemd 模板、补齐缺失的 worker env、并
+服务器上 root-owned 的 `/usr/local/sbin/finops-ensure-runtime-workers`，幂等安装 runtime worker systemd 模板、补齐缺失的 worker env、并
 `enable/restart` 最小生产正确性必须长期运行的 worker 矩阵。最后脚本会检查 live 前端 `index.html` 与 release 内
 `web/dist/index.html` 的哈希一致，避免后端和前端版本漂移。
 
@@ -102,10 +103,23 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 最小生产正确性不需要 RabbitMQ，也不应依赖人工长期手动启动。标准 release 发布会自动运行：
 
 ```bash
-sudo -n /bin/bash "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" "$RELEASE_DIR/src"
+sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"
 ```
 
-该脚本只在目标 env 文件缺失时从模板创建，不覆盖已有 secret 或 worker 配置；它会安装/更新
+`/usr/local/sbin/finops-ensure-runtime-workers` 必须是服务器 root-owned 固定 helper，不能从 release 目录直接
+`sudo /bin/bash` 执行上传脚本。仓库内的 `deploy/oa/bin/finops-ensure-runtime-workers.sh` 是 helper 源文件，历史服务器首次接入时应由 root 安装：
+
+```bash
+sudo install -m 0755 -o root -g root \
+  deploy/oa/bin/finops-ensure-runtime-workers.sh \
+  /usr/local/sbin/finops-ensure-runtime-workers
+printf '%s\n' \
+  'finops-deploy ALL=(root) NOPASSWD: /usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/*/src' |
+  sudo tee /etc/sudoers.d/finops-runtime-workers >/dev/null
+sudo visudo -cf /etc/sudoers.d/finops-runtime-workers
+```
+
+该 helper 只在目标 env 文件缺失时从模板创建，不覆盖已有 secret 或 worker 配置；它会安装/更新
 `fin-ops-worker@.service`，并启用、重启：
 
 ```bash
@@ -122,7 +136,10 @@ fin-ops-worker@import.service
 如果需要手动修复一台历史服务器，可以执行等价命令：
 
 ```bash
-sudo /bin/bash deploy/oa/bin/finops-ensure-runtime-workers.sh "$(pwd)"
+sudo install -m 0755 -o root -g root \
+  deploy/oa/bin/finops-ensure-runtime-workers.sh \
+  /usr/local/sbin/finops-ensure-runtime-workers
+sudo /usr/local/sbin/finops-ensure-runtime-workers "$(pwd)"
 ```
 
 `--check` 应在发布前对每类 worker 跑一次，确认 handler、PostgreSQL 和 Redis 状态：

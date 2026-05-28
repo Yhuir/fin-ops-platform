@@ -84,11 +84,15 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 - `worker-workbench-matching`：`--enable-workbench-matching --worker-kind workbench-matching`
 - `worker-file-migration`：可选迁移 worker，只有 legacy GridFS 与对象存储 secret 已配置时才启用
 
-最小生产正确性先用 PostgreSQL polling worker，不需要 RabbitMQ。标准 release 发布会自动运行
-`deploy/oa/bin/finops-ensure-runtime-workers.sh`，确保常驻 worker 矩阵安装、开机自启并重启到当前 release。历史服务器手动修复时可执行同等步骤：
+最小生产正确性先用 PostgreSQL polling worker，不需要 RabbitMQ。标准 release 发布会自动运行服务器
+root-owned helper `/usr/local/sbin/finops-ensure-runtime-workers`，确保常驻 worker 矩阵安装、开机自启并重启到当前 release。
+仓库内的 `deploy/oa/bin/finops-ensure-runtime-workers.sh` 是 helper 源文件，历史服务器手动修复时先由 root 安装到固定路径再执行：
 
 ```bash
-sudo /bin/bash deploy/oa/bin/finops-ensure-runtime-workers.sh "$(pwd)"
+sudo install -m 0755 -o root -g root \
+  deploy/oa/bin/finops-ensure-runtime-workers.sh \
+  /usr/local/sbin/finops-ensure-runtime-workers
+sudo /usr/local/sbin/finops-ensure-runtime-workers "$(pwd)"
 ```
 
 生产或本地补数 worker 必须带明确的卡死释放和 SQL statement timeout，例如：

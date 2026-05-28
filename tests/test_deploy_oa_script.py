@@ -36,6 +36,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertEqual(args.domain, "www.yn-sourcing.com")
         self.assertEqual(args.remote_releases_dir, "/opt/fin-ops/releases")
         self.assertEqual(args.deploy_control_path, "/usr/local/sbin/finops-deploy-control")
+        self.assertEqual(args.runtime_worker_ensure_path, "/usr/local/sbin/finops-ensure-runtime-workers")
         self.assertEqual(args.keep_releases, 8)
         self.assertFalse(args.skip_build)
         self.assertFalse(args.skip_pip)
@@ -76,10 +77,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control activate main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
-        self.assertIn(
-            'sudo -n /bin/bash "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" "$RELEASE_DIR/src"',
-            remote_script,
-        )
+        self.assertIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
+        self.assertNotIn("sudo -n /bin/bash", remote_script)
         self.assertIn("KEEP_RELEASES=8", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control cleanup-releases --keep 8", remote_script)
         self.assertNotIn("/opt/fin-ops/current/backend", remote_script)
