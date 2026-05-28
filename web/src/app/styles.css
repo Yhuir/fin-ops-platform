@@ -6943,20 +6943,23 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-rule-editor-shell {
-  display: grid;
-  grid-template-rows: 0fr;
   overflow: hidden;
-  opacity: 0;
-  transform: translateX(20px);
-  transition: grid-template-rows 180ms ease, transform 180ms ease, opacity 140ms ease;
-  visibility: hidden;
 }
 
-.bank-auto-tag-rule-editor-shell.open {
-  grid-template-rows: 1fr;
+.bank-auto-tag-rule-editor-slide {
+  opacity: 0;
+  transform: translateX(20px);
+  transition: transform 180ms ease, opacity 140ms ease;
+}
+
+.bank-auto-tag-rule-editor-shell.MuiCollapse-hidden .bank-auto-tag-rule-editor-slide {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+.bank-auto-tag-rule-editor-shell.MuiCollapse-entered .bank-auto-tag-rule-editor-slide {
   opacity: 1;
   transform: translateX(0);
-  visibility: visible;
 }
 
 .bank-auto-tag-rule-editor {

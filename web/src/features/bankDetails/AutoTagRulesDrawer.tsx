@@ -14,6 +14,7 @@ import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
+import Collapse from "@mui/material/Collapse";
 import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
 import FormControl from "@mui/material/FormControl";
@@ -699,7 +700,6 @@ function RuleEditor({
   };
   const title = ruleDisplayLabel(rule);
   const panelId = `${rule.localId}-editor-panel`;
-  const [editorMounted, setEditorMounted] = useState(expanded);
   const visibleFieldOptions = fieldOptions.filter((option) => !HIDDEN_MATCH_FIELDS.has(option.value));
   const visibleFieldValues = visibleFieldOptions.map((option) => option.value);
   const panelDisabled = disabled || !expanded;
@@ -721,18 +721,6 @@ function RuleEditor({
     }
     return selected.length > 0 ? `已选 ${selected.length} 项` : "";
   };
-
-  useEffect(() => {
-    if (expanded) {
-      setEditorMounted(true);
-      return undefined;
-    }
-    if (!editorMounted) {
-      return undefined;
-    }
-    const timeoutId = window.setTimeout(() => setEditorMounted(false), 180);
-    return () => window.clearTimeout(timeoutId);
-  }, [editorMounted, expanded]);
 
   return (
     <Paper className={`bank-auto-tag-rule-card${expanded ? " expanded" : ""}`} elevation={0}>
@@ -796,12 +784,15 @@ function RuleEditor({
           </IconButton>
         </Stack>
       </Stack>
-      {editorMounted ? (
-        <Box
+      <Collapse
           id={panelId}
-          className={`bank-auto-tag-rule-editor-shell${expanded ? " open" : ""}`}
+          className="bank-auto-tag-rule-editor-shell"
+          in={expanded}
+          timeout={180}
+          unmountOnExit
           aria-hidden={!expanded}
         >
+        <Box className="bank-auto-tag-rule-editor-slide">
           <Box className="bank-auto-tag-rule-editor">
             <Box className="bank-auto-tag-rule-editor-body">
               <Box className="bank-auto-tag-rule-field-row">
@@ -890,7 +881,7 @@ function RuleEditor({
             </Box>
           </Box>
         </Box>
-      ) : null}
+      </Collapse>
     </Paper>
   );
 }

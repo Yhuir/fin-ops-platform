@@ -243,19 +243,21 @@ describe("AutoTagRulesDrawer", () => {
     expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*border-color:\s*#2563eb/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*box-shadow:\s*inset 5px 0 0 #1d4ed8/s);
     expect(source).toMatch(/\.bank-auto-tag-field-actions\s*\{/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-editor-shell\s*\{[^}]*transition:[^}]*grid-template-rows[^}]*transform[^}]*opacity/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-editor-shell\.open\s*\{[^}]*transform:\s*translateX\(0\)/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-editor-slide\s*\{[^}]*transition:[^}]*transform[^}]*opacity/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-editor-shell\.MuiCollapse-entered\s+\.bank-auto-tag-rule-editor-slide\s*\{[^}]*transform:\s*translateX\(0\)/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-editor-body\s*\{[^}]*grid-template-columns:\s*minmax\(240px,\s*360px\) minmax\(0,\s*1fr\)/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/@media \(max-width:\s*1200px\)[\s\S]*\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/@media \(max-width:\s*720px\)[\s\S]*\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
   });
 
-  test("does not use animated height measurement for expanded rule editors", () => {
+  test("uses MUI Collapse for expanded rule editor mounting", () => {
     const source = readFileSync(resolve(process.cwd(), "src/features/bankDetails/AutoTagRulesDrawer.tsx"), "utf8");
 
-    expect(source).not.toContain("@mui/material/Collapse");
-    expect(source).not.toContain("<Collapse");
+    expect(source).toContain("@mui/material/Collapse");
+    expect(source).toContain("<Collapse");
+    expect(source).toContain("unmountOnExit");
+    expect(source).not.toContain("setEditorMounted");
   });
 
   test("validates active rules before save", async () => {
