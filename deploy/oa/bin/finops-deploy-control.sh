@@ -88,6 +88,7 @@ write_api_dropin() {
   mkdir -p "$API_DROPIN_DIR"
   cat > "$API_DROPIN" <<DROPIN
 [Service]
+EnvironmentFile=
 EnvironmentFile=$COMMON_ENV
 EnvironmentFile=$SECRETS_ENV
 EnvironmentFile=-$ENV_DIR/fin-ops.rabbitmq-monitoring.env

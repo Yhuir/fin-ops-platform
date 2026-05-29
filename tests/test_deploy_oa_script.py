@@ -83,6 +83,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("verify_finops_deploy_control_contract", remote_script)
         self.assertIn("deploy-control helper still loads the retired /root PostgreSQL env", remote_script)
         self.assertIn("deploy-control helper does not load fin-ops.secrets.env", remote_script)
+        self.assertIn("deploy-control helper does not reset inherited EnvironmentFile entries", remote_script)
         self.assertIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
         self.assertIn("wait_finops_backend_ready", remote_script)
         self.assertIn("check_finops_session_route /fin-ops-api/api/session/me", remote_script)
@@ -264,8 +265,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("run_schema_migrations", script)
         self.assertIn("fin_ops_platform.postgres.migrate apply", script)
         self.assertIn("missing PostgreSQL DSN", script)
+        self.assertIn("EnvironmentFile=\nEnvironmentFile=$COMMON_ENV", script)
         self.assertIn("EnvironmentFile=$COMMON_ENV", script)
         self.assertIn("EnvironmentFile=$SECRETS_ENV", script)
+        self.assertNotIn("EnvironmentFile=/opt/fin-ops/fin-ops.env", script)
         self.assertNotIn("/root/fin_ops_stage23_postgres_runtime.env", script)
         self.assertNotIn("FIN_OPS_POSTGRES_DATABASE_URL=", script)
 
