@@ -297,6 +297,41 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertNotIn("route_to", external_turnover)
         self.assertNotIn("audit", external_turnover)
 
+    def test_legacy_sequential_order_priorities_are_normalized_to_priority_two(self) -> None:
+        payload = BankTransactionCategoryService.auto_tag_rules_payload(
+            {
+                "version": 3,
+                "definitions": [
+                    {
+                        "code": "custom_fee",
+                        "label": "手续费",
+                        "path": ["自动识别", "手续费"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 10,
+                        "sort_order": 1,
+                        "rules": {"match_fields": ["summary_text"], "contains": ["手续费"], "excludes": []},
+                    },
+                    {
+                        "code": "custom_salary",
+                        "label": "工资",
+                        "path": ["自动识别", "工资"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 20,
+                        "sort_order": 2,
+                        "rules": {"match_fields": ["summary_text"], "contains": ["工资"], "excludes": []},
+                    },
+                ],
+            }
+        )
+
+        rules_by_code = {rule["code"]: rule for rule in payload["active_rules"]}
+        self.assertEqual(rules_by_code["custom_fee"]["priority"], 2)
+        self.assertEqual(rules_by_code["custom_salary"]["priority"], 2)
+        self.assertEqual(rules_by_code["custom_fee"]["sort_order"], 1)
+        self.assertEqual(rules_by_code["custom_salary"]["sort_order"], 2)
+
     def test_auto_tag_rules_update_validates_identity_labels_and_rules(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(None)
         current = service.auto_tag_rules_payload(service.tag_dictionary_payload())

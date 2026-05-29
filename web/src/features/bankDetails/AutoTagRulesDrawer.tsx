@@ -439,7 +439,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         "aria-label": open ? "自动标签规则" : undefined,
         className: "bank-auto-tag-drawer-paper",
         role: "dialog",
-        sx: { width: "100vw", maxWidth: "100vw" },
+        sx: { width: "80vw", maxWidth: "80vw" },
       }}
     >
       <Stack className="bank-auto-tag-drawer">
@@ -517,13 +517,13 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                       <TableCell>不限</TableCell>
                       <TableCell>{systemRule.label}</TableCell>
                       <TableCell>系统规则</TableCell>
-                      <TableCell>系统识别</TableCell>
-                      <TableCell>内部账户成对流水</TableCell>
-                      <TableCell>金额、时间、账户同时满足</TableCell>
-                      <TableCell>成对命中</TableCell>
-                      <TableCell>多解不猜测</TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell>—</TableCell>
                       <TableCell>1</TableCell>
-                      <TableCell align="right"><Chip size="small" label="只读" /></TableCell>
+                      <TableCell align="right">—</TableCell>
                     </TableRow>
                   ) : null}
                   {activeRuleGroups.flatMap((group) => group.rules.map((rule, rowIndex) => (
@@ -782,22 +782,21 @@ function ConditionCell({
   return (
     <TableCell>
       <Button
-        className="bank-auto-tag-condition-summary"
+        className="bank-auto-tag-condition-field-button"
         size="small"
         variant="outlined"
         aria-label={`编辑${ruleLabel}${label}`}
         disabled={disabled}
         onClick={onEdit}
       >
-        编辑
+        <Stack className="bank-auto-tag-condition-preview" spacing={0.25}>
+          {conditionDisplay(values).map((value) => (
+            <Typography key={value} component="span" variant="caption" color={value === "无" ? "text.secondary" : "text.primary"}>
+              {value}
+            </Typography>
+          ))}
+        </Stack>
       </Button>
-      <Stack className="bank-auto-tag-condition-preview" spacing={0.25}>
-        {conditionDisplay(values).map((value) => (
-          <Typography key={value} component="span" variant="caption" color={value === "无" ? "text.secondary" : "text.primary"}>
-            {value}
-          </Typography>
-        ))}
-      </Stack>
     </TableCell>
   );
 }

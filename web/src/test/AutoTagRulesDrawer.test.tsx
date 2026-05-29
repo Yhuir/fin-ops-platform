@@ -129,10 +129,15 @@ describe("AutoTagRulesDrawer", () => {
     expect(within(table).getByRole("columnheader", { name: "主标签" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "不包含字样" })).toBeInTheDocument();
     expect(within(drawer).getByText("内部往来款")).toBeInTheDocument();
-    expect(rowForText(drawer, "系统规则")).toHaveTextContent("1");
+    const systemRow = rowForText(drawer, "系统规则");
+    expect(systemRow).toHaveTextContent("内部往来款");
+    expect(systemRow).toHaveTextContent("1");
+    expect(systemRow).not.toHaveTextContent("内部账户成对流水");
+    expect(systemRow).not.toHaveTextContent("只读");
     expect(within(drawer).getAllByDisplayValue("费用")).toHaveLength(1);
     expect(within(drawer).getByDisplayValue("手续费")).toBeInTheDocument();
     expect(within(drawer).getAllByDisplayValue("2").length).toBeGreaterThanOrEqual(2);
+    expect(within(drawer).queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
     expect(within(drawer).queryByRole("button", { name: /上移/ })).not.toBeInTheDocument();
     expect(within(drawer).queryByRole("button", { name: /下移/ })).not.toBeInTheDocument();
     expect(within(drawer).queryByText("OA中的类型")).not.toBeInTheDocument();
@@ -364,12 +369,14 @@ describe("AutoTagRulesDrawer", () => {
   test("keeps automatic tag rule drawer styling table-based and non-truncating", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
-    expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s*\{[^}]*width:\s*100vw/s);
+    expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s*\{[^}]*width:\s*80vw/s);
     expect(source).toMatch(/\.bank-auto-tag-table-container\s*\{[^}]*overflow-x:\s*hidden/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*table-layout:\s*fixed/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*width:\s*100%/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s+\.MuiTableCell-root\s*\{[^}]*white-space:\s*normal/s);
-    expect(source).toMatch(/\.bank-auto-tag-condition-summary\.MuiButton-root\s*\{[^}]*min-height:\s*36px/s);
+    expect(source).toMatch(/\.bank-auto-tag-condition-field-button\.MuiButton-root\s*\{[^}]*min-height:\s*34px/s);
+    expect(source).toMatch(/\.bank-auto-tag-condition-field-button\.MuiButton-root\s*\{[^}]*background:\s*transparent/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-row\s+\.MuiOutlinedInput-root\s*\{[^}]*background:\s*transparent/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-preview\s*\{[^}]*white-space:\s*normal/s);
     expect(source).toMatch(/\.bank-auto-tag-primary-cell\.MuiTableCell-root\s*\{[^}]*border-right/s);
     expect(source).toMatch(/\.bank-auto-tag-field-menu-actions\s*\{/);

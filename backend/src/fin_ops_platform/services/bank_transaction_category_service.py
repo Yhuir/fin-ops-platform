@@ -1606,10 +1606,29 @@ class BankTransactionCategoryService:
             if code in definitions_by_code and definitions_by_code[code]["source"] == "system":
                 continue
             definitions_by_code[code] = definition
+        cls._normalize_legacy_auto_tag_priority_sequence(definitions_by_code)
         return {
             "version": version,
             "definitions": sorted(definitions_by_code.values(), key=lambda item: (item["source"] != "system", item["code"])),
         }
+
+    @classmethod
+    def _normalize_legacy_auto_tag_priority_sequence(cls, definitions_by_code: dict[str, dict[str, Any]]) -> None:
+        for definition in list(definitions_by_code.values()):
+            if not cls._is_auto_tag_rule_definition(definition):
+                continue
+            if str(definition.get("status") or "active") != "active":
+                continue
+            priority = cls._normalize_optional_priority(definition.get("priority"))
+            sort_order = cls._normalize_optional_sort_order(definition.get("sort_order"))
+            if priority is None or sort_order is None:
+                continue
+            if priority < 10 or priority != sort_order * 10:
+                continue
+            code = str(definition.get("code") or "")
+            normalized = dict(definition)
+            normalized["priority"] = 2
+            definitions_by_code[code] = normalized
 
     @classmethod
     def _normalize_tag_definition(cls, item: dict[str, Any]) -> dict[str, Any]:
