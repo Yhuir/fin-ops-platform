@@ -76,8 +76,18 @@ class AppSettingsService:
     def _refresh_snapshot_from_state_store(self) -> None:
         if self._state_store is None:
             return
+        loaded_settings = self._state_store.load_app_settings()
+        if (
+            isinstance(loaded_settings, dict)
+            and "no_oa_bank_batch_tag_selection" not in loaded_settings
+            and isinstance(getattr(self, "_snapshot", None), dict)
+        ):
+            loaded_settings = {
+                **loaded_settings,
+                "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
+            }
         normalized_snapshot = self._normalize_settings(
-            self._state_store.load_app_settings(),
+            loaded_settings,
             validate_pending_invoice_tag_groups=False,
         )
         if normalized_snapshot == self._snapshot:
@@ -275,7 +285,11 @@ class AppSettingsService:
             previous_snapshot["pending_invoice_tag_groups"],
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
         )
-        if not normalized["changes"]["changed"] and not detached_pending_invoice_references:
+        next_no_oa_selection, detached_no_oa_references = self._detach_no_oa_bank_batch_tag_references(
+            previous_snapshot["no_oa_bank_batch_tag_selection"],
+            tag_codes=set(normalized["changes"].get("archived_codes") or []),
+        )
+        if not normalized["changes"]["changed"] and not detached_pending_invoice_references and not detached_no_oa_references:
             return self.get_bank_auto_tag_rules_payload(can_save=True)
 
         next_snapshot = dict(self._snapshot)
@@ -284,6 +298,7 @@ class AppSettingsService:
             **next_pending_invoice_groups,
             "version": int(next_tags["version"]),
         }
+        next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
         try:
             if self._state_store is not None:
                 self._state_store.save_app_settings(next_snapshot)
@@ -297,6 +312,57 @@ class AppSettingsService:
             "new_version": int(normalized["new_version"]),
             **normalized["changes"],
             "detached_pending_invoice_tag_references": detached_pending_invoice_references,
+            "detached_no_oa_bank_batch_tag_references": detached_no_oa_references,
+        }
+        self._record_bank_auto_tag_rules_audit(event)
+        if after_bank_auto_tag_rules_saved is not None:
+            after_bank_auto_tag_rules_saved(dict(event))
+        return self.get_bank_auto_tag_rules_payload(can_save=True)
+
+    def replace_bank_auto_tag_rules_from_file_source(
+        self,
+        source: Any,
+        *,
+        actor_id: str,
+        after_bank_auto_tag_rules_saved: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        previous_snapshot = dict(self._snapshot)
+        normalized = BankTransactionCategoryService.normalize_auto_tag_rules_file_replacement(
+            source,
+            previous_tag_dictionary=previous_snapshot["bank_transaction_tags"],
+        )
+        next_tags = normalized["tag_dictionary"]
+        archived_codes = set(normalized["changes"].get("archived_codes") or [])
+        next_pending_invoice_groups, detached_pending_invoice_references = self._detach_pending_invoice_tag_references(
+            previous_snapshot["pending_invoice_tag_groups"],
+            tag_codes=archived_codes,
+        )
+        next_no_oa_selection, detached_no_oa_references = self._detach_no_oa_bank_batch_tag_references(
+            previous_snapshot["no_oa_bank_batch_tag_selection"],
+            tag_codes=archived_codes,
+        )
+        if not normalized["changes"]["changed"] and not detached_pending_invoice_references and not detached_no_oa_references:
+            return self.get_bank_auto_tag_rules_payload(can_save=True)
+
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["bank_transaction_tags"] = next_tags
+        next_snapshot["pending_invoice_tag_groups"] = {
+            **next_pending_invoice_groups,
+            "version": int(next_tags["version"]),
+        }
+        next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
+        if self._state_store is not None:
+            self._state_store.save_app_settings(next_snapshot)
+        self._snapshot = next_snapshot
+        self._configure_category_service(next_snapshot)
+        event = {
+            "actor_id": str(actor_id or "bank_auto_tag_rules").strip() or "bank_auto_tag_rules",
+            "old_version": int(normalized["old_version"]),
+            "new_version": int(normalized["new_version"]),
+            **normalized["changes"],
+            "detached_pending_invoice_tag_references": detached_pending_invoice_references,
+            "detached_no_oa_bank_batch_tag_references": detached_no_oa_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
         if after_bank_auto_tag_rules_saved is not None:
@@ -1116,8 +1182,15 @@ class AppSettingsService:
                 "reenabled_codes": list(event.get("reenabled_codes") or []),
                 "priority_changes": list(event.get("priority_changes") or []),
                 "rule_changes": list(event.get("rule_changes") or []),
+                "source": dict(event.get("source") or {}),
+                "reused_codes": list(event.get("reused_codes") or []),
+                "added_codes": list(event.get("added_codes") or []),
+                "skipped_rows": list(event.get("skipped_rows") or []),
                 "detached_pending_invoice_tag_references": list(
                     event.get("detached_pending_invoice_tag_references") or []
+                ),
+                "detached_no_oa_bank_batch_tag_references": list(
+                    event.get("detached_no_oa_bank_batch_tag_references") or []
                 ),
             },
         )
@@ -1289,6 +1362,34 @@ class AppSettingsService:
             next_groups[group_id] = {"label": label, "tag_codes": next_codes}
 
         return {**dict(raw_payload), "groups": next_groups}, detached
+
+    @staticmethod
+    def _detach_no_oa_bank_batch_tag_references(
+        value: Any,
+        *,
+        tag_codes: set[str],
+    ) -> tuple[dict[str, Any], list[dict[str, str]]]:
+        normalized_codes = {str(code or "").strip() for code in tag_codes if str(code or "").strip()}
+        raw_payload = value if isinstance(value, dict) else {}
+        selected: list[str] = []
+        detached: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in list(raw_payload.get("selected_tag_codes") or []):
+            tag_code = str(item or "").strip()
+            if not tag_code or tag_code in seen:
+                continue
+            seen.add(tag_code)
+            if tag_code in normalized_codes:
+                detached.append({"tag_code": tag_code})
+                continue
+            selected.append(tag_code)
+        current_version = BankTransactionCategoryService._normalize_version(raw_payload.get("version", 1)) or 1
+        next_version = current_version + 1 if detached else current_version
+        return {
+            **dict(raw_payload),
+            "version": next_version,
+            "selected_tag_codes": selected,
+        }, detached
 
     @staticmethod
     def _normalize_option_list(

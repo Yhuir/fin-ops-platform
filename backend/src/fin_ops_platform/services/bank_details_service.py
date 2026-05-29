@@ -267,6 +267,10 @@ class BankDetailsService:
         effective_label = effective_category["effective_category_label"]
         effective_path = list(effective_category["effective_category_path"] or [])
         effective_source = effective_category["effective_category_source"]
+        manual_source = str(manual_category.get("source") or "")
+        manual_confirmed_code = manual_category["category_code"] if manual_source == "auto_confirmation" else None
+        auto_status = str(auto_category.get("category_resolution_status") or "") if isinstance(auto_category, dict) else ""
+        category_resolution_status = "manual_confirmed" if manual_confirmed_code else (auto_status or "unmatched")
         relation_tags = self._relation_tag_payload(relation)
         text_fields = self._bank_text_display_fields(row)
         return {
@@ -292,6 +296,7 @@ class BankDetailsService:
             "manual_category_path": list(manual_category.get("category_path") or []),
             "manual_category_source": str(manual_category.get("source") or ""),
             "manual_category_version": manual_category["category_version"],
+            "manual_confirmed_category_code": manual_confirmed_code,
             "auto_category_code": auto_category.get("category_code") if isinstance(auto_category, dict) else None,
             "auto_category_label": auto_category.get("category_label") if isinstance(auto_category, dict) else None,
             "auto_category_primary_label": auto_category.get("category_primary_label") if isinstance(auto_category, dict) else None,
@@ -302,6 +307,10 @@ class BankDetailsService:
             "auto_category_reason": str(auto_category.get("reason") or "") if isinstance(auto_category, dict) else "",
             "auto_category_confidence": str(auto_category.get("confidence") or "") if isinstance(auto_category, dict) else "",
             "auto_category_evidence": dict(auto_category.get("auto_category_evidence") or {}) if isinstance(auto_category, dict) else {},
+            "auto_candidate_category_codes": list(auto_category.get("auto_candidate_category_codes") or []) if isinstance(auto_category, dict) else [],
+            "auto_candidate_categories": list(auto_category.get("auto_candidate_categories") or []) if isinstance(auto_category, dict) else [],
+            "category_resolution_status": category_resolution_status,
+            "category_rule_version": str(auto_category.get("rule_version") or manual_category.get("category_rule_version") or "") if isinstance(auto_category, dict) else str(manual_category.get("category_rule_version") or ""),
             "effective_category_code": effective_code,
             "effective_category_label": effective_label,
             "effective_category_primary_label": effective_category.get("effective_category_primary_label"),

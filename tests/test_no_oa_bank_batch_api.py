@@ -11,6 +11,7 @@ from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_BATCH_TYPE_ORDER
 
 
 AUTO_CATEGORY_TEXT_BY_CODE = {
@@ -55,7 +56,12 @@ def bank_transaction(
 
 
 class NoOaBankBatchApiTests(unittest.TestCase):
-    def _app_with_transactions(self, transactions: list[BankTransaction], categories: dict[str, str] | None = None):
+    def _app_with_transactions(
+        self,
+        transactions: list[BankTransaction],
+        categories: dict[str, str] | None = None,
+        selected_tag_codes: list[str] | None = None,
+    ):
         app = build_application()
         app._import_service = ImportNormalizationService(existing_transactions=transactions)
         updates = [
@@ -64,6 +70,19 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         ]
         if updates:
             app._bank_transaction_category_service.apply_updates(updates, actor="tester")
+        selected_codes = (
+            selected_tag_codes
+            if selected_tag_codes is not None
+            else sorted({str(update["category_code"]) for update in updates if str(update["category_code"])})
+        )
+        selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+        app._app_settings_service.update_no_oa_bank_batch_tag_selection(
+            {
+                "expected_version": selection["version"],
+                "selected_tag_codes": selected_codes,
+            },
+            actor_id="tester",
+        )
         return app
 
     def _replace_transaction_text(self, app, transaction_id: str, text: str) -> None:
@@ -119,6 +138,11 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         app = build_application()
         app._import_service = ImportNormalizationService(fact_repository=FactRepository())
         app._bank_transaction_effective_category_provider = CategoryProvider()
+        selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+        app._app_settings_service.update_no_oa_bank_batch_tag_selection(
+            {"expected_version": selection["version"], "selected_tag_codes": ["fee"]},
+            actor_id="tester",
+        )
 
         payload = self._list_batches(app)
 
@@ -138,6 +162,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
                 ),
             ],
             categories={"bank-202603-fee-1": "fee", "bank-202604-salary-1": "salary"},
+            selected_tag_codes=list(NO_OA_MANAGED_BATCH_TYPE_ORDER),
         )
 
         payload = self._list_batches(app)

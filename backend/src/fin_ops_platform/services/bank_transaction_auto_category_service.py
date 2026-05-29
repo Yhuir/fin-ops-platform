@@ -85,9 +85,14 @@ class BankTransactionAutoCategoryService:
             payload if isinstance(payload, dict) else default_bank_transaction_tag_dictionary_payload()
         )
 
+    def current_rule_version(self) -> str:
+        return self._category_service.auto_tag_rule_version_label()
+
     def suggest_for_rows(self, bank_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         rows = [deepcopy(row) for row in list(bank_rows or []) if isinstance(row, dict)]
         suggestions = self._internal_transfer_detector.detect(rows)
+        for suggestion in suggestions.values():
+            self._enrich_auto_match_status(suggestion, status="internal_transfer")
         for row in rows:
             transaction_id = self._transaction_id(row)
             if not transaction_id or transaction_id in suggestions:
@@ -110,17 +115,27 @@ class BankTransactionAutoCategoryService:
             and isinstance(definition.get("rules"), dict)
         ]
         rules.sort(key=lambda definition: (int(definition.get("priority") or 10_000), str(definition.get("code") or "")))
+        matched_suggestions: list[dict[str, Any]] = []
         for rule in rules:
             match = self._rule_match(semantic_fields, rule)
             if match is None:
                 continue
-            return self._suggestion(
+            matched_suggestions.append(
+                self._suggestion(
+                    transaction_id=transaction_id,
+                    category_code=str(rule["code"]),
+                    rule_code=str(rule.get("rule_code") or rule["code"]),
+                    reason=self._rule_reason(rule, match),
+                    confidence="high",
+                    evidence=match,
+                )
+            )
+        if len(matched_suggestions) == 1:
+            return matched_suggestions[0]
+        if len(matched_suggestions) > 1:
+            return self._confirmation_suggestion(
                 transaction_id=transaction_id,
-                category_code=str(rule["code"]),
-                rule_code=str(rule.get("rule_code") or rule["code"]),
-                reason=self._rule_reason(rule, match),
-                confidence="high",
-                evidence=match,
+                candidates=matched_suggestions,
             )
         return None
 
@@ -434,16 +449,76 @@ class BankTransactionAutoCategoryService:
             "rule_code": rule_code,
             "reason": reason,
             "confidence": confidence,
-            "rule_version": BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION,
+            "rule_version": self.current_rule_version(),
         }
         if evidence is not None:
             evidence_payload = dict(evidence)
             evidence_payload["tag_code"] = category_code
             evidence_payload["tag_label"] = payload["category_label"]
             evidence_payload["rule_code"] = rule_code
-            evidence_payload["rule_version"] = BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION
+            evidence_payload["rule_version"] = self.current_rule_version()
             payload["auto_category_evidence"] = evidence_payload
+        self._enrich_auto_match_status(payload, status="auto_matched")
         return payload
+
+    @staticmethod
+    def _enrich_auto_match_status(payload: dict[str, Any], *, status: str) -> None:
+        category_code = payload.get("category_code")
+        payload["category_resolution_status"] = status
+        payload["auto_category_code"] = category_code
+        payload["auto_candidate_category_codes"] = [category_code] if category_code else []
+        payload["auto_candidate_categories"] = [
+            BankTransactionAutoCategoryService._candidate_payload(payload)
+        ] if category_code else []
+
+    @staticmethod
+    def _candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "transaction_id": payload.get("transaction_id"),
+            "category_code": payload.get("category_code"),
+            "category_label": payload.get("category_label"),
+            "category_primary_label": payload.get("category_primary_label"),
+            "category_sub_label": payload.get("category_sub_label"),
+            "category_label_path": list(payload.get("category_label_path") or []),
+            "category_path": list(payload.get("category_path") or []),
+            "source": payload.get("source"),
+            "rule_code": payload.get("rule_code"),
+            "reason": payload.get("reason"),
+            "confidence": payload.get("confidence"),
+            "rule_version": payload.get("rule_version"),
+            "auto_category_evidence": dict(payload.get("auto_category_evidence") or {}),
+        }
+
+    def _confirmation_suggestion(
+        self,
+        *,
+        transaction_id: str,
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        candidate_payloads = [self._candidate_payload(candidate) for candidate in candidates]
+        return {
+            "transaction_id": transaction_id,
+            "category_code": None,
+            "category_label": None,
+            "category_primary_label": None,
+            "category_sub_label": None,
+            "category_label_path": [],
+            "category_path": [],
+            "source": "auto",
+            "rule_code": "",
+            "reason": "命中多个自动标签规则，需要用户确认。",
+            "confidence": "needs_confirmation",
+            "rule_version": self.current_rule_version(),
+            "category_resolution_status": "needs_confirmation",
+            "auto_category_code": None,
+            "auto_candidate_category_codes": [
+                str(candidate.get("category_code"))
+                for candidate in candidate_payloads
+                if str(candidate.get("category_code") or "").strip()
+            ],
+            "auto_candidate_categories": candidate_payloads,
+            "auto_category_evidence": {"candidates": candidate_payloads},
+        }
 
     @classmethod
     def _text_matches(
@@ -514,6 +589,16 @@ def resolve_effective_category(
     manual_source = str(manual.get("source") or "").strip()
     auto = auto_category if isinstance(auto_category, dict) else {}
     auto_code = auto.get("category_code")
+    if manual_code and manual_source == "auto_confirmation":
+        return {
+            "effective_category_code": manual_code,
+            "effective_category_label": manual.get("category_label"),
+            "effective_category_primary_label": manual.get("category_primary_label"),
+            "effective_category_sub_label": manual.get("category_sub_label"),
+            "effective_category_label_path": list(manual.get("category_label_path") or []),
+            "effective_category_path": list(manual.get("category_path") or []),
+            "effective_category_source": "manual_confirmation",
+        }
     if manual_code in BANK_TRANSACTION_CATEGORY_DEFINITIONS and (
         manual_source == "turnover_ledger" or auto_code == "external_turnover"
     ):

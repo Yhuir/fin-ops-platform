@@ -154,9 +154,7 @@ describe("groupDisplayModel time filter", () => {
 
     expect(buildWorkbenchServerPageQuery(state)).toEqual({
       search: "供应商A",
-      searchByPane: {
-        bank: "供应商A",
-      },
+      searchMode: "linked_context",
       sort: "bank:desc",
     });
   });

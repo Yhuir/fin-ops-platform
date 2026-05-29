@@ -49,6 +49,62 @@ class RecordingSyncService:
 
 
 class AppSettingsServiceTests(unittest.TestCase):
+    def test_file_rule_replacement_detaches_pending_invoice_and_no_oa_archived_codes_atomically(self) -> None:
+        fixture = json.loads(
+            Path("fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json").read_text(encoding="utf-8")
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.get_settings_payload()
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                bank_transaction_tags=current["bank_transaction_tags"],
+                pending_invoice_tag_groups={
+                    "version": current["pending_invoice_tag_groups"]["version"],
+                    "groups": {
+                        "requires_invoice": {"tag_codes": ["salary"]},
+                        "bank_statement_as_invoice": {"tag_codes": []},
+                        "no_invoice_required": {"tag_codes": []},
+                    },
+                },
+                actor_id="settings-owner",
+            )
+            selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+            app._app_settings_service.update_no_oa_bank_batch_tag_selection(
+                {"expected_version": selection["version"], "selected_tag_codes": ["salary"]},
+                actor_id="settings-owner",
+            )
+
+            result = app._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
+                fixture,
+                actor_id="settings-owner",
+            )
+
+            settings = app._app_settings_service.get_settings_payload()
+
+        self.assertEqual(result["version"], current["bank_transaction_tags"]["version"] + 2)
+        self.assertEqual(settings["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"], [])
+        self.assertEqual(settings["no_oa_bank_batch_tag_selection"]["selected_tag_codes"], [])
+        self.assertEqual(
+            settings["no_oa_bank_batch_tag_selection"]["version"],
+            3,
+        )
+        audit = app._audit_service.as_dicts()[-1]
+        self.assertEqual(audit["action"], "bank_auto_tag_rules_updated")
+        self.assertEqual(
+            audit["metadata"]["detached_pending_invoice_tag_references"],
+            [{"group_id": "requires_invoice", "label": "需要开票", "tag_code": "salary"}],
+        )
+        self.assertEqual(
+            audit["metadata"]["detached_no_oa_bank_batch_tag_references"],
+            [{"tag_code": "salary"}],
+        )
+        self.assertEqual(audit["metadata"]["source"]["source_name"], "银行流水标签ui2.numbers")
+
     def test_settings_payload_includes_bank_transaction_tags_and_pending_invoice_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

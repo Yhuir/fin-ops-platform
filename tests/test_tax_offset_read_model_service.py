@@ -131,6 +131,7 @@ class TaxOffsetReadModelServiceTests(unittest.TestCase):
                     "input_plan_count": 1,
                     "certified_count": 1,
                     "source_scope_keys": [],
+                    "source_versions": {},
                 }
             ],
         )

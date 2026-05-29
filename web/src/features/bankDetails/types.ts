@@ -56,6 +56,24 @@ export type BankInternalTransferCounterpart = {
   counterpartyName: string;
 };
 
+export type BankDetailCategoryResolutionStatus =
+  | "unmatched"
+  | "auto_matched"
+  | "needs_confirmation"
+  | "internal_transfer"
+  | "manual_confirmed";
+
+export type BankDetailAutoCandidateCategory = {
+  categoryCode: BankTransactionCategoryCode;
+  categoryLabel: string | null;
+  categoryPrimaryLabel: string | null;
+  categorySubLabel: string | null;
+  categoryLabelPath: string[];
+  categoryPath: string[];
+  ruleCode: string | null;
+  reason: string | null;
+};
+
 export type BankDetailTransaction = {
   id: string;
   tradeTime: string;
@@ -79,6 +97,9 @@ export type BankDetailTransaction = {
   categoryLabelPath: string[];
   categorySource: string;
   categoryVersion: number | null;
+  categoryResolutionStatus: BankDetailCategoryResolutionStatus;
+  categoryRuleVersion: string | null;
+  manualConfirmedCategoryCode: BankTransactionCategoryCode | null;
   autoCategoryCode: BankTransactionCategoryCode | null;
   autoCategoryLabel: string | null;
   autoCategoryPath: string[];
@@ -88,6 +109,8 @@ export type BankDetailTransaction = {
   autoCategorySource: string;
   autoCategoryReason: string | null;
   autoCategoryConfidence: string | null;
+  autoCandidateCategoryCodes: BankTransactionCategoryCode[];
+  autoCandidateCategories: BankDetailAutoCandidateCategory[];
   internalTransferCounterpart: BankInternalTransferCounterpart | null;
   effectiveCategoryCode: BankTransactionCategoryCode | null;
   effectiveCategoryLabel: string | null;

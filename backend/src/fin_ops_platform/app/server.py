@@ -1027,6 +1027,8 @@ class Application:
             return self._handle_api_workbench_events(query.get("month", [None])[0])
         if method == "GET" and route_path == "/api/bank-details/auto-tag-rules":
             return self._handle_api_bank_details_auto_tag_rules(headers)
+        if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/file-replacement":
+            return self._handle_api_bank_details_auto_tag_rules_file_replacement(body, headers)
         if method == "PUT" and route_path == "/api/bank-details/auto-tag-rules":
             return self._handle_api_bank_details_auto_tag_rules_update(body, headers)
         if method == "GET" and route_path == "/api/bank-details/accounts":
@@ -1048,6 +1050,16 @@ class Application:
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
+        bank_detail_confirmation_prefix = "/api/bank-details/transactions/"
+        bank_detail_confirmation_suffix = "/category-confirmation"
+        if route_path.startswith(bank_detail_confirmation_prefix) and route_path.endswith(bank_detail_confirmation_suffix):
+            transaction_id = unquote(
+                route_path[len(bank_detail_confirmation_prefix):-len(bank_detail_confirmation_suffix)]
+            )
+            if method == "POST":
+                return self._handle_api_bank_detail_category_confirmation(transaction_id, body, headers)
+            if method == "DELETE":
+                return self._handle_api_bank_detail_category_confirmation_delete(transaction_id, headers)
         if method == "GET" and route_path == "/api/import-facts/invoices":
             return self._handle_api_import_fact_invoices(query)
         if method == "GET" and route_path == "/api/import-facts/batches":
@@ -10487,6 +10499,61 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, updated)
 
+    def _handle_api_bank_details_auto_tag_rules_file_replacement(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有替换自动标签规则权限。"},
+            )
+        source: object
+        if body not in (None, b"", ""):
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            source = payload.get("source") if isinstance(payload, dict) and "source" in payload else payload
+        else:
+            source = self._default_bank_auto_tag_rules_file_source()
+        actor_id = (
+            session.identity.username or session.identity.user_id
+            if session is not None
+            else "bank_auto_tag_rules_file_replacement"
+        )
+        try:
+            updated = self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
+                source,
+                actor_id=str(actor_id or "bank_auto_tag_rules_file_replacement"),
+                after_bank_auto_tag_rules_saved=self._finalize_bank_auto_tag_rules_update,
+            )
+        except (BankAutoTagRulesValidationError, FileNotFoundError, json.JSONDecodeError) as exc:
+            error_code = getattr(exc, "error_code", "invalid_bank_auto_tag_rule_file")
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": error_code,
+                    "message": str(exc),
+                    "field_errors": list(getattr(exc, "field_errors", [])),
+                    "references": list(getattr(exc, "references", [])),
+                },
+            )
+        return self._json_response(HTTPStatus.OK, updated)
+
+    @staticmethod
+    def _default_bank_auto_tag_rules_file_source() -> dict[str, object]:
+        fixture_path = (
+            Path(__file__).resolve().parents[4]
+            / "fixtures"
+            / "bank_auto_tag_rules"
+            / "bank_flow_tag_rules_ui2.normalized.json"
+        )
+        return json.loads(fixture_path.read_text(encoding="utf-8"))
+
     def _handle_api_bank_details_transactions(
         self,
         *,
@@ -10539,6 +10606,157 @@ class Application:
                 {"error": "invalid_bank_details_request", "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_bank_detail_category_confirmation(
+        self,
+        transaction_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有确认银行明细标签权限。"},
+            )
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        selected_code = str(
+            payload.get("category_code")
+            or payload.get("selected_category_code")
+            or payload.get("selectedCategoryCode")
+            or ""
+        ).strip()
+        actor_id = (
+            session.identity.username or session.identity.user_id
+            if session is not None
+            else "bank_category_confirmation"
+        )
+        try:
+            suggestion = self._latest_bank_detail_auto_category_suggestion(transaction_id)
+            if (
+                not isinstance(suggestion, dict)
+                or str(suggestion.get("category_resolution_status") or "") != "needs_confirmation"
+            ):
+                raise BankTransactionCategoryValidationError(
+                    "invalid_category_confirmation_candidate",
+                    "当前流水没有需要确认的自动标签候选。",
+                    transaction_id=transaction_id,
+                )
+            candidate_codes = [
+                str(code).strip()
+                for code in list((suggestion or {}).get("auto_candidate_category_codes") or [])
+                if str(code or "").strip()
+            ]
+            if len(set(candidate_codes)) < 2:
+                raise BankTransactionCategoryValidationError(
+                    "invalid_category_confirmation_candidate",
+                    "当前流水没有多个可确认的自动标签候选。",
+                    transaction_id=transaction_id,
+                )
+            result = self._bank_transaction_category_service.confirm_auto_category(
+                transaction_id=transaction_id,
+                category_code=selected_code,
+                candidate_category_codes=candidate_codes,
+                rule_version=self._bank_transaction_auto_category_service.current_rule_version(),
+                actor=str(actor_id or "bank_category_confirmation"),
+            )
+        except BankTransactionCategoryValidationError as exc:
+            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
+            return self._json_response(
+                status,
+                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
+            )
+        affected_months = self._bank_transaction_category_affected_months([transaction_id])
+        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
+        self._after_bank_category_confirmation_mutation(
+            transaction_id=transaction_id,
+            actor_id=str(actor_id or "bank_category_confirmation"),
+            action="bank_detail_category_confirmed",
+            affected_months=affected_months,
+            metadata={
+                "selected_category_code": selected_code,
+                "candidate_category_codes": candidate_codes,
+            },
+        )
+        return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
+
+    def _handle_api_bank_detail_category_confirmation_delete(
+        self,
+        transaction_id: str,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有撤销银行明细标签确认权限。"},
+            )
+        actor_id = (
+            session.identity.username or session.identity.user_id
+            if session is not None
+            else "bank_category_confirmation"
+        )
+        try:
+            result = self._bank_transaction_category_service.revoke_auto_category_confirmation(
+                transaction_id=transaction_id,
+                actor=str(actor_id or "bank_category_confirmation"),
+            )
+        except BankTransactionCategoryValidationError as exc:
+            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
+            return self._json_response(
+                status,
+                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
+            )
+        affected_months = self._bank_transaction_category_affected_months([transaction_id])
+        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
+        self._after_bank_category_confirmation_mutation(
+            transaction_id=transaction_id,
+            actor_id=str(actor_id or "bank_category_confirmation"),
+            action="bank_detail_category_confirmation_revoked",
+            affected_months=affected_months,
+            metadata={},
+        )
+        return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
+
+    def _latest_bank_detail_auto_category_suggestion(self, transaction_id: str) -> dict[str, object] | None:
+        normalized_transaction_id = str(transaction_id or "").strip()
+        transaction = self._import_service.get_transaction(normalized_transaction_id)
+        row = self._serialize_value(transaction)
+        if not isinstance(row, dict):
+            row = dict(row or {})
+        row["id"] = normalized_transaction_id
+        input_row = self._bank_details_service._auto_category_input_row(row)  # noqa: SLF001
+        return self._bank_transaction_auto_category_service.suggest_for_rows([input_row]).get(normalized_transaction_id)
+
+    def _after_bank_category_confirmation_mutation(
+        self,
+        *,
+        transaction_id: str,
+        actor_id: str,
+        action: str,
+        affected_months: list[str],
+        metadata: dict[str, object],
+    ) -> None:
+        scope_keys = affected_months or ["all"]
+        self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="bank_detail_category_confirmation_changed")
+        self._invalidate_workbench_after_bank_transaction_categories(affected_months)
+        self._audit_service.record_action(
+            actor_id=actor_id,
+            action=action,
+            entity_type="bank_transaction_category_confirmation",
+            entity_id=str(transaction_id or ""),
+            metadata={
+                "transaction_id": str(transaction_id or ""),
+                "affected_months": list(affected_months or []),
+                **dict(metadata),
+            },
+        )
 
     def _handle_api_bank_details_transactions_export(
         self,

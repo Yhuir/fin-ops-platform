@@ -176,6 +176,55 @@ def test_workbench_category_replaces_events_and_category_in_one_transaction() ->
     assert "insert into app.bank_transaction_categories" in executed_sql[2]
 
 
+def test_workbench_category_confirmation_uses_confirmation_fact_table() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_bank_transaction_categories(
+        {
+            "categories": {
+                "txn-1": {
+                    "category_code": "fee",
+                    "source": "auto_confirmation",
+                    "candidate_category_codes": ["fee", "salary"],
+                    "rule_version": "bank-auto-tag-rules:2",
+                    "version": 3,
+                    "updated_by": "reviewer",
+                }
+            },
+            "audit_log": [],
+        }
+    )
+
+    executed_sql = [sql for sql, _ in connection.executed]
+    assert any("update app.bank_transaction_category_confirmations" in sql for sql in executed_sql)
+    assert any("insert into app.bank_transaction_category_confirmations" in sql for sql in executed_sql)
+    assert all("insert into app.bank_transaction_categories" not in sql for sql in executed_sql)
+
+
+def test_workbench_category_confirmation_revoke_updates_confirmation_fact_table() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_bank_transaction_categories(
+        {
+            "categories": {
+                "txn-1": {
+                    "category_code": None,
+                    "source": "auto_confirmation_revoked",
+                    "version": 4,
+                    "updated_by": "reviewer",
+                }
+            },
+            "audit_log": [],
+        }
+    )
+
+    executed_sql = [sql for sql, _ in connection.executed]
+    assert any("update app.bank_transaction_category_confirmations" in sql for sql in executed_sql)
+    assert all("insert into app.bank_transaction_categories" not in sql for sql in executed_sql)
+
+
 def test_read_model_tax_save_uses_entry_count_column_and_transaction() -> None:
     connection = RecordingConnection()
     repository = PostgresReadModelRepository(connection)

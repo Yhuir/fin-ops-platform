@@ -1,6 +1,9 @@
 import unittest
+import json
+from pathlib import Path
 
 from fin_ops_platform.services.bank_transaction_category_service import (
+    BankAutoTagRulesValidationError,
     BankTransactionCategoryConflictError,
     BankTransactionCategoryValidationError,
     BANK_TRANSACTION_CATEGORY_LABELS,
@@ -9,6 +12,158 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 
 
 class BankTransactionCategoryServiceTests(unittest.TestCase):
+    def test_parse_normalized_bank_flow_fixture_into_file_rules(self) -> None:
+        fixture_path = Path("fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json")
+        source = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+        parsed = BankTransactionCategoryService.parse_auto_tag_rule_file_source(source)
+
+        self.assertEqual(parsed["source"]["source_name"], "银行流水标签ui2.numbers")
+        self.assertEqual(parsed["source"]["source_version"], "2026-05-29-ui2-normalized")
+        self.assertTrue(parsed["source"]["source_hash"].startswith("sha256:"))
+        self.assertEqual(parsed["source"]["field_mapping_version"], "2026-05-29-bank-auto-tag-field-mapping-v1")
+        self.assertEqual(len(parsed["active_rules"]), 37)
+        self.assertNotIn("内部往来款", [rule["output_primary_label"] for rule in parsed["active_rules"]])
+
+        fee = next(
+            rule
+            for rule in parsed["active_rules"]
+            if rule["output_primary_label"] == "费用" and rule["output_sub_label"] == "手续费"
+        )
+        self.assertEqual(
+            fee["rules"]["match_fields"],
+            ["purpose_text", "summary_text", "note_text", "detail_text"],
+        )
+        self.assertEqual(
+            fee["rules"]["contains_any"],
+            ["手续费", "短信服务费", "收费", "网银证书服务费", "企业网银服务费"],
+        )
+
+        housing_fund = next(
+            rule
+            for rule in parsed["active_rules"]
+            if rule["output_primary_label"] == "薪资社保福利" and rule["output_sub_label"] == "公积金"
+        )
+        self.assertEqual(housing_fund["rules"]["match_fields"], ["counterparty_name"])
+
+        management = next(
+            rule
+            for rule in parsed["active_rules"]
+            if rule["output_primary_label"] == "费用" and rule["output_sub_label"] == "管理"
+        )
+        self.assertEqual(
+            management["rules"]["none_of"],
+            ["保证金", "投标保证金", "履约保证金", "押金", "往来款", "暂借款", "还暂借款"],
+        )
+
+    def test_parse_worksheet_rows_maps_headers_aliases_and_ignores_oa_type(self) -> None:
+        rows = [
+            ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命中", "不包含字样", "优先级", "OA中的类型"],
+            ["支出或收入", "内部往来款", "系统说明", "", "", "", "", "", "1", "忽略"],
+            ["支出", "费用", "手续费", "用途/交易用途、摘要、备注/附言/客户附言", "手续费、短信服务费", "网银\n服务费", "账户管理费，证书费", "退款；退回", "2", "忽略"],
+            ["支出", "薪资社保福利", "公积金", "对方户", "昆明市住房公积金管理中心", "", "", "", "2", "忽略"],
+        ]
+
+        parsed = BankTransactionCategoryService.parse_auto_tag_rule_file_source(
+            rows,
+            source_name="worksheet.xlsx",
+            source_version="test-version",
+        )
+
+        self.assertEqual(len(parsed["active_rules"]), 2)
+        fee = parsed["active_rules"][0]
+        self.assertEqual(fee["output_primary_label"], "费用")
+        self.assertEqual(fee["output_sub_label"], "手续费")
+        self.assertEqual(fee["rules"]["contains_any"], ["手续费", "短信服务费"])
+        self.assertEqual(fee["rules"]["contains_all"], ["网银", "服务费"])
+        self.assertEqual(fee["rules"]["exact_any"], ["账户管理费", "证书费"])
+        self.assertEqual(fee["rules"]["none_of"], ["退款", "退回"])
+        self.assertEqual(parsed["active_rules"][1]["rules"]["match_fields"], ["counterparty_name"])
+
+    def test_parse_file_rules_rejects_unknown_query_field_with_structured_error(self) -> None:
+        rows = [
+            ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样"],
+            ["支出", "费用", "手续费", "未知字段", "手续费", "", "", ""],
+        ]
+
+        with self.assertRaises(BankAutoTagRulesValidationError) as context:
+            BankTransactionCategoryService.parse_auto_tag_rule_file_source(rows)
+
+        self.assertEqual(context.exception.error_code, "invalid_bank_auto_tag_rule_file")
+        self.assertIn(
+            {"path": "rows[1].选择查询的项", "message": "未知的查询字段：未知字段"},
+            context.exception.field_errors,
+        )
+
+    def test_compare_file_rule_sources_ignores_header_alias_and_oa_type_only(self) -> None:
+        ui2_rows = [
+            ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样", "OA中的类型"],
+            ["支出", "费用", "手续费", "用途/交易用途、摘要、备注/附言/客户附言", "手续费", "", "账户管理费", "", "旧OA"],
+        ]
+        xlsx_rows = [
+            ["流水类型", "主标签", "子标签", "选择查询的项", "包含", "必须同时包含", "精准命中", "不包含字样", "OA中的类型"],
+            ["支出", "费用", "手续费", "用途/交易用途、摘要、备注/附言/客户附言", "手续费", "", "账户管理费", "", "新OA"],
+        ]
+
+        self.assertEqual(
+            BankTransactionCategoryService.compare_auto_tag_rule_file_sources(ui2_rows, xlsx_rows),
+            {"matched": True, "diffs": []},
+        )
+
+        changed_rows = [list(row) for row in xlsx_rows]
+        changed_rows[1][4] = "账户费"
+        with self.assertRaises(BankAutoTagRulesValidationError) as context:
+            BankTransactionCategoryService.compare_auto_tag_rule_file_sources(ui2_rows, changed_rows)
+
+        self.assertEqual(context.exception.error_code, "bank_auto_tag_rule_file_diff")
+        self.assertEqual(context.exception.field_errors[0]["path"], "rules[0]")
+
+    def test_file_replacement_reuses_matching_label_code_archives_external_rules_and_audits_source(self) -> None:
+        fixture_path = Path("fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json")
+        source = json.loads(fixture_path.read_text(encoding="utf-8"))
+        previous = BankTransactionCategoryService.from_snapshot(None).tag_dictionary_payload()
+        previous["version"] = 8
+        previous["definitions"].append(
+            {
+                "code": "custom_old_office",
+                "label": "办公",
+                "path": ["自动识别", "办公"],
+                "source": "custom",
+                "status": "active",
+                "direction": "any",
+                "account_scope": {"type": "any", "values": []},
+                "output_primary_label": "费用",
+                "output_sub_label": "办公",
+                "rules": {
+                    "match_fields": ["all_text"],
+                    "exact_any": [],
+                    "contains_any": ["旧办公"],
+                    "contains_all": [],
+                    "none_of": [],
+                    "regex_any": [],
+                },
+                "rule_code": "custom_old_office",
+            }
+        )
+
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_file_replacement(
+            source,
+            previous_tag_dictionary=previous,
+        )
+
+        payload = BankTransactionCategoryService.auto_tag_rules_payload(result["tag_dictionary"])
+        office = next(rule for rule in payload["active_rules"] if rule["output_primary_label"] == "费用" and rule["output_sub_label"] == "办公")
+        self.assertEqual(office["code"], "custom_old_office")
+        self.assertEqual(office["rules"]["contains_any"], ["办公", "办公用品", "资料费", "打印复印费", "复印费", "招标文件", "电信", "通信费", "电话费"])
+        self.assertIn("salary", [rule["code"] for rule in payload["archived_rules"]])
+        self.assertEqual(result["old_version"], 8)
+        self.assertEqual(result["new_version"], 9)
+        self.assertEqual(result["changes"]["source"]["source_name"], "银行流水标签ui2.numbers")
+        self.assertEqual(result["changes"]["source"]["field_mapping_version"], "2026-05-29-bank-auto-tag-field-mapping-v1")
+        self.assertIn("custom_old_office", result["changes"]["reused_codes"])
+        self.assertIn("salary", result["changes"]["archived_codes"])
+        self.assertTrue(result["changes"]["added_codes"])
+
     def test_apply_updates_persists_category_with_version_and_audit_fields(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(
             None,
@@ -115,7 +270,7 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
 
         self.assertEqual(external_turnover["direction"], "any")
         self.assertEqual(external_turnover["account_scope"], {"type": "any", "values": []})
-        self.assertEqual(external_turnover["sort_order"], len(payload["active_rules"]))
+        self.assertEqual(external_turnover["sort_order"], len(payload["active_rules"]) + 1)
         self.assertIn("contains_any", external_turnover["rules"])
         self.assertIn("contains_all", external_turnover["rules"])
         self.assertIn("none_of", external_turnover["rules"])

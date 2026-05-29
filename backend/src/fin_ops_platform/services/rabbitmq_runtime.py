@@ -18,6 +18,7 @@ SUPPORTED_EVENT_TYPES = (
     "workbench.read_model.refresh",
     "search.read_model.refresh",
     "pending_invoice.read_model.refresh",
+    "bank_account_balance.read_model.refresh",
     "bank_detail.read_model.refresh",
     "input_invoice_usage.read_model.refresh",
     "output_invoice_collection.read_model.refresh",

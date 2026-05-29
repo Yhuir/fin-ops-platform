@@ -118,15 +118,57 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["system_rule"]["code"], "internal_transfer")
-        self.assertEqual(payload["system_rule"]["priority_label"], "优先级 0")
+        self.assertEqual(payload["system_rule"]["priority_label"], "优先级 1")
         self.assertFalse(payload["system_rule"]["editable"])
         self.assertIn("salary", [rule["code"] for rule in payload["active_rules"]])
-        self.assertEqual(payload["active_rules"][0]["priority_label"], "优先级 1")
+        self.assertEqual(payload["active_rules"][0]["priority_label"], "优先级 2")
         fee = next(rule for rule in payload["active_rules"] if rule["code"] == "fee")
         self.assertEqual(fee["output_primary_label"], "费用")
         self.assertEqual(fee["output_sub_label"], "手续费")
         self.assertEqual(payload["field_options"][0]["value"], "counterparty_name")
         self.assertEqual(payload["permissions"], {"can_save": True})
+
+    def test_file_replacement_endpoint_uses_bundled_rules_and_triggers_lifecycle(self) -> None:
+        app = build_application()
+        queue = _ReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_details_auto_tag_rules_file_replacement(None, {})
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(payload["active_rules"]), 30)
+        self.assertEqual(payload["system_rule"]["priority_label"], "优先级 1")
+        self.assertEqual(payload["active_rules"][0]["priority_label"], "优先级 2")
+        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+
+    def test_confirmation_endpoint_rejects_single_auto_match_candidate(self) -> None:
+        app = build_application()
+        confirm_calls: list[object] = []
+
+        def confirm_stub(**kwargs: object) -> dict[str, object]:
+            confirm_calls.append(kwargs)
+            return {}
+
+        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+            "category_resolution_status": "auto_matched",
+            "auto_candidate_category_codes": ["fee"],
+            "rule_version": "bank-auto-tag-rules:1",
+        }
+        app._bank_transaction_category_service.confirm_auto_category = confirm_stub
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_detail_category_confirmation(
+                "txn-1",
+                json.dumps({"category_code": "fee"}),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_category_confirmation_candidate")
+        self.assertEqual(confirm_calls, [])
 
     def test_put_renames_reorders_adds_archives_audits_and_triggers_lifecycle(self) -> None:
         app = build_application()

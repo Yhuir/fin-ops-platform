@@ -53,6 +53,8 @@ EXPECTED_MIGRATIONS = [
     "0038_workbench_generation_stats_runtime_grants.sql",
     "0039_bank_account_balance_read_model.sql",
     "0040_pending_invoice_source_versions.sql",
+    "0041_bank_transaction_category_confirmations.sql",
+    "0042_bank_detail_candidate_projection.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -74,6 +76,7 @@ EXPECTED_TABLES = [
     "app.bank_transactions",
     "app.bank_transaction_categories",
     "app.bank_transaction_category_events",
+    "app.bank_transaction_category_confirmations",
     "app.matching_runs",
     "app.matching_results",
     "app.workbench_pair_relations",
@@ -148,7 +151,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 41)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 43)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -482,6 +485,35 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("decision_status in ('proposed', 'paired', 'open', 'suppressed', 'consumed', 'expired')", sql)
         self.assertIn("match_domain in ('free', 'special')", sql)
         self.assertIn("display_state in ('paired', 'open')", sql)
+
+    def test_bank_transaction_category_confirmation_schema(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        body = re.search(
+            r"create table if not exists app\.bank_transaction_category_confirmations\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        self.assertIsNotNone(body)
+        table_body = body.group(1)
+        for required in (
+            "tenant_id text not null default 'default'",
+            "category_code text not null",
+            "candidate_category_codes jsonb not null default '[]'::jsonb",
+            "rule_version text not null default ''",
+            "status text not null default 'active'",
+            "version integer not null default 1",
+            "confirmed_by text not null default ''",
+            "confirmed_at timestamptz not null default now()",
+            "revoked_by text null",
+            "revoked_at timestamptz null",
+            "raw_payload jsonb not null default '{}'::jsonb",
+        ):
+            self.assertIn(required, table_body)
+        self.assertIn("status in ('active', 'revoked')", sql)
+        self.assertIn(
+            "on app.bank_transaction_category_confirmations(tenant_id, legacy_transaction_id)",
+            sql,
+        )
 
         dirty_body = re.search(
             r"create table if not exists job\.workbench_matching_dirty_scopes\s*\((.*?)\);",

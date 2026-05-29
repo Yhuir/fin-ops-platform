@@ -68,16 +68,20 @@ async function openCategoryFilterPanel(user: ReturnType<typeof userEvent.setup>,
 }
 
 async function editRuleLabelInDrawer(user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement, currentLabel: string, primary: string, sub: string) {
-  await user.click(await within(drawer).findByRole("button", { name: `编辑标签 ${currentLabel}` }));
-  const primaryInput = within(drawer).getByLabelText("主标签名称", { selector: "input" });
-  const subInput = within(drawer).getByLabelText("子标签名称", { selector: "input" });
+  const [_currentPrimary, currentSub = ""] = currentLabel.split(" / ");
+  const currentInput = await within(drawer).findByDisplayValue(currentSub || _currentPrimary);
+  const row = currentInput.closest("tr");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error(`rule row for ${currentLabel} not found`);
+  }
+  const primaryInput = within(row).getByLabelText(/主标签$/, { selector: "input" });
+  const subInput = within(row).getByLabelText(/子标签$/, { selector: "input" });
   await user.clear(primaryInput);
   await user.type(primaryInput, primary);
   await user.clear(subInput);
   if (sub) {
     await user.type(subInput, sub);
   }
-  await user.keyboard("{Enter}");
 }
 
 afterEach(() => {
@@ -360,7 +364,7 @@ describe("Bank details page", () => {
     await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
 
     expect(await screen.findByRole("dialog", { name: "自动标签规则" })).toBeInTheDocument();
-    expect(screen.getByText("优先级 0")).toBeInTheDocument();
+    expect(screen.getByText("内部往来款").closest("tr")).toHaveTextContent("1");
     expect(screen.getByText("内部往来款")).toBeInTheDocument();
     const rulesRequest = requestUrls(fetchMock, "/api/bank-details/auto-tag-rules").at(-1);
     expect(rulesRequest?.pathname).toBe("/api/bank-details/auto-tag-rules");

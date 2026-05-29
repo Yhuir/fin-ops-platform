@@ -152,11 +152,30 @@ class BankDetailSqlProjectionBuilder:
                    coalesce(legacy_transaction_id, bank_transaction_id::text) as transaction_id,
                    category,
                    source,
-                   version
+                   version,
+                   raw_payload
             from app.bank_transaction_categories
             where status = 'active'
               and coalesce(legacy_transaction_id, bank_transaction_id::text) = any(%s)
             order by coalesce(legacy_transaction_id, bank_transaction_id::text), updated_at desc
+            """,
+            (list(identity_to_row_id),),
+        )
+        confirmation_rows = self._connection.fetch_all(
+            """
+            select distinct on (coalesce(legacy_transaction_id, bank_transaction_id::text))
+                   coalesce(legacy_transaction_id, bank_transaction_id::text) as transaction_id,
+                   category_code,
+                   candidate_category_codes,
+                   rule_version,
+                   version,
+                   confirmed_by,
+                   confirmed_at,
+                   raw_payload
+            from app.bank_transaction_category_confirmations
+            where status = 'active'
+              and coalesce(legacy_transaction_id, bank_transaction_id::text) = any(%s)
+            order by coalesce(legacy_transaction_id, bank_transaction_id::text), confirmed_at desc
             """,
             (list(identity_to_row_id),),
         )
@@ -166,12 +185,47 @@ class BankDetailSqlProjectionBuilder:
             category_code = text(row.get("category"))
             if transaction_id is None:
                 continue
+            raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
+            normalized_payload = (
+                raw_payload.get("normalized_payload")
+                if isinstance(raw_payload.get("normalized_payload"), dict)
+                else {}
+            )
             result[transaction_id] = {
                 "category_code": category_code,
-                "category_label": BankTransactionCategoryService.label_for(category_code),
-                "category_path": BankTransactionCategoryService.path_for(category_code),
+                "category_label": text(normalized_payload.get("category_label")) or BankTransactionCategoryService.label_for(category_code),
+                "category_path": text_list(normalized_payload.get("category_path")) or BankTransactionCategoryService.path_for(category_code),
+                "category_primary_label": text(normalized_payload.get("category_primary_label")),
+                "category_sub_label": text(normalized_payload.get("category_sub_label")),
+                "category_label_path": text_list(normalized_payload.get("category_label_path")),
                 "source": text(row.get("source")) or "manual",
                 "category_version": int(row.get("version") or 0),
+                "category_rule_version": text(normalized_payload.get("category_rule_version")),
+            }
+        for row in confirmation_rows:
+            transaction_id = identity_to_row_id.get(text(row.get("transaction_id")) or "")
+            category_code = text(row.get("category_code"))
+            if transaction_id is None or not category_code:
+                continue
+            raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
+            normalized_payload = (
+                raw_payload.get("normalized_payload")
+                if isinstance(raw_payload.get("normalized_payload"), dict)
+                else {}
+            )
+            result[transaction_id] = {
+                "category_code": category_code,
+                "category_label": text(normalized_payload.get("category_label")) or BankTransactionCategoryService.label_for(category_code),
+                "category_path": text_list(normalized_payload.get("category_path")) or BankTransactionCategoryService.path_for(category_code),
+                "category_primary_label": text(normalized_payload.get("category_primary_label")),
+                "category_sub_label": text(normalized_payload.get("category_sub_label")),
+                "category_label_path": text_list(normalized_payload.get("category_label_path")),
+                "source": "auto_confirmation",
+                "category_version": int(row.get("version") or normalized_payload.get("version") or 0),
+                "category_rule_version": text(row.get("rule_version")) or text(normalized_payload.get("rule_version")),
+                "candidate_category_codes": text_list(
+                    row.get("candidate_category_codes") or normalized_payload.get("candidate_category_codes")
+                ),
             }
         return result
 
@@ -335,6 +389,10 @@ class BankDetailSqlProjectionBuilder:
         }
         auto = auto_category or {}
         effective = resolve_effective_category(manual, auto)
+        manual_source = text(manual.get("source")) or ""
+        manual_confirmed_code = manual.get("category_code") if manual_source == "auto_confirmation" else None
+        auto_status = text(auto.get("category_resolution_status")) if isinstance(auto, dict) else None
+        category_resolution_status = "manual_confirmed" if manual_confirmed_code else (auto_status or "unmatched")
         relation_payload = relation or {"oa_relation_tag": "无oa", "invoice_relation_tag": "无发票", "relation_case_id": None}
         relation_tags = [
             str(relation_payload.get("oa_relation_tag") or "无oa"),
@@ -376,6 +434,7 @@ class BankDetailSqlProjectionBuilder:
             "manual_category_label_path": list(manual.get("category_label_path") or []),
             "manual_category_source": manual.get("source") or "",
             "manual_category_version": manual.get("category_version"),
+            "manual_confirmed_category_code": manual_confirmed_code,
             "auto_category_code": auto.get("category_code"),
             "auto_category_label": auto.get("category_label"),
             "auto_category_path": list(auto.get("category_path") or []),
@@ -387,6 +446,10 @@ class BankDetailSqlProjectionBuilder:
             "auto_category_reason": auto.get("reason"),
             "auto_category_confidence": auto.get("confidence"),
             "auto_category_rule_version": auto.get("rule_version") or BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION,
+            "auto_candidate_category_codes": list(auto.get("auto_candidate_category_codes") or []),
+            "auto_candidate_categories": list(auto.get("auto_candidate_categories") or []),
+            "category_resolution_status": category_resolution_status,
+            "category_rule_version": auto.get("rule_version") or manual.get("category_rule_version") or "",
             "internal_transfer_counterpart": internal_transfer_counterpart,
             "effective_category_code": effective.get("effective_category_code"),
             "effective_category_label": effective.get("effective_category_label"),

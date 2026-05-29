@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from fin_ops_platform.services.bank_transaction_auto_category_service import (
-    BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION,
-    BankTransactionAutoCategoryService,
-    resolve_effective_category,
-)
+from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService, resolve_effective_category
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 
 
@@ -42,7 +38,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestion["source"], "auto")
         self.assertEqual(suggestion["rule_code"], "fee_text_keyword")
         self.assertEqual(suggestion["confidence"], "high")
-        self.assertEqual(suggestion["rule_version"], BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION)
+        self.assertEqual(suggestion["rule_version"], "bank-auto-tag-rules:1")
         self.assertEqual(suggestions["txn-fee-counterparty"]["category_code"], "fee")
 
     def test_plain_service_fee_text_is_not_bank_fee(self) -> None:
@@ -154,7 +150,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(evidence["tag_code"], "salary")
         self.assertEqual(evidence["tag_label"], "人员薪酬")
         self.assertEqual(evidence["rule_code"], "salary_text_keyword")
-        self.assertEqual(evidence["rule_version"], BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION)
+        self.assertEqual(evidence["rule_version"], "bank-auto-tag-rules:12")
         self.assertEqual(evidence["condition_type"], "contains_any")
         self.assertEqual(evidence["semantic_field"], "note_text")
         self.assertEqual(evidence["semantic_field_label"], "备注/附言/客户附言")
@@ -273,6 +269,95 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestion["auto_category_evidence"]["matched_text"], "网银、服务费")
         self.assertNotIn("txn-only-online-banking", suggestions)
 
+    def test_single_ordinary_rule_match_marks_auto_matched_and_candidate_code(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 15,
+                "definitions": [
+                    {
+                        "code": "custom_office",
+                        "label": "办公",
+                        "path": ["自动识别", "办公"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 10,
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "exact_any": [],
+                            "contains_any": ["办公用品"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    }
+                ],
+            }
+        )
+
+        suggestion = self.service.suggest_for_rows([{"id": "txn-office", "summary": "购买办公用品"}])["txn-office"]
+
+        self.assertEqual(suggestion["category_resolution_status"], "auto_matched")
+        self.assertEqual(suggestion["category_code"], "custom_office")
+        self.assertEqual(suggestion["auto_category_code"], "custom_office")
+        self.assertEqual(suggestion["auto_candidate_category_codes"], ["custom_office"])
+        self.assertEqual(suggestion["auto_candidate_categories"][0]["category_code"], "custom_office")
+
+    def test_multiple_ordinary_rule_matches_require_confirmation_in_rule_order(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 16,
+                "definitions": [
+                    {
+                        "code": "custom_project_insurance",
+                        "label": "保证金保险",
+                        "path": ["自动识别", "保证金保险"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 20,
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "exact_any": [],
+                            "contains_any": ["保险"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    },
+                    {
+                        "code": "custom_staff_insurance",
+                        "label": "人员保险",
+                        "path": ["自动识别", "人员保险"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 10,
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "exact_any": [],
+                            "contains_any": ["保险费"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    },
+                ],
+            }
+        )
+
+        suggestion = self.service.suggest_for_rows([{"id": "txn-insurance", "summary": "保险费"}])["txn-insurance"]
+
+        self.assertEqual(suggestion["category_resolution_status"], "needs_confirmation")
+        self.assertIsNone(suggestion["category_code"])
+        self.assertIsNone(suggestion["auto_category_code"])
+        self.assertEqual(
+            suggestion["auto_candidate_category_codes"],
+            ["custom_staff_insurance", "custom_project_insurance"],
+        )
+        self.assertEqual(
+            [item["category_code"] for item in suggestion["auto_candidate_categories"]],
+            ["custom_staff_insurance", "custom_project_insurance"],
+        )
+        self.assertEqual(suggestion["rule_version"], "bank-auto-tag-rules:16")
+
     def test_external_turnover_candidate_runs_after_specific_business_rules(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [
@@ -382,6 +467,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
 
         self.assertEqual(suggestions["txn-transfer-out"]["category_code"], "internal_transfer")
         self.assertEqual(suggestions["txn-transfer-in"]["category_code"], "internal_transfer")
+        self.assertEqual(suggestions["txn-transfer-out"]["category_resolution_status"], "internal_transfer")
         self.assertEqual(suggestions["txn-transfer-out"]["category_label"], "内部往来款")
         self.assertEqual(suggestions["txn-transfer-out"]["rule_code"], "internal_transfer_pair")
         self.assertIn("txn-transfer-in", suggestions["txn-transfer-out"]["reason"])

@@ -31,30 +31,85 @@ function requestPayload(fetchMock: ReturnType<typeof installMockApiFetch>, pathn
 
 async function waitForLoadedRule(drawer: HTMLElement, label: string) {
   await waitFor(() => {
-    expect(within(drawer).getByRole("heading", { name: label })).toBeInTheDocument();
+    expect(within(drawer).getByDisplayValue(label)).toBeInTheDocument();
   });
 }
 
-function lastRuleCard(drawer: HTMLElement) {
-  const cards = drawer.querySelectorAll(".bank-auto-tag-rule-card");
-  const card = cards[cards.length - 1];
-  if (!(card instanceof HTMLElement)) {
-    throw new Error("rule card not found");
+function rowForText(drawer: HTMLElement, text: string) {
+  const cellContent = within(drawer).getByText(text);
+  const row = cellContent.closest("tr");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error(`row for ${text} not found`);
   }
-  return card;
+  return row;
 }
 
-async function editRuleLabel(user: ReturnType<typeof userEvent.setup>, card: HTMLElement, primary: string, sub: string) {
-  await user.click(within(card).getByRole("button", { name: /^编辑标签/ }));
-  const primaryInput = within(card).getByLabelText("主标签名称", { selector: "input" });
-  const subInput = within(card).getByLabelText("子标签名称", { selector: "input" });
+function rowForDisplayValue(drawer: HTMLElement, value: string) {
+  const input = within(drawer).getByDisplayValue(value);
+  const row = input.closest("tr");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error(`row for ${value} not found`);
+  }
+  return row;
+}
+
+function buttonByName(container: HTMLElement, name: string) {
+  const button = Array.from(container.querySelectorAll("button"))
+    .find((item) => item.getAttribute("aria-label") === name || item.textContent?.trim() === name);
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`button ${name} not found`);
+  }
+  return button;
+}
+
+function matchFieldCombobox(row: HTMLElement) {
+  const combobox = Array.from(row.querySelectorAll('[role="combobox"]'))
+    .find((item) => item.getAttribute("aria-labelledby")?.endsWith("-fields-label"));
+  if (!(combobox instanceof HTMLElement)) {
+    throw new Error("match field combobox not found");
+  }
+  return combobox;
+}
+
+function lastEditableRow(drawer: HTMLElement) {
+  const rows = Array.from(drawer.querySelectorAll(".bank-auto-tag-rule-row"));
+  const row = rows.at(-1);
+  if (!(row instanceof HTMLElement)) {
+    throw new Error("rule row not found");
+  }
+  return row;
+}
+
+async function editRuleLabel(user: ReturnType<typeof userEvent.setup>, row: HTMLElement, primary: string, sub: string) {
+  const primaryInput = within(row).getByLabelText(/主标签$/, { selector: "input" });
+  const subInput = within(row).getByLabelText(/子标签$/, { selector: "input" });
   await user.clear(primaryInput);
-  await user.type(primaryInput, primary);
+  if (primary) {
+    await user.type(primaryInput, primary);
+  }
   await user.clear(subInput);
   if (sub) {
     await user.type(subInput, sub);
   }
-  await user.keyboard("{Enter}");
+}
+
+async function editCondition(
+  user: ReturnType<typeof userEvent.setup>,
+  drawer: HTMLElement,
+  ruleLabel: string,
+  conditionLabel: string,
+  value: string,
+) {
+  await user.click(buttonByName(drawer, `编辑${ruleLabel}${conditionLabel}`));
+  const dialog = await screen.findByRole("dialog", { name: conditionLabel });
+  const textarea = within(dialog).getByRole("textbox");
+  await user.clear(textarea);
+  if (value) {
+    await user.type(textarea, value);
+  }
+  await user.click(within(dialog).getByRole("button", { name: "确定" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: conditionLabel })).not.toBeInTheDocument());
+  await waitFor(() => expect(drawer).not.toHaveAttribute("aria-hidden", "true"));
 }
 
 afterEach(() => {
@@ -62,7 +117,7 @@ afterEach(() => {
 });
 
 describe("AutoTagRulesDrawer", () => {
-  test("reorders active rules by drag ids without mutating the original list", () => {
+  test("reorders active rules by ids without mutating the original list", () => {
     const rules = [
       { localId: "fee" },
       { localId: "salary" },
@@ -82,56 +137,26 @@ describe("AutoTagRulesDrawer", () => {
     expect(reorderRulesById(rules, "missing", "fee")).toBe(rules);
   });
 
-  test("loads system, active, and archived rule areas", async () => {
+  test("loads active rules as a wide table with fixed system priority first", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderDrawer();
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    const table = within(drawer).getByRole("table", { name: "自动标签规则表格" });
 
-    expect(within(drawer).getByText("优先级 0")).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "流水类型" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "主标签" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "不包含字样" })).toBeInTheDocument();
     expect(within(drawer).getByText("内部往来款")).toBeInTheDocument();
-    expect(within(drawer).getByText("优先级 1")).toBeInTheDocument();
-    await waitForLoadedRule(drawer, "费用 / 手续费");
-    expect(within(drawer).queryByLabelText("标签名称", { selector: "input" })).not.toBeInTheDocument();
+    expect(rowForText(drawer, "系统规则")).toHaveTextContent("1");
+    expect(within(drawer).getAllByDisplayValue("费用").length).toBeGreaterThan(0);
+    expect(within(drawer).getByDisplayValue("手续费")).toBeInTheDocument();
+    expect(rowForText(drawer, "手续费")).toHaveTextContent("2");
+    expect(within(drawer).queryByText("OA中的类型")).not.toBeInTheDocument();
 
     await user.click(within(drawer).getByRole("button", { name: "停用" }));
     expect(await within(drawer).findByText("费用 / 旧奖金")).toBeInTheDocument();
-  });
-
-  test("uses a compact rule header with editor content in a sliding panel", async () => {
-    installMockApiFetch();
-    renderDrawer();
-
-    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
-
-    const feeHeading = within(drawer).getByRole("heading", { name: "费用 / 手续费" });
-    const feeCard = feeHeading.closest(".bank-auto-tag-rule-card");
-    const feeHeader = feeCard?.querySelector(".bank-auto-tag-rule-header");
-    expect(feeCard).not.toBeNull();
-    expect(feeCard?.querySelector(".bank-auto-tag-rule-summary")).not.toBeInTheDocument();
-    expect(feeHeader).not.toHaveTextContent("字段");
-    expect(feeHeader).not.toHaveTextContent("精确 0");
-    expect(feeHeader).not.toHaveTextContent("包含任一 手续费");
-    expect(feeCard?.querySelector(".bank-auto-tag-rule-actions")).not.toBeInTheDocument();
-    expect(feeCard?.querySelector(".bank-auto-tag-expand-action")).toBeInTheDocument();
-    expect(feeCard?.querySelector(".bank-auto-tag-rule-editor-shell")).toBeInTheDocument();
-    expect(feeCard?.querySelector(".bank-auto-tag-rule-editor-body")).toBeInTheDocument();
-    expect(feeCard?.querySelector(".bank-auto-tag-condition-grid")).toBeInTheDocument();
-  });
-
-  test("uses sortable drag handles instead of up and down ordering buttons", async () => {
-    installMockApiFetch();
-    renderDrawer();
-
-    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
-
-    expect(within(drawer).queryByRole("button", { name: /上移/ })).not.toBeInTheDocument();
-    expect(within(drawer).queryByRole("button", { name: /下移/ })).not.toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "拖拽排序 费用 / 手续费" })).toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "拖拽排序 费用 / 工资" })).toBeInTheDocument();
   });
 
   test("opens a confirmation dialog before archiving an active rule", async () => {
@@ -140,49 +165,25 @@ describe("AutoTagRulesDrawer", () => {
     renderDrawer();
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
+    await waitForLoadedRule(drawer, "手续费");
 
     await user.click(within(drawer).getByRole("button", { name: "停用 费用 / 手续费" }));
     const dialog = await screen.findByRole("dialog", { name: "确认停用标签" });
     expect(within(dialog).getByText("确定停用「费用 / 手续费」吗？")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "取消" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认停用标签" })).not.toBeInTheDocument());
-    expect(within(drawer).getByRole("heading", { name: "费用 / 手续费" })).toBeInTheDocument();
+    expect(within(drawer).getByDisplayValue("手续费")).toBeInTheDocument();
 
     await user.click(within(drawer).getByRole("button", { name: "停用 费用 / 手续费" }));
     await user.click(within(await screen.findByRole("dialog", { name: "确认停用标签" })).getByRole("button", { name: "确认停用" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认停用标签" })).not.toBeInTheDocument());
-    expect(within(drawer).queryByRole("heading", { name: "费用 / 手续费" })).not.toBeInTheDocument();
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    expect(within(drawer).queryByDisplayValue("手续费")).not.toBeInTheDocument();
+    await user.click(buttonByName(drawer, "保存"));
 
     const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
     expect(payload?.archived_rules).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "fee", label: "手续费" }),
     ]));
-  });
-
-  test("shows production rule controls without exposing hidden system fields", async () => {
-    installMockApiFetch();
-    renderDrawer();
-
-    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
-
-    expect(within(drawer).queryByLabelText("适用方向")).not.toBeInTheDocument();
-    expect(within(drawer).queryByLabelText("适用账户范围")).not.toBeInTheDocument();
-    expect(within(drawer).queryByLabelText("账户范围值")).not.toBeInTheDocument();
-    expect(within(drawer).queryByLabelText("主标签名称", { selector: "input" })).not.toBeInTheDocument();
-    expect(within(drawer).queryByLabelText("子标签名称", { selector: "input" })).not.toBeInTheDocument();
-    expect(within(drawer).getByLabelText("必须同时包含", { selector: "textarea" })).toBeInTheDocument();
-    expect(within(drawer).getByLabelText("不包含字样", { selector: "textarea" })).toBeInTheDocument();
-    expect(within(drawer).queryByLabelText("正则命中", { selector: "textarea" })).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("不限账户时无需填写")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("一行一个完整匹配文本")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("任意一行命中即可")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("stop_on_match")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("review_required")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("route_to")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("规则ID")).not.toBeInTheDocument();
   });
 
   test("manages match fields with select all and clear actions without showing all text as an option", async () => {
@@ -191,26 +192,24 @@ describe("AutoTagRulesDrawer", () => {
     renderDrawer();
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
-    const card = drawer.querySelector(".bank-auto-tag-rule-card");
-    if (!(card instanceof HTMLElement)) {
-      throw new Error("rule card not found");
-    }
-    await editRuleLabel(user, card, "往来款", "外部往来候选");
-    await user.type(within(card).getByLabelText("包含任一", { selector: "textarea" }), "借据号");
+    await waitForLoadedRule(drawer, "手续费");
+    const feeRow = rowForText(drawer, "手续费");
+    await editRuleLabel(user, feeRow, "往来款", "外部往来候选");
+    await editCondition(user, drawer, "往来款 / 外部往来候选", "包含", "借据号");
+    const editedRow = rowForDisplayValue(drawer, "外部往来候选");
 
-    await user.click(within(card).getByRole("button", { name: "清空匹配字段" }));
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    await user.click(buttonByName(editedRow, "清空"));
+    await user.click(buttonByName(drawer, "保存"));
 
-    expect(await within(drawer).findByText("往来款 / 外部往来候选 至少选择一个匹配字段。")).toBeInTheDocument();
+    expect(await within(drawer).findByText("往来款 至少选择一个匹配字段。")).toBeInTheDocument();
     expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
 
-    await user.click(within(card).getByRole("button", { name: "全选匹配字段" }));
-    await user.click(within(card).getByLabelText("匹配字段"));
+    await user.click(buttonByName(editedRow, "全选"));
+    await user.click(matchFieldCombobox(editedRow));
     const listbox = await screen.findByRole("listbox");
     expect(within(listbox).queryByRole("option", { name: /全部文本/ })).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    await user.click(buttonByName(drawer, "保存"));
 
     const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
     expect(payload?.active_rules).toEqual(expect.arrayContaining([
@@ -229,21 +228,23 @@ describe("AutoTagRulesDrawer", () => {
     ]));
   });
 
-  test("edits labels inline, toggles direction, and normalizes hidden account and regex fields", async () => {
+  test("edits labels and multiline condition cells in the table", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderDrawer();
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
+    await waitForLoadedRule(drawer, "手续费");
     await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
 
-    const card = lastRuleCard(drawer);
-    await editRuleLabel(user, card, "往来款", "外部往来候选");
-    await user.click(within(card).getByRole("button", { name: "支出" }));
-    await user.type(within(card).getByLabelText("包含任一", { selector: "textarea" }), "借据号");
-    await user.type(within(card).getByLabelText("必须同时包含", { selector: "textarea" }), "还款");
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    const row = lastEditableRow(drawer);
+    await editRuleLabel(user, row, "往来款", "外部往来候选");
+    const editedRow = rowForDisplayValue(drawer, "外部往来候选");
+    await user.click(within(editedRow).getByText("不限"));
+    await user.click(await screen.findByRole("option", { name: "支出" }));
+    await editCondition(user, drawer, "往来款 / 外部往来候选", "包含", "借据号");
+    await editCondition(user, drawer, "往来款 / 外部往来候选", "必须同时包含", "还款");
+    await user.click(buttonByName(drawer, "保存"));
 
     const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
     expect(payload?.active_rules).toEqual(expect.arrayContaining([
@@ -263,94 +264,17 @@ describe("AutoTagRulesDrawer", () => {
     ]));
   });
 
-  test("keeps Enter-created new lines visible while editing rule keywords", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
-    renderDrawer();
-
-    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
-    await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
-
-    const card = lastRuleCard(drawer);
-    await editRuleLabel(user, card, "往来款", "外部往来候选");
-    const textarea = within(card).getByLabelText("包含任一", { selector: "textarea" });
-    await user.type(textarea, "借款{Enter}");
-
-    expect(textarea).toHaveValue("借款\n");
-
-    await user.type(textarea, "还款");
-    expect(textarea).toHaveValue("借款\n还款");
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
-
-    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
-    expect(payload?.active_rules).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        label: "外部往来候选",
-        output_primary_label: "往来款",
-        output_sub_label: "外部往来候选",
-        rules: expect.objectContaining({
-          contains_any: ["借款", "还款"],
-        }),
-      }),
-    ]));
-  });
-
-  test("keeps automatic tag rule drawer styling simple and non-truncating", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
-
-    expect(source).toMatch(/\.bank-auto-tag-rule-list\s*\{[^}]*background:\s*#dbe5f2/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*border:\s*1px solid #9fb4cf/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-card\s*\{[^}]*overflow:\s*visible/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*border-color:\s*#2563eb/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-card\.expanded\s*\{[^}]*box-shadow:\s*inset 5px 0 0 #1d4ed8/s);
-    expect(source).toMatch(/\.bank-auto-tag-drag-handle\s*\{/s);
-    expect(source).toMatch(/\.bank-auto-tag-inline-delete-action\s*\{/s);
-    expect(source).toMatch(/\.bank-auto-tag-expand-action\s*\{/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-card\.dragging\s*\{[^}]*box-shadow:/s);
-    expect(source).toMatch(/\.bank-auto-tag-field-actions\s*\{/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-editor-slide\s*\{[^}]*transition:[^}]*transform[^}]*opacity/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-editor-shell\.MuiCollapse-entered\s+\.bank-auto-tag-rule-editor-slide\s*\{[^}]*transform:\s*translateX\(0\)/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-editor-body\s*\{[^}]*grid-template-columns:\s*minmax\(240px,\s*360px\) minmax\(0,\s*1fr\)/s);
-    expect(source).toMatch(/\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).toMatch(/@media \(max-width:\s*1200px\)[\s\S]*\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).toMatch(/@media \(max-width:\s*720px\)[\s\S]*\.bank-auto-tag-condition-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
-  });
-
-  test("uses MUI Collapse for expanded rule editor mounting", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/features/bankDetails/AutoTagRulesDrawer.tsx"), "utf8");
-
-    expect(source).toContain("@mui/material/Collapse");
-    expect(source).toContain("<Collapse");
-    expect(source).toContain("unmountOnExit");
-    expect(source).not.toContain("setEditorMounted");
-  });
-
-  test("uses dnd-kit sortable primitives for active rule ordering", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/features/bankDetails/AutoTagRulesDrawer.tsx"), "utf8");
-
-    expect(source).toContain("@dnd-kit/core");
-    expect(source).toContain("@dnd-kit/sortable");
-    expect(source).toContain("@dnd-kit/utilities");
-    expect(source).toContain("DndContext");
-    expect(source).toContain("SortableContext");
-    expect(source).toContain("useSortable");
-    expect(source).toContain("verticalListSortingStrategy");
-    expect(source).toContain("sortableKeyboardCoordinates");
-    expect(source).toContain("reorderRulesById");
-  });
-
   test("validates active rules before save", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderDrawer();
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
+    await waitForLoadedRule(drawer, "手续费");
     await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    await user.click(buttonByName(drawer, "保存"));
 
-    expect(await within(drawer).findByText("优先级 3 的主标签名称不能为空。")).toBeInTheDocument();
+    expect(await within(drawer).findByText("优先级 4 的主标签名称不能为空。")).toBeInTheDocument();
     expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
     expect(within(drawer).queryByText(/正则命中/)).not.toBeInTheDocument();
   });
@@ -361,18 +285,15 @@ describe("AutoTagRulesDrawer", () => {
     renderDrawer();
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
-    const firstCard = drawer.querySelector(".bank-auto-tag-rule-card");
-    if (!(firstCard instanceof HTMLElement)) {
-      throw new Error("rule card not found");
-    }
-    await editRuleLabel(user, firstCard, "费用", "手续费调整");
+    await waitForLoadedRule(drawer, "手续费");
+    const firstRow = rowForText(drawer, "手续费");
+    await editRuleLabel(user, firstRow, "费用", "手续费调整");
     await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
 
     await user.click(within(drawer).getByRole("button", { name: "停用 未命名标签" }));
     await user.click(within(await screen.findByRole("dialog", { name: "确认停用标签" })).getByRole("button", { name: "确认停用" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认停用标签" })).not.toBeInTheDocument());
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    await user.click(buttonByName(drawer, "保存"));
 
     const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
     expect(payload?.archived_rules).toEqual([
@@ -390,13 +311,13 @@ describe("AutoTagRulesDrawer", () => {
     renderDrawer(onSaved);
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await waitForLoadedRule(drawer, "费用 / 手续费");
+    await waitForLoadedRule(drawer, "手续费");
     await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
 
-    const card = lastRuleCard(drawer);
-    await editRuleLabel(user, card, "收入", "银行利息");
-    await user.type(within(card).getByLabelText("包含任一", { selector: "textarea" }), "利息");
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    const row = lastEditableRow(drawer);
+    await editRuleLabel(user, row, "收入", "银行利息");
+    await editCondition(user, drawer, "收入 / 银行利息", "包含", "利息");
+    await user.click(buttonByName(drawer, "保存"));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
@@ -410,5 +331,16 @@ describe("AutoTagRulesDrawer", () => {
         rules: expect.objectContaining({ regex_any: [] }),
       }),
     ]));
+  });
+
+  test("keeps automatic tag rule drawer styling table-based and non-truncating", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+
+    expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s*\{[^}]*width:\s*min\(1280px,\s*92vw\)/s);
+    expect(source).toMatch(/\.bank-auto-tag-table-container\s*\{[^}]*overflow-x:\s*hidden/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*table-layout:\s*fixed/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-table\s+\.MuiTableCell-root\s*\{[^}]*white-space:\s*normal/s);
+    expect(source).toMatch(/\.bank-auto-tag-condition-summary\.MuiButton-root\s*\{[^}]*min-height:\s*36px/s);
+    expect(source).toMatch(/\.bank-auto-tag-condition-preview\s*\{[^}]*white-space:\s*normal/s);
   });
 });

@@ -37,8 +37,11 @@ class FakeConnection:
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         self.calls.append(("fetch_all", sql, params))
-        if "from job.read_model_dirty_scopes" in " ".join(sql.lower().split()):
+        normalized_sql = " ".join(sql.lower().split())
+        if "from job.read_model_dirty_scopes" in normalized_sql:
             return list(self.dirty_scope_rows)
+        if "from app.bank_transaction_category_confirmations" in normalized_sql:
+            return []
         value = self.rows.pop(0) if self.rows else []
         return list(value) if isinstance(value, list) else []
 
@@ -605,6 +608,16 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(repository.saved_rows[0]["auto_category_primary_label"], "费用")
         self.assertEqual(repository.saved_rows[0]["auto_category_sub_label"], "手续费")
         self.assertEqual(repository.saved_rows[0]["auto_category_label_path"], ["费用", "手续费"])
+        self.assertEqual(repository.saved_rows[0]["category_resolution_status"], "auto_matched")
+        self.assertEqual(
+            repository.saved_rows[0]["auto_candidate_category_codes"],
+            ["custom_netbank_certificate_service_fee"],
+        )
+        self.assertEqual(repository.saved_rows[0]["manual_confirmed_category_code"], None)
+        self.assertEqual(
+            repository.saved_rows[0]["category_rule_version"],
+            repository.saved_rows[0]["auto_category_rule_version"],
+        )
         self.assertEqual(repository.saved_rows[0]["effective_category_code"], "custom_netbank_certificate_service_fee")
         self.assertEqual(repository.saved_rows[0]["effective_category_label"], "手续费")
         self.assertEqual(repository.saved_rows[0]["effective_category_primary_label"], "费用")

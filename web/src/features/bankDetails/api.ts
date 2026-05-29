@@ -2,6 +2,8 @@ import type {
   BankDetailAccount,
   BankDetailAccountsRequest,
   BankDetailAccountsResponse,
+  BankDetailAutoCandidateCategory,
+  BankDetailCategoryResolutionStatus,
   BankDetailReadModelStatus,
   BankDetailExportRequest,
   BankDetailExportResponse,
@@ -74,6 +76,9 @@ type ApiBankDetailTransaction = {
   category_label_path?: string[];
   category_source?: string | null;
   category_version?: number | null;
+  category_resolution_status?: string | null;
+  category_rule_version?: string | null;
+  manual_confirmed_category_code?: BankTransactionCategoryCode | null;
   auto_category_code?: BankTransactionCategoryCode | null;
   auto_category_label?: string | null;
   auto_category_path?: string[];
@@ -83,6 +88,8 @@ type ApiBankDetailTransaction = {
   auto_category_source?: string | null;
   auto_category_reason?: string | null;
   auto_category_confidence?: string | null;
+  auto_candidate_category_codes?: unknown[];
+  auto_candidate_categories?: ApiBankDetailAutoCandidateCategory[];
   internal_transfer_counterpart?: ApiBankInternalTransferCounterpart | null;
   effective_category_code?: BankTransactionCategoryCode | null;
   effective_category_label?: string | null;
@@ -95,6 +102,17 @@ type ApiBankDetailTransaction = {
   invoice_relation_tag?: string | null;
   relation_tags?: string[];
   relation_case_id?: string | null;
+};
+
+type ApiBankDetailAutoCandidateCategory = {
+  category_code?: string | null;
+  category_label?: string | null;
+  category_primary_label?: string | null;
+  category_sub_label?: string | null;
+  category_label_path?: unknown[];
+  category_path?: unknown[];
+  rule_code?: string | null;
+  reason?: string | null;
 };
 
 type ApiBankInternalTransferCounterpart = {
@@ -193,6 +211,7 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   bank_detail_export_account_required: "请选择具体银行账户后再导出当前账户。",
   bank_detail_export_account_not_found: "当前银行账户不存在或不在当前筛选范围内。",
   bank_detail_export_row_limit_exceeded: "当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。",
+  invalid_category_confirmation_candidate: "只能选择当前自动规则命中的候选标签。",
 };
 
 function normalizeBankDetailReadModelStatus(value: unknown): BankDetailReadModelStatus {
@@ -368,6 +387,35 @@ function mapInternalTransferCounterpart(
   };
 }
 
+function normalizeCategoryResolutionStatus(value: unknown): BankDetailCategoryResolutionStatus {
+  if (
+    value === "auto_matched"
+    || value === "needs_confirmation"
+    || value === "internal_transfer"
+    || value === "manual_confirmed"
+  ) {
+    return value;
+  }
+  return "unmatched";
+}
+
+function mapAutoCandidateCategory(value: ApiBankDetailAutoCandidateCategory): BankDetailAutoCandidateCategory | null {
+  const categoryCode = String(value.category_code ?? "").trim();
+  if (!categoryCode) {
+    return null;
+  }
+  return {
+    categoryCode,
+    categoryLabel: value.category_label ?? null,
+    categoryPrimaryLabel: value.category_primary_label ?? null,
+    categorySubLabel: value.category_sub_label ?? null,
+    categoryLabelPath: Array.isArray(value.category_label_path) ? value.category_label_path.map(String).filter(Boolean) : [],
+    categoryPath: Array.isArray(value.category_path) ? value.category_path.map(String).filter(Boolean) : [],
+    ruleCode: value.rule_code ?? null,
+    reason: value.reason ?? null,
+  };
+}
+
 function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
   const relationTags = Array.isArray(row.relation_tags)
     ? row.relation_tags.map(String).map((tag) => tag.trim()).filter(Boolean)
@@ -397,6 +445,9 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     categoryLabelPath: Array.isArray(row.category_label_path) ? row.category_label_path.map(String).filter(Boolean) : [],
     categorySource: row.category_source ?? "",
     categoryVersion: row.category_version ?? null,
+    categoryResolutionStatus: normalizeCategoryResolutionStatus(row.category_resolution_status),
+    categoryRuleVersion: row.category_rule_version ?? null,
+    manualConfirmedCategoryCode: row.manual_confirmed_category_code ?? null,
     autoCategoryCode: row.auto_category_code ?? null,
     autoCategoryLabel: row.auto_category_label ?? null,
     autoCategoryPath: Array.isArray(row.auto_category_path) ? row.auto_category_path.map(String).filter(Boolean) : [],
@@ -406,6 +457,12 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     autoCategorySource: row.auto_category_source ?? "",
     autoCategoryReason: row.auto_category_reason ?? null,
     autoCategoryConfidence: row.auto_category_confidence ?? null,
+    autoCandidateCategoryCodes: Array.isArray(row.auto_candidate_category_codes)
+      ? row.auto_candidate_category_codes.map(String).filter(Boolean)
+      : [],
+    autoCandidateCategories: Array.isArray(row.auto_candidate_categories)
+      ? row.auto_candidate_categories.map(mapAutoCandidateCategory).filter((item): item is BankDetailAutoCandidateCategory => item !== null)
+      : [],
     internalTransferCounterpart: mapInternalTransferCounterpart(row.internal_transfer_counterpart),
     effectiveCategoryCode: row.effective_category_code ?? null,
     effectiveCategoryLabel: row.effective_category_label ?? null,
@@ -485,7 +542,7 @@ function mapAutoTagSystemRule(rule: ApiBankAutoTagSystemRule | undefined): BankA
   return {
     code: String(rule?.code ?? "internal_transfer"),
     label: String(rule?.label ?? "内部往来款"),
-    priorityLabel: String(rule?.priority_label ?? "优先级 0"),
+    priorityLabel: String(rule?.priority_label ?? "优先级 1"),
     source: rule?.source === "custom" ? "custom" : "system",
     status: rule?.status === "archived" ? "archived" : "active",
     editable: Boolean(rule?.editable),
@@ -663,6 +720,23 @@ export async function saveBankAutoTagRules(
     body: JSON.stringify(serializeSaveAutoTagRulesRequest(payload)),
   });
   return mapAutoTagRulesResponse(response);
+}
+
+export async function confirmBankDetailCategory(
+  transactionId: string,
+  categoryCode: BankTransactionCategoryCode,
+): Promise<unknown> {
+  return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-confirmation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category_code: categoryCode }),
+  });
+}
+
+export async function revokeBankDetailCategoryConfirmation(transactionId: string): Promise<unknown> {
+  return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-confirmation`, {
+    method: "DELETE",
+  });
 }
 
 export async function downloadBankDetailTransactionsExport({

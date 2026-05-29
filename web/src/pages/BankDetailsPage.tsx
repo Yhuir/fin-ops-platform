@@ -35,7 +35,13 @@ import StatePanel from "../components/common/StatePanel";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
-import { downloadBankDetailTransactionsExport, fetchBankDetailAccounts, fetchBankDetailTransactions } from "../features/bankDetails/api";
+import {
+  confirmBankDetailCategory,
+  downloadBankDetailTransactionsExport,
+  fetchBankDetailAccounts,
+  fetchBankDetailTransactions,
+  revokeBankDetailCategoryConfirmation,
+} from "../features/bankDetails/api";
 import {
   FINANCE_DOMAIN_EVENTS,
   eventAffectedMonths,
@@ -700,7 +706,73 @@ function counterpartyNameDensity(name: string) {
   return "regular";
 }
 
-function TypeCell({ row }: { row: BankDetailTransaction }) {
+function TypeCell({
+  row,
+  confirming,
+  onConfirm,
+  onRevoke,
+}: {
+  row: BankDetailTransaction;
+  confirming: boolean;
+  onConfirm: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
+  onRevoke: (row: BankDetailTransaction) => void;
+}) {
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  if (row.categoryResolutionStatus === "needs_confirmation" && row.autoCandidateCategories.length > 0) {
+    return (
+      <>
+        <Button
+          size="small"
+          variant="outlined"
+          color="warning"
+          onClick={(event) => setAnchorEl(event.currentTarget)}
+          disabled={confirming}
+        >
+          待确认
+        </Button>
+        <Menu
+          anchorEl={anchorEl}
+          open={Boolean(anchorEl)}
+          onClose={() => setAnchorEl(null)}
+        >
+          {row.autoCandidateCategories.map((candidate) => {
+            const labelPath = candidate.categoryLabelPath.length
+              ? candidate.categoryLabelPath.join(" / ")
+              : [candidate.categoryPrimaryLabel, candidate.categorySubLabel].filter(Boolean).join(" / ") || candidate.categoryLabel || candidate.categoryCode;
+            return (
+              <MenuItem
+                key={candidate.categoryCode}
+                onClick={() => {
+                  setAnchorEl(null);
+                  onConfirm(row, candidate.categoryCode);
+                }}
+              >
+                {labelPath}
+              </MenuItem>
+            );
+          })}
+        </Menu>
+      </>
+    );
+  }
+  if (row.categoryResolutionStatus === "manual_confirmed" && row.effectiveCategoryCode) {
+    const displayLabel = row.effectiveCategoryLabelPath.length
+      ? row.effectiveCategoryLabelPath.join(" / ")
+      : [row.effectiveCategoryPrimaryLabel, row.effectiveCategorySubLabel].filter(Boolean).join(" / ") || row.effectiveCategoryLabel || row.effectiveCategoryCode;
+    return (
+      <Stack spacing={0.5} alignItems="center">
+        <BankCategoryTag
+          categoryCode={row.effectiveCategoryCode}
+          compact
+          hierarchyTooltip
+          label={displayLabel}
+        />
+        <Button size="small" variant="text" onClick={() => onRevoke(row)} disabled={confirming}>
+          撤销
+        </Button>
+      </Stack>
+    );
+  }
   if (!row.autoCategoryCode || !row.autoCategoryLabel) {
     return <Typography className="bank-auto-type-empty" component="span">-</Typography>;
   }
@@ -836,6 +908,7 @@ export default function BankDetailsPage() {
   const [rulesDrawerOpen, setRulesDrawerOpen] = useState(false);
   const [rulesFeedback, setRulesFeedback] = useState<string | null>(null);
   const [rulesRefreshStatus, setRulesRefreshStatus] = useState<"idle" | "refreshing" | "fresh">("idle");
+  const [categoryMutationId, setCategoryMutationId] = useState<string | null>(null);
   const rulesRefreshPendingRef = useRef(false);
   const hasAccountPayloadRef = useRef(false);
   const hasTransactionPayloadRef = useRef(false);
@@ -1108,6 +1181,24 @@ export default function BankDetailsPage() {
   const handleSearchKeywordChange = (value: string) => {
     resetToFirstPage();
     setSearchInput(value);
+  };
+
+  const handleConfirmCategory = (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => {
+    setCategoryMutationId(row.id);
+    setError(null);
+    confirmBankDetailCategory(row.id, categoryCode)
+      .then(() => setRefreshToken((current) => current + 1))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签确认失败。"))
+      .finally(() => setCategoryMutationId(null));
+  };
+
+  const handleRevokeCategoryConfirmation = (row: BankDetailTransaction) => {
+    setCategoryMutationId(row.id);
+    setError(null);
+    revokeBankDetailCategoryConfirmation(row.id)
+      .then(() => setRefreshToken((current) => current + 1))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签撤销失败。"))
+      .finally(() => setCategoryMutationId(null));
   };
 
   const handleCategoryFilterChange = (filter: BankCategoryFilter) => {
@@ -1454,7 +1545,12 @@ export default function BankDetailsPage() {
                           </Stack>
                         </TableCell>
                         <TableCell align="center" className="bank-col-type">
-                          <TypeCell row={row} />
+                          <TypeCell
+                            row={row}
+                            confirming={categoryMutationId === row.id}
+                            onConfirm={handleConfirmCategory}
+                            onRevoke={handleRevokeCategoryConfirmation}
+                          />
                         </TableCell>
                         <TableCell align="right" className="bank-col-amount">
                           <Stack className="bank-amount-cell" alignItems="stretch" justifyContent="center" spacing={0.5} sx={{ width: "100%" }}>

@@ -57,6 +57,37 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(_json(save_response)["selected_tag_codes"], ["fee"])
         self.assertEqual([batch["batch_type"] for batch in enabled_batches["batches"]], ["fee"])
 
+    def test_archived_selected_tag_is_removed_by_auto_tag_rule_update(self) -> None:
+        app = build_application()
+        selection = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
+        app.handle_request(
+            "PUT",
+            "/api/no-oa-bank-batches/tag-selection",
+            body=json.dumps({"expected_version": selection["version"], "selected_tag_codes": ["salary"]}),
+            headers={"Content-Type": "application/json"},
+        )
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        salary = next(rule for rule in current["active_rules"] if rule["code"] == "salary")
+
+        app._app_settings_service.update_bank_auto_tag_rules(
+            {
+                "expected_version": current["version"],
+                "active_rules": [rule for rule in current["active_rules"] if rule["code"] != "salary"],
+                "archived_rules": [{**salary, "rules": salary["rules"]}],
+            },
+            actor_id="settings-owner",
+        )
+        updated = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
+
+        self.assertEqual(updated["selected_tag_codes"], [])
+        self.assertNotIn("salary", [tag["code"] for tag in updated["active_tags"]])
+        self.assertEqual(updated["inactive_selected_tag_codes"], [])
+        audit = app._audit_service.as_dicts()[-1]
+        self.assertEqual(
+            audit["metadata"]["detached_no_oa_bank_batch_tag_references"],
+            [{"tag_code": "salary"}],
+        )
+
     def test_selected_row_submit_creates_one_batch_for_same_bank_subset(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(

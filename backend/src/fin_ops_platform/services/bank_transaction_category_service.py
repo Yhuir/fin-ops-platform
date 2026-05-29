@@ -238,6 +238,26 @@ BANK_AUTO_TAG_ALLOWED_DIRECTIONS = {"income", "expense", "any"}
 BANK_AUTO_TAG_ALLOWED_ACCOUNT_SCOPE_TYPES = {"any", "bank_account", "account_type", "bank"}
 DEFAULT_BANK_AUTO_TAG_DIRECTION = "any"
 DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE = {"type": "any", "values": []}
+BANK_AUTO_TAG_FILE_FIELD_MAPPING_VERSION = "2026-05-29-bank-auto-tag-field-mapping-v1"
+BANK_AUTO_TAG_FILE_SCHEMA_VERSION = "2026-05-29-bank-auto-tag-rules-normalized-v1"
+BANK_AUTO_TAG_FILE_TEXT_FIELD_LABEL = "用途/交易用途、摘要、备注/附言/客户附言"
+BANK_AUTO_TAG_FILE_FIELD_MAPPINGS: dict[str, list[str]] = {
+    BANK_AUTO_TAG_FILE_TEXT_FIELD_LABEL: ["purpose_text", "summary_text", "note_text", "detail_text"],
+    "对方户": ["counterparty_name"],
+}
+BANK_AUTO_TAG_FILE_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
+    "flow_type": ("流水类型", "flow_type"),
+    "primary_label": ("分类（一级）", "主标签", "primary_label"),
+    "sub_label": ("银行流水标签（贰级）", "银行流水标签（二级）", "子标签", "sub_label"),
+    "query_fields": ("选择查询的项", "选择查询的项（可全选/清空）", "query_fields"),
+    "contains": ("包含", "contains"),
+    "contains_all": ("必须同时包含", "contains_all"),
+    "exact": ("精准命重", "精准命中", "exact"),
+    "none_of": ("不包含字样", "none_of"),
+    "priority": ("优先级", "priority"),
+    "source_row": ("source_row", "源行号"),
+}
+_BANK_AUTO_TAG_FILE_TERM_SPLIT_RE = re.compile(r"[\r\n、，,；;]+")
 DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
     "fee": {
         "priority": 10,
@@ -376,7 +396,7 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
 BANK_AUTO_TAG_SYSTEM_RULE = {
     "code": BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE,
     "label": "内部往来款",
-    "priority_label": "优先级 0",
+    "priority_label": "优先级 1",
     "source": "system",
     "status": "active",
     "editable": False,
@@ -532,6 +552,13 @@ class BankTransactionCategoryService:
         with self._lock:
             return deepcopy(self._tag_dictionary_payload)
 
+    def tag_dictionary_version(self) -> int:
+        with self._lock:
+            return int(self._tag_dictionary_payload.get("version") or BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION)
+
+    def auto_tag_rule_version_label(self) -> str:
+        return f"bank-auto-tag-rules:{self.tag_dictionary_version()}"
+
     def configure_tag_dictionary(self, payload: dict[str, Any] | None) -> None:
         normalized_payload = self._normalize_tag_dictionary_payload(payload)
         with self._lock:
@@ -569,7 +596,7 @@ class BankTransactionCategoryService:
             "system_rule": dict(BANK_AUTO_TAG_SYSTEM_RULE),
             "active_rules": [
                 cls._public_auto_tag_rule(definition, priority_index=index)
-                for index, definition in enumerate(active, start=1)
+                for index, definition in enumerate(active, start=2)
             ],
             "archived_rules": [
                 cls._public_auto_tag_rule(definition, priority_index=None)
@@ -725,6 +752,271 @@ class BankTransactionCategoryService:
             "new_version": int(normalized_next["version"]),
         }
 
+    @classmethod
+    def parse_auto_tag_rule_file_source(
+        cls,
+        source: Any,
+        *,
+        source_name: str | None = None,
+        source_version: str | None = None,
+    ) -> dict[str, Any]:
+        source_payload, raw_rows = cls._auto_tag_file_rows(source)
+        resolved_source_name = str(
+            source_name
+            or source_payload.get("source_name")
+            or source_payload.get("source_workbook_name")
+            or "bank_auto_tag_rules"
+        ).strip()
+        resolved_source_version = str(
+            source_version
+            or source_payload.get("source_version")
+            or source_payload.get("schema_version")
+            or BANK_AUTO_TAG_FILE_SCHEMA_VERSION
+        ).strip()
+        source_hash = str(source_payload.get("source_hash") or "").strip()
+        if not source_hash:
+            source_hash = "sha256:" + hashlib.sha256(
+                json.dumps(raw_rows, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()
+
+        field_errors: list[dict[str, str]] = []
+        active_rules: list[dict[str, Any]] = []
+        skipped_rows = [
+            dict(item)
+            for item in list(source_payload.get("skipped_rows") or [])
+            if isinstance(item, dict)
+        ]
+        seen_label_paths: set[tuple[str, str]] = set()
+
+        for index, row in enumerate(raw_rows):
+            normalized_row = cls._normalize_auto_tag_file_row(row)
+            source_row = str(normalized_row.get("source_row") or index + 1)
+            try:
+                error_row_index = max(int(source_row) - 1, index)
+            except (TypeError, ValueError):
+                error_row_index = index
+            primary_label = str(normalized_row.get("primary_label") or "").strip()
+            sub_label = str(normalized_row.get("sub_label") or "").strip()
+            if primary_label == BANK_AUTO_TAG_SYSTEM_RULE["label"]:
+                if not any(item.get("source_row") == normalized_row.get("source_row") for item in skipped_rows):
+                    skipped_rows.append(
+                        {
+                            "source_row": normalized_row.get("source_row") or index + 1,
+                            "primary_label": primary_label,
+                            "reason": "internal_transfer_system_rule",
+                        }
+                    )
+                continue
+
+            contains_any = cls._split_auto_tag_file_terms(normalized_row.get("contains"))
+            contains_all = cls._split_auto_tag_file_terms(normalized_row.get("contains_all"))
+            exact_any = cls._split_auto_tag_file_terms(normalized_row.get("exact"))
+            none_of = cls._split_auto_tag_file_terms(normalized_row.get("none_of"))
+            has_positive_condition = bool(contains_any or contains_all or exact_any)
+            if not has_positive_condition:
+                if primary_label or sub_label:
+                    skipped_rows.append(
+                        {
+                            "source_row": normalized_row.get("source_row") or index + 1,
+                            "primary_label": primary_label,
+                            "sub_label": sub_label,
+                            "reason": "missing_positive_condition",
+                        }
+                    )
+                continue
+
+            if not primary_label:
+                field_errors.append({"path": f"rows[{error_row_index}].主标签", "message": "主标签不能为空。"})
+            query_fields_label = str(normalized_row.get("query_fields") or "").strip()
+            match_fields = BANK_AUTO_TAG_FILE_FIELD_MAPPINGS.get(query_fields_label)
+            if match_fields is None:
+                field_errors.append({
+                    "path": f"rows[{error_row_index}].选择查询的项",
+                    "message": f"未知的查询字段：{query_fields_label}",
+                })
+                match_fields = []
+            label_path = (primary_label, sub_label)
+            if primary_label and label_path in seen_label_paths:
+                field_errors.append({
+                    "path": f"rows[{error_row_index}].主标签",
+                    "message": "文件规则主标签和子标签组合不能重复。",
+                })
+            seen_label_paths.add(label_path)
+            if not primary_label or not match_fields:
+                continue
+
+            label = sub_label or primary_label
+            active_rules.append(
+                {
+                    "label": label,
+                    "output_primary_label": primary_label,
+                    "output_sub_label": sub_label,
+                    "direction": cls._auto_tag_file_direction(normalized_row.get("flow_type")),
+                    "account_scope": deepcopy(DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE),
+                    "rules": {
+                        "match_fields": list(match_fields),
+                        "exact_any": exact_any,
+                        "contains_any": contains_any,
+                        "contains_all": contains_all,
+                        "none_of": none_of,
+                        "regex_any": [],
+                        "exact": exact_any,
+                        "contains": contains_any,
+                        "excludes": none_of,
+                    },
+                    "source_row": normalized_row.get("source_row") or source_row,
+                }
+            )
+
+        if field_errors:
+            raise BankAutoTagRulesValidationError(
+                "invalid_bank_auto_tag_rule_file",
+                "银行流水标签文件规则校验失败。",
+                field_errors=field_errors,
+            )
+        return {
+            "source": {
+                "source_name": resolved_source_name,
+                "source_version": resolved_source_version,
+                "source_hash": source_hash,
+                "schema_version": str(source_payload.get("schema_version") or BANK_AUTO_TAG_FILE_SCHEMA_VERSION),
+                "field_mapping_version": str(
+                    source_payload.get("field_mapping_version") or BANK_AUTO_TAG_FILE_FIELD_MAPPING_VERSION
+                ),
+            },
+            "active_rules": active_rules,
+            "skipped_rows": skipped_rows,
+        }
+
+    @classmethod
+    def compare_auto_tag_rule_file_sources(cls, left: Any, right: Any) -> dict[str, Any]:
+        left_rules = cls.parse_auto_tag_rule_file_source(left)["active_rules"]
+        right_rules = cls.parse_auto_tag_rule_file_source(right)["active_rules"]
+        left_comparable = [cls._auto_tag_file_rule_comparable(rule) for rule in left_rules]
+        right_comparable = [cls._auto_tag_file_rule_comparable(rule) for rule in right_rules]
+        if left_comparable == right_comparable:
+            return {"matched": True, "diffs": []}
+        diffs: list[dict[str, str]] = []
+        max_len = max(len(left_comparable), len(right_comparable))
+        for index in range(max_len):
+            left_rule = left_comparable[index] if index < len(left_comparable) else None
+            right_rule = right_comparable[index] if index < len(right_comparable) else None
+            if left_rule != right_rule:
+                diffs.append(
+                    {
+                        "path": f"rules[{index}]",
+                        "message": "文件规则内容不一致。",
+                    }
+                )
+        raise BankAutoTagRulesValidationError(
+            "bank_auto_tag_rule_file_diff",
+            "银行流水标签文件规则内容不一致。",
+            field_errors=diffs,
+        )
+
+    @classmethod
+    def normalize_auto_tag_rules_file_replacement(
+        cls,
+        source: Any,
+        *,
+        previous_tag_dictionary: dict[str, Any],
+    ) -> dict[str, Any]:
+        parsed = cls.parse_auto_tag_rule_file_source(source)
+        previous = cls._normalize_tag_dictionary_payload(previous_tag_dictionary)
+        previous_version = int(previous.get("version") or BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION)
+        previous_definitions_by_code = cls._build_tag_definition_index(previous)
+        previous_managed_codes = {
+            code
+            for code, definition in previous_definitions_by_code.items()
+            if cls._is_auto_tag_rule_definition(definition)
+        }
+        reusable_by_label_path: dict[tuple[str, str], dict[str, Any]] = {}
+        for definition in previous_definitions_by_code.values():
+            if not cls._is_auto_tag_rule_definition(definition):
+                continue
+            key = (
+                str(definition.get("output_primary_label") or definition.get("label") or "").strip(),
+                str(definition.get("output_sub_label") or "").strip(),
+            )
+            if key[0] and key not in reusable_by_label_path:
+                reusable_by_label_path[key] = dict(definition)
+
+        active_definitions: list[dict[str, Any]] = []
+        reused_codes: list[str] = []
+        added_codes: list[str] = []
+        active_codes: set[str] = set()
+        occupied_codes = dict(previous_definitions_by_code)
+        for index, rule in enumerate(parsed["active_rules"]):
+            primary_label = str(rule["output_primary_label"])
+            sub_label = str(rule.get("output_sub_label") or "")
+            label = sub_label or primary_label
+            reusable = reusable_by_label_path.get((primary_label, sub_label))
+            if reusable is not None:
+                code = str(reusable["code"])
+                source_type = str(reusable.get("source") or "custom")
+                rule_code = str(reusable.get("rule_code") or code)
+                reused_codes.append(code)
+            else:
+                code = cls._generate_custom_auto_tag_code(label, rule["rules"], occupied_codes)
+                source_type = "custom"
+                rule_code = code
+                added_codes.append(code)
+                occupied_codes[code] = {"code": code}
+            active_codes.add(code)
+            active_definitions.append(
+                {
+                    "code": code,
+                    "label": label,
+                    "path": ["自动识别", label],
+                    "source": source_type if source_type in {"system", "custom"} else "custom",
+                    "status": "active",
+                    "priority": (index + 1) * 10,
+                    "direction": rule["direction"],
+                    "account_scope": deepcopy(DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE),
+                    "output_primary_label": primary_label,
+                    "output_sub_label": sub_label,
+                    "rules": cls._normalize_auto_tag_rule_conditions(rule["rules"], allow_invalid=False),
+                    "rule_code": rule_code,
+                }
+            )
+
+        archived_definitions: list[dict[str, Any]] = []
+        for code in sorted(previous_managed_codes - active_codes):
+            previous_definition = dict(previous_definitions_by_code[code])
+            previous_definition["status"] = "archived"
+            previous_definition.pop("priority", None)
+            archived_definitions.append(previous_definition)
+
+        next_by_code = dict(previous_definitions_by_code)
+        for code in previous_managed_codes:
+            next_by_code.pop(code, None)
+        for definition in [*active_definitions, *archived_definitions]:
+            next_by_code[str(definition["code"])] = definition
+        normalized_next = cls._normalize_tag_dictionary_payload(
+            {
+                "version": previous_version,
+                "definitions": list(next_by_code.values()),
+            }
+        )
+        changes = cls._auto_tag_rule_changes(previous, normalized_next)
+        changes["source"] = dict(parsed["source"])
+        changes["reused_codes"] = sorted(set(reused_codes))
+        changes["added_codes"] = sorted(set(added_codes))
+        changes["skipped_rows"] = [dict(item) for item in parsed["skipped_rows"]]
+        changes["changed"] = bool(
+            changes["changed"]
+            or changes["reused_codes"]
+            or changes["added_codes"]
+            or changes["skipped_rows"]
+        )
+        normalized_next["version"] = previous_version + 1 if changes["changed"] else previous_version
+        return {
+            "tag_dictionary": normalized_next,
+            "changes": changes,
+            "old_version": previous_version,
+            "new_version": int(normalized_next["version"]),
+        }
+
     def get(self, transaction_id: str) -> dict[str, Any]:
         transaction_key = self._normalize_transaction_id(transaction_id)
         with self._lock:
@@ -753,6 +1045,72 @@ class BankTransactionCategoryService:
             allowed_category_codes=set(BANK_TRANSACTION_CATEGORY_DEFINITIONS),
             invalid_category_error="invalid_turnover_category_code",
             invalid_category_message="Only turnover leaf category codes can be selected from turnover ledger.",
+        )
+
+    def confirm_auto_category(
+        self,
+        *,
+        transaction_id: str,
+        category_code: str,
+        candidate_category_codes: list[str],
+        rule_version: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        normalized_transaction_id = self._normalize_transaction_id(transaction_id)
+        normalized_category_code = str(category_code or "").strip()
+        normalized_candidates = [
+            str(code).strip()
+            for code in list(candidate_category_codes or [])
+            if str(code or "").strip()
+        ]
+        if not normalized_transaction_id:
+            raise BankTransactionCategoryValidationError("unknown_transaction_id", "transaction_id is required.")
+        if self._transaction_exists is not None and not self._transaction_exists(normalized_transaction_id):
+            raise BankTransactionCategoryValidationError(
+                "unknown_transaction_id",
+                f"Unknown bank transaction id: {normalized_transaction_id}",
+                transaction_id=normalized_transaction_id,
+            )
+        if normalized_category_code not in normalized_candidates:
+            raise BankTransactionCategoryValidationError(
+                "invalid_category_confirmation_candidate",
+                "只能选择当前自动规则命中的候选标签。",
+                transaction_id=normalized_transaction_id,
+            )
+        definition = self._tag_definitions_by_code.get(normalized_category_code)
+        if not isinstance(definition, dict) or str(definition.get("status") or "active") == "archived":
+            raise BankTransactionCategoryValidationError(
+                "invalid_category_code",
+                f"Invalid bank transaction category code: {normalized_category_code}",
+                transaction_id=normalized_transaction_id,
+            )
+        return self._apply_updates(
+            [
+                {
+                    "transaction_id": normalized_transaction_id,
+                    "category_code": normalized_category_code,
+                    "candidate_category_codes": normalized_candidates,
+                    "rule_version": str(rule_version or "").strip(),
+                }
+            ],
+            actor=actor,
+            source="auto_confirmation",
+        )
+
+    def revoke_auto_category_confirmation(self, *, transaction_id: str, actor: str) -> dict[str, Any]:
+        normalized_transaction_id = self._normalize_transaction_id(transaction_id)
+        if not normalized_transaction_id:
+            raise BankTransactionCategoryValidationError("unknown_transaction_id", "transaction_id is required.")
+        if self._transaction_exists is not None and not self._transaction_exists(normalized_transaction_id):
+            raise BankTransactionCategoryValidationError(
+                "unknown_transaction_id",
+                f"Unknown bank transaction id: {normalized_transaction_id}",
+                transaction_id=normalized_transaction_id,
+            )
+        return self._apply_updates(
+            [{"transaction_id": normalized_transaction_id, "category_code": None}],
+            actor=actor,
+            source="auto_confirmation_revoked",
         )
 
     def _apply_updates(
@@ -838,6 +1196,10 @@ class BankTransactionCategoryService:
                     "updated_at": timestamp,
                     "version": next_version,
                 }
+                if update.get("candidate_category_codes"):
+                    record["candidate_category_codes"] = list(update.get("candidate_category_codes") or [])
+                if update.get("rule_version"):
+                    record["rule_version"] = str(update.get("rule_version") or "")
                 self._categories[transaction_id] = record
                 updated_categories.append(self._public_record(transaction_id, record))
                 audit_entries.append(
@@ -845,6 +1207,9 @@ class BankTransactionCategoryService:
                         "transaction_id": transaction_id,
                         "previous_category_code": previous_code,
                         "category_code": category_code,
+                        "source": source,
+                        "candidate_category_codes": list(update.get("candidate_category_codes") or []),
+                        "rule_version": str(update.get("rule_version") or ""),
                         "updated_by": normalized_actor,
                         "updated_at": timestamp,
                         "version": next_version,
@@ -1320,6 +1685,103 @@ class BankTransactionCategoryService:
             terms.append(text)
         return terms
 
+    @classmethod
+    def _auto_tag_file_rows(cls, source: Any) -> tuple[dict[str, Any], list[Any]]:
+        if isinstance(source, dict):
+            if isinstance(source.get("rules"), list):
+                return dict(source), list(source.get("rules") or [])
+            if isinstance(source.get("rows"), list):
+                return dict(source), cls._worksheet_auto_tag_file_rows(source.get("rows"))
+            return dict(source), []
+        if isinstance(source, list):
+            if source and isinstance(source[0], (list, tuple)):
+                return {}, cls._worksheet_auto_tag_file_rows(source)
+            return {}, list(source)
+        return {}, []
+
+    @classmethod
+    def _worksheet_auto_tag_file_rows(cls, rows: Any) -> list[dict[str, Any]]:
+        raw_rows = list(rows or [])
+        if not raw_rows:
+            return []
+        headers = [str(value or "").strip() for value in list(raw_rows[0] or [])]
+        normalized_rows: list[dict[str, Any]] = []
+        last_flow_type = ""
+        last_primary_label = ""
+        for row_index, row in enumerate(raw_rows[1:], start=1):
+            values = list(row or [])
+            if not any(str(value or "").strip() for value in values):
+                continue
+            raw = {
+                headers[index]: values[index] if index < len(values) else ""
+                for index in range(len(headers))
+                if headers[index]
+            }
+            normalized = cls._normalize_auto_tag_file_row(raw)
+            if normalized.get("flow_type"):
+                last_flow_type = str(normalized["flow_type"])
+            else:
+                normalized["flow_type"] = last_flow_type
+            if normalized.get("primary_label"):
+                last_primary_label = str(normalized["primary_label"])
+            else:
+                normalized["primary_label"] = last_primary_label
+            if not normalized.get("source_row"):
+                normalized["source_row"] = row_index + 1
+            normalized_rows.append(normalized)
+        return normalized_rows
+
+    @classmethod
+    def _normalize_auto_tag_file_row(cls, row: Any) -> dict[str, Any]:
+        raw = row if isinstance(row, dict) else {}
+        normalized: dict[str, Any] = {}
+        for field, aliases in BANK_AUTO_TAG_FILE_HEADER_ALIASES.items():
+            for alias in aliases:
+                if alias in raw:
+                    normalized[field] = raw.get(alias)
+                    break
+            else:
+                normalized[field] = ""
+        return {
+            key: (str(value).strip() if value is not None else "")
+            for key, value in normalized.items()
+        }
+
+    @staticmethod
+    def _split_auto_tag_file_terms(value: Any) -> list[str]:
+        terms: list[str] = []
+        seen: set[str] = set()
+        for item in _BANK_AUTO_TAG_FILE_TERM_SPLIT_RE.split(str(value or "")):
+            term = item.strip()
+            if not term or term in seen:
+                continue
+            seen.add(term)
+            terms.append(term)
+        return terms
+
+    @staticmethod
+    def _auto_tag_file_direction(value: Any) -> str:
+        text = str(value or "").strip()
+        if text == "支出":
+            return "expense"
+        if text == "收入":
+            return "income"
+        return "any"
+
+    @staticmethod
+    def _auto_tag_file_rule_comparable(rule: dict[str, Any]) -> dict[str, Any]:
+        rules = rule.get("rules") if isinstance(rule.get("rules"), dict) else {}
+        return {
+            "output_primary_label": str(rule.get("output_primary_label") or ""),
+            "output_sub_label": str(rule.get("output_sub_label") or ""),
+            "direction": str(rule.get("direction") or "any"),
+            "match_fields": list(rules.get("match_fields") or []),
+            "exact_any": list(rules.get("exact_any") or []),
+            "contains_any": list(rules.get("contains_any") or []),
+            "contains_all": list(rules.get("contains_all") or []),
+            "none_of": list(rules.get("none_of") or []),
+        }
+
     @staticmethod
     def _normalize_match_fields(value: Any, *, allow_invalid: bool = False) -> list[str]:
         fields: list[str] = []
@@ -1361,6 +1823,12 @@ class BankTransactionCategoryService:
                 "updated_by": str(record.get("updated_by") or "").strip(),
                 "updated_at": str(record.get("updated_at") or "").strip(),
                 "version": self._normalize_version(record.get("version")),
+                "candidate_category_codes": [
+                    str(code).strip()
+                    for code in list(record.get("candidate_category_codes") or [])
+                    if str(code or "").strip()
+                ],
+                "rule_version": str(record.get("rule_version") or "").strip(),
             }
         return normalized
 
@@ -1401,6 +1869,12 @@ class BankTransactionCategoryService:
             "transaction_id": transaction_id,
             "category_code": category_code,
             "expected_version": expected_version,
+            "candidate_category_codes": [
+                str(code).strip()
+                for code in list(update.get("candidate_category_codes") or [])
+                if str(code or "").strip()
+            ],
+            "rule_version": str(update.get("rule_version") or "").strip(),
         }
 
     @staticmethod
@@ -1515,4 +1989,6 @@ class BankTransactionCategoryService:
             "source": str(record.get("source") or "") if isinstance(record, dict) else "",
             "updated_by": str(record.get("updated_by") or "") if isinstance(record, dict) else "",
             "updated_at": str(record.get("updated_at") or "") if isinstance(record, dict) else "",
+            "confirmed_candidate_category_codes": list(record.get("candidate_category_codes") or []) if isinstance(record, dict) else [],
+            "category_rule_version": str(record.get("rule_version") or "") if isinstance(record, dict) else "",
         }

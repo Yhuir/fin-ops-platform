@@ -50,6 +50,10 @@ EXPECTED_MIGRATION_FILES = [
     "0036_workbench_generation_consistency.sql",
     "0037_workbench_generation_stats_retention.sql",
     "0038_workbench_generation_stats_runtime_grants.sql",
+    "0039_bank_account_balance_read_model.sql",
+    "0040_pending_invoice_source_versions.sql",
+    "0041_bank_transaction_category_confirmations.sql",
+    "0042_bank_detail_candidate_projection.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

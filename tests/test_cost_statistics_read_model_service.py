@@ -143,6 +143,7 @@ class CostStatisticsReadModelServiceTests(unittest.TestCase):
                     "cache_status": "ready",
                     "entry_count": 4,
                     "source_scope_keys": [],
+                    "source_versions": {},
                 },
                 {
                     "scope_key": "all:all",
@@ -154,6 +155,7 @@ class CostStatisticsReadModelServiceTests(unittest.TestCase):
                     "cache_status": "warming",
                     "entry_count": 2,
                     "source_scope_keys": [],
+                    "source_versions": {},
                 },
             ],
         )

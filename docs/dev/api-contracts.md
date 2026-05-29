@@ -138,16 +138,48 @@
 
 日期筛选只影响 `transaction_count`，不改变 `latest_balance`、`total_balance` 或 `total_balances_by_currency`。关键字、分类筛选和自动标签规则变化不调用该接口重新计算账户余额；只有银行流水导入、删除、重导或原始余额字段变化才应触发 `bank_account_balance.read_model.refresh`。
 
+`GET /api/bank-details/transactions`
+
+返回银行明细流水列表。除基础流水字段、自动标签字段和关系标签外，自动标签候选确认相关字段如下：
+
+| 字段 | 说明 |
+| --- | --- |
+| `category_resolution_status` | 分类解析状态：`auto_matched`、`needs_confirmation`、`internal_transfer`、`manual_confirmed` 或 `unmatched`。 |
+| `category_rule_version` | 生成该自动标签或候选集时使用的自动标签规则版本。 |
+| `manual_confirmed_category_code` | 用户从自动候选集中确认后的标签 code；未确认时为 `null`。 |
+| `auto_candidate_category_codes` | 当前自动规则命中的候选标签 code 列表；只有 `needs_confirmation` 时用于页面选择。 |
+| `auto_candidate_categories` | 候选标签展示对象列表，包含 `category_code`、`category_label`、`category_primary_label`、`category_sub_label`、`category_label_path`、`category_path`、`rule_code` 和 `reason`。 |
+
+当 `category_resolution_status=needs_confirmation` 时，前端只能展示 `auto_candidate_categories` 作为确认项，不得回退到全量银行明细标签字典。确认后接口返回的行应表现为 `manual_confirmed`，`effective_*` 字段按确认标签填充；撤销后回到当前自动规则重新计算结果。
+
+`POST /api/bank-details/transactions/{transaction_id}/category-confirmation`
+
+从当前自动规则命中的候选标签中确认一个标签。请求体：
+
+```json
+{
+  "category_code": "fee"
+}
+```
+
+后端必须按当前流水和当前自动标签规则重新计算候选集，并校验请求标签存在、启用且属于当前候选集。不满足时返回 `400 invalid_category_confirmation_candidate`，不得接受前端伪造的非候选标签。成功后写来源为 `auto_confirmation` 的确认记录、审计记录，并标记银行明细 read model 及相关下游派生数据 dirty/enqueue。
+
+`DELETE /api/bank-details/transactions/{transaction_id}/category-confirmation`
+
+撤销该流水当前自动候选确认。撤销后写来源为 `auto_confirmation_revoked` 的记录、审计记录，并触发同样的派生数据刷新链路。该接口只撤销候选确认，不恢复旧版“任意人工分类”能力。
+
 `GET /api/bank-details/auto-tag-rules`
 
 返回银行明细文本类自动标签规则。该接口只读取 `bank_transaction_tags`，不读取平行规则表。
+
+普通文本规则可由 `银行流水标签ui2.numbers` 归一化后一次性替换现有 app 内普通规则；替换时后端按主/子标签尽量复用稳定 `code`，未出现在文件中的旧普通规则进入停用/归档口径。`internal_transfer` 是系统规则，不由文件导入或 PUT 请求提交。
 
 响应字段：
 
 | 字段 | 说明 |
 | --- | --- |
 | `version` | 当前银行明细标签配置版本，用于保存时乐观锁。 |
-| `system_rule` | 固定系统规则，目前为 `internal_transfer`/`内部往来款`，只展示不允许编辑。 |
+| `system_rule` | 固定系统规则，目前为 `internal_transfer`/`内部往来款`，只展示不允许编辑，UI 固定显示优先级 `1`。 |
 | `active_rules` | 可用文本类标签，按优先级升序返回。 |
 | `archived_rules` | 停用文本类标签，不参与自动命中。 |
 | `field_options` | 可用于规则配置的稳定语义字段。 |
@@ -161,7 +193,7 @@
 | `code` | 稳定标签身份；新增标签保存前可为空，保存后由后端生成。 |
 | `label` | 当前显示名称。 |
 | `status` | `active` 或 `archived`。 |
-| `priority` / `priority_label` | 可用区优先级；停用区可为空。 |
+| `priority` / `priority_label` | 可用区优先级；系统规则固定为 1，普通规则从 2 开始；停用区可为空。 |
 | `sort_order` | 同优先级内排序号；可用区返回。 |
 | `direction` | 适用方向：`income`、`expense`、`any`。 |
 | `account_scope` | 兼容保留的适用账户范围字段：`{"type":"any","values":[]}`、`bank_account`、`account_type` 或 `bank`。普通维护 UI 不编辑账户范围，保存时固定写 `{"type":"any","values":[]}`。 |
@@ -224,13 +256,23 @@
 - `expected_version` 必填；版本不一致返回 `409 bank_transaction_tags_version_conflict`。
 - 请求提交完整的可用区和停用区文本规则列表。`internal_transfer` 不在请求体中提交。
 - 已存在标签必须携带原 `code`；新建标签不得提交 `code`，由后端生成稳定 `custom_...` code。
-- 可用标签 `label` 去首尾空格后不能为空，同一状态区内不可重复。
+- 可用标签的 `output_primary_label` 去首尾空格后不能为空；唯一性按 `output_primary_label + output_sub_label` 组合判断，同主同子不允许重复，停用区允许历史重复。
 - 普通维护 UI 保存时，所有规则固定提交 `account_scope={"type":"any","values":[]}` 和 `rules.regex_any=[]`。后端继续兼容读取旧数据中的账户范围和正则字段，但普通维护 UI 不生成这些高级条件。
 - 可用标签必须至少填写 `exact_any`、`contains_any` 或 `contains_all` 中的一类；`none_of` 只能为空或配合正向条件使用，不能单独构成命中。
 - `match_fields` 只能使用 `field_options` 中的语义字段，且不能为空。
-- 停用已被待找发票规则引用的标签返回 `400 bank_transaction_tag_in_use_by_pending_invoice_filter`，响应 `details.references` 给出引用位置。
+- 停用已被待找发票规则或免 OA 批量标签选择引用的标签时，后端同步移除这些引用、写入审计，并在保存成功后触发相关 read model 刷新。
 - 成功后返回与 GET 相同结构，并写审计动作 `bank_auto_tag_rules_updated`。
 - 成功保存只标记派生数据 dirty/enqueue 后台刷新，不在 API 请求热路径同步扫描全量银行流水、免 OA 批次、关联台或待找发票 read model。
+
+文件规则替换：
+
+`POST /api/bank-details/auto-tag-rules/file-replacement`
+
+- 需要银行明细写权限。
+- 请求体为空时使用仓库内 `fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json` 作为生产基准规则；也可提交同结构 JSON 或 `{ "source": ... }`。
+- 后端用文件内普通规则替换当前普通自动标签规则，保留 `内部往来款` 系统规则；能按主标签+子标签复用的标签沿用原 code，无法复用的生成新 code，不在文件内的旧普通规则归档。
+- 被归档标签若被待找发票规则或免 OA 批量标签选择引用，后端同步移除引用并审计。
+- 成功后触发 `bank_auto_tag_rules_changed` 生命周期事件和银行明细 read model 刷新。
 
 错误响应保持 JSON envelope：
 

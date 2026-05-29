@@ -131,7 +131,7 @@ class BankTransactionEffectiveCategoryProvider:
         category_code = effective.get("effective_category_code")
         category_source = str(effective.get("effective_category_source") or "").strip()
         category_version = 0
-        if isinstance(manual, dict) and str(manual.get("source") or "").strip() == "manual":
+        if isinstance(manual, dict) and str(manual.get("source") or "").strip() in {"manual", "auto_confirmation"}:
             category_version = int(manual.get("category_version") or 0)
         return {
             "transaction_id": transaction_id,

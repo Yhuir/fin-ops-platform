@@ -540,14 +540,20 @@ class PostgresStateStore:
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_bank_transaction_categories()
         fallback = self._load_snapshot("bank_transaction_categories")
-        if snapshot or fallback:
+        if snapshot:
             categories = snapshot.get("categories") if isinstance(snapshot, dict) else None
             audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else None
             return normalize_bank_transaction_categories(
-                categories if categories else None,
-                audit_log if audit_log else None,
-                snapshot=fallback,
+                categories if isinstance(categories, dict) else {},
+                audit_log if isinstance(audit_log, list) else [],
+                snapshot={
+                    key: value
+                    for key, value in (fallback.items() if isinstance(fallback, dict) else [])
+                    if key not in {"categories", "audit_log"}
+                },
             )
+        if fallback:
+            return normalize_bank_transaction_categories(None, None, snapshot=fallback)
         return {}
 
     def save_bank_transaction_categories(self, snapshot: dict[str, Any]) -> None:

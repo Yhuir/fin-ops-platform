@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { downloadBankDetailTransactionsExport, fetchBankDetailTransactions, saveBankAutoTagRules } from "../features/bankDetails/api";
+import {
+  confirmBankDetailCategory,
+  downloadBankDetailTransactionsExport,
+  fetchBankDetailTransactions,
+  revokeBankDetailCategoryConfirmation,
+  saveBankAutoTagRules,
+} from "../features/bankDetails/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -161,6 +167,107 @@ describe("bank details API", () => {
       noteText: "工行附言",
     });
     expect(payload.categoryCounts.fee).toBe(1);
+  });
+
+  test("maps ambiguous automatic category candidates without widening the choice list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        rows: [
+          {
+            id: "bank-detail-needs-confirmation",
+            trade_time: "2026-05-01 10:30:00+08:00",
+            counterparty_name: "候选供应商",
+            direction: "expense",
+            direction_label: "支",
+            amount: "88.00",
+            balance: "130412.50",
+            summary: "网银手续费工资",
+            purpose: "手续费工资",
+            purpose_text: "手续费工资",
+            summary_text: "网银手续费工资",
+            note_text: "",
+            bank_name: "工商银行",
+            account_last4: "6386",
+            category_code: null,
+            category_label: null,
+            category_path: [],
+            category_source: "",
+            category_version: 1,
+            category_resolution_status: "needs_confirmation",
+            category_rule_version: "bank-auto-tag-rules:2",
+            manual_confirmed_category_code: null,
+            auto_category_code: null,
+            auto_category_label: null,
+            auto_category_path: [],
+            auto_candidate_category_codes: ["fee", "salary"],
+            auto_candidate_categories: [
+              {
+                category_code: "fee",
+                category_label: "手续费",
+                category_primary_label: "费用",
+                category_sub_label: "手续费",
+                category_label_path: ["费用", "手续费"],
+                category_path: ["自动识别", "手续费"],
+                rule_code: "fee",
+                reason: "摘要命中手续费",
+              },
+              {
+                category_code: "salary",
+                category_label: "工资",
+                category_primary_label: "费用",
+                category_sub_label: "工资",
+                category_label_path: ["费用", "工资"],
+                category_path: ["自动识别", "工资"],
+                rule_code: "salary",
+                reason: "摘要命中工资",
+              },
+            ],
+            effective_category_code: null,
+            effective_category_label: null,
+            effective_category_path: [],
+            effective_category_source: "",
+          },
+        ],
+        category_counts: { uncategorized: 1 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+
+    const payload = await fetchBankDetailTransactions({
+      dateFrom: "2026-05-01",
+      dateTo: "2026-05-31",
+    });
+
+    expect(payload.rows[0]).toMatchObject({
+      categoryResolutionStatus: "needs_confirmation",
+      categoryRuleVersion: "bank-auto-tag-rules:2",
+      autoCategoryCode: null,
+      autoCandidateCategoryCodes: ["fee", "salary"],
+      autoCandidateCategories: [
+        expect.objectContaining({ categoryCode: "fee", categoryLabelPath: ["费用", "手续费"], ruleCode: "fee" }),
+        expect.objectContaining({ categoryCode: "salary", categoryLabelPath: ["费用", "工资"], ruleCode: "salary" }),
+      ],
+      effectiveCategoryCode: null,
+    });
+  });
+
+  test("confirms and revokes a bank detail category candidate through scoped endpoints", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await confirmBankDetailCategory("bank-detail-001", "fee");
+    await revokeBankDetailCategoryConfirmation("bank-detail-001");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/bank-details/transactions/bank-detail-001/category-confirmation", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ category_code: "fee" }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/bank-details/transactions/bank-detail-001/category-confirmation", expect.objectContaining({
+      method: "DELETE",
+    }));
   });
 
   test("does not copy legacy purpose or summary into split bank text columns", async () => {

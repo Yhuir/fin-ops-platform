@@ -208,15 +208,71 @@ class PostgresWorkbenchRepository:
         event_rows = self._connection.fetch_all(
             "select raw_payload from app.bank_transaction_category_events order by occurred_at"
         )
+        confirmation_rows = self._connection.fetch_all(
+            """
+            select coalesce(legacy_transaction_id, bank_transaction_id::text) as key,
+                   category_code, candidate_category_codes, rule_version, version,
+                   confirmed_by, confirmed_at, raw_payload
+            from app.bank_transaction_category_confirmations
+            where status = 'active'
+            order by key
+            """
+        )
+        confirmation_audit_rows = self._connection.fetch_all(
+            """
+            select raw_payload
+            from app.bank_transaction_category_confirmations
+            order by confirmed_at, id
+            """
+        )
+        categories = {str(row.get("key")): row_payload(row, "raw_payload") for row in rows}
+        for row in confirmation_rows:
+            transaction_id = text(row.get("key"))
+            category_code = text(row.get("category_code"))
+            if not transaction_id or not category_code:
+                continue
+            payload = row_payload(row, "raw_payload")
+            normalized_payload = dict(payload) if isinstance(payload, dict) else {}
+            normalized_payload.update(
+                {
+                    "transaction_id": transaction_id,
+                    "category_code": category_code,
+                    "source": "auto_confirmation",
+                    "updated_by": text(row.get("confirmed_by")) or normalized_payload.get("updated_by") or "",
+                    "updated_at": (
+                        row.get("confirmed_at").isoformat()
+                        if hasattr(row.get("confirmed_at"), "isoformat")
+                        else text(row.get("confirmed_at")) or normalized_payload.get("updated_at") or ""
+                    ),
+                    "version": int_value(row.get("version"), int_value(normalized_payload.get("version"), 1)),
+                    "candidate_category_codes": text_list(
+                        row.get("candidate_category_codes") or normalized_payload.get("candidate_category_codes")
+                    ),
+                    "rule_version": text(row.get("rule_version")) or normalized_payload.get("rule_version") or "",
+                }
+            )
+            categories[transaction_id] = normalized_payload
         return normalize_bank_transaction_categories(
-            {str(row.get("key")): row_payload(row, "raw_payload") for row in rows},
-            [payload for row in event_rows if isinstance((payload := row_payload(row, "raw_payload")), dict)],
+            categories,
+            [
+                payload
+                for source_rows in (event_rows, confirmation_audit_rows)
+                for row in source_rows
+                if isinstance((payload := row_payload(row, "raw_payload")), dict)
+            ],
         )
 
     def save_bank_transaction_categories(self, snapshot: dict[str, Any]) -> None:
         def write(connection: Any) -> None:
             categories = snapshot.get("categories") if isinstance(snapshot, dict) else None
             for transaction_id, payload in iter_mapping(categories):
+                source = text(payload.get("source"))
+                if source == "auto_confirmation":
+                    self._save_bank_transaction_category_confirmation(connection, transaction_id, payload)
+                    continue
+                if source == "auto_confirmation_revoked":
+                    self._revoke_bank_transaction_category_confirmation(connection, transaction_id, payload)
+                    continue
                 connection.execute(
                     """
                     delete from app.bank_transaction_category_events
@@ -262,6 +318,119 @@ class PostgresWorkbenchRepository:
             )
 
         run_in_transaction(self._connection, write)
+
+    def _save_bank_transaction_category_confirmation(
+        self,
+        connection: Any,
+        transaction_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        category_code = text(payload.get("category_code") or payload.get("category"))
+        if not category_code:
+            return
+        actor = text(payload.get("updated_by") or payload.get("actor_id") or payload.get("confirmed_by")) or ""
+        rule_version = text(payload.get("rule_version") or payload.get("category_rule_version")) or ""
+        candidate_codes = text_list(payload.get("candidate_category_codes"))
+        version = int_value(payload.get("version"), 1)
+        existing = connection.fetch_one(
+            """
+            select id, category_code, candidate_category_codes, rule_version
+            from app.bank_transaction_category_confirmations
+            where tenant_id = 'default'
+              and legacy_transaction_id = %s
+              and status = 'active'
+            order by confirmed_at desc
+            limit 1
+            """,
+            (transaction_id,),
+        )
+        raw_payload = {
+            "normalized_payload": {
+                **payload,
+                "transaction_id": transaction_id,
+                "category_code": category_code,
+                "source": "auto_confirmation",
+                "candidate_category_codes": candidate_codes,
+                "rule_version": rule_version,
+            }
+        }
+        if (
+            isinstance(existing, dict)
+            and text(existing.get("category_code")) == category_code
+            and text_list(existing.get("candidate_category_codes")) == candidate_codes
+            and (text(existing.get("rule_version")) or "") == rule_version
+        ):
+            connection.execute(
+                """
+                update app.bank_transaction_category_confirmations
+                set version = greatest(version, %s),
+                    confirmed_by = %s,
+                    raw_payload = %s
+                where id = %s
+                """,
+                (version, actor, jsonb(raw_payload), existing.get("id")),
+            )
+            return
+        connection.execute(
+            """
+            update app.bank_transaction_category_confirmations
+            set status = 'revoked',
+                revoked_by = %s,
+                revoked_at = now(),
+                version = version + 1
+            where tenant_id = 'default'
+              and legacy_transaction_id = %s
+              and status = 'active'
+            """,
+            (actor, transaction_id),
+        )
+        connection.execute(
+            """
+            insert into app.bank_transaction_category_confirmations(
+                tenant_id, legacy_transaction_id, category_code, candidate_category_codes,
+                rule_version, status, version, confirmed_by, raw_payload
+            )
+            values ('default', %s, %s, %s, %s, 'active', %s, %s, %s)
+            """,
+            (
+                transaction_id,
+                category_code,
+                jsonb(candidate_codes),
+                rule_version,
+                version,
+                actor,
+                jsonb(raw_payload),
+            ),
+        )
+
+    def _revoke_bank_transaction_category_confirmation(
+        self,
+        connection: Any,
+        transaction_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        actor = text(payload.get("updated_by") or payload.get("actor_id") or payload.get("revoked_by")) or ""
+        raw_payload = {
+            "normalized_payload": {
+                **payload,
+                "transaction_id": transaction_id,
+                "source": "auto_confirmation_revoked",
+            }
+        }
+        connection.execute(
+            """
+            update app.bank_transaction_category_confirmations
+            set status = 'revoked',
+                revoked_by = %s,
+                revoked_at = now(),
+                version = version + 1,
+                raw_payload = %s
+            where tenant_id = 'default'
+              and legacy_transaction_id = %s
+              and status = 'active'
+            """,
+            (actor, jsonb(raw_payload), transaction_id),
+        )
 
     def load_turnover_relations(self) -> dict[str, Any]:
         rows = self._connection.fetch_all("select relation_id as key, raw_payload from app.turnover_relations order by relation_id")
