@@ -10,6 +10,9 @@ SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "deploy_oa.py"
 ENSURE_WORKERS_SCRIPT_PATH = (
     Path(__file__).resolve().parents[1] / "deploy" / "oa" / "bin" / "finops-ensure-runtime-workers.sh"
 )
+DEPLOY_CONTROL_SCRIPT_PATH = (
+    Path(__file__).resolve().parents[1] / "deploy" / "oa" / "bin" / "finops-deploy-control.sh"
+)
 
 
 def load_deploy_module():
@@ -77,6 +80,9 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control activate main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
+        self.assertIn("verify_finops_deploy_control_contract", remote_script)
+        self.assertIn("deploy-control helper still loads the retired /root PostgreSQL env", remote_script)
+        self.assertIn("/etc/fin-ops/fin-ops.secrets.env", remote_script)
         self.assertIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
         self.assertIn("wait_finops_backend_ready", remote_script)
         self.assertIn("check_finops_session_route /fin-ops-api/api/session/me", remote_script)
@@ -247,6 +253,18 @@ class DeployOAScriptTest(unittest.TestCase):
         ):
             self.assertIn(f"fin-ops.worker.{instance_name}.env.example", script)
             self.assertIn(f"fin-ops-worker@${{worker}}.service", script)
+
+    def test_deploy_control_script_uses_canonical_etc_finops_secret_contract(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+
+        self.assertIn('COMMON_ENV="$ENV_DIR/fin-ops.common.env"', script)
+        self.assertIn('SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"', script)
+        self.assertIn("assert_runtime_env_contract", script)
+        self.assertIn("missing PostgreSQL DSN", script)
+        self.assertIn("EnvironmentFile=$COMMON_ENV", script)
+        self.assertIn("EnvironmentFile=$SECRETS_ENV", script)
+        self.assertNotIn("/root/fin_ops_stage23_postgres_runtime.env", script)
+        self.assertNotIn("FIN_OPS_POSTGRES_DATABASE_URL=", script)
 
 
 if __name__ == "__main__":

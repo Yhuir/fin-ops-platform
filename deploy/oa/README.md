@@ -256,17 +256,35 @@ PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。
 - `git push main` 只更新远端仓库，不会自动改变服务器；服务器生效必须执行发布脚本并激活 release
 - 默认拒绝从 dirty worktree 发布；确需发布未提交代码时必须显式加 `--allow-dirty`，但生产发布不建议这样做
 
-历史服务器首次接入 worker 自动化时，需要 root 一次性安装固定 helper 并授权 deploy 用户只允许传入 release `src` 目录：
+历史服务器首次接入 release 自动化时，需要 root 一次性安装固定 helper。API 与 worker 必须共用
+`/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，不要再让 API helper
+引用历史 `/root/fin_ops_stage23_postgres_runtime.env`。否则 API 和 worker 会读取不同 secret 来源，
+release 激活后可能出现 worker 正常但 `fin-ops.service` 因缺少 PostgreSQL DSN 反复退出。
 
 ```bash
+sudo install -m 0755 -o root -g root \
+  deploy/oa/bin/finops-deploy-control.sh \
+  /usr/local/sbin/finops-deploy-control
 sudo install -m 0755 -o root -g root \
   deploy/oa/bin/finops-ensure-runtime-workers.sh \
   /usr/local/sbin/finops-ensure-runtime-workers
 printf '%s\n' \
+  'finops-deploy ALL=(root) NOPASSWD: /usr/local/sbin/finops-deploy-control' \
   'finops-deploy ALL=(root) NOPASSWD: /usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/*/src' |
-  sudo tee /etc/sudoers.d/finops-runtime-workers >/dev/null
-sudo visudo -cf /etc/sudoers.d/finops-runtime-workers
+  sudo tee /etc/sudoers.d/finops-release-helpers >/dev/null
+sudo visudo -cf /etc/sudoers.d/finops-release-helpers
 ```
+
+安装后先验证 helper 合同，再发布：
+
+```bash
+grep -q '/etc/fin-ops/fin-ops.secrets.env' /usr/local/sbin/finops-deploy-control
+! grep -q '/root/fin_ops_stage23_postgres_runtime.env' /usr/local/sbin/finops-deploy-control
+sudo /usr/local/sbin/finops-deploy-control check-release <已上传的-release-name>
+```
+
+`scripts/deploy-oa.sh` 会在激活前检查服务器 helper 是否仍引用历史 root env；如果检查失败，会在
+`activate` 之前中止，避免前端已发布但后端无法监听 `127.0.0.1:18001`。
 - `--reload-nginx` 只对旧 `legacy-current` 模式有意义；默认 release 模式不修改 nginx 配置，静态文件变更不需要 reload nginx
 - 旧覆盖式部署仍保留为显式模式：
 

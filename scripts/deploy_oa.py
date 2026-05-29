@@ -187,6 +187,7 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
         f"RELEASE_NAME={quoted_release_name}",
         f"RELEASES_DIR={quoted_releases_dir}",
         f"RELEASE_DIR={quoted_release_dir}",
+        f"DEPLOY_CONTROL={quoted_deploy_control}",
         f"KEEP_RELEASES={int(config.keep_releases)}",
         'case "$RELEASE_NAME" in *[!A-Za-z0-9._-]*|"") echo "invalid release name: $RELEASE_NAME" >&2; exit 64 ;; esac',
         'mkdir -p "$RELEASES_DIR"',
@@ -202,6 +203,7 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
             'test -d "$RELEASE_DIR/src/backend/src"',
             'test -f "$RELEASE_DIR/src/backend/requirements.txt"',
             'test -f "$RELEASE_DIR/src/web/dist/index.html"',
+            build_deploy_control_contract_check(),
             f"sudo -n {quoted_deploy_control} check-release {quoted_release_name}",
         ]
     )
@@ -223,6 +225,30 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
     else:
         commands.append('echo "release uploaded and validated; activation skipped: $RELEASE_NAME"')
     return "\n".join(commands) + "\n"
+
+
+def build_deploy_control_contract_check() -> str:
+    return "\n".join(
+        [
+            "verify_finops_deploy_control_contract() {",
+            '  if [ ! -x "$DEPLOY_CONTROL" ]; then',
+            '    printf \'deploy-control helper is missing or not executable: %s\\n\' "$DEPLOY_CONTROL" >&2',
+            "    exit 68",
+            "  fi",
+            '  if [ -r "$DEPLOY_CONTROL" ]; then',
+            "    if grep -q '/root/fin_ops_stage23_postgres_runtime.env' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper still loads the retired /root PostgreSQL env; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
+            "      exit 68",
+            "    fi",
+            "    if ! grep -q '/etc/fin-ops/fin-ops.secrets.env' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper does not load /etc/fin-ops/fin-ops.secrets.env; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
+            "      exit 68",
+            "    fi",
+            "  fi",
+            "}",
+            "verify_finops_deploy_control_contract",
+        ]
+    )
 
 
 def build_frontend_hash_check(config: DeploymentConfig) -> str:
