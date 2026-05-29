@@ -823,7 +823,7 @@ export default function ReconciliationWorkbenchPage() {
       if (includeAuxiliary) {
         void loadWorkbenchAuxiliaryData(month, signal);
       }
-    } catch {
+    } catch (error) {
       if (signal?.aborted) {
         return;
       }
@@ -832,7 +832,7 @@ export default function ReconciliationWorkbenchPage() {
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
         setIgnoredData({ month, rows: [] });
-        setLoadError("工作台数据加载失败，请稍后重试。");
+        setLoadError(error instanceof Error && error.message ? error.message : "工作台数据加载失败，请稍后重试。");
         setIsLoading(false);
       } else {
         setIsRefreshing(false);

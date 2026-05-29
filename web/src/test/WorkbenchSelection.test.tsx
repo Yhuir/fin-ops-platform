@@ -1924,7 +1924,8 @@ describe("Workbench row selection and detail modal", () => {
     installMockApiFetch({ workbenchErrorMonths: ["all"] });
     renderWorkbenchPage();
 
-    expect(await screen.findByText("工作台数据加载失败，请稍后重试。")).toBeInTheDocument();
+    expect(await screen.findByText("workbench summary failed")).toBeInTheDocument();
+    expect(screen.queryByText("工作台数据加载失败，请稍后重试。")).not.toBeInTheDocument();
   });
 
   test("expands one zone to the full workbench area and restores it", async () => {

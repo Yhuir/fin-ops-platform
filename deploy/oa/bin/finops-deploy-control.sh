@@ -17,6 +17,7 @@ LEGACY_CURRENT_ARCHIVE_DIR="${FINOPS_LEGACY_CURRENT_ARCHIVE_DIR:-/opt/fin-ops/le
 COMMON_ENV="$ENV_DIR/fin-ops.common.env"
 SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
+ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 
 usage() {
   cat <<'USAGE'
@@ -157,6 +158,12 @@ ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.rabbitmq_dispatcher --publisher
 DROPIN
 }
 
+ensure_runtime_workers() {
+  local src="$1"
+  [[ -x "$ENSURE_RUNTIME_WORKERS_HELPER" ]] || die "runtime worker ensure helper is not executable: $ENSURE_RUNTIME_WORKERS_HELPER"
+  "$ENSURE_RUNTIME_WORKERS_HELPER" "$src"
+}
+
 publish_frontend() {
   local src="$1"
   local dist="$src/web/dist"
@@ -282,6 +289,7 @@ case "$cmd" in
     write_api_dropin "$src"
     write_worker_dropin "$src"
     write_dispatcher_dropin "$src"
+    ensure_runtime_workers "$src"
     publish_frontend "$src"
     restart_services
     status

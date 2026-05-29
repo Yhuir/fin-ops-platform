@@ -38,12 +38,11 @@
 ```bash
 sudo -n /usr/local/sbin/finops-deploy-control check-release <release-name>
 sudo -n /usr/local/sbin/finops-deploy-control activate <release-name>
-sudo -n /usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src
 ```
 
-`activate` 负责让 API、RabbitMQ worker 和 dispatcher 指向该 release 并重启 active services。发布脚本随后会执行
-服务器上 root-owned 的 `/usr/local/sbin/finops-ensure-runtime-workers`，幂等安装 runtime worker systemd 模板、补齐缺失的 worker env、并
-`enable/restart` 最小生产正确性必须长期运行的 worker 矩阵。最后脚本会检查 live 前端 `index.html` 与 release 内
+`activate` 负责让 API、RabbitMQ worker 和 dispatcher 指向该 release，执行 schema migration，并调用服务器上
+root-owned 的 `/usr/local/sbin/finops-ensure-runtime-workers`，幂等安装 runtime worker systemd 模板、补齐缺失的
+worker env、并 `enable/restart` 最小生产正确性必须长期运行的 worker 矩阵。最后脚本会检查 live 前端 `index.html` 与 release 内
 `web/dist/index.html` 的哈希一致，避免后端和前端版本漂移。
 
 `git push main` 不是部署动作。标准顺序是：本地验证、提交、推送、执行 release 发布、发布后 smoke check。默认脚本会拒绝 dirty worktree；生产发布必须能追溯到具体 commit。
@@ -103,10 +102,10 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 最小生产正确性不需要 RabbitMQ，也不应依赖人工长期手动启动。标准 release 发布会自动运行：
 
 ```bash
-sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"
+sudo -n /usr/local/sbin/finops-deploy-control activate <release-name>
 ```
 
-`/usr/local/sbin/finops-ensure-runtime-workers` 必须是服务器 root-owned 固定 helper，不能从 release 目录直接
+`activate` 内部必须调用 `/usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"`。该 helper 必须是服务器 root-owned 固定 helper，不能从 release 目录直接
 `sudo /bin/bash` 执行上传脚本。仓库内的 `deploy/oa/bin/finops-ensure-runtime-workers.sh` 是 helper 源文件，历史服务器首次接入时应由 root 安装：
 
 ```bash
