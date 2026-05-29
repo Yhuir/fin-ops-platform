@@ -90,6 +90,7 @@ class AppTests(unittest.TestCase):
                 }
 
             def get_workbench_groups_page(self, **kwargs):
+                self.last_page_size = kwargs["page_size"]
                 zone = kwargs["zone"]
                 return {
                     "read_model_status": "fresh",
@@ -98,12 +99,14 @@ class AppTests(unittest.TestCase):
                     "groups": [{"id": f"{zone}-1"}],
                 }
 
-        app._workbench_sql_read_repository = WorkbenchRepository()
+        repository = WorkbenchRepository()
+        app._workbench_sql_read_repository = repository
 
         response = app.handle_request("GET", "/health")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(repository.last_page_size, 200)
         self.assertEqual(
             payload["workbench_api_self_test"],
             {

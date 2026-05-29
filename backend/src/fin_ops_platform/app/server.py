@@ -1858,7 +1858,7 @@ class Application:
                     scope_key=scope_key,
                     zone=zone,
                     page=1,
-                    page_size=50,
+                    page_size=200,
                     detail_level="summary",
                 )
                 if not isinstance(page_payload, dict):
