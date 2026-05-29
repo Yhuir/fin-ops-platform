@@ -81,6 +81,21 @@ type CategoryTreeGroup = {
   children: CategorySummaryItem[];
 };
 
+type BankCategoryFilter =
+  | { kind: "all" }
+  | { kind: "uncategorized" }
+  | { kind: "primary"; primaryLabel: string }
+  | { kind: "tag"; code: BankTransactionCategoryCode; primaryLabel: string; subLabel: string | null };
+
+type BankCategoryFilterRequestParams = {
+  categoryCode: string | null;
+  categoryPrimaryLabel: string | null;
+  categorySubLabel: string | null;
+};
+
+const ALL_CATEGORY_FILTER: BankCategoryFilter = { kind: "all" };
+const UNCATEGORIZED_CATEGORY_FILTER: BankCategoryFilter = { kind: "uncategorized" };
+
 function tagDefinitionDisplayLabel(tag: BankTransactionTagDefinition) {
   const path = [tag.outputPrimaryLabel, tag.outputSubLabel]
     .map((value) => value.trim())
@@ -144,6 +159,76 @@ function buildCategoryTree(items: CategorySummaryItem[]): CategoryTreeGroup[] {
   return Array.from(groups.values());
 }
 
+function categoryFilterMatches(selected: BankCategoryFilter, candidate: BankCategoryFilter) {
+  if (selected.kind !== candidate.kind) {
+    return false;
+  }
+  switch (selected.kind) {
+    case "all":
+    case "uncategorized":
+      return true;
+    case "primary":
+      return candidate.kind === "primary" && selected.primaryLabel === candidate.primaryLabel;
+    case "tag":
+      return (
+        candidate.kind === "tag"
+        && selected.code === candidate.code
+        && selected.primaryLabel === candidate.primaryLabel
+        && selected.subLabel === candidate.subLabel
+      );
+  }
+}
+
+function tagCategoryFilter(option: CategorySummaryItem): BankCategoryFilter {
+  return {
+    kind: "tag",
+    code: option.code,
+    primaryLabel: option.primaryLabel,
+    subLabel: option.subLabel || null,
+  };
+}
+
+function categoryFilterRequestParams(filter: BankCategoryFilter): BankCategoryFilterRequestParams {
+  if (filter.kind === "uncategorized") {
+    return {
+      categoryCode: "uncategorized",
+      categoryPrimaryLabel: null,
+      categorySubLabel: null,
+    };
+  }
+  if (filter.kind === "primary") {
+    return {
+      categoryCode: null,
+      categoryPrimaryLabel: filter.primaryLabel,
+      categorySubLabel: null,
+    };
+  }
+  if (filter.kind === "tag") {
+    return {
+      categoryCode: filter.code,
+      categoryPrimaryLabel: filter.primaryLabel,
+      categorySubLabel: filter.subLabel,
+    };
+  }
+  return {
+    categoryCode: null,
+    categoryPrimaryLabel: null,
+    categorySubLabel: null,
+  };
+}
+
+function selectedCategoryFilterStillExists(filter: BankCategoryFilter, options: BankTransactionTagDefinition[]) {
+  if (filter.kind === "all" || filter.kind === "uncategorized") {
+    return true;
+  }
+  return options.some((option) => {
+    if (filter.kind === "tag") {
+      return option.code === filter.code;
+    }
+    return tagDefinitionDisplayParts(option).primaryLabel === filter.primaryLabel;
+  });
+}
+
 function normalizeReadModelStatus(value: BankDetailReadModelStatus | null | undefined): BankDetailReadModelStatus {
   return value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing"
     ? value
@@ -185,8 +270,9 @@ function readModelStatusMessage(status: BankDetailReadModelStatus) {
 type BankDetailsTableToolbarProps = {
   effectiveCategoryCounts: BankTransactionCategoryCounts;
   visibleCategorySummary: CategorySummaryItem[];
-  selectedCategoryCode: string | null;
-  onCategoryFilterChange: (categoryCode: string | null) => void;
+  rowCount: number;
+  selectedCategoryFilter: BankCategoryFilter;
+  onCategoryFilterChange: (filter: BankCategoryFilter) => void;
   searchKeyword: string;
   onSearchKeywordChange: (value: string) => void;
   exportMenuAnchorEl: HTMLElement | null;
@@ -353,7 +439,8 @@ function EmptyTransactionOverlay() {
 function BankDetailsTableToolbar({
   effectiveCategoryCounts = EMPTY_CATEGORY_COUNTS,
   visibleCategorySummary = [],
-  selectedCategoryCode = null,
+  rowCount = 0,
+  selectedCategoryFilter = ALL_CATEGORY_FILTER,
   onCategoryFilterChange = () => undefined,
   searchKeyword = "",
   onSearchKeywordChange = () => undefined,
@@ -368,11 +455,23 @@ function BankDetailsTableToolbar({
   const exportMenuOpen = Boolean(exportMenuAnchorEl);
   const [categoryAnchorEl, setCategoryAnchorEl] = useState<HTMLElement | null>(null);
   const categoryCloseTimerRef = useRef<number | null>(null);
-  const categoryTreeOpen = Boolean(categoryAnchorEl);
-  const categoryTreeId = "bank-category-filter-tree";
-  const categoryTreeGroups = useMemo(() => buildCategoryTree(visibleCategorySummary), [visibleCategorySummary]);
-  const selectedCategory = visibleCategorySummary.find((option) => option.code === selectedCategoryCode) ?? null;
-  const selectedCategoryLabel = selectedCategory ? `${selectedCategory.label} ${selectedCategory.count}` : "全部";
+  const categoryPanelOpen = Boolean(categoryAnchorEl);
+  const categoryPanelId = "bank-category-filter-panel";
+  const categoryGroups = useMemo(() => buildCategoryTree(visibleCategorySummary), [visibleCategorySummary]);
+  const selectedCategoryLabel = useMemo(() => {
+    if (selectedCategoryFilter.kind === "uncategorized") {
+      return `未分类 ${effectiveCategoryCounts.uncategorized}`;
+    }
+    if (selectedCategoryFilter.kind === "primary") {
+      const group = categoryGroups.find((item) => item.label === selectedCategoryFilter.primaryLabel);
+      return `${selectedCategoryFilter.primaryLabel} ${group?.count ?? 0}`;
+    }
+    if (selectedCategoryFilter.kind === "tag") {
+      const category = visibleCategorySummary.find((option) => option.code === selectedCategoryFilter.code);
+      return category ? `${category.label} ${category.count}` : `${selectedCategoryFilter.primaryLabel} 0`;
+    }
+    return `全部 ${rowCount}`;
+  }, [categoryGroups, effectiveCategoryCounts.uncategorized, rowCount, selectedCategoryFilter, visibleCategorySummary]);
 
   useEffect(() => () => {
     if (categoryCloseTimerRef.current !== null) {
@@ -387,17 +486,17 @@ function BankDetailsTableToolbar({
     }
   };
 
-  const openCategoryTree = (event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => {
+  const openCategoryPanel = (event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => {
     clearCategoryCloseTimer();
     setCategoryAnchorEl(event.currentTarget);
   };
 
-  const closeCategoryTree = () => {
+  const closeCategoryPanel = () => {
     clearCategoryCloseTimer();
     setCategoryAnchorEl(null);
   };
 
-  const scheduleCategoryTreeClose = () => {
+  const scheduleCategoryPanelClose = () => {
     clearCategoryCloseTimer();
     categoryCloseTimerRef.current = window.setTimeout(() => {
       setCategoryAnchorEl(null);
@@ -405,138 +504,138 @@ function BankDetailsTableToolbar({
     }, 140);
   };
 
-  const toggleCategoryTree = (event: MouseEvent<HTMLElement>) => {
+  const toggleCategoryPanel = (event: MouseEvent<HTMLElement>) => {
     clearCategoryCloseTimer();
     setCategoryAnchorEl((current) => (current ? null : event.currentTarget));
   };
 
-  const handleCategoryTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+  const handleCategoryPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape") {
-      closeCategoryTree();
+      closeCategoryPanel();
     }
   };
 
-  const selectCategoryFilter = (categoryCode: string | null) => {
-    onCategoryFilterChange(categoryCode);
-    closeCategoryTree();
+  const selectCategoryFilter = (filter: BankCategoryFilter) => {
+    onCategoryFilterChange(filter);
+    closeCategoryPanel();
   };
 
-  const renderCategoryTreeButton = (option: CategorySummaryItem, className: string, label = option.subLabel || option.label) => (
+  const renderCategoryFilterButton = (
+    filter: BankCategoryFilter,
+    label: string,
+    count: number,
+    level: "root" | "primary" | "child",
+    className = "",
+  ) => {
+    const selected = categoryFilterMatches(selectedCategoryFilter, filter);
+    return (
     <ListItemButton
-      aria-label={`${label} ${option.count}`}
-      aria-current={selectedCategoryCode === option.code ? "true" : undefined}
-      className={className}
+      aria-label={`${label} ${count}`}
+      aria-current={selected ? "true" : "false"}
+      className={`bank-category-filter-row ${className}`.trim()}
       component="button"
-      key={option.code}
-      onClick={() => selectCategoryFilter(option.code)}
-      role="treeitem"
-      selected={selectedCategoryCode === option.code}
+      data-level={level}
+      onClick={() => selectCategoryFilter(filter)}
+      role="menuitem"
+      selected={selected}
     >
       <ListItemText
         disableTypography
         primary={(
-          <Box className="bank-category-tree-row-content">
-            <Typography className="bank-category-tree-label" component="span">{label}</Typography>
-            <Typography className="bank-category-tree-count" component="span">{option.count}</Typography>
+          <Box className="bank-category-filter-row-content">
+            <Typography className="bank-category-filter-label" component="span">{label}</Typography>
+            <Typography className="bank-category-filter-count" component="span">{count}</Typography>
           </Box>
         )}
       />
     </ListItemButton>
-  );
+    );
+  };
 
   return (
     <Box className="bank-grid-toolbar">
       <Stack className="bank-grid-toolbar-content" direction="row" spacing={0.75} alignItems="center">
-        <ClickAwayListener onClickAway={closeCategoryTree}>
+        <ClickAwayListener onClickAway={closeCategoryPanel}>
           <Box
             className="bank-category-filter-entry"
-            onKeyDown={handleCategoryTreeKeyDown}
+            onKeyDown={handleCategoryPanelKeyDown}
             onMouseEnter={clearCategoryCloseTimer}
-            onMouseLeave={scheduleCategoryTreeClose}
+            onMouseLeave={scheduleCategoryPanelClose}
           >
             <Button
-              aria-controls={categoryTreeOpen ? categoryTreeId : undefined}
-              aria-expanded={categoryTreeOpen ? "true" : undefined}
-              aria-haspopup="tree"
+              aria-controls={categoryPanelOpen ? categoryPanelId : undefined}
+              aria-expanded={categoryPanelOpen ? "true" : undefined}
+              aria-haspopup="menu"
               className="bank-category-filter-trigger"
               size="small"
-              variant={selectedCategoryCode === null ? "outlined" : "contained"}
-              onClick={toggleCategoryTree}
-              onFocus={openCategoryTree}
-              onMouseEnter={openCategoryTree}
+              variant={selectedCategoryFilter.kind === "all" ? "outlined" : "contained"}
+              onClick={toggleCategoryPanel}
+              onFocus={openCategoryPanel}
+              onMouseEnter={openCategoryPanel}
             >
               标签筛选：{selectedCategoryLabel}
             </Button>
             <Popper
               anchorEl={categoryAnchorEl}
-              className="bank-category-tree-popper"
+              className="bank-category-filter-popper"
               disablePortal
-              open={categoryTreeOpen}
+              open={categoryPanelOpen}
               placement="bottom-start"
             >
               <Paper
-                className="bank-category-tree-panel"
+                className="bank-category-filter-panel"
                 elevation={8}
                 onMouseEnter={clearCategoryCloseTimer}
-                onMouseLeave={scheduleCategoryTreeClose}
+                onMouseLeave={scheduleCategoryPanelClose}
               >
                 <List
                   aria-label="银行明细标签筛选"
-                  className="bank-category-tree-list"
+                  className="bank-category-filter-list"
                   dense
                   disablePadding
-                  id={categoryTreeId}
-                  role="tree"
+                  id={categoryPanelId}
+                  role="menu"
                 >
-                  <ListItemButton
-                    aria-current={selectedCategoryCode === null ? "true" : undefined}
-                    className="bank-category-tree-action"
-                    component="button"
-                    onClick={() => selectCategoryFilter(null)}
-                    role="treeitem"
-                    selected={selectedCategoryCode === null}
-                  >
-                    <ListItemText
-                      disableTypography
-                      primary={(
-                        <Box className="bank-category-tree-row-content">
-                          <Typography className="bank-category-tree-label" component="span">全部</Typography>
-                        </Box>
-                      )}
-                    />
-                  </ListItemButton>
-                  <Box
-                    aria-disabled="true"
-                    aria-label={`未分类 ${effectiveCategoryCounts.uncategorized}`}
-                    className="bank-category-tree-static-row"
-                    role="treeitem"
-                  >
-                    <Box className="bank-category-tree-row-content">
-                      <Typography className="bank-category-tree-label" component="span">未分类</Typography>
-                      <Typography className="bank-category-tree-count" component="span">
-                        {effectiveCategoryCounts.uncategorized}
-                      </Typography>
-                    </Box>
-                  </Box>
-                  <Divider className="bank-category-tree-divider" />
-                  {categoryTreeGroups.map((group) => (
-                    <Box className="bank-category-tree-group" key={group.key}>
-                      {group.directItem && group.children.length === 0 ? (
-                        renderCategoryTreeButton(group.directItem, "bank-category-tree-root-button", group.label)
-                      ) : (
-                        <Box className="bank-category-tree-root" role="treeitem" aria-expanded="true" aria-label={`${group.label} ${group.count}`}>
-                          <Box className="bank-category-tree-row-content">
-                            <Typography className="bank-category-tree-label" component="span">{group.label}</Typography>
-                            <Typography className="bank-category-tree-count" component="span">{group.count}</Typography>
-                          </Box>
-                        </Box>
+                  {renderCategoryFilterButton(ALL_CATEGORY_FILTER, "全部", rowCount, "root", "bank-category-filter-action")}
+                  {renderCategoryFilterButton(
+                    UNCATEGORIZED_CATEGORY_FILTER,
+                    "未分类",
+                    effectiveCategoryCounts.uncategorized,
+                    "root",
+                    "bank-category-filter-action",
+                  )}
+                  <Divider className="bank-category-filter-divider" />
+                  {categoryGroups.map((group) => (
+                    <Box className="bank-category-filter-group" key={group.key}>
+                      {renderCategoryFilterButton(
+                        { kind: "primary", primaryLabel: group.label },
+                        group.label,
+                        group.count,
+                        "primary",
+                        "bank-category-filter-primary-row",
                       )}
                       {group.directItem && group.children.length > 0 ? (
-                        renderCategoryTreeButton(group.directItem, "bank-category-tree-child bank-category-tree-direct-child", group.label)
+                        renderCategoryFilterButton(
+                          tagCategoryFilter(group.directItem),
+                          group.label,
+                          group.directItem.count,
+                          "child",
+                          "bank-category-filter-child-row bank-category-filter-direct-child",
+                        )
                       ) : null}
                       {group.children.length > 0 ? (
-                        <Box className="bank-category-tree-children" role="group">
-                          {group.children.map((child) => renderCategoryTreeButton(child, "bank-category-tree-child"))}
+                        <Box className="bank-category-filter-children" role="group">
+                          {group.children.map((child) => (
+                            <Fragment key={child.code}>
+                              {renderCategoryFilterButton(
+                                tagCategoryFilter(child),
+                                child.subLabel || child.label,
+                                child.count,
+                                "child",
+                                "bank-category-filter-child-row",
+                              )}
+                            </Fragment>
+                          ))}
                         </Box>
                       ) : null}
                     </Box>
@@ -722,10 +821,10 @@ export default function BankDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [categoryCounts, setCategoryCounts] = useState<BankTransactionCategoryCounts>(EMPTY_CATEGORY_COUNTS);
   const [categoryOptions, setCategoryOptions] = useState<BankTransactionTagDefinition[]>([]);
-  const [selectedCategoryCode, setSelectedCategoryCode] = useState<string | null>(null);
-  const selectedCategoryOption = useMemo(
-    () => categoryOptions.find((option) => option.code === selectedCategoryCode) ?? null,
-    [categoryOptions, selectedCategoryCode],
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<BankCategoryFilter>(ALL_CATEGORY_FILTER);
+  const selectedCategoryRequestParams = useMemo(
+    () => categoryFilterRequestParams(selectedCategoryFilter),
+    [selectedCategoryFilter],
   );
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
   const [dateFilterAnchorEl, setDateFilterAnchorEl] = useState<HTMLElement | null>(null);
@@ -811,9 +910,9 @@ export default function BankDetailsPage() {
       dateFrom: dateFilter.dateFrom,
       dateTo: dateFilter.dateTo,
       keyword: searchKeyword,
-      categoryCode: selectedCategoryOption?.code ?? null,
-      categoryPrimaryLabel: selectedCategoryOption?.outputPrimaryLabel ?? null,
-      categorySubLabel: selectedCategoryOption?.outputSubLabel ?? null,
+      categoryCode: selectedCategoryRequestParams.categoryCode,
+      categoryPrimaryLabel: selectedCategoryRequestParams.categoryPrimaryLabel,
+      categorySubLabel: selectedCategoryRequestParams.categorySubLabel,
       page: paginationModel.page + 1,
       pageSize: paginationModel.pageSize,
       signal: controller.signal,
@@ -827,7 +926,13 @@ export default function BankDetailsPage() {
         hasTransactionPayloadRef.current = true;
         setRows(payload.rows);
         setRowCount(payload.pagination.total);
-        setCategoryCounts(payload.categoryCounts);
+        setCategoryCounts((current) => (
+          selectedCategoryRequestParams.categoryCode
+            || selectedCategoryRequestParams.categoryPrimaryLabel
+            || selectedCategoryRequestParams.categorySubLabel
+            ? current
+            : payload.categoryCounts
+        ));
         if (payload.tagDictionary?.tags) {
           setCategoryOptions(payload.tagDictionary.tags.filter((tag) => tag.status === "active"));
         }
@@ -856,10 +961,16 @@ export default function BankDetailsPage() {
     refreshToken,
     searchKeyword,
     selectedAccountKey,
-    selectedCategoryOption?.code,
-    selectedCategoryOption?.outputPrimaryLabel,
-    selectedCategoryOption?.outputSubLabel,
+    selectedCategoryRequestParams.categoryCode,
+    selectedCategoryRequestParams.categoryPrimaryLabel,
+    selectedCategoryRequestParams.categorySubLabel,
   ]);
+
+  useEffect(() => {
+    if (!selectedCategoryFilterStillExists(selectedCategoryFilter, categoryOptions)) {
+      setSelectedCategoryFilter(ALL_CATEGORY_FILTER);
+    }
+  }, [categoryOptions, selectedCategoryFilter]);
 
   useEffect(() => {
     if (!rulesRefreshPendingRef.current) {
@@ -937,6 +1048,7 @@ export default function BankDetailsPage() {
   const effectiveCategoryCounts = categoryCounts;
   const visibleCategorySummary = useMemo<CategorySummaryItem[]>(() => {
     const optionByCode = new Map(categoryOptions.map((option) => [option.code, option]));
+    const selectedTagCode = selectedCategoryFilter.kind === "tag" ? selectedCategoryFilter.code : null;
     const toSummaryItem = (option: BankTransactionTagDefinition): CategorySummaryItem => {
       const displayParts = tagDefinitionDisplayParts(option);
       return {
@@ -954,11 +1066,11 @@ export default function BankDetailsPage() {
     const active = categoryOptions
       .filter((option) => (
         !FEATURED_CATEGORY_CODES.includes(option.code)
-        && (effectiveCategoryCounts[option.code] ?? 0) > 0
+        && ((effectiveCategoryCounts[option.code] ?? 0) > 0 || option.code === selectedTagCode)
       ))
       .map(toSummaryItem);
     return [...featured, ...active];
-  }, [categoryOptions, effectiveCategoryCounts]);
+  }, [categoryOptions, effectiveCategoryCounts, selectedCategoryFilter]);
 
   const selectedAccount = useMemo(
     () => accountsData.accounts.find((account) => account.accountKey === selectedAccountKey) ?? null,
@@ -996,9 +1108,9 @@ export default function BankDetailsPage() {
     setSearchInput(value);
   };
 
-  const handleCategoryFilterChange = (categoryCode: string | null) => {
+  const handleCategoryFilterChange = (filter: BankCategoryFilter) => {
     resetToFirstPage();
-    setSelectedCategoryCode((current) => (current === categoryCode ? null : categoryCode));
+    setSelectedCategoryFilter(filter);
   };
 
   const applyPreset = (preset: BankDateFilter["preset"]) => {
@@ -1042,9 +1154,9 @@ export default function BankDetailsPage() {
       dateFrom: dateFilter.dateFrom,
       dateTo: dateFilter.dateTo,
       keyword: searchKeyword,
-      categoryCode: selectedCategoryOption?.code ?? null,
-      categoryPrimaryLabel: selectedCategoryOption?.outputPrimaryLabel ?? null,
-      categorySubLabel: selectedCategoryOption?.outputSubLabel ?? null,
+      categoryCode: selectedCategoryRequestParams.categoryCode,
+      categoryPrimaryLabel: selectedCategoryRequestParams.categoryPrimaryLabel,
+      categorySubLabel: selectedCategoryRequestParams.categorySubLabel,
     })
       .then(({ blob, fileName }) => {
         const objectUrl = window.URL.createObjectURL(blob);
@@ -1264,7 +1376,8 @@ export default function BankDetailsPage() {
               <BankDetailsTableToolbar
                 effectiveCategoryCounts={effectiveCategoryCounts}
                 visibleCategorySummary={visibleCategorySummary}
-                selectedCategoryCode={selectedCategoryCode}
+                rowCount={rowCount}
+                selectedCategoryFilter={selectedCategoryFilter}
                 onCategoryFilterChange={handleCategoryFilterChange}
                 searchKeyword={searchInput}
                 onSearchKeywordChange={handleSearchKeywordChange}

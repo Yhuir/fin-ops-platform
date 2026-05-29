@@ -5322,6 +5322,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
       const keyword = (url.searchParams.get("keyword") ?? "").trim();
+      const categoryCode = url.searchParams.get("category_code");
+      const categoryPrimaryLabel = url.searchParams.get("category_primary_label");
+      const categorySubLabel = url.searchParams.get("category_sub_label");
       const page = Number(url.searchParams.get("page") ?? "1");
       const pageSize = Number(url.searchParams.get("page_size") ?? "100");
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
@@ -5458,6 +5461,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
         hiddenTargetRow,
       ];
+      const defaultFilterDataset = searchDataset.filter((row) => row.id !== "bank-detail-search-target");
       const matchedRows = keyword
         ? searchDataset.filter((row) => Object.values(row).some((value) => (
           Array.isArray(value)
@@ -5465,43 +5469,65 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             : String(value ?? "").includes(keyword)
         )))
         : null;
+      const hasCategoryFilter = Boolean(categoryCode || categoryPrimaryLabel || categorySubLabel);
+      const categoryMatches = (row: typeof searchDataset[number]) => {
+        if (categoryCode === "uncategorized" && row.effective_category_code) {
+          return false;
+        }
+        if (categoryCode && categoryCode !== "uncategorized" && row.effective_category_code !== categoryCode) {
+          return false;
+        }
+        if (categoryPrimaryLabel && row.effective_category_primary_label !== categoryPrimaryLabel) {
+          return false;
+        }
+        if (categorySubLabel && row.effective_category_sub_label !== categorySubLabel) {
+          return false;
+        }
+        return true;
+      };
       const rows = !accountKey || accountKey === "icbc:6386"
-        ? (matchedRows ?? [visibleRow])
+        ? (matchedRows ?? (hasCategoryFilter ? defaultFilterDataset : [visibleRow])).filter(categoryMatches)
         : [];
       const responseRows = readModelStatus === "refreshing" && options.bankDetailRefreshingTransactionsEmpty ? [] : rows;
+      const baseCategoryCounts = {
+        borrow_in_company_pending_repayment: 2,
+        business_warranty_pending_collection: 1,
+        borrow_out_personal_pending_collection: 0,
+        salary: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 1 : 0,
+        fee: 0,
+        internal_transfer: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 2 : 0,
+        holiday_bonus: 0,
+        bonus: 0,
+        uncategorized: responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : responseRows.length,
+      };
+      const visibleCategoryCounts = {
+        borrow_in_company_pending_repayment: 0,
+        business_warranty_pending_collection: 0,
+        borrow_out_personal_pending_collection: 0,
+        salary: responseRows.filter((row) => row.effective_category_code === "salary").length,
+        fee: responseRows.filter((row) => row.effective_category_code === "fee").length,
+        internal_transfer: responseRows.filter((row) => row.effective_category_code === "internal_transfer").length,
+        holiday_bonus: 0,
+        bonus: 0,
+        uncategorized: categoryCode === "uncategorized" && (!accountKey || accountKey === "icbc:6386") && isCurrentYear
+          ? 295
+          : responseRows.filter((row) => !row.effective_category_code).length,
+      };
       return {
         body: {
           account_key: accountKey,
           date_from: dateFrom,
           date_to: dateTo,
           rows: responseRows,
-          category_counts: keyword
-            ? {
-              borrow_in_company_pending_repayment: 0,
-              business_warranty_pending_collection: 0,
-              borrow_out_personal_pending_collection: 0,
-              salary: responseRows.filter((row) => row.effective_category_code === "salary").length,
-              fee: responseRows.filter((row) => row.effective_category_code === "fee").length,
-              internal_transfer: responseRows.filter((row) => row.effective_category_code === "internal_transfer").length,
-              holiday_bonus: 0,
-              bonus: 0,
-              uncategorized: responseRows.filter((row) => !row.effective_category_code).length,
-            }
-            : {
-              borrow_in_company_pending_repayment: 2,
-              business_warranty_pending_collection: 1,
-              borrow_out_personal_pending_collection: 0,
-              salary: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 1 : 0,
-              fee: 0,
-              internal_transfer: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 2 : 0,
-              holiday_bonus: 0,
-              bonus: 0,
-              uncategorized: responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : responseRows.length,
-            },
+          category_counts: keyword || hasCategoryFilter ? visibleCategoryCounts : baseCategoryCounts,
           pagination: {
             page,
             page_size: pageSize,
-            total: keyword ? responseRows.length : responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : responseRows.length,
+            total: categoryCode === "uncategorized" && (!accountKey || accountKey === "icbc:6386") && isCurrentYear
+              ? 295
+              : keyword || hasCategoryFilter
+              ? responseRows.length
+              : responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : responseRows.length,
           },
           bank_transaction_tags: {
             version: 1,
