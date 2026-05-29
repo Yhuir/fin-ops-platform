@@ -43,6 +43,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
+                "bank_account_balance_read_model",
                 "bank_detail_read_model",
                 "workbench_read_model",
                 "workbench_matching_dirty_scopes",
@@ -122,6 +123,15 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertIn("tax_offset_cache_warmup", plan["will_enqueue_jobs"])
         self.assertEqual([domain["domain"] for domain in attach_plan["domains"]], [domain["domain"] for domain in plan["domains"]])
         self.assertEqual(attach_plan["will_enqueue_jobs"], plan["will_enqueue_jobs"])
+
+    def test_bank_auto_tag_rules_changed_does_not_refresh_account_balances(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("bank_auto_tag_rules_changed", months=["2026-03"])
+
+        domains = [domain["domain"] for domain in plan["domains"]]
+        self.assertIn("bank_detail_read_model", domains)
+        self.assertNotIn("bank_account_balance_read_model", domains)
 
     def test_oa_rebuilt_maps_oa_workbench_candidate_tax_cost_and_historical_reconcile_domains(self) -> None:
         service = DerivedDataLifecycleService()
@@ -255,6 +265,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "pending_invoice_read_model",
+                "bank_account_balance_read_model",
                 "bank_detail_read_model",
                 "search_cache",
                 "oa_adapter_records_cache",

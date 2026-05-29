@@ -503,6 +503,101 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
 
         self.assertEqual(suggestions, {})
 
+    def test_internal_transfer_explicit_self_account_rows_pair_when_amount_repeats(self) -> None:
+        suggestions = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-self-account-out-a",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "bank_name": "民生银行",
+                    "account_last4": "9486",
+                    "debit_amount": "500000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-02-01 10:00:00",
+                    "summary": "电子转账",
+                    "purpose": "本公司帐户",
+                },
+                {
+                    "id": "txn-self-account-in-a",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "bank_name": "工商银行",
+                    "account_last4": "6386",
+                    "debit_amount": "",
+                    "credit_amount": "500000.00",
+                    "pay_receive_time": "2026-02-01 10:01:00",
+                    "summary": "本公司帐户",
+                },
+                {
+                    "id": "txn-self-account-out-b",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "bank_name": "民生银行",
+                    "account_last4": "9486",
+                    "debit_amount": "500000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-02-01 10:05:00",
+                    "summary": "电子转账",
+                    "purpose": "本公司帐户",
+                },
+                {
+                    "id": "txn-self-account-in-b",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "bank_name": "工商银行",
+                    "account_last4": "6386",
+                    "debit_amount": "",
+                    "credit_amount": "500000.00",
+                    "pay_receive_time": "2026-02-01 10:06:00",
+                    "summary": "本公司帐户",
+                },
+                {
+                    "id": "txn-self-tax-out",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "bank_name": "民生银行",
+                    "account_last4": "9486",
+                    "debit_amount": "4000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-04-16 11:09:13",
+                    "summary": "本公司税户",
+                    "purpose": "本公司税户",
+                },
+                {
+                    "id": "txn-self-tax-in",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "bank_name": "工商银行",
+                    "account_last4": "6386",
+                    "debit_amount": "",
+                    "credit_amount": "4000.00",
+                    "pay_receive_time": "2026-04-16 11:09:16",
+                    "summary": "本公司税户",
+                    "purpose": "本公司税户",
+                },
+            ]
+        )
+
+        self.assertEqual(set(suggestions), {
+            "txn-self-account-out-a",
+            "txn-self-account-in-a",
+            "txn-self-account-out-b",
+            "txn-self-account-in-b",
+            "txn-self-tax-out",
+            "txn-self-tax-in",
+        })
+        self.assertEqual(
+            suggestions["txn-self-account-out-a"]["counterpart_id"],
+            "txn-self-account-in-a",
+        )
+        self.assertEqual(
+            suggestions["txn-self-account-out-b"]["counterpart_id"],
+            "txn-self-account-in-b",
+        )
+        self.assertEqual(suggestions["txn-self-tax-out"]["counterpart_id"], "txn-self-tax-in")
+        self.assertEqual({item["category_code"] for item in suggestions.values()}, {"internal_transfer"})
+
     def test_effective_category_ignores_manual_history_when_auto_exists(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(
             None,

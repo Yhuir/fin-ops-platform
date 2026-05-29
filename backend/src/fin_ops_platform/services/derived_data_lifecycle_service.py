@@ -38,6 +38,7 @@ DERIVED_DATA_DOMAINS = (
     "tax_offset_read_model",
     "tax_offset_month_cache",
     "pending_invoice_read_model",
+    "bank_account_balance_read_model",
     "bank_detail_read_model",
     "search_cache",
     "oa_adapter_records_cache",
@@ -79,6 +80,7 @@ class DerivedDataLifecycleService:
         "tax_offset_read_model": "invalidate",
         "tax_offset_month_cache": "clear",
         "pending_invoice_read_model": "invalidate",
+        "bank_account_balance_read_model": "invalidate",
         "bank_detail_read_model": "invalidate",
         "search_cache": "clear",
         "oa_adapter_records_cache": "clear",
@@ -98,6 +100,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "bank_import_confirmed": (
+            "bank_account_balance_read_model",
             "bank_detail_read_model",
             "workbench_read_model",
             "workbench_matching_dirty_scopes",
@@ -237,6 +240,7 @@ class DerivedDataLifecycleService:
         ),
         "settings_reset_completed": (
             "oa_adapter_records_cache",
+            "bank_account_balance_read_model",
             "bank_detail_read_model",
             "workbench_read_model",
             "workbench_candidate_matches",

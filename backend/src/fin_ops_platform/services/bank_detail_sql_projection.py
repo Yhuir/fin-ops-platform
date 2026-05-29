@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from fin_ops_platform.services.bank_account_balance_projection import _account_identity, _normalize_account_no
 from fin_ops_platform.services.bank_transaction_auto_category_service import (
     BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION,
     BankTransactionAutoCategoryService,
@@ -262,11 +263,17 @@ class BankDetailSqlProjectionBuilder:
         raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
         normalized_payload = raw_payload.get("normalized_payload") if isinstance(raw_payload.get("normalized_payload"), dict) else raw_payload
         bank_name = text(normalized_payload.get("imported_bank_name") or normalized_payload.get("bank_name")) or "未知银行"
+        account_no = _normalize_account_no(row.get("account_no") or normalized_payload.get("account_no"))
         account_last4 = (
             text(normalized_payload.get("imported_bank_last4") or normalized_payload.get("account_last4"))
-            or text(row.get("account_no"))
+            or account_no
             or "unknown"
         )[-4:]
+        account_identity, _identity_confidence = _account_identity(
+            account_no=account_no,
+            bank_name=bank_name,
+            account_last4=account_last4,
+        )
         direction = _direction(row.get("txn_direction"), row.get("signed_amount"))
         amount = decimal_text(row.get("amount")) or "0"
         signed_amount = decimal_text(row.get("signed_amount")) or ("-" + amount if direction == "expense" else amount)
@@ -282,10 +289,10 @@ class BankDetailSqlProjectionBuilder:
             "transaction_id": text(row.get("transaction_id")) or text(row.get("id")) or "",
             "source_batch_id": text(row.get("source_batch_id")),
             "legacy_source_batch_id": text(row.get("legacy_source_batch_id")),
-            "account_key": _account_key(bank_name, account_last4),
+            "account_key": account_identity,
             "bank_name": bank_name,
             "account_last4": account_last4 or "unknown",
-            "account_no": text(row.get("account_no")),
+            "account_no": account_no,
             "account_name": text(row.get("account_name")),
             "trade_time": _trade_time_text(row.get("trade_time")),
             "trade_date": text(row.get("txn_date") or row.get("trade_time")),

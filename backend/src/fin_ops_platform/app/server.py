@@ -10382,6 +10382,34 @@ class Application:
                 date_from=date_from,
                 date_to=date_to,
             )
+        account_balance_loader = getattr(repository, "list_bank_account_balances", None)
+        if callable(account_balance_loader):
+            payload = account_balance_loader(date_from=date_from, date_to=date_to)
+            if not isinstance(payload, dict):
+                self._enqueue_bank_account_balance_read_model_refresh(reason="api_miss")
+                return self._bank_detail_accounts_refreshing_payload(
+                    scope_keys=["all"],
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+            payload_status = str(
+                payload.get("balance_read_model_status")
+                or payload.get("read_model_status")
+                or "fresh"
+            )
+            if payload_status != "fresh" and not (payload.get("accounts") or []):
+                self._enqueue_bank_account_balance_read_model_refresh(reason=f"api_{payload_status or 'stale'}")
+                return self._bank_detail_accounts_refreshing_payload(
+                    scope_keys=["all"],
+                    date_from=date_from,
+                    date_to=date_to,
+                    scope_summary=payload,
+                )
+            result = dict(payload)
+            result["read_model_status"] = payload_status
+            result["balance_read_model_status"] = payload_status
+            result["cache_status"] = "uncached"
+            return result
         scope_keys = self._bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to)
         scope_summary = self._bank_detail_scope_summary(scope_keys)
         read_model_status = str(scope_summary.get("read_model_status") or "missing")
@@ -17373,6 +17401,7 @@ class Application:
                 "tax_offset_read_model": self._derived_lifecycle_tax_offset_executor,
                 "tax_offset_month_cache": self._derived_lifecycle_tax_offset_month_cache_executor,
                 "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
+                "bank_account_balance_read_model": self._derived_lifecycle_bank_account_balance_executor,
                 "bank_detail_read_model": self._derived_lifecycle_bank_detail_executor,
                 "search_cache": self._derived_lifecycle_search_cache_executor,
                 "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
@@ -17522,6 +17551,22 @@ class Application:
             "invalidated_scopes": target_scope_keys,
             "enqueued_jobs": ["bank_detail.read_model.refresh"] if enqueued else [],
         }
+
+    def _derived_lifecycle_bank_account_balance_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        enqueued = self._enqueue_bank_account_balance_read_model_refresh(reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_account_balance"))
+        return {
+            "deleted_counts": {"bank_account_balance_read_models": 0},
+            "invalidated_scopes": ["all"],
+            "enqueued_jobs": ["bank_account_balance.read_model.refresh"] if enqueued else [],
+        }
+
+    def _enqueue_bank_account_balance_read_model_refresh(self, *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueue(scope_type="bank_account_balance", scope_key="all", reason=reason)
+        return True
 
     def _bank_detail_available_month_scope_keys(self) -> list[str]:
         months: set[str] = set()

@@ -314,8 +314,8 @@ describe("Bank details page", () => {
   test("keeps the read-model refresh banner stable while retaining the last fresh rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      bankDetailAccountReadModelStatuses: ["refreshing", "refreshing", "refreshing"],
-      bankDetailTransactionReadModelStatuses: ["fresh"],
+      bankDetailAccountReadModelStatuses: ["fresh"],
+      bankDetailTransactionReadModelStatuses: ["refreshing", "refreshing"],
       bankDetailRefreshingTransactionsEmpty: true,
     });
     renderBankDetailsPage();
@@ -595,9 +595,9 @@ describe("Bank details page", () => {
     });
 
     await waitFor(() => {
-      expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBeGreaterThan(initialAccountRequests);
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
+    expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBe(initialAccountRequests);
   });
 
   test("refetches bank detail data when bank detail tag settings update", async () => {
@@ -613,9 +613,9 @@ describe("Bank details page", () => {
     });
 
     await waitFor(() => {
-      expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBeGreaterThan(initialAccountRequests);
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
+    expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBe(initialAccountRequests);
   });
 
   test("refetches bank detail data on focus when bank tag version fallback detects a missed update", async () => {
@@ -703,6 +703,33 @@ describe("Bank details page", () => {
       expect(requestUrls(fetchMock as ReturnType<typeof installMockApiFetch>, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
     expect(await screen.findByText("版本2供应商")).toBeInTheDocument();
+  });
+
+  test("saving auto tag rules refreshes transactions without refetching account balances", async () => {
+    const fetchMock = installMockApiFetch({
+      bankDetailAccountReadModelStatuses: ["fresh", "fresh"],
+      bankDetailPostSaveAccountsTotalBalance: "999999.99",
+      bankDetailPostSaveTransactionLabel: "规则保存后流水",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    const initialAccountRequests = requestUrls(fetchMock, "/api/bank-details/accounts").length;
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    await within(page).findByText("云南溯源科技有限公司");
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "网银证书服务费");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
+    });
+    expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBe(initialAccountRequests);
+    expect(screen.queryByText("999,999.99")).not.toBeInTheDocument();
   });
 
   test("ignores aborted bank detail requests", async () => {

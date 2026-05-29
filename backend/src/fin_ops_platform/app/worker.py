@@ -13,6 +13,8 @@ from fin_ops_platform.services.app_settings_service import (
     DEFAULT_OA_IMPORT_STATUSES,
     DEFAULT_OA_RETENTION_CUTOFF_DATE,
 )
+from fin_ops_platform.services.bank_account_balance_projection import BankAccountBalanceProjectionBuilder
+from fin_ops_platform.services.bank_account_balance_read_model_refresh import BankAccountBalanceReadModelRefreshService
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
 from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
 from fin_ops_platform.services.cost_tax_sql_projection import (
@@ -70,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-tax-offset-read-model-refresh", action="store_true", help="Register tax offset SQL read model refresh handler.")
     parser.add_argument("--enable-search-read-model-refresh", action="store_true", help="Register search SQL read model refresh handler.")
     parser.add_argument("--enable-pending-invoice-read-model-refresh", action="store_true", help="Register pending invoice SQL read model refresh handler.")
+    parser.add_argument("--enable-bank-account-balance-read-model-refresh", action="store_true", help="Register bank account balance SQL read model refresh handler.")
     parser.add_argument("--enable-bank-detail-read-model-refresh", action="store_true", help="Register bank detail SQL read model refresh handler.")
     parser.add_argument("--enable-input-invoice-usage-read-model-refresh", action="store_true", help="Register input invoice usage SQL read model refresh handler.")
     parser.add_argument("--enable-output-invoice-collection-read-model-refresh", action="store_true", help="Register output invoice collection SQL read model refresh handler.")
@@ -185,6 +188,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers["bank_detail.read_model.refresh"] = refresh_service.handle_runtime_event
         if "bank_detail.read_model.refresh" not in config.event_types:
             config.event_types.append("bank_detail.read_model.refresh")
+    if args.enable_bank_account_balance_read_model_refresh:
+        projection_builder = BankAccountBalanceProjectionBuilder(connection=connection)
+        refresh_service = BankAccountBalanceReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue,
+        )
+        handlers["bank_account_balance.read_model.refresh"] = refresh_service.handle_runtime_event
+        if "bank_account_balance.read_model.refresh" not in config.event_types:
+            config.event_types.append("bank_account_balance.read_model.refresh")
     if args.enable_input_invoice_usage_read_model_refresh or args.enable_output_invoice_collection_read_model_refresh:
         projection_builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=connection)
         refresh_service = InvoiceUsageCollectionReadModelRefreshService(

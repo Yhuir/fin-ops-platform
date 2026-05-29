@@ -564,7 +564,7 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, [dateFilter.dateFrom, dateFilter.dateTo, refreshToken, setSelectedAccountKey]);
+  }, [dateFilter.dateFrom, dateFilter.dateTo, setSelectedAccountKey]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -850,7 +850,6 @@ export default function BankDetailsPage() {
     rulesRefreshPendingRef.current = true;
     setRulesRefreshStatus("refreshing");
     setRulesFeedback("规则已保存，银行明细正在刷新。");
-    setAccountsReadModelStatus("refreshing");
     setTransactionsReadModelStatus("refreshing");
     setRefreshToken((current) => current + 1);
   };

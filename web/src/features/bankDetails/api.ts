@@ -24,14 +24,20 @@ import { ApiClientError, apiFetch, apiRequestJson, looksLikeHtmlResponse } from 
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
 
 type ApiBankDetailAccount = {
+  account_identity?: string | null;
   account_key: string;
   bank_name: string;
   account_last4: string;
   display_name: string;
+  account_no?: string | null;
+  account_name?: string | null;
+  currency?: string | null;
   latest_balance: string | null;
   latest_balance_at: string | null;
+  latest_balance_transaction_id?: string | null;
   has_balance: boolean;
   transaction_count: number;
+  transaction_total_count?: number | null;
 };
 
 type ApiBankDetailAccountsResponse = {
@@ -39,6 +45,8 @@ type ApiBankDetailAccountsResponse = {
   total_balance: string | null;
   balance_account_count: number;
   missing_balance_account_count: number;
+  total_balances_by_currency?: Record<string, string>;
+  balance_read_model_status?: string | null;
   read_model_status?: string | null;
   cache_status?: string | null;
 };
@@ -296,14 +304,20 @@ function filenameFromContentDisposition(value: string | null) {
 
 function mapAccount(account: ApiBankDetailAccount): BankDetailAccount {
   return {
+    accountIdentity: account.account_identity ?? null,
     accountKey: account.account_key,
     bankName: account.bank_name,
     accountLast4: account.account_last4,
     displayName: account.display_name,
+    accountNo: account.account_no ?? null,
+    accountName: account.account_name ?? null,
+    currency: account.currency ?? null,
     latestBalance: account.latest_balance,
     latestBalanceAt: account.latest_balance_at,
+    latestBalanceTransactionId: account.latest_balance_transaction_id ?? null,
     hasBalance: account.has_balance,
     transactionCount: account.transaction_count,
+    transactionTotalCount: Number(account.transaction_total_count) || account.transaction_count,
   };
 }
 
@@ -560,6 +574,8 @@ export async function fetchBankDetailAccounts({
     totalBalance: payload.total_balance,
     balanceAccountCount: payload.balance_account_count,
     missingBalanceAccountCount: payload.missing_balance_account_count,
+    totalBalancesByCurrency: payload.total_balances_by_currency ?? undefined,
+    balanceReadModelStatus: normalizeBankDetailReadModelStatus(payload.balance_read_model_status),
     readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
     cacheStatus: payload.cache_status ?? null,
   };

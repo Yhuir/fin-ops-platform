@@ -1,14 +1,20 @@
 import type { BankTransactionTagDictionary } from "../pendingInvoices/types";
 
 export type BankDetailAccount = {
+  accountIdentity?: string | null;
   accountKey: string;
   bankName: string;
   accountLast4: string;
   displayName: string;
+  accountNo?: string | null;
+  accountName?: string | null;
+  currency?: string | null;
   latestBalance: string | null;
   latestBalanceAt: string | null;
+  latestBalanceTransactionId?: string | null;
   hasBalance: boolean;
   transactionCount: number;
+  transactionTotalCount?: number;
 };
 
 export type BankDetailReadModelStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
@@ -18,6 +24,8 @@ export type BankDetailAccountsResponse = {
   totalBalance: string | null;
   balanceAccountCount: number;
   missingBalanceAccountCount: number;
+  totalBalancesByCurrency?: Record<string, string>;
+  balanceReadModelStatus?: BankDetailReadModelStatus;
   readModelStatus?: BankDetailReadModelStatus;
   cacheStatus?: string | null;
 };

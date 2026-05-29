@@ -9,6 +9,7 @@ from fin_ops_platform.services.import_file_service import is_company_identity
 
 INTERNAL_TRANSFER_MATCH_WINDOW = timedelta(hours=48)
 INTERNAL_TRANSFER_RULE_CODE = "internal_transfer_pair"
+INTERNAL_TRANSFER_SELF_TEXT_MARKERS = ("本公司帐户", "本公司账户", "本公司税户")
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 
@@ -64,11 +65,68 @@ class BankInternalTransferDetector:
 
         if not candidates:
             return {}
+
         if any(count > 1 for count in degrees.values()):
+            return self._detect_explicit_self_transfer_pairs(amount_text, rows)
+
+        pairs = [(outflow, inflow, delta_seconds) for _, _, delta_seconds, outflow, inflow in candidates]
+        return self._suggestions_for_pairs(amount_text, pairs)
+
+    def _detect_explicit_self_transfer_pairs(self, amount_text: str, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        explicit_rows = [row for row in rows if self._has_explicit_self_transfer_text(row)]
+        outflows = [row for row in explicit_rows if self._direction(row) == "outflow"]
+        inflows = [row for row in explicit_rows if self._direction(row) == "inflow"]
+        if not outflows or len(outflows) != len(inflows):
             return {}
 
+        pairs = self._nearest_pairs(outflows, inflows)
+        if len(pairs) != len(outflows):
+            return {}
+        return self._suggestions_for_pairs(amount_text, pairs)
+
+    def _nearest_pairs(
+        self,
+        outflows: list[dict[str, Any]],
+        inflows: list[dict[str, Any]],
+    ) -> list[tuple[dict[str, Any], dict[str, Any], int]]:
+        candidates: list[tuple[int, str, str, dict[str, Any], dict[str, Any]]] = []
+        for outflow in outflows:
+            outflow_id = self._row_id(outflow)
+            outflow_time = self._row_time(outflow)
+            if not outflow_id or outflow_time is None:
+                continue
+            for inflow in inflows:
+                inflow_id = self._row_id(inflow)
+                if not inflow_id or not self._accounts_are_distinct(outflow, inflow):
+                    continue
+                inflow_time = self._row_time(inflow)
+                if inflow_time is None:
+                    continue
+                delta = abs(inflow_time - outflow_time)
+                if delta > INTERNAL_TRANSFER_MATCH_WINDOW:
+                    continue
+                candidates.append((int(delta.total_seconds()), outflow_id, inflow_id, outflow, inflow))
+
+        pairs: list[tuple[dict[str, Any], dict[str, Any], int]] = []
+        used_outflow_ids: set[str] = set()
+        used_inflow_ids: set[str] = set()
+        for delta_seconds, outflow_id, inflow_id, outflow, inflow in sorted(candidates):
+            if outflow_id in used_outflow_ids or inflow_id in used_inflow_ids:
+                continue
+            used_outflow_ids.add(outflow_id)
+            used_inflow_ids.add(inflow_id)
+            pairs.append((outflow, inflow, delta_seconds))
+        return pairs
+
+    def _suggestions_for_pairs(
+        self,
+        amount_text: str,
+        pairs: list[tuple[dict[str, Any], dict[str, Any], int]],
+    ) -> dict[str, dict[str, Any]]:
         suggestions: dict[str, dict[str, Any]] = {}
-        for outflow_id, inflow_id, delta_seconds, outflow, inflow in candidates:
+        for outflow, inflow, delta_seconds in pairs:
+            outflow_id = self._row_id(outflow)
+            inflow_id = self._row_id(inflow)
             suggestions[outflow_id] = self._suggestion(
                 transaction_id=outflow_id,
                 counterpart_id=inflow_id,
@@ -119,6 +177,43 @@ class BankInternalTransferDetector:
     @classmethod
     def _is_company_bank_row(cls, row: dict[str, Any]) -> bool:
         return bool(cls._account_key(row)) and is_company_identity(None, str(row.get("counterparty_name") or ""))
+
+    @classmethod
+    def _has_explicit_self_transfer_text(cls, row: dict[str, Any]) -> bool:
+        return any(
+            marker in text
+            for text in cls._internal_transfer_text_values(row)
+            for marker in INTERNAL_TRANSFER_SELF_TEXT_MARKERS
+        )
+
+    @staticmethod
+    def _internal_transfer_text_values(row: dict[str, Any]) -> list[str]:
+        values: list[str] = []
+        for field_name in (
+            "purpose",
+            "purpose_text",
+            "summary",
+            "summary_text",
+            "remark",
+            "note",
+            "note_text",
+            "customer_note",
+            "detail_text",
+        ):
+            value = row.get(field_name)
+            if value not in (None, "", "--", "—"):
+                values.append(str(value))
+        detail_fields = row.get("detail_fields")
+        if isinstance(detail_fields, dict):
+            values.extend(str(value) for value in detail_fields.values() if value not in (None, "", "--", "—"))
+        bank_text_fields = row.get("bank_text_fields")
+        if isinstance(bank_text_fields, list):
+            for item in bank_text_fields:
+                if isinstance(item, dict):
+                    value = item.get("value")
+                    if value not in (None, "", "--", "—"):
+                        values.append(str(value))
+        return values
 
     @classmethod
     def _accounts_are_distinct(cls, left: dict[str, Any], right: dict[str, Any]) -> bool:

@@ -25,6 +25,39 @@
 
 ## 银行明细自动标签规则 API
 
+`GET /api/bank-details/accounts`
+
+返回银行明细页左侧账户列表和总余额。余额来自独立账户余额 read model，不从 `read_model.bank_detail_rows` 的自动标签投影聚合。
+
+响应字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `accounts` | 账户列表。 |
+| `total_balance` | CNY 账户最新余额合计；没有任何非空余额时为 `null`。 |
+| `total_balances_by_currency` | 按币种汇总的账户最新余额。 |
+| `balance_account_count` | 有最新余额的账户数。 |
+| `missing_balance_account_count` | 没有可用余额的账户数。 |
+| `balance_read_model_status` / `read_model_status` | 账户余额 read model 状态：`fresh`、`refreshing`、`stale`、`schema_mismatch` 或 `missing`。 |
+
+`accounts[*]` 至少包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `account_identity` | 账户事实身份。优先使用完整账号哈希；缺少完整账号时回退为银行 + 尾号哈希。 |
+| `account_key` | 前端筛选流水使用的稳定 key；与银行明细流水 read model 中的 `account_key` 对齐。 |
+| `bank_name` / `account_last4` / `display_name` | 账户展示字段。 |
+| `account_no` / `account_name` | 可选账户原始字段；完整账号只用于身份区分和必要展示，不参与前端自造 key。 |
+| `latest_balance` | 该账户按交易时间排序的最新一笔非空 `balance`。 |
+| `latest_balance_at` | 贡献最新余额的流水时间。 |
+| `latest_balance_transaction_id` | 贡献最新余额的流水 ID，用于审计和排查余额变化。 |
+| `currency` | 币种，缺省为 `CNY`。 |
+| `has_balance` | 是否有可用最新余额。 |
+| `transaction_count` | 当前日期范围内该账户流水数量；只影响列表徽标，不参与余额计算。 |
+| `transaction_total_count` | 该账户全部流水数量。 |
+
+日期筛选只影响 `transaction_count`，不改变 `latest_balance`、`total_balance` 或 `total_balances_by_currency`。关键字、分类筛选和自动标签规则变化不调用该接口重新计算账户余额；只有银行流水导入、删除、重导或原始余额字段变化才应触发 `bank_account_balance.read_model.refresh`。
+
 `GET /api/bank-details/auto-tag-rules`
 
 返回银行明细文本类自动标签规则。该接口只读取 `bank_transaction_tags`，不读取平行规则表。
