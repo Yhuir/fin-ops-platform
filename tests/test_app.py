@@ -78,6 +78,47 @@ class AppTests(unittest.TestCase):
         self.assertIn("package_import_path_mismatch", runtime_release["problems"])
         self.assertIn("release_metadata_missing_or_invalid", runtime_release["problems"])
 
+    def test_health_endpoint_reports_workbench_api_self_test_counts(self) -> None:
+        app = build_application()
+
+        class WorkbenchRepository:
+            def get_workbench_summary(self, *, scope_key: str):
+                self.summary_scope_key = scope_key
+                return {
+                    "read_model_status": "fresh",
+                    "summary": {"paired_count": 2, "open_count": 3},
+                }
+
+            def get_workbench_groups_page(self, **kwargs):
+                zone = kwargs["zone"]
+                return {
+                    "read_model_status": "fresh",
+                    "zone": zone,
+                    "total": 10 if zone == "paired" else 20,
+                    "groups": [{"id": f"{zone}-1"}],
+                }
+
+        app._workbench_sql_read_repository = WorkbenchRepository()
+
+        response = app.handle_request("GET", "/health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            payload["workbench_api_self_test"],
+            {
+                "scope_key": "all",
+                "status": "ok",
+                "summary_status": "fresh",
+                "summary_counts": {"paired_count": 2, "open_count": 3},
+                "groups": {
+                    "paired": {"status": "fresh", "total": 10, "returned_count": 1},
+                    "open": {"status": "fresh", "total": 20, "returned_count": 1},
+                },
+                "errors": [],
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

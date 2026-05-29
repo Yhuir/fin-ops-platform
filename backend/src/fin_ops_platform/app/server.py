@@ -1814,7 +1814,84 @@ class Application:
             "planned": ["costing"],
         }
         payload["api_performance"] = self._api_performance_recorder.summary()
+        payload["workbench_api_self_test"] = self._workbench_api_self_test()
         return payload
+
+    def _workbench_api_self_test(self) -> dict[str, object]:
+        scope_key = "all"
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        get_summary = getattr(repository, "get_workbench_summary", None)
+        get_groups_page = getattr(repository, "get_workbench_groups_page", None)
+        if not callable(get_summary) or not callable(get_groups_page):
+            return {
+                "scope_key": scope_key,
+                "status": "unavailable",
+                "summary_status": "unavailable",
+                "summary_counts": {},
+                "groups": {},
+                "errors": ["workbench_sql_read_repository_unavailable"],
+            }
+        errors: list[str] = []
+        summary_status = "unknown"
+        summary_counts: dict[str, object] = {}
+        try:
+            summary_payload = get_summary(scope_key=scope_key)
+            if isinstance(summary_payload, dict):
+                summary_status = str(summary_payload.get("read_model_status") or "fresh")
+                raw_summary = summary_payload.get("summary")
+                if isinstance(raw_summary, dict):
+                    summary_counts = {
+                        key: raw_summary.get(key)
+                        for key in ("paired_count", "open_count", "oa_count", "bank_count", "invoice_count")
+                        if key in raw_summary
+                    }
+            else:
+                summary_status = "missing"
+                errors.append("summary_missing")
+        except Exception as exc:
+            summary_status = "error"
+            errors.append(f"summary:{str(exc) or exc.__class__.__name__}")
+        groups: dict[str, object] = {}
+        for zone in ("paired", "open"):
+            try:
+                page_payload = get_groups_page(
+                    scope_key=scope_key,
+                    zone=zone,
+                    page=1,
+                    page_size=50,
+                    detail_level="summary",
+                )
+                if not isinstance(page_payload, dict):
+                    groups[zone] = {"status": "missing", "total": 0, "returned_count": 0}
+                    errors.append(f"{zone}:groups_missing")
+                    continue
+                raw_groups = page_payload.get("groups")
+                groups[zone] = {
+                    "status": str(page_payload.get("read_model_status") or "fresh"),
+                    "total": page_payload.get("total", 0),
+                    "returned_count": len(raw_groups) if isinstance(raw_groups, list) else 0,
+                }
+            except Exception as exc:
+                groups[zone] = {"status": "error", "total": 0, "returned_count": 0}
+                errors.append(f"{zone}:{str(exc) or exc.__class__.__name__}")
+        nonfresh_statuses = [
+            str(value.get("status"))
+            for value in groups.values()
+            if isinstance(value, dict) and str(value.get("status") or "fresh") != "fresh"
+        ]
+        status = "ok"
+        if errors:
+            status = "error"
+        elif summary_status != "fresh" or nonfresh_statuses:
+            status = "stale"
+        return {
+            "scope_key": scope_key,
+            "status": status,
+            "summary_status": summary_status,
+            "summary_counts": summary_counts,
+            "groups": groups,
+            "errors": errors,
+        }
 
     def _handle_workbench_prototype(self) -> Response:
         prototype_path = Path(__file__).resolve().parents[4] / "web" / "prototypes" / "reconciliation-workbench-v2.html"
