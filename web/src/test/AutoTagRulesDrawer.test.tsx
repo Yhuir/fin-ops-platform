@@ -129,6 +129,18 @@ describe("AutoTagRulesDrawer", () => {
     expect(within(table).getByRole("columnheader", { name: "主标签" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "不包含字样" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "查询项" })).toBeInTheDocument();
+    expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "主标签",
+      "子标签",
+      "流水类型",
+      "查询项",
+      "包含",
+      "必须同时包含",
+      "精准命中",
+      "不包含字样",
+      "优先级",
+      "操作",
+    ]);
     expect(within(drawer).queryByText("选择查询的项")).not.toBeInTheDocument();
     expect(within(drawer).getByText("内部往来款")).toBeInTheDocument();
     const systemRow = rowForText(drawer, "系统规则");

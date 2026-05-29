@@ -494,9 +494,9 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
             <TableContainer component={Paper} variant="outlined" className="bank-auto-tag-table-container">
               <Table stickyHeader size="small" className="bank-auto-tag-rule-table" aria-label="自动标签规则表格">
                 <colgroup>
-                  <col className="bank-auto-tag-col-direction" />
                   <col className="bank-auto-tag-col-primary" />
                   <col className="bank-auto-tag-col-sub" />
+                  <col className="bank-auto-tag-col-direction" />
                   <col className="bank-auto-tag-col-fields" />
                   <col className="bank-auto-tag-col-contains" />
                   <col className="bank-auto-tag-col-contains-all" />
@@ -507,9 +507,9 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                 </colgroup>
                 <TableHead>
                   <TableRow>
-                    <TableCell>流水类型</TableCell>
                     <TableCell>主标签</TableCell>
                     <TableCell>子标签</TableCell>
+                    <TableCell>流水类型</TableCell>
                     <TableCell>查询项</TableCell>
                     <TableCell>包含</TableCell>
                     <TableCell>必须同时包含</TableCell>
@@ -522,9 +522,9 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                 <TableBody>
                   {systemRule ? (
                     <TableRow className="bank-auto-tag-system-row">
-                      <TableCell>不限</TableCell>
                       <TableCell>{systemRule.label}</TableCell>
                       <TableCell>系统规则</TableCell>
+                      <TableCell>不限</TableCell>
                       <TableCell>—</TableCell>
                       <TableCell>—</TableCell>
                       <TableCell>—</TableCell>
@@ -536,24 +536,6 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                   ) : null}
                   {activeRuleGroups.flatMap((group) => group.rules.map((rule, rowIndex) => (
                     <TableRow key={rule.localId} className={`bank-auto-tag-rule-row ${group.colorClass}`}>
-                      <TableCell>
-                        <Select
-                          variant="standard"
-                          size="small"
-                          value={rule.direction}
-                          disabled={readonly}
-                          aria-label={`${ruleDisplayLabel(rule)} 流水类型`}
-                          inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 流水类型` }}
-                          onChange={(event) => updateActiveRule(rule.localId, (current) => ({
-                            ...current,
-                            direction: event.target.value as BankAutoTagDirection,
-                          }))}
-                        >
-                          {DIRECTION_OPTIONS.map((option) => (
-                            <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
-                          ))}
-                        </Select>
-                      </TableCell>
                       {rowIndex === 0 ? (
                         <TableCell
                           rowSpan={group.rules.length}
@@ -583,6 +565,24 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                             outputSubLabel: event.target.value,
                           }))}
                         />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          variant="standard"
+                          size="small"
+                          value={rule.direction}
+                          disabled={readonly}
+                          aria-label={`${ruleDisplayLabel(rule)} 流水类型`}
+                          inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 流水类型` }}
+                          onChange={(event) => updateActiveRule(rule.localId, (current) => ({
+                            ...current,
+                            direction: event.target.value as BankAutoTagDirection,
+                          }))}
+                        >
+                          {DIRECTION_OPTIONS.map((option) => (
+                            <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                          ))}
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <FormControl size="small" fullWidth disabled={readonly} variant="standard">
