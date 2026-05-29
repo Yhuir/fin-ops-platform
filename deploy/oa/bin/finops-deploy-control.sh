@@ -63,6 +63,16 @@ assert_runtime_env_contract() {
   if ! grep -hE '^(FIN_OPS_POSTGRES_DATABASE_URL|DATABASE_URL)=' "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
     die "missing PostgreSQL DSN in $COMMON_ENV or $SECRETS_ENV"
   fi
+  local required_key
+  for required_key in \
+    FIN_OPS_OA_BASE_URL \
+    FIN_OPS_OA_USER_INFO_PATH \
+    FIN_OPS_ALLOWED_USERNAMES \
+    FIN_OPS_ADMIN_USERNAMES; do
+    if ! grep -hE "^${required_key}=" "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
+      die "missing OA session runtime env: $required_key in $COMMON_ENV or $SECRETS_ENV"
+    fi
+  done
 }
 
 sync_python_envs() {

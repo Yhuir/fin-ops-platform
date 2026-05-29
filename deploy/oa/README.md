@@ -138,6 +138,9 @@ VITE_APP_BASE_PATH=/fin-ops/
 补充说明：
 
 - `FIN_OPS_OA_BASE_URL` 必须指向 OA 网关对外地址
+- `finops-deploy-control check-release` 会在发布前校验 PostgreSQL DSN 以及
+  `FIN_OPS_OA_BASE_URL / FIN_OPS_OA_USER_INFO_PATH / FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_ADMIN_USERNAMES`，
+  缺任一项都会停止发布，避免上线后才出现“未配置 OA 用户信息服务地址”
 - `FIN_OPS_OA_REQUIRED_PERMISSION` 默认就是 `finops:app:view`
 - `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES / FIN_OPS_ADMIN_USERNAMES`
   是启动期兜底配置，真实长期口径仍以 app 设置持久化为准
