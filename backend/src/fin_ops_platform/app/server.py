@@ -61,7 +61,9 @@ from fin_ops_platform.services.bank_transaction_auto_category_service import Ban
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
     BankAutoTagRulesValidationError,
+    BankTransactionCategoryConflictError,
     BankTransactionCategoryService,
+    BankTransactionCategoryValidationError,
 )
 from fin_ops_platform.services.bank_transaction_effective_category_provider import (
     BankTransactionEffectiveCategoryProvider,
@@ -826,7 +828,8 @@ class Application:
             if category_code not in TURNOVER_CATEGORY_RULES:
                 manual_category = self._bank_transaction_category_service.get(transaction_id)
                 manual_category_code = str(manual_category.get("category_code") or "").strip()
-                if manual_category_code in TURNOVER_CATEGORY_RULES:
+                manual_category_source = str(manual_category.get("source") or "").strip()
+                if manual_category_code in TURNOVER_CATEGORY_RULES and manual_category_source == "turnover_ledger":
                     category = manual_category
                     category_code = manual_category_code
             if category_code not in TURNOVER_CATEGORY_RULES:
@@ -1139,6 +1142,8 @@ class Application:
             return self._handle_api_turnover_ledger_export(query)
         if method == "GET" and route_path == "/api/turnover-ledger":
             return self._handle_api_turnover_ledger(query)
+        if method == "POST" and route_path == "/api/turnover-ledger/bank-row-tags/batch":
+            return self._handle_api_turnover_ledger_bank_row_tags_batch(body, headers)
         if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_turnover_ledger_relation_extra(relation_id)
@@ -11698,6 +11703,7 @@ class Application:
     def _handle_api_turnover_ledger(self, query: dict[str, list[str]]) -> Response:
         view = query.get("view", [None])[0]
         family = query.get("family", ["all"])[0]
+        direction = query.get("direction", ["all"])[0]
         status = query.get("status", [None])[0]
         page = int(query.get("page", ["1"])[0] or 1)
         page_size = int(query.get("page_size", ["50"])[0] or 50)
@@ -11707,6 +11713,7 @@ class Application:
             if callable(read_turnover_ledger):
                 read_model_payload = read_turnover_ledger(
                     family=family,
+                    direction=direction,
                     status=status,
                     page=page,
                     page_size=page_size,
@@ -11717,6 +11724,7 @@ class Application:
             payload = self._turnover_ledger_api_routes.list_ledger(
                 view=view,
                 family=family,
+                direction=direction,
                 status=status,
                 page=page,
                 page_size=page_size,
@@ -11734,6 +11742,104 @@ class Application:
                 except Exception:
                     pass
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_turnover_ledger_bank_row_tags_batch(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session_response = self._turnover_mutation_session(headers)
+        if isinstance(session_response, Response):
+            return session_response
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        if not isinstance(payload, dict) or not isinstance(payload.get("updates"), list):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_bank_row_tag_update", "message": "updates must be an array."},
+            )
+        updates = [dict(update) for update in payload.get("updates") if isinstance(update, dict)]
+        if len(updates) != len(payload.get("updates")):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_bank_row_tag_update", "message": "each update must be an object."},
+            )
+        transaction_ids = [
+            str(update.get("transaction_id") or "").strip()
+            for update in updates
+            if str(update.get("transaction_id") or "").strip()
+        ]
+        try:
+            self._ensure_turnover_bank_row_tag_targets(transaction_ids)
+            actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
+            result = self._bank_transaction_category_service.apply_turnover_updates(updates, actor=actor)
+        except BankTransactionCategoryConflictError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc),
+                    "transaction_id": exc.transaction_id,
+                    "expected_version": exc.expected_version,
+                    "actual_version": exc.actual_version,
+                },
+            )
+        except BankTransactionCategoryValidationError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
+            )
+        affected_months = self._bank_transaction_category_affected_months(transaction_ids)
+        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
+        self._turnover_relation_service.rebuild_from_bank_rows(self._turnover_bank_transaction_rows())
+        self._after_turnover_relation_mutation(affected_months)
+        result["affected_months"] = affected_months
+        result["turnover_ledger_invalidated"] = True
+        result["workbench_invalidated"] = True
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _ensure_turnover_bank_row_tag_targets(self, transaction_ids: list[str]) -> None:
+        if not transaction_ids:
+            raise BankTransactionCategoryValidationError(
+                "invalid_turnover_bank_row_tag_update",
+                "updates must contain at least one transaction_id.",
+            )
+        if len(set(transaction_ids)) != len(transaction_ids):
+            raise BankTransactionCategoryValidationError(
+                "invalid_turnover_bank_row_tag_update",
+                "duplicate transaction_id in updates.",
+            )
+        rows: list[dict[str, object]] = []
+        for transaction_id in transaction_ids:
+            try:
+                transaction = self._import_service.get_transaction(transaction_id)
+            except KeyError as exc:
+                raise BankTransactionCategoryValidationError(
+                    "unknown_transaction_id",
+                    f"Unknown bank transaction id: {transaction_id}",
+                    transaction_id=transaction_id,
+                ) from exc
+            payload = self._serialize_value(transaction)
+            if not isinstance(payload, dict):
+                payload = {}
+            rows.append(dict(payload, id=transaction_id))
+        categories = self._bank_transaction_effective_category_provider.bulk_get_for_rows(rows)
+        for transaction_id in transaction_ids:
+            category = categories.get(transaction_id) or {}
+            code = str(category.get("category_code") or "").strip()
+            manual = self._bank_transaction_category_service.get(transaction_id)
+            manual_code = str(manual.get("category_code") or "").strip()
+            manual_source = str(manual.get("source") or "").strip()
+            if code == "external_turnover" or code in TURNOVER_CATEGORY_RULES:
+                continue
+            if manual_code in TURNOVER_CATEGORY_RULES and manual_source == "turnover_ledger":
+                continue
+            raise BankTransactionCategoryValidationError(
+                "not_turnover_bank_row",
+                f"Bank transaction is not tagged as turnover: {transaction_id}",
+                transaction_id=transaction_id,
+            )
 
     def _handle_api_turnover_ledger_export_preview(self, query: dict[str, list[str]]) -> Response:
         try:

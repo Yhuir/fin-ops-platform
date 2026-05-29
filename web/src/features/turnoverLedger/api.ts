@@ -1,6 +1,8 @@
 import type {
   ConfirmTurnoverRelationRequest,
   FetchTurnoverLedgerRequest,
+  SaveTurnoverBankRowTagsRequest,
+  SaveTurnoverBankRowTagsResponse,
   SaveTurnoverLedgerExtraRequest,
   SaveTurnoverLedgerExtraResponse,
   TurnoverBankRow,
@@ -108,7 +110,9 @@ type ApiTurnoverLedgerGroupedRow = {
   repayment_direction?: string | null;
   balance_amount?: string | null;
   business_type?: string | null;
+  category_code?: string | null;
   category_label?: string | null;
+  category_version?: number | null;
   counterparty_bank_name?: string | null;
   summary_text?: string | null;
   allocation_status?: string | null;
@@ -244,6 +248,19 @@ type ApiTurnoverRelationMutationResponse = {
   relation_id?: string | null;
   status?: string | null;
   relation?: ApiTurnoverLedgerRow;
+};
+
+type ApiSaveTurnoverBankRowTagsResponse = {
+  updated_categories?: Array<{
+    transaction_id?: string | null;
+    category_code?: string | null;
+    category_label?: string | null;
+    category_path?: string[];
+    version?: number | null;
+  }>;
+  affected_months?: string[];
+  turnover_ledger_invalidated?: boolean | null;
+  workbench_invalidated?: boolean | null;
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
@@ -458,7 +475,9 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     repaymentDirection: text(row.repayment_direction),
     balanceAmount: text(row.balance_amount, "0.00"),
     businessType: row.business_type ?? null,
+    categoryCode: text(row.category_code),
     categoryLabel: text(row.category_label),
+    categoryVersion: numberValue(row.category_version),
     counterpartyBankName: text(row.counterparty_bank_name),
     summaryText: text(row.summary_text),
     allocationStatus: text(row.allocation_status),
@@ -596,6 +615,7 @@ function mapMutation(payload: ApiTurnoverRelationMutationResponse): TurnoverRela
 
 export async function fetchTurnoverLedger({
   family = "all",
+  direction = "all",
   status,
   page = 1,
   pageSize = 100,
@@ -603,6 +623,7 @@ export async function fetchTurnoverLedger({
 }: FetchTurnoverLedgerRequest = {}): Promise<TurnoverLedgerResponse> {
   const params = new URLSearchParams();
   params.set("family", family);
+  params.set("direction", direction);
   if (status) {
     params.set("status", status);
   }
@@ -626,6 +647,7 @@ export async function fetchTurnoverLedger({
 
 export async function fetchTurnoverLedgerGrouped({
   family = "all",
+  direction = "all",
   status,
   page = 1,
   pageSize = 100,
@@ -634,6 +656,7 @@ export async function fetchTurnoverLedgerGrouped({
   const params = new URLSearchParams();
   params.set("view", "grouped");
   params.set("family", family);
+  params.set("direction", direction);
   if (status) {
     params.set("status", status);
   }
@@ -652,6 +675,41 @@ export async function fetchTurnoverLedgerGrouped({
       pageSize: payload.pagination?.page_size ?? pageSize,
       total: payload.pagination?.total ?? payload.groups?.length ?? 0,
     },
+  };
+}
+
+export async function saveTurnoverBankRowTags({
+  updates,
+  signal,
+}: SaveTurnoverBankRowTagsRequest): Promise<SaveTurnoverBankRowTagsResponse> {
+  const payload = await requestJson<ApiSaveTurnoverBankRowTagsResponse>(
+    "/api/turnover-ledger/bank-row-tags/batch",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        updates: updates.map((update) => ({
+          transaction_id: update.transactionId,
+          category_code: update.categoryCode,
+          expected_version: update.expectedVersion,
+        })),
+      }),
+      signal,
+    },
+  );
+  return {
+    updatedCategories: (payload.updated_categories ?? []).map((category) => ({
+      transactionId: text(category.transaction_id),
+      categoryCode: category.category_code ?? null,
+      categoryLabel: category.category_label ?? null,
+      categoryPath: stringList(category.category_path),
+      version: numberValue(category.version),
+    })),
+    affectedMonths: stringList(payload.affected_months),
+    turnoverLedgerInvalidated: Boolean(payload.turnover_ledger_invalidated),
+    workbenchInvalidated: Boolean(payload.workbench_invalidated),
   };
 }
 

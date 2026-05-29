@@ -10,7 +10,7 @@ from fin_ops_platform.services.turnover_relation_service import TurnoverRelation
 
 
 VALID_EXTRA_RATE_TYPES = {"annual", "monthly", "none"}
-VALID_FAMILIES = {"all", "personal", "company", "bank", "business"}
+VALID_FAMILIES = {"all", "personal", "company", "bank", "business", "uncategorized"}
 MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.000001")
 ZERO = Decimal("0.00")
@@ -150,6 +150,7 @@ class TurnoverLedgerApiRoutes:
         *,
         view: str | None = None,
         family: str = "all",
+        direction: str = "all",
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
@@ -157,12 +158,14 @@ class TurnoverLedgerApiRoutes:
         if str(view or "").strip().lower() == "grouped":
             return self.list_grouped_ledger(
                 family=family,
+                direction=direction,
                 status=status,
                 page=page,
                 page_size=page_size,
             )
         return self._ledger_service.list_ledger(
             family=family,
+            direction=direction,
             status=status,
             page=page,
             page_size=page_size,
@@ -172,16 +175,18 @@ class TurnoverLedgerApiRoutes:
         self,
         *,
         family: str = "all",
+        direction: str = "all",
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, object]:
         list_grouped = getattr(self._ledger_service, "list_grouped_ledger", None)
         if callable(list_grouped):
-            payload = list_grouped(family=family, status=status, page=page, page_size=page_size)
+            payload = list_grouped(family=family, direction=direction, status=status, page=page, page_size=page_size)
             return self._normalize_grouped_payload(payload)
         flat_payload = self._ledger_service.list_ledger(
             family=family,
+            direction=direction,
             status=status,
             page=page,
             page_size=page_size,

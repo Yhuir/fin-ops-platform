@@ -8,6 +8,7 @@ import {
   fetchTurnoverLedgerGrouped,
   fetchTurnoverRelationExtra,
   fetchTurnoverRelationDetail,
+  saveTurnoverBankRowTags,
   saveTurnoverRelationExtra,
   withdrawTurnoverRelation,
 } from "../features/turnoverLedger/api";
@@ -17,6 +18,57 @@ afterEach(() => {
 });
 
 describe("turnover ledger API", () => {
+  test("saves turnover bank row tags with expected versions", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      expect(url.pathname).toBe("/api/turnover-ledger/bank-row-tags/batch");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        updates: [
+          {
+            transaction_id: "bank-001",
+            category_code: "borrow_in_company_pending_repayment",
+            expected_version: 0,
+          },
+        ],
+      });
+      return Response.json({
+        updated_categories: [
+          {
+            transaction_id: "bank-001",
+            category_code: "borrow_in_company_pending_repayment",
+            category_label: "公司暂借款：待还款",
+            category_path: ["借入", "公司往来款", "待还款"],
+            version: 1,
+          },
+        ],
+        affected_months: ["2026-05"],
+        turnover_ledger_invalidated: true,
+        workbench_invalidated: true,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await saveTurnoverBankRowTags({
+      updates: [
+        {
+          transactionId: "bank-001",
+          categoryCode: "borrow_in_company_pending_repayment",
+          expectedVersion: 0,
+        },
+      ],
+    });
+
+    expect(result.updatedCategories[0]).toMatchObject({
+      transactionId: "bank-001",
+      categoryCode: "borrow_in_company_pending_repayment",
+      categoryLabel: "公司暂借款：待还款",
+      version: 1,
+    });
+    expect(result.affectedMonths).toEqual(["2026-05"]);
+    expect(result.turnoverLedgerInvalidated).toBe(true);
+  });
+
   test("maps ledger, detail, confirm, and withdraw responses from snake_case", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");

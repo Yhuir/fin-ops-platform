@@ -214,6 +214,41 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("rows", payload)
         self.assertNotIn("rows", payload["groups"][0])
 
+    def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+            details_response = app.handle_request(
+                "GET",
+                f"/api/bank-details/transactions?category_code=borrow_in_company_pending_repayment",
+            )
+            details_payload = json.loads(details_response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["updated_categories"][0]["category_code"], "borrow_in_company_pending_repayment")
+        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertEqual(details_response.status_code, 200)
+        self.assertEqual(details_payload["pagination"]["total"], 1)
+        self.assertEqual(details_payload["rows"][0]["category_code"], "borrow_in_company_pending_repayment")
+        self.assertEqual(details_payload["rows"][0]["category_label"], "公司暂借款：待还款")
+
     def test_grouped_view_preserves_service_flow_rows_and_allocation_lots(self) -> None:
         class FakeLedgerService:
             def list_grouped_ledger(self, **_: object) -> dict[str, object]:

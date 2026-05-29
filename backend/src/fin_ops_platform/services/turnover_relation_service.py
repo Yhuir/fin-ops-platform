@@ -85,7 +85,7 @@ def _build_category_rules() -> dict[str, _CategoryRule]:
             expected_direction="outflow",
             direction_semantics="borrow_in_repayment",
         )
-    for family, code_family in (("personal", "personal"), ("company", "company"), ("business", "goods")):
+    for family, code_family in (("personal", "personal"), ("company", "company"), ("bank", "bank"), ("business", "goods")):
         rules[f"borrow_out_{code_family}_lent"] = _CategoryRule(
             category_code=f"borrow_out_{code_family}_lent",
             category_family=family,

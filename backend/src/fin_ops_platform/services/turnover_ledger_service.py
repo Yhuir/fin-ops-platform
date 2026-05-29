@@ -25,6 +25,7 @@ TURNOVER_FAMILY_LABELS = {
     "company": "公司往来",
     "bank": "银行往来",
     "business": "业务往来",
+    "uncategorized": "待分类",
 }
 TURNOVER_STATUS_LABELS = {
     "deterministic": "完全闭合",
@@ -43,6 +44,7 @@ ROW_TONES = {
     "withdrawn": "muted",
 }
 VALID_FAMILY_FILTERS = {"all", *TURNOVER_FAMILY_LABELS.keys()}
+VALID_DIRECTION_FILTERS = {"all", "borrow_in", "borrow_out"}
 
 
 class TurnoverLedgerService:
@@ -67,6 +69,7 @@ class TurnoverLedgerService:
         self,
         *,
         family: str = "all",
+        direction: str = "all",
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
@@ -76,7 +79,7 @@ class TurnoverLedgerService:
         rows_by_id = {str(row.get("id") or ""): row for row in bank_rows}
         ledger_rows = [self._row_payload(relation, rows_by_id) for relation in relations]
         ledger_rows = [row for row in ledger_rows if row is not None]
-        filtered_rows = self._apply_filters(ledger_rows, family=family, status=status)
+        filtered_rows = self._apply_filters(ledger_rows, family=family, direction=direction, status=status)
         filtered_rows.sort(
             key=lambda row: (
                 str(row.get("first_transaction_at") or ""),
@@ -105,6 +108,7 @@ class TurnoverLedgerService:
             },
             "filters": {
                 "family": self._normalize_family(family),
+                "direction": self._normalize_direction_filter(direction),
                 "status": self._normalize_status(status),
             },
         }
@@ -113,6 +117,7 @@ class TurnoverLedgerService:
         self,
         *,
         family: str = "all",
+        direction: str = "all",
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
@@ -143,8 +148,19 @@ class TurnoverLedgerService:
                     "balance_amount": self._money(legacy_row.get("balance_amount")),
                 }
             )
+        relation_row_ids = {
+            str(row_id)
+            for relation in relations
+            for row_id in list(relation.get("bank_row_ids") or [])
+            if str(row_id).strip()
+        }
+        for row in bank_rows:
+            row_id = self._row_id(row)
+            if row_id in relation_row_ids or str(row.get("category_code") or "") != "external_turnover":
+                continue
+            items.append(self._unclassified_item(row))
 
-        filtered_items = self._apply_item_filters(items, family=family, status=status)
+        filtered_items = self._apply_item_filters(items, family=family, direction=direction, status=status)
         filtered_items.sort(
             key=lambda item: (
                 str(item["row"].get("borrow_date") or ""),
@@ -176,6 +192,7 @@ class TurnoverLedgerService:
             },
             "filters": {
                 "family": self._normalize_family(family),
+                "direction": self._normalize_direction_filter(direction),
                 "status": self._normalize_status(status),
             },
         }
@@ -212,7 +229,7 @@ class TurnoverLedgerService:
                 continue
             category = categories_by_transaction_id.get(transaction_id, {})
             category_code = category.get("category_code")
-            if category_code not in BANK_TRANSACTION_CATEGORY_DEFINITIONS:
+            if category_code not in BANK_TRANSACTION_CATEGORY_DEFINITIONS and category_code != "external_turnover":
                 continue
             enriched = dict(row)
             enriched["category_code"] = category_code
@@ -220,6 +237,7 @@ class TurnoverLedgerService:
                 category_code
             )
             enriched["category_path"] = list(category.get("category_path") or [])
+            enriched["category_version"] = int(category.get("category_version") or 0)
             enriched["debit_amount"] = self._debit_amount(row)
             enriched["credit_amount"] = self._credit_amount(row)
             enriched["counterparty_name"] = str(row.get("counterparty_name_raw") or row.get("counterparty_name") or "")
@@ -585,7 +603,9 @@ class TurnoverLedgerService:
                     "repayment_amount": self._format_money(repayment_amount),
                     "repayment_date": transaction_date if direction == "expense" else None,
                     "business_type": business_type,
+                    "category_code": str(bank_row.get("category_code") or "").strip(),
                     "category_label": str(bank_row.get("category_label") or "").strip(),
+                    "category_version": int(bank_row.get("category_version") or 0),
                     "counterparty_bank_name": self._counterparty_bank_name([bank_row]),
                     "summary_text": self._summary_text([bank_row]),
                     "allocation_status": self._allocation_status(allocated_lot_ids),
@@ -594,6 +614,81 @@ class TurnoverLedgerService:
                 }
             )
         return flow_rows
+
+    def _unclassified_item(self, row: dict[str, Any]) -> dict[str, Any]:
+        row_id = self._row_id(row)
+        amount = self._row_amount(row)
+        direction = "income" if self._direction(row) == "inflow" else "expense"
+        transaction_at = self._transaction_at(row)
+        flow_row = {
+            "row_kind": "flow",
+            "flow_id": f"bank:{row_id}",
+            "relation_id": f"turnover_pending_{row_id}",
+            "source_bank_row_id": row_id,
+            "status": "unclassified",
+            "status_label": "待分类",
+            "row_tone": "warning",
+            "transaction_at": transaction_at,
+            "flow_direction": direction,
+            "flow_amount": self._format_money(amount),
+            "borrow_amount": self._format_money(amount if direction == "income" else ZERO),
+            "borrow_date": self._date_from_value(transaction_at) if direction == "income" else None,
+            "borrow_direction": "income",
+            "repayment_amount": self._format_money(amount if direction == "expense" else ZERO),
+            "repayment_date": self._date_from_value(transaction_at) if direction == "expense" else None,
+            "repayment_direction": "expense",
+            "business_type": "",
+            "category_code": str(row.get("category_code") or "").strip(),
+            "category_label": str(row.get("category_label") or "外部往来款").strip(),
+            "category_version": int(row.get("category_version") or 0),
+            "counterparty_bank_name": self._counterparty_bank_name([row]),
+            "summary_text": self._summary_text([row]),
+            "allocation_status": "unclassified",
+            "allocated_lot_ids": [],
+            "bank_row_ids": [row_id],
+        }
+        grouped_row = {
+            **flow_row,
+            "row_kind": "summary",
+            "display_level": "unclassified_summary",
+            "balance_amount": self._format_money(amount),
+            "interest_rate_type": "none",
+            "interest_rate_value": self._format_rate(ZERO_RATE),
+            "interest_paid_amount": self._format_money(ZERO),
+            "loan_days": None,
+            "accrued_interest": self._format_money(ZERO),
+            "interest_paid_date": None,
+            "interest_payment_method": "",
+            "note": "",
+        }
+        return {
+            "legacy": {
+                "relation_id": grouped_row["relation_id"],
+                "status": "unclassified",
+                "family": "uncategorized",
+                "family_label": "待分类",
+                "counterparty_name": str(row.get("counterparty_name") or ""),
+                "principal_amount": self._format_money(amount),
+                "settled_amount": self._format_money(ZERO),
+                "balance_amount": self._format_money(amount),
+                "first_transaction_at": transaction_at,
+                "last_settlement_at": None,
+                "bank_account_labels": self._bank_account_labels([row]),
+                "summary_text": self._summary_text([row]),
+                "sync_to_workbench": False,
+                "bank_row_ids": [row_id],
+                "category_codes": ["external_turnover"],
+                "business_type": "",
+            },
+            "row": grouped_row,
+            "flow_rows": [flow_row],
+            "allocation_lots": [],
+            "family": "uncategorized",
+            "status": "unclassified",
+            "counterparty_name": str(row.get("counterparty_name") or ""),
+            "business_type": "",
+            "balance_amount": amount,
+        }
 
     @staticmethod
     def _allocation_status(allocated_lot_ids: list[str]) -> str:
@@ -1036,11 +1131,15 @@ class TurnoverLedgerService:
         rows: list[dict[str, Any]],
         *,
         family: str,
+        direction: str,
         status: str | None,
     ) -> list[dict[str, Any]]:
         family_filter = cls._normalize_family(family)
+        direction_filter = cls._normalize_direction_filter(direction)
         status_filter = cls._normalize_status(status)
         filtered = list(rows)
+        if direction_filter != "all":
+            filtered = [row for row in filtered if cls._direction_filter_value(str(row.get("business_type") or "")) == direction_filter]
         if family_filter != "all":
             filtered = [row for row in filtered if row.get("family") == family_filter]
         if status_filter:
@@ -1053,11 +1152,15 @@ class TurnoverLedgerService:
         items: list[dict[str, Any]],
         *,
         family: str,
+        direction: str,
         status: str | None,
     ) -> list[dict[str, Any]]:
         family_filter = cls._normalize_family(family)
+        direction_filter = cls._normalize_direction_filter(direction)
         status_filter = cls._normalize_status(status)
         filtered = list(items)
+        if direction_filter != "all":
+            filtered = [item for item in filtered if cls._direction_filter_value(str(item.get("business_type") or "")) == direction_filter]
         if family_filter != "all":
             filtered = [item for item in filtered if item.get("family") == family_filter]
         if status_filter:
@@ -1068,6 +1171,19 @@ class TurnoverLedgerService:
     def _normalize_family(family: str | None) -> str:
         normalized = str(family or "all").strip().lower()
         return normalized if normalized in VALID_FAMILY_FILTERS else "all"
+
+    @staticmethod
+    def _normalize_direction_filter(direction: str | None) -> str:
+        normalized = str(direction or "all").strip().lower()
+        return normalized if normalized in VALID_DIRECTION_FILTERS else "all"
+
+    @staticmethod
+    def _direction_filter_value(business_type: str) -> str:
+        if business_type == "borrow_in":
+            return "borrow_in"
+        if business_type in {"borrow_out", "business_receivable"}:
+            return "borrow_out"
+        return "all"
 
     @staticmethod
     def _normalize_status(status: str | None) -> str | None:

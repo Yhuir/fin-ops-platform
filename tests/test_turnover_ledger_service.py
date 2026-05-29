@@ -464,6 +464,42 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["bank_row_ids"], ["txn-effective-turnover"])
         self.assertEqual(payload["rows"][0]["category_codes"], ["borrow_in_company_pending_repayment"])
 
+    def test_grouped_ledger_includes_external_turnover_rows_without_sub_tag_as_uncategorized(self) -> None:
+        transaction = self._transaction(
+            "txn-external-turnover",
+            direction=TransactionDirection.INFLOW,
+            amount="9000.00",
+            counterparty="云南路桥",
+            trade_time="2026-01-01 09:00:00",
+            summary="往来款",
+        )
+        ledger_service = TurnoverLedgerService(
+            import_service=_ImportServiceStub([transaction]),
+            category_service=BankTransactionCategoryService.from_snapshot(None),
+            relation_service=TurnoverRelationService.from_snapshot(None),
+            category_provider=_EffectiveCategoryProviderStub(
+                {
+                    "txn-external-turnover": {
+                        "category_code": "external_turnover",
+                        "category_label": "外部往来款",
+                        "category_path": [],
+                        "category_source": "auto",
+                        "category_version": 0,
+                    }
+                }
+            ),
+        )
+
+        payload = ledger_service.list_grouped_ledger()
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        group = payload["groups"][0]
+        self.assertEqual(group["family"], "uncategorized")
+        self.assertEqual(group["family_label"], "待分类")
+        self.assertEqual(group["flow_rows"][0]["source_bank_row_id"], "txn-external-turnover")
+        self.assertEqual(group["flow_rows"][0]["category_code"], "external_turnover")
+        self.assertEqual(group["flow_rows"][0]["category_version"], 0)
+
     def test_family_and_status_filters_are_applied_before_pagination(self) -> None:
         ledger_service, _, _ = self._service()
 
@@ -479,7 +515,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
 
         payload = ledger_service.list_grouped_ledger(family="company", page=1, page_size=10)
 
-        self.assertEqual(payload["filters"], {"family": "company", "status": None})
+        self.assertEqual(payload["filters"], {"family": "company", "direction": "all", "status": None})
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 10, "total": 1})
         group = payload["groups"][0]
         self.assertEqual(group["counterparty_name"], "云南路桥")

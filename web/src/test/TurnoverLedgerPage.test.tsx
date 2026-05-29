@@ -406,6 +406,22 @@ function installTurnoverLedgerFetch() {
       expect(url.searchParams.get("view")).toBe("grouped");
       return Response.json(groupedPayload(url.searchParams.get("family") ?? "all"));
     }
+    if (url.pathname === "/api/turnover-ledger/bank-row-tags/batch" && method === "POST") {
+      return Response.json({
+        updated_categories: [
+          {
+            transaction_id: "bank-jia-income-200000",
+            category_code: "borrow_in_company_pending_repayment",
+            category_label: "公司暂借款：待还款",
+            category_path: ["借入", "公司往来款", "待还款"],
+            version: 1,
+          },
+        ],
+        affected_months: ["2026-02"],
+        turnover_ledger_invalidated: true,
+        workbench_invalidated: true,
+      });
+    }
     if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1" && method === "GET") {
       return Response.json({
         relation: groupedPayload("personal").groups[0].rows[0],
@@ -516,12 +532,25 @@ describe("Turnover ledger page", () => {
     expect(within(page).getByRole("heading", { name: "往来款管理" })).toBeInTheDocument();
     expect(within(page).getByRole("tab", { name: "全部" })).toHaveAttribute("aria-selected", "true");
     expect(within(page).getByText("待还款金额")).toBeInTheDocument();
+    expect(within(page).getByText("已还款金额")).toBeInTheDocument();
+    expect(within(page).getByText("待收款金额")).toBeInTheDocument();
+    expect(within(page).getByText("已收款金额")).toBeInTheDocument();
+    expect(within(page).queryByText("已闭合金额")).not.toBeInTheDocument();
+    expect(within(page).queryByText("待人工确认数量")).not.toBeInTheDocument();
+    expect(within(page).queryByText("冲突/异常数量")).not.toBeInTheDocument();
+    expect(within(page).queryByText("账单行数")).not.toBeInTheDocument();
+    expect(within(page).queryByText("分组余额")).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "全部方向" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(page).getByRole("button", { name: "借出" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "借入" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "保存修改" })).toBeDisabled();
     expect(within(page).getByRole("button", { name: "下载表格" })).toBeInTheDocument();
 
     await waitFor(() => {
       const request = requestUrls(fetchMock, "/api/turnover-ledger")[0];
       expect(request?.searchParams.get("view")).toBe("grouped");
       expect(request?.searchParams.get("family")).toBe("all");
+      expect(request?.searchParams.get("direction")).toBe("all");
     });
 
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
@@ -633,6 +662,47 @@ describe("Turnover ledger page", () => {
       expectCustomEventDetailContaining(extraListener, { relationId: "rel-personal-1" });
     });
     window.removeEventListener("turnoverLedgerExtraUpdated", extraListener);
+  });
+
+  test("edits a single bank flow sub tag and saves all dirty changes in one request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch();
+    const categoryListener = vi.fn();
+    window.addEventListener("bankTransactionCategoryUpdated", categoryListener);
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+
+    await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    await user.click(within(table).getByRole("combobox", { name: "往来款子标签 bank-jia-income-200000" }));
+    await user.click(await screen.findByRole("option", { name: "借入 / 公司往来款 / 待还款" }));
+    await user.click(within(page).getByRole("button", { name: "保存修改 (1)" }));
+
+    await waitFor(() => {
+      const saveRequest = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/bank-row-tags/batch" && init?.method === "POST";
+      });
+      expect(saveRequest).toBeDefined();
+      expect(JSON.parse(String(saveRequest?.[1]?.body))).toEqual({
+        updates: [
+          {
+            transaction_id: "bank-jia-income-200000",
+            category_code: "borrow_in_company_pending_repayment",
+            expected_version: 0,
+          },
+        ],
+      });
+    });
+    await waitFor(() => {
+      expectCustomEventDetailContaining(categoryListener, {
+        affectedMonths: ["2026-02"],
+        source: "turnover_bank_row_tag_save",
+      });
+    });
+    window.removeEventListener("bankTransactionCategoryUpdated", categoryListener);
   });
 
   test("reloads on category updates and downloads a previewed export for the current tab", async () => {

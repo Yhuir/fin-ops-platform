@@ -4925,11 +4925,13 @@ class PostgresReadModelRepository:
         self,
         *,
         family: str = "all",
+        direction: str = "all",
         status: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
     ) -> dict[str, Any] | None:
         normalized_family = (text(family) or "all").lower()
+        normalized_direction = (text(direction) or "all").lower()
         normalized_status = text(status)
         normalized_page = max(int_value(page, 1), 1)
         normalized_page_size = min(max(int_value(page_size, 50), 1), 200)
@@ -4953,9 +4955,15 @@ class PostgresReadModelRepository:
         )
         if not all_rows:
             return None
-        page_rows = all_rows[(normalized_page - 1) * normalized_page_size : normalized_page * normalized_page_size]
         ledger_rows = [_turnover_ledger_row_payload(row) for row in all_rows]
-        visible_rows = [_turnover_ledger_row_payload(row) for row in page_rows]
+        if normalized_direction == "borrow_in":
+            ledger_rows = [row for row in ledger_rows if row.get("business_type") == "borrow_in"]
+        elif normalized_direction == "borrow_out":
+            ledger_rows = [
+                row for row in ledger_rows
+                if row.get("business_type") in {"borrow_out", "business_receivable"}
+            ]
+        visible_rows = ledger_rows[(normalized_page - 1) * normalized_page_size : normalized_page * normalized_page_size]
         return {
             "summary": _turnover_ledger_summary(ledger_rows),
             "family_summaries": [
@@ -4970,6 +4978,7 @@ class PostgresReadModelRepository:
             },
             "filters": {
                 "family": normalized_family,
+                "direction": normalized_direction,
                 "status": normalized_status,
             },
             "read_model_status": "fresh",

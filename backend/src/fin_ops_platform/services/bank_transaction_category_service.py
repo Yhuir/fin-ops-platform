@@ -47,24 +47,32 @@ BANK_TRANSACTION_CATEGORY_TAXONOMY: list[dict[str, Any]] = [
                 "name": "个人往来款",
                 "display_name": "个人往来款",
                 "items": [
-                    ("borrow_out_personal_lent", "已借款"),
-                    ("borrow_out_personal_pending_collection", "待收款"),
+                    ("borrow_out_personal_lent", "待收款"),
+                    ("borrow_out_personal_pending_collection", "已收款"),
                 ],
             },
             {
                 "name": "公司往来款",
                 "display_name": "公司往来款",
                 "items": [
-                    ("borrow_out_company_lent", "已借款"),
-                    ("borrow_out_company_pending_collection", "待收款"),
+                    ("borrow_out_company_lent", "待收款"),
+                    ("borrow_out_company_pending_collection", "已收款"),
+                ],
+            },
+            {
+                "name": "银行往来款",
+                "display_name": "银行往来款",
+                "items": [
+                    ("borrow_out_bank_lent", "待收款"),
+                    ("borrow_out_bank_pending_collection", "已收款"),
                 ],
             },
             {
                 "name": "货款往来款",
                 "display_name": "货款往来款",
                 "items": [
-                    ("borrow_out_goods_lent", "已借款"),
-                    ("borrow_out_goods_pending_collection", "待收款"),
+                    ("borrow_out_goods_lent", "待收款"),
+                    ("borrow_out_goods_pending_collection", "已收款"),
                 ],
             },
         ],
@@ -735,6 +743,28 @@ class BankTransactionCategoryService:
             }
 
     def apply_updates(self, updates: list[dict[str, Any]], *, actor: str) -> dict[str, Any]:
+        return self._apply_updates(updates, actor=actor)
+
+    def apply_turnover_updates(self, updates: list[dict[str, Any]], *, actor: str) -> dict[str, Any]:
+        return self._apply_updates(
+            updates,
+            actor=actor,
+            source="turnover_ledger",
+            allowed_category_codes=set(BANK_TRANSACTION_CATEGORY_DEFINITIONS),
+            invalid_category_error="invalid_turnover_category_code",
+            invalid_category_message="Only turnover leaf category codes can be selected from turnover ledger.",
+        )
+
+    def _apply_updates(
+        self,
+        updates: list[dict[str, Any]],
+        *,
+        actor: str,
+        source: str = "manual",
+        allowed_category_codes: set[str] | None = None,
+        invalid_category_error: str = "invalid_category_code",
+        invalid_category_message: str = "Invalid bank transaction category code.",
+    ) -> dict[str, Any]:
         normalized_actor = str(actor or "").strip()
         if not normalized_actor:
             raise BankTransactionCategoryValidationError(
@@ -750,6 +780,15 @@ class BankTransactionCategoryService:
         timestamp = datetime.now(UTC).isoformat()
         with self._lock:
             normalized_updates = [self._normalize_update(update) for update in updates]
+            if allowed_category_codes is not None:
+                for update in normalized_updates:
+                    category_code = update.get("category_code")
+                    if category_code not in allowed_category_codes:
+                        raise BankTransactionCategoryValidationError(
+                            invalid_category_error,
+                            invalid_category_message,
+                            transaction_id=update["transaction_id"],
+                        )
             transaction_ids = [update["transaction_id"] for update in normalized_updates]
             if len(set(transaction_ids)) != len(transaction_ids):
                 raise BankTransactionCategoryValidationError(
@@ -783,7 +822,8 @@ class BankTransactionCategoryService:
                 category_code = update["category_code"]
                 existing = self._categories.get(transaction_id)
                 previous_code = existing.get("category_code") if isinstance(existing, dict) else None
-                if existing is not None and previous_code == category_code:
+                previous_source = str(existing.get("source") or "") if isinstance(existing, dict) else ""
+                if existing is not None and previous_code == category_code and previous_source == source:
                     updated_categories.append(self._public_record(transaction_id, existing))
                     continue
 
@@ -793,7 +833,7 @@ class BankTransactionCategoryService:
                     "category_code": category_code,
                     "category_label": self._label_for(category_code),
                     "category_path": self._path_for(category_code),
-                    "source": "manual",
+                    "source": source,
                     "updated_by": normalized_actor,
                     "updated_at": timestamp,
                     "version": next_version,

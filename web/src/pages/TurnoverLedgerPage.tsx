@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from "react";
 import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
+import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
@@ -30,11 +30,13 @@ import {
   fetchTurnoverLedgerGrouped,
   fetchTurnoverRelationDetail,
   fetchTurnoverRelationExtra,
+  saveTurnoverBankRowTags,
   saveTurnoverRelationExtra,
   withdrawTurnoverRelation,
 } from "../features/turnoverLedger/api";
 import type {
   TurnoverLedgerExportPreview,
+  TurnoverLedgerDirectionFilter,
   TurnoverLedgerExtra,
   TurnoverLedgerFamily,
   TurnoverLedgerGroupedResponse,
@@ -51,6 +53,12 @@ const FAMILY_TABS: Array<{ value: TurnoverLedgerFamily; label: string }> = [
   { value: "company", label: "公司往来" },
   { value: "bank", label: "银行往来" },
   { value: "business", label: "业务往来" },
+];
+
+const DIRECTION_FILTERS: Array<{ value: TurnoverLedgerDirectionFilter; label: string; ariaLabel: string }> = [
+  { value: "all", label: "全部", ariaLabel: "全部方向" },
+  { value: "borrow_out", label: "借出", ariaLabel: "借出" },
+  { value: "borrow_in", label: "借入", ariaLabel: "借入" },
 ];
 
 const DEFAULT_SUMMARY: TurnoverLedgerSummary = {
@@ -121,6 +129,7 @@ function relationIdForRow(row: TurnoverLedgerGroupedRow) {
 
 export default function TurnoverLedgerPage() {
   const { canMutateData } = useSessionPermissions();
+  const [direction, setDirection] = useState<TurnoverLedgerDirectionFilter>("all");
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -132,6 +141,8 @@ export default function TurnoverLedgerPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [savingExtra, setSavingExtra] = useState(false);
+  const [savingTags, setSavingTags] = useState(false);
+  const [tagChanges, setTagChanges] = useState<Record<string, { categoryCode: string; expectedVersion: number }>>({});
   const [mutatingRelation, setMutatingRelation] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFamily, setExportFamily] = useState<TurnoverLedgerFamily>("all");
@@ -141,7 +152,6 @@ export default function TurnoverLedgerPage() {
   const [exportDownloading, setExportDownloading] = useState(false);
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
 
-  const selectedFamilyLabel = FAMILY_TABS.find((tab) => tab.value === family)?.label ?? "全部";
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
 
@@ -150,6 +160,7 @@ export default function TurnoverLedgerPage() {
     setError(null);
     fetchTurnoverLedgerGrouped({
       family,
+      direction,
       page: 1,
       pageSize: DEFAULT_PAGE_SIZE,
       signal,
@@ -162,7 +173,7 @@ export default function TurnoverLedgerPage() {
         setError(caught instanceof Error ? caught.message : "往来款台账加载失败");
       })
       .finally(() => setLoading(false));
-  }, [family]);
+  }, [direction, family]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -201,6 +212,73 @@ export default function TurnoverLedgerPage() {
       return;
     }
     setFamily(nextFamily);
+  };
+
+  const availableFamilyTabs = useMemo(() => (
+    direction === "borrow_in"
+      ? FAMILY_TABS.filter((tab) => tab.value !== "business")
+      : FAMILY_TABS
+  ), [direction]);
+
+  const handleDirectionChange = (nextDirection: TurnoverLedgerDirectionFilter) => {
+    setDirection(nextDirection);
+    if (nextDirection === "borrow_in" && family === "business") {
+      setFamily("all");
+    }
+  };
+
+  const handleTagChange = (row: TurnoverLedgerGroupedRow, categoryCode: string) => {
+    const bankRowId = row.sourceBankRowId || (row.bankRowIds.length === 1 ? row.bankRowIds[0] : "");
+    if (!bankRowId) {
+      return;
+    }
+    setTagChanges((current) => {
+      const originalCode = row.categoryCode || "";
+      if (categoryCode === originalCode) {
+        const { [bankRowId]: _removed, ...rest } = current;
+        return rest;
+      }
+      return {
+        ...current,
+        [bankRowId]: {
+          categoryCode,
+          expectedVersion: row.categoryVersion,
+        },
+      };
+    });
+  };
+
+  const handleSaveTags = async () => {
+    const updates = Object.entries(tagChanges)
+      .filter(([, change]) => change.categoryCode)
+      .map(([transactionId, change]) => ({
+        transactionId,
+        categoryCode: change.categoryCode,
+        expectedVersion: change.expectedVersion,
+      }));
+    if (!updates.length || savingTags) {
+      return;
+    }
+    setSavingTags(true);
+    try {
+      const result = await saveTurnoverBankRowTags({ updates });
+      setTagChanges({});
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
+        affectedMonths: result.affectedMonths,
+        affectedRowIds: updates.map((update) => update.transactionId),
+        source: "turnover_bank_row_tag_save",
+      });
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
+        affectedMonths: result.affectedMonths,
+        source: "turnover_bank_row_tag_save",
+      });
+      setSnackbar({ severity: "success", message: "往来款子标签已保存" });
+      loadLedger();
+    } catch (caught) {
+      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "往来款子标签保存失败" });
+    } finally {
+      setSavingTags(false);
+    }
   };
 
   const handleOpenEditor = (row: TurnoverLedgerGroupedRow) => {
@@ -308,7 +386,7 @@ export default function TurnoverLedgerPage() {
     }
   };
 
-  const familySummaries = useMemo(() => ledger?.familySummaries ?? [], [ledger?.familySummaries]);
+  const dirtyTagCount = Object.keys(tagChanges).length;
 
   return (
     <Box data-testid="turnover-ledger-page">
@@ -340,41 +418,53 @@ export default function TurnoverLedgerPage() {
           <SummaryCard label="已还款金额" value={formatMoney(summary.repaidAmount)} />
           <SummaryCard label="待收款金额" value={formatMoney(summary.pendingCollectionAmount)} />
           <SummaryCard label="已收款金额" value={formatMoney(summary.collectedAmount)} />
-          <SummaryCard label="已闭合金额" value={formatMoney(summary.closedAmount)} />
-          <SummaryCard label="待人工确认数量" value={summary.suggestedCount} helper={`当前：${selectedFamilyLabel}`} />
-          <SummaryCard label="冲突/异常数量" value={summary.conflictCount} />
-          <SummaryCard label="账单行数" value={summary.rowCount} />
         </Stack>
-
-        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-          <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1 }}>
-            分组余额
-          </Typography>
-          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-            {familySummaries.map((summaryItem) => (
-              <Chip
-                key={summaryItem.family}
-                label={`${summaryItem.label} 余额 ${formatMoney(summaryItem.pendingAmount)} / ${summaryItem.rowCount} 条`}
-                variant="outlined"
-              />
-            ))}
-          </Stack>
-        </Paper>
 
         <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
           <Stack spacing={1.5} sx={{ p: 1.5 }}>
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              {DIRECTION_FILTERS.map((item) => (
+                <Button
+                  key={item.value}
+                  variant={direction === item.value ? "contained" : "outlined"}
+                  aria-pressed={direction === item.value}
+                  aria-label={item.ariaLabel}
+                  onClick={() => handleDirectionChange(item.value)}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </Stack>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between">
               <Tabs value={family} onChange={handleFamilyChange} aria-label="往来款账单范围" variant="scrollable" allowScrollButtonsMobile>
-                {FAMILY_TABS.map((tab) => (
+                {availableFamilyTabs.map((tab) => (
                   <Tab key={tab.value} value={tab.value} label={tab.label} />
                 ))}
               </Tabs>
-              <Button variant="contained" startIcon={<DownloadOutlinedIcon />} onClick={handleOpenExport}>
-                下载表格
-              </Button>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<SaveOutlinedIcon />}
+                  onClick={() => void handleSaveTags()}
+                  disabled={!canMutateData || dirtyTagCount === 0 || savingTags}
+                >
+                  保存修改{dirtyTagCount ? ` (${dirtyTagCount})` : ""}
+                </Button>
+                <Button variant="contained" startIcon={<DownloadOutlinedIcon />} onClick={handleOpenExport}>
+                  下载表格
+                </Button>
+              </Stack>
             </Stack>
             <Divider />
-            <TurnoverLedgerGroupedTable groups={groups} loading={loading} onEdit={handleOpenEditor} />
+            <TurnoverLedgerGroupedTable
+              groups={groups}
+              loading={loading}
+              onEdit={handleOpenEditor}
+              canMutateData={canMutateData}
+              tagChanges={Object.fromEntries(Object.entries(tagChanges).map(([rowId, change]) => [rowId, change.categoryCode]))}
+              onTagChange={handleTagChange}
+            />
           </Stack>
         </Paper>
       </PageScaffold>

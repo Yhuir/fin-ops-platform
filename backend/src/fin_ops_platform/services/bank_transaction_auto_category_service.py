@@ -8,6 +8,7 @@ import unicodedata
 from fin_ops_platform.services.bank_internal_transfer_detector import BankInternalTransferDetector
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_AUTO_TAG_FIELD_LABELS,
+    BANK_TRANSACTION_CATEGORY_DEFINITIONS,
     BankTransactionCategoryService,
     default_bank_transaction_tag_dictionary_payload,
 )
@@ -508,8 +509,23 @@ def resolve_effective_category(
     manual_category: dict[str, Any] | None,
     auto_category: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    manual = manual_category if isinstance(manual_category, dict) else {}
+    manual_code = manual.get("category_code")
+    manual_source = str(manual.get("source") or "").strip()
     auto = auto_category if isinstance(auto_category, dict) else {}
     auto_code = auto.get("category_code")
+    if manual_code in BANK_TRANSACTION_CATEGORY_DEFINITIONS and (
+        manual_source == "turnover_ledger" or auto_code == "external_turnover"
+    ):
+        return {
+            "effective_category_code": manual_code,
+            "effective_category_label": manual.get("category_label"),
+            "effective_category_primary_label": manual.get("category_primary_label"),
+            "effective_category_sub_label": manual.get("category_sub_label"),
+            "effective_category_label_path": list(manual.get("category_label_path") or []),
+            "effective_category_path": list(manual.get("category_path") or []),
+            "effective_category_source": manual_source or "manual",
+        }
     if auto_code:
         return {
             "effective_category_code": auto_code,

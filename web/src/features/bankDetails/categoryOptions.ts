@@ -53,24 +53,32 @@ export const CATEGORY_TREE: Array<{
         name: "个人往来款",
         displayName: "个人往来款",
         items: [
-          { code: "borrow_out_personal_lent", status: "已借款" },
-          { code: "borrow_out_personal_pending_collection", status: "待收款" },
+          { code: "borrow_out_personal_lent", status: "待收款" },
+          { code: "borrow_out_personal_pending_collection", status: "已收款" },
         ],
       },
       {
         name: "公司往来款",
         displayName: "公司往来款",
         items: [
-          { code: "borrow_out_company_lent", status: "已借款" },
-          { code: "borrow_out_company_pending_collection", status: "待收款" },
+          { code: "borrow_out_company_lent", status: "待收款" },
+          { code: "borrow_out_company_pending_collection", status: "已收款" },
+        ],
+      },
+      {
+        name: "银行往来款",
+        displayName: "银行往来款",
+        items: [
+          { code: "borrow_out_bank_lent", status: "待收款" },
+          { code: "borrow_out_bank_pending_collection", status: "已收款" },
         ],
       },
       {
         name: "货款往来款",
         displayName: "货款往来款",
         items: [
-          { code: "borrow_out_goods_lent", status: "已借款" },
-          { code: "borrow_out_goods_pending_collection", status: "待收款" },
+          { code: "borrow_out_goods_lent", status: "待收款" },
+          { code: "borrow_out_goods_pending_collection", status: "已收款" },
         ],
       },
     ],

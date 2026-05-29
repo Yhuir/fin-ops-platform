@@ -472,6 +472,39 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(restored.get("txn-1")["category_path"], ["借入", "个人往来款", "已还款"])
         self.assertEqual(restored.get("txn-1")["category_version"], 1)
 
+    def test_apply_turnover_updates_allows_only_turnover_leaf_tags_atomically(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id in {"txn-1", "txn-2"},
+        )
+
+        with self.assertRaises(BankTransactionCategoryValidationError) as context:
+            service.apply_turnover_updates(
+                [
+                    {"transaction_id": "txn-1", "category_code": "borrow_in_personal_pending_repayment", "expected_version": 0},
+                    {"transaction_id": "txn-2", "category_code": "fee", "expected_version": 0},
+                ],
+                actor="YNSYLP005",
+            )
+
+        self.assertEqual(context.exception.error_code, "invalid_turnover_category_code")
+        self.assertEqual(service.get("txn-1")["category_code"], None)
+        self.assertEqual(service.get("txn-2")["category_code"], None)
+
+        result = service.apply_turnover_updates(
+            [
+                {
+                    "transaction_id": "txn-1",
+                    "category_code": "borrow_in_personal_pending_repayment",
+                    "expected_version": 0,
+                }
+            ],
+            actor="YNSYLP005",
+        )
+
+        self.assertEqual(result["updated_categories"][0]["category_code"], "borrow_in_personal_pending_repayment")
+        self.assertEqual(service.get("txn-1")["source"], "turnover_ledger")
+
 
 if __name__ == "__main__":
     unittest.main()

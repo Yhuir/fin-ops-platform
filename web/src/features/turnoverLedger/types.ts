@@ -1,5 +1,7 @@
 export type TurnoverLedgerFamily = "all" | "personal" | "company" | "bank" | "business";
 
+export type TurnoverLedgerDirectionFilter = "all" | "borrow_in" | "borrow_out";
+
 export type TurnoverRelationStatus =
   | "suggested"
   | "deterministic"
@@ -89,7 +91,9 @@ export type TurnoverLedgerGroupedRow = {
   repaymentDirection: TurnoverLedgerDirection;
   balanceAmount: string;
   businessType: string | null;
+  categoryCode: string;
   categoryLabel: string;
+  categoryVersion: number;
   counterpartyBankName: string;
   summaryText: string;
   allocationStatus: "allocated" | "partial" | "unallocated" | "not_applicable" | string;
@@ -156,10 +160,33 @@ export type TurnoverLedgerGroupedResponse = {
 
 export type FetchTurnoverLedgerRequest = {
   family?: TurnoverLedgerFamily;
+  direction?: TurnoverLedgerDirectionFilter;
   status?: string | null;
   page?: number;
   pageSize?: number;
   signal?: AbortSignal;
+};
+
+export type SaveTurnoverBankRowTagsRequest = {
+  updates: Array<{
+    transactionId: string;
+    categoryCode: string;
+    expectedVersion: number;
+  }>;
+  signal?: AbortSignal;
+};
+
+export type SaveTurnoverBankRowTagsResponse = {
+  updatedCategories: Array<{
+    transactionId: string;
+    categoryCode: string | null;
+    categoryLabel: string | null;
+    categoryPath: string[];
+    version: number;
+  }>;
+  affectedMonths: string[];
+  turnoverLedgerInvalidated: boolean;
+  workbenchInvalidated: boolean;
 };
 
 export type TurnoverLedgerExtra = {
