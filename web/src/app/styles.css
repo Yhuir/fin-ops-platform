@@ -6816,7 +6816,7 @@ body.column-layout-dragging {
 .bank-auto-tag-drawer-header {
   flex: 0 0 auto;
   padding: 12px 16px;
-  background: #ffffff;
+  background: #e7eef7;
 }
 
 .bank-auto-tag-drawer-toolbar {
@@ -6849,7 +6849,7 @@ body.column-layout-dragging {
   overflow-y: auto;
   border-color: #9fb4cf;
   border-radius: 8px;
-  background: #fbfdff;
+  background: #dbe5f2;
 }
 
 .bank-auto-tag-rule-table {
@@ -6858,43 +6858,43 @@ body.column-layout-dragging {
   min-width: 0;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(1) {
+.bank-auto-tag-col-direction {
   width: 6%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(2) {
+.bank-auto-tag-col-primary {
   width: 10%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(3) {
+.bank-auto-tag-col-sub {
   width: 9%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(4) {
+.bank-auto-tag-col-fields {
   width: 11%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(5) {
+.bank-auto-tag-col-contains {
   width: 16%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(6) {
+.bank-auto-tag-col-contains-all {
   width: 12%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(7) {
+.bank-auto-tag-col-exact {
   width: 9%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(8) {
+.bank-auto-tag-col-none {
   width: 15%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(9) {
+.bank-auto-tag-col-priority {
   width: 8%;
 }
 
-.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(10) {
+.bank-auto-tag-col-actions {
   width: 4%;
 }
 
@@ -6931,26 +6931,26 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-rule-row .MuiInputBase-root {
-  min-height: 34px;
+  min-height: 30px;
   background: transparent;
   font-size: 0.78rem;
 }
 
-.bank-auto-tag-rule-row .MuiOutlinedInput-root {
-  background: transparent;
+.bank-auto-tag-rule-row .MuiInput-root::before,
+.bank-auto-tag-rule-row .MuiInput-root:hover:not(.Mui-disabled, .Mui-error)::before {
+  border-bottom-color: transparent;
 }
 
-.bank-auto-tag-rule-row .MuiOutlinedInput-notchedOutline {
-  border-color: rgba(36, 59, 83, 0.32);
+.bank-auto-tag-rule-row .MuiInput-root::after {
+  border-bottom-color: rgba(15, 98, 254, 0.82);
 }
 
-.bank-auto-tag-rule-row .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline,
-.bank-auto-tag-rule-row .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
-  border-color: rgba(15, 98, 254, 0.72);
+.bank-auto-tag-rule-row .MuiInput-root.Mui-focused {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .bank-auto-tag-rule-row .MuiInputBase-input {
-  padding: 7px 8px;
+  padding: 5px 4px;
 }
 
 .bank-auto-tag-rule-row .MuiInputLabel-root {
@@ -6958,7 +6958,7 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-rule-row .MuiSelect-select {
-  padding: 7px 24px 7px 8px;
+  padding: 5px 22px 5px 4px;
 }
 
 .bank-auto-tag-rule-row.bank-auto-tag-group-blue .MuiTableCell-root {
@@ -6989,12 +6989,14 @@ body.column-layout-dragging {
   border-bottom-color: rgba(20, 31, 43, 0.22);
 }
 
-.bank-auto-tag-primary-cell.MuiTableCell-root {
+.bank-auto-tag-primary-cell.MuiTableCell-root,
+.bank-auto-tag-priority-cell.MuiTableCell-root {
   border-right: 2px solid rgba(15, 23, 42, 0.26);
   font-weight: 900;
 }
 
-.bank-auto-tag-primary-cell .MuiInputBase-root {
+.bank-auto-tag-primary-cell .MuiInputBase-root,
+.bank-auto-tag-priority-cell .MuiInputBase-root {
   background: transparent;
 }
 
@@ -7013,9 +7015,10 @@ body.column-layout-dragging {
   justify-content: flex-start;
   width: 100%;
   min-width: 0;
-  min-height: 34px;
-  padding: 6px 8px;
-  border-color: rgba(36, 59, 83, 0.32);
+  min-height: 30px;
+  padding: 5px 4px;
+  border-color: transparent;
+  border-radius: 4px;
   background: transparent;
   color: #243b53;
   text-align: left;
@@ -7025,7 +7028,7 @@ body.column-layout-dragging {
 .bank-auto-tag-condition-field-button.MuiButton-root:hover,
 .bank-auto-tag-condition-field-button.MuiButton-root:focus-visible {
   border-color: rgba(15, 98, 254, 0.72);
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .bank-auto-tag-condition-preview {
