@@ -30,4 +30,15 @@ create unique index if not exists bank_transaction_category_confirmations_one_ac
 create index if not exists bank_transaction_category_confirmations_category_idx
     on app.bank_transaction_category_confirmations(tenant_id, category_code);
 
-grant select, insert, update, delete on app.bank_transaction_category_confirmations to fin_ops_runtime;
+do $$
+begin
+    if exists (select 1 from pg_roles where rolname = 'fin_ops_app_runtime') then
+        grant select, insert, update, delete on app.bank_transaction_category_confirmations to fin_ops_app_runtime;
+    end if;
+    if exists (select 1 from pg_roles where rolname = 'fin_ops_worker') then
+        grant select, insert, update, delete on app.bank_transaction_category_confirmations to fin_ops_worker;
+    end if;
+    if exists (select 1 from pg_roles where rolname = 'fin_ops_migrator') then
+        grant select, insert, update, delete on app.bank_transaction_category_confirmations to fin_ops_migrator;
+    end if;
+end $$;

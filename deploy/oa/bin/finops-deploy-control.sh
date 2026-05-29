@@ -14,6 +14,7 @@ DISPATCHER_DROPIN="$DISPATCHER_DROPIN_DIR/99-deploy-release.conf"
 FRONTEND_DIR="${FINOPS_FRONTEND_DIR:-/www/wwwroot/fin-ops/dist}"
 COMMON_ENV="$ENV_DIR/fin-ops.common.env"
 SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
+MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
 
 usage() {
   cat <<'USAGE'
@@ -70,6 +71,16 @@ sync_python_envs() {
   if [[ "$WORKER_PYTHON" != "$API_PYTHON" ]]; then
     "$WORKER_PYTHON" -m pip install -r "$src/backend/requirements.txt" >/dev/null
   fi
+}
+
+run_schema_migrations() {
+  local src="$1"
+  [[ -f "$MIGRATOR_ENV" ]] || die "missing PostgreSQL migrator env: $MIGRATOR_ENV"
+  set -a
+  # shellcheck disable=SC1090
+  source "$MIGRATOR_ENV"
+  set +a
+  PYTHONPATH="$src/backend/src" "$API_PYTHON" -m fin_ops_platform.postgres.migrate apply
 }
 
 write_api_dropin() {
@@ -237,6 +248,7 @@ case "$cmd" in
     src="$(release_src "${2:-}")"
     assert_runtime_env_contract
     sync_python_envs "$src"
+    run_schema_migrations "$src"
     write_api_dropin "$src"
     write_worker_dropin "$src"
     write_dispatcher_dropin "$src"
