@@ -23,6 +23,86 @@
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
 
+## 免 OA 流水批量处理 API
+
+`GET /api/no-oa-bank-batches/tag-selection`
+
+返回免 OA 页面的全局标签准入范围。该接口只读取银行明细自动标签规则中的可用标签作为候选，不创建独立标签事实源。
+
+响应字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `version` | 免 OA 标签准入配置版本，用于保存时乐观锁。 |
+| `selected_tag_codes` | 当前已保存、仍处于可用状态的标签 code 列表。首次为空数组，后续由用户保存决定。 |
+| `inactive_selected_tag_codes` | 历史配置中已停用或不可用的标签 code；不参与候选生成，保存后会被清理。 |
+| `active_tags` | 银行明细自动标签规则中的可用标签，供抽屉按主/子标签层级展示。 |
+
+`active_tags[*]` 至少包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `code` | 银行明细标签稳定身份。 |
+| `label` | 标签显示名称。 |
+| `path` | 标签路径，可用于审计或调试。 |
+| `status` | 当前只返回 `active`。 |
+| `output_primary_label` / `output_sub_label` | 免 OA 页面展示的主/子标签。`output_sub_label` 可为空，前端显示为“主标签本身”。 |
+
+`PUT /api/no-oa-bank-batches/tag-selection`
+
+请求示例：
+
+```json
+{
+  "expected_version": 3,
+  "selected_tag_codes": ["fee", "salary"]
+}
+```
+
+保存规则：
+
+- `expected_version` 必填；版本不一致返回 `409 no_oa_bank_batch_tag_selection_version_conflict`。
+- `selected_tag_codes` 可为空数组，表示免 OA 页面暂不生成新的未提交候选。
+- 只能提交当前 `active_tags` 中存在且处于可用状态的标签 code；未知或停用标签返回业务错误。
+- 成功后返回与 GET 相同结构，并写审计动作 `no_oa_bank_batch_tag_selection_updated`。
+- 保存后只影响后续未提交候选；已提交历史批次继续可见并允许按批次撤回。
+
+`GET /api/no-oa-bank-batches`
+
+查询免 OA 批次列表。常用查询参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `month` | `YYYY-MM` 月份。 |
+| `bucket` | `unsubmitted`、`submitted`、`withdrawn` 或 `all`。 |
+| `account_key` | 银行账户筛选。 |
+
+响应中的 `summary.categories[*]` 和 `batches[*]` 需要携带 `category_primary_label`、`category_sub_label`、`category_label_path`，供前端构造主/子标签三栏。候选批次只来自当前保存的免 OA 标签准入范围；已提交历史批次即使标签不再准入也继续返回。
+
+`POST /api/no-oa-bank-batches/submit-selection`
+
+提交当前页面选中的银行流水，后端按这一次选择生成一个免 OA 批次并立即提交，不按银行账户自动拆分多个批次。
+
+请求示例：
+
+```json
+{
+  "transaction_ids": ["bank-row-001", "bank-row-002"],
+  "note": ""
+}
+```
+
+提交规则：
+
+- `transaction_ids` 必填且不能为空，不能重复。
+- 所有流水必须来自同一月份、同一银行账户、同一 `category_code`，且该 `category_code` 必须在当前免 OA 标签准入范围内。
+- 只提交请求中的流水；同银行区域内未选中的流水不提交。
+- 成功后写入 `relation_mode=no_oa_bank_batch`，返回 `affected_months` 和 `workbench_rebuild_queued` 供前端刷新关联台。
+
+`POST /api/no-oa-bank-batches/{batch_id}/withdraw`
+
+撤回已提交免 OA 批次。撤回必须使用批次 API，不能从关联台绕过批次直接普通取消 relation。
+
 ## 银行明细自动标签规则 API
 
 `GET /api/bank-details/accounts`

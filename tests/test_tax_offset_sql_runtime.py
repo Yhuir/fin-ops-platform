@@ -246,6 +246,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
                     "refresh_status": "fresh",
                     "generated_at": "2026-05-21T09:00:00+00:00",
                     "schema_version": "2026-05-tax-offset-month-v1",
+                    "source_versions": app._tax_offset_expected_source_versions(),
                 }
             },
         )()
@@ -260,7 +261,9 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["input_plan_items"], [{"id": "input-1"}])
-        self.assertEqual(redis.sets[0][0], "tax_offset:month:2026-05")
+        self.assertTrue(
+            redis.sets[0][0].startswith("tax_offset:month:2026-05:schema:2026-05-tax-offset-month-v1:sources:")
+        )
         self.assertLessEqual(redis.sets[0][2], 120)
 
     def test_tax_offset_api_falls_back_to_sql_when_redis_times_out(self) -> None:
@@ -279,6 +282,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
                     "refresh_status": "fresh",
                     "generated_at": "2026-05-21T09:00:00+00:00",
                     "schema_version": "2026-05-tax-offset-month-v1",
+                    "source_versions": app._tax_offset_expected_source_versions(),
                 }
             },
         )()
@@ -307,6 +311,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
                     "refresh_status": "fresh",
                     "generated_at": "2026-05-21T09:00:00+00:00",
                     "schema_version": "2026-05-tax-offset-month-v1",
+                    "source_versions": app._tax_offset_expected_source_versions(),
                 }
             },
         )()
@@ -320,7 +325,9 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["item_counts"]["input_plan_items"], 1)
         self.assertNotIn("output_items", payload)
         self.assertNotIn("input_plan_items", payload)
-        self.assertEqual(redis.sets[0][0], "tax_offset:summary:2026-05")
+        self.assertTrue(
+            redis.sets[0][0].startswith("tax_offset:summary:2026-05:schema:2026-05-tax-offset-month-v1:sources:")
+        )
 
     def test_tax_offset_summary_api_reads_small_redis_cache_without_sql(self) -> None:
         cached_summary = {
@@ -445,7 +452,9 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(deleted, [])
         self.assertEqual(queue.refreshes, [("tax_offset", "2026-05", "unit_test")])
-        self.assertEqual(redis.deletes, ["tax_offset:month:2026-05", "tax_offset:summary:2026-05"])
+        self.assertIn("tax_offset:month:2026-05", redis.deletes)
+        self.assertIn("tax_offset:summary:2026-05", redis.deletes)
+        self.assertTrue(any(":schema:2026-05-tax-offset-month-v1:sources:" in key for key in redis.deletes))
 
     def test_tax_offset_invalidation_ignores_redis_delete_timeout(self) -> None:
         queue = QueueRecorder()
@@ -459,7 +468,9 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
 
         app._delete_tax_offset_redis_cache("2026-05")
 
-        self.assertEqual(redis.deletes, ["tax_offset:month:2026-05", "tax_offset:summary:2026-05"])
+        self.assertIn("tax_offset:month:2026-05", redis.deletes)
+        self.assertIn("tax_offset:summary:2026-05", redis.deletes)
+        self.assertTrue(any(":schema:2026-05-tax-offset-month-v1:sources:" in key for key in redis.deletes))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -10,6 +10,9 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
+import Drawer from "@mui/material/Drawer";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
@@ -23,6 +26,7 @@ import TextField from "@mui/material/TextField";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
+import CloseIcon from "@mui/icons-material/Close";
 
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
@@ -33,31 +37,23 @@ import {
 } from "../features/domainEvents";
 import {
   fetchNoOaBankBatchDetail,
+  fetchNoOaBankBatchTagSelection,
   fetchNoOaBankBatches,
-  submitNoOaBankBatch,
-  submitNoOaBankBatches,
+  saveNoOaBankBatchTagSelection,
+  submitNoOaBankBatchSelection,
   withdrawNoOaBankBatch,
 } from "../features/noOaBankBatches/api";
 import type {
   NoOaBankBatch,
-  NoOaBankBatchCountMap,
   NoOaBankBatchDetail,
   NoOaBankBatchesResponse,
-  NoOaBankBatchType,
   NoOaBankBatchStatus,
   NoOaBankBatchStatusBucket,
+  NoOaBankBatchDetailRow,
+  NoOaBankBatchSummaryCategory,
+  NoOaBankBatchTagDefinition,
+  NoOaBankBatchTagSelection,
 } from "../features/noOaBankBatches/types";
-
-const NO_OA_CATEGORIES: Array<{ value: NoOaBankBatchType; label: string }> = [
-  { value: "fee", label: "手续费" },
-  { value: "salary", label: "工资" },
-  { value: "holiday_bonus", label: "过节费" },
-  { value: "bonus", label: "奖金" },
-  { value: "tax_payment", label: "税款" },
-  { value: "treasury_tax_collection", label: "代理国库税收收缴" },
-  { value: "social_security", label: "社保款" },
-  { value: "internal_transfer", label: "内部往来款" },
-];
 
 const EMPTY_BATCHES: NoOaBankBatchesResponse = {
   summary: {
@@ -72,23 +68,21 @@ const EMPTY_BATCHES: NoOaBankBatchesResponse = {
   batches: [],
 };
 
+const EMPTY_TAG_SELECTION: NoOaBankBatchTagSelection = {
+  version: 1,
+  selectedTagCodes: [],
+  inactiveSelectedTagCodes: [],
+  activeTags: [],
+};
+
+const SELF_SUB_LABEL = "主标签本身";
+
 const STATUS_META: Record<NoOaBankBatchStatus, { label: string; color: "default" | "primary" | "success" | "warning" | "error" }> = {
   draft: { label: "待提交", color: "warning" },
   submitted: { label: "已提交", color: "success" },
   withdrawn: { label: "已撤回", color: "default" },
   conflict: { label: "冲突", color: "error" },
   stale: { label: "需复核", color: "primary" },
-};
-
-const TAG_LABELS: Record<string, string> = {
-  fee: "手续费",
-  salary: "工资",
-  holiday_bonus: "过节费",
-  bonus: "奖金",
-  tax_payment: "税款",
-  treasury_tax_collection: "代理国库税收收缴",
-  social_security: "社保款",
-  internal_transfer: "内部往来款",
 };
 
 function currentMonth() {
@@ -141,17 +135,6 @@ function sourceLabel(source: string) {
   return source || "-";
 }
 
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "-";
-  }
-  return value.replace("T", " ").slice(0, 19);
-}
-
-function canSubmit(batch: NoOaBankBatch) {
-  return batch.canSubmit || batch.status === "draft";
-}
-
 function canWithdraw(batch: NoOaBankBatch) {
   return batch.canWithdraw || batch.status === "submitted";
 }
@@ -166,118 +149,89 @@ function statusBucketFor(batch: NoOaBankBatch): NoOaBankBatchStatusBucket {
   return "unsubmitted";
 }
 
-function blockedReason(batch: NoOaBankBatch) {
-  return batch.blockedReason || batch.conflictReason || (batch.status === "stale" ? "源流水或分类已变化，需要复核后处理" : "");
-}
-
 function BatchStatusChip({ status }: { status: string }) {
   const meta = STATUS_META[status as NoOaBankBatchStatus] ?? { label: status, color: "default" as const };
   return <Chip color={meta.color} label={meta.label} size="small" />;
-}
-
-function formatCounts(counts: NoOaBankBatchCountMap, fallbackType: string, fallbackCount: number) {
-  const entries = Object.entries(counts);
-  if (entries.length === 0 && fallbackType) {
-    return `${TAG_LABELS[fallbackType] ?? fallbackType} ${fallbackCount}`;
-  }
-  return entries.map(([code, count]) => `${TAG_LABELS[code] ?? code} ${count}`).join(" · ");
-}
-
-function formatDirectionCounts(counts: NoOaBankBatchCountMap) {
-  const income = counts.income ?? 0;
-  const expense = counts.expense ?? 0;
-  if (!income && !expense) {
-    return "";
-  }
-  return `收入 ${income} / 支出 ${expense}`;
-}
-
-function categoryRowCount(batch: NoOaBankBatch, category: NoOaBankBatchType) {
-  const explicitCount = batch.tagCounts[category];
-  if (typeof explicitCount === "number" && Number.isFinite(explicitCount)) {
-    return explicitCount;
-  }
-  if (batch.batchType === category) {
-    return batch.rowCount;
-  }
-  return 0;
 }
 
 function mutationEventDetail(result: { affectedMonths?: string[] }) {
   return { affectedMonths: result.affectedMonths ?? [] };
 }
 
+type NoOaTagNode = {
+  code: string;
+  label: string;
+  primaryLabel: string;
+  subLabel: string;
+};
+
+function cleanText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function tagPrimaryLabel(tag: NoOaBankBatchTagDefinition | NoOaBankBatchSummaryCategory | NoOaBankBatch) {
+  if ("outputPrimaryLabel" in tag) {
+    return cleanText(tag.outputPrimaryLabel) || cleanText(tag.label) || cleanText(tag.code);
+  }
+  if ("primaryLabel" in tag) {
+    return cleanText(tag.primaryLabel) || cleanText(tag.label) || cleanText(tag.code);
+  }
+  if ("batchType" in tag) {
+    return cleanText(tag.categoryPrimaryLabel) || cleanText(tag.batchLabel) || cleanText(tag.batchType);
+  }
+  return cleanText(tag.label) || cleanText(tag.code);
+}
+
+function tagSubLabel(tag: NoOaBankBatchTagDefinition | NoOaBankBatchSummaryCategory | NoOaBankBatch) {
+  if ("outputSubLabel" in tag) {
+    return cleanText(tag.outputSubLabel);
+  }
+  if ("subLabel" in tag) {
+    return cleanText(tag.subLabel);
+  }
+  return "batchType" in tag ? cleanText(tag.categorySubLabel) : "";
+}
+
+function tagDisplayLabel(node: NoOaTagNode) {
+  return node.subLabel ? `${node.primaryLabel} / ${node.subLabel}` : node.primaryLabel;
+}
+
 export default function NoOaBankBatchPage() {
   const [month, setMonth] = useState(currentMonth);
-  const [selectedCategory, setSelectedCategory] = useState<NoOaBankBatchType>("fee");
   const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
   const [accountKey, setAccountKey] = useState("");
   const [payload, setPayload] = useState<NoOaBankBatchesResponse>(EMPTY_BATCHES);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [tagSelection, setTagSelection] = useState<NoOaBankBatchTagSelection>(EMPTY_TAG_SELECTION);
+  const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
+  const [draftSelectedTagCodes, setDraftSelectedTagCodes] = useState<Set<string>>(() => new Set());
+  const [selectedPrimaryLabel, setSelectedPrimaryLabel] = useState("");
+  const [selectedSubKey, setSelectedSubKey] = useState("");
   const [details, setDetails] = useState<Record<string, NoOaBankBatchDetail>>({});
-  const [detailLoadingBatchId, setDetailLoadingBatchId] = useState<string | null>(null);
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
-  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(() => new Set());
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
+  const [selectedAccountForSubmit, setSelectedAccountForSubmit] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [tagLoading, setTagLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<NoOaBankBatch | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
 
-  const visibleBucketBatches = useMemo(
-    () => payload.batches.filter((batch) => statusBucketFor(batch) === bucket),
-    [bucket, payload.batches],
-  );
-
-  const noOaCategories = useMemo(() => {
-    const categories = payload.summary.categories
-      .map((category) => ({
-        value: category.code as NoOaBankBatchType,
-        label: category.label || TAG_LABELS[category.code] || category.code,
-      }))
-      .filter((category) => category.value && category.label);
-    return categories.length > 0 ? categories : NO_OA_CATEGORIES;
-  }, [payload.summary.categories]);
-
-  const categoryStats = useMemo(() => {
-    const stats = new Map<NoOaBankBatchType, { batchCount: number; rowCount: number }>();
-    noOaCategories.forEach((category) => stats.set(category.value, { batchCount: 0, rowCount: 0 }));
-    visibleBucketBatches.forEach((batch) => {
-      noOaCategories.forEach((category) => {
-        const rowCount = categoryRowCount(batch, category.value);
-        if (rowCount > 0 || batch.batchType === category.value) {
-          const current = stats.get(category.value) ?? { batchCount: 0, rowCount: 0 };
-          stats.set(category.value, {
-            batchCount: current.batchCount + 1,
-            rowCount: current.rowCount + rowCount,
-          });
+  const loadTagSelection = useCallback((signal?: AbortSignal) => {
+    setTagLoading(true);
+    fetchNoOaBankBatchTagSelection(signal)
+      .then((nextSelection) => {
+        setTagSelection(nextSelection);
+        setDraftSelectedTagCodes(new Set(nextSelection.selectedTagCodes));
+      })
+      .catch((caught) => {
+        if (!isAbortLikeError(caught)) {
+          setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "免OA标签配置加载失败" });
         }
-      });
-    });
-    return stats;
-  }, [noOaCategories, visibleBucketBatches]);
-
-  const visibleBatches = useMemo(
-    () => visibleBucketBatches.filter((batch) => batch.batchType === selectedCategory || (batch.tagCounts[selectedCategory] ?? 0) > 0),
-    [selectedCategory, visibleBucketBatches],
-  );
-
-  const selectedCategoryMeta = noOaCategories.find((category) => category.value === selectedCategory) ?? noOaCategories[0];
-  const selectedCategoryStats = categoryStats.get(selectedCategory) ?? { batchCount: 0, rowCount: 0 };
-  const unsubmittedCount = payload.summary.draftCount + payload.summary.conflictCount + payload.summary.staleCount;
-
-  const selectedBatch = useMemo(
-    () => visibleBatches.find((batch) => batch.batchId === selectedBatchId) ?? null,
-    [selectedBatchId, visibleBatches],
-  );
-
-  const selectedDetail = selectedBatch ? details[selectedBatch.batchId] ?? null : null;
-
-  const selectedDraftBatches = useMemo(
-    () => payload.batches.filter((batch) => selectedBatchIds.has(batch.batchId) && canSubmit(batch)),
-    [payload.batches, selectedBatchIds],
-  );
+      })
+      .finally(() => setTagLoading(false));
+  }, []);
 
   const loadBatches = useCallback((signal?: AbortSignal) => {
     setLoading(true);
@@ -290,147 +244,238 @@ export default function NoOaBankBatchPage() {
     })
       .then((nextPayload) => {
         setPayload(nextPayload);
-        const nextVisible = nextPayload.batches.filter((batch) => (
-          statusBucketFor(batch) === bucket
-          && (batch.batchType === selectedCategory || (batch.tagCounts[selectedCategory] ?? 0) > 0)
-        ));
-        setSelectedBatchId((current) => (current && nextVisible.some((batch) => batch.batchId === current) ? current : nextVisible[0]?.batchId ?? null));
-        setSelectedBatchIds((current) => {
-          const available = new Set(nextPayload.batches.filter(canSubmit).map((batch) => batch.batchId));
-          return new Set(Array.from(current).filter((batchId) => available.has(batchId)));
-        });
+        setSelectedTransactionIds(new Set());
+        setSelectedAccountForSubmit(null);
       })
       .catch((caught: unknown) => {
-        if (isAbortLikeError(caught)) {
-          return;
+        if (!isAbortLikeError(caught)) {
+          setError(caught instanceof Error ? caught.message : "免OA流水批次加载失败");
         }
-        setError(caught instanceof Error ? caught.message : "免OA流水批次加载失败");
       })
       .finally(() => setLoading(false));
-  }, [accountKey, bucket, month, selectedCategory]);
-
-  const loadDetail = useCallback((batchId: string, force = false) => {
-    if (!force && details[batchId]) {
-      return;
-    }
-    setDetailLoadingBatchId(batchId);
-    setDetailErrors((current) => ({ ...current, [batchId]: "" }));
-    fetchNoOaBankBatchDetail(batchId)
-      .then((detail) => {
-        setDetails((current) => ({ ...current, [batchId]: detail }));
-      })
-      .catch((caught: unknown) => {
-        setDetailErrors((current) => ({
-          ...current,
-          [batchId]: caught instanceof Error ? caught.message : "批次明细加载失败",
-        }));
-      })
-      .finally(() => setDetailLoadingBatchId(null));
-  }, [details]);
+  }, [accountKey, bucket, month]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setSelectedBatchId(null);
-    setSelectedBatchIds(new Set());
+    loadTagSelection(controller.signal);
+    return () => controller.abort();
+  }, [loadTagSelection]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setDetails({});
     loadBatches(controller.signal);
     return () => controller.abort();
   }, [loadBatches]);
 
+  const tagNodesByCode = useMemo(() => {
+    const nodes = new Map<string, NoOaTagNode>();
+    tagSelection.activeTags.forEach((tag) => {
+      if (!tagSelection.selectedTagCodes.includes(tag.code)) {
+        return;
+      }
+      nodes.set(tag.code, {
+        code: tag.code,
+        label: tag.label || tag.code,
+        primaryLabel: tagPrimaryLabel(tag) || tag.label || tag.code,
+        subLabel: tagSubLabel(tag),
+      });
+    });
+    payload.summary.categories.forEach((category) => {
+      if (!nodes.has(category.code)) {
+        nodes.set(category.code, {
+          code: category.code,
+          label: category.label || category.code,
+          primaryLabel: tagPrimaryLabel(category) || category.label || category.code,
+          subLabel: tagSubLabel(category),
+        });
+      }
+    });
+    payload.batches.forEach((batch) => {
+      if (!nodes.has(batch.batchType)) {
+        nodes.set(batch.batchType, {
+          code: batch.batchType,
+          label: batch.batchLabel || batch.batchType,
+          primaryLabel: tagPrimaryLabel(batch) || batch.batchLabel || batch.batchType,
+          subLabel: tagSubLabel(batch),
+        });
+      }
+    });
+    return nodes;
+  }, [payload.batches, payload.summary.categories, tagSelection.activeTags, tagSelection.selectedTagCodes]);
+
+  const visibleBucketBatches = useMemo(
+    () => payload.batches.filter((batch) => statusBucketFor(batch) === bucket),
+    [bucket, payload.batches],
+  );
+
+  const primaryGroups = useMemo(() => {
+    const groups = new Map<string, { primaryLabel: string; codes: string[]; batchCount: number; rowCount: number }>();
+    tagNodesByCode.forEach((node) => {
+      if (!groups.has(node.primaryLabel)) {
+        groups.set(node.primaryLabel, { primaryLabel: node.primaryLabel, codes: [], batchCount: 0, rowCount: 0 });
+      }
+      groups.get(node.primaryLabel)?.codes.push(node.code);
+    });
+    visibleBucketBatches.forEach((batch) => {
+      const node = tagNodesByCode.get(batch.batchType);
+      if (!node) {
+        return;
+      }
+      const group = groups.get(node.primaryLabel);
+      if (group) {
+        group.batchCount += 1;
+        group.rowCount += batch.rowCount;
+      }
+    });
+    return Array.from(groups.values());
+  }, [tagNodesByCode, visibleBucketBatches]);
+
   useEffect(() => {
-    if (selectedBatchId) {
-      loadDetail(selectedBatchId);
+    if (primaryGroups.length === 0) {
+      setSelectedPrimaryLabel("");
+      setSelectedSubKey("");
+      return;
     }
-  }, [loadDetail, selectedBatchId]);
+    if (!primaryGroups.some((group) => group.primaryLabel === selectedPrimaryLabel)) {
+      setSelectedPrimaryLabel(primaryGroups[0].primaryLabel);
+    }
+  }, [primaryGroups, selectedPrimaryLabel]);
+
+  const subGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; codes: string[]; batchCount: number; rowCount: number }>();
+    tagNodesByCode.forEach((node) => {
+      if (node.primaryLabel !== selectedPrimaryLabel) {
+        return;
+      }
+      const key = node.subLabel || SELF_SUB_LABEL;
+      if (!groups.has(key)) {
+        groups.set(key, { key, label: key, codes: [], batchCount: 0, rowCount: 0 });
+      }
+      groups.get(key)?.codes.push(node.code);
+    });
+    visibleBucketBatches.forEach((batch) => {
+      const node = tagNodesByCode.get(batch.batchType);
+      if (!node || node.primaryLabel !== selectedPrimaryLabel) {
+        return;
+      }
+      const key = node.subLabel || SELF_SUB_LABEL;
+      const group = groups.get(key);
+      if (group) {
+        group.batchCount += 1;
+        group.rowCount += batch.rowCount;
+      }
+    });
+    return Array.from(groups.values());
+  }, [selectedPrimaryLabel, tagNodesByCode, visibleBucketBatches]);
+
+  useEffect(() => {
+    if (subGroups.length === 0) {
+      setSelectedSubKey("");
+      return;
+    }
+    if (!subGroups.some((group) => group.key === selectedSubKey)) {
+      setSelectedSubKey(subGroups[0].key);
+    }
+  }, [selectedSubKey, subGroups]);
+
+  const selectedSubGroup = subGroups.find((group) => group.key === selectedSubKey) ?? null;
+  const visibleBatches = useMemo(() => {
+    const codes = new Set(selectedSubGroup?.codes ?? []);
+    return visibleBucketBatches.filter((batch) => codes.has(batch.batchType));
+  }, [selectedSubGroup, visibleBucketBatches]);
+
+  useEffect(() => {
+    visibleBatches.forEach((batch) => {
+      if (details[batch.batchId] || detailErrors[batch.batchId]) {
+        return;
+      }
+      fetchNoOaBankBatchDetail(batch.batchId)
+        .then((detail) => setDetails((current) => ({ ...current, [batch.batchId]: detail })))
+        .catch((caught) => setDetailErrors((current) => ({
+          ...current,
+          [batch.batchId]: caught instanceof Error ? caught.message : "批次明细加载失败",
+        })));
+    });
+  }, [detailErrors, details, visibleBatches]);
 
   useEffect(() => {
     const handleCategoryUpdated = () => {
       setDetails({});
+      loadTagSelection();
       loadBatches();
     };
     return subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
-  }, [loadBatches]);
-
-  const handleSelectBatch = (batch: NoOaBankBatch, checked: boolean) => {
-    setSelectedBatchIds((current) => {
-      const next = new Set(current);
-      if (checked && canSubmit(batch)) {
-        next.add(batch.batchId);
-      } else {
-        next.delete(batch.batchId);
-      }
-      return next;
-    });
-  };
+  }, [loadBatches, loadTagSelection]);
 
   const handleMutationComplete = (message: string, result: { affectedMonths?: string[] }) => {
     emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
       ...mutationEventDetail(result),
     });
+    setSelectedTransactionIds(new Set());
+    setSelectedAccountForSubmit(null);
     setDetails({});
     setSnackbar({ severity: "success", message });
     loadBatches();
   };
 
-  const handleSubmitBatch = async (batch: NoOaBankBatch) => {
-    if (!canSubmit(batch) || mutating) {
-      return;
-    }
-    setMutating(true);
-    try {
-      const result = await submitNoOaBankBatch({
-        batchId: batch.batchId,
-        expectedVersion: batch.version,
-        note: "",
-      });
-      handleMutationComplete("批次已提交", result);
-    } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "提交批次失败" });
-    } finally {
-      setMutating(false);
-    }
+  const toggleTransaction = (row: NoOaBankBatchDetailRow, checked: boolean) => {
+    setSelectedTransactionIds((current) => {
+      const next = new Set(current);
+      if (!checked) {
+        next.delete(row.transactionId);
+        if (next.size === 0) {
+          setSelectedAccountForSubmit(null);
+        }
+        return next;
+      }
+      if (selectedAccountForSubmit && selectedAccountForSubmit !== row.accountKey) {
+        setSnackbar({ severity: "warning", message: "请先清空已选银行区域，再选择其他银行流水。" });
+        return current;
+      }
+      setSelectedAccountForSubmit(row.accountKey);
+      next.add(row.transactionId);
+      return next;
+    });
   };
 
-  const handleBulkSubmit = async () => {
-    if (selectedDraftBatches.length === 0 || mutating) {
+  const setRegionSelection = (rows: NoOaBankBatchDetailRow[], checked: boolean) => {
+    if (!checked) {
+      setSelectedTransactionIds((current) => {
+        const next = new Set(current);
+        rows.forEach((row) => next.delete(row.transactionId));
+        if (next.size === 0) {
+          setSelectedAccountForSubmit(null);
+        }
+        return next;
+      });
+      return;
+    }
+    const account = rows[0]?.accountKey;
+    if (!account) {
+      return;
+    }
+    if (selectedAccountForSubmit && selectedAccountForSubmit !== account) {
+      setSnackbar({ severity: "warning", message: "请先清空已选银行区域，再选择其他银行流水。" });
+      return;
+    }
+    setSelectedAccountForSubmit(account);
+    setSelectedTransactionIds((current) => new Set([...current, ...rows.map((row) => row.transactionId)]));
+  };
+
+  const handleSubmitSelected = async () => {
+    if (selectedTransactionIds.size === 0 || mutating) {
       return;
     }
     setMutating(true);
     try {
-      const result = await submitNoOaBankBatches({
-        batches: selectedDraftBatches.map((batch) => ({
-          batchId: batch.batchId,
-          expectedVersion: batch.version,
-        })),
+      const result = await submitNoOaBankBatchSelection({
+        transactionIds: Array.from(selectedTransactionIds),
+        note: "",
       });
-      const submittedCount = result.results.filter((item) => String(item.status || "") === "submitted").length;
-      const failedResults = result.results.filter((item) => String(item.status || "") === "failed");
-      const failedBatchIds = new Set(
-        failedResults
-          .map((item) => String(item.batch_id || item.batchId || ""))
-          .filter(Boolean),
-      );
-      setSelectedBatchIds((previous) => {
-        if (failedBatchIds.size === 0) {
-          return new Set();
-        }
-        return new Set([...previous].filter((batchId) => failedBatchIds.has(batchId)));
-      });
-      if (submittedCount > 0) {
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-          ...mutationEventDetail(result),
-        });
-      }
-      setDetails({});
-      if (failedResults.length === 0) {
-        setSnackbar({ severity: "success", message: "选中批次已提交" });
-      } else if (submittedCount > 0) {
-        setSnackbar({ severity: "warning", message: `已提交 ${submittedCount} 个，失败 ${failedResults.length} 个，请查看失败项后重试` });
-      } else {
-        setSnackbar({ severity: "error", message: "批量提交失败，请查看失败项后重试" });
-      }
-      loadBatches();
+      handleMutationComplete("选中流水已提交", result);
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "批量提交失败" });
+      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "提交选中流水失败" });
     } finally {
       setMutating(false);
     }
@@ -457,38 +502,59 @@ export default function NoOaBankBatchPage() {
     }
   };
 
-  const handleBucketChange = (_event: MouseEvent<HTMLElement>, nextBucket: NoOaBankBatchStatusBucket | null) => {
-    if (!nextBucket) {
-      return;
+  const saveTagSelection = async () => {
+    setMutating(true);
+    try {
+      const saved = await saveNoOaBankBatchTagSelection({
+        expectedVersion: tagSelection.version,
+        selectedTagCodes: Array.from(draftSelectedTagCodes),
+      });
+      setTagSelection(saved);
+      setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
+      setTagDrawerOpen(false);
+      setDetails({});
+      setSnackbar({ severity: "success", message: "免OA流水标签范围已保存" });
+      loadBatches();
+    } catch (caught) {
+      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "保存免OA标签范围失败" });
+    } finally {
+      setMutating(false);
     }
-    setBucket(nextBucket);
   };
 
-  const handleCategoryChange = (nextCategory: NoOaBankBatchType) => {
-    setSelectedCategory(nextCategory);
-    const nextVisible = visibleBucketBatches.filter((batch) => batch.batchType === nextCategory || (batch.tagCounts[nextCategory] ?? 0) > 0);
-    setSelectedBatchId(nextVisible[0]?.batchId ?? null);
-  };
+  const drawerGroups = useMemo(() => {
+    const groups = new Map<string, NoOaBankBatchTagDefinition[]>();
+    tagSelection.activeTags.forEach((tag) => {
+      const primary = tagPrimaryLabel(tag) || tag.label || tag.code;
+      groups.set(primary, [...(groups.get(primary) ?? []), tag]);
+    });
+    return Array.from(groups.entries()).map(([primaryLabel, tags]) => ({ primaryLabel, tags }));
+  }, [tagSelection.activeTags]);
 
-  const selectedTagCounts = selectedDetail?.tagCounts ?? selectedBatch?.tagCounts ?? {};
-  const selectedDirectionCounts = selectedDetail?.directionCounts ?? selectedBatch?.directionCounts ?? {};
+  const unsubmittedCount = payload.summary.draftCount + payload.summary.conflictCount + payload.summary.staleCount;
 
   return (
     <PageScaffold
       title="免OA流水批量处理"
-      description="按银行账户、月份和类型确认免 OA 银行流水批次。"
+      description="按月份、主子标签和银行账户确认免 OA 银行流水批次。"
       actions={(
-        <Button
-          disabled={loading}
-          onClick={() => {
-            setDetails({});
-            loadBatches();
-          }}
-          startIcon={<RefreshOutlinedIcon />}
-          variant="outlined"
-        >
-          刷新
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button disabled={tagLoading} onClick={() => setTagDrawerOpen(true)} variant="outlined">
+            免OA流水标签管理
+          </Button>
+          <Button
+            disabled={loading}
+            onClick={() => {
+              setDetails({});
+              loadTagSelection();
+              loadBatches();
+            }}
+            startIcon={<RefreshOutlinedIcon />}
+            variant="outlined"
+          >
+            刷新
+          </Button>
+        </Stack>
       )}
     >
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
@@ -497,28 +563,21 @@ export default function NoOaBankBatchPage() {
             aria-label="批次状态"
             color="primary"
             exclusive
-            onChange={handleBucketChange}
+            onChange={(_event, nextBucket: NoOaBankBatchStatusBucket | null) => nextBucket && setBucket(nextBucket)}
             size="small"
             value={bucket}
           >
             <ToggleButton value="unsubmitted">未提交 {unsubmittedCount}</ToggleButton>
             <ToggleButton value="submitted">已提交 {payload.summary.submittedCount}</ToggleButton>
           </ToggleButtonGroup>
-          <TextField
-            InputLabelProps={{ shrink: true }}
-            label="月份"
-            onChange={(event) => setMonth(event.target.value)}
-            size="small"
-            type="month"
-            value={month}
-          />
-          <TextField
-            label="银行账户"
-            onChange={(event) => setAccountKey(event.target.value)}
-            placeholder="银行或账户尾号"
-            size="small"
-            value={accountKey}
-          />
+          <TextField InputLabelProps={{ shrink: true }} label="月份" onChange={(event) => setMonth(event.target.value)} size="small" type="month" value={month} />
+          <TextField label="银行账户" onChange={(event) => setAccountKey(event.target.value)} placeholder="银行或账户尾号" size="small" value={accountKey} />
+          {bucket === "unsubmitted" ? (
+            <Button disabled={selectedTransactionIds.size === 0 || mutating} onClick={handleSubmitSelected} variant="contained">
+              提交批次
+            </Button>
+          ) : null}
+          {selectedTransactionIds.size > 0 ? <Chip label={`已选 ${selectedTransactionIds.size} 条`} color="primary" /> : null}
         </Stack>
       </Paper>
 
@@ -528,40 +587,33 @@ export default function NoOaBankBatchPage() {
         sx={{
           display: "grid",
           gap: 1.5,
-          gridTemplateColumns: { xs: "1fr", lg: "280px 280px minmax(0, 1fr)" },
+          gridTemplateColumns: { xs: "1fr", lg: "18% 18% minmax(0, 1fr)" },
           alignItems: "start",
         }}
       >
-        <Paper aria-label="免OA分类" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
+        <Paper aria-label="主标签" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
           <Stack spacing={0.5} sx={{ px: 2, py: 1.5 }}>
-            <Typography fontWeight={900}>免OA分类</Typography>
-            <Typography color="text.secondary" variant="caption">固定显示全部免OA标签</Typography>
+            <Typography fontWeight={900}>主标签</Typography>
+            <Typography color="text.secondary" variant="caption">来自银行明细自动标签</Typography>
           </Stack>
           <Divider />
           <Stack divider={<Divider flexItem />}>
-            {noOaCategories.map((category) => {
-              const stats = categoryStats.get(category.value) ?? { batchCount: 0, rowCount: 0 };
-              const selected = selectedCategory === category.value;
+            {primaryGroups.length === 0 ? <StatePanel compact tone="empty" title="请先在标签管理中选择免OA标签" /> : null}
+            {primaryGroups.map((group) => {
+              const selected = selectedPrimaryLabel === group.primaryLabel;
               return (
                 <Box
-                  aria-label={`${category.label} ${stats.batchCount} 批 ${stats.rowCount} 条`}
+                  aria-label={`${group.primaryLabel} ${group.batchCount} 批 ${group.rowCount} 条`}
                   aria-pressed={selected}
-                  key={category.value}
-                  onClick={() => handleCategoryChange(category.value)}
+                  key={group.primaryLabel}
+                  onClick={() => setSelectedPrimaryLabel(group.primaryLabel)}
                   role="button"
-                  sx={{
-                    bgcolor: selected ? "action.selected" : "background.paper",
-                    borderLeft: selected ? 4 : 0,
-                    borderColor: "primary.main",
-                    cursor: "pointer",
-                    px: 2,
-                    py: 1.5,
-                  }}
+                  sx={{ bgcolor: selected ? "action.selected" : "background.paper", borderLeft: selected ? 4 : 0, borderColor: "primary.main", cursor: "pointer", px: 2, py: 1.5 }}
                   tabIndex={0}
                 >
-                  <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                    <Typography fontWeight={900}>{category.label}</Typography>
-                    <Chip label={`${stats.batchCount} 批 / ${stats.rowCount} 条`} size="small" variant={selected ? "filled" : "outlined"} />
+                  <Stack spacing={0.75}>
+                    <Typography fontWeight={900}>{group.primaryLabel}</Typography>
+                    <Chip label={`${group.batchCount} 批 / ${group.rowCount} 条`} size="small" variant={selected ? "filled" : "outlined"} />
                   </Stack>
                 </Box>
               );
@@ -569,213 +621,247 @@ export default function NoOaBankBatchPage() {
           </Stack>
         </Paper>
 
-        <Paper aria-label="免OA批次" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1.5} sx={{ px: 2, py: 1.5 }}>
-            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-              <Typography component="h2" variant="h6" fontWeight={900}>
-                {selectedCategoryMeta.label} {selectedCategoryStats.batchCount} 批 / {selectedCategoryStats.rowCount} 条
-              </Typography>
-            </Stack>
-            <Button disabled={selectedDraftBatches.length === 0 || mutating} onClick={handleBulkSubmit} size="small" variant="contained">
-              批量提交选中
-            </Button>
+        <Paper aria-label="子标签" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
+          <Stack spacing={0.5} sx={{ px: 2, py: 1.5 }}>
+            <Typography fontWeight={900}>子标签</Typography>
+            <Typography color="text.secondary" variant="caption">{selectedPrimaryLabel || "请选择主标签"}</Typography>
           </Stack>
           <Divider />
-          <Stack divider={<Divider flexItem />} sx={{ maxHeight: { lg: "30vh" }, overflow: "auto" }}>
-            {loading ? <StatePanel compact tone="loading" title="批次加载中" /> : null}
-            {!loading && visibleBatches.length === 0 ? <StatePanel compact tone="empty" title={`当前状态下暂无${selectedCategoryMeta.label}批次`} /> : null}
-            {!loading
-              ? visibleBatches.map((batch) => {
-                const selected = selectedBatchId === batch.batchId;
-                const reason = blockedReason(batch);
-                const isSubmitReady = canSubmit(batch);
-                return (
-                  <Box
-                    aria-label={`${batch.batchLabel || batch.batchType} ${accountLabel(batch)} ${batch.scopeMonth} ${batch.rowCount} 条 ${reason}`}
-                    key={batch.batchId}
-                    onClick={() => setSelectedBatchId(batch.batchId)}
-                    role="button"
-                    sx={{
-                      bgcolor: selected ? "action.selected" : "background.paper",
-                      borderLeft: selected ? 4 : 0,
-                      borderColor: "primary.main",
-                      cursor: "pointer",
-                      p: 1.5,
-                    }}
-                    tabIndex={0}
-                  >
-                    <Stack spacing={1}>
-                      <Stack alignItems="flex-start" direction="row" justifyContent="space-between" spacing={1}>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Checkbox
-                            checked={selectedBatchIds.has(batch.batchId)}
-                            disabled={!isSubmitReady}
-                            inputProps={{
-                              "aria-label": `选择 ${batch.batchLabel} ${accountLabel(batch)} ${batch.scopeMonth}`,
-                            }}
-                            onChange={(event) => handleSelectBatch(batch, event.target.checked)}
-                            onClick={(event) => event.stopPropagation()}
-                            size="small"
-                          />
-                          <Box>
-                            <Typography fontWeight={900}>{batch.batchLabel || batch.batchType}</Typography>
-                            <Typography color="text.secondary" variant="caption">
-                              {batch.scopeMonth} · {accountLabel(batch)}
-                            </Typography>
-                          </Box>
-                        </Stack>
-                        <BatchStatusChip status={batch.status} />
-                      </Stack>
-                      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                        <Chip label={batch.scopeMonth || "-"} size="small" />
-                        <Chip label={accountLabel(batch)} size="small" variant="outlined" />
-                        <Chip label={`${batch.rowCount} 条`} size="small" variant="outlined" />
-                        <Chip label={batch.batchLabel || batch.batchType} size="small" variant="outlined" />
-                      </Stack>
-                      {reason ? (
-                        <Typography color={batch.status === "conflict" ? "error" : "text.secondary"} variant="caption">
-                          {reason}
-                        </Typography>
-                      ) : null}
-                      {batch.status === "submitted" ? (
-                        <Typography color="text.secondary" variant="caption">
-                          {batch.submittedBy || "-"} · {formatDateTime(batch.submittedAt)}
-                        </Typography>
-                      ) : null}
-                      <Stack direction="row" spacing={1}>
-                        {isSubmitReady ? (
-                          <Button disabled={mutating} onClick={(event) => {
-                            event.stopPropagation();
-                            handleSubmitBatch(batch);
-                          }} size="small" variant="contained">
-                            提交批次
-                          </Button>
-                        ) : null}
-                        {canWithdraw(batch) ? (
-                          <Button disabled={mutating} onClick={(event) => {
-                            event.stopPropagation();
-                            setWithdrawTarget(batch);
-                          }} size="small" variant="outlined">
-                            撤回批次
-                          </Button>
-                        ) : null}
-                      </Stack>
-                    </Stack>
-                  </Box>
-                );
-              })
-              : null}
+          <Stack divider={<Divider flexItem />}>
+            {subGroups.length === 0 ? <StatePanel compact tone="empty" title="暂无子标签" /> : null}
+            {subGroups.map((group) => {
+              const selected = selectedSubKey === group.key;
+              return (
+                <Box
+                  aria-label={`${group.label} ${group.batchCount} 批 ${group.rowCount} 条`}
+                  aria-pressed={selected}
+                  key={group.key}
+                  onClick={() => setSelectedSubKey(group.key)}
+                  role="button"
+                  sx={{ bgcolor: selected ? "action.selected" : "background.paper", borderLeft: selected ? 4 : 0, borderColor: "primary.main", cursor: "pointer", px: 2, py: 1.5 }}
+                  tabIndex={0}
+                >
+                  <Stack spacing={0.75}>
+                    <Typography fontWeight={900}>{group.label}</Typography>
+                    <Chip label={`${group.batchCount} 批 / ${group.rowCount} 条`} size="small" variant={selected ? "filled" : "outlined"} />
+                  </Stack>
+                </Box>
+              );
+            })}
           </Stack>
         </Paper>
 
-        <Paper aria-label="批次明细" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-            {selectedBatch ? (
-              <>
-              <Stack spacing={1} sx={{ px: 2, py: 1.5 }}>
-                <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
-                  <Typography fontWeight={900}>
-                    {selectedBatch.batchLabel || selectedBatch.batchType} · {selectedBatch.rowCount} 条 · 合计 {formatMoney(selectedBatch.totalAmount)}
-                  </Typography>
-                  <BatchStatusChip status={selectedBatch.status} />
-                </Stack>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Chip label={formatCounts(selectedTagCounts, selectedBatch.batchType, selectedBatch.rowCount)} size="small" />
-                  {selectedBatch.batchType === "internal_transfer" && formatDirectionCounts(selectedDirectionCounts) ? (
-                    <Chip label={formatDirectionCounts(selectedDirectionCounts)} size="small" variant="outlined" />
-                  ) : null}
-                </Stack>
-              </Stack>
-              <Divider />
-              {detailErrors[selectedBatch.batchId] ? (
-                <StatePanel compact tone="error" title={detailErrors[selectedBatch.batchId]} />
-              ) : null}
-              {detailLoadingBatchId === selectedBatch.batchId && !selectedDetail ? (
-                <StatePanel compact tone="loading" title="明细加载中" />
-              ) : null}
-              {selectedDetail && selectedDetail.rows.length === 0 ? (
-                <StatePanel compact tone="empty" title="暂无批次明细" />
-              ) : null}
-              {selectedDetail && selectedDetail.rows.length > 0 ? (
-                <TableContainer sx={{ maxHeight: { lg: "60vh" } }}>
-                  <Table stickyHeader size="small" aria-label="批次明细表格">
-	                    <TableHead>
-	                      <TableRow>
-	                        <TableCell>交易时间</TableCell>
-	                        <TableCell>对方户名</TableCell>
-	                        <TableCell align="right">金额</TableCell>
-	                        <TableCell>摘要/用途/备注</TableCell>
-	                        <TableCell>分类来源</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {selectedDetail.rows.map((row) => (
-	                        <TableRow key={row.transactionId || `${row.tradeTime}-${row.amount}`}>
-	                          <TableCell>{row.tradeTime || "-"}</TableCell>
-	                          <TableCell>{row.counterpartyName || "-"}</TableCell>
-	                          <TableCell align="right">
-	                            <Stack alignItems="flex-end" spacing={0.25}>
-	                              <Stack alignItems="center" direction="row" justifyContent="flex-end" spacing={0.75}>
-	                                <Chip label={directionTagLabel(row)} size="small" />
-	                                <Typography variant="body2">{formatMoney(row.amount)}</Typography>
-	                              </Stack>
-	                              <Chip label={bankTagLabel(row)} size="small" variant="outlined" />
-	                            </Stack>
-	                          </TableCell>
-	                          <TableCell>
-	                            <Stack spacing={0.25}>
-	                              <Typography variant="body2">{row.summary || "-"}</Typography>
-                              <Typography color="text.secondary" variant="caption">
-                                {[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}
-                              </Typography>
-                            </Stack>
-                          </TableCell>
-                          <TableCell>{sourceLabel(row.categorySource)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              ) : null}
-              </>
-            ) : (
-              <StatePanel compact tone="empty" title="请选择批次查看明细" />
-            )}
+        <Paper aria-label="流水" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
+          <Stack spacing={0.5} sx={{ px: 2, py: 1.5 }}>
+            <Typography fontWeight={900}>
+              {selectedPrimaryLabel && selectedSubKey ? `${selectedPrimaryLabel} / ${selectedSubKey}` : "流水"}
+            </Typography>
+            <Typography color="text.secondary" variant="caption">
+              {bucket === "unsubmitted" ? "每次只能选择同一银行区域内的流水提交。" : "已提交批次保留撤回入口。"}
+            </Typography>
+          </Stack>
+          <Divider />
+          <Stack divider={<Divider flexItem />} sx={{ maxHeight: { lg: "68vh" }, overflow: "auto" }}>
+            {loading ? <StatePanel compact tone="loading" title="流水加载中" /> : null}
+            {!loading && visibleBatches.length === 0 ? <StatePanel compact tone="empty" title="当前标签下暂无流水" /> : null}
+            {!loading ? visibleBatches.map((batch) => {
+              const detail = details[batch.batchId];
+              const rows = detail?.rows ?? [];
+              const regionChecked = rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
+              return (
+                <Box key={batch.batchId} sx={{ p: 1.5 }}>
+                  <Stack spacing={1}>
+                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                        <Typography fontWeight={900}>{accountLabel(batch)}</Typography>
+                        <Chip label={`${batch.rowCount} 条`} size="small" />
+                        <Chip label={`合计 ${formatMoney(batch.totalAmount)}`} size="small" variant="outlined" />
+                        <BatchStatusChip status={batch.status} />
+                      </Stack>
+                      <Stack direction="row" spacing={1}>
+                        {bucket === "unsubmitted" ? (
+                          <>
+                            <Button disabled={rows.length === 0 || mutating} onClick={() => setRegionSelection(rows, true)} size="small">全选</Button>
+                            <Button disabled={rows.length === 0 || mutating} onClick={() => setRegionSelection(rows, false)} size="small">清空</Button>
+                          </>
+                        ) : null}
+                        {canWithdraw(batch) ? (
+                          <Button disabled={mutating} onClick={() => setWithdrawTarget(batch)} size="small" variant="outlined">撤回批次</Button>
+                        ) : null}
+                      </Stack>
+                    </Stack>
+                    {detailErrors[batch.batchId] ? <Alert severity="error">{detailErrors[batch.batchId]}</Alert> : null}
+                    {!detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
+                    {detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
+                    {rows.length > 0 ? (
+                      <TableContainer>
+                        <Table size="small" aria-label={`${accountLabel(batch)}流水`}>
+                          <TableHead>
+                            <TableRow>
+                              {bucket === "unsubmitted" ? (
+                                <TableCell padding="checkbox">
+                                  <Checkbox
+                                    checked={regionChecked}
+                                    inputProps={{ "aria-label": `${accountLabel(batch)}全选` }}
+                                    onChange={(event) => setRegionSelection(rows, event.target.checked)}
+                                  />
+                                </TableCell>
+                              ) : null}
+                              <TableCell>交易时间</TableCell>
+                              <TableCell>对方户名</TableCell>
+                              <TableCell align="right">金额</TableCell>
+                              <TableCell>摘要/用途/备注</TableCell>
+                              <TableCell>分类来源</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {rows.map((row) => (
+                              <TableRow key={row.transactionId}>
+                                {bucket === "unsubmitted" ? (
+                                  <TableCell padding="checkbox">
+                                    <Checkbox
+                                      checked={selectedTransactionIds.has(row.transactionId)}
+                                      inputProps={{ "aria-label": `选择流水 ${row.transactionId}` }}
+                                      onChange={(event) => toggleTransaction(row, event.target.checked)}
+                                    />
+                                  </TableCell>
+                                ) : null}
+                                <TableCell>{row.tradeTime || "-"}</TableCell>
+                                <TableCell>{row.counterpartyName || "-"}</TableCell>
+                                <TableCell align="right">
+                                  <Stack alignItems="flex-end" spacing={0.25}>
+                                    <Stack alignItems="center" direction="row" justifyContent="flex-end" spacing={0.75}>
+                                      <Chip label={directionTagLabel(row)} size="small" />
+                                      <Typography variant="body2">{formatMoney(row.amount)}</Typography>
+                                    </Stack>
+                                    <Chip label={bankTagLabel(row)} size="small" variant="outlined" />
+                                  </Stack>
+                                </TableCell>
+                                <TableCell>
+                                  <Stack spacing={0.25}>
+                                    <Typography variant="body2">{row.summary || "-"}</Typography>
+                                    <Typography color="text.secondary" variant="caption">{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</Typography>
+                                  </Stack>
+                                </TableCell>
+                                <TableCell>{sourceLabel(row.categorySource)}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    ) : null}
+                  </Stack>
+                </Box>
+              );
+            }) : null}
+          </Stack>
         </Paper>
       </Box>
+
+      <Drawer
+        anchor="right"
+        open={tagDrawerOpen}
+        onClose={() => setTagDrawerOpen(false)}
+        PaperProps={{ sx: { width: { xs: "100%", sm: "520px" }, maxWidth: "100vw" }, role: "dialog", "aria-label": "免OA流水标签管理" }}
+      >
+        <Stack spacing={0} sx={{ height: "100%" }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
+            <Box>
+              <Typography component="h2" variant="h6" fontWeight={900}>免OA流水标签管理</Typography>
+              <Typography color="text.secondary" variant="caption">版本 {tagSelection.version}</Typography>
+            </Box>
+            <IconButton aria-label="关闭免OA流水标签管理" onClick={() => setTagDrawerOpen(false)}><CloseIcon /></IconButton>
+          </Stack>
+          <Divider />
+          <Stack direction="row" spacing={1} sx={{ p: 2 }}>
+            <Button onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} size="small" variant="outlined">全选</Button>
+            <Button onClick={() => setDraftSelectedTagCodes(new Set())} size="small" variant="outlined">清空</Button>
+            <Button disabled={mutating} onClick={saveTagSelection} size="small" variant="contained">保存</Button>
+          </Stack>
+          {tagSelection.inactiveSelectedTagCodes.length > 0 ? (
+            <Alert severity="warning" sx={{ mx: 2, mb: 1 }}>
+              已停用标签不再生效：{tagSelection.inactiveSelectedTagCodes.join("、")}。保存后会清理这些引用。
+            </Alert>
+          ) : null}
+          <Stack divider={<Divider flexItem />} sx={{ overflow: "auto" }}>
+            {drawerGroups.map((group) => {
+              const codes = group.tags.map((tag) => tag.code);
+              const checkedCount = codes.filter((code) => draftSelectedTagCodes.has(code)).length;
+              const allChecked = checkedCount === codes.length && codes.length > 0;
+              return (
+                <Box key={group.primaryLabel} sx={{ p: 2 }}>
+                  <FormControlLabel
+                    control={(
+                      <Checkbox
+                        checked={allChecked}
+                        indeterminate={checkedCount > 0 && !allChecked}
+                        onChange={(event) => {
+                          setDraftSelectedTagCodes((current) => {
+                            const next = new Set(current);
+                            codes.forEach((code) => {
+                              if (event.target.checked) {
+                                next.add(code);
+                              } else {
+                                next.delete(code);
+                              }
+                            });
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                    label={<Typography fontWeight={900}>{group.primaryLabel}</Typography>}
+                  />
+                  <Stack sx={{ pl: 4 }}>
+                    {group.tags.map((tag) => {
+                      const node = { code: tag.code, label: tag.label, primaryLabel: tagPrimaryLabel(tag), subLabel: tagSubLabel(tag) };
+                      return (
+                        <FormControlLabel
+                          key={tag.code}
+                          control={(
+                            <Checkbox
+                              checked={draftSelectedTagCodes.has(tag.code)}
+                              onChange={(event) => {
+                                setDraftSelectedTagCodes((current) => {
+                                  const next = new Set(current);
+                                  if (event.target.checked) {
+                                    next.add(tag.code);
+                                  } else {
+                                    next.delete(tag.code);
+                                  }
+                                  return next;
+                                });
+                              }}
+                            />
+                          )}
+                          label={node.subLabel ? tagDisplayLabel(node) : SELF_SUB_LABEL}
+                        />
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              );
+            })}
+          </Stack>
+        </Stack>
+      </Drawer>
 
       <Dialog fullWidth maxWidth="xs" onClose={() => setWithdrawTarget(null)} open={Boolean(withdrawTarget)}>
         <DialogTitle>撤回批次</DialogTitle>
         <DialogContent>
           <Stack spacing={1.5} sx={{ pt: 1 }}>
             <Alert severity="warning">撤回后会取消关联台闭环关系，相关流水回到未配对区域。</Alert>
-            <TextField
-              autoFocus
-              label="撤回原因"
-              multiline
-              minRows={3}
-              onChange={(event) => setWithdrawReason(event.target.value)}
-              value={withdrawReason}
-            />
+            <TextField autoFocus label="撤回原因" multiline minRows={3} onChange={(event) => setWithdrawReason(event.target.value)} value={withdrawReason} />
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setWithdrawTarget(null)}>取消</Button>
-          <Button disabled={!withdrawReason.trim() || mutating} onClick={handleConfirmWithdraw} variant="contained">
-            确认撤回
-          </Button>
+          <Button disabled={!withdrawReason.trim() || mutating} onClick={handleConfirmWithdraw} variant="contained">确认撤回</Button>
         </DialogActions>
       </Dialog>
 
-      <Snackbar
-        autoHideDuration={3000}
-        onClose={() => setSnackbar(null)}
-        open={Boolean(snackbar)}
-      >
-        {snackbar ? (
-          <Alert onClose={() => setSnackbar(null)} severity={snackbar.severity} variant="filled">
-            {snackbar.message}
-          </Alert>
-        ) : undefined}
+      <Snackbar autoHideDuration={3000} onClose={() => setSnackbar(null)} open={Boolean(snackbar)}>
+        {snackbar ? <Alert onClose={() => setSnackbar(null)} severity={snackbar.severity} variant="filled">{snackbar.message}</Alert> : undefined}
       </Snackbar>
     </PageScaffold>
   );

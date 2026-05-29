@@ -186,6 +186,42 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(detail_payload["relation"]["relation_id"], relation_id)
         self.assertEqual(len(detail_payload["bank_rows"]), 2)
 
+    def test_get_turnover_ledger_rebuilds_stale_sql_read_model_source_versions(self) -> None:
+        class StaleTurnoverReadRepository:
+            def __init__(self) -> None:
+                self.saved_payload: dict[str, object] | None = None
+
+            def list_turnover_ledger_view(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "summary": {},
+                    "rows": [{"relation_id": "stale_sql_row", "counterparty_name": "旧读模型"}],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "filters": {},
+                    "read_model_status": "fresh",
+                    "source_versions": {"turnover_ledger_schema_version": "old"},
+                }
+
+            def save_turnover_ledger_rows(self, payload: dict[str, object]) -> None:
+                self.saved_payload = payload
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            repository = StaleTurnoverReadRepository()
+            app._workbench_sql_read_repository = repository
+
+            response = app.handle_request("GET", "/api/turnover-ledger")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["rows"][0]["counterparty_name"], "梁希涛")
+        self.assertNotEqual(payload["rows"][0]["relation_id"], "stale_sql_row")
+        self.assertIsNotNone(repository.saved_payload)
+        saved_payload = repository.saved_payload or {}
+        self.assertEqual(saved_payload["source_versions"], app._turnover_ledger_source_versions())
+        self.assertEqual(saved_payload["rows"][0]["source_versions"], app._turnover_ledger_source_versions())
+
     def test_get_turnover_ledger_grouped_view_returns_groups(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

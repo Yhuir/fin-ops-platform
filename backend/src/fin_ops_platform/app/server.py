@@ -59,6 +59,7 @@ from fin_ops_platform.services.bank_details_export_service import (
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
+    BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
     BANK_TRANSACTION_CATEGORY_LABELS,
     BankAutoTagRulesValidationError,
     BankTransactionCategoryConflictError,
@@ -73,7 +74,10 @@ from fin_ops_platform.services.background_job_service import (
     BackgroundJobNotFoundError,
     BackgroundJobService,
 )
-from fin_ops_platform.services.cost_statistics_read_model_service import CostStatisticsReadModelService
+from fin_ops_platform.services.cost_statistics_read_model_service import (
+    COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    CostStatisticsReadModelService,
+)
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_service import (
@@ -121,10 +125,12 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
+    SOURCE_VERSION as INPUT_INVOICE_USAGE_SOURCE_VERSION,
 )
 from fin_ops_platform.services.output_invoice_collection_service import (
     OutputInvoiceCollectionError,
     OutputInvoiceCollectionQueryService,
+    SOURCE_VERSION as OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
 )
 from fin_ops_platform.services.invoice_inventory_stats_service import InvoiceInventoryStatsService
 from fin_ops_platform.services.integrations import IntegrationHubService
@@ -133,6 +139,7 @@ from fin_ops_platform.services.live_workbench_service import LiveWorkbenchServic
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
 from fin_ops_platform.services.no_oa_bank_batch_service import (
+    NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NO_OA_BANK_BATCH_RELATION_MODE,
     NoOaBankBatchService,
 )
@@ -164,6 +171,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
 )
 from fin_ops_platform.services.project_costing import ProjectCostingService
+from fin_ops_platform.services.read_model_freshness import normalize_source_versions, source_version_mismatch_reasons
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
 from fin_ops_platform.services.settings_data_reset_service import (
@@ -175,9 +183,12 @@ from fin_ops_platform.services.settings_data_reset_service import (
 from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap, RuntimeRepositoryContext
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
-from fin_ops_platform.services.tax_offset_read_model_service import TaxOffsetReadModelService
+from fin_ops_platform.services.tax_offset_read_model_service import (
+    TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+    TaxOffsetReadModelService,
+)
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
-from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
+from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION, TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_TYPE
 from fin_ops_platform.services.turnover_relation_service import (
     TURNOVER_CATEGORY_RULES,
@@ -216,7 +227,10 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
     CASH_TURNOVER_TAG,
     WorkbenchSpecialPairRuleService,
 )
-from fin_ops_platform.services.workbench_sql_projection import MONTH_RE as WORKBENCH_SQL_MONTH_RE
+from fin_ops_platform.services.workbench_sql_projection import (
+    MONTH_RE as WORKBENCH_SQL_MONTH_RE,
+    WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+)
 from fin_ops_platform.services.seeds import build_demo_seed
 
 
@@ -1118,8 +1132,14 @@ class Application:
             return self._handle_api_pending_invoice_manual_confirm(body, headers)
         if method == "GET" and route_path == "/api/no-oa-bank-batches":
             return self._handle_api_no_oa_bank_batches(query)
+        if method == "GET" and route_path == "/api/no-oa-bank-batches/tag-selection":
+            return self._handle_api_no_oa_bank_batch_tag_selection()
+        if method == "PUT" and route_path == "/api/no-oa-bank-batches/tag-selection":
+            return self._handle_api_no_oa_bank_batch_tag_selection_update(body, headers)
         if method == "POST" and route_path == "/api/no-oa-bank-batches/submit":
             return self._handle_api_no_oa_bank_batches_bulk_submit(body, headers)
+        if method == "POST" and route_path == "/api/no-oa-bank-batches/submit-selection":
+            return self._handle_api_no_oa_bank_batches_submit_selection(body, headers)
         if method == "GET" and route_path == "/api/batch-accounting":
             return self._handle_api_batch_accounting(query)
         if method == "POST" and route_path == "/api/batch-accounting/submit":
@@ -1617,7 +1637,9 @@ class Application:
                 "/api/etc/batches/{batch_id}/confirm-submitted",
                 "/api/etc/batches/{batch_id}/mark-not-submitted",
                 "/api/no-oa-bank-batches",
+                "/api/no-oa-bank-batches/tag-selection",
                 "/api/no-oa-bank-batches/submit",
+                "/api/no-oa-bank-batches/submit-selection",
                 "/api/no-oa-bank-batches/{batch_id}",
                 "/api/no-oa-bank-batches/{batch_id}/submit",
                 "/api/no-oa-bank-batches/{batch_id}/withdraw",
@@ -1822,6 +1844,10 @@ class Application:
                 payload["rows_page"] = view.get("rows_page")
             return self._json_response(HTTPStatus.ACCEPTED, payload)
         refresh_status = str(view.get("refresh_status") or view.get("cache_status") or "fresh")
+        stale_reasons = self._workbench_sql_read_model_stale_reasons(view.get("source_versions"))
+        if stale_reasons:
+            refresh_status = "stale"
+            payload["read_model_stale_reasons"] = stale_reasons
         if refresh_status != "fresh":
             self._enqueue_workbench_read_model_refresh(scope_key, reason="api_stale")
         payload["read_model_status"] = refresh_status
@@ -1899,6 +1925,14 @@ class Application:
                 },
             )
         payload = dict(payload)
+        stale_reasons = self._workbench_sql_read_model_stale_reasons(payload.get("source_versions"))
+        if stale_reasons:
+            payload["read_model_status"] = "stale"
+            payload["read_model_stale_reasons"] = [
+                *list(payload.get("read_model_stale_reasons") if isinstance(payload.get("read_model_stale_reasons"), list) else []),
+                *stale_reasons,
+            ]
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_summary_source_versions_stale")
         if "oa_status" not in payload:
             oa_status_payload = getattr(getattr(self, "_workbench_query_service", None), "oa_status_payload", None)
             if callable(oa_status_payload):
@@ -1968,6 +2002,14 @@ class Application:
                 },
             )
         redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        refresh_status_payload: dict[str, object] | None = None
+        get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
+        if callable(get_refresh_status):
+            raw_refresh_status = get_refresh_status(scope_key=scope_key)
+            if isinstance(raw_refresh_status, dict):
+                refresh_status_payload = self._workbench_refresh_status_with_source_freshness(raw_refresh_status)
+                if str(refresh_status_payload.get("read_model_status") or "fresh") != "fresh":
+                    self._enqueue_workbench_read_model_refresh(scope_key, reason="api_groups_source_versions_stale")
         get_cached = getattr(redis_helper, "get_json", None)
         get_text = getattr(redis_helper, "get_text", None)
         set_text = getattr(redis_helper, "set_text", None)
@@ -1989,7 +2031,11 @@ class Application:
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
         )
-        if cache_key and callable(get_cached):
+        can_use_groups_redis_cache = (
+            refresh_status_payload is None
+            or str(refresh_status_payload.get("read_model_status") or "fresh") == "fresh"
+        )
+        if cache_key and callable(get_cached) and can_use_groups_redis_cache:
             cached = get_cached(cache_key)
             if isinstance(cached, dict):
                 payload = dict(cached.get("payload") if isinstance(cached.get("payload"), dict) else cached)
@@ -2013,7 +2059,7 @@ class Application:
                 column_filters=normalized_column_filters,
                 time_filters=normalized_time_filters,
             )
-        if cache_key and callable(get_cached):
+        if cache_key and callable(get_cached) and can_use_groups_redis_cache:
             if callable(set_text):
                 parsed_version = self._workbench_groups_redis_cache_version_from_key(cache_key)
                 if parsed_version:
@@ -2082,6 +2128,13 @@ class Application:
             )
         payload = dict(payload)
         payload["read_model_scope_key"] = scope_key
+        stale_reasons = self._workbench_sql_read_model_stale_reasons(payload.get("source_versions"))
+        if stale_reasons:
+            payload["read_model_status"] = "stale"
+            payload["read_model_stale_reasons"] = [
+                *list(payload.get("read_model_stale_reasons") if isinstance(payload.get("read_model_stale_reasons"), list) else []),
+                *stale_reasons,
+            ]
         groups_status = str(payload.get("read_model_status") or "fresh")
         if groups_status != "fresh":
             self._enqueue_workbench_read_model_refresh(scope_key, reason="api_groups_stale")
@@ -2193,6 +2246,8 @@ class Application:
                 },
             )
         payload = get_refresh_status(scope_key=scope_key)
+        if isinstance(payload, dict):
+            payload = self._workbench_refresh_status_with_source_freshness(payload)
         return self._json_response(HTTPStatus.OK, self._normalize_workbench_refresh_status_payload(
             payload if isinstance(payload, dict) else {},
             scope_key=scope_key,
@@ -2243,6 +2298,8 @@ class Application:
                 fallback_status="unavailable",
             )
         payload = get_refresh_status(scope_key=scope_key)
+        if isinstance(payload, dict):
+            payload = self._workbench_refresh_status_with_source_freshness(payload)
         return self._normalize_workbench_refresh_status_payload(
             payload if isinstance(payload, dict) else {},
             scope_key=scope_key,
@@ -2897,11 +2954,29 @@ class Application:
         refresh_status = str(payload.get("refresh_status") or "fresh")
         if refresh_status != "fresh":
             self._enqueue_search_read_model_refresh(scope_key, reason="api_stale")
+        stale_reasons = source_version_mismatch_reasons(
+            expected=self._search_index_expected_source_versions(),
+            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            refresh_status = "stale"
+            self._enqueue_search_read_model_refresh(scope_key, reason="api_source_versions_stale")
         result = dict(payload)
         result["read_model_status"] = refresh_status
         result["read_model_scope_key"] = scope_key
+        if stale_reasons:
+            result["read_model_stale_reasons"] = stale_reasons
         result.pop("refresh_status", None)
         return result
+
+    def _search_index_expected_source_versions(self) -> dict[str, object]:
+        return {
+            "search_index_schema_version": "2026-05-search-index-v1",
+            "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+            "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
+            "oa_projection_sync_version": self._current_oa_projection_sync_version(),
+        }
 
     def _enqueue_search_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
@@ -7060,6 +7135,13 @@ class Application:
         if refresh_status != "fresh":
             self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_stale")
             return self._invoice_relation_refreshing_payload(scope_key=scope_key)
+        stale_reasons = source_version_mismatch_reasons(
+            expected=self._input_invoice_usage_expected_source_versions(),
+            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_source_versions_stale")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
         parsed_filters = self._input_invoice_usage_service()._parse_filters(query.get("filters", [None])[0])
         sort_field, sort_direction = self._input_invoice_usage_service()._parse_sort(
             query.get("sort_field", ["invoice_date"])[0],
@@ -7104,6 +7186,17 @@ class Application:
         if refresh_status != "fresh":
             self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_stale")
             return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
+        stale_reasons = source_version_mismatch_reasons(
+            expected=self._output_invoice_collection_expected_source_versions(),
+            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_source_versions_stale")
+            return self._invoice_relation_refreshing_payload(
+                scope_key=scope_key,
+                include_output_metadata=True,
+                stale_reasons=stale_reasons,
+            )
         parsed_filters = self._output_invoice_collection_service()._parse_filters(query.get("filters", [None])[0])
         sort_field, sort_direction = self._output_invoice_collection_service()._parse_sort(
             query.get("sort_field", ["invoice_date"])[0],
@@ -7158,11 +7251,25 @@ class Application:
             return month[:7]
         return "all"
 
+    def _input_invoice_usage_expected_source_versions(self) -> dict[str, object]:
+        return {
+            "input_invoice_usage_source_version": INPUT_INVOICE_USAGE_SOURCE_VERSION,
+            "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
+            "oa_projection_sync_version": self._current_oa_projection_sync_version(),
+        }
+
+    def _output_invoice_collection_expected_source_versions(self) -> dict[str, object]:
+        return {
+            "output_invoice_collection_source_version": OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
+            "oa_projection_sync_version": self._current_oa_projection_sync_version(),
+        }
+
     @staticmethod
     def _invoice_relation_refreshing_payload(
         *,
         scope_key: str,
         include_output_metadata: bool = False,
+        stale_reasons: list[str] | None = None,
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "rows": [],
@@ -7172,6 +7279,8 @@ class Application:
             "read_model_status": "refreshing",
             "read_model_scope_key": scope_key,
         }
+        if stale_reasons:
+            payload["read_model_stale_reasons"] = list(stale_reasons)
         if include_output_metadata:
             payload["readModelStatus"] = "refreshing"
         return payload
@@ -7710,6 +7819,20 @@ class Application:
                 scope_key=scope_key,
             )
             return result
+        stale_reasons = source_version_mismatch_reasons(
+            expected=self._pending_invoice_expected_source_versions(),
+            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_source_versions_stale")
+            return self._pending_invoice_refreshing_payload(
+                direction=normalized_direction,
+                filter_name=normalized_filter,
+                scope_key=scope_key,
+                query=query,
+                source_payload=payload,
+                stale_reasons=stale_reasons,
+            )
         result = self._pending_invoice_sql_payload_response(
             payload,
             read_model_status=refresh_status,
@@ -7767,8 +7890,9 @@ class Application:
         scope_key: str,
         query: dict[str, list[str]],
         source_payload: dict[str, object] | None = None,
+        stale_reasons: list[str] | None = None,
     ) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "direction": direction,
             "filter": filter_name,
             "rows": [],
@@ -7787,6 +7911,29 @@ class Application:
             "bank_transaction_tags_version": 1,
             "read_model_status": "refreshing",
             "read_model_scope_key": scope_key,
+        }
+        if stale_reasons:
+            payload["read_model_stale_reasons"] = list(stale_reasons)
+        return payload
+
+    def _pending_invoice_expected_source_versions(self) -> dict[str, object]:
+        settings_service = getattr(self, "_app_settings_service", None)
+        get_settings_payload = getattr(settings_service, "get_settings_payload", None)
+        settings = get_settings_payload() if callable(get_settings_payload) else {}
+        if not isinstance(settings, dict):
+            settings = {}
+        pending_groups = settings.get("pending_invoice_tag_groups")
+        bank_tags = settings.get("bank_transaction_tags")
+        return {
+            "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
+            "pending_invoice_tag_groups_version": (
+                pending_groups.get("version") if isinstance(pending_groups, dict) else 1
+            ),
+            "bank_auto_tag_rules_version": (
+                bank_tags.get("version") if isinstance(bank_tags, dict) else self._current_bank_auto_tag_rules_version()
+            ),
+            "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
+            "oa_projection_sync_version": self._current_oa_projection_sync_version(),
         }
 
     def _pending_invoice_source_summary_for_query(
@@ -9030,7 +9177,8 @@ class Application:
         if not callable(get_view):
             return None
         scope_key = self._cost_statistics_request_scope_key(month, project_scope)
-        cache_key = self._cost_statistics_redis_cache_key(scope_key)
+        expected_source_versions = self._cost_statistics_expected_source_versions(scope_key)
+        cache_key = self._cost_statistics_redis_cache_key(scope_key, source_versions=expected_source_versions)
         redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
         get_cached = getattr(redis_helper, "get_json", None)
         if callable(get_cached):
@@ -9052,10 +9200,22 @@ class Application:
 
         payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
         refresh_status = str(view.get("refresh_status") or "fresh")
+        stale_reasons = source_version_mismatch_reasons(
+            expected=expected_source_versions,
+            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            refresh_status = "stale"
         if refresh_status != "fresh":
-            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_stale")
+            self._enqueue_cost_statistics_read_model_refresh(
+                scope_key,
+                reason="api_source_versions_stale" if stale_reasons else "api_stale",
+            )
         payload["read_model_status"] = refresh_status
         payload["read_model_scope_key"] = scope_key
+        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
+        if stale_reasons:
+            payload["read_model_stale_reasons"] = stale_reasons
         if view.get("generated_at"):
             payload["read_model_generated_at"] = view.get("generated_at")
         set_cached = getattr(redis_helper, "set_json", None)
@@ -9073,7 +9233,8 @@ class Application:
         if not callable(get_view):
             return None
         scope_key = self._cost_statistics_request_scope_key(month, project_scope)
-        cache_key = self._cost_statistics_month_redis_cache_key(scope_key)
+        expected_source_versions = self._cost_statistics_expected_source_versions(scope_key)
+        cache_key = self._cost_statistics_month_redis_cache_key(scope_key, source_versions=expected_source_versions)
         redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
         get_cached = getattr(redis_helper, "get_json", None)
         if callable(get_cached):
@@ -9096,10 +9257,22 @@ class Application:
         explorer_payload = view.get("payload") if isinstance(view.get("payload"), dict) else {}
         payload = self._cost_statistics_month_payload_from_explorer_payload(month, explorer_payload)
         refresh_status = str(view.get("refresh_status") or "fresh")
+        stale_reasons = source_version_mismatch_reasons(
+            expected=expected_source_versions,
+            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            refresh_status = "stale"
         if refresh_status != "fresh":
-            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_month_stale")
+            self._enqueue_cost_statistics_read_model_refresh(
+                scope_key,
+                reason="api_month_source_versions_stale" if stale_reasons else "api_month_stale",
+            )
         payload["read_model_status"] = refresh_status
         payload["read_model_scope_key"] = scope_key
+        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
+        if stale_reasons:
+            payload["read_model_stale_reasons"] = stale_reasons
         if view.get("generated_at"):
             payload["read_model_generated_at"] = view.get("generated_at")
         set_cached = getattr(redis_helper, "set_json", None)
@@ -9174,13 +9347,61 @@ class Application:
     def _cost_statistics_request_scope_key(month: str, project_scope: str) -> str:
         return f"{str(project_scope or 'active').strip().lower()}:{str(month or 'all').strip() or 'all'}"
 
-    @staticmethod
-    def _cost_statistics_redis_cache_key(scope_key: str) -> str:
-        return f"cost_statistics:explorer:{scope_key}"
+    def _cost_statistics_expected_source_versions(self, scope_key: str) -> dict[str, object]:
+        _project_scope, month = str(scope_key or "active:all").split(":", 1)
+        return {
+            "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            "workbench_scope_key": month,
+            "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+            "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
+            "oa_projection_sync_version": self._current_oa_projection_sync_version(),
+        }
 
-    @staticmethod
-    def _cost_statistics_month_redis_cache_key(scope_key: str) -> str:
-        return f"cost_statistics:month:{scope_key}"
+    def _cost_statistics_redis_cache_key(
+        self,
+        scope_key: str,
+        *,
+        source_versions: dict[str, object] | None = None,
+    ) -> str:
+        return self._read_model_redis_cache_key(
+            "cost_statistics:explorer",
+            scope_key,
+            schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            source_versions=source_versions,
+        )
+
+    def _cost_statistics_month_redis_cache_key(
+        self,
+        scope_key: str,
+        *,
+        source_versions: dict[str, object] | None = None,
+    ) -> str:
+        return self._read_model_redis_cache_key(
+            "cost_statistics:month",
+            scope_key,
+            schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            source_versions=source_versions,
+        )
+
+    def _read_model_redis_cache_key(
+        self,
+        prefix: str,
+        scope_key: str,
+        *,
+        schema_version: str,
+        source_versions: dict[str, object] | None,
+    ) -> str:
+        normalized_source_versions = normalize_source_versions(source_versions)
+        source_hash = hashlib.sha256(
+            json.dumps(
+                normalized_source_versions or {"source_versions": "unknown"},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        return f"{prefix}:{scope_key}:schema:{schema_version}:sources:{source_hash}"
 
     @staticmethod
     def _cost_statistics_redis_ttl_seconds() -> int:
@@ -9907,7 +10128,8 @@ class Application:
         if not callable(get_view):
             return None
         scope_key = self._tax_offset_request_scope_key(month)
-        cache_key = self._tax_offset_redis_cache_key(scope_key)
+        expected_source_versions = self._tax_offset_expected_source_versions()
+        cache_key = self._tax_offset_redis_cache_key(scope_key, source_versions=expected_source_versions)
         redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
         get_cached = getattr(redis_helper, "get_json", None)
         if callable(get_cached):
@@ -9929,10 +10151,22 @@ class Application:
 
         payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
         refresh_status = str(view.get("refresh_status") or "fresh")
+        stale_reasons = source_version_mismatch_reasons(
+            expected=expected_source_versions,
+            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            refresh_status = "stale"
         if refresh_status != "fresh":
-            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_stale")
+            self._enqueue_tax_offset_read_model_refresh(
+                scope_key,
+                reason="api_source_versions_stale" if stale_reasons else "api_stale",
+            )
         payload["read_model_status"] = refresh_status
         payload["read_model_scope_key"] = scope_key
+        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
+        if stale_reasons:
+            payload["read_model_stale_reasons"] = stale_reasons
         if view.get("generated_at"):
             payload["read_model_generated_at"] = view.get("generated_at")
         if view.get("schema_version"):
@@ -9948,7 +10182,8 @@ class Application:
 
     def _get_tax_offset_month_summary_payload(self, month: str) -> tuple[dict[str, object], bool]:
         scope_key = self._tax_offset_request_scope_key(month)
-        cache_key = self._tax_offset_summary_redis_cache_key(scope_key)
+        expected_source_versions = self._tax_offset_expected_source_versions()
+        cache_key = self._tax_offset_summary_redis_cache_key(scope_key, source_versions=expected_source_versions)
         cached = self._runtime_redis_get_json_best_effort(cache_key)
         if isinstance(cached, dict):
             cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
@@ -9976,9 +10211,21 @@ class Application:
         full_payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
         payload = self._tax_offset_summary_payload(full_payload, scope_key=scope_key)
         refresh_status = str(view.get("refresh_status") or "fresh")
+        stale_reasons = source_version_mismatch_reasons(
+            expected=expected_source_versions,
+            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            refresh_status = "stale"
         if refresh_status != "fresh":
-            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_summary_stale")
+            self._enqueue_tax_offset_read_model_refresh(
+                scope_key,
+                reason="api_summary_source_versions_stale" if stale_reasons else "api_summary_stale",
+            )
         payload["read_model_status"] = refresh_status
+        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
+        if stale_reasons:
+            payload["read_model_stale_reasons"] = stale_reasons
         if view.get("generated_at"):
             payload["read_model_generated_at"] = view.get("generated_at")
         if view.get("schema_version"):
@@ -10070,6 +10317,8 @@ class Application:
             result["read_model_generated_at"] = payload.get("read_model_generated_at")
         if payload.get("read_model_schema_version"):
             result["read_model_schema_version"] = payload.get("read_model_schema_version")
+        if isinstance(payload.get("source_versions"), dict):
+            result["source_versions"] = payload.get("source_versions")
         if payload.get("error"):
             result["error"] = payload.get("error")
         return result
@@ -10081,13 +10330,38 @@ class Application:
             raise ValueError("month must be YYYY-MM for tax offset read model.")
         return normalized_month
 
-    @staticmethod
-    def _tax_offset_redis_cache_key(scope_key: str) -> str:
-        return f"tax_offset:month:{scope_key}"
+    def _tax_offset_expected_source_versions(self) -> dict[str, object]:
+        return {
+            "tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
+            "oa_projection_sync_version": self._current_oa_projection_sync_version(),
+        }
 
-    @staticmethod
-    def _tax_offset_summary_redis_cache_key(scope_key: str) -> str:
-        return f"tax_offset:summary:{scope_key}"
+    def _tax_offset_redis_cache_key(
+        self,
+        scope_key: str,
+        *,
+        source_versions: dict[str, object] | None = None,
+    ) -> str:
+        return self._read_model_redis_cache_key(
+            "tax_offset:month",
+            scope_key,
+            schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            source_versions=source_versions,
+        )
+
+    def _tax_offset_summary_redis_cache_key(
+        self,
+        scope_key: str,
+        *,
+        source_versions: dict[str, object] | None = None,
+    ) -> str:
+        return self._read_model_redis_cache_key(
+            "tax_offset:summary",
+            scope_key,
+            schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            source_versions=source_versions,
+        )
 
     @staticmethod
     def _tax_offset_redis_ttl_seconds() -> int:
@@ -10963,6 +11237,20 @@ class Application:
             summary_read_model_batches = list_read_model_batches(summary_filters)
             read_model_batches = list_read_model_batches(filters)
             if summary_read_model_batches is not None and read_model_batches is not None:
+                stale_reasons = self._no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
+                if stale_reasons:
+                    self._refresh_no_oa_bank_batches()
+                    summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
+                    batches = self._no_oa_bank_batch_service.list_batches(filters)
+                    return self._json_response(
+                        HTTPStatus.OK,
+                        {
+                            "summary": self._no_oa_bank_batch_summary(summary_batches),
+                            "batches": self._resolve_no_oa_bank_batch_labels(batches),
+                            "read_model_status": "stale",
+                            "read_model_stale_reasons": stale_reasons,
+                        },
+                    )
                 return self._json_response(
                     HTTPStatus.OK,
                     {
@@ -10981,6 +11269,44 @@ class Application:
                 "batches": self._resolve_no_oa_bank_batch_labels(batches),
             },
         )
+
+    def _handle_api_no_oa_bank_batch_tag_selection(self) -> Response:
+        return self._json_response(
+            HTTPStatus.OK,
+            self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload(),
+        )
+
+    def _handle_api_no_oa_bank_batch_tag_selection_update(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session = self._no_oa_bank_batch_mutation_session(headers)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        try:
+            result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(
+                payload,
+                actor_id=actor,
+            )
+        except AppSettingsValidationError as exc:
+            status = (
+                HTTPStatus.CONFLICT
+                if exc.error_code == "no_oa_bank_batch_tag_selection_version_conflict"
+                else HTTPStatus.BAD_REQUEST
+            )
+            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
+        self._refresh_no_oa_bank_batches()
+        self._after_no_oa_bank_batch_mutation(
+            ["all"],
+            changed_case_ids=[],
+            persist=True,
+        )
+        return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_no_oa_bank_batch_detail(self, batch_id: str) -> Response:
         bank_rows, categories_by_transaction_id = self._refresh_no_oa_bank_batches()
@@ -11351,6 +11677,34 @@ class Application:
             },
         )
 
+    def _handle_api_no_oa_bank_batches_submit_selection(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session = self._no_oa_bank_batch_mutation_session(headers)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        raw_transaction_ids = payload.get("transaction_ids")
+        if not isinstance(raw_transaction_ids, list):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_no_oa_bank_batch_request", "message": "transaction_ids must be an array."},
+            )
+        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        try:
+            result = self._submit_no_oa_bank_batch_selection(
+                row_ids=[str(row_id) for row_id in raw_transaction_ids],
+                actor=actor,
+                note=str(payload.get("note") or "").strip() or None,
+            )
+        except ValueError as exc:
+            return self._no_oa_bank_batch_value_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
     def _submit_no_oa_bank_batch(
         self,
         batch_id: str,
@@ -11374,6 +11728,40 @@ class Application:
             affected_months,
             changed_case_ids=[relation_case_id] if relation_case_id else [],
             persist=persist,
+        )
+        return {
+            "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
+            "pair_relation": relation or {},
+            "affected_months": affected_months,
+            "workbench_rebuild_queued": workbench_rebuild_queued,
+            "results": [{"batch_id": batch.get("batch_id"), "status": "submitted"}],
+        }
+
+    def _submit_no_oa_bank_batch_selection(
+        self,
+        *,
+        row_ids: list[str],
+        actor: str,
+        note: str | None,
+    ) -> dict[str, object]:
+        bank_rows, categories_by_transaction_id = self._refresh_no_oa_bank_batches()
+        batch = self._no_oa_bank_batch_service.submit_selected_rows(
+            bank_rows=bank_rows,
+            categories_by_transaction_id=categories_by_transaction_id,
+            active_relations=self._workbench_pair_relation_service.list_active_relations(),
+            source_versions=self._no_oa_bank_batch_source_versions(),
+            eligible_batch_types=self._no_oa_bank_batch_selected_tag_codes(),
+            row_ids=row_ids,
+            actor=actor,
+            note=note,
+        )
+        relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+        relation = self._pair_relation_snapshot_by_case_id(relation_case_id)
+        affected_months = self._no_oa_bank_batch_affected_months(batch)
+        workbench_rebuild_queued = self._after_no_oa_bank_batch_mutation(
+            affected_months,
+            changed_case_ids=[relation_case_id] if relation_case_id else [],
+            persist=True,
         )
         return {
             "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
@@ -11420,7 +11808,8 @@ class Application:
             bank_rows,
             categories_by_transaction_id,
             self._workbench_pair_relation_service.list_active_relations(),
-            self._workbench_matching_source_versions(),
+            self._no_oa_bank_batch_source_versions(),
+            eligible_batch_types=self._no_oa_bank_batch_selected_tag_codes(),
         )
         migration_result = self._no_oa_bank_batch_service.last_legacy_migration_result()
         if migration_result.get("changed"):
@@ -11547,28 +11936,82 @@ class Application:
             next_batch = dict(batch)
             batch_type = str(next_batch.get("batch_type") or "").strip()
             if batch_type:
-                label = self._bank_transaction_tag_label_current(batch_type)
+                definition = self._bank_transaction_tag_definition_current(batch_type)
+                label = self._bank_transaction_tag_label_from_definition(batch_type, definition)
                 next_batch["batch_label"] = label
                 next_batch["display_tags"] = ["免OA", label]
+                next_batch["category_primary_label"] = str(
+                    (definition or {}).get("output_primary_label") or label
+                )
+                next_batch["category_sub_label"] = str((definition or {}).get("output_sub_label") or "")
+                next_batch["category_label_path"] = [
+                    item
+                    for item in [
+                        str(next_batch.get("category_primary_label") or "").strip(),
+                        str(next_batch.get("category_sub_label") or "").strip(),
+                    ]
+                    if item
+                ]
             resolved.append(next_batch)
         return resolved
+
+    def _bank_transaction_tag_definition_current(self, code: str) -> dict[str, object] | None:
+        tag_code = str(code or "").strip()
+        if not tag_code:
+            return None
+        payload = self._bank_transaction_category_service.tag_dictionary_payload()
+        for definition in list(payload.get("definitions") or []):
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip() == tag_code:
+                return dict(definition)
+        return None
+
+    @staticmethod
+    def _bank_transaction_tag_label_from_definition(code: str, definition: dict[str, object] | None) -> str:
+        if isinstance(definition, dict):
+            return str(definition.get("label") or definition.get("output_sub_label") or definition.get("output_primary_label") or code)
+        return NO_OA_MANAGED_LABELS.get(code, BANK_TRANSACTION_CATEGORY_LABELS.get(code, code))
 
     def _bank_transaction_tag_label_current(self, code: str) -> str:
         tag_code = str(code or "").strip()
         if not tag_code:
             return ""
-        payload = self._bank_transaction_category_service.tag_dictionary_payload()
-        for definition in list(payload.get("definitions") or []):
-            if isinstance(definition, dict) and str(definition.get("code") or "").strip() == tag_code:
-                return str(definition.get("label") or tag_code)
-        return NO_OA_MANAGED_LABELS.get(tag_code, BANK_TRANSACTION_CATEGORY_LABELS.get(tag_code, tag_code))
+        return self._bank_transaction_tag_label_from_definition(
+            tag_code,
+            self._bank_transaction_tag_definition_current(tag_code),
+        )
+
+    def _no_oa_bank_batch_selected_tag_codes(self) -> list[str]:
+        payload = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+        return [str(code) for code in list(payload.get("selected_tag_codes") or []) if str(code).strip()]
 
     def _no_oa_bank_batch_summary(self, batches: list[dict[str, object]]) -> dict[str, object]:
         counts: dict[str, int] = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
-        category_counts: dict[str, dict[str, object]] = {
-            batch_type: {
+        selected_or_existing_codes = [
+            *self._no_oa_bank_batch_selected_tag_codes(),
+            *[
+                str(batch.get("batch_type") or "").strip()
+                for batch in batches
+                if isinstance(batch, dict) and str(batch.get("batch_type") or "").strip()
+            ],
+        ]
+        category_counts: dict[str, dict[str, object]] = {}
+        for batch_type in selected_or_existing_codes:
+            if not batch_type or batch_type in category_counts:
+                continue
+            definition = self._bank_transaction_tag_definition_current(batch_type)
+            category_counts[batch_type] = {
                 "code": batch_type,
-                "label": self._bank_transaction_tag_label_current(batch_type),
+                "label": self._bank_transaction_tag_label_from_definition(batch_type, definition),
+                "primary_label": str((definition or {}).get("output_primary_label") or ""),
+                "sub_label": str((definition or {}).get("output_sub_label") or ""),
+                "label_path": [
+                    item
+                    for item in [
+                        str((definition or {}).get("output_primary_label") or "").strip(),
+                        str((definition or {}).get("output_sub_label") or "").strip(),
+                    ]
+                    if item
+                ],
                 "total": 0,
                 "draft": 0,
                 "submitted": 0,
@@ -11577,8 +12020,6 @@ class Application:
                 "stale": 0,
                 "total_amount": Decimal("0.00"),
             }
-            for batch_type in NO_OA_MANAGED_BATCH_TYPE_ORDER
-        }
         total_amount = Decimal("0.00")
         for batch in batches:
             status = str(batch.get("status") or "").strip()
@@ -11598,8 +12039,7 @@ class Application:
                 category["total_amount"] = category["total_amount"] + amount
                 continue
         categories = []
-        for batch_type in NO_OA_MANAGED_BATCH_TYPE_ORDER:
-            category = dict(category_counts[batch_type])
+        for category in [dict(value) for value in category_counts.values()]:
             category["total_amount"] = f"{category['total_amount']:.2f}"
             categories.append(category)
         return {
@@ -11719,7 +12159,9 @@ class Application:
                     page_size=page_size,
                 )
                 if isinstance(read_model_payload, dict):
-                    return self._json_response(HTTPStatus.OK, read_model_payload)
+                    stale_reasons = self._turnover_ledger_stale_reasons(read_model_payload.get("source_versions"))
+                    if not stale_reasons:
+                        return self._json_response(HTTPStatus.OK, read_model_payload)
         try:
             payload = self._turnover_ledger_api_routes.list_ledger(
                 view=view,
@@ -11735,6 +12177,7 @@ class Application:
                 {"error": "invalid_turnover_ledger_request", "message": str(exc)},
             )
         if str(view or "").strip().lower() != "grouped":
+            payload = self._with_turnover_ledger_source_versions(payload)
             save_turnover_ledger = getattr(repository, "save_turnover_ledger_rows", None)
             if callable(save_turnover_ledger):
                 try:
@@ -14921,12 +15364,138 @@ class Application:
             "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
             "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
             "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
+            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
         }
         if parser_version:
             payload["oa_attachment_invoice_parser_version"] = parser_version
         if projection_sync_version:
             payload["oa_projection_sync_version"] = projection_sync_version
         return payload
+
+    def _workbench_sql_read_model_source_versions(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+        }
+        parser_version = self._current_oa_attachment_invoice_parser_version()
+        if parser_version:
+            payload["oa_attachment_invoice_parser_version"] = parser_version
+        projection_sync_version = self._current_oa_projection_sync_version()
+        if projection_sync_version:
+            payload["oa_projection_sync_version"] = projection_sync_version
+        return payload
+
+    def _workbench_sql_read_model_stale_reasons(self, source_versions: object) -> list[str]:
+        return source_version_mismatch_reasons(
+            expected=self._workbench_sql_read_model_source_versions(),
+            actual=source_versions if isinstance(source_versions, dict) else {},
+        )
+
+    def _no_oa_bank_batch_source_versions(self) -> dict[str, object]:
+        no_oa_selection = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+        payload = {
+            **self._workbench_matching_source_versions(),
+            "no_oa_bank_batch_schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
+            "no_oa_bank_batch_tag_selection_version": int(no_oa_selection.get("version") or 1),
+            "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
+            "pair_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._workbench_pair_relation_service.snapshot()
+            ),
+            "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._bank_transaction_category_service.snapshot()
+            ),
+        }
+        return payload
+
+    def _no_oa_bank_batch_stale_reasons(self, batches: object) -> list[str]:
+        batch_rows = batches if isinstance(batches, list) else []
+        if not batch_rows:
+            return []
+        expected = self._no_oa_bank_batch_source_versions()
+        reasons: list[str] = []
+        for batch in batch_rows:
+            if not isinstance(batch, dict):
+                continue
+            source_versions = batch.get("source_versions")
+            for reason in source_version_mismatch_reasons(
+                expected=expected,
+                actual=source_versions if isinstance(source_versions, dict) else {},
+            ):
+                if reason not in reasons:
+                    reasons.append(reason)
+        return reasons
+
+    def _turnover_ledger_source_versions(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "turnover_ledger_schema_version": TURNOVER_LEDGER_SCHEMA_VERSION,
+            "turnover_relation_schema_version": TURNOVER_RELATION_SCHEMA_VERSION,
+            "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
+            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+            "turnover_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._turnover_relation_service.snapshot()
+            ),
+            "turnover_ledger_extras_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._turnover_ledger_api_routes.extras_snapshot()
+            ),
+            "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._bank_transaction_category_service.snapshot()
+            ),
+        }
+        projection_sync_version = self._current_oa_projection_sync_version()
+        if projection_sync_version:
+            payload["oa_projection_sync_version"] = projection_sync_version
+        return payload
+
+    def _turnover_ledger_stale_reasons(self, source_versions: object) -> list[str]:
+        return source_version_mismatch_reasons(
+            expected=self._turnover_ledger_source_versions(),
+            actual=source_versions if isinstance(source_versions, dict) else {},
+        )
+
+    def _with_turnover_ledger_source_versions(self, payload: dict[str, object]) -> dict[str, object]:
+        source_versions = self._turnover_ledger_source_versions()
+        result = dict(payload)
+        result["source_versions"] = source_versions
+        rows: list[object] = []
+        for row in list(result.get("rows") or []):
+            if isinstance(row, dict):
+                rows.append({**row, "source_versions": source_versions})
+            else:
+                rows.append(row)
+        result["rows"] = rows
+        return result
+
+    def _workbench_refresh_status_source_versions(self, payload: dict[str, object]) -> dict[str, object]:
+        generations = payload.get("generations") if isinstance(payload.get("generations"), list) else []
+        active_generation_id = str(payload.get("active_generation_id") or "")
+        for generation in generations:
+            if not isinstance(generation, dict):
+                continue
+            if str(generation.get("generation_id") or "") != active_generation_id:
+                continue
+            source_versions = generation.get("source_versions")
+            return dict(source_versions) if isinstance(source_versions, dict) else {}
+        source_versions = payload.get("source_versions")
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
+
+    def _workbench_refresh_status_with_source_freshness(
+        self,
+        status_payload: dict[str, object],
+    ) -> dict[str, object]:
+        reasons = self._workbench_sql_read_model_stale_reasons(
+            self._workbench_refresh_status_source_versions(status_payload)
+        )
+        if not reasons:
+            return status_payload
+        result = dict(status_payload)
+        existing_reasons = result.get("read_model_stale_reasons")
+        result["read_model_stale_reasons"] = [
+            *list(existing_reasons if isinstance(existing_reasons, list) else []),
+            *[reason for reason in reasons if reason not in (existing_reasons if isinstance(existing_reasons, list) else [])],
+        ]
+        if str(result.get("read_model_status") or "fresh") == "fresh":
+            result["read_model_status"] = "stale"
+        return result
 
     def _workbench_read_model_source_versions(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -14945,6 +15514,7 @@ class Application:
                 self._turnover_relation_snapshot_for_workbench()
             ),
             "matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
         }
         parser_version = self._current_oa_attachment_invoice_parser_version()
         if parser_version:
@@ -15417,12 +15987,14 @@ class Application:
             raise ValueError("cost statistics read model scope_key must be project_scope:month.")
         project_scope, month = parsed
         payload = self._cost_statistics_service.get_explorer(month, project_scope=project_scope)
+        source_versions = self._cost_statistics_expected_source_versions(scope_key)
         read_model = self._cost_statistics_read_model_service.upsert_read_model(
             month,
             project_scope,
             payload,
             generated_at=datetime.now().isoformat(),
             source_scope_keys=[month],
+            source_versions=source_versions,
             cache_status="ready",
         )
         warmed_scope_key = self._cost_statistics_read_model_scope_key(
@@ -15441,8 +16013,9 @@ class Application:
             cached_payload = dict(payload)
             cached_payload["read_model_status"] = "fresh"
             cached_payload["read_model_scope_key"] = warmed_scope_key
+            cached_payload["source_versions"] = source_versions
             set_cached(
-                self._cost_statistics_redis_cache_key(warmed_scope_key),
+                self._cost_statistics_redis_cache_key(warmed_scope_key, source_versions=source_versions),
                 {"payload": cached_payload},
                 ttl_seconds=self._cost_statistics_redis_ttl_seconds(),
             )
@@ -15456,11 +16029,13 @@ class Application:
     def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
         month = self._tax_offset_request_scope_key(scope_key)
         payload = self._tax_api_routes.get_tax_offset(month)
+        source_versions = self._tax_offset_expected_source_versions()
         read_model = self._tax_offset_read_model_service.upsert_read_model(
             month,
             payload,
             generated_at=datetime.now().isoformat(),
             source_scope_keys=[month],
+            source_versions=source_versions,
             cache_status="ready",
         )
         warmed_scope_key = self._tax_offset_read_model_scope_key(month, read_model=read_model)
@@ -15475,13 +16050,14 @@ class Application:
             cached_payload = dict(payload)
             cached_payload["read_model_status"] = "fresh"
             cached_payload["read_model_scope_key"] = warmed_scope_key
+            cached_payload["source_versions"] = source_versions
             self._runtime_redis_set_json_best_effort(
-                self._tax_offset_redis_cache_key(warmed_scope_key),
+                self._tax_offset_redis_cache_key(warmed_scope_key, source_versions=source_versions),
                 {"payload": cached_payload},
                 ttl_seconds=self._tax_offset_redis_ttl_seconds(),
             )
             self._runtime_redis_set_json_best_effort(
-                self._tax_offset_summary_redis_cache_key(warmed_scope_key),
+                self._tax_offset_summary_redis_cache_key(warmed_scope_key, source_versions=source_versions),
                 {"payload": self._tax_offset_summary_payload(cached_payload, scope_key=warmed_scope_key)},
                 ttl_seconds=self._tax_offset_redis_ttl_seconds(),
             )
@@ -15490,6 +16066,92 @@ class Application:
             "month": month,
             "entry_count": self._tax_offset_month_entry_count(payload),
         }
+
+    def list_input_invoice_usage_scope_shards(self, scope_key: str) -> list[str]:
+        normalized = str(scope_key or "").strip()
+        if SEARCH_MONTH_RE.match(normalized):
+            return [normalized]
+        return self._list_search_months()
+
+    def list_output_invoice_collection_scope_shards(self, scope_key: str) -> list[str]:
+        normalized = str(scope_key or "").strip()
+        if SEARCH_MONTH_RE.match(normalized):
+            return [normalized]
+        return self._list_search_months()
+
+    def mark_input_invoice_usage_scope_empty(self, scope_key: str) -> None:
+        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
+        mark_scope = getattr(repository, "mark_input_invoice_usage_scope", None)
+        if callable(mark_scope):
+            mark_scope(
+                scope_key=str(scope_key or "all").strip() or "all",
+                row_count=0,
+                source_versions=self._input_invoice_usage_expected_source_versions(),
+            )
+
+    def mark_output_invoice_collection_scope_empty(self, scope_key: str) -> None:
+        repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
+        mark_scope = getattr(repository, "mark_output_invoice_collection_scope", None)
+        if callable(mark_scope):
+            mark_scope(
+                scope_key=str(scope_key or "all").strip() or "all",
+                row_count=0,
+                source_versions=self._output_invoice_collection_expected_source_versions(),
+            )
+
+    def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
+        month = str(scope_key or "").strip()
+        if month != "all" and not SEARCH_MONTH_RE.match(month):
+            raise ValueError("input invoice usage read model scope_key must be all or YYYY-MM.")
+        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
+        save_rows = getattr(repository, "save_input_invoice_usage_rows", None)
+        if not callable(save_rows):
+            raise RuntimeError("Input invoice usage SQL read repository is not configured.")
+        rows = self._invoice_relation_live_rows(
+            lambda **kwargs: self._input_invoice_usage_service().list_rows(**kwargs),
+            month=None if month == "all" else month,
+        )
+        source_versions = self._input_invoice_usage_expected_source_versions()
+        save_rows(scope_key=month, rows=rows, source_versions=source_versions)
+        return {"scope_key": month, "row_count": len(rows), "source_versions": source_versions}
+
+    def rebuild_output_invoice_collection_read_model_scope(self, scope_key: str) -> dict[str, object]:
+        month = str(scope_key or "").strip()
+        if month != "all" and not SEARCH_MONTH_RE.match(month):
+            raise ValueError("output invoice collection read model scope_key must be all or YYYY-MM.")
+        repository = getattr(self, "_output_invoice_collection_sql_read_repository", None)
+        save_rows = getattr(repository, "save_output_invoice_collection_rows", None)
+        if not callable(save_rows):
+            raise RuntimeError("Output invoice collection SQL read repository is not configured.")
+        rows = self._invoice_relation_live_rows(
+            lambda **kwargs: self._output_invoice_collection_service().list_rows(**kwargs),
+            month=None if month == "all" else month,
+        )
+        source_versions = self._output_invoice_collection_expected_source_versions()
+        save_rows(scope_key=month, rows=rows, source_versions=source_versions)
+        return {"scope_key": month, "row_count": len(rows), "source_versions": source_versions}
+
+    @staticmethod
+    def _invoice_relation_live_rows(list_rows: Any, *, month: str | None) -> list[dict[str, object]]:
+        page_size = 200
+        page = 1
+        rows: list[dict[str, object]] = []
+        total_rows: int | None = None
+        while True:
+            payload = list_rows(page=page, page_size=page_size, month=month)
+            page_rows = [row for row in list((payload or {}).get("rows") or []) if isinstance(row, dict)]
+            rows.extend(page_rows)
+            pagination = payload.get("pagination") if isinstance(payload, dict) else {}
+            if isinstance(pagination, dict):
+                raw_total = pagination.get("total")
+                try:
+                    total_rows = int(raw_total)
+                except (TypeError, ValueError):
+                    total_rows = len(rows)
+            if not page_rows or len(page_rows) < page_size or (total_rows is not None and len(rows) >= total_rows):
+                break
+            page += 1
+        return rows
 
     def rebuild_search_index_scope(self, scope_key: str) -> dict[str, object]:
         month = str(scope_key or "").strip()
@@ -15501,11 +16163,12 @@ class Application:
         if not callable(save_rows):
             raise RuntimeError("Search SQL read repository is not configured.")
         total_rows = 0
+        source_versions = self._search_index_expected_source_versions()
         for current_month in months:
             rows = self._build_search_index_rows_for_month(current_month)
-            save_rows(scope_key=current_month, rows=rows)
+            save_rows(scope_key=current_month, rows=rows, source_versions=source_versions)
             total_rows += len(rows)
-        return {"scope_key": month, "row_count": total_rows}
+        return {"scope_key": month, "row_count": total_rows, "source_versions": source_versions}
 
     def _build_search_index_rows_for_month(self, month: str) -> list[dict[str, object]]:
         month_index = self._search_service._load_month_index(month)
@@ -15577,8 +16240,9 @@ class Application:
                 break
             page += 1
         rows = self._pending_invoice_rows_for_read_model(source_rows)
-        save_rows(scope_key=f"{normalized_direction}:{normalized_filter}", rows=rows)
-        return {"scope_key": f"{normalized_direction}:{normalized_filter}", "row_count": len(rows)}
+        source_versions = self._pending_invoice_expected_source_versions()
+        save_rows(scope_key=f"{normalized_direction}:{normalized_filter}", rows=rows, source_versions=source_versions)
+        return {"scope_key": f"{normalized_direction}:{normalized_filter}", "row_count": len(rows), "source_versions": source_versions}
 
     def _pending_invoice_rows_for_read_model(self, rows: object) -> list[dict[str, object]]:
         result: list[dict[str, object]] = []
@@ -17932,8 +18596,11 @@ class Application:
         redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
         delete = getattr(redis_helper, "delete", None)
         if callable(delete):
-            delete(self._cost_statistics_redis_cache_key(scope_key))
-            delete(self._cost_statistics_month_redis_cache_key(scope_key))
+            source_versions = self._cost_statistics_expected_source_versions(scope_key)
+            delete(self._cost_statistics_redis_cache_key(scope_key, source_versions=source_versions))
+            delete(self._cost_statistics_month_redis_cache_key(scope_key, source_versions=source_versions))
+            delete(f"cost_statistics:explorer:{scope_key}")
+            delete(f"cost_statistics:month:{scope_key}")
 
     @staticmethod
     def _cost_statistics_months_from_workbench_scope_keys(scope_keys: list[str]) -> set[str]:
@@ -18356,8 +19023,11 @@ class Application:
         return enqueued
 
     def _delete_tax_offset_redis_cache(self, scope_key: str) -> None:
-        self._runtime_redis_delete_best_effort(self._tax_offset_redis_cache_key(scope_key))
-        self._runtime_redis_delete_best_effort(self._tax_offset_summary_redis_cache_key(scope_key))
+        source_versions = self._tax_offset_expected_source_versions()
+        self._runtime_redis_delete_best_effort(self._tax_offset_redis_cache_key(scope_key, source_versions=source_versions))
+        self._runtime_redis_delete_best_effort(self._tax_offset_summary_redis_cache_key(scope_key, source_versions=source_versions))
+        self._runtime_redis_delete_best_effort(f"tax_offset:month:{scope_key}")
+        self._runtime_redis_delete_best_effort(f"tax_offset:summary:{scope_key}")
 
     @staticmethod
     def _tax_offset_months_from_scope_keys(scope_keys: list[str]) -> set[str]:

@@ -2,9 +2,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   fetchNoOaBankBatchDetail,
+  fetchNoOaBankBatchTagSelection,
   fetchNoOaBankBatches,
+  saveNoOaBankBatchTagSelection,
   submitNoOaBankBatch,
   submitNoOaBankBatches,
+  submitNoOaBankBatchSelection,
   withdrawNoOaBankBatch,
 } from "../features/noOaBankBatches/api";
 
@@ -13,6 +16,64 @@ afterEach(() => {
 });
 
 describe("no OA bank batch API", () => {
+  test("maps tag selection payload and saves selected tag codes", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/no-oa-bank-batches/tag-selection" && (!init?.method || init.method === "GET")) {
+        return new Response(JSON.stringify({
+          version: 3,
+          selected_tag_codes: ["fee"],
+          inactive_selected_tag_codes: ["archived_fee"],
+          active_tags: [
+            {
+              code: "fee",
+              label: "手续费",
+              output_primary_label: "费用",
+              output_sub_label: "手续费",
+              status: "active",
+            },
+            {
+              code: "custom_no_sub",
+              label: "主标签本身",
+              output_primary_label: "其他免OA",
+              output_sub_label: "",
+              status: "active",
+            },
+          ],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        version: 4,
+        selected_tag_codes: ["fee", "custom_no_sub"],
+        inactive_selected_tag_codes: [],
+        active_tags: [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await fetchNoOaBankBatchTagSelection();
+    const saved = await saveNoOaBankBatchTagSelection({ expectedVersion: payload.version, selectedTagCodes: ["fee", "custom_no_sub"] });
+
+    expect(payload).toMatchObject({
+      version: 3,
+      selectedTagCodes: ["fee"],
+      inactiveSelectedTagCodes: ["archived_fee"],
+      activeTags: [
+        { code: "fee", label: "手续费", outputPrimaryLabel: "费用", outputSubLabel: "手续费", status: "active" },
+        { code: "custom_no_sub", label: "主标签本身", outputPrimaryLabel: "其他免OA", outputSubLabel: "", status: "active" },
+      ],
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/no-oa-bank-batches/tag-selection",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ expected_version: 3, selected_tag_codes: ["fee", "custom_no_sub"] }),
+      }),
+    );
+    expect(saved.version).toBe(4);
+  });
+
   test("maps snake_case and camelCase batch payloads", async () => {
     vi.stubGlobal(
       "fetch",
@@ -265,6 +326,40 @@ describe("no OA bank batch API", () => {
         }),
       }),
     );
+  });
+
+  test("submits selected transaction ids as one batch", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      batch: {
+        batch_id: "batch-selected-fee",
+        batch_type: "fee",
+        batch_label: "手续费",
+        scope_month: "2026-05",
+        account_key: "ccb:8106",
+        bank_name: "建设银行",
+        account_last4: "8106",
+        status: "submitted",
+        row_count: 2,
+        total_amount: "27.00",
+        version: 2,
+      },
+      affected_months: ["2026-05"],
+      workbench_rebuild_queued: true,
+      results: [{ batch_id: "batch-selected-fee", status: "submitted" }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await submitNoOaBankBatchSelection({ transactionIds: ["row-1", "row-2"], note: "提交选中" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/no-oa-bank-batches/submit-selection",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ transaction_ids: ["row-1", "row-2"], note: "提交选中" }),
+      }),
+    );
+    expect(result.batch?.batchId).toBe("batch-selected-fee");
+    expect(result.results).toEqual([{ batch_id: "batch-selected-fee", status: "submitted" }]);
   });
 
   test("reports HTML responses as a backend routing problem", async () => {

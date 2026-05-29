@@ -17,6 +17,9 @@ READ_MODEL_SOURCE_VERSION_FIELDS = (
     "candidate_snapshot_version",
     "turnover_relation_snapshot_version",
     "matching_rules_version",
+    "bank_auto_tag_rules_version",
+    "oa_attachment_invoice_parser_version",
+    "oa_projection_sync_version",
 )
 
 
@@ -244,7 +247,11 @@ class WorkbenchReadModelService:
         case_snapshot_version: str | None = None,
         pair_relation_snapshot_version: str | None = None,
         candidate_snapshot_version: str | None = None,
+        turnover_relation_snapshot_version: str | None = None,
         matching_rules_version: str | None = None,
+        bank_auto_tag_rules_version: str | int | None = None,
+        oa_attachment_invoice_parser_version: str | None = None,
+        oa_projection_sync_version: str | None = None,
     ) -> dict[str, str]:
         merged: dict[str, str] = {}
         if isinstance(source_versions, dict):
@@ -258,7 +265,11 @@ class WorkbenchReadModelService:
             "case_snapshot_version": case_snapshot_version,
             "pair_relation_snapshot_version": pair_relation_snapshot_version,
             "candidate_snapshot_version": candidate_snapshot_version,
+            "turnover_relation_snapshot_version": turnover_relation_snapshot_version,
             "matching_rules_version": matching_rules_version,
+            "bank_auto_tag_rules_version": bank_auto_tag_rules_version,
+            "oa_attachment_invoice_parser_version": oa_attachment_invoice_parser_version,
+            "oa_projection_sync_version": oa_projection_sync_version,
         }
         for key, value in explicit_values.items():
             if value in (None, ""):

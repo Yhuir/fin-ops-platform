@@ -181,6 +181,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_results": [{"row_id": "txn-1"}],
                     "invoice_results": [],
                     "refresh_status": "fresh",
+                    "source_versions": app._search_index_expected_source_versions(),
                 }
             },
         )()
@@ -346,6 +347,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
+                    "source_versions": app._pending_invoice_expected_source_versions(),
                 }
             },
         )()
@@ -379,6 +381,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
+                    "source_versions": app._pending_invoice_expected_source_versions(),
                 }
             },
         )()
@@ -469,6 +472,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
+                    "source_versions": app._pending_invoice_expected_source_versions(),
                 }
             },
         )()

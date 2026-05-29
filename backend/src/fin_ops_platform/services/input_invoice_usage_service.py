@@ -20,6 +20,8 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
+READ_MODEL_STATUS = "live_query"
+SOURCE_VERSION = "input-invoice-usage:v1"
 
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {

@@ -25,6 +25,9 @@ export type NoOaBankBatchCountMap = Record<string, number>;
 export type NoOaBankBatchSummaryCategory = {
   code: NoOaBankBatchType | string;
   label: string;
+  primaryLabel?: string;
+  subLabel?: string;
+  labelPath?: string[];
   total: number;
   draft: number;
   submitted: number;
@@ -57,6 +60,9 @@ export type NoOaBankBatch = {
   canSubmit: boolean;
   canWithdraw: boolean;
   version: number | null;
+  categoryPrimaryLabel?: string;
+  categorySubLabel?: string;
+  categoryLabelPath?: string[];
 };
 
 export type NoOaBankBatchSummary = {
@@ -140,4 +146,33 @@ export type NoOaBankBatchMutationResult = {
   affectedMonths: string[];
   workbenchRebuildQueued: boolean;
   results: Array<Record<string, unknown>>;
+};
+
+export type NoOaBankBatchTagDefinition = {
+  code: string;
+  label: string;
+  path: string[];
+  source: string;
+  status: string;
+  outputPrimaryLabel: string;
+  outputSubLabel: string;
+};
+
+export type NoOaBankBatchTagSelection = {
+  version: number;
+  selectedTagCodes: string[];
+  inactiveSelectedTagCodes: string[];
+  activeTags: NoOaBankBatchTagDefinition[];
+};
+
+export type SaveNoOaBankBatchTagSelectionRequest = {
+  expectedVersion: number;
+  selectedTagCodes: string[];
+  signal?: AbortSignal;
+};
+
+export type SubmitNoOaBankBatchSelectionRequest = {
+  transactionIds: string[];
+  note?: string;
+  signal?: AbortSignal;
 };

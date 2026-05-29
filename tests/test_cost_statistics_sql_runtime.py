@@ -261,6 +261,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     },
                     "refresh_status": "fresh",
                     "generated_at": "2026-05-21T09:00:00+00:00",
+                    "source_versions": app._cost_statistics_expected_source_versions("active:2026-05"),
                 }
             },
         )()
@@ -277,7 +278,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["total_amount"], "15.50")
         self.assertEqual(payload["summary"]["transaction_count"], 2)
         self.assertEqual(payload["rows"][0]["amount"], "15.50")
-        self.assertEqual(redis.sets[0][0], "cost_statistics:month:active:2026-05")
+        self.assertTrue(
+            redis.sets[0][0].startswith(
+                "cost_statistics:month:active:2026-05:schema:2026-05-cost-statistics-explorer-v1:sources:"
+            )
+        )
         self.assertLessEqual(redis.sets[0][2], 120)
 
     def test_cost_statistics_api_reads_sql_and_populates_short_redis_cache(self) -> None:
@@ -296,6 +301,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     "payload": {"month": "2026-05", "time_rows": [{"transaction_id": "txn-1"}]},
                     "refresh_status": "fresh",
                     "generated_at": "2026-05-21T09:00:00+00:00",
+                    "source_versions": app._cost_statistics_expected_source_versions("active:2026-05"),
                 }
             },
         )()
@@ -310,7 +316,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["time_rows"], [{"transaction_id": "txn-1"}])
-        self.assertEqual(redis.sets[0][0], "cost_statistics:explorer:active:2026-05")
+        self.assertTrue(
+            redis.sets[0][0].startswith(
+                "cost_statistics:explorer:active:2026-05:schema:2026-05-cost-statistics-explorer-v1:sources:"
+            )
+        )
         self.assertLessEqual(redis.sets[0][2], 120)
 
     def test_cost_statistics_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done(self) -> None:
@@ -416,15 +426,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 ("cost_statistics", "all:2026-05", "unit_test"),
             ],
         )
-        self.assertEqual(
-            redis.deletes,
-            [
-                "cost_statistics:explorer:active:2026-05",
-                "cost_statistics:month:active:2026-05",
-                "cost_statistics:explorer:all:2026-05",
-                "cost_statistics:month:all:2026-05",
-            ],
-        )
+        self.assertIn("cost_statistics:explorer:active:2026-05", redis.deletes)
+        self.assertIn("cost_statistics:month:active:2026-05", redis.deletes)
+        self.assertIn("cost_statistics:explorer:all:2026-05", redis.deletes)
+        self.assertIn("cost_statistics:month:all:2026-05", redis.deletes)
+        self.assertTrue(any(":schema:2026-05-cost-statistics-explorer-v1:sources:" in key for key in redis.deletes))
 
 
 if __name__ == "__main__":

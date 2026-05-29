@@ -67,6 +67,7 @@ class TaxOffsetReadModelService:
         *,
         generated_at: str | None = None,
         source_scope_keys: list[str] | None = None,
+        source_versions: dict[str, Any] | None = None,
         cache_status: str = "ready",
     ) -> dict[str, Any]:
         resolved_scope_key = self.scope_key(month)
@@ -84,6 +85,7 @@ class TaxOffsetReadModelService:
                 "certified_count": self._item_count(normalized_payload, "certified_items"),
                 "payload": normalized_payload,
                 "source_scope_keys": self._normalize_source_scope_keys(source_scope_keys),
+                "source_versions": deepcopy(source_versions if isinstance(source_versions, dict) else {}),
             },
             fallback_scope_key=resolved_scope_key,
         )
@@ -148,6 +150,7 @@ class TaxOffsetReadModelService:
                         "input_plan_count",
                         "certified_count",
                         "source_scope_keys",
+                        "source_versions",
                     )
                 }
                 for read_model in self._read_models.values()
@@ -185,6 +188,7 @@ class TaxOffsetReadModelService:
             "certified_count": cls._item_count(normalized_payload, "certified_items"),
             "payload": normalized_payload,
             "source_scope_keys": cls._normalize_source_scope_keys(read_model.get("source_scope_keys")),
+            "source_versions": deepcopy(read_model.get("source_versions") if isinstance(read_model.get("source_versions"), dict) else {}),
         }
 
     @classmethod

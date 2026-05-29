@@ -6,8 +6,11 @@ import json
 import re
 from typing import Any
 
+from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -38,8 +41,13 @@ class SearchPendingSqlProjectionBuilder:
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("search SQL projection scope_key must be a month shard YYYY-MM.")
         rows = self._search_rows_for_month(normalized_scope)
-        self._read_model_repository.save_search_index_rows(scope_key=normalized_scope, rows=rows)
-        return {"scope_key": normalized_scope, "row_count": len(rows)}
+        source_versions = self._search_source_versions()
+        self._read_model_repository.save_search_index_rows(
+            scope_key=normalized_scope,
+            rows=rows,
+            source_versions=source_versions,
+        )
+        return {"scope_key": normalized_scope, "row_count": len(rows), "source_versions": source_versions}
 
     def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
@@ -50,11 +58,13 @@ class SearchPendingSqlProjectionBuilder:
         if month is None:
             raise ValueError("pending invoice SQL projection scope_key must include a month shard YYYY-MM.")
         rows = self._pending_invoice_rows(direction=normalized_direction, filter_name=normalized_filter, month=month)
+        source_versions = self._pending_invoice_source_versions()
         self._read_model_repository.save_pending_invoice_rows(
             scope_key=f"{normalized_direction}:{normalized_filter}:{month}",
             rows=rows,
+            source_versions=source_versions,
         )
-        return {"scope_key": f"{normalized_direction}:{normalized_filter}:{month}", "row_count": len(rows)}
+        return {"scope_key": f"{normalized_direction}:{normalized_filter}:{month}", "row_count": len(rows), "source_versions": source_versions}
 
     def mark_pending_invoice_scope_empty(self, scope_key: str) -> dict[str, object]:
         normalized_direction, normalized_filter, _month = _parse_pending_invoice_scope_key(scope_key)
@@ -66,7 +76,11 @@ class SearchPendingSqlProjectionBuilder:
         if not callable(mark_scope):
             return {"scope_key": f"{normalized_direction}:{normalized_filter}", "row_count": 0}
         normalized_scope_key = str(scope_key or "").strip() or f"{normalized_direction}:{normalized_filter}"
-        mark_scope(scope_key=normalized_scope_key, row_count=0)
+        mark_scope(
+            scope_key=normalized_scope_key,
+            row_count=0,
+            source_versions=self._pending_invoice_source_versions(),
+        )
         return {"scope_key": normalized_scope_key, "row_count": 0}
 
     def list_pending_invoice_scope_shards(self, scope_key: str) -> list[str]:
@@ -371,6 +385,27 @@ class SearchPendingSqlProjectionBuilder:
             for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required")
         }
 
+    def _search_source_versions(self) -> dict[str, object]:
+        return {
+            "search_index_schema_version": "2026-05-search-index-v1",
+            "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+            "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(self._connection),
+            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
+        }
+
+    def _pending_invoice_source_versions(self) -> dict[str, object]:
+        settings = _settings_payload(self._connection)
+        pending_groups = settings.get("pending_invoice_tag_groups")
+        bank_tags = settings.get("bank_transaction_tags")
+        return {
+            "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
+            "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
+            "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,
+            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
+        }
+
 
 def _parse_pending_invoice_scope_key(scope_key: str) -> tuple[str, str, str | None]:
     parts = [part.strip() for part in str(scope_key or "").split(":")]
@@ -379,6 +414,26 @@ def _parse_pending_invoice_scope_key(scope_key: str) -> tuple[str, str, str | No
     month = parts[2] if len(parts) > 2 and parts[2] else ""
     normalized_month = month[:7] if MONTH_RE.match(month[:7]) else None
     return direction, filter_name, normalized_month
+
+
+def _settings_payload(connection: Any) -> dict[str, Any]:
+    row = connection.fetch_one(
+        "select settings_payload from app.app_settings where settings_key = %s",
+        ("app_settings",),
+    )
+    payload = row.get("settings_payload") if isinstance(row, dict) else {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _current_bank_auto_tag_rules_version(connection: Any) -> int:
+    settings = _settings_payload(connection)
+    rules_payload = settings.get("bank_transaction_tags")
+    if not isinstance(rules_payload, dict):
+        return 1
+    try:
+        return int(rules_payload.get("version") or 1)
+    except (TypeError, ValueError):
+        return 1
 
 
 def _payload_from_row(row: dict[str, Any]) -> dict[str, Any]:

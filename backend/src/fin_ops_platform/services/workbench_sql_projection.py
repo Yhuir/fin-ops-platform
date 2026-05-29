@@ -143,6 +143,7 @@ class WorkbenchSqlProjectionBuilder:
                     "source_versions": {
                         "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
                         "source_version": resolved_source_version,
+                        "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
                         "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
                         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
                     },
@@ -157,6 +158,23 @@ class WorkbenchSqlProjectionBuilder:
             "row_count": row_count,
             "ignored_row_count": 0,
         }
+
+    def _current_bank_auto_tag_rules_version(self) -> int:
+        row = self._connection.fetch_one(
+            "select settings_payload from app.app_settings where settings_key = %s",
+            ("app_settings",),
+        )
+        payload = row_payload(row, "settings_payload")
+        if not isinstance(payload, dict):
+            return 1
+        bank_transaction_tags = payload.get("bank_transaction_tags")
+        if isinstance(bank_transaction_tags, dict):
+            value = bank_transaction_tags.get("version")
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 1
+        return 1
 
     def refresh_workbench_all_scope_from_active_shards(
         self,

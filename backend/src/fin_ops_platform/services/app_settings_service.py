@@ -36,6 +36,10 @@ PENDING_INVOICE_TAG_GROUP_LABELS = {
     "bank_statement_as_invoice": "流水代替发票",
     "no_invoice_required": "无需开票",
 }
+DEFAULT_NO_OA_BANK_BATCH_TAG_SELECTION = {
+    "version": 1,
+    "selected_tag_codes": [],
+}
 
 
 class AppSettingsValidationError(ValueError):
@@ -141,6 +145,10 @@ class AppSettingsService:
                 "applicant_names": list(self._snapshot["oa_invoice_offset"]["applicant_names"]),
             },
             "bank_transaction_tags": self._public_bank_transaction_tags(self._snapshot["bank_transaction_tags"]),
+            "no_oa_bank_batch_tag_selection": self._public_no_oa_bank_batch_tag_selection(
+                self._snapshot["no_oa_bank_batch_tag_selection"],
+                bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            ),
             "pending_invoice_tag_groups": self._public_pending_invoice_tag_groups(
                 self._snapshot["pending_invoice_tag_groups"],
                 version=int(self._snapshot["bank_transaction_tags"]["version"]),
@@ -203,6 +211,7 @@ class AppSettingsService:
                     if pending_invoice_tag_groups is not None
                     else self._snapshot.get("pending_invoice_tag_groups", {})
                 ),
+                "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
             },
             validate_pending_invoice_tag_groups=True,
         )
@@ -293,6 +302,54 @@ class AppSettingsService:
         if after_bank_auto_tag_rules_saved is not None:
             after_bank_auto_tag_rules_saved(dict(event))
         return self.get_bank_auto_tag_rules_payload(can_save=True)
+
+    def get_no_oa_bank_batch_tag_selection_payload(self) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        return self._public_no_oa_bank_batch_tag_selection(
+            self._snapshot["no_oa_bank_batch_tag_selection"],
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+        )
+
+    def update_no_oa_bank_batch_tag_selection(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        current = self._snapshot["no_oa_bank_batch_tag_selection"]
+        requested_version = BankTransactionCategoryService._normalize_version(
+            payload.get("expected_version", payload.get("version", 0))
+        )
+        if requested_version != int(current.get("version") or 1):
+            raise AppSettingsValidationError(
+                "no_oa_bank_batch_tag_selection_version_conflict",
+                "No-OA bank batch tag selection version conflict.",
+            )
+        next_selection = self._normalize_no_oa_bank_batch_tag_selection(
+            {
+                "version": int(current.get("version") or 1) + 1,
+                "selected_tag_codes": payload.get("selected_tag_codes"),
+            },
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            validate=True,
+        )
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["no_oa_bank_batch_tag_selection"] = next_selection
+        if self._state_store is not None:
+            self._state_store.save_app_settings(next_snapshot)
+        self._snapshot = next_snapshot
+        self._configure_category_service(next_snapshot)
+        self._record_no_oa_bank_batch_tag_selection_audit(
+            {
+                "actor_id": actor_id,
+                "old_version": int(current.get("version") or 1),
+                "new_version": int(next_selection.get("version") or 1),
+                "old_selected_tag_codes": list(current.get("selected_tag_codes") or []),
+                "new_selected_tag_codes": list(next_selection.get("selected_tag_codes") or []),
+            }
+        )
+        return self.get_no_oa_bank_batch_tag_selection_payload()
 
     def sync_oa_projects(self, *, actor_id: str) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
@@ -677,6 +734,11 @@ class AppSettingsService:
             bank_transaction_tags=bank_transaction_tags,
             validate=validate_pending_invoice_tag_groups,
         )
+        no_oa_bank_batch_tag_selection = AppSettingsService._normalize_no_oa_bank_batch_tag_selection(
+            raw_payload.get("no_oa_bank_batch_tag_selection"),
+            bank_transaction_tags=bank_transaction_tags,
+            validate=False,
+        )
         return {
             "completed_project_ids": completed_ids,
             "manual_projects": manual_projects,
@@ -695,6 +757,7 @@ class AppSettingsService:
             "oa_invoice_offset": {"applicant_names": applicant_names},
             "bank_transaction_tags": bank_transaction_tags,
             "pending_invoice_tag_groups": pending_invoice_tag_groups,
+            "no_oa_bank_batch_tag_selection": no_oa_bank_batch_tag_selection,
         }
 
     @staticmethod
@@ -810,6 +873,100 @@ class AppSettingsService:
                 }
                 for group_id, label in PENDING_INVOICE_TAG_GROUP_LABELS.items()
             },
+        }
+
+    @staticmethod
+    def _active_bank_transaction_tag_definitions(bank_transaction_tags: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            dict(definition)
+            for definition in list(bank_transaction_tags.get("definitions") or [])
+            if isinstance(definition, dict)
+            and str(definition.get("code") or "").strip()
+            and str(definition.get("status") or "active") == "active"
+        ]
+
+    @staticmethod
+    def _normalize_no_oa_bank_batch_tag_selection(
+        value: Any,
+        *,
+        bank_transaction_tags: dict[str, Any],
+        validate: bool,
+    ) -> dict[str, Any]:
+        raw_payload = value if isinstance(value, dict) else {}
+        version = BankTransactionCategoryService._normalize_version(
+            raw_payload.get("version", DEFAULT_NO_OA_BANK_BATCH_TAG_SELECTION["version"])
+        )
+        if version <= 0:
+            version = int(DEFAULT_NO_OA_BANK_BATCH_TAG_SELECTION["version"])
+        definitions_by_code = {
+            str(definition.get("code") or "").strip(): definition
+            for definition in list(bank_transaction_tags.get("definitions") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+        selected_tag_codes: list[str] = []
+        seen: set[str] = set()
+        for item in list(raw_payload.get("selected_tag_codes") or []):
+            tag_code = str(item or "").strip()
+            if not tag_code or tag_code in seen:
+                continue
+            definition = definitions_by_code.get(tag_code)
+            if not isinstance(definition, dict):
+                if validate:
+                    raise AppSettingsValidationError(
+                        "unknown_bank_transaction_tag",
+                        f"Unknown bank transaction tag code in no-OA selection: {tag_code}",
+                    )
+                continue
+            if str(definition.get("status") or "active") != "active":
+                if validate:
+                    raise AppSettingsValidationError(
+                        "archived_bank_transaction_tag",
+                        f"Archived bank transaction tag cannot enter no-OA selection: {tag_code}",
+                    )
+                continue
+            seen.add(tag_code)
+            selected_tag_codes.append(tag_code)
+        return {
+            "version": version,
+            "selected_tag_codes": selected_tag_codes,
+        }
+
+    @staticmethod
+    def _public_no_oa_bank_batch_tag_selection(
+        payload: dict[str, Any],
+        *,
+        bank_transaction_tags: dict[str, Any],
+    ) -> dict[str, Any]:
+        active_tags = [
+            {
+                "code": str(definition.get("code") or ""),
+                "label": str(definition.get("label") or definition.get("code") or ""),
+                "path": list(definition.get("path") or []),
+                "source": str(definition.get("source") or ""),
+                "status": str(definition.get("status") or "active"),
+                "output_primary_label": str(
+                    definition.get("output_primary_label") or definition.get("label") or definition.get("code") or ""
+                ),
+                "output_sub_label": str(definition.get("output_sub_label") or ""),
+            }
+            for definition in AppSettingsService._active_bank_transaction_tag_definitions(bank_transaction_tags)
+        ]
+        active_codes = {tag["code"] for tag in active_tags}
+        selected = [
+            str(tag_code)
+            for tag_code in list(payload.get("selected_tag_codes") or [])
+            if str(tag_code) in active_codes
+        ]
+        inactive_selected = [
+            str(tag_code)
+            for tag_code in list(payload.get("selected_tag_codes") or [])
+            if str(tag_code) and str(tag_code) not in active_codes
+        ]
+        return {
+            "version": int(payload.get("version") or 1),
+            "selected_tag_codes": selected,
+            "inactive_selected_tag_codes": inactive_selected,
+            "active_tags": active_tags,
         }
 
     def _configure_category_service(self, snapshot: dict[str, Any]) -> None:
@@ -962,6 +1119,22 @@ class AppSettingsService:
                 "detached_pending_invoice_tag_references": list(
                     event.get("detached_pending_invoice_tag_references") or []
                 ),
+            },
+        )
+
+    def _record_no_oa_bank_batch_tag_selection_audit(self, event: dict[str, Any]) -> None:
+        if self._audit_service is None:
+            return
+        self._audit_service.record_action(
+            actor_id=str(event.get("actor_id") or "no_oa_bank_batch_tag_selection"),
+            action="no_oa_bank_batch_tag_selection_updated",
+            entity_type="app_settings",
+            entity_id="no_oa_bank_batch_tag_selection",
+            metadata={
+                "old_version": int(event.get("old_version") or 0),
+                "new_version": int(event.get("new_version") or 0),
+                "old_selected_tag_codes": list(event.get("old_selected_tag_codes") or []),
+                "new_selected_tag_codes": list(event.get("new_selected_tag_codes") or []),
             },
         )
 

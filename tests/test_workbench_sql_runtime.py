@@ -23,7 +23,19 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
     WARNING_INVOICE_AMOUNT_MISMATCH,
 )
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
-from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
+from fin_ops_platform.services.workbench_sql_projection import (
+    WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+    WorkbenchSqlProjectionBuilder,
+)
+
+
+def fresh_workbench_sql_source_versions(app: Application) -> dict[str, object]:
+    return {
+        "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+        "bank_auto_tag_rules_version": app._current_bank_auto_tag_rules_version(),
+        "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
+        "oa_projection_sync_version": app._current_oa_projection_sync_version(),
+    }
 
 
 class WorkbenchSqlReadConnection:
@@ -2218,16 +2230,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "SqlWorkbench",
             (),
             {
-                "get_workbench_view": lambda _self, **_kwargs: {
-                    "payload": {"open": {"groups": []}},
-                    "refresh_status": "fresh",
-                    "source_versions": {
-                        "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
-                        "oa_projection_sync_version": app._current_oa_projection_sync_version(),
-                    },
-                }
-            },
-        )()
+	                "get_workbench_view": lambda _self, **_kwargs: {
+	                    "payload": {"open": {"groups": []}},
+	                    "refresh_status": "fresh",
+	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                }
+	            },
+	        )()
 
         def explode_builder(_month: str):
             raise AssertionError("API request path must not synchronously build workbench payload")
@@ -2250,14 +2259,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "SqlWorkbench",
             (),
             {
-                "get_workbench_summary": lambda _self, **_kwargs: {
-                    "month": "all",
-                    "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 3, "paired_count": 4, "open_count": 5, "exception_count": 0},
-                    "read_model_status": "fresh",
-                    "generated_at": "2026-05-22T09:30:00+00:00",
-                }
-            },
-        )()
+	                "get_workbench_summary": lambda _self, **_kwargs: {
+	                    "month": "all",
+	                    "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 3, "paired_count": 4, "open_count": 5, "exception_count": 0},
+	                    "read_model_status": "fresh",
+	                    "generated_at": "2026-05-22T09:30:00+00:00",
+	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                }
+	            },
+	        )()
         app._build_raw_workbench_payload = lambda _month: (_ for _ in ()).throw(
             AssertionError("summary API must not build full workbench payload")
         )
@@ -2322,10 +2332,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "page": 1,
                     "page_size": 50,
                     "total": 1,
-                    "has_more": False,
-                    "groups": [{"group_id": "case:1", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
-                    "read_model_status": "fresh",
-                }
+	                    "has_more": False,
+	                    "groups": [{"group_id": "case:1", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
+	                    "read_model_status": "fresh",
+	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                }
 
             def workbench_groups_cache_version(self, **_kwargs):
                 return "v7"
@@ -2465,10 +2476,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "page_size": 50,
                     "total": 1,
                     "has_more": False,
-                    "groups": [{"group_id": "fresh", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
-                    "read_model_status": "fresh",
-                    "detail_level": "summary",
-                }
+	                    "groups": [{"group_id": "fresh", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
+	                    "read_model_status": "fresh",
+	                    "detail_level": "summary",
+	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                }
 
             def workbench_groups_cache_version(self, **_kwargs):
                 raise AssertionError("Redis version key should avoid SQL cache version lookup")
@@ -2647,11 +2659,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             {
                 "get_workbench_refresh_status": lambda _self, **_kwargs: {
                     "scope_key": "all",
-                    "read_model_status": "fresh",
-                    "generated_at": "2026-05-28T10:00:00+08:00",
-                    "dirty_scopes": [],
-                    "worker_lag_seconds": 1.5,
-                }
+	                    "read_model_status": "fresh",
+	                    "generated_at": "2026-05-28T10:00:00+08:00",
+	                    "dirty_scopes": [],
+	                    "worker_lag_seconds": 1.5,
+	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                }
             },
         )()
 

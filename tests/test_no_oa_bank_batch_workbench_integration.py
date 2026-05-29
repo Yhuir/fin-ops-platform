@@ -15,6 +15,62 @@ def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[
 
 
 class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
+    def test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh(self) -> None:
+        class StaleNoOaReadRepository:
+            def list_no_oa_bank_batch_rows(self, _filters: dict[str, object]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "batch_id": "stale_sql_batch",
+                        "batch_type": "salary",
+                        "status": "submitted",
+                        "status_bucket": "submitted",
+                        "scope_month": "2026-02",
+                        "row_ids": ["stale-bank-row"],
+                        "row_count": 1,
+                        "total_amount": "1.00",
+                        "source_versions": {"bank_auto_tag_rules_version": 0},
+                    }
+                ]
+
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="salary-payment.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-28",
+                    "trade_time": "2026-02-28 17:08:00",
+                    "pay_receive_time": "2026-02-28 17:08:00",
+                    "counterparty_name": "李四",
+                    "debit_amount": "9.00",
+                    "credit_amount": "",
+                    "summary": "2月工资发放",
+                    "remark": "工资",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        version = json.loads(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection").body)["version"]
+        app.handle_request(
+            "PUT",
+            "/api/no-oa-bank-batches/tag-selection",
+            body=json.dumps({"expected_version": version, "selected_tag_codes": ["salary"]}),
+            headers={"Content-Type": "application/json"},
+        )
+        app._workbench_sql_read_repository = StaleNoOaReadRepository()
+
+        response = app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
+        self.assertNotEqual(payload["batches"][0]["batch_id"], "stale_sql_batch")
+        self.assertEqual(payload["batches"][0]["source_versions"], app._no_oa_bank_batch_source_versions())
+
     def test_salary_auto_candidate_does_not_create_active_relation_before_batch_submit(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(

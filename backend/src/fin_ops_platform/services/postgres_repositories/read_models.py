@@ -176,7 +176,7 @@ class PostgresReadModelRepository:
         params.append(resolved_limit * 3)
         rows = self._connection.fetch_all(
             f"""
-            select source_kind, payload, raw_payload
+            select source_kind, source_versions, payload, raw_payload
             from read_model.search_index_rows
             where {" and ".join(where)}
             order by generated_at desc, row_id
@@ -187,7 +187,10 @@ class PostgresReadModelRepository:
         if not rows:
             return None
         grouped = {"oa": [], "bank": [], "invoice": []}
+        source_versions: dict[str, Any] = {}
         for row in rows:
+            if not source_versions and isinstance(row.get("source_versions"), dict):
+                source_versions = dict(row.get("source_versions"))
             source_kind = text(row.get("source_kind")) or ""
             if source_kind not in grouped or len(grouped[source_kind]) >= resolved_limit:
                 continue
@@ -213,17 +216,27 @@ class PostgresReadModelRepository:
             "bank_results": grouped["bank"],
             "invoice_results": grouped["invoice"],
             "refresh_status": self._refresh_status(scope_type="search", scope_key=resolved_month),
+            "source_versions": source_versions,
         }
         return result
 
-    def save_search_index_rows(self, *, scope_key: str, rows: list[dict[str, Any]]) -> None:
+    def save_search_index_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
         scope_month = month_start(scope_key)
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
 
         def write(connection: Any) -> None:
             if scope_month is not None:
                 connection.execute("delete from read_model.search_index_rows where scope_month = %s::date", (scope_month,))
             for row in list(rows or []):
-                payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
+                row_payload = dict(row) if isinstance(row, dict) else {}
+                row_payload["source_versions"] = normalized_source_versions
+                payload = serialize_value(row_payload.get("payload") if isinstance(row_payload.get("payload"), dict) else row_payload)
                 connection.execute(
                     """
                     insert into read_model.search_index_rows(
@@ -248,18 +261,18 @@ class PostgresReadModelRepository:
                         updated_at = now()
                     """,
                     (
-                        text(row.get("row_id") or payload.get("row_id")),
-                        text(row.get("source_kind") or payload.get("record_type")),
+                        text(row_payload.get("row_id") or payload.get("row_id")),
+                        text(row_payload.get("source_kind") or payload.get("record_type")),
                         scope_month or month_start(payload.get("month")),
-                        text(row.get("status") or payload.get("zone_hint")),
-                        text(row.get("title") or payload.get("title")),
-                        text(row.get("subtitle") or payload.get("secondary_meta")),
-                        text(row.get("searchable_text")),
-                        text(row.get("project_name")),
-                        text(row.get("counterparty_name")),
-                        decimal_text(row.get("amount")),
-                        jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
-                        text(row.get("generated_at")),
+                        text(row_payload.get("status") or payload.get("zone_hint")),
+                        text(row_payload.get("title") or payload.get("title")),
+                        text(row_payload.get("subtitle") or payload.get("secondary_meta")),
+                        text(row_payload.get("searchable_text")),
+                        text(row_payload.get("project_name")),
+                        text(row_payload.get("counterparty_name")),
+                        decimal_text(row_payload.get("amount")),
+                        jsonb(normalized_source_versions),
+                        text(row_payload.get("generated_at")),
                         jsonb(payload),
                         jsonb({"normalized_payload": payload}),
                     ),
@@ -1011,21 +1024,35 @@ class PostgresReadModelRepository:
             summary_kind="input",
         )
 
-    def save_input_invoice_usage_rows(self, *, scope_key: str, rows: list[dict[str, Any]]) -> None:
+    def save_input_invoice_usage_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
         self._save_invoice_relation_rows(
             table_name="read_model.input_invoice_usage_rows",
             scope_table_name="read_model.input_invoice_usage_scopes",
             scope_type="input_invoice_usage",
             scope_key=scope_key,
             rows=rows,
+            source_versions=source_versions,
             row_builder=_input_invoice_usage_read_model_record,
         )
 
-    def mark_input_invoice_usage_scope(self, *, scope_key: str, row_count: int = 0) -> None:
+    def mark_input_invoice_usage_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
         self._mark_invoice_relation_scope(
             scope_table_name="read_model.input_invoice_usage_scopes",
             scope_key=scope_key,
             row_count=row_count,
+            source_versions=source_versions,
         )
 
     def list_output_invoice_collection_rows(
@@ -1059,21 +1086,35 @@ class PostgresReadModelRepository:
             summary_kind="output",
         )
 
-    def save_output_invoice_collection_rows(self, *, scope_key: str, rows: list[dict[str, Any]]) -> None:
+    def save_output_invoice_collection_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
         self._save_invoice_relation_rows(
             table_name="read_model.output_invoice_collection_rows",
             scope_table_name="read_model.output_invoice_collection_scopes",
             scope_type="output_invoice_collection",
             scope_key=scope_key,
             rows=rows,
+            source_versions=source_versions,
             row_builder=_output_invoice_collection_read_model_record,
         )
 
-    def mark_output_invoice_collection_scope(self, *, scope_key: str, row_count: int = 0) -> None:
+    def mark_output_invoice_collection_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
         self._mark_invoice_relation_scope(
             scope_table_name="read_model.output_invoice_collection_scopes",
             scope_key=scope_key,
             row_count=row_count,
+            source_versions=source_versions,
         )
 
     def _list_invoice_relation_rows(
@@ -1122,14 +1163,21 @@ class PostgresReadModelRepository:
         )
         total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
         refresh_status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key=scope_key)
+        scope_row = self._invoice_relation_scope_row(scope_table_name=scope_table_name, scope_key=scope_key)
+        source_versions = (
+            scope_row.get("source_versions")
+            if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
+            else {}
+        )
         if total == 0:
-            if not self._invoice_relation_scope_exists(scope_table_name=scope_table_name, scope_key=scope_key):
+            if scope_row is None:
                 return None
             return {
                 "rows": [],
                 "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
                 "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=0),
                 "refresh_status": refresh_status,
+                "source_versions": source_versions,
             }
         order_sql = _invoice_relation_order_sql(
             sort_field=sort_field,
@@ -1152,6 +1200,7 @@ class PostgresReadModelRepository:
             "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
             "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=total),
             "refresh_status": refresh_status,
+            "source_versions": source_versions,
         }
 
     def _save_invoice_relation_rows(
@@ -1162,10 +1211,12 @@ class PostgresReadModelRepository:
         scope_type: str,
         scope_key: str,
         rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None,
         row_builder: Any,
     ) -> None:
         normalized_scope_key = _invoice_relation_scope_key(scope_key)
         rows_to_save = list(rows or [])
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
 
         def write(connection: Any) -> None:
             if normalized_scope_key == "all":
@@ -1173,7 +1224,9 @@ class PostgresReadModelRepository:
             else:
                 connection.execute(f"delete from {table_name} where scope_key = %s", (normalized_scope_key,))
             for row in rows_to_save:
-                record = row_builder(row, normalized_scope_key)
+                row_payload = dict(row) if isinstance(row, dict) else {}
+                row_payload["sourceVersions"] = normalized_source_versions
+                record = row_builder(row_payload, normalized_scope_key)
                 connection.execute(
                     f"""
                     insert into {table_name}(
@@ -1249,12 +1302,21 @@ class PostgresReadModelRepository:
                 scope_key=normalized_scope_key,
                 row_count=len(rows_to_save),
                 scope_type=scope_type,
+                source_versions=normalized_source_versions,
             )
 
         run_in_transaction(self._connection, write)
 
-    def _mark_invoice_relation_scope(self, *, scope_table_name: str, scope_key: str, row_count: int) -> None:
+    def _mark_invoice_relation_scope(
+        self,
+        *,
+        scope_table_name: str,
+        scope_key: str,
+        row_count: int,
+        source_versions: dict[str, Any] | None,
+    ) -> None:
         normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
 
         def write(connection: Any) -> None:
             self._upsert_invoice_relation_scope(
@@ -1263,6 +1325,7 @@ class PostgresReadModelRepository:
                 scope_key=normalized_scope_key,
                 row_count=max(int_value(row_count, 0), 0),
                 scope_type="",
+                source_versions=normalized_source_versions,
             )
 
         run_in_transaction(self._connection, write)
@@ -1275,6 +1338,7 @@ class PostgresReadModelRepository:
         scope_key: str,
         row_count: int,
         scope_type: str,
+        source_versions: dict[str, Any],
     ) -> None:
         connection.execute(
             f"""
@@ -1295,20 +1359,22 @@ class PostgresReadModelRepository:
                 scope_key,
                 month_start(scope_key) if MONTH_SCOPE_RE.match(scope_key) else None,
                 row_count,
-                jsonb({"source_version": row_count}),
-                jsonb({"scope_type": scope_type, "scope_key": scope_key, "row_count": row_count}),
+                jsonb(source_versions),
+                jsonb({"scope_type": scope_type, "scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
             ),
         )
 
-    def _invoice_relation_scope_exists(self, *, scope_table_name: str, scope_key: str) -> bool:
+    def _invoice_relation_scope_row(self, *, scope_table_name: str, scope_key: str) -> dict[str, Any] | None:
         if scope_key == "all":
-            row = self._connection.fetch_one(f"select scope_key from {scope_table_name} limit 1")
-            return row is not None
+            row = self._connection.fetch_one(
+                f"select scope_key, source_versions from {scope_table_name} order by generated_at desc limit 1"
+            )
+            return dict(row) if isinstance(row, dict) else None
         row = self._connection.fetch_one(
-            f"select scope_key from {scope_table_name} where scope_key = %s limit 1",
+            f"select scope_key, source_versions from {scope_table_name} where scope_key = %s limit 1",
             (scope_key,),
         )
-        return row is not None
+        return dict(row) if isinstance(row, dict) else None
 
     def _invoice_relation_refresh_status(self, *, scope_type: str, scope_key: str) -> str:
         if scope_key != "all":
@@ -1378,8 +1444,14 @@ class PostgresReadModelRepository:
                 scope_key=scope_key,
                 connection=connection,
             )
+            scope_row = self._pending_invoice_scope_row(scope_key, connection=connection)
+            source_versions = (
+                scope_row.get("source_versions")
+                if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
+                else {}
+            )
             if total == 0:
-                if not self._pending_invoice_scope_exists(scope_key, connection=connection):
+                if scope_row is None:
                     return None
                 return {
                     "direction": normalized_direction,
@@ -1400,6 +1472,7 @@ class PostgresReadModelRepository:
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": refresh_status,
+                    "source_versions": source_versions,
                 }
             rows = connection.fetch_all(
                 f"""
@@ -1432,11 +1505,19 @@ class PostgresReadModelRepository:
                 "bank_transaction_tags": {},
                 "bank_transaction_tags_version": 1,
                 "refresh_status": refresh_status,
+                "source_versions": source_versions,
             }
 
-    def save_pending_invoice_rows(self, *, scope_key: str, rows: list[dict[str, Any]]) -> None:
+    def save_pending_invoice_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
         normalized_direction, normalized_filter, scope_month = _parse_pending_invoice_scope_key(scope_key)
         rows_to_save = list(rows or [])
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
 
         def write(connection: Any) -> None:
             if scope_month:
@@ -1455,7 +1536,9 @@ class PostgresReadModelRepository:
                     (normalized_direction, normalized_filter, normalized_filter),
                 )
             for row in rows_to_save:
-                payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
+                row_payload = dict(row) if isinstance(row, dict) else {}
+                row_payload["source_versions"] = normalized_source_versions
+                payload = serialize_value(row_payload.get("payload") if isinstance(row_payload.get("payload"), dict) else row_payload)
                 bank_transaction = payload.get("bank_transaction") if isinstance(payload.get("bank_transaction"), dict) else {}
                 status = payload.get("invoice_acquisition_status") if isinstance(payload.get("invoice_acquisition_status"), dict) else {}
                 input_invoices = payload.get("input_invoices") if isinstance(payload.get("input_invoices"), dict) else {}
@@ -1472,7 +1555,7 @@ class PostgresReadModelRepository:
                 oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
                 primary_oa = oa.get("primary") if isinstance(oa.get("primary"), dict) else {}
                 row_scope_month = scope_month or month_start(bank_transaction.get("trade_time"))
-                row_filter_group = text(row.get("filter_group") or payload.get("filter_group") or normalized_filter) or "all"
+                row_filter_group = text(row_payload.get("filter_group") or payload.get("filter_group") or normalized_filter) or "all"
                 row_scope_key = _pending_invoice_row_scope_key(
                     direction=normalized_direction,
                     filter_group=row_filter_group,
@@ -1521,9 +1604,9 @@ class PostgresReadModelRepository:
                         text(primary_oa.get("project_name")),
                         not bool(payload.get("invoices")),
                         bool(payload.get("can_create_invoice")),
-                        text(row.get("searchable_text") or payload),
+                        text(row_payload.get("searchable_text") or payload),
                         row_scope_key,
-                        text(row.get("generated_at")),
+                        text(row_payload.get("generated_at")),
                         jsonb(payload),
                         jsonb({"normalized_payload": payload}),
                     ),
@@ -1534,12 +1617,20 @@ class PostgresReadModelRepository:
                 direction=normalized_direction,
                 filter_group=normalized_filter,
                 row_count=len(rows_to_save),
+                source_versions=normalized_source_versions,
             )
 
         run_in_transaction(self._connection, write)
 
-    def mark_pending_invoice_scope(self, *, scope_key: str, row_count: int = 0) -> None:
+    def mark_pending_invoice_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+    ) -> None:
         normalized_direction, normalized_filter, _scope_month = _parse_pending_invoice_scope_key(scope_key)
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
 
         def write(connection: Any) -> None:
             self._upsert_pending_invoice_scope(
@@ -1548,6 +1639,7 @@ class PostgresReadModelRepository:
                 direction=normalized_direction,
                 filter_group=normalized_filter,
                 row_count=max(int_value(row_count, 0), 0),
+                source_versions=normalized_source_versions,
             )
 
         run_in_transaction(self._connection, write)
@@ -1565,11 +1657,11 @@ class PostgresReadModelRepository:
             date_to=date_to,
         )
 
-    def _pending_invoice_scope_exists(self, scope_key: str, *, connection: Any | None = None) -> bool:
+    def _pending_invoice_scope_row(self, scope_key: str, *, connection: Any | None = None) -> dict[str, Any] | None:
         executor = connection or self._connection
         row = executor.fetch_one(
             """
-            select scope_key
+            select scope_key, source_versions
             from read_model.pending_invoice_scopes
             where scope_key = %s
                or scope_key like %s
@@ -1577,7 +1669,7 @@ class PostgresReadModelRepository:
             """,
             (scope_key, f"{scope_key}:%"),
         )
-        return row is not None
+        return dict(row) if isinstance(row, dict) else None
 
     def _pending_invoice_source_summary(
         self,
@@ -1632,19 +1724,21 @@ class PostgresReadModelRepository:
         direction: str,
         filter_group: str,
         row_count: int,
+        source_versions: dict[str, Any],
     ) -> None:
         connection.execute(
             """
             insert into read_model.pending_invoice_scopes(
-                scope_key, direction, filter_group, row_count, generated_at, cache_status, raw_payload
+                scope_key, direction, filter_group, row_count, generated_at, cache_status, source_versions, raw_payload
             )
-            values (%s, %s, %s, %s, now(), 'fresh', %s)
+            values (%s, %s, %s, %s, now(), 'fresh', %s, %s)
             on conflict (scope_key) do update set
                 direction = excluded.direction,
                 filter_group = excluded.filter_group,
                 row_count = excluded.row_count,
                 generated_at = excluded.generated_at,
                 cache_status = excluded.cache_status,
+                source_versions = excluded.source_versions,
                 raw_payload = excluded.raw_payload,
                 updated_at = now()
             """,
@@ -1653,7 +1747,8 @@ class PostgresReadModelRepository:
                 direction,
                 filter_group,
                 row_count,
-                jsonb({"scope_key": scope_key, "row_count": row_count}),
+                jsonb(source_versions),
+                jsonb({"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
             ),
         )
 
@@ -1696,6 +1791,23 @@ class PostgresReadModelRepository:
             (scope_key,),
         )
         return text(row.get("generation_id")) if isinstance(row, dict) else None
+
+    @staticmethod
+    def _active_workbench_generation_source_versions(executor: Any, *, scope_key: str) -> dict[str, Any]:
+        row = executor.fetch_one(
+            """
+            select source_versions
+            from read_model.workbench_generations
+            where tenant_id = 'default'
+              and scope_key = %s
+              and status = 'active'
+            order by activated_at desc nulls last, completed_at desc nulls last, updated_at desc
+            limit 1
+            """,
+            (scope_key,),
+        )
+        source_versions = row.get("source_versions") if isinstance(row, dict) else {}
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
 
     @staticmethod
     def _workbench_generation_metadata(executor: Any, *, scope_key: str) -> dict[str, Any]:
@@ -2148,6 +2260,11 @@ class PostgresReadModelRepository:
                 result.setdefault("month", normalized_scope_key)
                 result.setdefault("scope_key", normalized_scope_key)
                 result.setdefault("generated_at", text(materialized_row.get("generated_at")))
+                result["source_versions"] = (
+                    materialized_row.get("source_versions")
+                    if isinstance(materialized_row.get("source_versions"), dict)
+                    else {}
+                )
                 result["active_generation_id"] = active_generation_id or text(materialized_row.get("generation_id"))
                 result["read_model_version"] = result["active_generation_id"]
                 result["read_model_status"] = self._workbench_summary_read_model_status(
@@ -2184,6 +2301,10 @@ class PostgresReadModelRepository:
             ),
             "read_model_status": refresh_status["read_model_status"],
             "generated_at": generated_at,
+            "source_versions": self._active_workbench_generation_source_versions(
+                self._connection,
+                scope_key=normalized_scope_key,
+            ),
             "active_generation_id": active_generation_id,
             "read_model_version": active_generation_id,
         }
@@ -2456,6 +2577,11 @@ class PostgresReadModelRepository:
             return "fresh"
         where_sql, params = self._workbench_scope_filter(normalized_scope_key)
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        active_source_versions = (
+            self._active_workbench_generation_source_versions(self._connection, scope_key=normalized_scope_key)
+            if active_generation_id
+            else {}
+        )
         generation_clause = ""
         generation_params: list[Any] = []
         if active_generation_id:
@@ -2665,6 +2791,10 @@ class PostgresReadModelRepository:
         offset = (normalized_page - 1) * normalized_page_size
         scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        active_source_versions = self._active_workbench_generation_source_versions(
+            self._connection,
+            scope_key=normalized_scope_key,
+        )
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
         normalized_search_by_pane = _normalize_workbench_search_by_pane(search_by_pane)
@@ -2832,6 +2962,7 @@ class PostgresReadModelRepository:
             "has_more": len(rows) > normalized_page_size,
             "groups": groups,
             "read_model_status": read_model_status,
+            "source_versions": active_source_versions,
             "active_generation_id": active_generation_id,
             "read_model_version": active_generation_id,
         }
@@ -3692,7 +3823,11 @@ class PostgresReadModelRepository:
         max_generated_at = ""
         max_source_version: int | None = None
         parser_versions: set[str] = set()
+        bank_auto_tag_rules_versions: set[str] = set()
+        oa_projection_sync_versions: set[str] = set()
         has_group_without_parser_version = False
+        has_group_without_bank_auto_tag_rules_version = False
+        has_group_without_oa_projection_sync_version = False
         for row in group_rows:
             group = _read_model_payload(row)
             if not isinstance(group, dict):
@@ -3703,6 +3838,16 @@ class PostgresReadModelRepository:
                 parser_versions.add(parser_version)
             else:
                 has_group_without_parser_version = True
+            bank_auto_tag_rules_version = text(row_source_versions.get("bank_auto_tag_rules_version"))
+            if bank_auto_tag_rules_version:
+                bank_auto_tag_rules_versions.add(bank_auto_tag_rules_version)
+            else:
+                has_group_without_bank_auto_tag_rules_version = True
+            oa_projection_sync_version = text(row_source_versions.get("oa_projection_sync_version"))
+            if oa_projection_sync_version:
+                oa_projection_sync_versions.add(oa_projection_sync_version)
+            else:
+                has_group_without_oa_projection_sync_version = True
             normalized_group = deepcopy(group)
             normalized_group["_source_scope_key"] = text(row.get("scope_key"))
             normalized_group["_source_scope_month"] = text(row.get("scope_month"))
@@ -3728,6 +3873,10 @@ class PostgresReadModelRepository:
         }
         if len(parser_versions) == 1 and not has_group_without_parser_version:
             aggregate_source_versions["oa_attachment_invoice_parser_version"] = next(iter(parser_versions))
+        if len(bank_auto_tag_rules_versions) == 1 and not has_group_without_bank_auto_tag_rules_version:
+            aggregate_source_versions["bank_auto_tag_rules_version"] = next(iter(bank_auto_tag_rules_versions))
+        if len(oa_projection_sync_versions) == 1 and not has_group_without_oa_projection_sync_version:
+            aggregate_source_versions["oa_projection_sync_version"] = next(iter(oa_projection_sync_versions))
         generated_at = max_generated_at or None
         workbench_rows = list(self._iter_workbench_rows(aggregate_payload))
         workbench_groups = list(self._iter_workbench_groups(aggregate_payload))
@@ -4844,7 +4993,13 @@ class PostgresReadModelRepository:
             "project_scope": text(row.get("project_scope") or payload.get("project_scope")),
             "payload": payload,
             "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
-            "source_versions": stored_payload.get("source_versions") if isinstance(stored_payload.get("source_versions"), dict) else {},
+            "source_versions": (
+                row.get("source_versions")
+                if isinstance(row.get("source_versions"), dict)
+                else stored_payload.get("source_versions")
+                if isinstance(stored_payload.get("source_versions"), dict)
+                else {}
+            ),
             "entry_count": int_value(
                 row.get("entry_count")
                 or payload.get("entry_count")
@@ -4903,7 +5058,7 @@ class PostgresReadModelRepository:
             params.append(value)
         rows = self._connection.fetch_all(
             f"""
-            select batch_id, payload, raw_payload
+            select batch_id, source_versions, payload, raw_payload
             from read_model.no_oa_bank_batch_rows
             where {" and ".join(where)}
             order by scope_month desc nulls last, generated_at desc, batch_id
@@ -4916,9 +5071,14 @@ class PostgresReadModelRepository:
         for row in rows:
             payload = _read_model_payload(row)
             if isinstance(payload, dict):
+                if isinstance(row.get("source_versions"), dict):
+                    payload = {**payload, "source_versions": row.get("source_versions")}
                 result.append(payload)
             elif batch_id := text(row.get("batch_id")):
-                result.append({"batch_id": batch_id})
+                payload = {"batch_id": batch_id}
+                if isinstance(row.get("source_versions"), dict):
+                    payload["source_versions"] = row.get("source_versions")
+                result.append(payload)
         return result
 
     def list_turnover_ledger_view(
@@ -4946,7 +5106,7 @@ class PostgresReadModelRepository:
         where_sql = " and ".join(clauses)
         all_rows = self._connection.fetch_all(
             f"""
-            select relation_id, family, status, amount::text as amount, payload, raw_payload
+            select relation_id, family, status, amount::text as amount, source_versions, payload, raw_payload
             from read_model.turnover_ledger_rows
             where {where_sql}
             order by scope_month desc nulls last, generated_at desc, relation_id
@@ -4955,6 +5115,7 @@ class PostgresReadModelRepository:
         )
         if not all_rows:
             return None
+        source_versions = _shared_source_versions(all_rows)
         ledger_rows = [_turnover_ledger_row_payload(row) for row in all_rows]
         if normalized_direction == "borrow_in":
             ledger_rows = [row for row in ledger_rows if row.get("business_type") == "borrow_in"]
@@ -4982,6 +5143,7 @@ class PostgresReadModelRepository:
                 "status": normalized_status,
             },
             "read_model_status": "fresh",
+            "source_versions": source_versions,
         }
 
     def save_turnover_ledger_rows(self, payload: dict[str, Any]) -> None:
@@ -5093,7 +5255,13 @@ class PostgresReadModelRepository:
             "payload": payload,
             "schema_version": text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
             "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
-            "source_versions": stored_payload.get("source_versions") if isinstance(stored_payload.get("source_versions"), dict) else {},
+            "source_versions": (
+                row.get("source_versions")
+                if isinstance(row.get("source_versions"), dict)
+                else stored_payload.get("source_versions")
+                if isinstance(stored_payload.get("source_versions"), dict)
+                else {}
+            ),
             "entry_count": int_value(row.get("entry_count") or stored_payload.get("entry_count") or _tax_offset_item_count(payload), 0),
             "refresh_status": refresh_status,
             "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
@@ -5964,6 +6132,20 @@ def _turnover_ledger_row_payload(row: dict[str, Any]) -> dict[str, Any]:
         "status": text(row.get("status")),
         "balance_amount": decimal_text(row.get("amount")) or "0.00",
     }
+
+
+def _shared_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    versions: dict[str, Any] = {}
+    for row in rows:
+        row_versions = row.get("source_versions")
+        if not isinstance(row_versions, dict):
+            return {}
+        if not versions:
+            versions = dict(row_versions)
+            continue
+        if row_versions != versions:
+            return {}
+    return versions
 
 
 def _turnover_ledger_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:

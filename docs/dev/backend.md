@@ -135,6 +135,14 @@ RabbitMQ 消息体不得携带 read model payload 或页面 snapshot。回滚时
 
 `read_model.workbench_rows`、`read_model.workbench_groups` 和 `read_model.workbench_group_rows` 是页面热路径。`read_model.workbench_snapshots.payload/raw_payload` 只用于审计、导出、对账和兼容期。Groups 接口可使用 Redis 短 TTL page cache；Redis key 必须包含 read model schema version、source version、分页、列筛选、时间筛选、`search`、`search_by_pane`、排序、`detail_level` 和过滤语义版本，Redis miss 必须回 PostgreSQL read model，Redis 清空不影响正确性。工作台 DTO/schema 变更必须提升 schema version，防止旧 Redis page cache 或旧 SQL projection payload 被当成新契约使用。`/api/workbench/summary` 和 `/api/workbench/groups` 输出 `workbench_api_metric` 结构化日志，生产指标系统按 endpoint 聚合 p95。
 
+所有正式 read model 必须遵守统一 freshness contract：
+
+- writer 发布 read model 时写入 `source_versions`；API 读取时用当前 `expected_source_versions(scope)` 比较 persisted vs expected。
+- `source_versions` 至少包含本 read model schema/source version，以及会改变投影口径的上游版本，例如银行明细自动标签规则版本、OA 附件发票解析版本、OA projection sync 版本、关系/分类快照版本。
+- 不一致不能当作 `fresh` 返回。worker 化 read model 只能返回 `refreshing`/`stale` 并 enqueue durable refresh；已有稳定行可以继续作为非 fresh 最近可用结果展示。工作台继续用 generation 原子发布校验，其他单表 read model 使用 `source_versions + schema + dirty scope` 校验。
+- Redis 只做短 TTL cache；key 必须包含 read model schema/source version 或 generation id，以及标准化查询参数 hash。Redis 命中不能绕过 SQL read model freshness 判断。
+- 当前覆盖：workbench matching/read model、bank detail、cost statistics、tax offset、search、pending invoice、input invoice usage、output invoice collection、No-OA batch rows 和 turnover ledger rows。No-OA/Turnover 仍沿用现有状态表/同步重建路径，但 SQL 读取不能把旧 `source_versions` 误判为 fresh。
+
 成本统计 SQL read model worker：
 
 ```bash
@@ -148,7 +156,7 @@ python3 -m fin_ops_platform.app.worker \
   --statement-timeout-seconds 30
 ```
 
-`/api/cost-statistics/explorer` 和 `/api/cost-statistics` month summary 在 PostgreSQL read model 存在时从 SQL 返回，并用 Redis 短 TTL 缓存热点 `month/all + project_scope` payload。Redis 清空后仍会回落 PostgreSQL；SQL miss 时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh。
+`/api/cost-statistics/explorer` 和 `/api/cost-statistics` month summary 在 PostgreSQL read model 存在且 `source_versions` 匹配时从 SQL 返回，并用 Redis 短 TTL 缓存热点 `month/all + project_scope` payload。Redis key 必须包含成本统计 schema version、上游 source_versions hash 和查询 scope；Redis 清空后仍会回落 PostgreSQL；SQL miss/stale/source_versions 不匹配时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh。
 
 税金抵扣 SQL read model worker：
 
@@ -163,7 +171,7 @@ python3 -m fin_ops_platform.app.worker \
   --statement-timeout-seconds 30
 ```
 
-`/api/tax-offset` 在 PostgreSQL read model 存在时从 SQL 返回，并用 Redis 短 TTL 缓存热点 month payload。Redis 清空后仍会回落 PostgreSQL；SQL miss 时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh。
+`/api/tax-offset` 在 PostgreSQL read model 存在且 `source_versions` 匹配时从 SQL 返回，并用 Redis 短 TTL 缓存热点 month payload。Redis key 必须包含税金抵扣 schema version、上游 source_versions hash 和查询 scope；Redis 清空后仍会回落 PostgreSQL；SQL miss/stale/source_versions 不匹配时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh。
 
 搜索和待找发票 read model worker：
 
@@ -180,7 +188,7 @@ python3 -m fin_ops_platform.app.worker \
   --statement-timeout-seconds 30
 ```
 
-`/api/search` 从 `read_model.search_index_rows` 查询，`/api/pending-invoices/rows` 从 `read_model.pending_invoice_rows` 分页查询。`/api/input-invoice-usage/rows` 从 `read_model.input_invoice_usage_rows` 查询，`/api/output-invoice-collections/rows` 从 `read_model.output_invoice_collection_rows` 查询；对应 filter-options 必须基于 SQL read model 行集生成。SQL miss/stale/schema-stale 时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh；API 请求路径不得同步扫描全量发票、流水、OA 或关系数据。
+`/api/search` 从 `read_model.search_index_rows` 查询，`/api/pending-invoices/rows` 从 `read_model.pending_invoice_rows` 分页查询。`/api/input-invoice-usage/rows` 从 `read_model.input_invoice_usage_rows` 查询，`/api/output-invoice-collections/rows` 从 `read_model.output_invoice_collection_rows` 查询；对应 filter-options 必须基于 SQL read model 行集生成。SQL miss/stale/schema-stale/source_versions 不匹配时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh；API 请求路径不得同步扫描全量发票、流水、OA 或关系数据。
 
 进项发票使用/销项发票收款 read model worker：
 

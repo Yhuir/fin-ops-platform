@@ -2,13 +2,17 @@ import type {
   NoOaBankBatch,
   NoOaBankBatchDetail,
   NoOaBankBatchDetailRow,
+  NoOaBankBatchTagDefinition,
+  NoOaBankBatchTagSelection,
   NoOaBankBatchMutationResult,
   NoOaBankBatchesRequest,
   NoOaBankBatchesResponse,
   NoOaBankBatchCountMap,
   NoOaBankBatchSummary,
+  SaveNoOaBankBatchTagSelectionRequest,
   SubmitNoOaBankBatchesRequest,
   SubmitNoOaBankBatchRequest,
+  SubmitNoOaBankBatchSelectionRequest,
   WithdrawNoOaBankBatchRequest,
 } from "./types";
 import { apiRequestJson } from "../apiClient";
@@ -56,6 +60,12 @@ type ApiNoOaBankBatch = {
   can_withdraw?: boolean | null;
   canWithdraw?: boolean | null;
   version?: number | null;
+  category_primary_label?: string | null;
+  categoryPrimaryLabel?: string | null;
+  category_sub_label?: string | null;
+  categorySubLabel?: string | null;
+  category_label_path?: unknown[] | null;
+  categoryLabelPath?: unknown[] | null;
 };
 
 type ApiNoOaBankBatchSummary = {
@@ -85,6 +95,34 @@ type ApiNoOaBankBatchSummaryCategory = {
   stale?: number | null;
   total_amount?: string | null;
   totalAmount?: string | null;
+  primary_label?: string | null;
+  primaryLabel?: string | null;
+  sub_label?: string | null;
+  subLabel?: string | null;
+  label_path?: unknown[] | null;
+  labelPath?: unknown[] | null;
+};
+
+type ApiNoOaBankBatchTagDefinition = {
+  code?: string | null;
+  label?: string | null;
+  path?: unknown[] | null;
+  source?: string | null;
+  status?: string | null;
+  output_primary_label?: string | null;
+  outputPrimaryLabel?: string | null;
+  output_sub_label?: string | null;
+  outputSubLabel?: string | null;
+};
+
+type ApiNoOaBankBatchTagSelection = {
+  version?: number | null;
+  selected_tag_codes?: unknown[] | null;
+  selectedTagCodes?: unknown[] | null;
+  inactive_selected_tag_codes?: unknown[] | null;
+  inactiveSelectedTagCodes?: unknown[] | null;
+  active_tags?: ApiNoOaBankBatchTagDefinition[] | null;
+  activeTags?: ApiNoOaBankBatchTagDefinition[] | null;
 };
 
 type ApiNoOaBankBatchesResponse = {
@@ -166,6 +204,10 @@ function stringList(value: string[] | undefined) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
+function unknownStringList(value: unknown) {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
 function countMap(value: Record<string, unknown> | null | undefined): NoOaBankBatchCountMap {
   if (!value || typeof value !== "object") {
     return {};
@@ -178,7 +220,7 @@ function countMap(value: Record<string, unknown> | null | undefined): NoOaBankBa
 }
 
 function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
-  return {
+  const mapped: NoOaBankBatch = {
     batchId: text(batch.batch_id ?? batch.batchId),
     batchType: text(batch.batch_type ?? batch.batchType),
     batchLabel: text(batch.batch_label ?? batch.batchLabel),
@@ -202,6 +244,19 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     canWithdraw: Boolean(batch.can_withdraw ?? batch.canWithdraw),
     version: nullableNumberValue(batch.version),
   };
+  const primaryLabel = text(batch.category_primary_label ?? batch.categoryPrimaryLabel);
+  const subLabel = text(batch.category_sub_label ?? batch.categorySubLabel);
+  const labelPath = unknownStringList(batch.category_label_path ?? batch.categoryLabelPath);
+  if (primaryLabel) {
+    mapped.categoryPrimaryLabel = primaryLabel;
+  }
+  if (subLabel) {
+    mapped.categorySubLabel = subLabel;
+  }
+  if (labelPath.length > 0) {
+    mapped.categoryLabelPath = labelPath;
+  }
+  return mapped;
 }
 
 function mapSummary(summary: ApiNoOaBankBatchSummary = {}): NoOaBankBatchSummary {
@@ -217,7 +272,7 @@ function mapSummary(summary: ApiNoOaBankBatchSummary = {}): NoOaBankBatchSummary
 }
 
 function mapSummaryCategory(category: ApiNoOaBankBatchSummaryCategory) {
-  return {
+  const mapped = {
     code: text(category.code),
     label: text(category.label),
     total: numberValue(category.total),
@@ -227,6 +282,38 @@ function mapSummaryCategory(category: ApiNoOaBankBatchSummaryCategory) {
     conflict: numberValue(category.conflict),
     stale: numberValue(category.stale),
     totalAmount: text(category.total_amount ?? category.totalAmount, "0.00"),
+  };
+  const primaryLabel = text(category.primary_label ?? category.primaryLabel);
+  const subLabel = text(category.sub_label ?? category.subLabel);
+  const labelPath = unknownStringList(category.label_path ?? category.labelPath);
+  return {
+    ...mapped,
+    ...(primaryLabel ? { primaryLabel } : {}),
+    ...(subLabel ? { subLabel } : {}),
+    ...(labelPath.length > 0 ? { labelPath } : {}),
+  };
+}
+
+function mapTagDefinition(tag: ApiNoOaBankBatchTagDefinition = {}): NoOaBankBatchTagDefinition {
+  return {
+    code: text(tag.code),
+    label: text(tag.label),
+    path: unknownStringList(tag.path),
+    source: text(tag.source),
+    status: text(tag.status, "active"),
+    outputPrimaryLabel: text(tag.output_primary_label ?? tag.outputPrimaryLabel),
+    outputSubLabel: text(tag.output_sub_label ?? tag.outputSubLabel),
+  };
+}
+
+function mapTagSelection(payload: ApiNoOaBankBatchTagSelection = {}): NoOaBankBatchTagSelection {
+  return {
+    version: numberValue(payload.version),
+    selectedTagCodes: unknownStringList(payload.selected_tag_codes ?? payload.selectedTagCodes),
+    inactiveSelectedTagCodes: unknownStringList(payload.inactive_selected_tag_codes ?? payload.inactiveSelectedTagCodes),
+    activeTags: Array.isArray(payload.active_tags ?? payload.activeTags)
+      ? (payload.active_tags ?? payload.activeTags ?? []).map(mapTagDefinition)
+      : [],
   };
 }
 
@@ -300,6 +387,31 @@ export async function fetchNoOaBankBatches({
   };
 }
 
+export async function fetchNoOaBankBatchTagSelection(signal?: AbortSignal): Promise<NoOaBankBatchTagSelection> {
+  const payload = await requestJson<ApiNoOaBankBatchTagSelection>(
+    "/api/no-oa-bank-batches/tag-selection",
+    { method: "GET", signal },
+  );
+  return mapTagSelection(payload);
+}
+
+export async function saveNoOaBankBatchTagSelection({
+  expectedVersion,
+  selectedTagCodes,
+  signal,
+}: SaveNoOaBankBatchTagSelectionRequest): Promise<NoOaBankBatchTagSelection> {
+  const payload = await requestJson<ApiNoOaBankBatchTagSelection>(
+    "/api/no-oa-bank-batches/tag-selection",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_version: expectedVersion, selected_tag_codes: selectedTagCodes }),
+      signal,
+    },
+  );
+  return mapTagSelection(payload);
+}
+
 export async function fetchNoOaBankBatchDetail(batchId: string, signal?: AbortSignal): Promise<NoOaBankBatchDetail> {
   const payload = await requestJson<ApiNoOaBankBatchDetail>(
     `/api/no-oa-bank-batches/${encodeURIComponent(batchId)}`,
@@ -364,6 +476,23 @@ export async function submitNoOaBankBatches({
           expected_version: batch.expectedVersion,
         })),
       }),
+      signal,
+    },
+  );
+  return mapMutationResult(payload);
+}
+
+export async function submitNoOaBankBatchSelection({
+  transactionIds,
+  note,
+  signal,
+}: SubmitNoOaBankBatchSelectionRequest): Promise<NoOaBankBatchMutationResult> {
+  const payload = await requestJson<ApiNoOaBankBatchMutationResult>(
+    "/api/no-oa-bank-batches/submit-selection",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transaction_ids: transactionIds, note: note ?? "" }),
       signal,
     },
   );

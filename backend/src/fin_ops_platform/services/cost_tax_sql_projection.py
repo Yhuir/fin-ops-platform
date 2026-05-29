@@ -6,12 +6,21 @@ from decimal import Decimal, InvalidOperation
 import re
 from typing import Any
 
-from fin_ops_platform.services.cost_statistics_read_model_service import CostStatisticsReadModelService
+from fin_ops_platform.services.cost_statistics_read_model_service import (
+    COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    CostStatisticsReadModelService,
+)
 from fin_ops_platform.services.live_workbench_service import format_decimal
+from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.tax_offset_read_model_service import TaxOffsetReadModelService
+from fin_ops_platform.services.tax_offset_read_model_service import (
+    TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+    TaxOffsetReadModelService,
+)
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
+from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -55,6 +64,7 @@ class CostStatisticsSqlProjectionBuilder:
         if month == "all":
             raise ValueError("cost statistics all-scope must be expanded into month shards before rebuild.")
         payload = self._build_explorer_payload(month, project_scope=project_scope)
+        source_versions = self._source_versions(month)
         service = CostStatisticsReadModelService()
         read_model = service.upsert_read_model(
             month,
@@ -62,6 +72,7 @@ class CostStatisticsSqlProjectionBuilder:
             payload,
             generated_at=datetime.now().isoformat(),
             source_scope_keys=[month],
+            source_versions=source_versions,
             cache_status="ready",
         )
         warmed_scope_key = str(read_model["scope_key"])
@@ -71,13 +82,30 @@ class CostStatisticsSqlProjectionBuilder:
         )
         self._set_redis_json(
             f"cost_statistics:explorer:{warmed_scope_key}",
-            {"payload": {**payload, "read_model_status": "fresh", "read_model_scope_key": warmed_scope_key}},
+            {
+                "payload": {
+                    **payload,
+                    "read_model_status": "fresh",
+                    "read_model_scope_key": warmed_scope_key,
+                    "source_versions": source_versions,
+                }
+            },
         )
         return {
             "scope_key": warmed_scope_key,
             "month": month,
             "project_scope": project_scope,
             "entry_count": len(payload.get("time_rows") or []),
+        }
+
+    def _source_versions(self, month: str) -> dict[str, Any]:
+        return {
+            "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            "workbench_scope_key": month,
+            "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+            "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(self._connection),
+            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
 
     def _build_explorer_payload(self, month: str, *, project_scope: str) -> dict[str, Any]:
@@ -262,12 +290,14 @@ class TaxOffsetSqlProjectionBuilder:
         if not MONTH_RE.match(month):
             raise ValueError("tax offset SQL projection scope_key must be a month shard YYYY-MM.")
         payload = self._build_tax_payload(month)
+        source_versions = self._source_versions()
         service = TaxOffsetReadModelService()
         read_model = service.upsert_read_model(
             month,
             payload,
             generated_at=datetime.now().isoformat(),
             source_scope_keys=[month],
+            source_versions=source_versions,
             cache_status="ready",
         )
         warmed_scope_key = str(read_model["scope_key"])
@@ -277,12 +307,27 @@ class TaxOffsetSqlProjectionBuilder:
         )
         self._set_redis_json(
             f"tax_offset:month:{warmed_scope_key}",
-            {"payload": {**payload, "read_model_status": "fresh", "read_model_scope_key": warmed_scope_key}},
+            {
+                "payload": {
+                    **payload,
+                    "read_model_status": "fresh",
+                    "read_model_scope_key": warmed_scope_key,
+                    "source_versions": source_versions,
+                }
+            },
         )
         return {
             "scope_key": warmed_scope_key,
             "month": month,
             "entry_count": sum(len(payload.get(key) or []) for key in ("output_items", "input_plan_items", "certified_items")),
+        }
+
+    @staticmethod
+    def _source_versions() -> dict[str, Any]:
+        return {
+            "tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
 
     def _build_tax_payload(self, month: str) -> dict[str, Any]:
@@ -409,6 +454,23 @@ def _parse_cost_scope_key(scope_key: str) -> tuple[str, str]:
     if month != "all" and not MONTH_RE.match(month):
         raise ValueError("cost statistics month must be all or YYYY-MM.")
     return project_scope, month
+
+
+def _current_bank_auto_tag_rules_version(connection: Any) -> int:
+    row = connection.fetch_one(
+        "select settings_payload from app.app_settings where settings_key = %s limit 1",
+        ("app_settings",),
+    )
+    payload = row.get("settings_payload") if isinstance(row, dict) else {}
+    if not isinstance(payload, dict):
+        return 1
+    rules_payload = payload.get("bank_transaction_tags")
+    if not isinstance(rules_payload, dict):
+        return 1
+    try:
+        return int(rules_payload.get("version") or 1)
+    except (TypeError, ValueError):
+        return 1
 
 
 def _cost_context_from_oa_rows(oa_rows: list[dict[str, Any]]) -> dict[str, str] | None:

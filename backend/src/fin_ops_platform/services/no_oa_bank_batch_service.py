@@ -93,10 +93,12 @@ class NoOaBankBatchService:
         categories_by_transaction_id: dict[str, dict[str, Any]],
         active_relations: list[dict[str, Any]],
         source_versions: dict[str, Any] | None,
+        eligible_batch_types: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
         rows = [dict(row) for row in list(bank_rows or []) if isinstance(row, dict)]
         categories = categories_by_transaction_id if isinstance(categories_by_transaction_id, dict) else {}
         source_version_payload = dict(source_versions or {})
+        eligible_types = self._eligible_batch_types(eligible_batch_types)
 
         self._migrate_legacy_active_relations(
             rows=rows,
@@ -129,7 +131,7 @@ class NoOaBankBatchService:
         )
 
         generated: dict[str, dict[str, Any]] = {}
-        generated.update(self._build_single_side_batches(rows, categories, occupied_row_ids, source_version_payload))
+        generated.update(self._build_single_side_batches(rows, categories, occupied_row_ids, source_version_payload, eligible_types))
         generated.update(
             self._build_internal_transfer_batches(
                 rows,
@@ -137,6 +139,7 @@ class NoOaBankBatchService:
                 occupied_row_ids,
                 no_oa_occupied_row_ids,
                 source_version_payload,
+                eligible_types,
             )
         )
 
@@ -189,8 +192,82 @@ class NoOaBankBatchService:
                 ],
             )
 
+        for batch in generated.values():
+            if isinstance(batch, dict):
+                batch["source_versions"] = deepcopy(source_version_payload)
         self._batches = {batch_id: self._normalize_batch(batch) for batch_id, batch in generated.items()}
         return self.list_batches()
+
+    def submit_selected_rows(
+        self,
+        *,
+        bank_rows: list[dict[str, Any]],
+        categories_by_transaction_id: dict[str, dict[str, Any]],
+        active_relations: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None,
+        eligible_batch_types: set[str] | list[str] | tuple[str, ...],
+        row_ids: list[str],
+        actor: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        rows_by_id = {self._row_id(row): dict(row) for row in list(bank_rows or []) if self._row_id(row)}
+        selected_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
+        if not selected_row_ids:
+            raise ValueError("no_oa_bank_batch_selection_empty")
+        if len(set(selected_row_ids)) != len(selected_row_ids):
+            raise ValueError("no_oa_bank_batch_selection_duplicate_rows")
+        selected_rows = [rows_by_id.get(row_id) for row_id in selected_row_ids]
+        if any(row is None for row in selected_rows):
+            raise ValueError("no_oa_bank_batch_selection_unknown_row")
+        resolved_rows = [row for row in selected_rows if isinstance(row, dict)]
+        occupied_row_ids = self._active_relation_row_ids(active_relations)
+        if any(row_id in occupied_row_ids for row_id in selected_row_ids):
+            raise ValueError("no_oa_bank_batch_selection_occupied")
+        categories = categories_by_transaction_id if isinstance(categories_by_transaction_id, dict) else {}
+        eligible_types = self._eligible_batch_types(eligible_batch_types)
+        batch_types = {self._category_code(row, categories) for row in resolved_rows}
+        batch_types.discard("")
+        if len(batch_types) != 1:
+            raise ValueError("no_oa_bank_batch_selection_cross_tag")
+        batch_type = next(iter(batch_types))
+        if batch_type not in eligible_types:
+            raise ValueError("no_oa_bank_batch_selection_unselected_tag")
+        scope_months = {self._scope_month(row) for row in resolved_rows}
+        scope_months.discard("")
+        if len(scope_months) != 1:
+            raise ValueError("no_oa_bank_batch_selection_cross_month")
+        account_keys = {self._account_key(row) for row in resolved_rows}
+        account_keys.discard("")
+        if len(account_keys) != 1:
+            raise ValueError("no_oa_bank_batch_selection_cross_bank")
+        scope_month = next(iter(scope_months))
+        account_key = next(iter(account_keys))
+        sorted_rows = sorted(resolved_rows, key=self._row_id)
+        sorted_row_ids = [self._row_id(row) for row in sorted_rows]
+        batch_key = f"selection:{batch_type}:{scope_month}:{account_key}:{self._row_set_digest(sorted_row_ids)}"
+        evidence = {
+            "matched_fields": ["selected_transaction_ids", "category_code", "account_key", "scope_month"],
+            "category_sources": self._category_sources(sorted_row_ids, categories),
+            "selected_transaction_ids": sorted_row_ids,
+        }
+        draft = self._draft_batch(
+            batch_key=batch_key,
+            batch_type=batch_type,
+            scope_month=scope_month,
+            account_key=account_key,
+            rows=sorted_rows,
+            row_ids=sorted_row_ids,
+            total_amount=sum((self._amount(row) or ZERO for row in sorted_rows), ZERO),
+            source_versions=dict(source_versions or {}),
+            evidence=evidence,
+        )
+        self._batches[str(draft["batch_id"])] = self._normalize_batch(draft)
+        return self.submit_batch(
+            str(draft["batch_id"]),
+            actor=actor,
+            expected_version=int(draft.get("version") or 1),
+            note=note,
+        )
 
     def last_legacy_migration_result(self) -> dict[str, Any]:
         return deepcopy(self._last_legacy_migration_result)
@@ -909,7 +986,7 @@ class NoOaBankBatchService:
                 "batch_id": batch_id,
                 "batch_key": batch_key,
                 "batch_type": batch_type,
-                "batch_label": NO_OA_BANK_BATCH_LABELS[batch_type],
+                "batch_label": self._batch_label(batch_type),
                 "scope_month": scope_month,
                 "account_key": account_key,
                 "bank_name": self._bank_name(first_row),
@@ -1011,7 +1088,7 @@ class NoOaBankBatchService:
             batch_type = str(relation_metadata.get("batch_type") or "").strip()
             if not batch_type and resolved_rows:
                 batch_type = self._category_code(resolved_rows[0], categories)
-            if batch_type not in SUPPORTED_BATCH_TYPES:
+            if not batch_type:
                 continue
             scope_month = self._relation_scope_month(relation, resolved_rows)
             total_amount = self._decimal(relation_metadata.get("total_amount"))
@@ -1214,7 +1291,7 @@ class NoOaBankBatchService:
                 "batch_id": batch_id,
                 "batch_key": batch_key,
                 "batch_type": batch_type,
-                "batch_label": NO_OA_BANK_BATCH_LABELS[batch_type],
+                "batch_label": self._batch_label(batch_type),
                 "scope_month": self._legacy_relation_scope_month(legacy_relation, sorted_rows),
                 "account_key": self._account_key(first_row) if batch_type != "internal_transfer" else "",
                 "bank_name": self._bank_name(first_row),
@@ -1318,7 +1395,7 @@ class NoOaBankBatchService:
                 "batch_id": batch_id,
                 "batch_key": batch_key,
                 "batch_type": batch_type,
-                "batch_label": NO_OA_BANK_BATCH_LABELS[batch_type],
+                "batch_label": self._batch_label(batch_type),
                 "scope_month": scope_month,
                 "account_key": account_key,
                 "bank_name": self._bank_name(first_row),
@@ -1405,6 +1482,7 @@ class NoOaBankBatchService:
         categories: dict[str, dict[str, Any]],
         occupied_row_ids: set[str],
         source_versions: dict[str, Any],
+        eligible_batch_types: set[str],
     ) -> dict[str, dict[str, Any]]:
         grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
         for row in rows:
@@ -1412,7 +1490,7 @@ class NoOaBankBatchService:
             if not row_id or row_id in occupied_row_ids:
                 continue
             batch_type = self._category_code(row, categories)
-            if batch_type not in SINGLE_SIDE_BATCH_TYPES:
+            if batch_type == "internal_transfer" or batch_type not in eligible_batch_types:
                 continue
             scope_month = self._scope_month(row)
             account_key = self._account_key(row)
@@ -1454,7 +1532,10 @@ class NoOaBankBatchService:
         occupied_row_ids: set[str],
         no_oa_occupied_row_ids: set[str],
         source_versions: dict[str, Any],
+        eligible_batch_types: set[str],
     ) -> dict[str, dict[str, Any]]:
+        if "internal_transfer" not in eligible_batch_types:
+            return {}
         internal_rows = [
             row
             for row in rows
@@ -1633,7 +1714,7 @@ class NoOaBankBatchService:
                 "batch_id": batch_id,
                 "batch_key": batch_key,
                 "batch_type": batch_type,
-                "batch_label": NO_OA_BANK_BATCH_LABELS[batch_type],
+                "batch_label": self._batch_label(batch_type),
                 "scope_month": scope_month,
                 "account_key": account_key,
                 "bank_name": self._bank_name(first_row),
@@ -1957,6 +2038,16 @@ class NoOaBankBatchService:
     @staticmethod
     def _display_tags(batch_type: str) -> list[str]:
         return ["免OA", NO_OA_BANK_BATCH_LABELS.get(batch_type, batch_type)]
+
+    @staticmethod
+    def _batch_label(batch_type: str) -> str:
+        return NO_OA_BANK_BATCH_LABELS.get(str(batch_type or ""), str(batch_type or ""))
+
+    @staticmethod
+    def _eligible_batch_types(values: set[str] | list[str] | tuple[str, ...] | None) -> set[str]:
+        if values is None:
+            return set(SUPPORTED_BATCH_TYPES)
+        return {str(value).strip() for value in values if str(value).strip()}
 
     @staticmethod
     def _row_id(row: dict[str, Any]) -> str:
