@@ -15,6 +15,43 @@ class FakeConnection:
         normalized = " ".join(sql.lower().split())
         if "like '%." in normalized:
             raise AssertionError("literal percent signs must be escaped for psycopg SQL")
+        if "pending_outbox_by_scope" in normalized:
+            return [
+                {
+                    "event_type": "workbench.read_model.refresh",
+                    "status": "pending",
+                    "scope_type": "workbench",
+                    "scope_key": "all",
+                    "count": 2,
+                    "oldest_age_seconds": 610.0,
+                    "attempts": 1,
+                    "last_error": "",
+                }
+            ]
+        if "dirty_scope_backlog_by_scope" in normalized:
+            return [
+                {
+                    "scope_type": "workbench",
+                    "scope_key": "all",
+                    "status": "pending",
+                    "count": 1,
+                    "oldest_age_seconds": 620.0,
+                    "attempts": 2,
+                    "last_error": "still refreshing",
+                }
+            ]
+        if "workbench_generation_status_counts" in normalized:
+            return [{"status": "active", "count": 3}, {"status": "building", "count": 1}]
+        if "workbench_active_generation_totals" in normalized:
+            return [
+                {
+                    "active_scope_count": 3,
+                    "active_row_count": 150,
+                    "active_group_count": 45,
+                    "active_summary_count": 3,
+                    "latest_generated_at": "2026-05-29 21:00:00+08",
+                }
+            ]
         if "publish_status" in normalized:
             return [{"publish_status": "unpublished", "count": 4}, {"publish_status": "failed", "count": 2}]
         if "from job.outbox_events" in normalized:
@@ -50,6 +87,15 @@ class FakeConnection:
             return {"failed_count": 1, "read_model_refresh_total": 10}
         if "publish_status in" in normalized:
             return {"max_unpublished_age_seconds": 11.0}
+        if "workbench_all_scope_generation" in normalized:
+            return {
+                "status": "building",
+                "row_count": 0,
+                "group_count": 0,
+                "summary_count": 0,
+                "updated_at": "2026-05-29 21:02:00+08",
+                "last_error": "",
+            }
         return {"max_pending_age_seconds": 42.0}
 
 
@@ -91,6 +137,56 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["rabbitmq_dlq_count"], 0)
         self.assertEqual(summary["stale_dirty_scope_count"], 1)
         self.assertEqual(summary["stale_dirty_scopes"][0]["scope_key"], "workbench:month:2026-05")
+        self.assertEqual(
+            summary["pending_outbox_events_by_scope"],
+            [
+                {
+                    "event_type": "workbench.read_model.refresh",
+                    "status": "pending",
+                    "scope_type": "workbench",
+                    "scope_key": "all",
+                    "count": 2,
+                    "oldest_age_seconds": 610.0,
+                    "attempts": 1,
+                    "last_error": "",
+                }
+            ],
+        )
+        self.assertEqual(
+            summary["dirty_scopes_by_scope"],
+            [
+                {
+                    "scope_type": "workbench",
+                    "scope_key": "all",
+                    "status": "pending",
+                    "count": 1,
+                    "oldest_age_seconds": 620.0,
+                    "attempts": 2,
+                    "last_error": "still refreshing",
+                }
+            ],
+        )
+        self.assertEqual(
+            summary["workbench_read_model"],
+            {
+                "generation_status_counts": {"active": 3, "building": 1},
+                "active_scope_count": 3,
+                "active_row_count": 150,
+                "active_group_count": 45,
+                "active_summary_count": 3,
+                "building_scope_count": 1,
+                "failed_scope_count": 0,
+                "latest_generated_at": "2026-05-29 21:00:00+08",
+                "all_scope": {
+                    "status": "building",
+                    "row_count": 0,
+                    "group_count": 0,
+                    "summary_count": 0,
+                    "updated_at": "2026-05-29 21:02:00+08",
+                    "last_error": "",
+                },
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -143,6 +143,9 @@ class RuntimeMonitoringRepository:
               and raw_payload->'rabbitmq_publish' ? 'confirm_latency_ms'
             """
         )
+        pending_outbox_by_scope = self._pending_outbox_events_by_scope()
+        dirty_scopes_by_scope = self._dirty_scopes_by_scope()
+        workbench_read_model = self._workbench_read_model_summary()
         queue_backlog = {str(row["status"]): int(row["count"]) for row in queue_rows}
         dirty_scopes = {str(row["status"]): int(row["count"]) for row in dirty_count_rows}
         publish_status = {str(row["publish_status"]): int(row["count"]) for row in publish_rows}
@@ -190,6 +193,149 @@ class RuntimeMonitoringRepository:
             **rabbitmq_metrics,
             "stale_dirty_scope_count": len(stale_dirty_scopes),
             "stale_dirty_scopes": stale_dirty_scopes,
+            "pending_outbox_events_by_scope": pending_outbox_by_scope,
+            "dirty_scopes_by_scope": dirty_scopes_by_scope,
+            "workbench_read_model": workbench_read_model,
+        }
+
+    def _pending_outbox_events_by_scope(self) -> list[dict[str, Any]]:
+        rows = self._connection.fetch_all(
+            """
+            with pending_outbox_by_scope as (
+              select
+                event_type,
+                status,
+                coalesce(scope_type, raw_payload->>'scope_type', aggregate_type, '') as scope_type,
+                coalesce(scope_key, raw_payload->>'scope_key', aggregate_id, '') as scope_key,
+                count(*)::bigint as count,
+                extract(epoch from max(now() - created_at))::float as oldest_age_seconds,
+                max(attempts)::integer as attempts,
+                max(coalesce(last_error, '')) as last_error
+              from job.outbox_events
+              where status in ('pending', 'processing', 'failed', 'dead_lettered')
+              group by 1, 2, 3, 4
+              order by oldest_age_seconds desc nulls last, event_type, scope_type, scope_key
+              limit 30
+            )
+            select * from pending_outbox_by_scope
+            """
+        )
+        return [
+            {
+                "event_type": str(row.get("event_type") or ""),
+                "status": str(row.get("status") or ""),
+                "scope_type": str(row.get("scope_type") or ""),
+                "scope_key": str(row.get("scope_key") or ""),
+                "count": int(row.get("count") or 0),
+                "oldest_age_seconds": row.get("oldest_age_seconds"),
+                "attempts": int(row.get("attempts") or 0),
+                "last_error": str(row.get("last_error") or ""),
+            }
+            for row in rows
+        ]
+
+    def _dirty_scopes_by_scope(self) -> list[dict[str, Any]]:
+        rows = self._connection.fetch_all(
+            """
+            with dirty_scope_backlog_by_scope as (
+              select
+                scope_type,
+                scope_key,
+                status,
+                count(*)::bigint as count,
+                extract(epoch from max(now() - updated_at))::float as oldest_age_seconds,
+                max(attempts)::integer as attempts,
+                max(coalesce(last_error, '')) as last_error
+              from job.read_model_dirty_scopes
+              where status in ('pending', 'processing', 'failed')
+              group by scope_type, scope_key, status
+              order by oldest_age_seconds desc nulls last, scope_type, scope_key
+              limit 30
+            )
+            select * from dirty_scope_backlog_by_scope
+            """
+        )
+        return [
+            {
+                "scope_type": str(row.get("scope_type") or ""),
+                "scope_key": str(row.get("scope_key") or ""),
+                "status": str(row.get("status") or ""),
+                "count": int(row.get("count") or 0),
+                "oldest_age_seconds": row.get("oldest_age_seconds"),
+                "attempts": int(row.get("attempts") or 0),
+                "last_error": str(row.get("last_error") or ""),
+            }
+            for row in rows
+        ]
+
+    def _workbench_read_model_summary(self) -> dict[str, Any]:
+        generation_rows = self._connection.fetch_all(
+            """
+            with workbench_generation_status_counts as (
+              select status, count(*)::bigint as count
+              from read_model.workbench_generations
+              where tenant_id = 'default'
+                and status in ('active', 'building', 'failed')
+              group by status
+              order by status
+            )
+            select * from workbench_generation_status_counts
+            """
+        )
+        active_rows = self._connection.fetch_all(
+            """
+            with workbench_active_generation_totals as (
+              select
+                count(*)::bigint as active_scope_count,
+                coalesce(sum(row_count), 0)::bigint as active_row_count,
+                coalesce(sum(group_count), 0)::bigint as active_group_count,
+                coalesce(sum(summary_count), 0)::bigint as active_summary_count,
+                max(activated_at)::text as latest_generated_at
+              from read_model.workbench_generations
+              where tenant_id = 'default'
+                and status = 'active'
+            )
+            select * from workbench_active_generation_totals
+            """
+        )
+        all_scope_row = self._connection.fetch_one(
+            """
+            select
+              status,
+              row_count,
+              group_count,
+              summary_count,
+              updated_at::text as updated_at,
+              coalesce(last_error, '') as last_error
+            from read_model.workbench_generations workbench_all_scope_generation
+            where tenant_id = 'default'
+              and scope_key = 'all'
+              and status in ('active', 'building', 'failed')
+            order by
+              case status when 'active' then 0 when 'building' then 1 else 2 end,
+              updated_at desc
+            limit 1
+            """
+        )
+        status_counts = {str(row.get("status") or ""): int(row.get("count") or 0) for row in generation_rows}
+        active_totals = active_rows[0] if active_rows else {}
+        return {
+            "generation_status_counts": status_counts,
+            "active_scope_count": int(active_totals.get("active_scope_count") or 0),
+            "active_row_count": int(active_totals.get("active_row_count") or 0),
+            "active_group_count": int(active_totals.get("active_group_count") or 0),
+            "active_summary_count": int(active_totals.get("active_summary_count") or 0),
+            "building_scope_count": int(status_counts.get("building", 0)),
+            "failed_scope_count": int(status_counts.get("failed", 0)),
+            "latest_generated_at": active_totals.get("latest_generated_at"),
+            "all_scope": {
+                "status": str((all_scope_row or {}).get("status") or ""),
+                "row_count": int((all_scope_row or {}).get("row_count") or 0),
+                "group_count": int((all_scope_row or {}).get("group_count") or 0),
+                "summary_count": int((all_scope_row or {}).get("summary_count") or 0),
+                "updated_at": (all_scope_row or {}).get("updated_at"),
+                "last_error": str((all_scope_row or {}).get("last_error") or ""),
+            },
         }
 
     def _rabbitmq_metrics(self) -> dict[str, Any]:
