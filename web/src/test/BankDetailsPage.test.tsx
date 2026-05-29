@@ -408,6 +408,39 @@ describe("Bank details page", () => {
     });
   });
 
+  test("reapplying automatic tag rules refreshes bank details without saving changes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      bankDetailTransactionReadModelStatuses: ["refreshing", "fresh"],
+    });
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await user.click(within(drawer).getByRole("button", { name: "重新应用规则" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("已提交重新应用，银行明细正在刷新。").length).toBeGreaterThan(0);
+    });
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
+    });
+    const reapplyCall = fetchMock.mock.calls.find(([input, init]) => (
+      new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules/reapply"
+      && String(init?.method || "GET").toUpperCase() === "POST"
+    ));
+    const saveCall = fetchMock.mock.calls.find(([input, init]) => (
+      new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
+      && String(init?.method || "GET").toUpperCase() === "PUT"
+    ));
+    expect(reapplyCall).toBeTruthy();
+    expect(saveCall).toBeFalsy();
+  });
+
   test("keeps the read-model refresh banner stable while retaining the last fresh rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({

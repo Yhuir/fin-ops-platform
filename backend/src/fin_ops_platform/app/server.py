@@ -1028,6 +1028,8 @@ class Application:
             return self._handle_api_workbench_events(query.get("month", [None])[0])
         if method == "GET" and route_path == "/api/bank-details/auto-tag-rules":
             return self._handle_api_bank_details_auto_tag_rules(headers)
+        if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/reapply":
+            return self._handle_api_bank_details_auto_tag_rules_reapply(headers)
         if method == "POST" and route_path == "/api/bank-details/auto-tag-rules/file-replacement":
             return self._handle_api_bank_details_auto_tag_rules_file_replacement(body, headers)
         if method == "PUT" and route_path == "/api/bank-details/auto-tag-rules":
@@ -1605,6 +1607,7 @@ class Application:
                 "/api/workbench",
                 "/api/workbench/groups/detail",
                 "/api/search",
+                "/api/bank-details/auto-tag-rules/reapply",
                 "/api/bank-details/accounts",
                 "/api/bank-details/transactions",
                 "/api/bank-details/transactions/export",
@@ -10552,6 +10555,62 @@ class Application:
                 },
             )
         return self._json_response(HTTPStatus.OK, updated)
+
+    def _handle_api_bank_details_auto_tag_rules_reapply(
+        self,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有重新应用自动标签规则权限。"},
+            )
+
+        scope_keys = self._bank_detail_available_month_scope_keys()
+        enqueued = self._enqueue_bank_detail_read_model_refreshes(
+            scope_keys,
+            reason="bank_auto_tag_rules_reapply_requested",
+        )
+        if not enqueued:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "bank_auto_tag_rules_reapply_unavailable",
+                    "message": "自动标签规则已保存，但银行明细刷新队列暂时不可用，请稍后重试。",
+                },
+            )
+
+        version = self._current_bank_auto_tag_rules_version()
+        actor_id = (
+            session.identity.username or session.identity.user_id
+            if session is not None
+            else "bank_auto_tag_rules_reapply"
+        )
+        self._audit_service.record_action(
+            actor_id=str(actor_id or "bank_auto_tag_rules_reapply"),
+            action="bank_auto_tag_rules_reapply_requested",
+            entity_type="app_settings",
+            entity_id="bank_auto_tag_rules",
+            metadata={
+                "version": version,
+                "scope_keys": list(scope_keys),
+                "reason": "bank_auto_tag_rules_reapply_requested",
+                "enqueued_jobs": ["bank_detail.read_model.refresh"],
+            },
+        )
+
+        can_save = True if session is None else bool(session.can_mutate_data)
+        payload = self._app_settings_service.get_bank_auto_tag_rules_payload(
+            can_save=can_save,
+            read_model_status="refreshing",
+        )
+        payload["read_model_status"] = "refreshing"
+        payload["read_model_scope_keys"] = list(scope_keys)
+        payload["enqueued_jobs"] = ["bank_detail.read_model.refresh"]
+        return self._json_response(HTTPStatus.ACCEPTED, payload)
 
     def _handle_api_bank_details_auto_tag_rules_file_replacement(
         self,

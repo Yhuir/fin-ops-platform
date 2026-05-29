@@ -375,6 +375,44 @@ describe("AutoTagRulesDrawer", () => {
     ]));
   });
 
+  test("reapplies saved rules without submitting a rule update", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const onSaved = vi.fn();
+    renderDrawer(onSaved);
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    const reapplyButton = buttonByName(drawer, "重新应用规则");
+    const saveButton = buttonByName(drawer, "保存");
+    expect(Boolean(reapplyButton.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    await user.click(reapplyButton);
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(within(drawer).getByText("已提交重新应用，银行明细正在刷新。")).toBeInTheDocument();
+    const reapplyCall = fetchMock.mock.calls.find(([input, init]) => (
+      new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules/reapply"
+      && String(init?.method || "GET").toUpperCase() === "POST"
+    ));
+    expect(reapplyCall).toBeTruthy();
+    expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
+  });
+
+  test("requires saving draft changes before reapplying rules", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    const primaryInput = within(drawer).getByDisplayValue("费用");
+    await user.clear(primaryInput);
+    await user.type(primaryInput, "支出费用");
+
+    expect(buttonByName(drawer, "重新应用规则")).toBeDisabled();
+  });
+
   test("keeps automatic tag rule drawer styling table-based and non-truncating", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 

@@ -234,6 +234,7 @@ export type BankAutoTagRulesResponse = {
     canSave: boolean;
   };
   readModelStatus?: "fresh" | "refreshing" | string;
+  refreshReason?: "saved" | "reapplied";
 };
 
 export type SaveBankAutoTagRule = {

@@ -268,6 +268,18 @@
 - 成功后返回与 GET 相同结构，并写审计动作 `bank_auto_tag_rules_updated`。
 - 成功保存只标记派生数据 dirty/enqueue 后台刷新，不在 API 请求热路径同步扫描全量银行流水、免 OA 批次、关联台或待找发票 read model。
 
+重新应用当前规则：
+
+`POST /api/bank-details/auto-tag-rules/reapply`
+
+- 需要银行明细写权限。
+- 不读取请求体，不修改 `bank_transaction_tags`，不递增 `version`。
+- 使用服务器当前已保存的自动标签规则，重新入队 `bank_detail.read_model.refresh`，让后台 worker 重建 `read_model.bank_detail_rows`。
+- 成功返回 `202`，响应主体包含与 GET 相同的规则结构，并附加 `read_model_status="refreshing"`、`read_model_scope_keys` 和 `enqueued_jobs=["bank_detail.read_model.refresh"]`。
+- 成功后写审计动作 `bank_auto_tag_rules_reapply_requested`，metadata 至少包含当前规则 `version`、`scope_keys`、`reason` 和 `enqueued_jobs`。
+- 如果运行时队列不可用或没有任何 scope 入队，返回 `503 bank_auto_tag_rules_reapply_unavailable`，不得返回假成功。
+- 该接口只负责触发银行明细 read model 重新投影；同优先级规则命中多个标签时仍按自动标签规则执行结果进入待确认，不强制选择任一标签。
+
 文件规则替换：
 
 `POST /api/bank-details/auto-tag-rules/file-replacement`

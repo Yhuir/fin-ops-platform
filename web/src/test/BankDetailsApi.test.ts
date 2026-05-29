@@ -4,6 +4,7 @@ import {
   confirmBankDetailCategory,
   downloadBankDetailTransactionsExport,
   fetchBankDetailTransactions,
+  reapplyBankAutoTagRules,
   revokeBankDetailCategoryConfirmation,
   saveBankAutoTagRules,
 } from "../features/bankDetails/api";
@@ -268,6 +269,29 @@ describe("bank details API", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/bank-details/transactions/bank-detail-001/category-confirmation", expect.objectContaining({
       method: "DELETE",
     }));
+  });
+
+  test("reapplies saved auto tag rules through a dedicated endpoint", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      version: 3,
+      system_rule: { code: "internal_transfer", label: "内部往来款", priority_label: "优先级 1" },
+      active_rules: [],
+      archived_rules: [],
+      field_options: [],
+      permissions: { can_save: true },
+      read_model_status: "refreshing",
+      read_model_scope_keys: ["2026-05"],
+      enqueued_jobs: ["bank_detail.read_model.refresh"],
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await reapplyBankAutoTagRules();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/bank-details/auto-tag-rules/reapply", expect.objectContaining({
+      method: "POST",
+    }));
+    expect(payload.version).toBe(3);
+    expect(payload.readModelStatus).toBe("refreshing");
   });
 
   test("does not copy legacy purpose or summary into split bank text columns", async () => {

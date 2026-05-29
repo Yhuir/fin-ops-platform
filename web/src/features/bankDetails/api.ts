@@ -207,6 +207,7 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   bank_transaction_tags_version_conflict: "规则已被其他用户更新，请刷新后重新编辑。",
   invalid_bank_auto_tag_rules_request: "自动标签规则请求不合法，请刷新后重试。",
   invalid_auto_tag_rule: "自动标签规则校验失败，请检查规则内容。",
+  bank_auto_tag_rules_reapply_unavailable: "自动标签规则已保存，但银行明细刷新队列暂时不可用，请稍后重试。",
   unknown_bank_transaction_tag: "该银行明细标签不存在，请刷新后重新选择。",
   bank_transaction_tag_in_use_by_pending_invoice_filter: "该银行明细标签仍被下游规则引用，请先解除引用后再停用。",
   bank_detail_export_account_required: "请选择具体银行账户后再导出当前账户。",
@@ -725,7 +726,14 @@ export async function saveBankAutoTagRules(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(serializeSaveAutoTagRulesRequest(payload)),
   });
-  return mapAutoTagRulesResponse(response);
+  return { ...mapAutoTagRulesResponse(response), refreshReason: "saved" };
+}
+
+export async function reapplyBankAutoTagRules(): Promise<BankAutoTagRulesResponse> {
+  const response = await requestJson<ApiBankAutoTagRulesResponse>("/api/bank-details/auto-tag-rules/reapply", {
+    method: "POST",
+  });
+  return { ...mapAutoTagRulesResponse(response), refreshReason: "reapplied" };
 }
 
 export async function confirmBankDetailCategory(

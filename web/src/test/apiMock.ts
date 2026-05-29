@@ -5199,6 +5199,74 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         )}`,
       },
     }),
+    "/api/bank-details/auto-tag-rules/reapply": () => {
+      bankDetailAutoTagRulesSaved = true;
+      bankDetailPostSaveAccountRequestCount = 0;
+      bankDetailPostSaveTransactionRequestCount = 0;
+      return {
+        status: 202,
+        body: {
+          version: 1,
+          system_rule: {
+            code: "internal_transfer",
+            label: "内部往来款",
+            priority_label: "优先级 1",
+            source: "system",
+            status: "active",
+            editable: false,
+            archivable: false,
+            sortable: false,
+          },
+          active_rules: [
+            {
+              code: "fee",
+              label: "手续费",
+              output_primary_label: "费用",
+              output_sub_label: "手续费",
+              status: "active",
+              source: "system",
+              priority: 2,
+              priority_label: "优先级 2",
+              sort_order: 1,
+              rules: { match_fields: ["counterparty_name", "summary_text", "note_text"], exact: [], contains: ["手续费"], excludes: [] },
+              rule_summary: "对方户名/摘要/备注包含：手续费",
+              editable: true,
+              archivable: true,
+              sortable: true,
+            },
+            {
+              code: "salary",
+              label: "工资",
+              output_primary_label: "费用",
+              output_sub_label: "工资",
+              status: "active",
+              source: "system",
+              priority: 2,
+              priority_label: "优先级 2",
+              sort_order: 2,
+              rules: { match_fields: ["summary_text", "purpose_text", "note_text", "detail_text"], exact: [], contains: ["工资", "绩效奖", "年终奖"], excludes: [] },
+              rule_summary: "摘要/用途/备注/其他明细包含：工资",
+              editable: true,
+              archivable: true,
+              sortable: true,
+            },
+          ],
+          archived_rules: [],
+          field_options: [
+            { value: "counterparty_name", label: "对方户名" },
+            { value: "purpose_text", label: "用途/交易用途" },
+            { value: "summary_text", label: "摘要" },
+            { value: "note_text", label: "备注/附言/客户附言" },
+            { value: "detail_text", label: "其他明细" },
+            { value: "all_text", label: "全部文本" },
+          ],
+          permissions: { can_save: true },
+          read_model_status: "refreshing",
+          read_model_scope_keys: ["2026-01"],
+          enqueued_jobs: ["bank_detail.read_model.refresh"],
+        },
+      };
+    },
     "/api/bank-details/auto-tag-rules": ({ init, jsonBody }) => {
       const baseRules = {
         version: 1,

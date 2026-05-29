@@ -145,6 +145,54 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual({rule["priority"] for rule in payload["active_rules"]}, {2})
         self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
+    def test_reapply_endpoint_enqueues_bank_detail_refresh_without_changing_rules(self) -> None:
+        app = build_application()
+        queue = _ReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app.handle_request("POST", "/api/bank-details/auto-tag-rules/reapply", "{}")
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["version"], current["version"])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["enqueued_jobs"], ["bank_detail.read_model.refresh"])
+        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_reapply_requested"), queue.enqueued)
+        audit = app._audit_service.as_dicts()[-1]
+        self.assertEqual(audit["action"], "bank_auto_tag_rules_reapply_requested")
+        self.assertEqual(audit["metadata"]["scope_keys"], ["all"])
+        self.assertEqual(audit["metadata"]["version"], current["version"])
+
+    def test_reapply_endpoint_fails_when_bank_detail_refresh_queue_is_unavailable(self) -> None:
+        app = build_application()
+        app._runtime_repositories = SimpleNamespace(queue_repository=None)
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app.handle_request("POST", "/api/bank-details/auto-tag-rules/reapply", "{}")
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "bank_auto_tag_rules_reapply_unavailable")
+
+    def test_reapply_endpoint_requires_mutation_permission(self) -> None:
+        app = build_application()
+        queue = _ReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+        with patch.object(
+            app,
+            "_resolve_bank_details_read_session",
+            return_value=(_session(can_mutate_data=False), None),
+        ):
+            response = app.handle_request("POST", "/api/bank-details/auto-tag-rules/reapply", "{}")
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "permission_denied")
+        self.assertEqual(queue.enqueued, [])
+
     def test_confirmation_endpoint_rejects_single_auto_match_candidate(self) -> None:
         app = build_application()
         confirm_calls: list[object] = []

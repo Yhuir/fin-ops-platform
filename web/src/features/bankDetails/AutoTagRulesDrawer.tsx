@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import AddIcon from "@mui/icons-material/Add";
 import CloseIcon from "@mui/icons-material/Close";
 import DeleteIcon from "@mui/icons-material/Delete";
+import ReplayIcon from "@mui/icons-material/Replay";
 import RestoreIcon from "@mui/icons-material/Restore";
 import SaveIcon from "@mui/icons-material/Save";
 import Alert from "@mui/material/Alert";
@@ -36,7 +37,7 @@ import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 
-import { fetchBankAutoTagRules, saveBankAutoTagRules } from "./api";
+import { fetchBankAutoTagRules, reapplyBankAutoTagRules, saveBankAutoTagRules } from "./api";
 import type {
   BankAutoTagDirection,
   BankAutoTagEditableRule,
@@ -243,8 +244,10 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
   const [tab, setTab] = useState<"active" | "archived">("active");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reapplying, setReapplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [lastRefreshAction, setLastRefreshAction] = useState<"save" | "reapply">("save");
   const [version, setVersion] = useState(1);
   const [systemRule, setSystemRule] = useState<BankAutoTagSystemRule | null>(null);
   const [fieldOptions, setFieldOptions] = useState<BankAutoTagRulesResponse["fieldOptions"]>([]);
@@ -296,15 +299,16 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
 
   useEffect(() => {
     if (refreshStatus === "refreshing") {
-      setFeedback("规则已保存，银行明细正在刷新。");
+      setFeedback(lastRefreshAction === "reapply" ? "已提交重新应用，银行明细正在刷新。" : "规则已保存，银行明细正在刷新。");
     }
     if (refreshStatus === "fresh") {
-      setFeedback("规则已保存，银行明细已刷新。");
+      setFeedback(lastRefreshAction === "reapply" ? "重新应用已完成，银行明细已刷新。" : "规则已保存，银行明细已刷新。");
     }
-  }, [refreshStatus]);
+  }, [lastRefreshAction, refreshStatus]);
 
   const dirty = useMemo(() => normalizedDraft(activeRules, archivedRules) !== baseline, [activeRules, archivedRules, baseline]);
-  const readonly = !canSave || saving || loading;
+  const readonly = !canSave || saving || reapplying || loading;
+  const reapplyDisabled = readonly || dirty;
   const visibleFieldOptions = fieldOptions.filter((option) => !HIDDEN_MATCH_FIELDS.has(option.value));
   const activeRuleGroups = useMemo(() => groupRules(activeRules), [activeRules]);
 
@@ -388,6 +392,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
     }
     setSaving(true);
     setError(null);
+    setLastRefreshAction("save");
     saveBankAutoTagRules({
       expectedVersion: version,
       refreshScope,
@@ -411,6 +416,34 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         setError(caught instanceof Error ? caught.message : "自动标签规则保存失败。");
       })
       .finally(() => setSaving(false));
+  };
+
+  const reapplyRules = () => {
+    if (dirty) {
+      setError("请先保存规则后再重新应用。");
+      return;
+    }
+    setReapplying(true);
+    setError(null);
+    setLastRefreshAction("reapply");
+    reapplyBankAutoTagRules()
+      .then((payload) => {
+        const nextActive = payload.activeRules.map(cloneRule);
+        const nextArchived = payload.archivedRules.map(cloneRule);
+        setVersion(payload.version);
+        setSystemRule(payload.systemRule);
+        setFieldOptions(payload.fieldOptions);
+        setCanSave(payload.permissions.canSave);
+        setActiveRules(nextActive);
+        setArchivedRules(nextArchived);
+        setBaseline(normalizedDraft(nextActive, nextArchived));
+        setFeedback(payload.readModelStatus === "fresh" ? "重新应用已完成，银行明细已刷新。" : "已提交重新应用，银行明细正在刷新。");
+        onSaved?.(payload);
+      })
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : "自动标签规则重新应用失败。");
+      })
+      .finally(() => setReapplying(false));
   };
 
   const commitConditionEditor = () => {
@@ -476,6 +509,19 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
             <Button startIcon={<AddIcon />} variant="outlined" size="small" onClick={addRule} disabled={readonly}>
               新增标签
             </Button>
+            <Tooltip title={dirty ? "请先保存规则后再重新应用" : ""}>
+              <span>
+                <Button
+                  startIcon={<ReplayIcon />}
+                  variant="outlined"
+                  size="small"
+                  onClick={reapplyRules}
+                  disabled={reapplyDisabled}
+                >
+                  重新应用规则
+                </Button>
+              </span>
+            </Tooltip>
             <Button startIcon={<SaveIcon />} variant="contained" size="small" onClick={saveRules} disabled={readonly || !dirty}>
               保存
             </Button>

@@ -910,6 +910,10 @@ export default function BankDetailsPage() {
   const [rulesRefreshStatus, setRulesRefreshStatus] = useState<"idle" | "refreshing" | "fresh">("idle");
   const [categoryMutationId, setCategoryMutationId] = useState<string | null>(null);
   const rulesRefreshPendingRef = useRef(false);
+  const rulesRefreshFeedbackRef = useRef({
+    refreshing: "规则已保存，银行明细正在刷新。",
+    fresh: "规则已保存，银行明细已刷新。",
+  });
   const hasAccountPayloadRef = useRef(false);
   const hasTransactionPayloadRef = useRef(false);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -1053,12 +1057,12 @@ export default function BankDetailsPage() {
     }
     if (readModelNeedsRefresh) {
       setRulesRefreshStatus("refreshing");
-      setRulesFeedback("规则已保存，银行明细正在刷新。");
+      setRulesFeedback(rulesRefreshFeedbackRef.current.refreshing);
       return;
     }
     rulesRefreshPendingRef.current = false;
     setRulesRefreshStatus("fresh");
-    setRulesFeedback("规则已保存，银行明细已刷新。");
+    setRulesFeedback(rulesRefreshFeedbackRef.current.fresh);
   }, [readModelNeedsRefresh]);
 
   useEffect(() => {
@@ -1283,8 +1287,17 @@ export default function BankDetailsPage() {
       channel.close();
     }
     rulesRefreshPendingRef.current = true;
+    rulesRefreshFeedbackRef.current = payload.refreshReason === "reapplied"
+      ? {
+        refreshing: "已提交重新应用，银行明细正在刷新。",
+        fresh: "重新应用已完成，银行明细已刷新。",
+      }
+      : {
+        refreshing: "规则已保存，银行明细正在刷新。",
+        fresh: "规则已保存，银行明细已刷新。",
+      };
     setRulesRefreshStatus("refreshing");
-    setRulesFeedback("规则已保存，银行明细正在刷新。");
+    setRulesFeedback(rulesRefreshFeedbackRef.current.refreshing);
     setTransactionsReadModelStatus("refreshing");
     setRefreshToken((current) => current + 1);
   };
