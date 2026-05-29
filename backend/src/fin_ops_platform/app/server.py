@@ -220,6 +220,7 @@ from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_P
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
@@ -1844,7 +1845,10 @@ class Application:
                 payload["rows_page"] = view.get("rows_page")
             return self._json_response(HTTPStatus.ACCEPTED, payload)
         refresh_status = str(view.get("refresh_status") or view.get("cache_status") or "fresh")
-        stale_reasons = self._workbench_sql_read_model_stale_reasons(view.get("source_versions"))
+        stale_reasons = self._workbench_sql_read_model_stale_reasons(
+            view.get("source_versions"),
+            scope_key=scope_key,
+        )
         if stale_reasons:
             refresh_status = "stale"
             payload["read_model_stale_reasons"] = stale_reasons
@@ -1925,7 +1929,10 @@ class Application:
                 },
             )
         payload = dict(payload)
-        stale_reasons = self._workbench_sql_read_model_stale_reasons(payload.get("source_versions"))
+        stale_reasons = self._workbench_sql_read_model_stale_reasons(
+            payload.get("source_versions"),
+            scope_key=scope_key,
+        )
         if stale_reasons:
             payload["read_model_status"] = "stale"
             payload["read_model_stale_reasons"] = [
@@ -2007,7 +2014,10 @@ class Application:
         if callable(get_refresh_status):
             raw_refresh_status = get_refresh_status(scope_key=scope_key)
             if isinstance(raw_refresh_status, dict):
-                refresh_status_payload = self._workbench_refresh_status_with_source_freshness(raw_refresh_status)
+                refresh_status_payload = self._workbench_refresh_status_with_source_freshness(
+                    raw_refresh_status,
+                    scope_key=scope_key,
+                )
                 if str(refresh_status_payload.get("read_model_status") or "fresh") != "fresh":
                     self._enqueue_workbench_read_model_refresh(scope_key, reason="api_groups_source_versions_stale")
         get_cached = getattr(redis_helper, "get_json", None)
@@ -2128,7 +2138,10 @@ class Application:
             )
         payload = dict(payload)
         payload["read_model_scope_key"] = scope_key
-        stale_reasons = self._workbench_sql_read_model_stale_reasons(payload.get("source_versions"))
+        stale_reasons = self._workbench_sql_read_model_stale_reasons(
+            payload.get("source_versions"),
+            scope_key=scope_key,
+        )
         if stale_reasons:
             payload["read_model_status"] = "stale"
             payload["read_model_stale_reasons"] = [
@@ -2247,7 +2260,7 @@ class Application:
             )
         payload = get_refresh_status(scope_key=scope_key)
         if isinstance(payload, dict):
-            payload = self._workbench_refresh_status_with_source_freshness(payload)
+            payload = self._workbench_refresh_status_with_source_freshness(payload, scope_key=scope_key)
         return self._json_response(HTTPStatus.OK, self._normalize_workbench_refresh_status_payload(
             payload if isinstance(payload, dict) else {},
             scope_key=scope_key,
@@ -2299,7 +2312,7 @@ class Application:
             )
         payload = get_refresh_status(scope_key=scope_key)
         if isinstance(payload, dict):
-            payload = self._workbench_refresh_status_with_source_freshness(payload)
+            payload = self._workbench_refresh_status_with_source_freshness(payload, scope_key=scope_key)
         return self._normalize_workbench_refresh_status_payload(
             payload if isinstance(payload, dict) else {},
             scope_key=scope_key,
@@ -15372,9 +15385,15 @@ class Application:
             payload["oa_projection_sync_version"] = projection_sync_version
         return payload
 
-    def _workbench_sql_read_model_source_versions(self) -> dict[str, object]:
+    def _workbench_sql_read_model_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
+        normalized_scope_key = str(scope_key or "").strip()
+        builder_version = (
+            WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+            if normalized_scope_key == "all"
+            else WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
+        )
         payload: dict[str, object] = {
-            "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+            "builder": builder_version,
             "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
         }
         parser_version = self._current_oa_attachment_invoice_parser_version()
@@ -15385,9 +15404,14 @@ class Application:
             payload["oa_projection_sync_version"] = projection_sync_version
         return payload
 
-    def _workbench_sql_read_model_stale_reasons(self, source_versions: object) -> list[str]:
+    def _workbench_sql_read_model_stale_reasons(
+        self,
+        source_versions: object,
+        *,
+        scope_key: str | None = None,
+    ) -> list[str]:
         return source_version_mismatch_reasons(
-            expected=self._workbench_sql_read_model_source_versions(),
+            expected=self._workbench_sql_read_model_source_versions(scope_key),
             actual=source_versions if isinstance(source_versions, dict) else {},
         )
 
@@ -15481,9 +15505,12 @@ class Application:
     def _workbench_refresh_status_with_source_freshness(
         self,
         status_payload: dict[str, object],
+        *,
+        scope_key: str | None = None,
     ) -> dict[str, object]:
         reasons = self._workbench_sql_read_model_stale_reasons(
-            self._workbench_refresh_status_source_versions(status_payload)
+            self._workbench_refresh_status_source_versions(status_payload),
+            scope_key=scope_key,
         )
         if not reasons:
             return status_payload

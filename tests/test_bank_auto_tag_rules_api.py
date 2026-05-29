@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
 def _session(*, can_mutate_data: bool = True) -> SimpleNamespace:
@@ -267,10 +269,14 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             matching_versions = app._workbench_matching_source_versions()
             read_model_versions = app._workbench_read_model_source_versions()
             sql_versions = app._workbench_sql_read_model_source_versions()
+            aggregate_sql_versions = app._workbench_sql_read_model_source_versions("all")
 
         self.assertEqual(matching_versions["bank_auto_tag_rules_version"], 42)
         self.assertEqual(read_model_versions["bank_auto_tag_rules_version"], 42)
         self.assertEqual(sql_versions["bank_auto_tag_rules_version"], 42)
+        self.assertEqual(sql_versions["builder"], WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)
+        self.assertEqual(aggregate_sql_versions["bank_auto_tag_rules_version"], 42)
+        self.assertEqual(aggregate_sql_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
 
     def test_workbench_refresh_status_marks_old_bank_auto_tag_generation_stale(self) -> None:
         app = build_application()

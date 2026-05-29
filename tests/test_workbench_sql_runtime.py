@@ -29,9 +29,14 @@ from fin_ops_platform.services.workbench_sql_projection import (
 )
 
 
-def fresh_workbench_sql_source_versions(app: Application) -> dict[str, object]:
+def fresh_workbench_sql_source_versions(app: Application, scope_key: str = "2026-05") -> dict[str, object]:
+    builder = (
+        WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+        if scope_key == "all"
+        else WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
+    )
     return {
-        "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+        "builder": builder,
         "bank_auto_tag_rules_version": app._current_bank_auto_tag_rules_version(),
         "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
         "oa_projection_sync_version": app._current_oa_projection_sync_version(),
@@ -2264,7 +2269,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 	                    "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 3, "paired_count": 4, "open_count": 5, "exception_count": 0},
 	                    "read_model_status": "fresh",
 	                    "generated_at": "2026-05-22T09:30:00+00:00",
-	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
 	                }
 	            },
 	        )()
@@ -2335,7 +2340,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 	                    "has_more": False,
 	                    "groups": [{"group_id": "case:1", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
 	                    "read_model_status": "fresh",
-	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
 	                }
 
             def workbench_groups_cache_version(self, **_kwargs):
@@ -2479,7 +2484,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 	                    "groups": [{"group_id": "fresh", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
 	                    "read_model_status": "fresh",
 	                    "detail_level": "summary",
-	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
 	                }
 
             def workbench_groups_cache_version(self, **_kwargs):
@@ -2663,7 +2668,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 	                    "generated_at": "2026-05-28T10:00:00+08:00",
 	                    "dirty_scopes": [],
 	                    "worker_lag_seconds": 1.5,
-	                    "source_versions": fresh_workbench_sql_source_versions(app),
+	                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
 	                }
             },
         )()
