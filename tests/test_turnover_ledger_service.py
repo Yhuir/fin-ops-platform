@@ -20,6 +20,16 @@ class _ImportServiceStub:
         return list(self._transactions)
 
 
+class _RepositoryBackedImportServiceStub:
+    def __init__(self, transactions: list[BankTransaction]) -> None:
+        self._transactions = list(transactions)
+
+    def list_transactions(self, *, month: str | None = None) -> list[BankTransaction]:
+        if month == "all":
+            return list(self._transactions)
+        return []
+
+
 class _LedgerExtraServiceStub:
     def __init__(self, extras: dict[str, dict[str, object]]) -> None:
         self._extras = dict(extras)
@@ -499,6 +509,37 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["flow_rows"][0]["source_bank_row_id"], "txn-external-turnover")
         self.assertEqual(group["flow_rows"][0]["category_code"], "external_turnover")
         self.assertEqual(group["flow_rows"][0]["category_version"], 0)
+
+    def test_grouped_ledger_reads_repository_backed_all_month_bank_rows(self) -> None:
+        transaction = self._transaction(
+            "txn-postgres-external-turnover",
+            direction=TransactionDirection.OUTFLOW,
+            amount="30000.00",
+            counterparty="招标代理机构",
+            trade_time="2026-04-12 10:00:00",
+            summary="投标保证金",
+        )
+        ledger_service = TurnoverLedgerService(
+            import_service=_RepositoryBackedImportServiceStub([transaction]),
+            category_service=BankTransactionCategoryService.from_snapshot(None),
+            relation_service=TurnoverRelationService.from_snapshot(None),
+            category_provider=_EffectiveCategoryProviderStub(
+                {
+                    "txn-postgres-external-turnover": {
+                        "category_code": "external_turnover",
+                        "category_label": "外部往来款",
+                        "category_path": [],
+                        "category_source": "auto",
+                        "category_version": 0,
+                    }
+                }
+            ),
+        )
+
+        payload = ledger_service.list_grouped_ledger()
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["groups"][0]["flow_rows"][0]["source_bank_row_id"], "txn-postgres-external-turnover")
 
     def test_family_and_status_filters_are_applied_before_pagination(self) -> None:
         ledger_service, _, _ = self._service()

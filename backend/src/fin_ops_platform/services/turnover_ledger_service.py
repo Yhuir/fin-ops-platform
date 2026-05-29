@@ -218,9 +218,13 @@ class TurnoverLedgerService:
 
     def _bank_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
+        try:
+            transactions = list(self._import_service.list_transactions(month="all"))
+        except TypeError:
+            transactions = list(self._import_service.list_transactions())
         transaction_rows = [
             self._transaction_payload(transaction)
-            for transaction in list(self._import_service.list_transactions())
+            for transaction in transactions
         ]
         categories_by_transaction_id = self._categories_for_rows(transaction_rows)
         for row in transaction_rows:
