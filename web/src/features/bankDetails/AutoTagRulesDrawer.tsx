@@ -19,7 +19,6 @@ import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
 import FormControl from "@mui/material/FormControl";
 import IconButton from "@mui/material/IconButton";
-import InputLabel from "@mui/material/InputLabel";
 import ListItemText from "@mui/material/ListItemText";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
@@ -60,7 +59,6 @@ type DraftRule = BankAutoTagEditableRule & { localId: string };
 type RuleConditionKey = "containsAny" | "containsAll" | "exactAny" | "noneOf";
 type RuleGroup = {
   key: string;
-  priority?: number;
   primaryLabel: string;
   colorClass: string;
   rules: DraftRule[];
@@ -95,7 +93,7 @@ function cloneRule(rule: BankAutoTagEditableRule, index: number): DraftRule {
   const sortOrder = typeof rule.sortOrder === "number" ? rule.sortOrder : index + 1;
   return {
     ...rule,
-    priority: normalizeIncomingRulePriority(rule.priority, sortOrder),
+    priority: 2,
     sortOrder,
     localId: rule.code || `new-${index}`,
     accountScope: { type: "any", values: [] },
@@ -135,7 +133,7 @@ function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
   return {
     ...(rule.code ? { code: rule.code } : {}),
     label,
-    priority: normalizeRulePriority(rule.priority),
+    priority: 2,
     ...(typeof rule.sortOrder === "number" ? { sortOrder: rule.sortOrder } : {}),
     outputPrimaryLabel,
     outputSubLabel,
@@ -162,15 +160,6 @@ function normalizedDraft(activeRules: DraftRule[], archivedRules: DraftRule[]) {
 function normalizeRulePriority(value: unknown) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 2 ? parsed : 2;
-}
-
-function normalizeIncomingRulePriority(value: unknown, sortOrder: unknown) {
-  const priority = normalizeRulePriority(value);
-  const parsedSortOrder = Number(sortOrder);
-  if (Number.isInteger(parsedSortOrder) && parsedSortOrder > 0 && priority >= 10 && priority === parsedSortOrder * 10) {
-    return 2;
-  }
-  return priority;
 }
 
 function ruleHasPositiveCondition(rule: DraftRule) {
@@ -232,14 +221,12 @@ function groupRules(rules: DraftRule[]): RuleGroup[] {
     || String(left.code ?? left.localId).localeCompare(String(right.code ?? right.localId), "zh-Hans-CN")
   ));
   for (const rule of sortedRules) {
-    const priority = typeof rule.priority === "number" ? rule.priority : undefined;
     const primaryLabel = rule.outputPrimaryLabel.trim() || "未命名主标签";
     const key = primaryLabel;
     let group = byKey.get(key);
     if (!group) {
       group = {
         key,
-        priority,
         primaryLabel,
         colorClass: GROUP_COLOR_CLASSES[groups.length % GROUP_COLOR_CLASSES.length],
         rules: [],
@@ -339,14 +326,6 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
     )));
   };
 
-  const updateGroupPriority = (group: RuleGroup, value: string) => {
-    const localIds = new Set(group.rules.map((rule) => rule.localId));
-    const nextPriority = value === "" ? undefined : Number(value);
-    setActiveRules((current) => current.map((rule) => (
-      localIds.has(rule.localId) ? { ...rule, priority: nextPriority } : rule
-    )));
-  };
-
   const addRule = () => {
     const createdAt = Date.now();
     setActiveRules((current) => [
@@ -395,7 +374,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
       if (!target) {
         return current;
       }
-      setActiveRules((active) => [...active, { ...target, status: "active", priority: normalizeRulePriority(target.priority) }]);
+      setActiveRules((active) => [...active, { ...target, status: "active", priority: 2 }]);
       return current.filter((rule) => rule.localId !== localId);
     });
     setTab("active");
@@ -531,7 +510,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                     <TableCell>流水类型</TableCell>
                     <TableCell>主标签</TableCell>
                     <TableCell>子标签</TableCell>
-                    <TableCell>选择查询的项</TableCell>
+                    <TableCell>查询项</TableCell>
                     <TableCell>包含</TableCell>
                     <TableCell>必须同时包含</TableCell>
                     <TableCell>精准命中</TableCell>
@@ -607,11 +586,12 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                       </TableCell>
                       <TableCell>
                         <FormControl size="small" fullWidth disabled={readonly} variant="standard">
-                          <InputLabel id={`${rule.localId}-fields-label`}>选择查询的项</InputLabel>
                           <Select
                             variant="standard"
-                            labelId={`${rule.localId}-fields-label`}
                             multiple
+                            displayEmpty
+                            aria-label={`${ruleDisplayLabel(rule)} 查询项`}
+                            inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 查询项` }}
                             value={rule.rules.matchFields.filter((field) => !HIDDEN_MATCH_FIELDS.has(field))}
                             renderValue={(selected) => fieldLabels(selected, fieldOptions)}
                             onChange={(event) => {
@@ -691,23 +671,11 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                         disabled={readonly}
                         onEdit={() => setConditionEditor({ localId: rule.localId, key: "noneOf", label: "不包含字样", values: rule.rules.noneOf })}
                       />
-                      {rowIndex === 0 ? (
-                        <TableCell
-                          rowSpan={group.rules.length}
-                          className={`bank-auto-tag-priority-cell ${group.colorClass}`}
-                        >
-                          <TextField
-                            variant="standard"
-                            size="small"
-                            type="number"
-                            placeholder="优先级"
-                            value={group.priority ?? ""}
-                            disabled={readonly}
-                            inputProps={{ min: 2, step: 1, "aria-label": `${group.primaryLabel} 优先级` }}
-                            onChange={(event) => updateGroupPriority(group, event.target.value)}
-                          />
-                        </TableCell>
-                      ) : null}
+                      <TableCell className="bank-auto-tag-priority-cell">
+                        <Typography component="span" className="bank-auto-tag-priority-value" aria-label={`${ruleDisplayLabel(rule)} 优先级`}>
+                          2
+                        </Typography>
+                      </TableCell>
                       <TableCell align="right">
                         <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
                           <Tooltip title="停用">

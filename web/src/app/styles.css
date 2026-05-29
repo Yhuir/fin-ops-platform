@@ -6953,10 +6953,6 @@ body.column-layout-dragging {
   padding: 5px 4px;
 }
 
-.bank-auto-tag-rule-row .MuiInputLabel-root {
-  font-size: 0.72rem;
-}
-
 .bank-auto-tag-rule-row .MuiSelect-select {
   padding: 5px 22px 5px 4px;
 }
@@ -6989,15 +6985,19 @@ body.column-layout-dragging {
   border-bottom-color: rgba(20, 31, 43, 0.22);
 }
 
-.bank-auto-tag-primary-cell.MuiTableCell-root,
-.bank-auto-tag-priority-cell.MuiTableCell-root {
-  border-right: 2px solid rgba(15, 23, 42, 0.26);
+.bank-auto-tag-primary-cell.MuiTableCell-root {
   font-weight: 900;
 }
 
-.bank-auto-tag-primary-cell .MuiInputBase-root,
-.bank-auto-tag-priority-cell .MuiInputBase-root {
+.bank-auto-tag-primary-cell .MuiInputBase-root {
   background: transparent;
+}
+
+.bank-auto-tag-priority-value {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  font-weight: 800;
 }
 
 .bank-auto-tag-field-menu-actions {
