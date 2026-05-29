@@ -61,6 +61,12 @@ function exactTextContent(text: string) {
   );
 }
 
+async function openCategoryFilterTree(user: ReturnType<typeof userEvent.setup>, page: HTMLElement) {
+  const trigger = within(page).getByRole("button", { name: /标签筛选/ });
+  await user.hover(trigger);
+  return within(page).findByRole("tree", { name: "银行明细标签筛选" });
+}
+
 async function editRuleLabelInDrawer(user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement, currentLabel: string, primary: string, sub: string) {
   await user.click(await within(drawer).findByRole("button", { name: `编辑标签 ${currentLabel}` }));
   const primaryInput = within(drawer).getByLabelText("主标签名称", { selector: "input" });
@@ -125,6 +131,7 @@ describe("Bank details page", () => {
   });
 
   test("renders accounts as a list and transactions in the bank transaction table", async () => {
+    const user = userEvent.setup();
     installMockApiFetch();
     renderBankDetailsPage();
 
@@ -174,7 +181,11 @@ describe("Bank details page", () => {
     expect(within(table).getByText("工商银行 6386").closest(".bank-source-chip")).toHaveClass("bank-chip-auto-size");
     expect(within(table).getByText("货款")).toBeInTheDocument();
     expect(within(table).getByText("项目回款")).toBeInTheDocument();
-    expect(within(page).getByText(exactTextContent("公司暂借款：待还款 2")).closest(".bank-category-tag")).toHaveClass("bank-chip-auto-size");
+    expect(within(page).queryByText(exactTextContent("公司暂借款：待还款 2"))).not.toBeInTheDocument();
+    const categoryTree = await openCategoryFilterTree(user, page);
+    expect(within(categoryTree).getByRole("treeitem", { name: "公司暂借款 2" })).toBeInTheDocument();
+    expect(within(categoryTree).getByRole("treeitem", { name: "待还款 2" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(within(page).queryByText("未保存 0")).not.toBeInTheDocument();
     expect(within(page).getByText("每页行数")).toBeInTheDocument();
   });
@@ -222,6 +233,7 @@ describe("Bank details page", () => {
   });
 
   test("shows read-only auto category and keeps manual category controls out of bank details", async () => {
+    const user = userEvent.setup();
     installMockApiFetch();
     renderBankDetailsPage();
 
@@ -231,10 +243,14 @@ describe("Bank details page", () => {
     expect(await within(table).findByText("费用 / 工资")).toBeInTheDocument();
     expect(within(table).queryByLabelText("bank-detail-001 类型")).not.toBeInTheDocument();
     expect(within(table).queryByText("自动")).not.toBeInTheDocument();
-    expect(await within(page).findByText(exactTextContent("公司暂借款：待还款 2"))).toBeInTheDocument();
-    expect(within(page).getByText("费用 / 工资 1")).toBeInTheDocument();
-    expect(within(page).getByText("内部往来款 2")).toBeInTheDocument();
-    expect(within(page).getByText(exactTextContent("质保金：待收款 1"))).toBeInTheDocument();
+    expect(within(page).queryByText(exactTextContent("公司暂借款：待还款 2"))).not.toBeInTheDocument();
+    const categoryTree = await openCategoryFilterTree(user, page);
+    expect(within(categoryTree).getByRole("treeitem", { name: "费用 1" })).toBeInTheDocument();
+    expect(within(categoryTree).getByRole("treeitem", { name: "工资 1" })).toBeInTheDocument();
+    expect(within(categoryTree).getByRole("treeitem", { name: "内部往来款 2" })).toBeInTheDocument();
+    expect(within(categoryTree).getByRole("treeitem", { name: "质保金 1" })).toBeInTheDocument();
+    expect(within(categoryTree).getByRole("treeitem", { name: "待收款 1" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(within(page).queryByText(/未保存/)).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
   });
@@ -256,6 +272,32 @@ describe("Bank details page", () => {
     expect(within(tooltip).getByText("建设银行 1410")).toBeInTheDocument();
     expect(within(tooltip).getByText("13,000.00")).toBeInTheDocument();
     expect(within(tooltip).getByText("云南溯源科技有限公司工商银行账户")).toBeInTheDocument();
+  });
+
+  test("shows category hierarchy in the compact tag filter tree", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    expect(within(page).queryByText(exactTextContent("费用 / 工资 1"))).not.toBeInTheDocument();
+
+    const categoryTree = await openCategoryFilterTree(user, page);
+    const feeRoot = within(categoryTree).getByRole("treeitem", { name: "费用 1" });
+    const salaryChild = within(categoryTree).getByRole("treeitem", { name: "工资 1" });
+    expect(feeRoot).toHaveAttribute("aria-expanded", "true");
+    expect(salaryChild).toHaveClass("bank-category-tree-child");
+
+    await user.click(salaryChild);
+
+    await waitFor(() => {
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(transactionRequest?.searchParams.get("category_code")).toBe("salary");
+      expect(transactionRequest?.searchParams.get("category_primary_label")).toBe("费用");
+      expect(transactionRequest?.searchParams.get("category_sub_label")).toBe("工资");
+    });
+    expect(within(page).getByRole("button", { name: /标签筛选：费用 \/ 工资 1/ })).toBeInTheDocument();
   });
 
   test("opens automatic tag rules drawer from the page toolbar", async () => {
@@ -298,8 +340,9 @@ describe("Bank details page", () => {
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
     await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests + 2);
       expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
-    }, { timeout: 2500 });
+    }, { timeout: 4000 });
     const saveCall = fetchMock.mock.calls.find(([input, init]) => (
       new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
       && init?.method === "PUT"
@@ -384,14 +427,17 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await within(page).findByText("费用 / 工资");
-    expect(within(page).getByText("未分类 295")).toBeInTheDocument();
+    let categoryTree = await openCategoryFilterTree(user, page);
+    expect(within(categoryTree).getByRole("treeitem", { name: "未分类 295" })).toBeInTheDocument();
     expect(within(page).queryByText("无 295")).not.toBeInTheDocument();
 
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
     const table = await within(page).findByRole("table", { name: "交易流水" });
     expect(await within(table).findByText("普通供应商")).toBeInTheDocument();
     expect(table.querySelector(".bank-auto-type-empty")).toHaveTextContent("-");
-    expect(within(page).getByText("未分类 1")).toBeInTheDocument();
+    categoryTree = await openCategoryFilterTree(user, page);
+    expect(within(categoryTree).getByRole("treeitem", { name: "未分类 1" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
   });
 
@@ -530,7 +576,10 @@ describe("Bank details page", () => {
     });
     expect(await within(page).findByText("跨页目标供应商")).toBeInTheDocument();
     expect(within(page).getByText("1-1 / 1")).toBeInTheDocument();
-    expect(within(page).getByText("费用 / 手续费 1")).toBeInTheDocument();
+    const categoryTree = await openCategoryFilterTree(user, page);
+    expect(within(categoryTree).getByRole("treeitem", { name: "费用 1" })).toBeInTheDocument();
+    expect(within(categoryTree).getByRole("treeitem", { name: "手续费 1" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(within(page).queryByText("费用 / 工资 1")).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /工商银行 6386.*299 条/ })).toBeInTheDocument();
   });

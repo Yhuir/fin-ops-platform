@@ -7531,7 +7531,7 @@ body.column-layout-dragging {
 
 .bank-grid-toolbar {
   display: block;
-  padding: 8px 10px 10px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--bank-border-subtle);
 }
 
@@ -7541,26 +7541,159 @@ body.column-layout-dragging {
   overflow: visible;
 }
 
-.bank-grid-category-summary {
+.bank-category-filter-entry {
+  position: relative;
+  z-index: 6;
+  flex: 0 1 auto;
+  min-width: 168px;
+  max-width: min(360px, 44vw);
+}
+
+.bank-category-filter-trigger.MuiButton-root {
+  justify-content: flex-start;
   width: 100%;
-  flex: 0 0 auto;
+  min-height: 34px;
+  padding-inline: 10px;
+  border-color: var(--bank-border);
+  color: var(--bank-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.15;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bank-category-filter-trigger.MuiButton-contained {
+  border-color: var(--bank-blue);
+  background: var(--bank-blue);
+  color: #ffffff;
+}
+
+.bank-category-tree-popper {
+  z-index: 25;
+  padding-top: 6px;
+}
+
+.bank-category-tree-panel {
+  width: min(360px, calc(100vw - 40px));
+  max-height: min(520px, calc(100vh - 180px));
+  overflow: hidden;
+  border: 1px solid var(--bank-border);
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+}
+
+.bank-category-tree-list {
+  max-height: inherit;
+  overflow: auto;
+  padding: 6px;
+}
+
+.bank-category-tree-action.MuiListItemButton-root,
+.bank-category-tree-root-button.MuiListItemButton-root,
+.bank-category-tree-child.MuiListItemButton-root,
+.bank-category-tree-static-row,
+.bank-category-tree-root {
+  min-height: 30px;
+  border-radius: 5px;
+  color: var(--bank-text);
+}
+
+.bank-category-tree-action.MuiListItemButton-root,
+.bank-category-tree-root-button.MuiListItemButton-root,
+.bank-category-tree-child.MuiListItemButton-root {
+  padding: 4px 8px;
+}
+
+.bank-category-tree-action.Mui-selected,
+.bank-category-tree-root-button.Mui-selected,
+.bank-category-tree-child.Mui-selected {
+  background: var(--bank-selected);
+  color: var(--bank-blue);
+}
+
+.bank-category-tree-static-row,
+.bank-category-tree-root {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+}
+
+.bank-category-tree-root {
+  margin-top: 2px;
+  background: #f7f9fc;
+  color: #243b53;
+  font-weight: 800;
+}
+
+.bank-category-tree-children {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 4px;
+}
+
+.bank-category-tree-child.MuiListItemButton-root {
+  padding-left: 24px;
+  color: #334e68;
+}
+
+.bank-category-tree-direct-child.MuiListItemButton-root {
+  color: #243b53;
+}
+
+.bank-category-tree-row-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
   min-width: 0;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  padding-top: 1px;
+  gap: 8px;
+}
+
+.bank-category-tree-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bank-category-tree-count {
+  min-width: 26px;
+  padding: 1px 7px;
+  border: 1px solid var(--bank-border-subtle);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--bank-text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.bank-category-tree-static-row {
+  color: var(--bank-text-secondary);
+}
+
+.bank-category-tree-divider.MuiDivider-root {
+  margin: 5px 2px;
+  border-color: var(--bank-border-subtle);
 }
 
 .bank-grid-toolbar-actions {
-  width: 100%;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   min-width: 0;
-  min-height: 48px;
+  min-height: 34px;
   overflow: visible;
-  padding-bottom: 2px;
-  row-gap: 6px;
+  row-gap: 0;
 }
 
 .bank-export-feedback {
@@ -8017,6 +8150,49 @@ body.column-layout-dragging {
 
 .bank-internal-transfer-tooltip-amount {
   font-variant-numeric: tabular-nums;
+}
+
+.bank-category-hierarchy-tooltip {
+  min-width: 180px;
+  max-width: 260px;
+  padding: 2px 0;
+  color: #ffffff;
+}
+
+.bank-category-hierarchy-title {
+  display: block;
+  margin-bottom: 8px;
+  color: #ffffff;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.bank-category-hierarchy-tree {
+  display: grid;
+  gap: 4px;
+}
+
+.bank-category-hierarchy-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+
+.bank-category-hierarchy-branch {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.bank-category-hierarchy-node {
+  color: #ffffff;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .bank-category-tag.category-tone-holiday-bonus {
