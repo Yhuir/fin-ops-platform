@@ -234,7 +234,7 @@ PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。
   - `/usr/local/sbin/finops-deploy-control activate <release-name>`
 - `activate` 会先用 `/etc/fin-ops/fin-ops.postgres-migrator.env` 执行 PostgreSQL schema migration，
   成功后才激活 API、RabbitMQ worker 和 dispatcher 指向该 release
-- API release drop-in 会先清空基础 unit 继承的 `EnvironmentFile`，再加载
+- API 和 dispatcher release drop-in 会先清空基础 unit 继承的 `EnvironmentFile`，再加载
   `/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，避免历史
   `/opt/fin-ops/fin-ops.env` 覆盖 release `PYTHONPATH` 导致新服务仍导入 `/opt/fin-ops/current`
   旧代码

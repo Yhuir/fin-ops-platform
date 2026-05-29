@@ -266,6 +266,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("fin_ops_platform.postgres.migrate apply", script)
         self.assertIn("missing PostgreSQL DSN", script)
         self.assertIn("EnvironmentFile=\nEnvironmentFile=$COMMON_ENV", script)
+        self.assertGreaterEqual(script.count("EnvironmentFile=\nEnvironmentFile=$COMMON_ENV"), 2)
         self.assertIn("EnvironmentFile=$COMMON_ENV", script)
         self.assertIn("EnvironmentFile=$SECRETS_ENV", script)
         self.assertNotIn("EnvironmentFile=/opt/fin-ops/fin-ops.env", script)

@@ -120,6 +120,7 @@ write_dispatcher_dropin() {
   cat > "$DISPATCHER_DROPIN" <<DROPIN
 [Service]
 WorkingDirectory=$src
+EnvironmentFile=
 EnvironmentFile=$COMMON_ENV
 EnvironmentFile=$SECRETS_ENV
 EnvironmentFile=-$ENV_DIR/fin-ops.rabbitmq-dispatcher.env
