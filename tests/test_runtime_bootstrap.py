@@ -80,6 +80,19 @@ class ImportFactBootstrapConnection:
         return 1
 
 
+class RuntimeBootstrapQueue:
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+        self.enqueued.append((scope_type, scope_key, reason))
+
+
+class MissingBankAccountBalanceRepository:
+    def list_bank_account_balances(self, **_kwargs: object) -> dict[str, object] | None:
+        raise RuntimeError('relation "read_model.bank_account_balances" does not exist')
+
+
 class RuntimeBootstrapTests(unittest.TestCase):
     def test_lightweight_bootstrap_does_not_call_full_state_load_and_exposes_repositories(self) -> None:
         store = LoadTrackingStore()
@@ -259,6 +272,30 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertIn("refreshing", response.body)
+
+    def test_production_postgres_bank_details_accounts_missing_balance_table_returns_refreshing(self) -> None:
+        app = object.__new__(server_module.Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
+        app._bank_detail_sql_read_repository = MissingBankAccountBalanceRepository()
+        queue = RuntimeBootstrapQueue()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._bank_details_service = type(
+            "LegacyBankDetails",
+            (),
+            {
+                "list_accounts": lambda *args, **kwargs: (_ for _ in ()).throw(
+                    AssertionError("production bank details accounts API must not fallback to legacy service")
+                ),
+            },
+        )()
+
+        response = app._handle_api_bank_details_accounts(date_from="2026-04-01", date_to="2026-04-30")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("refreshing", response.body)
+        self.assertIn("bank_account_balance", response.body)
+        self.assertEqual(queue.enqueued, [("bank_account_balance", "all", "api_migration_missing")])
 
     def test_production_snapshot_reads_are_confined_to_legacy_allowlist(self) -> None:
         allowed_paths = {

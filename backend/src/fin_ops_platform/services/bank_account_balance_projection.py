@@ -148,7 +148,7 @@ class BankAccountBalanceProjectionBuilder:
             "trade_time_sort": _time_text(row.get("trade_time_sort") or row.get("trade_time") or row.get("txn_date")),
             "bank_serial_no": text(row.get("bank_serial_no")),
             "balance": decimal_text(row.get("balance")),
-            "currency": text(row.get("currency")) or "CNY",
+            "currency": _normalize_currency(row.get("currency")),
         }
 
     @staticmethod
@@ -182,3 +182,15 @@ def _time_text(value: Any) -> str:
     if raw.endswith("Z") and len(raw) >= 20:
         return raw[:19]
     return raw
+
+
+def _normalize_currency(value: Any) -> str:
+    raw = text(value)
+    if raw is None:
+        return "CNY"
+    normalized = raw.strip().upper()
+    if normalized in {"CNY", "RMB"}:
+        return "CNY"
+    if raw.strip() in {"人民币", "人民币元", "元"}:
+        return "CNY"
+    return normalized or "CNY"

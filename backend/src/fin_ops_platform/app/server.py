@@ -2340,6 +2340,14 @@ class Application:
             and ("does not exist" in message or "undefinedtable" in error.__class__.__name__.lower())
         )
 
+    @staticmethod
+    def _is_missing_bank_account_balance_read_model_error(error: Exception) -> bool:
+        message = str(error).lower()
+        return (
+            "read_model.bank_account_balances" in message
+            and ("does not exist" in message or "undefinedtable" in error.__class__.__name__.lower())
+        )
+
     def _workbench_groups_redis_cache_key(
         self,
         *,
@@ -10384,7 +10392,23 @@ class Application:
             )
         account_balance_loader = getattr(repository, "list_bank_account_balances", None)
         if callable(account_balance_loader):
-            payload = account_balance_loader(date_from=date_from, date_to=date_to)
+            try:
+                payload = account_balance_loader(date_from=date_from, date_to=date_to)
+            except Exception as error:
+                if self._is_missing_bank_account_balance_read_model_error(error):
+                    self._enqueue_bank_account_balance_read_model_refresh(reason="api_migration_missing")
+                    return self._bank_detail_accounts_refreshing_payload(
+                        scope_keys=["all"],
+                        date_from=date_from,
+                        date_to=date_to,
+                        scope_summary={
+                            "read_model_status": "refreshing",
+                            "balance_read_model_status": "missing",
+                            "read_model_scope_keys": ["all"],
+                            "read_model_error": "bank_account_balance_read_model_not_migrated",
+                        },
+                    )
+                raise
             if not isinstance(payload, dict):
                 self._enqueue_bank_account_balance_read_model_refresh(reason="api_miss")
                 return self._bank_detail_accounts_refreshing_payload(
@@ -10703,6 +10727,16 @@ class Application:
             "balance_account_count": 0,
             "missing_balance_account_count": 0,
             "read_model_status": "refreshing",
+            **(
+                {"balance_read_model_status": summary.get("balance_read_model_status")}
+                if summary.get("balance_read_model_status") is not None
+                else {}
+            ),
+            **(
+                {"read_model_error": summary.get("read_model_error")}
+                if summary.get("read_model_error") is not None
+                else {}
+            ),
             "read_model_scope_keys": list(summary.get("read_model_scope_keys") or scope_keys),
             "read_model_generated_at": summary.get("read_model_generated_at"),
             "date_from": date_from,

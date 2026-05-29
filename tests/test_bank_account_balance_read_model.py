@@ -122,6 +122,35 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
             by_account_no["9558800011116386"]["account_identity"],
         )
 
+    def test_projection_normalizes_renminbi_currency_aliases(self) -> None:
+        repository = CaptureAccountBalanceRepository()
+        connection = FakeConnection(
+            rows=[
+                [
+                    {
+                        "id": "txn-rmb",
+                        "transaction_id": "pg-rmb",
+                        "account_no": "6222000011116386",
+                        "account_name": "基本户",
+                        "txn_date": "2026-04-01",
+                        "trade_time": "2026-04-01 09:00:00",
+                        "trade_time_sort": "2026-04-01 09:00:00",
+                        "bank_serial_no": "001",
+                        "balance": "900.00",
+                        "currency": "人民币元",
+                        "raw_payload": {"normalized_payload": {"imported_bank_name": "工商银行", "imported_bank_last4": "6386"}},
+                    }
+                ]
+            ]
+        )
+
+        BankAccountBalanceProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        ).rebuild_bank_account_balance_read_model()
+
+        self.assertEqual(repository.saved_rows[0]["currency"], "CNY")
+
     def test_repository_lists_balances_without_reading_bank_detail_rows_for_balance(self) -> None:
         connection = FakeConnection(
             rows=[
