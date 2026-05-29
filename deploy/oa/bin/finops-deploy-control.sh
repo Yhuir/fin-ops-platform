@@ -12,6 +12,8 @@ API_DROPIN="$API_DROPIN_DIR/99-deploy-release.conf"
 WORKER_DROPIN="$WORKER_DROPIN_DIR/99-deploy-release.conf"
 DISPATCHER_DROPIN="$DISPATCHER_DROPIN_DIR/99-deploy-release.conf"
 FRONTEND_DIR="${FINOPS_FRONTEND_DIR:-/www/wwwroot/fin-ops/dist}"
+LEGACY_CURRENT_DIR="${FINOPS_LEGACY_CURRENT_DIR:-/opt/fin-ops/current}"
+LEGACY_CURRENT_ARCHIVE_DIR="${FINOPS_LEGACY_CURRENT_ARCHIVE_DIR:-/opt/fin-ops/legacy-current-archives}"
 COMMON_ENV="$ENV_DIR/fin-ops.common.env"
 SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
@@ -81,6 +83,21 @@ run_schema_migrations() {
   source "$MIGRATOR_ENV"
   set +a
   PYTHONPATH="$src/backend/src" "$API_PYTHON" -m fin_ops_platform.postgres.migrate apply
+}
+
+archive_legacy_current() {
+  [[ -e "$LEGACY_CURRENT_DIR" || -L "$LEGACY_CURRENT_DIR" ]] || return 0
+  mkdir -p "$LEGACY_CURRENT_ARCHIVE_DIR"
+  local timestamp target suffix
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  target="$LEGACY_CURRENT_ARCHIVE_DIR/current-$timestamp"
+  suffix=0
+  while [[ -e "$target" || -L "$target" ]]; do
+    suffix=$((suffix + 1))
+    target="$LEGACY_CURRENT_ARCHIVE_DIR/current-$timestamp-$suffix"
+  done
+  mv "$LEGACY_CURRENT_DIR" "$target"
+  printf 'archived legacy current runtime: %s -> %s\n' "$LEGACY_CURRENT_DIR" "$target"
 }
 
 write_api_dropin() {
@@ -251,6 +268,7 @@ case "$cmd" in
     assert_runtime_env_contract
     sync_python_envs "$src"
     run_schema_migrations "$src"
+    archive_legacy_current
     write_api_dropin "$src"
     write_worker_dropin "$src"
     write_dispatcher_dropin "$src"

@@ -1,5 +1,7 @@
 import json
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 
@@ -54,6 +56,27 @@ class AppTests(unittest.TestCase):
         self.assertIn("input_invoice_usage_read_model", payload["capabilities"])
         self.assertIn("output_invoice_collection_read_model", payload["capabilities"])
         self.assertIn("no_oa_bank_batch_processing", payload["capabilities"])
+        runtime_release = payload["runtime_release"]
+        self.assertEqual(runtime_release["consistent"], True)
+        self.assertIn("working_directory", runtime_release)
+        self.assertIn("package_file", runtime_release)
+        self.assertIn("expected_source_root", runtime_release)
+        self.assertIn("pythonpath", runtime_release)
+
+    def test_health_endpoint_marks_release_import_path_mismatch_not_ready(self) -> None:
+        app = build_application()
+
+        with patch("fin_ops_platform.app.server.Path.cwd", return_value=Path("/opt/fin-ops/releases/main-test/src")):
+            response = app.handle_request("GET", "/health")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "not_ready")
+        runtime_release = payload["runtime_release"]
+        self.assertEqual(runtime_release["is_release_runtime"], True)
+        self.assertEqual(runtime_release["consistent"], False)
+        self.assertIn("package_import_path_mismatch", runtime_release["problems"])
+        self.assertIn("release_metadata_missing_or_invalid", runtime_release["problems"])
 
 
 if __name__ == "__main__":

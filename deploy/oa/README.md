@@ -238,6 +238,11 @@ PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。
   `/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，避免历史
   `/opt/fin-ops/fin-ops.env` 覆盖 release `PYTHONPATH` 导致新服务仍导入 `/opt/fin-ops/current`
   旧代码
+- `activate` 会把历史 `/opt/fin-ops/current` 归档到 `/opt/fin-ops/legacy-current-archives/current-<timestamp>`；
+  release 模式只允许从 `/opt/fin-ops/releases/<release-name>/src` 运行，`current` 目录不再参与运行时
+- `/health` 会暴露 runtime identity，包括工作目录、实际 `fin_ops_platform.__file__`、`PYTHONPATH`
+  和 `RELEASE.json`。release 运行时若实际导入路径不在当前 release 的 `backend/src` 下，健康状态必须是
+  `not_ready`
 - 自动执行 `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src`，确保常驻 worker 矩阵
   已安装、开机自启并重启到当前 release
 - 验证前端 `index.html` 与激活 release 的 `web/dist/index.html` 哈希一致
@@ -290,8 +295,9 @@ sudo /usr/local/sbin/finops-deploy-control check-release <已上传的-release-n
 
 `scripts/deploy-oa.sh` 会在激活前检查服务器 helper 是否仍引用历史 root env；如果检查失败，会在
 `activate` 之前中止，避免前端已发布但后端无法监听 `127.0.0.1:18001`。helper 的 `activate`
-还必须先执行 schema migration，并且 API drop-in 必须 reset 旧 `EnvironmentFile`；不要手工创建业务表、
-不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 参与 release 运行时。
+还必须先执行 schema migration、reset 旧 `EnvironmentFile` 并归档 legacy `/opt/fin-ops/current`；不要手工创建业务表、
+不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
+参与 release 运行时。
 - `--reload-nginx` 只对旧 `legacy-current` 模式有意义；默认 release 模式不修改 nginx 配置，静态文件变更不需要 reload nginx
 - 旧覆盖式部署仍保留为显式模式：
 

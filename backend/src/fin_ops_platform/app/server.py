@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from pymongo.errors import PyMongoError
 
+import fin_ops_platform
 from fin_ops_platform import __version__
 from fin_ops_platform.app.auth import (
     ForbiddenOAAccessError,
@@ -1574,10 +1575,13 @@ class Application:
             except Exception as exc:  # pragma: no cover - readiness should report degraded dependency state.
                 storage_summary.update({"postgres_status": "error", "postgres_error": str(exc)})
 
+        runtime_release = self._runtime_release_summary()
+        status = "ready" if runtime_release["consistent"] else "not_ready"
         return {
             "service": "fin-ops-platform-api",
             "version": __version__,
-            "status": "ready",
+            "status": status,
+            "runtime_release": runtime_release,
             "bootstrap": {
                 "mode": self._bootstrap_mode,
                 "legacy_snapshot_disabled": self._bootstrap_mode != "legacy",
@@ -1733,6 +1737,56 @@ class Application:
             ],
             "storage": storage_summary,
             "future_modules": [],
+        }
+
+    @staticmethod
+    def _path_is_relative_to(path: Path, parent: Path) -> bool:
+        try:
+            path.relative_to(parent)
+        except ValueError:
+            return False
+        return True
+
+    @classmethod
+    def _runtime_release_summary(cls) -> dict[str, object]:
+        working_directory = Path.cwd().resolve()
+        expected_source_root = (working_directory / "backend" / "src").resolve()
+        package_file = Path(str(getattr(fin_ops_platform, "__file__", ""))).resolve()
+        pythonpath_entries = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
+        release_metadata_path = working_directory / "RELEASE.json"
+        release_metadata: dict[str, object] | None = None
+        release_metadata_error: str | None = None
+        if release_metadata_path.exists():
+            try:
+                raw_metadata = json.loads(release_metadata_path.read_text(encoding="utf-8"))
+                if isinstance(raw_metadata, dict):
+                    release_metadata = raw_metadata
+                else:
+                    release_metadata_error = "RELEASE.json must contain an object."
+            except Exception as exc:
+                release_metadata_error = str(exc)
+
+        is_release_runtime = (
+            cls._path_is_relative_to(working_directory, Path("/opt/fin-ops/releases"))
+            or release_metadata_path.exists()
+        )
+        problems: list[str] = []
+        if is_release_runtime and not cls._path_is_relative_to(package_file, expected_source_root):
+            problems.append("package_import_path_mismatch")
+        if is_release_runtime and release_metadata is None:
+            problems.append("release_metadata_missing_or_invalid")
+
+        return {
+            "working_directory": str(working_directory),
+            "package_file": str(package_file),
+            "expected_source_root": str(expected_source_root),
+            "pythonpath": pythonpath_entries,
+            "release_metadata_path": str(release_metadata_path),
+            "release_metadata": release_metadata,
+            "release_metadata_error": release_metadata_error,
+            "is_release_runtime": is_release_runtime,
+            "consistent": not problems,
+            "problems": problems,
         }
 
     def _health_payload(self) -> dict[str, object]:
