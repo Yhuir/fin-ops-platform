@@ -19,6 +19,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 SUMMARY_TEXT_LABELS = ("摘要",)
 NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
+UNCATEGORIZED_CATEGORY_FILTER_CODE = "uncategorized"
 
 
 class BankDetailsService:
@@ -449,8 +450,13 @@ class BankDetailsService:
         category_primary_label: str,
         category_sub_label: str,
     ) -> bool:
-        if category_code and str(row.get("effective_category_code") or "").strip() != category_code:
-            return False
+        if category_code:
+            effective_category_code = str(row.get("effective_category_code") or "").strip()
+            if category_code == UNCATEGORIZED_CATEGORY_FILTER_CODE:
+                if effective_category_code:
+                    return False
+            elif effective_category_code != category_code:
+                return False
         if category_primary_label and str(row.get("effective_category_primary_label") or "").strip() != category_primary_label:
             return False
         if category_sub_label and str(row.get("effective_category_sub_label") or "").strip() != category_sub_label:

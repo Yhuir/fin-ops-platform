@@ -1008,6 +1008,35 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(payload["category_counts"]["fee"], 1)
         self.assertEqual(payload["category_counts"]["salary"], 0)
 
+    def test_uncategorized_category_filter_matches_rows_without_effective_category(self) -> None:
+        transactions = [
+            self._transaction(
+                transaction_id="txn-uncategorized",
+                trade_time="2026-04-02 09:00:00",
+                summary="普通付款",
+                remark="普通用途",
+            ),
+            self._transaction(
+                transaction_id="txn-fee",
+                trade_time="2026-04-01 09:00:00",
+                summary="网银手续费",
+            ),
+        ]
+        service = BankDetailsService(
+            _ImportServiceStub(transactions),
+            auto_category_service=BankTransactionAutoCategoryService(),
+        )
+
+        payload = service.list_transactions(
+            account_key="工商银行:6386",
+            category_code="uncategorized",
+        )
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["txn-uncategorized"])
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["category_counts"]["uncategorized"], 1)
+        self.assertEqual(payload["category_counts"]["fee"], 0)
+
     def test_category_counts_are_based_on_effective_categories_across_full_filter(self) -> None:
         transactions = [
             self._transaction(

@@ -7310,6 +7310,9 @@ def _bank_detail_month_text(value: Any) -> str | None:
     return candidate if MONTH_SCOPE_RE.match(candidate) else None
 
 
+UNCATEGORIZED_CATEGORY_FILTER_CODE = "uncategorized"
+
+
 def _bank_detail_filter_sql(
     *,
     tenant_id: str,
@@ -7341,8 +7344,11 @@ def _bank_detail_filter_sql(
         where.append("search_text ilike %s")
         params.append(f"%{normalized_keyword}%")
     if normalized_category_code := text(category_code):
-        where.append("effective_category_code = %s")
-        params.append(normalized_category_code)
+        if normalized_category_code == UNCATEGORIZED_CATEGORY_FILTER_CODE:
+            where.append("effective_category_code is null")
+        else:
+            where.append("effective_category_code = %s")
+            params.append(normalized_category_code)
     if not require_current_schema and text(category_code):
         return " and ".join(where), params
     if normalized_category_primary_label := text(category_primary_label):

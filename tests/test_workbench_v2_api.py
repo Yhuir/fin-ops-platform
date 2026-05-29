@@ -470,6 +470,34 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in payload["rows"]], [fee_id])
         self.assertEqual(payload["pagination"]["total"], 1)
 
+    def test_bank_details_api_filters_uncategorized_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            uncategorized_id = self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-03 09:15:30",
+                summary="普通付款",
+                remark="普通用途",
+            )
+            self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-02 09:15:30",
+                summary="网银手续费",
+                remark="转账手续费",
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions?category_code=uncategorized",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual([row["id"] for row in payload["rows"]], [uncategorized_id])
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["category_counts"]["uncategorized"], 1)
+        self.assertEqual(payload["category_counts"]["fee"], 0)
+
     def test_bank_details_api_passes_keyword_to_server_side_transaction_search(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

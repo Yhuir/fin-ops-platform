@@ -142,6 +142,55 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
 
+    def test_transactions_filter_uncategorized_rows_by_null_effective_category(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-05")],
+                {"total": 1},
+                [{"category_code": "uncategorized", "count": 1}],
+                [
+                    {
+                        "payload": {
+                            "id": "txn-uncategorized",
+                            "trade_time": "2026-05-01 10:00:00",
+                            "counterparty_name": "供应商",
+                            "direction": "expense",
+                            "direction_label": "支",
+                            "amount": "10.00",
+                            "balance": "90.00",
+                            "summary": "普通付款",
+                            "purpose": "",
+                            "bank_name": "工商银行",
+                            "account_last4": "6386",
+                            "effective_category_code": None,
+                            "effective_category_label": None,
+                        },
+                        "raw_payload": {},
+                        "summary": "普通付款",
+                        "purpose": "",
+                    }
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_transactions(
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            category_code="uncategorized",
+            page=1,
+            page_size=100,
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["rows"][0]["id"], "txn-uncategorized")
+        self.assertEqual(payload["category_counts"]["uncategorized"], 1)
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 1})
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("effective_category_code is null", sql_text)
+        self.assertNotIn("effective_category_code = %s", sql_text)
+        self.assertNotIn("uncategorized", [param for call in connection.calls for param in call[2]])
+
     def test_transactions_serve_previous_schema_rows_while_refreshing(self) -> None:
         connection = FakeConnection(
             rows=[
