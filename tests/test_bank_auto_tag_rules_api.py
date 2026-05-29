@@ -122,6 +122,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertFalse(payload["system_rule"]["editable"])
         self.assertIn("salary", [rule["code"] for rule in payload["active_rules"]])
         self.assertEqual(payload["active_rules"][0]["priority_label"], "优先级 2")
+        self.assertEqual({rule["priority"] for rule in payload["active_rules"]}, {2})
         fee = next(rule for rule in payload["active_rules"] if rule["code"] == "fee")
         self.assertEqual(fee["output_primary_label"], "费用")
         self.assertEqual(fee["output_sub_label"], "手续费")
@@ -141,6 +142,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["active_rules"]), 30)
         self.assertEqual(payload["system_rule"]["priority_label"], "优先级 1")
         self.assertEqual(payload["active_rules"][0]["priority_label"], "优先级 2")
+        self.assertEqual({rule["priority"] for rule in payload["active_rules"]}, {2})
         self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
     def test_confirmation_endpoint_rejects_single_auto_match_candidate(self) -> None:
@@ -233,10 +235,10 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["version"], current["version"] + 1)
-        self.assertEqual(payload["active_rules"][0]["code"], "salary")
-        self.assertEqual(payload["active_rules"][0]["label"], "薪酬发放")
-        self.assertEqual(payload["active_rules"][0]["output_primary_label"], "费用")
-        self.assertEqual(payload["active_rules"][0]["output_sub_label"], "薪酬发放")
+        saved_salary = next(rule for rule in payload["active_rules"] if rule["code"] == "salary")
+        self.assertEqual(saved_salary["label"], "薪酬发放")
+        self.assertEqual(saved_salary["output_primary_label"], "费用")
+        self.assertEqual(saved_salary["output_sub_label"], "薪酬发放")
         self.assertTrue(any(rule["label"] == "银行利息" and rule["code"].startswith("custom_") for rule in payload["active_rules"]))
         self.assertEqual([rule["code"] for rule in payload["archived_rules"]], ["bonus"])
         self.assertEqual(lifecycle_calls[0][0], "bank_auto_tag_rules_changed")
@@ -249,7 +251,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(metadata["renamed_tags"][0]["code"], "salary")
         self.assertIn("bonus", metadata["archived_codes"])
         self.assertTrue(metadata["added_tags"])
-        self.assertTrue(metadata["priority_changes"])
         self.assertTrue(metadata["rule_changes"])
 
     def test_put_updates_auto_category_engine_rule_source(self) -> None:
@@ -668,6 +669,34 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                     self.assertEqual(payload["error"], expected_error)
                     self.assertIn("field_errors", payload)
                     self.assertIn("references", payload)
+
+    def test_put_rejects_ordinary_priority_below_two_or_non_integer(self) -> None:
+        app = build_application()
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        salary = next(rule for rule in current["active_rules"] if rule["code"] == "salary")
+
+        cases = [1, 0, -1, "2.5", "abc"]
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            for priority in cases:
+                with self.subTest(priority=priority):
+                    response = app._handle_api_bank_details_auto_tag_rules_update(
+                        json.dumps(
+                            {
+                                "expected_version": current["version"],
+                                "active_rules": [{**salary, "priority": priority}],
+                                "archived_rules": current["archived_rules"],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        {},
+                    )
+                    payload = json.loads(response.body)
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(payload["error"], "invalid_auto_tag_rule")
+                    self.assertTrue(
+                        any(error["path"] == "active_rules[0].priority" for error in payload["field_errors"])
+                    )
 
     def test_put_rejects_archived_rules_without_existing_code(self) -> None:
         app = build_application()

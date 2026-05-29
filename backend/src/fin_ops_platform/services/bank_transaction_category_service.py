@@ -260,7 +260,7 @@ BANK_AUTO_TAG_FILE_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
 _BANK_AUTO_TAG_FILE_TERM_SPLIT_RE = re.compile(r"[\r\n、，,；;]+")
 DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
     "fee": {
-        "priority": 10,
+        "priority": 2,
         "rule_code": "fee_text_keyword",
         "output_primary_label": "费用",
         "output_sub_label": "手续费",
@@ -272,7 +272,7 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "holiday_bonus": {
-        "priority": 20,
+        "priority": 2,
         "rule_code": "holiday_bonus_text_keyword",
         "rules": {
             "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
@@ -282,7 +282,7 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "salary": {
-        "priority": 30,
+        "priority": 2,
         "rule_code": "salary_text_keyword",
         "rules": {
             "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
@@ -292,7 +292,7 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "bonus": {
-        "priority": 40,
+        "priority": 2,
         "rule_code": "bonus_text_keyword",
         "rules": {
             "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
@@ -302,7 +302,7 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "treasury_tax_collection": {
-        "priority": 50,
+        "priority": 2,
         "rule_code": "treasury_tax_collection_text_keyword",
         "rules": {
             "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
@@ -312,7 +312,7 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "social_security": {
-        "priority": 60,
+        "priority": 2,
         "rule_code": "social_security_text_keyword",
         "rules": {
             "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
@@ -322,7 +322,7 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "tax_payment": {
-        "priority": 70,
+        "priority": 2,
         "rule_code": "tax_payment_text_keyword",
         "direction": "expense",
         "rules": {
@@ -333,7 +333,7 @@ DEFAULT_BANK_AUTO_TAG_RULES: dict[str, dict[str, Any]] = {
         },
     },
     "external_turnover": {
-        "priority": 900,
+        "priority": 2,
         "rule_code": "external_turnover_candidate_text_keyword",
         "direction": "any",
         "account_scope": DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE,
@@ -589,17 +589,17 @@ class BankTransactionCategoryService:
             for definition in definitions
             if str(definition.get("status") or "active") == "archived"
         ]
-        active.sort(key=lambda definition: (cls._normalize_optional_priority(definition.get("priority")) or 10_000, str(definition.get("code") or "")))
+        active.sort(key=cls._auto_tag_rule_sort_key)
         archived.sort(key=lambda definition: (str(definition.get("label") or ""), str(definition.get("code") or "")))
         payload: dict[str, Any] = {
             "version": int(normalized.get("version") or BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION),
             "system_rule": dict(BANK_AUTO_TAG_SYSTEM_RULE),
             "active_rules": [
-                cls._public_auto_tag_rule(definition, priority_index=index)
-                for index, definition in enumerate(active, start=2)
+                cls._public_auto_tag_rule(definition, priority_index=index, sort_index=index - 1)
+                for index, definition in enumerate(active, start=1)
             ],
             "archived_rules": [
-                cls._public_auto_tag_rule(definition, priority_index=None)
+                cls._public_auto_tag_rule(definition, priority_index=None, sort_index=None)
                 for definition in archived
             ],
             "field_options": [dict(option) for option in BANK_AUTO_TAG_FIELD_OPTIONS],
@@ -659,14 +659,29 @@ class BankTransactionCategoryService:
         seen_codes: set[str] = set()
         field_errors: list[dict[str, str]] = []
 
+        previous_sort_orders = [
+            cls._normalize_optional_sort_order(definition.get("sort_order"))
+            for definition in previous_definitions_by_code.values()
+            if cls._is_auto_tag_rule_definition(definition)
+        ]
+        next_new_sort_order = (max([value for value in previous_sort_orders if value is not None], default=0) + 1)
+
         for index, item in enumerate(active_items):
+            priority = cls._normalize_submitted_auto_tag_priority(
+                item.get("priority") if isinstance(item, dict) else None,
+                path=f"active_rules[{index}].priority",
+                field_errors=field_errors,
+            )
+            if priority is None:
+                priority = 2
             definition = cls._normalize_auto_tag_rule_item(
                 item,
                 path_prefix=f"active_rules[{index}]",
                 previous_definitions_by_code=previous_definitions_by_code,
                 previous_managed_codes=previous_managed_codes,
                 status="active",
-                priority=(index + 1) * 10,
+                priority=priority,
+                fallback_sort_order=next_new_sort_order + index,
                 field_errors=field_errors,
             )
             code = definition["code"]
@@ -683,6 +698,7 @@ class BankTransactionCategoryService:
                 previous_managed_codes=previous_managed_codes,
                 status="archived",
                 priority=None,
+                fallback_sort_order=None,
                 field_errors=field_errors,
             )
             code = definition["code"]
@@ -970,7 +986,8 @@ class BankTransactionCategoryService:
                     "path": ["自动识别", label],
                     "source": source_type if source_type in {"system", "custom"} else "custom",
                     "status": "active",
-                    "priority": (index + 1) * 10,
+                    "priority": 2,
+                    "sort_order": index + 1,
                     "direction": rule["direction"],
                     "account_scope": deepcopy(DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE),
                     "output_primary_label": primary_label,
@@ -984,7 +1001,7 @@ class BankTransactionCategoryService:
         for code in sorted(previous_managed_codes - active_codes):
             previous_definition = dict(previous_definitions_by_code[code])
             previous_definition["status"] = "archived"
-            previous_definition.pop("priority", None)
+            previous_definition["priority"] = cls._normalize_optional_priority(previous_definition.get("priority")) or 2
             archived_definitions.append(previous_definition)
 
         next_by_code = dict(previous_definitions_by_code)
@@ -1275,9 +1292,19 @@ class BankTransactionCategoryService:
         return code in BANK_AUTO_TAG_EDITABLE_CODES or isinstance(definition.get("rules"), dict)
 
     @classmethod
-    def _public_auto_tag_rule(cls, definition: dict[str, Any], *, priority_index: int | None) -> dict[str, Any]:
+    def _public_auto_tag_rule(
+        cls,
+        definition: dict[str, Any],
+        *,
+        priority_index: int | None,
+        sort_index: int | None,
+    ) -> dict[str, Any]:
         code = str(definition.get("code") or "").strip()
         rules = cls._normalize_auto_tag_rule_conditions(definition.get("rules"), allow_invalid=True)
+        priority = cls._normalize_optional_priority(definition.get("priority")) or 2
+        sort_order = cls._normalize_optional_sort_order(definition.get("sort_order"))
+        if sort_order is None and sort_index is not None:
+            sort_order = sort_index
         payload: dict[str, Any] = {
             "code": code,
             "label": str(definition.get("label") or code),
@@ -1295,9 +1322,14 @@ class BankTransactionCategoryService:
             "sortable": priority_index is not None,
         }
         if priority_index is not None:
-            payload["priority"] = cls._normalize_optional_priority(definition.get("priority")) or priority_index * 10
-            payload["priority_label"] = f"优先级 {priority_index}"
-            payload["sort_order"] = priority_index
+            payload["priority"] = priority
+            payload["priority_label"] = f"优先级 {priority}"
+            payload["sort_order"] = sort_order or priority_index
+        elif definition.get("priority") is not None:
+            payload["priority"] = priority
+            payload["priority_label"] = f"优先级 {priority}"
+            if sort_order is not None:
+                payload["sort_order"] = sort_order
         return payload
 
     @classmethod
@@ -1310,6 +1342,7 @@ class BankTransactionCategoryService:
         previous_managed_codes: set[str],
         status: str,
         priority: int | None,
+        fallback_sort_order: int | None,
         field_errors: list[dict[str, str]],
     ) -> dict[str, Any]:
         if not isinstance(item, dict):
@@ -1391,6 +1424,13 @@ class BankTransactionCategoryService:
                 definition[system_key] = deepcopy(previous_value)
         if priority is not None:
             definition["priority"] = priority
+        sort_order = cls._normalize_optional_sort_order(item.get("sort_order")) if isinstance(item, dict) else None
+        if sort_order is None and not is_new:
+            sort_order = cls._normalize_optional_sort_order(previous_definitions_by_code.get(code, {}).get("sort_order"))
+        if sort_order is None:
+            sort_order = fallback_sort_order
+        if sort_order is not None:
+            definition["sort_order"] = sort_order
         return definition
 
     @classmethod
@@ -1493,8 +1533,8 @@ class BankTransactionCategoryService:
             for code in sorted(set(previous_by_code).intersection(next_by_code))
             if previous_by_code[code]["status"] == "archived" and next_by_code[code]["status"] == "active"
         ]
-        previous_order = [rule["code"] for rule in previous_rules["active_rules"]]
-        next_order = [rule["code"] for rule in next_rules["active_rules"]]
+        previous_order = [(rule["code"], rule.get("priority")) for rule in previous_rules["active_rules"]]
+        next_order = [(rule["code"], rule.get("priority")) for rule in next_rules["active_rules"]]
         priority_changes = [] if previous_order == next_order else [{"old_order": previous_order, "new_order": next_order}]
         rule_changes = [
             {
@@ -1558,7 +1598,7 @@ class BankTransactionCategoryService:
                         next_definition["rules"] = deepcopy(definition["rules"])
                     if definition.get("rule_code"):
                         next_definition["rule_code"] = definition["rule_code"]
-                    for key in ("direction", "account_scope", "output_primary_label", "output_sub_label", "stop_on_match", "review_required", "route_to"):
+                    for key in ("direction", "account_scope", "output_primary_label", "output_sub_label", "sort_order", "stop_on_match", "review_required", "route_to"):
                         if key in definition:
                             next_definition[key] = deepcopy(definition[key])
                 definitions_by_code[code] = next_definition
@@ -1604,6 +1644,9 @@ class BankTransactionCategoryService:
             priority = int(default_fields["priority"])
         if priority is not None:
             definition["priority"] = priority
+        sort_order = cls._normalize_optional_sort_order(item.get("sort_order"))
+        if sort_order is not None:
+            definition["sort_order"] = sort_order
         rules = item.get("rules")
         if not isinstance(rules, dict) and default_fields:
             rules = default_fields["rules"]
@@ -1782,6 +1825,39 @@ class BankTransactionCategoryService:
             "none_of": list(rules.get("none_of") or []),
         }
 
+    @classmethod
+    def _auto_tag_rule_sort_key(cls, definition: dict[str, Any]) -> tuple[int, int, str]:
+        priority = cls._normalize_optional_priority(definition.get("priority")) or 2
+        if priority < 2:
+            priority = 2
+        sort_order = cls._normalize_optional_sort_order(definition.get("sort_order"))
+        if sort_order is None:
+            sort_order = 10_000
+        return (priority, sort_order, str(definition.get("code") or ""))
+
+    @classmethod
+    def _normalize_submitted_auto_tag_priority(
+        cls,
+        value: Any,
+        *,
+        path: str,
+        field_errors: list[dict[str, str]],
+    ) -> int | None:
+        if value in (None, ""):
+            return None
+        if isinstance(value, bool):
+            field_errors.append({"path": path, "message": "普通规则优先级必须是大于等于 2 的整数。"})
+            return None
+        text = str(value).strip()
+        if not re.fullmatch(r"[+-]?\d+", text):
+            field_errors.append({"path": path, "message": "普通规则优先级必须是大于等于 2 的整数。"})
+            return None
+        priority = int(text)
+        if priority < 2:
+            field_errors.append({"path": path, "message": "普通规则优先级必须大于等于 2。"})
+            return None
+        return priority
+
     @staticmethod
     def _normalize_match_fields(value: Any, *, allow_invalid: bool = False) -> list[str]:
         fields: list[str] = []
@@ -1798,6 +1874,15 @@ class BankTransactionCategoryService:
 
     @staticmethod
     def _normalize_optional_priority(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _normalize_optional_sort_order(value: Any) -> int | None:
         if value in (None, ""):
             return None
         try:

@@ -114,30 +114,50 @@ class BankTransactionAutoCategoryService:
             and str(definition.get("status") or "active") == "active"
             and isinstance(definition.get("rules"), dict)
         ]
-        rules.sort(key=lambda definition: (int(definition.get("priority") or 10_000), str(definition.get("code") or "")))
-        matched_suggestions: list[dict[str, Any]] = []
+        rules.sort(key=self._rule_sort_key)
+        priority_buckets: dict[int, list[dict[str, Any]]] = {}
         for rule in rules:
-            match = self._rule_match(semantic_fields, rule)
-            if match is None:
-                continue
-            matched_suggestions.append(
-                self._suggestion(
-                    transaction_id=transaction_id,
-                    category_code=str(rule["code"]),
-                    rule_code=str(rule.get("rule_code") or rule["code"]),
-                    reason=self._rule_reason(rule, match),
-                    confidence="high",
-                    evidence=match,
+            priority_buckets.setdefault(self._rule_priority(rule), []).append(rule)
+        for priority in sorted(priority_buckets):
+            matched_suggestions: list[dict[str, Any]] = []
+            for rule in priority_buckets[priority]:
+                match = self._rule_match(semantic_fields, rule)
+                if match is None:
+                    continue
+                matched_suggestions.append(
+                    self._suggestion(
+                        transaction_id=transaction_id,
+                        category_code=str(rule["code"]),
+                        rule_code=str(rule.get("rule_code") or rule["code"]),
+                        reason=self._rule_reason(rule, match),
+                        confidence="high",
+                        evidence=match,
+                    )
                 )
-            )
-        if len(matched_suggestions) == 1:
-            return matched_suggestions[0]
-        if len(matched_suggestions) > 1:
-            return self._confirmation_suggestion(
-                transaction_id=transaction_id,
-                candidates=matched_suggestions,
-            )
+            if len(matched_suggestions) == 1:
+                return matched_suggestions[0]
+            if len(matched_suggestions) > 1:
+                return self._confirmation_suggestion(
+                    transaction_id=transaction_id,
+                    candidates=matched_suggestions,
+                )
         return None
+
+    @staticmethod
+    def _rule_priority(rule: dict[str, Any]) -> int:
+        try:
+            priority = int(rule.get("priority") or 2)
+        except (TypeError, ValueError):
+            priority = 2
+        return priority if priority >= 2 else 2
+
+    @classmethod
+    def _rule_sort_key(cls, rule: dict[str, Any]) -> tuple[int, int, str]:
+        try:
+            sort_order = int(rule.get("sort_order") or 10_000)
+        except (TypeError, ValueError):
+            sort_order = 10_000
+        return (cls._rule_priority(rule), max(sort_order, 0), str(rule.get("code") or ""))
 
     @classmethod
     def _semantic_text_fields(cls, row: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:

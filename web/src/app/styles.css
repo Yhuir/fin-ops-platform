@@ -6802,7 +6802,7 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-drawer-paper {
-  width: min(1280px, 92vw);
+  width: 100vw;
   max-width: 100vw;
 }
 
@@ -6838,14 +6838,14 @@ body.column-layout-dragging {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  padding: 18px 20px 22px;
+  padding: 16px 16px 20px;
   background: #dbe5f2;
 }
 
 .bank-auto-tag-table-container {
   min-height: 0;
   max-height: 100%;
-  overflow-x: hidden;
+  overflow-x: hidden !important;
   overflow-y: auto;
   border-color: #9fb4cf;
   border-radius: 8px;
@@ -6854,7 +6854,48 @@ body.column-layout-dragging {
 
 .bank-auto-tag-rule-table {
   table-layout: fixed;
-  min-width: 1120px;
+  width: 100%;
+  min-width: 0;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(1) {
+  width: 7%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(2) {
+  width: 11%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(3) {
+  width: 10%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(4) {
+  width: 12%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(5) {
+  width: 15%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(6) {
+  width: 11%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(7) {
+  width: 9%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(8) {
+  width: 15%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(9) {
+  width: 7%;
+}
+
+.bank-auto-tag-rule-table .MuiTableCell-root:nth-of-type(10) {
+  width: 3%;
 }
 
 .bank-auto-tag-rule-table .MuiTableCell-head {
@@ -6870,7 +6911,8 @@ body.column-layout-dragging {
 
 .bank-auto-tag-rule-table .MuiTableCell-root {
   vertical-align: top;
-  padding: 10px 8px;
+  min-width: 0;
+  padding: 10px 6px;
   white-space: normal;
 }
 
@@ -6886,6 +6928,54 @@ body.column-layout-dragging {
   background: #ffffff;
 }
 
+.bank-auto-tag-rule-row.bank-auto-tag-group-blue .MuiTableCell-root {
+  background: #d6e8ff;
+}
+
+.bank-auto-tag-rule-row.bank-auto-tag-group-teal .MuiTableCell-root {
+  background: #c7eee8;
+}
+
+.bank-auto-tag-rule-row.bank-auto-tag-group-green .MuiTableCell-root {
+  background: #c9ead0;
+}
+
+.bank-auto-tag-rule-row.bank-auto-tag-group-amber .MuiTableCell-root {
+  background: #ffe2a8;
+}
+
+.bank-auto-tag-rule-row.bank-auto-tag-group-violet .MuiTableCell-root {
+  background: #ded8ff;
+}
+
+.bank-auto-tag-rule-row.bank-auto-tag-group-rose .MuiTableCell-root {
+  background: #ffd1dc;
+}
+
+.bank-auto-tag-rule-row .MuiTableCell-root {
+  border-bottom-color: rgba(20, 31, 43, 0.22);
+}
+
+.bank-auto-tag-primary-cell.MuiTableCell-root {
+  border-right: 2px solid rgba(15, 23, 42, 0.26);
+  font-weight: 900;
+}
+
+.bank-auto-tag-primary-cell .MuiInputBase-root {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.bank-auto-tag-field-menu-actions {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #c8d6e5;
+  background: #f4f8fc;
+}
+
 .bank-auto-tag-condition-summary.MuiButton-root {
   min-width: 80px;
   min-height: 36px;
@@ -6895,12 +6985,18 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-condition-preview {
-  display: block;
+  display: flex;
   margin-top: 6px;
-  max-width: 120px;
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.25;
+}
+
+.bank-auto-tag-condition-preview .MuiTypography-root {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
 }
 
 .bank-auto-tag-system-card,

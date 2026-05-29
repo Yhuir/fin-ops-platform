@@ -74,7 +74,8 @@ async function editRuleLabelInDrawer(user: ReturnType<typeof userEvent.setup>, d
   if (!(row instanceof HTMLElement)) {
     throw new Error(`rule row for ${currentLabel} not found`);
   }
-  const primaryInput = within(row).getByLabelText(/主标签$/, { selector: "input" });
+  const primaryInput = within(row).queryByLabelText(/主标签$/, { selector: "input" })
+    ?? within(drawer).getByDisplayValue(_currentPrimary);
   const subInput = within(row).getByLabelText(/子标签$/, { selector: "input" });
   await user.clear(primaryInput);
   await user.type(primaryInput, primary);

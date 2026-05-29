@@ -80,6 +80,22 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(fee["rules"]["none_of"], ["退款", "退回"])
         self.assertEqual(parsed["active_rules"][1]["rules"]["match_fields"], ["counterparty_name"])
 
+    def test_file_replacement_persists_all_ordinary_rules_as_priority_two_in_file_order(self) -> None:
+        fixture_path = Path("fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json")
+        source = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+        normalized = BankTransactionCategoryService.normalize_auto_tag_rules_file_replacement(
+            source,
+            previous_tag_dictionary={"version": 1, "definitions": []},
+        )
+        payload = BankTransactionCategoryService.auto_tag_rules_payload(normalized["tag_dictionary"])
+
+        self.assertTrue(payload["active_rules"])
+        self.assertEqual({rule["priority"] for rule in payload["active_rules"]}, {2})
+        self.assertEqual([rule["sort_order"] for rule in payload["active_rules"]], list(range(1, len(payload["active_rules"]) + 1)))
+        self.assertEqual(payload["active_rules"][0]["output_primary_label"], "货款")
+        self.assertEqual(payload["active_rules"][1]["output_primary_label"], "货款")
+
     def test_parse_file_rules_rejects_unknown_query_field_with_structured_error(self) -> None:
         rows = [
             ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样"],
@@ -270,7 +286,8 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
 
         self.assertEqual(external_turnover["direction"], "any")
         self.assertEqual(external_turnover["account_scope"], {"type": "any", "values": []})
-        self.assertEqual(external_turnover["sort_order"], len(payload["active_rules"]) + 1)
+        self.assertEqual(external_turnover["priority"], 2)
+        self.assertGreaterEqual(external_turnover["sort_order"], 1)
         self.assertIn("contains_any", external_turnover["rules"])
         self.assertIn("contains_all", external_turnover["rules"])
         self.assertIn("none_of", external_turnover["rules"])

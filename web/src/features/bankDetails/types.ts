@@ -212,6 +212,7 @@ export type BankAutoTagEditableRule = {
   source: "system" | "custom";
   priority?: number;
   priorityLabel?: string;
+  sortOrder?: number;
   direction: BankAutoTagDirection;
   accountScope: BankAutoTagAccountScope;
   outputPrimaryLabel: string;
@@ -238,6 +239,8 @@ export type BankAutoTagRulesResponse = {
 export type SaveBankAutoTagRule = {
   code?: string;
   label: string;
+  priority?: number;
+  sortOrder?: number;
   outputPrimaryLabel: string;
   outputSubLabel: string;
   direction: BankAutoTagDirection;

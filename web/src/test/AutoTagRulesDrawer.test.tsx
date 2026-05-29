@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
-import AutoTagRulesDrawer, { reorderRulesById } from "../features/bankDetails/AutoTagRulesDrawer";
+import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
 import { installMockApiFetch } from "./apiMock";
 
 function renderDrawer(onSaved = vi.fn()) {
@@ -117,26 +117,6 @@ afterEach(() => {
 });
 
 describe("AutoTagRulesDrawer", () => {
-  test("reorders active rules by ids without mutating the original list", () => {
-    const rules = [
-      { localId: "fee" },
-      { localId: "salary" },
-      { localId: "tax" },
-    ];
-
-    expect(reorderRulesById(rules, "tax", "fee")).toEqual([
-      { localId: "tax" },
-      { localId: "fee" },
-      { localId: "salary" },
-    ]);
-    expect(rules).toEqual([
-      { localId: "fee" },
-      { localId: "salary" },
-      { localId: "tax" },
-    ]);
-    expect(reorderRulesById(rules, "missing", "fee")).toBe(rules);
-  });
-
   test("loads active rules as a wide table with fixed system priority first", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
@@ -150,9 +130,11 @@ describe("AutoTagRulesDrawer", () => {
     expect(within(table).getByRole("columnheader", { name: "不包含字样" })).toBeInTheDocument();
     expect(within(drawer).getByText("内部往来款")).toBeInTheDocument();
     expect(rowForText(drawer, "系统规则")).toHaveTextContent("1");
-    expect(within(drawer).getAllByDisplayValue("费用").length).toBeGreaterThan(0);
+    expect(within(drawer).getAllByDisplayValue("费用")).toHaveLength(1);
     expect(within(drawer).getByDisplayValue("手续费")).toBeInTheDocument();
-    expect(rowForText(drawer, "手续费")).toHaveTextContent("2");
+    expect(within(drawer).getAllByDisplayValue("2").length).toBeGreaterThanOrEqual(2);
+    expect(within(drawer).queryByRole("button", { name: /上移/ })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: /下移/ })).not.toBeInTheDocument();
     expect(within(drawer).queryByText("OA中的类型")).not.toBeInTheDocument();
 
     await user.click(within(drawer).getByRole("button", { name: "停用" }));
@@ -186,6 +168,43 @@ describe("AutoTagRulesDrawer", () => {
     ]));
   });
 
+  test("edits a merged primary label once and saves it to every child rule in the group", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    const primaryInput = within(drawer).getByDisplayValue("费用");
+    await user.clear(primaryInput);
+    await user.type(primaryInput, "支出费用");
+    await user.click(buttonByName(drawer, "保存"));
+
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    const activeRules = payload?.active_rules as Array<Record<string, unknown>>;
+    expect(activeRules.filter((rule) => rule.code === "fee" || rule.code === "salary")).toEqual([
+      expect.objectContaining({ code: "fee", output_primary_label: "支出费用" }),
+      expect.objectContaining({ code: "salary", output_primary_label: "支出费用" }),
+    ]);
+  });
+
+  test("splits the same primary label into separate merged cells when priorities differ", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "手续费");
+    expect(within(drawer).getAllByDisplayValue("费用")).toHaveLength(1);
+
+    const salaryRow = rowForText(drawer, "工资");
+    const salaryPriority = within(salaryRow).getByLabelText("费用 / 工资 优先级", { selector: "input" });
+    await user.clear(salaryPriority);
+    await user.type(salaryPriority, "3");
+
+    await waitFor(() => expect(within(drawer).getAllByDisplayValue("费用")).toHaveLength(2));
+  });
+
   test("manages match fields with select all and clear actions without showing all text as an option", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -198,16 +217,21 @@ describe("AutoTagRulesDrawer", () => {
     await editCondition(user, drawer, "往来款 / 外部往来候选", "包含", "借据号");
     const editedRow = rowForDisplayValue(drawer, "外部往来候选");
 
-    await user.click(buttonByName(editedRow, "清空"));
+    await user.click(matchFieldCombobox(editedRow));
+    let listbox = await screen.findByRole("listbox");
+    expect(within(listbox).getByRole("button", { name: "全选" })).toBeInTheDocument();
+    expect(within(listbox).getByRole("button", { name: "清空" })).toBeInTheDocument();
+    await user.click(within(listbox).getByRole("button", { name: "清空" }));
+    await user.keyboard("{Escape}");
     await user.click(buttonByName(drawer, "保存"));
 
     expect(await within(drawer).findByText("往来款 至少选择一个匹配字段。")).toBeInTheDocument();
     expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
 
-    await user.click(buttonByName(editedRow, "全选"));
     await user.click(matchFieldCombobox(editedRow));
-    const listbox = await screen.findByRole("listbox");
+    listbox = await screen.findByRole("listbox");
     expect(within(listbox).queryByRole("option", { name: /全部文本/ })).not.toBeInTheDocument();
+    await user.click(within(listbox).getByRole("button", { name: "全选" }));
     await user.keyboard("{Escape}");
     await user.click(buttonByName(drawer, "保存"));
 
@@ -244,6 +268,8 @@ describe("AutoTagRulesDrawer", () => {
     await user.click(await screen.findByRole("option", { name: "支出" }));
     await editCondition(user, drawer, "往来款 / 外部往来候选", "包含", "借据号");
     await editCondition(user, drawer, "往来款 / 外部往来候选", "必须同时包含", "还款");
+    expect(within(drawer).getByText("借据号")).toBeInTheDocument();
+    expect(within(drawer).queryByText(/共 \d+ 项/)).not.toBeInTheDocument();
     await user.click(buttonByName(drawer, "保存"));
 
     const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
@@ -253,6 +279,7 @@ describe("AutoTagRulesDrawer", () => {
         output_primary_label: "往来款",
         output_sub_label: "外部往来候选",
         direction: "expense",
+        priority: 2,
         account_scope: { type: "any", values: [] },
         rules: expect.objectContaining({
           contains_any: ["借据号"],
@@ -274,7 +301,7 @@ describe("AutoTagRulesDrawer", () => {
     await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
     await user.click(buttonByName(drawer, "保存"));
 
-    expect(await within(drawer).findByText("优先级 4 的主标签名称不能为空。")).toBeInTheDocument();
+    expect(await within(drawer).findByText("第 3 条规则的主标签名称不能为空。")).toBeInTheDocument();
     expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
     expect(within(drawer).queryByText(/正则命中/)).not.toBeInTheDocument();
   });
@@ -325,6 +352,7 @@ describe("AutoTagRulesDrawer", () => {
     expect(payload?.active_rules).toEqual(expect.arrayContaining([
       expect.objectContaining({
         label: "银行利息",
+        priority: 2,
         output_primary_label: "收入",
         output_sub_label: "银行利息",
         account_scope: { type: "any", values: [] },
@@ -336,11 +364,14 @@ describe("AutoTagRulesDrawer", () => {
   test("keeps automatic tag rule drawer styling table-based and non-truncating", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
-    expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s*\{[^}]*width:\s*min\(1280px,\s*92vw\)/s);
+    expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s*\{[^}]*width:\s*100vw/s);
     expect(source).toMatch(/\.bank-auto-tag-table-container\s*\{[^}]*overflow-x:\s*hidden/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*table-layout:\s*fixed/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*width:\s*100%/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s+\.MuiTableCell-root\s*\{[^}]*white-space:\s*normal/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-summary\.MuiButton-root\s*\{[^}]*min-height:\s*36px/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-preview\s*\{[^}]*white-space:\s*normal/s);
+    expect(source).toMatch(/\.bank-auto-tag-primary-cell\.MuiTableCell-root\s*\{[^}]*border-right/s);
+    expect(source).toMatch(/\.bank-auto-tag-field-menu-actions\s*\{/);
   });
 });

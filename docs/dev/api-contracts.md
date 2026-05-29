@@ -152,6 +152,8 @@
 
 当 `category_resolution_status=needs_confirmation` 时，前端只能展示 `auto_candidate_categories` 作为确认项，不得回退到全量银行明细标签字典。确认后接口返回的行应表现为 `manual_confirmed`，`effective_*` 字段按确认标签填充；撤销后回到当前自动规则重新计算结果。
 
+自动候选生成按优先级层级收敛：`内部往来款` priority `1` 先执行并命中即停止；普通规则按 priority 从小到大分桶执行。某个普通 priority 层级一旦存在命中，后端不再检查更低优先级层级；该层级命中一个标签返回 `auto_matched`，命中多个标签返回 `needs_confirmation`，候选列表只包含该层级命中的标签。
+
 `POST /api/bank-details/transactions/{transaction_id}/category-confirmation`
 
 从当前自动规则命中的候选标签中确认一个标签。请求体：
@@ -193,8 +195,8 @@
 | `code` | 稳定标签身份；新增标签保存前可为空，保存后由后端生成。 |
 | `label` | 当前显示名称。 |
 | `status` | `active` 或 `archived`。 |
-| `priority` / `priority_label` | 可用区优先级；系统规则固定为 1，普通规则从 2 开始；停用区可为空。 |
-| `sort_order` | 同优先级内排序号；可用区返回。 |
+| `priority` / `priority_label` | 可用区优先级；系统规则固定为 1，普通规则默认为 2，且必须大于等于 2。 |
+| `sort_order` | 同优先级内稳定排序号；用于保持 xlsx/file 原始业务顺序，不表达执行优先级。 |
 | `direction` | 适用方向：`income`、`expense`、`any`。 |
 | `account_scope` | 兼容保留的适用账户范围字段：`{"type":"any","values":[]}`、`bank_account`、`account_type` 或 `bank`。普通维护 UI 不编辑账户范围，保存时固定写 `{"type":"any","values":[]}`。 |
 | `rules.match_fields` | 语义字段列表。 |
@@ -257,6 +259,8 @@
 - 请求提交完整的可用区和停用区文本规则列表。`internal_transfer` 不在请求体中提交。
 - 已存在标签必须携带原 `code`；新建标签不得提交 `code`，由后端生成稳定 `custom_...` code。
 - 可用标签的 `output_primary_label` 去首尾空格后不能为空；唯一性按 `output_primary_label + output_sub_label` 组合判断，同主同子不允许重复，停用区允许历史重复。
+- 可用普通标签的 `priority` 必须是大于等于 `2` 的整数；`1`、`0`、负数、小数和非数字字符串均返回 `invalid_auto_tag_rule` 结构化字段错误。缺失 priority 仅在新建或历史兼容路径按 `2` 处理。
+- 保存后返回按 `priority ASC, sort_order ASC` 排序的规则；同一优先级内不按标签名称重排，避免打散 xlsx 原始业务顺序。
 - 普通维护 UI 保存时，所有规则固定提交 `account_scope={"type":"any","values":[]}` 和 `rules.regex_any=[]`。后端继续兼容读取旧数据中的账户范围和正则字段，但普通维护 UI 不生成这些高级条件。
 - 可用标签必须至少填写 `exact_any`、`contains_any` 或 `contains_all` 中的一类；`none_of` 只能为空或配合正向条件使用，不能单独构成命中。
 - `match_fields` 只能使用 `field_options` 中的语义字段，且不能为空。
@@ -271,6 +275,7 @@
 - 需要银行明细写权限。
 - 请求体为空时使用仓库内 `fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json` 作为生产基准规则；也可提交同结构 JSON 或 `{ "source": ... }`。
 - 后端用文件内普通规则替换当前普通自动标签规则，保留 `内部往来款` 系统规则；能按主标签+子标签复用的标签沿用原 code，无法复用的生成新 code，不在文件内的旧普通规则归档。
+- 文件内普通规则全部写入 priority `2`，并用 `sort_order` 保留文件顺序；`内部往来款` 仍是固定系统规则 priority `1`。
 - 被归档标签若被待找发票规则或免 OA 批量标签选择引用，后端同步移除引用并审计。
 - 成功后触发 `bank_auto_tag_rules_changed` 生命周期事件和银行明细 read model 刷新。
 

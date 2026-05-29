@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import AddIcon from "@mui/icons-material/Add";
-import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
-import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import CloseIcon from "@mui/icons-material/Close";
 import DeleteIcon from "@mui/icons-material/Delete";
 import RestoreIcon from "@mui/icons-material/Restore";
@@ -61,6 +59,13 @@ type AutoTagRulesDrawerProps = {
 
 type DraftRule = BankAutoTagEditableRule & { localId: string };
 type RuleConditionKey = "containsAny" | "containsAll" | "exactAny" | "noneOf";
+type RuleGroup = {
+  key: string;
+  priority: number;
+  primaryLabel: string;
+  colorClass: string;
+  rules: DraftRule[];
+};
 
 const EMPTY_RULES: BankAutoTagRuleConditions = {
   matchFields: ["all_text"],
@@ -78,10 +83,20 @@ const DIRECTION_OPTIONS: { value: BankAutoTagDirection; label: string }[] = [
 ];
 
 const HIDDEN_MATCH_FIELDS = new Set(["all_text"]);
+const GROUP_COLOR_CLASSES = [
+  "bank-auto-tag-group-blue",
+  "bank-auto-tag-group-teal",
+  "bank-auto-tag-group-green",
+  "bank-auto-tag-group-amber",
+  "bank-auto-tag-group-violet",
+  "bank-auto-tag-group-rose",
+];
 
 function cloneRule(rule: BankAutoTagEditableRule, index: number): DraftRule {
   return {
     ...rule,
+    priority: normalizeRulePriority(rule.priority),
+    sortOrder: typeof rule.sortOrder === "number" ? rule.sortOrder : index + 1,
     localId: rule.code || `new-${index}`,
     accountScope: { type: "any", values: [] },
     rules: {
@@ -120,6 +135,8 @@ function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
   return {
     ...(rule.code ? { code: rule.code } : {}),
     label,
+    priority: normalizeRulePriority(rule.priority),
+    ...(typeof rule.sortOrder === "number" ? { sortOrder: rule.sortOrder } : {}),
     outputPrimaryLabel,
     outputSubLabel,
     direction: rule.direction,
@@ -142,6 +159,11 @@ function normalizedDraft(activeRules: DraftRule[], archivedRules: DraftRule[]) {
   });
 }
 
+function normalizeRulePriority(value: unknown) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 2 ? parsed : 2;
+}
+
 function ruleHasPositiveCondition(rule: DraftRule) {
   return rule.rules.exactAny.length > 0 || rule.rules.containsAny.length > 0 || rule.rules.containsAll.length > 0;
 }
@@ -152,7 +174,10 @@ function validateDraft(activeRules: DraftRule[]) {
     const outputPrimaryLabel = rule.outputPrimaryLabel.trim();
     const outputSubLabel = rule.outputSubLabel.trim();
     if (!outputPrimaryLabel) {
-      return `优先级 ${index + 2} 的主标签名称不能为空。`;
+      return `第 ${index + 1} 条规则的主标签名称不能为空。`;
+    }
+    if (!Number.isInteger(rule.priority) || Number(rule.priority) < 2) {
+      return `${outputPrimaryLabel} 的普通规则优先级必须是大于等于 2 的整数。`;
     }
     const labelPathKey = `${outputPrimaryLabel}\u0000${outputSubLabel}`;
     if (seenLabelPaths.has(labelPathKey)) {
@@ -178,37 +203,8 @@ function ruleDisplayLabel(rule: Pick<DraftRule, "label" | "outputPrimaryLabel" |
   return primary || rule.label.trim() || "未命名标签";
 }
 
-export function reorderRulesById<T extends { localId: string }>(rules: T[], activeId: string, overId?: string | null) {
-  if (!overId || activeId === overId) {
-    return rules;
-  }
-  const activeIndex = rules.findIndex((rule) => rule.localId === activeId);
-  const overIndex = rules.findIndex((rule) => rule.localId === overId);
-  if (activeIndex < 0 || overIndex < 0) {
-    return rules;
-  }
-  const next = [...rules];
-  const [movedRule] = next.splice(activeIndex, 1);
-  next.splice(overIndex, 0, movedRule);
-  return next;
-}
-
-function moveRule<T>(rules: T[], index: number, direction: -1 | 1) {
-  const targetIndex = index + direction;
-  if (targetIndex < 0 || targetIndex >= rules.length) {
-    return rules;
-  }
-  const next = [...rules];
-  const [item] = next.splice(index, 1);
-  next.splice(targetIndex, 0, item);
-  return next;
-}
-
-function conditionSummary(values: string[]) {
-  if (!values.length) {
-    return "无";
-  }
-  return `共 ${values.length} 项`;
+function conditionDisplay(values: string[]) {
+  return values.length ? values : ["无"];
 }
 
 function fieldLabels(values: string[], fieldOptions: BankAutoTagRulesResponse["fieldOptions"]) {
@@ -216,6 +212,35 @@ function fieldLabels(values: string[], fieldOptions: BankAutoTagRulesResponse["f
     .filter((value) => !HIDDEN_MATCH_FIELDS.has(value))
     .map((value) => fieldOptions.find((option) => option.value === value)?.label ?? value);
   return labels.length ? labels.join("、") : "未选择";
+}
+
+function groupRules(rules: DraftRule[]): RuleGroup[] {
+  const groups: RuleGroup[] = [];
+  const byKey = new Map<string, RuleGroup>();
+  const sortedRules = [...rules].sort((left, right) => (
+    normalizeRulePriority(left.priority) - normalizeRulePriority(right.priority)
+    || Number(left.sortOrder ?? 10_000) - Number(right.sortOrder ?? 10_000)
+    || String(left.code ?? left.localId).localeCompare(String(right.code ?? right.localId), "zh-Hans-CN")
+  ));
+  for (const rule of sortedRules) {
+    const priority = normalizeRulePriority(rule.priority);
+    const primaryLabel = rule.outputPrimaryLabel.trim() || "未命名主标签";
+    const key = `${priority}\u0000${primaryLabel}`;
+    let group = byKey.get(key);
+    if (!group) {
+      group = {
+        key,
+        priority,
+        primaryLabel,
+        colorClass: GROUP_COLOR_CLASSES[groups.length % GROUP_COLOR_CLASSES.length],
+        rules: [],
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.rules.push(rule);
+  }
+  return groups;
 }
 
 export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStatus = "idle", refreshScope }: AutoTagRulesDrawerProps) {
@@ -285,6 +310,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
   const dirty = useMemo(() => normalizedDraft(activeRules, archivedRules) !== baseline, [activeRules, archivedRules, baseline]);
   const readonly = !canSave || saving || loading;
   const visibleFieldOptions = fieldOptions.filter((option) => !HIDDEN_MATCH_FIELDS.has(option.value));
+  const activeRuleGroups = useMemo(() => groupRules(activeRules), [activeRules]);
 
   const requestClose = () => {
     if (dirty && !window.confirm("自动标签规则有未保存修改，确定关闭吗？")) {
@@ -295,6 +321,13 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
 
   const updateActiveRule = (localId: string, updater: (rule: DraftRule) => DraftRule) => {
     setActiveRules((current) => current.map((rule) => (rule.localId === localId ? updater(rule) : rule)));
+  };
+
+  const updateGroupPrimaryLabel = (group: RuleGroup, value: string) => {
+    const localIds = new Set(group.rules.map((rule) => rule.localId));
+    setActiveRules((current) => current.map((rule) => (
+      localIds.has(rule.localId) ? { ...rule, outputPrimaryLabel: value } : rule
+    )));
   };
 
   const addRule = () => {
@@ -308,6 +341,9 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         outputSubLabel: "",
         status: "active",
         source: "custom",
+        priority: 2,
+        priorityLabel: "优先级 2",
+        sortOrder: current.length + archivedRules.length + 1,
         direction: "any",
         accountScope: { type: "any", values: [] },
         rules: { ...EMPTY_RULES, matchFields: ["purpose_text", "summary_text", "note_text", "detail_text"] },
@@ -329,7 +365,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
       if (target.code) {
         setArchivedRules((archived) => [
           ...archived.filter((rule) => rule.code !== target.code),
-          { ...target, status: "archived", priority: undefined, priorityLabel: undefined },
+          { ...target, status: "archived" },
         ]);
       }
       return current.filter((rule) => rule.localId !== localId);
@@ -342,7 +378,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
       if (!target) {
         return current;
       }
-      setActiveRules((active) => [...active, { ...target, status: "active" }]);
+      setActiveRules((active) => [...active, { ...target, status: "active", priority: normalizeRulePriority(target.priority) }]);
       return current.filter((rule) => rule.localId !== localId);
     });
     setTab("active");
@@ -403,7 +439,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         "aria-label": open ? "自动标签规则" : undefined,
         className: "bank-auto-tag-drawer-paper",
         role: "dialog",
-        sx: { width: { xs: "100%", md: "92vw" }, maxWidth: 1280 },
+        sx: { width: "100vw", maxWidth: "100vw" },
       }}
     >
       <Stack className="bank-auto-tag-drawer">
@@ -490,9 +526,9 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                       <TableCell align="right"><Chip size="small" label="只读" /></TableCell>
                     </TableRow>
                   ) : null}
-                  {activeRules.map((rule, index) => (
-                    <TableRow key={rule.localId} className="bank-auto-tag-rule-row">
-                      <TableCell sx={{ minWidth: 92 }}>
+                  {activeRuleGroups.flatMap((group) => group.rules.map((rule, rowIndex) => (
+                    <TableRow key={rule.localId} className={`bank-auto-tag-rule-row ${group.colorClass}`}>
+                      <TableCell>
                         <Select
                           size="small"
                           value={rule.direction}
@@ -509,19 +545,21 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                           ))}
                         </Select>
                       </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          label="主标签名称"
-                          value={rule.outputPrimaryLabel}
-                          disabled={readonly}
-                          inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 主标签` }}
-                          onChange={(event) => updateActiveRule(rule.localId, (current) => ({
-                            ...current,
-                            outputPrimaryLabel: event.target.value,
-                          }))}
-                        />
-                      </TableCell>
+                      {rowIndex === 0 ? (
+                        <TableCell
+                          rowSpan={group.rules.length}
+                          className={`bank-auto-tag-primary-cell ${group.colorClass}`}
+                        >
+                          <TextField
+                            size="small"
+                            label="主标签名称"
+                            value={group.primaryLabel === "未命名主标签" ? "" : group.primaryLabel}
+                            disabled={readonly}
+                            inputProps={{ "aria-label": `${group.primaryLabel} 合并主标签` }}
+                            onChange={(event) => updateGroupPrimaryLabel(group, event.target.value)}
+                          />
+                        </TableCell>
+                      ) : null}
                       <TableCell>
                         <TextField
                           size="small"
@@ -535,7 +573,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                           }))}
                         />
                       </TableCell>
-                      <TableCell sx={{ minWidth: 220 }}>
+                      <TableCell>
                         <FormControl size="small" fullWidth disabled={readonly}>
                           <InputLabel id={`${rule.localId}-fields-label`}>选择查询的项</InputLabel>
                           <Select
@@ -546,13 +584,44 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                             renderValue={(selected) => fieldLabels(selected, fieldOptions)}
                             onChange={(event) => {
                               const value = event.target.value;
-                              const selectedValues = typeof value === "string" ? value.split(",") : value;
+                              const selectedValues = (typeof value === "string" ? value.split(",") : value)
+                                .map((item) => String(item || "").trim())
+                                .filter((item) => item && !HIDDEN_MATCH_FIELDS.has(item));
                               updateActiveRule(rule.localId, (current) => ({
                                 ...current,
                                 rules: { ...current.rules, matchFields: selectedValues },
                               }));
                             }}
                           >
+                            <Box className="bank-auto-tag-field-menu-actions" onMouseDown={(event) => event.preventDefault()}>
+                              <Button
+                                size="small"
+                                disabled={readonly}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  updateActiveRule(rule.localId, (current) => ({
+                                    ...current,
+                                    rules: { ...current.rules, matchFields: visibleFieldOptions.map((option) => option.value) },
+                                  }));
+                                }}
+                              >
+                                全选
+                              </Button>
+                              <Button
+                                size="small"
+                                color="inherit"
+                                disabled={readonly}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  updateActiveRule(rule.localId, (current) => ({
+                                    ...current,
+                                    rules: { ...current.rules, matchFields: [] },
+                                  }));
+                                }}
+                              >
+                                清空
+                              </Button>
+                            </Box>
                             {visibleFieldOptions.map((option) => (
                               <MenuItem key={option.value} value={option.value}>
                                 <Checkbox checked={rule.rules.matchFields.includes(option.value)} />
@@ -561,31 +630,6 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                             ))}
                           </Select>
                         </FormControl>
-                        <Stack direction="row" spacing={0.5} mt={0.75}>
-                          <Button
-                            size="small"
-                            variant="text"
-                            disabled={readonly}
-                            onClick={() => updateActiveRule(rule.localId, (current) => ({
-                              ...current,
-                              rules: { ...current.rules, matchFields: visibleFieldOptions.map((option) => option.value) },
-                            }))}
-                          >
-                            全选
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="text"
-                            color="inherit"
-                            disabled={readonly}
-                            onClick={() => updateActiveRule(rule.localId, (current) => ({
-                              ...current,
-                              rules: { ...current.rules, matchFields: [] },
-                            }))}
-                          >
-                          清空
-                          </Button>
-                        </Stack>
                       </TableCell>
                       <ConditionCell
                         ruleLabel={ruleDisplayLabel(rule)}
@@ -615,33 +659,22 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                         disabled={readonly}
                         onEdit={() => setConditionEditor({ localId: rule.localId, key: "noneOf", label: "不包含字样", values: rule.rules.noneOf })}
                       />
-                      <TableCell>{index + 2}</TableCell>
+                      <TableCell>
+                        <TextField
+                          size="small"
+                          type="number"
+                          label="优先级"
+                          value={rule.priority ?? 2}
+                          disabled={readonly}
+                          inputProps={{ min: 2, step: 1, "aria-label": `${ruleDisplayLabel(rule)} 优先级` }}
+                          onChange={(event) => updateActiveRule(rule.localId, (current) => ({
+                            ...current,
+                            priority: event.target.value === "" ? undefined : Number(event.target.value),
+                          }))}
+                        />
+                      </TableCell>
                       <TableCell align="right">
                         <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
-                          <Tooltip title="上移">
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label={`上移 ${ruleDisplayLabel(rule)}`}
-                                disabled={readonly || index === 0}
-                                onClick={() => setActiveRules((current) => moveRule(current, index, -1))}
-                              >
-                                <ArrowUpwardIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                          <Tooltip title="下移">
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label={`下移 ${ruleDisplayLabel(rule)}`}
-                                disabled={readonly || index === activeRules.length - 1}
-                                onClick={() => setActiveRules((current) => moveRule(current, index, 1))}
-                              >
-                                <ArrowDownwardIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
                           <Tooltip title="停用">
                             <span>
                               <IconButton
@@ -657,7 +690,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                         </Stack>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  )))}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -747,7 +780,7 @@ function ConditionCell({
   onEdit: () => void;
 }) {
   return (
-    <TableCell sx={{ minWidth: 112 }}>
+    <TableCell>
       <Button
         className="bank-auto-tag-condition-summary"
         size="small"
@@ -756,13 +789,15 @@ function ConditionCell({
         disabled={disabled}
         onClick={onEdit}
       >
-        {conditionSummary(values)}
+        编辑
       </Button>
-      {values.length > 0 ? (
-        <Typography className="bank-auto-tag-condition-preview" variant="caption" color="text.secondary">
-          {values.slice(0, 2).join("、")}{values.length > 2 ? "…" : ""}
-        </Typography>
-      ) : null}
+      <Stack className="bank-auto-tag-condition-preview" spacing={0.25}>
+        {conditionDisplay(values).map((value) => (
+          <Typography key={value} component="span" variant="caption" color={value === "无" ? "text.secondary" : "text.primary"}>
+            {value}
+          </Typography>
+        ))}
+      </Stack>
     </TableCell>
   );
 }

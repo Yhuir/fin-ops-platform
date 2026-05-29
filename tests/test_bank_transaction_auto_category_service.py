@@ -313,7 +313,8 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
                         "path": ["自动识别", "保证金保险"],
                         "source": "custom",
                         "status": "active",
-                        "priority": 20,
+                        "priority": 2,
+                        "sort_order": 2,
                         "rules": {
                             "match_fields": ["summary_text"],
                             "exact_any": [],
@@ -329,7 +330,8 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
                         "path": ["自动识别", "人员保险"],
                         "source": "custom",
                         "status": "active",
-                        "priority": 10,
+                        "priority": 2,
+                        "sort_order": 1,
                         "rules": {
                             "match_fields": ["summary_text"],
                             "exact_any": [],
@@ -357,6 +359,55 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
             ["custom_staff_insurance", "custom_project_insurance"],
         )
         self.assertEqual(suggestion["rule_version"], "bank-auto-tag-rules:16")
+
+    def test_higher_priority_match_stops_lower_priority_candidates(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 17,
+                "definitions": [
+                    {
+                        "code": "custom_staff_insurance",
+                        "label": "人员保险",
+                        "path": ["自动识别", "人员保险"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 2,
+                        "sort_order": 1,
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "exact_any": [],
+                            "contains_any": ["保险费"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    },
+                    {
+                        "code": "custom_project_insurance",
+                        "label": "保证金保险",
+                        "path": ["自动识别", "保证金保险"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 3,
+                        "sort_order": 2,
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "exact_any": [],
+                            "contains_any": ["保险"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    },
+                ],
+            }
+        )
+
+        suggestion = self.service.suggest_for_rows([{"id": "txn-insurance", "summary": "保险费"}])["txn-insurance"]
+
+        self.assertEqual(suggestion["category_resolution_status"], "auto_matched")
+        self.assertEqual(suggestion["category_code"], "custom_staff_insurance")
+        self.assertEqual(suggestion["auto_candidate_category_codes"], ["custom_staff_insurance"])
 
     def test_external_turnover_candidate_runs_after_specific_business_rules(self) -> None:
         suggestions = self.service.suggest_for_rows(

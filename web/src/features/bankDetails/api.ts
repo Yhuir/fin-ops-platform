@@ -166,6 +166,7 @@ type ApiBankAutoTagEditableRule = {
   source?: "system" | "custom";
   priority?: number;
   priority_label?: string;
+  sort_order?: number;
   output_primary_label?: string;
   output_sub_label?: string;
   direction?: string;
@@ -526,6 +527,7 @@ function mapAutoTagEditableRule(rule: ApiBankAutoTagEditableRule): BankAutoTagEd
     source: rule.source === "system" ? "system" : "custom",
     priority: typeof rule.priority === "number" ? rule.priority : undefined,
     priorityLabel: String(rule.priority_label ?? "").trim() || undefined,
+    sortOrder: typeof rule.sort_order === "number" ? rule.sort_order : undefined,
     outputPrimaryLabel: String(rule.output_primary_label ?? rule.label ?? "").trim(),
     outputSubLabel: String(rule.output_sub_label ?? "").trim(),
     direction: mapAutoTagDirection(rule.direction),
@@ -591,6 +593,8 @@ function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) 
     active_rules: payload.activeRules.map((rule) => ({
       ...(rule.code ? { code: rule.code } : {}),
       label: rule.label,
+      ...(typeof rule.priority === "number" ? { priority: rule.priority } : {}),
+      ...(typeof rule.sortOrder === "number" ? { sort_order: rule.sortOrder } : {}),
       output_primary_label: rule.outputPrimaryLabel,
       output_sub_label: rule.outputSubLabel,
       direction: rule.direction,
@@ -600,6 +604,8 @@ function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) 
     archived_rules: payload.archivedRules.map((rule) => ({
       ...(rule.code ? { code: rule.code } : {}),
       label: rule.label,
+      ...(typeof rule.priority === "number" ? { priority: rule.priority } : {}),
+      ...(typeof rule.sortOrder === "number" ? { sort_order: rule.sortOrder } : {}),
       output_primary_label: rule.outputPrimaryLabel,
       output_sub_label: rule.outputSubLabel,
       direction: rule.direction,
