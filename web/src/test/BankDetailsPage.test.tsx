@@ -507,7 +507,7 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
-  test("uncategorized rows display a dash in the narrow type column", async () => {
+  test("uncategorized unmatched rows display a confirmation entry in the narrow type column", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderBankDetailsPage();
@@ -521,11 +521,29 @@ describe("Bank details page", () => {
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
     const table = await within(page).findByRole("table", { name: "交易流水" });
     expect(await within(table).findByText("普通供应商")).toBeInTheDocument();
-    expect(table.querySelector(".bank-auto-type-empty")).toHaveTextContent("-");
+    expect(within(table).getByRole("button", { name: "待确认" })).toBeInTheDocument();
     categoryPanel = await openCategoryFilterPanel(user, page);
     expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 1" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
+  });
+
+  test("unmatched rows open all active bank tag options for manual selection", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    const table = await within(page).findByRole("table", { name: "交易流水" });
+    expect(await within(table).findByText("普通供应商")).toBeInTheDocument();
+
+    await user.click(within(table).getByRole("button", { name: "待确认" }));
+
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "费用 / 工资" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "费用 / 手续费" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "质保金 / 待收款" })).toBeInTheDocument();
   });
 
   test("shows primary and sub tag labels in bank transaction rows", async () => {

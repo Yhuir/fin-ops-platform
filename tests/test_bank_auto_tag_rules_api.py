@@ -220,6 +220,35 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_category_confirmation_candidate")
         self.assertEqual(confirm_calls, [])
 
+    def test_confirmation_endpoint_allows_unmatched_row_to_choose_active_tag(self) -> None:
+        app = build_application()
+        confirm_calls: list[dict[str, object]] = []
+
+        def confirm_stub(**kwargs: object) -> dict[str, object]:
+            confirm_calls.append(dict(kwargs))
+            return {"ok": True}
+
+        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: None
+        app._bank_transaction_category_service.confirm_auto_category = confirm_stub
+        app._bank_transaction_category_affected_months = lambda _transaction_ids: []
+        app._after_bank_category_confirmation_mutation = lambda **_kwargs: None
+        app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_detail_category_confirmation(
+                "txn-unmatched",
+                json.dumps({"category_code": "fee"}),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(confirm_calls[0]["transaction_id"], "txn-unmatched")
+        self.assertEqual(confirm_calls[0]["category_code"], "fee")
+        self.assertIn("fee", confirm_calls[0]["candidate_category_codes"])
+        self.assertIn("salary", confirm_calls[0]["candidate_category_codes"])
+
     def test_put_renames_reorders_adds_archives_audits_and_triggers_lifecycle(self) -> None:
         app = build_application()
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()

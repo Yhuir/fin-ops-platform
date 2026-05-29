@@ -142,6 +142,15 @@ function tagDefinitionDisplayParts(tag: BankTransactionTagDefinition) {
   };
 }
 
+function tagDefinitionSelectionLabel(tag: BankTransactionTagDefinition) {
+  const parts = tagDefinitionDisplayParts(tag);
+  const path = [parts.primaryLabel, parts.subLabel].map((value) => value.trim()).filter(Boolean);
+  if (path.length > 0) {
+    return path.join(" / ");
+  }
+  return tagDefinitionDisplayLabel(tag) || tag.code;
+}
+
 function buildCategoryTree(items: CategorySummaryItem[]): CategoryTreeGroup[] {
   const groups = new Map<string, CategoryTreeGroup>();
   items.forEach((item) => {
@@ -709,16 +718,43 @@ function counterpartyNameDensity(name: string) {
 function TypeCell({
   row,
   confirming,
+  categoryOptions,
   onConfirm,
   onRevoke,
 }: {
   row: BankDetailTransaction;
   confirming: boolean;
+  categoryOptions: BankTransactionTagDefinition[];
   onConfirm: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
   onRevoke: (row: BankDetailTransaction) => void;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  if (row.categoryResolutionStatus === "needs_confirmation" && row.autoCandidateCategories.length > 0) {
+  const isUnmatchedWithoutCategory = row.categoryResolutionStatus === "unmatched"
+    && !row.autoCategoryCode
+    && !row.effectiveCategoryCode
+    && !row.categoryCode;
+
+  const confirmationChoices = row.categoryResolutionStatus === "needs_confirmation"
+    ? row.autoCandidateCategories.map((candidate) => ({
+      categoryCode: candidate.categoryCode,
+      label: candidate.categoryLabelPath.length
+        ? candidate.categoryLabelPath.join(" / ")
+        : [candidate.categoryPrimaryLabel, candidate.categorySubLabel].filter(Boolean).join(" / ") || candidate.categoryLabel || candidate.categoryCode,
+    }))
+    : isUnmatchedWithoutCategory
+    ? categoryOptions.reduce<Array<{ categoryCode: BankTransactionCategoryCode; label: string }>>((choices, tag) => {
+      if (tag.status === "archived" || choices.some((choice) => choice.categoryCode === tag.code)) {
+        return choices;
+      }
+      choices.push({
+        categoryCode: tag.code,
+        label: tagDefinitionSelectionLabel(tag),
+      });
+      return choices;
+    }, [])
+    : [];
+
+  if (confirmationChoices.length > 0) {
     return (
       <>
         <Button
@@ -735,22 +771,17 @@ function TypeCell({
           open={Boolean(anchorEl)}
           onClose={() => setAnchorEl(null)}
         >
-          {row.autoCandidateCategories.map((candidate) => {
-            const labelPath = candidate.categoryLabelPath.length
-              ? candidate.categoryLabelPath.join(" / ")
-              : [candidate.categoryPrimaryLabel, candidate.categorySubLabel].filter(Boolean).join(" / ") || candidate.categoryLabel || candidate.categoryCode;
-            return (
-              <MenuItem
-                key={candidate.categoryCode}
-                onClick={() => {
-                  setAnchorEl(null);
-                  onConfirm(row, candidate.categoryCode);
-                }}
-              >
-                {labelPath}
-              </MenuItem>
-            );
-          })}
+          {confirmationChoices.map((choice) => (
+            <MenuItem
+              key={choice.categoryCode}
+              onClick={() => {
+                setAnchorEl(null);
+                onConfirm(row, choice.categoryCode);
+              }}
+            >
+              {choice.label}
+            </MenuItem>
+          ))}
         </Menu>
       </>
     );
@@ -1561,6 +1592,7 @@ export default function BankDetailsPage() {
                           <TypeCell
                             row={row}
                             confirming={categoryMutationId === row.id}
+                            categoryOptions={categoryOptions}
                             onConfirm={handleConfirmCategory}
                             onRevoke={handleRevokeCategoryConfirmation}
                           />
