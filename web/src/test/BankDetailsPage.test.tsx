@@ -309,8 +309,8 @@ describe("Bank details page", () => {
     await waitFor(() => {
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
       expect(transactionRequest?.searchParams.get("category_code")).toBe("salary");
-      expect(transactionRequest?.searchParams.get("category_primary_label")).toBe("费用");
-      expect(transactionRequest?.searchParams.get("category_sub_label")).toBe("工资");
+      expect(transactionRequest?.searchParams.get("category_primary_label")).toBeNull();
+      expect(transactionRequest?.searchParams.get("category_sub_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
     expect(within(page).getByRole("button", { name: /标签筛选：费用 \/ 工资 1/ })).toBeInTheDocument();
@@ -325,6 +325,28 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
     expect(within(page).getByRole("button", { name: /标签筛选：未分类 295/ })).toBeInTheDocument();
+  });
+
+  test("filters code-only system tags by category code without derived label constraints", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+
+    const categoryPanel = await openCategoryFilterPanel(user, page);
+    await user.click(within(categoryPanel).getByRole("menuitem", { name: "内部往来款 2" }));
+
+    await waitFor(() => {
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(transactionRequest?.searchParams.get("category_code")).toBe("internal_transfer");
+      expect(transactionRequest?.searchParams.get("category_primary_label")).toBeNull();
+      expect(transactionRequest?.searchParams.get("category_sub_label")).toBeNull();
+      expect(transactionRequest?.searchParams.get("page")).toBe("1");
+    });
+    expect(await within(page).findByText("云南溯源科技有限公司建设银行账户")).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: /标签筛选：内部往来款 2/ })).toBeInTheDocument();
   });
 
   test("opens automatic tag rules drawer from the page toolbar", async () => {

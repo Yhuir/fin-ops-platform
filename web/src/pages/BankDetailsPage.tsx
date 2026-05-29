@@ -206,8 +206,8 @@ function categoryFilterRequestParams(filter: BankCategoryFilter): BankCategoryFi
   if (filter.kind === "tag") {
     return {
       categoryCode: filter.code,
-      categoryPrimaryLabel: filter.primaryLabel,
-      categorySubLabel: filter.subLabel,
+      categoryPrimaryLabel: null,
+      categorySubLabel: null,
     };
   }
   return {
@@ -608,7 +608,9 @@ function BankDetailsTableToolbar({
                   {categoryGroups.map((group) => (
                     <Box className="bank-category-filter-group" key={group.key}>
                       {renderCategoryFilterButton(
-                        { kind: "primary", primaryLabel: group.label },
+                        group.directItem && group.children.length === 0
+                          ? tagCategoryFilter(group.directItem)
+                          : { kind: "primary", primaryLabel: group.label },
                         group.label,
                         group.count,
                         "primary",
