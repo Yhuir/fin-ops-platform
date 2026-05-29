@@ -82,7 +82,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
         self.assertIn("verify_finops_deploy_control_contract", remote_script)
         self.assertIn("deploy-control helper still loads the retired /root PostgreSQL env", remote_script)
-        self.assertIn("/etc/fin-ops/fin-ops.secrets.env", remote_script)
+        self.assertIn("deploy-control helper does not load fin-ops.secrets.env", remote_script)
         self.assertIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
         self.assertIn("wait_finops_backend_ready", remote_script)
         self.assertIn("check_finops_session_route /fin-ops-api/api/session/me", remote_script)
