@@ -28,6 +28,8 @@ class RedisRecorder:
         self.text_values = dict(text_values or {})
         self.get_json_calls: list[str] = []
         self.get_text_calls: list[str] = []
+        self.set_json_calls: list[tuple[str, dict[str, object], int]] = []
+        self.set_text_calls: list[tuple[str, str, int]] = []
 
     def get_json(self, key: str) -> object:
         self.get_json_calls.append(key)
@@ -36,6 +38,16 @@ class RedisRecorder:
     def get_text(self, key: str) -> str | None:
         self.get_text_calls.append(key)
         return self.text_values.get(key)
+
+    def set_json(self, key: str, value: dict[str, object], *, ttl_seconds: int) -> bool:
+        self.set_json_calls.append((key, value, ttl_seconds))
+        self.json_values[key] = value
+        return True
+
+    def set_text(self, key: str, value: str, *, ttl_seconds: int) -> bool:
+        self.set_text_calls.append((key, value, ttl_seconds))
+        self.text_values[key] = value
+        return True
 
 
 def no_stale_reasons(_source_versions: object, *, scope_key: str | None = None) -> list[str]:
@@ -108,6 +120,56 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "fresh")
         self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
         self.assertEqual(redis.get_json_calls, [cache_key])
+
+    def test_groups_refreshing_status_bypasses_and_does_not_write_redis_payload(self) -> None:
+        class Repository:
+            def get_workbench_refresh_status(self, **_kwargs: object) -> dict[str, object]:
+                return {"read_model_status": "refreshing", "dirty_scopes": [{"scope_key": "all"}]}
+
+            def get_workbench_groups_page(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "month": "all",
+                    "zone": "open",
+                    "groups": [{"group_id": "fresh-db"}],
+                    "read_model_status": "fresh",
+                    "source_versions": {"builder": "v1"},
+                }
+
+        cache_key = "workbench:v7:groups:digest"
+        redis = RedisRecorder(
+            text_values={"workbench:groups:version:all": "v7"},
+            json_values={
+                cache_key: {
+                    "payload": {
+                        "month": "all",
+                        "zone": "open",
+                        "groups": [{"group_id": "stale-cached"}],
+                    }
+                }
+            },
+        )
+        queue = QueueRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=redis,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            groups_redis_version_key=lambda scope_key: f"workbench:groups:version:{scope_key}",
+            groups_cache_key_from_version=lambda **_kwargs: cache_key,
+            groups_cache_version_from_key=lambda _cache_key: "v7",
+            groups_redis_ttl_seconds=lambda: 600,
+        )
+
+        result = facade.groups("all", zone="open")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
+        self.assertEqual(redis.get_json_calls, [])
+        self.assertEqual(redis.set_json_calls, [])
+        self.assertEqual(queue.refreshes, [("all", "api_groups_source_versions_stale")])
 
 
 if __name__ == "__main__":

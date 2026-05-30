@@ -284,7 +284,7 @@ class WorkbenchQueryFacade:
                 reason="sql_status",
             )
         set_cached = getattr(self._redis_helper, "set_json", None)
-        if cache_key and callable(set_cached) and payload.get("read_model_status") == "fresh":
+        if cache_key and can_use_groups_redis_cache and callable(set_cached) and payload.get("read_model_status") == "fresh":
             set_cached(cache_key, {"payload": payload}, ttl_seconds=self._groups_redis_ttl_seconds())
         return WorkbenchQueryResult(HTTPStatus.OK, payload)
 

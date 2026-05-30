@@ -19,6 +19,9 @@
 - 未经用户确认，不得把 prompt 标记为 `verified`。
 - 不得记录 DB password、JWT secret、OA token、cookie 实值或生产 URL。
 - 后续 prompt 必须遵守 Macro-Inventory 与 Micro-JIT-Planning：先全局只读文件级分拣，再按单模块准时制深挖；不得一次性生成所有模块的详细设计或执行 prompt。
+- prompt 生成、prompt 审查、状态机更新、对应实现和该实现的 Merge Gate 必须在同一条 `codex/` 功能分支内完成。
+- Merge Gate 合入并复验 `main` 后，下一条 prompt 必须从最新 `main` 新建分支再生成；不得在 `main` 或旧功能分支上继续生成下一个模块的 prompt。
+- 不得把下一条 prompt 放在 prompt-only 分支，同时把对应实现放到另一条分支。纯流程文档分支若会约束后续实现，必须先合入 `main` 或同步到对应实现分支。
 
 Post-Flight 必须写明：
 
@@ -2279,7 +2282,7 @@ Post-Flight:
 
 ## PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)
 
-状态：`planned`
+状态：`verified`
 
 ### 目标
 
@@ -2431,3 +2434,158 @@ Post-Flight:
 - Prompt 明确保留 PF-P005 backend-only / contract-mismatch 字段，不允许借 Slice C 清理 API contract。
 - Prompt 明确不修改 SQL migration、前端、网关、部署配置、worker、builder、写路径，不执行 Traffic Gate。
 - PF-P007 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。
+
+### 执行结果
+
+- 执行分支：`codex/workbench-query-cache-freshness`。
+- 状态：`implemented`，等待用户确认，不得直接标记 `verified`。
+- 测试先行：新增 facade unit test 复现 refresh-status 为 `refreshing` 时仍写 Redis payload 的缺口。
+- 实现：`WorkbenchQueryFacade.groups(...)` 只有在 freshness gate 允许使用 groups Redis cache 且 DB payload 为 fresh 时才写 Redis JSON payload。
+- HTTP characterization 更新：stale / refreshing refresh-status 下不读取旧 Redis JSON payload，也不把 fresh-looking DB payload 写入 Redis。
+- TTL 评估：版本化 key 已具备 immutable cache 语义，但本轮保留现有 bounded TTL，避免缺少 Redis memory / cardinality 指标时改变运行时驻留策略。
+- 未修改 SQL migration、前端、网关、部署配置、生产配置、SSE、worker、builder、repository SQL 或 Workbench 写路径。
+- 用户已确认 PF-P007 verified。
+- 后续：执行已生成并审查的 `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate`。
+
+## PF-P007-MG - Workbench Query Cache and Freshness Merge Gate
+
+状态：`planned`
+
+### 目标
+
+将 PF-P007 已 verified 的 Workbench query cache/freshness gate 改动，以及同分支内同步固化的 prompt/实现分支共址工作流文档，安全合入 `main`。本 prompt 只处理 Merge Gate，不执行 Traffic Gate，不部署服务器，不开始 Slice D。
+
+### Prompt
+
+```text
+/goal
+执行 PF-P007-MG - Workbench Query Cache and Freshness Merge Gate。
+
+目标：只处理 PF-P007 已 verified 变更进入 `main` 的 Merge Gate。确认变更范围、复跑关键测试、精准 commit、同步最新 main、合入 main 并在 main 上复验。不得执行 Traffic Gate，不得部署服务器，不得开始 Slice D 或任何新的业务重构。
+
+Role:
+你是一位严格执行 Git merge gate、测试门禁、范围审计和 Python 后端重构交付纪律的资深工程师。
+
+Context:
+当前仓库执行 Python-first 后端架构模块化重构。PF-P007 已由用户确认 verified，完成 Workbench query/read-model 的 Slice C：stale / refreshing / unavailable freshness gate 未通过时，不读取旧 Redis JSON payload，也不把 fresh-looking DB payload 写入 Redis。当前分支还包含用户要求固化的“prompt / 状态机 / 实现 / Merge Gate 同分支，MG 合入 main 后从最新 main 新建下一分支”的工作流文档修正。
+
+Pre-Flight:
+必须先读取：
+- AGENTS.md
+- README.md
+- ARCHITECTURE.md
+- backend/README.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/workbench-read-model-query-plan.md
+- docs/architecture/backend-refactor/ai-execution-rules.md
+- backend/src/fin_ops_platform/services/workbench_query_facade.py
+- tests/test_workbench_query_facade.py
+- tests/test_workbench_sql_runtime.py
+
+必须确认：
+- `migration-state-log.md` 中 PF-P007 状态为 `verified`。
+- 当前 active prompt 是 `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate`。
+- 当前分支必须是 `codex/workbench-query-cache-freshness` 或同一 PF-P007 功能分支；不得在 `main` 上直接执行 merge gate 准备。
+- 本轮只处理 Merge Gate，不是 Traffic Gate。
+- 本轮不允许开始 Slice D，不允许修改 legacy `GET /api/workbench` fallback、row detail fallback、SSE、worker refresh、builder、repository SQL 重写或任何写路径。
+
+Expected Changed Files:
+本轮允许合入的文件仅限：
+- backend/src/fin_ops_platform/services/workbench_query_facade.py
+- tests/test_workbench_query_facade.py
+- tests/test_workbench_sql_runtime.py
+- docs/architecture/backend-refactor/ai-execution-rules.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/workbench-read-model-query-plan.md
+
+如出现其它 changed / staged / untracked 文件，必须阻断并说明来源；不得临时扩大白名单。
+
+Required Scope Checks:
+1. 确认代码 diff 只做了 PF-P007 cache/freshness gate：
+   - `WorkbenchQueryFacade.groups(...)` 只有在 freshness gate 允许使用 groups Redis cache 且 payload 为 fresh 时才写 Redis JSON payload。
+   - stale / refreshing / unavailable 时不读取旧 Redis JSON payload，也不写入新的 Redis JSON payload。
+2. 确认文档 diff 只记录：
+   - PF-P007 verified / PF-P007-MG planned。
+   - PF-P007 执行结果、测试结果和 TTL 决策。
+   - prompt/状态机/实现/Merge Gate 同分支工作流。
+3. 确认没有修改：
+   - SQL migration。
+   - 前端代码。
+   - Nginx、Vite、Caddy、部署配置或生产配置。
+   - SSE / worker / builder / repository SQL。
+   - Workbench 写路径。
+
+Mandatory Checks Before Commit:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --stat`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- Row detail targeted tests：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_row_detail_prefers_cached_read_model_before_query_service_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_opaque_oa_row_detail_prefers_month_read_model_without_full_oa_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_opaque_oa_row_detail_without_cache_returns_404_without_full_oa_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_row_detail_supports_oa_bank_and_invoice -v`
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- Facade 上帝对象注入静态检查：
+  - `rg -n "WorkbenchQueryFacade\\([^\\n]*(Application|RuntimeRepositories|RuntimeRepositoryContext|ApplicationStateStore|StateStoreProtocol|state_store)" backend/src/fin_ops_platform tests` 必须无输出。
+- Facade mock 静态检查：
+  - `rg -n "mock\\.patch\\(.+WorkbenchQueryFacade|patch\\(.+workbench_query_facade|monkeypatch.+WorkbenchQueryFacade|WorkbenchQueryFacade.*Mock|Mock.*WorkbenchQueryFacade" tests/test_workbench_sql_runtime.py` 必须无输出。
+- Observability 边界静态检查：
+  - `test ! -f backend/src/fin_ops_platform/services/workbench_query_facade.py || ! rg -n "request_database_timing" backend/src/fin_ops_platform/services/workbench_query_facade.py`
+
+Commit / Merge Preparation:
+- 严禁使用 `git add .` 或 `git add -A`。
+- 必须精准 staging Expected Changed Files。
+- 建议 commit message：
+  - `refactor(workbench): enforce query cache freshness gate`
+- commit 前后都必须确认 `git status --short --branch`。
+- commit 后执行 `git fetch origin main`。
+- merge 到 `main` 前必须确认当前分支包含最新 `origin/main`；如果 `origin/main` 有新提交，必须先 rebase 或 merge 最新 main 到当前分支，解决冲突后重新运行 Mandatory Checks。
+- 切到 `main` 后先确认 `main` 与 `origin/main` 关系；不得覆盖远端主干。
+- 合入 `main` 后必须在 `main` 上重新运行 Mandatory Checks。
+
+Forbidden Scope:
+- 不执行 Traffic Gate。
+- 不部署服务器。
+- 不 push 到 `origin/main`，除非用户在 PF-P007-MG 执行期间明确允许。
+- 不修改生产配置或网关配置。
+- 不开始 Slice D 或任何新业务模块重构。
+- 不访问生产 DB、Redis、RabbitMQ、OA Mongo、OA MySQL、MinIO/S3。
+- 不记录 DB password、JWT secret、OA token、cookie 实值或生产敏感 URL。
+- 未经用户确认，不得把 PF-P007-MG 标记为 `verified`。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 记录 PF-P007-MG 执行结果。
+  - 记录 commit、merge 方式、变更范围、验证命令和结果。
+  - 将 PF-P007-MG 状态设为 `implemented` 或 `blocked`，不得直接设为 `verified`。
+  - 记录下一步建议：用户确认后标记 PF-P007-MG verified；push origin/main 需要用户明确确认；下一条 prompt 必须从最新 main 新建分支生成。
+- 更新 `refactor-prompts.md` 的 PF-P007-MG 状态和执行结果。
+- 必要时更新 `workbench-read-model-query-plan.md`，但不得开始 Slice D 设计或实现。
+- 最终回复必须明确：
+  - 是否只合入 Expected Changed Files。
+  - 是否修改了 SQL migration、前端、网关、部署或生产配置。
+  - 是否执行 Traffic Gate。
+  - 哪些验证在 feature branch 和 main 上通过。
+  - 是否 push 到 origin/main。
+  - 下一步建议做什么。
+```
+
+### Gate Scope
+
+- Merge Gate：涉及。PF-P007-MG 只负责 PF-P007 已 verified 变更的 main 合入门禁。
+- Traffic Gate：不涉及。PF-P007-MG 不切流、不部署、不修改网关、不改变 worker 启动方式。
+- Test Gate：涉及。PF-P007-MG 必须在合入前后确认 facade unit tests、Workbench SQL runtime、row detail targeted tests、PF-P003 platform guards 和 `app.main --check` 通过。
+
+### 审查结论
+
+- PF-P007-MG 的边界正确：只处理 PF-P007 cache/freshness gate 与同分支工作流文档修正的合入。
+- Expected Changed Files 已包含本分支真实变更：facade、两个 Workbench 测试文件、三份状态/prompt/计划文档，以及 `ai-execution-rules.md`。
+- Prompt 明确禁止 Traffic Gate、部署、push origin/main 默认执行、Slice D 和任何新业务重构。
+- Prompt 保留 PF-P006/PF-P007 的关键门禁：上帝对象注入、mock facade、observability wrapper 边界、Redis freshness gate。
+- Prompt 明确了 untracked 文件检查、精准 staging、禁止 `git add .`、上游同步和 main 上复验。
+- PF-P007-MG 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。

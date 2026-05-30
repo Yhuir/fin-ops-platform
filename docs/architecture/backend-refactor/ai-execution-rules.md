@@ -50,6 +50,30 @@ prompt 必须写明：
 - 是否涉及 Merge Gate。
 - 是否涉及 Traffic Gate。
 
+### Prompt 与实现分支共址规则
+
+每个重构循环必须遵守“prompt / 状态机 / 实现同分支”原则：
+
+1. Merge Gate 合入并在 `main` 上复验后，先同步最新 `origin/main`。
+2. 从最新 `main` 创建新的 `codex/` 功能分支。
+3. 在这条功能分支内生成并审查下一条 prompt，更新 `refactor-prompts.md` 和 `migration-state-log.md`。
+4. 用户确认后，在同一条功能分支内执行该 prompt 的代码、测试和文档回写。
+5. 同一模块或同一切片可以在同一分支内连续完成一个或多个实现型 prompt，但每个 prompt 都必须先 `implemented`、经用户确认 `verified`，再进入下一个 prompt 或 Merge Gate。
+6. 进入 Merge Gate 后，仍在同一功能分支内完成范围检查、上游同步、commit、合并前验证、合入 `main` 和 main 上复验。
+7. Merge Gate 完成并按用户确认推送 `origin/main` 后，下一轮必须重新从最新 `main` 创建新分支，再生成下一条 prompt。
+
+禁止工作流：
+
+- 不得在 `main` 上生成下一条执行 prompt 并直接实现。
+- 不得把下一条 prompt 放在一个“prompt-only”分支，而把对应实现放在另一条分支。
+- 不得让状态机中的 active prompt 指向当前工作分支之外的未合入文档事实。
+- 不得在旧功能分支继续生成下一个模块的 prompt，除非它仍属于同一模块/切片且用户明确允许。
+
+例外：
+
+- 纯全局流程文档修正可以使用独立文档分支；但如果该规则会约束某个尚未执行的实现 prompt，必须先合入 `main`，或在对应实现分支中同步这条规则后再执行。
+- 紧急热修复可以从 `main` 单独开分支，但不得夹带重构 prompt 或模块实现。
+
 ### Post-Flight 回写硬规则
 
 每次 prompt 执行完，必须在进入下一条 prompt 前完成精准回写。回写不是可选总结，而是下一条 prompt 的输入事实源。
@@ -115,6 +139,8 @@ Micro-JIT prompt 不得：
 - 每个模块单独分支。
 - 不在 `main` 上直接修改业务代码。
 - 不把多个业务模块堆在一个分支。
+- prompt 生成、prompt 审查、状态机更新、对应实现和该实现的 Merge Gate 必须共用同一条功能分支。
+- 一个功能分支完成 Merge Gate 并合入 `main` 后，下一条 prompt 必须从最新 `main` 的新分支开始。
 - 不使用 `git reset --hard`、`git clean`、`git checkout --` 清理用户改动，除非用户明确要求。
 
 ## 模块执行规则

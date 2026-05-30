@@ -2686,7 +2686,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["groups"][0]["group_id"], "fresh-db")
         self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
         self.assertEqual(redis.get_json_calls, [])
-        self.assertEqual(redis.set_json_calls[0][1]["payload"]["groups"][0]["group_id"], "fresh-db")
+        self.assertEqual(redis.set_json_calls, [])
         self.assertEqual(page_calls[0]["scope_key"], "all")
         self.assertEqual(queue.refreshes, [("workbench", "all", "api_groups_source_versions_stale")])
 
