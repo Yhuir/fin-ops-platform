@@ -305,9 +305,9 @@ PF-P019 已新增 `tests/test_workbench_uow_contract.py`，用于锁定 UoW 目�
 2. 再实现最小 `WorkbenchWriteUnitOfWork.run(command, handler)`。
 3. 再逐步把已抽出的 Workbench write facade 写路径迁入 UoW。
 
-## 12. Next Slice Recommendation
+## 12. PF-P020 Prompt Review
 
-推荐下一条 prompt：
+PF-P019 已由用户确认 `verified`。PF-P020 已生成并审查，推荐下一条执行 prompt：
 
 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`
 
@@ -317,5 +317,9 @@ PF-P019 已新增 `tests/test_workbench_uow_contract.py`，用于锁定 UoW 目�
 - 优先让 PF-P019 中 platform transaction-bound writer contract 变绿。
 - 不把完整 Workbench write facade 切入 UoW。
 - 不修 stale write，不实现 durable idempotency store。
-- 不修改生产逻辑。
+- 不修改 Workbench 写路径生产逻辑。
 - 必须保持现有 characterization、dirty queue wiring 和 platform guard tests 绿色。
+
+PF-P020 应首选在 `RuntimeQueueRepository` 上新增 `enqueue_read_model_refresh_in_transaction(transaction=...)`，然后让现有 `enqueue_read_model_refresh()` 打开事务后委托该方法。这样可以保持现有 public API 不变，同时为后续 Workbench UoW 提供可复用的 transaction-bound writer port。
+
+PF-P020 verified 后，下一步才适合进入 `PF-P021 - Workbench Minimal Unit of Work Skeleton` 或等价 prompt。

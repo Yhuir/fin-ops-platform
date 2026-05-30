@@ -6018,3 +6018,158 @@ Post-Flight:
   - 未修改 `server.py`、`workbench_write_facade.py`、`runtime_queue.py`。
   - 未修改 SQL migration、前端、部署、CI/CD 或现有 characterization 期望。
 - 下一步建议：用户确认 PF-P019 `verified` 后，生成并审查 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`，先补齐可加入外层 PostgreSQL transaction 的 dirty scope/outbox writer，再进入完整 UoW 实现。
+
+用户已确认 PF-P019 `verified`。
+
+## PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer。
+
+Role: 你是一位精通 Python unittest、PostgreSQL transaction、Transactional Outbox、source_version 并发控制和遗留系统最小风险改造的后端架构工程师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P019 已 verified，新增了 `tests/test_workbench_uow_contract.py`。
+- PF-P019 当前 Expected Red：16 tests，14 failures，2 ok。红灯中最小可先解决的 blocker 是 transaction-bound dirty/outbox writer 缺失。
+- 当前 `RuntimeQueueRepository.enqueue_read_model_refresh()` 会自己打开 `self._connection.transaction()`，因此不能加入 Workbench facts transaction。
+- PF-P020 的目标是先解决 runtime queue 平台底座能力，不进入完整 Workbench UoW。
+
+Pre-Flight:
+1. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-boundary-design` 或同一 UoW 分支。
+   - 最近 verified prompt 是 `PF-P019 - Workbench UoW Contract Tests`。
+   - 当前 active prompt 是 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` planned。
+2. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+3. 必须读取或通过 CodeGraph 覆盖：
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/postgres_connection.py`
+   - `tests/test_runtime_queue.py`
+   - `tests/test_workbench_uow_contract.py`
+4. 必须先记录工作区状态：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - 若存在非本轮文件变更，必须停止并说明。
+
+Goal:
+实现一个可复用外层 PostgreSQL transaction 的 read model refresh dirty/outbox writer，让后续 Workbench UoW 能在同一 transaction 中提交 facts、audit/history、dirty scope 和 outbox。PF-P020 只解决 runtime queue 平台写入边界，不实现 Workbench UoW。
+
+Required Red Step:
+1. 先运行 PF-P019 中的 3 个 platform writer tests，确认它们当前仍红：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+2. 允许这 3 个测试失败，但失败必须是缺少 transaction-bound writer，而不是测试自身错误。
+
+Required Test Work:
+1. 在 `tests/test_runtime_queue.py` 中新增 focused tests，先写测试再实现：
+   - `test_enqueue_read_model_refresh_in_transaction_uses_supplied_transaction_without_opening_connection_context`
+   - `test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract`
+   - `test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer`
+2. 新测试必须复用或扩展现有 `FakeTransaction` / `FakeConnection` 模式。
+3. 测试必须明确断言：
+   - transaction-bound 方法接收外层 `transaction` 对象；
+   - transaction-bound 方法不调用 `connection.transaction()`；
+   - dirty scope SQL 和 outbox SQL 的 source_version、payload、priority、trace_id、dedupe_key 语义与现有 `enqueue_read_model_refresh()` 一致；
+   - 现有 `enqueue_read_model_refresh()` 仍然打开自己的 transaction，并委托 transaction-bound 方法，保持 public API 兼容。
+
+Required Implementation Work:
+1. 在 `backend/src/fin_ops_platform/services/runtime_queue.py` 中新增最小接口，首选：
+   - `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=..., scope_type, scope_key, reason, tenant_id="default", priority="normal", trace_id=None) -> RuntimeQueueEvent`
+2. 把现有 `enqueue_read_model_refresh()` 中的 dirty scope + outbox SQL 逻辑移动/委托到该 transaction-bound 方法。
+3. 保持现有 SQL 语义不变：
+   - `job.read_model_dirty_scopes` source_version 递增规则不变；
+   - `job.outbox_events` event_type、aggregate_type、aggregate_id、scope_type、scope_key、dedupe_key、schema_version、source_version、priority、trace_id、payload、raw_payload 语义不变；
+   - outbox `on conflict` 更新语义不变；
+   - `_json_param()` 和 `_event_from_row()` 继续作为唯一 JSON / event conversion 路径。
+4. transaction-bound 方法不得调用 `self._connection.transaction()`、`self._connection.fetch_one()` 或任何会自行开连接的方法；只能使用传入的 `transaction.fetch_one()`。
+5. 输入校验必须与现有 `enqueue_read_model_refresh()` 一致：空 `scope_type` / `scope_key` 仍抛 `RuntimeQueueDataError`。
+
+Expected Verification:
+1. PF-P020 targeted writer tests must pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_in_transaction_uses_supplied_transaction_without_opening_connection_context -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer -v`
+2. Existing runtime queue tests must pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+3. PF-P019 writer group must now pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+4. PF-P019 full contract file may remain Expected Red:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - Acceptable only if the remaining failures are missing `WorkbenchWriteUnitOfWork` / UoW semantics. The 3 transaction-bound writer tests must pass.
+5. Existing safety net must remain green:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Forbidden Scope:
+- 不实现 `WorkbenchWriteUnitOfWork`。
+- 不新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改 Workbench facts repositories。
+- 不修 stale write / optimistic locking。
+- 不实现 durable idempotency store。
+- 不改变现有 `enqueue_read_model_refresh()` public behavior。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不修改 PF-P019 target tests 来让红灯消失；目标是实现 runtime queue writer，而不是改测试。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+- 不使用 `git add .` 或 `git add -A`。
+
+Expected Changed Files:
+- 允许修改：
+  - `backend/src/fin_ops_platform/services/runtime_queue.py`
+  - `tests/test_runtime_queue.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 如需修改其它文件，必须停止并说明原因。
+
+Required Scope Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only | rg -v '^(backend/src/fin_ops_platform/services/runtime_queue\\.py$|tests/test_runtime_queue\\.py$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$)'`
+  - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P020 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录新 runtime queue tests、PF-P019 writer group、PF-P019 full expected red 和现有安全网验证结果。
+- 更新 `refactor-prompts.md` 的 PF-P020 执行结果。
+- 更新 `workbench-write-uow-boundary-design.md` 或 `workbench-writes-and-matching-plan.md`，记录 transaction-bound writer capability。
+- 不 merge 到 main。
+- 不 push。
+- 不执行 Merge Gate。
+- 未经用户确认，不得将 PF-P020 标记为 `verified`。
+- 最终回复必须说明：
+  - 是否新增 transaction-bound writer；
+  - PF-P019 哪些红灯已变绿、哪些仍保持 expected red；
+  - 现有绿色验证是否通过；
+  - 下一条建议 prompt 是什么。
+```
+
+### 审查结论
+
+- PF-P020 的边界正确：它只补 runtime queue 层 transaction-bound dirty/outbox writer，不进入 Workbench UoW。
+- PF-P020 直接对应 PF-P019 当前红灯中最小、最底层的 blocker，避免在 UoW 还没有 writer port 时先改 Workbench facade。
+- PF-P020 要求保留现有 `enqueue_read_model_refresh()` public API，并通过委托新方法复用同一套 SQL 语义，降低对现有 worker / read model 行为的影响。
+- PF-P020 明确 PF-P019 全量 contract file 仍可保持 Expected Red，但 3 个 writer tests 必须转绿，避免把完整 UoW 工作偷渡进本轮。
+- PF-P020 禁止修改 PF-P019 target tests、Workbench handler/facade、SQL migration、前端和部署配置；执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。

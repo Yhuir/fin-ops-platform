@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已执行，新增 UoW 目标契约测试，等待用户确认。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已生成并审查，等待执行。
 
 ## 1. Scope Boundary
 
@@ -525,7 +525,7 @@ PF-P019 已新增 `tests/test_workbench_uow_contract.py` 并完成红相验证�
 - `tests.test_workbench_uow_contract` 当前为 Expected Red：16 tests，14 failures，2 ok。红灯原因是缺失 transaction-bound writer / `WorkbenchWriteUnitOfWork`，不是测试自身错误。
 - 既有 `tests.test_workbench_write_characterization`、`tests.test_workbench_dirty_queue_wiring`、`tests.test_platform_runtime_boundary_guards` 全部通过。
 
-用户确认 PF-P019 `verified` 后，下一条建议 prompt：
+PF-P019 已由用户确认 `verified`。下一条建议 prompt 已生成并审查：
 
 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`
 

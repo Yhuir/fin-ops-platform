@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P019 - Workbench UoW Contract Tests` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P019 - Workbench UoW Contract Tests` (`implemented`) |
-| 最近 verified prompt | `PF-P018 - Workbench Write Unit of Work Boundary Design` |
+| 当前阶段 | `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` (`planned`) |
+| 最近 verified prompt | `PF-P019 - Workbench UoW Contract Tests` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | PF-P019 已新增目标 contract tests；新测试 16 个运行，14 个按预期失败、2 个通过；既有 Workbench characterization、dirty queue wiring、platform guard tests 全部通过；未改生产代码、SQL migration、前端、部署或生产配置 |
-| 下一条允许任务 | 用户确认后将 PF-P019 标记为 `verified`；随后生成并审查 PF-P020，建议先做 transaction-bound dirty/outbox writer 最小实现，不直接跳到完整 UoW |
+| 最近验证 | PF-P019 已由用户确认 verified；新增 16 个目标 contract tests，其中 14 个为预期红灯、2 个通过；既有 Workbench characterization、dirty queue wiring、platform guard tests 全部通过 |
+| 下一条允许任务 | 执行 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`；只允许实现 runtime queue 的 transaction-bound dirty/outbox writer，不得实现完整 Workbench UoW、stale write guard 或 durable idempotency store |
 
 ## Prompt 执行日志
 
@@ -2133,7 +2133,7 @@ PF-P018 已执行并由用户确认 `verified`，产物是 `workbench-write-uow-
 
 ### PF-P019 - Workbench UoW Contract Tests
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2158,11 +2158,47 @@ PF-P018 已执行并由用户确认 `verified`，产物是 `workbench-write-uow-
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 - 本轮未修改任何生产 `.py` 文件、SQL migration、前端、部署或 CI/CD。
-- PF-P019 执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+- PF-P019 已由用户确认 `verified`。
 
 #### 下一条 Prompt 上下文
 
-PF-P019 已执行，等待用户确认。新增测试显示当前最先阻塞点是 transaction-bound dirty/outbox writer 和 `WorkbenchWriteUnitOfWork` 目标接口缺失。用户确认 PF-P019 `verified` 后，建议生成并审查 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`，先让 read model refresh writer 能复用外层 PostgreSQL transaction，再进入完整 UoW 实现。
+PF-P019 已由用户确认 `verified`。新增测试显示当前最先阻塞点是 transaction-bound dirty/outbox writer 和 `WorkbenchWriteUnitOfWork` 目标接口缺失。PF-P020 已生成并审查，下一步允许执行 PF-P020：先让 read model refresh dirty scope/outbox writer 能复用外层 PostgreSQL transaction，再进入完整 UoW 实现。
+
+### PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer
+
+状态：`planned`
+
+#### 范围
+
+- 只实现 runtime queue 层的 transaction-bound read model refresh dirty/outbox writer。
+- 优先让 PF-P019 中 3 个 platform transaction-bound writer tests 变绿。
+- 允许在 `RuntimeQueueRepository` 上新增 `enqueue_read_model_refresh_in_transaction(transaction=...)` 或等价最小接口。
+- 允许让现有 `enqueue_read_model_refresh()` 打开事务后委托 transaction-bound 方法，以保持现有 public API 兼容。
+- 允许补充 `tests/test_runtime_queue.py` 中的 focused unit tests。
+- 允许更新 backend-refactor 状态机、prompt 库和 UoW 设计文档。
+
+#### 禁止范围
+
+- 不实现 `WorkbenchWriteUnitOfWork`。
+- 不新增 `workbench_uow.py`。
+- 不把任何 Workbench facade / server handler 接入 UoW。
+- 不修 stale write / optimistic locking。
+- 不实现 durable idempotency store。
+- 不修改 Workbench 生产写路径、SQL migration、前端、部署、CI/CD 或生产配置。
+- 不修改 PF-P019 target tests 来绕过红灯。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+
+#### 验收标准
+
+- PF-P020 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P020 必须要求先跑 PF-P019 的 3 个 writer tests 作为红灯，再实现最小 runtime queue writer。
+- PF-P020 必须保持 `tests.test_runtime_queue` 全绿。
+- PF-P020 必须明确 `tests.test_workbench_uow_contract` 全量仍可保持 Expected Red，但剩余失败只能是缺失 `WorkbenchWriteUnitOfWork` / UoW 语义。
+- PF-P020 执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P020 已生成并审查。下一步允许执行 PF-P020。PF-P020 verified 后，才允许生成 `PF-P021 - Workbench Minimal Unit of Work Skeleton` 或等价 prompt，把 transaction-bound writer 接入最小 UoW skeleton；仍不得一次性迁移全部 Workbench 写路径。
 
 ## 维护规则
 
