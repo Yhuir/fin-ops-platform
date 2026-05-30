@@ -476,7 +476,9 @@ PF-P003-MG 已执行平台 guard 分支的 Merge Gate 前置检查：
 - Untracked scope：新增 `architecture-inventory.md`、`platform-runtime-boundary-audit.md` 和 `test_platform_runtime_boundary_guards.py` 均属于本次允许范围。
 - Temp file guard：未发现 `.pkl`、`.sqlite`、`__pycache__/`、`.pytest_cache/`、测试输出目录或 IDE 临时文件需要提交。
 - Commit staging rule：本次必须使用精确文件列表 stage，不允许 `git add .` 或 `git add -A`。
-- Upstream sync：未执行，因为用户没有要求 merge 到 `main`。后续如执行 merge，必须先同步最新 main 并重跑完整验证。
+- Upstream sync：merge 前已 fetch origin，确认本地 `main` 与 `origin/main` 一致，且功能分支包含最新 main。
+- Local main merge：已本地 merge 到 `main`，merge commit 为 `58535cab`。
+- Remote push：尚未 push `main` 到 origin。
 - Traffic Gate：未执行；未修改网关、部署或生产配置。
 
 PF-P003-MG 验证：
@@ -489,6 +491,7 @@ PF-P003-MG 验证：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_runtime_redis tests.test_rabbitmq_runtime -v`：通过。
 - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过。
 - `git status --short --branch`：通过，范围与 PF-P003-MG 允许列表一致。
+- Main merge verification：上述测试已在本地 `main` merge 后重新执行并通过。
 
 ## 15. Refactor Readiness and Next Step
 

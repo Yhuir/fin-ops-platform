@@ -49,12 +49,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Platform Runtime Boundary Guard Merge Gate 已执行，等待用户验收 |
+| 当前阶段 | Platform Runtime Boundary Guard Merge Gate 已本地合入 main，等待用户验收 |
 | 当前 active prompt | `PF-P003-MG - Platform Runtime Boundary Guard Merge Gate` implemented |
 | 最近 verified prompt | `PF-P003 - Platform Runtime Boundary Enforcement / Guard Tests` |
-| 当前分支 | `codex/python-first-refactor-reset` |
-| 最近验证 | `PF-P003-MG` 范围检查和指定测试均已通过；已准备创建本地 commit，未 merge 到 main，未执行 Traffic Gate |
-| 下一条允许任务 | 用户审查 `PF-P003-MG` 执行结果；确认后可标记 PF-P003-MG verified，然后生成第一个业务模块 Micro-JIT prompt |
+| 当前分支 | `main` |
+| 最近验证 | `PF-P003-MG` 已本地 merge 到 main；main 上指定测试均已通过；未 push，未执行 Traffic Gate |
+| 下一条允许任务 | 用户审查 `PF-P003-MG` 本地 main 合入和验证结果；确认后可标记 PF-P003-MG verified，然后决定是否 push main，或生成第一个业务模块 Micro-JIT prompt |
 
 ## Prompt 执行日志
 
@@ -381,7 +381,8 @@ PF-P003 已由用户确认 verified。下一步只能执行 `PF-P003-MG - Platfo
 - 已复核 `server.py` production runtime guard 只影响 readiness summary，不改变业务 handler 行为。
 - 已复核 guard 默认不破坏 local/dev 行为；只有 release runtime 或显式 `FIN_OPS_PRODUCTION_RUNTIME_GUARD` 启用时才严格要求 PostgreSQL backend、非 legacy bootstrap、禁用 full snapshot。
 - 已复核静态 guard tests 使用 allowlist + known violations，未把业务模块迁移塞进 PF-P003。
-- 本次只创建本地 commit，不 merge 到 `main`；未执行 upstream sync，因为用户没有要求合入 main。
+- 已创建本地 commit 并本地 merge 到 `main`；merge 前已 fetch origin，确认本地 `main` 与 `origin/main` 一致，且 `main` 是功能分支祖先。
+- 未执行额外 upstream sync 到功能分支，因为 fetch 后确认功能分支已包含最新 main。
 - 未执行 Traffic Gate，未修改网关、部署或生产配置。
 
 #### 变更文件
@@ -411,17 +412,33 @@ PF-P003 已由用户确认 verified。下一步只能执行 `PF-P003-MG - Platfo
 - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过，本地 readiness `status=ready`，`production_runtime_guard.enabled=false`。
 - `git status --short --branch`：通过，范围与 PF-P003-MG 允许列表一致。
 
+#### Main Merge 验证
+
+- `git fetch origin`：通过。
+- `git rev-parse main` 与 `git rev-parse origin/main`：merge 前一致。
+- `git merge-base --is-ancestor main codex/python-first-refactor-reset`：通过，功能分支包含最新 main。
+- `git switch main`：通过。
+- `git merge --no-ff codex/python-first-refactor-reset -m "Merge branch 'codex/python-first-refactor-reset': establish platform runtime guards"`：通过，生成本地 merge commit `58535cab`。
+- `git diff --check`：在 main 上通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：在 main 上通过，9 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_bootstrap tests.test_state_store_factory_preflight tests.test_app_postgres_mode -v`：在 main 上通过，34 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_auth_guard tests.test_session_api -v`：在 main 上通过，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_runtime_redis tests.test_rabbitmq_runtime -v`：在 main 上通过，49 tests。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：在 main 上通过，本地 readiness `status=ready`，`production_runtime_guard.enabled=false`。
+- `git status --short --branch`：main 工作区干净，领先 `origin/main` 3 个本地提交。
+
 #### Commit / Merge
 
 - Staged files 必须使用精确 `git add <path>`；不得使用 `git add .` 或 `git add -A`。
-- Commit message：`feat(platform): establish runtime boundary guards and baseline tests`。
-- 本文档随 commit 一起提交，commit hash 不能在同一个提交内容中自引用；实际 commit hash 以执行后的 `git log -1 --oneline` 和最终回复为准。
-- 未 merge 到 `main`。
+- Feature commit：`b31ee8aa feat(platform): establish runtime boundary guards and baseline tests`。
+- Local merge commit：`58535cab Merge branch 'codex/python-first-refactor-reset': establish platform runtime guards`。
+- 已本地 merge 到 `main`。
+- 未 push `main` 到 origin。
 - 未执行 Traffic Gate。
 
 #### 下一条 Prompt 上下文
 
-PF-P003-MG 已执行并通过范围检查与指定验证，等待用户确认 verified。确认后才允许生成第一个业务模块 Micro-JIT prompt。下一条业务模块 prompt 必须读取 `architecture-inventory.md` 和 `platform-runtime-boundary-audit.md`，并继续遵守 PF-P003 固化的 8 类平台 guard。
+PF-P003-MG 已执行、本地合入 `main`，并在 `main` 上通过指定验证，等待用户确认 verified。确认后可以决定是否 push `main` 到 origin；也可以生成第一个业务模块 Micro-JIT prompt。下一条业务模块 prompt 必须读取 `architecture-inventory.md` 和 `platform-runtime-boundary-audit.md`，并继续遵守 PF-P003 固化的 8 类平台 guard。
 
 ## 维护规则
 

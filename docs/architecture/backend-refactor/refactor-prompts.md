@@ -1133,5 +1133,8 @@ Post-Flight:
 - untracked 检查通过：新增文件均属于本次允许范围，没有 `.pkl`、`.sqlite`、cache、测试输出或 IDE 临时文件混入。
 - 指定测试已通过：`git diff --check`、`git ls-files --others --exclude-standard`、PF-P003 guard tests、runtime bootstrap/state store/app postgres mode tests、auth/session tests、runtime queue/Redis/RabbitMQ tests、`python3 -m fin_ops_platform.app.main --check`。
 - 使用精确文件列表 stage，禁止 `git add .` 和 `git add -A`。
-- 本 prompt 创建本地 commit，但未 merge 到 `main`；未执行 upstream sync，因为用户没有要求合入 `main`。
+- 本 prompt 已创建本地 commit，并在用户确认后本地 merge 到 `main`。
+- merge 前已 fetch origin，确认本地 `main` 与 `origin/main` 一致，且功能分支包含最新 main。
+- merge 后已在 `main` 上复跑 PF-P003-MG 指定验证集并通过。
+- 尚未 push `main` 到 origin。
 - 本 prompt 未执行 Traffic Gate、未修改网关、部署或生产配置、未开始任何业务模块迁移。
