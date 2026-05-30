@@ -399,6 +399,12 @@ class WorkbenchUoWContractTests(unittest.TestCase):
     @unittest.expectedFailure
     def test_cancel_link_rejects_stale_replaced_relation(self) -> None:
         uow = self._new_uow()
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"affected_scope_keys": ["2026-05"]}
 
         with self.assertRaisesRegex(Exception, "409|stale|conflict|version"):
             self._run_uow(
@@ -408,27 +414,41 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                     expected_versions={"relation:CASE-OLD": 2},
                     payload={"current_relation_case_id": "CASE-NEW", "current_relation_version": 5},
                 ),
-                lambda ctx: {"affected_scope_keys": ["2026-05"]},
+                handler,
             )
+        self.assertFalse(called)
 
     @unittest.expectedFailure
     def test_ignore_row_rejects_when_row_already_confirmed(self) -> None:
         uow = self._new_uow()
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"affected_scope_keys": ["2026-05"]}
 
         with self.assertRaisesRegex(Exception, "409|stale|conflict|already"):
             self._run_uow(
                 uow,
                 _Command(
                     action_name="ignore_row",
-                    expected_versions={"row:bank-1": "open"},
+                    expected_versions={"row:invoice-1": "open", "relation:CASE-CONFIRMED": None},
                     payload={"current_row_status": "confirmed"},
                 ),
-                lambda ctx: {"affected_scope_keys": ["2026-05"]},
+                handler,
             )
+        self.assertFalse(called)
 
     @unittest.expectedFailure
     def test_cash_special_rejects_changed_relation_version(self) -> None:
         uow = self._new_uow()
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"affected_scope_keys": ["2026-05"]}
 
         with self.assertRaisesRegex(Exception, "409|stale|conflict|version"):
             self._run_uow(
@@ -436,10 +456,11 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 _Command(
                     action_name="confirm_cash_pass_through",
                     expected_versions={"relation:CASE-CASH": 1},
-                    payload={"current_relation_version": 2},
+                    payload={"current_relation_case_id": "CASE-CASH", "current_relation_version": 2},
                 ),
-                lambda ctx: {"affected_scope_keys": ["2026-05"]},
+                handler,
             )
+        self.assertFalse(called)
 
     @unittest.expectedFailure
     def test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history(self) -> None:

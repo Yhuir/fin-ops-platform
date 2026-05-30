@@ -411,4 +411,12 @@ PF-P023 should:
 
 PF-P022 has been confirmed `verified` by the user. PF-P023 has been generated and reviewed in `refactor-prompts.md`; it must be executed before any real Workbench write path migration.
 
+PF-P023 has been executed and is waiting for user confirmation. It added stale write / optimistic locking contract coverage without changing production code:
+
+- `tests/test_workbench_uow_contract.py` still has 7 target `expectedFailure` tests; stale cancel, ignore, and cash special now also assert the handler is not executed when conflict is detected.
+- `tests/test_workbench_stale_write_contract.py` adds one passing write-payload compatibility test and two target `expectedFailure` tests for withdraw preview version identity and 409 conflict response shape.
+- The confirmed gaps are: withdraw preview does not expose stable relation version identity, and UoW does not yet expose a stable `WorkbenchWriteConflict` response contract.
+
+After PF-P023 is confirmed `verified`, the next planning target should be `PF-P024 - Workbench Durable Idempotency Store Contract`; real write path migration should still wait.
+
 Then use PF-P024 for durable idempotency store contract and schema readiness before the first real write path UoW integration.

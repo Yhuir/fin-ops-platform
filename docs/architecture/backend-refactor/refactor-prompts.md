@@ -7181,3 +7181,37 @@ Post-Flight:
 - PF-P023 必须保持默认 CI 绿色；目标语义未实现时使用 `unittest.expectedFailure` 是正确机制，不能使用 skip 或删除测试。
 - PF-P023 不应处理 durable idempotency store；该工作应留给 PF-P024。
 - PF-P023 不应迁移 `confirm_link` / `cancel_link` 真实写路径；真实迁移应等 stale write contract 和 idempotency contract 都稳定后再进入后续 prompt。
+
+### 执行结果
+
+状态：`implemented`。未经用户确认，不得标记为 `verified`。
+
+变更摘要：
+
+- 补强 `tests/test_workbench_uow_contract.py` 中 stale cancel、ignore、cash special 三条 target contract tests：冲突发生时 handler 不得执行。
+- 新增 `tests/test_workbench_stale_write_contract.py`：
+  - 普通通过：`expected_versions` 作为 withdraw submit payload 扩展字段时不破坏当前成功响应 shape。
+  - `expectedFailure`：withdraw preview 未来必须暴露 stable relation identity/version 和 `submit_expected_versions`。
+  - `expectedFailure`：future `WorkbenchWriteConflict` 必须产生稳定 409 JSON response payload。
+- 未修改生产代码、SQL migration、前端、部署、worker 或真实 Workbench 写路径。
+
+验证结果：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：通过，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：通过，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：通过，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_stale_write_contract.py' -v`：通过，`expected failures=2`。
+
+发现的目标缺口：
+
+- Withdraw preview 当前缺少 submit 所需的 stable active relation identity/version 字段。
+- 当前 UoW 缺少稳定的 `WorkbenchWriteConflict` / 409 conflict response shape。
+- Durable idempotency 仍未实现，应留给 PF-P024。
+
+下一步建议：
+
+- 用户确认 PF-P023 后，将其标记为 `verified`。
+- 然后生成并审查 `PF-P024 - Workbench Durable Idempotency Store Contract`。
