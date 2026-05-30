@@ -9955,7 +9955,7 @@ PF-P034 已由用户确认 `verified`。下一步应执行 cumulative Merge Gate
 
 ## PF-P034-MG - Workbench Stale Guard Group Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -10113,5 +10113,6 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 - 已执行：本地 `main` 非快进合并。
-- 未执行：`git push origin main`、Traffic Gate、部署、生产访问。
-- 状态：PF-P034-MG 只能记录为 `implemented`；等待用户确认后才可标记 `verified`。
+- 用户确认：PF-P034-MG verified。
+- 未执行：Traffic Gate、部署、生产访问。
+- 下一步：执行 `git push origin main`；push 完成后，后续 prompt 必须从最新 `main` 新建分支生成。

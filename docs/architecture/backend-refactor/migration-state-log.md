@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已执行并合入本地 `main`，等待用户确认 verified |
-| 当前 active prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` |
+| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已由用户确认 verified，准备推送 `origin/main` |
+| 当前 active prompt | 无；`PF-P034-MG - Workbench Stale Guard Group Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P034-MG 在功能分支和本地 `main` 上均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试；未 push、未部署、未 Traffic Gate |
-| 下一条允许任务 | 等待用户确认 PF-P034-MG verified；确认后再决定是否执行 `git push origin main`，不得直接开始下一条 prompt |
+| 最近验证 | PF-P034-MG 在功能分支和本地 `main` 上均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试；用户确认 verified；未部署、未 Traffic Gate |
+| 下一条允许任务 | 执行 `git push origin main`；push 完成后从最新 `main` 新建分支，再生成并审查下一条 Workbench prompt |
 
 ## Prompt 执行日志
 
@@ -3593,7 +3593,7 @@ PF-P034 已完成实现和验证，并已由用户确认 `verified`。下一步�
 
 ### PF-P034-MG - Workbench Stale Guard Group Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3674,11 +3674,12 @@ PF-P034 已完成实现和验证，并已由用户确认 `verified`。下一步�
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 - 已执行本地 merge：`git merge --no-ff codex/workbench-ignore-row-stale-guard`。
-- 未执行：`git push origin main`、Traffic Gate、部署、生产访问。
+- 用户确认：PF-P034-MG verified。
+- 未执行：Traffic Gate、部署、生产访问。
 
 #### 下一条 Prompt 上下文
 
-PF-P034-MG 已完成本地 merge gate 并合入本地 `main`，但未经用户确认前不得标记为 `verified`。用户确认后，下一步应先决定是否 `git push origin main`；push 完成后，后续 prompt 必须从最新 `main` 新建分支生成。
+PF-P034-MG 已完成本地 merge gate、合入本地 `main`，并已由用户确认 `verified`。下一步执行 `git push origin main`；push 完成后，后续 prompt 必须从最新 `main` 新建分支生成。
 
 ## 维护规则
 
