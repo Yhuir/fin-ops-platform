@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` (`implemented`) |
-| 最近 verified prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` |
+| 当前阶段 | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` (`planned`) |
+| 最近 verified prompt | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` |
 | 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | PF-P027 已完成 docs-only discovery/scope checks；未修改生产代码或测试代码 |
-| 下一条允许任务 | 等待用户确认 PF-P027 是否可标记 `verified`。确认后才允许生成并审查 PF-P028；不得直接执行 PF-P028 |
+| 最近验证 | 用户确认 PF-P027 可标记 `verified`；PF-P028 已生成并审查但未执行 |
+| 下一条允许任务 | 只允许执行 PF-P028。PF-P028 只处理统一 409 conflict primitive 和 expected_versions contract，不迁移真实 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -2848,7 +2848,7 @@ PF-P026-MG 已 push 到 `origin/main`。已从最新 `main` 创建分支 `codex/
 
 ### PF-P027 - Workbench Stale Write Boundary Discovery and Planning
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2918,7 +2918,44 @@ PF-P027 是 docs-only discovery/planning，不运行 Workbench test suite；测�
 
 #### 下一条 Prompt 上下文
 
-PF-P027 已执行并记录为 `implemented`，不得标记 `verified`，直到用户确认。下一步建议生成并审查 `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`。PF-P028 应只实现 `WorkbenchWriteConflict` primitive、409 response payload contract 和 expected_versions contract 文档/测试，优先转绿 `test_target_workbench_write_conflict_response_shape_is_stable`；不得迁移真实 Workbench 写 API，不得修 withdraw submit/cancel/ignore/cash special 的真实写路径。
+PF-P027 已由用户确认 `verified`。PF-P028 已生成并审查，下一步只允许执行 `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`。PF-P028 应只实现 `WorkbenchWriteConflict` primitive、409 response payload contract 和 expected_versions contract 文档/测试，优先转绿 `test_target_workbench_write_conflict_response_shape_is_stable`；不得迁移真实 Workbench 写 API，不得修 withdraw submit/cancel/ignore/cash special 的真实写路径。
+
+### PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract
+
+状态：`planned`
+
+#### 范围
+
+- 只建立 Workbench stale write 的统一 conflict primitive 和 expected_versions 契约。
+- 优先让 `tests/test_workbench_stale_write_contract.py::WorkbenchStaleWriteContractTests::test_target_workbench_write_conflict_response_shape_is_stable` 从 expectedFailure 转为普通通过。
+- 可以新增 `workbench_write_conflict.py`，并从 `workbench_uow.py` re-export `WorkbenchWriteConflict` 以兼容现有测试导入。
+- 可以补充纯函数/primitive 单元测试，但不得接入真实写 API。
+- 更新本文档和 `refactor-prompts.md`。
+
+#### 禁止范围
+
+- 不迁移真实 Workbench 写 API。
+- 不修改 `server.py` handler 路由行为。
+- 不修改 `workbench_write_facade.py` 的真实写入逻辑。
+- 不实现 repository current-state reader。
+- 不实现 UoW stale precondition。
+- 不新增 SQL migration。
+- 不修改前端。
+- 不执行 Merge Gate、Traffic Gate、部署、merge 或 push。
+
+#### 验收标准
+
+- `WorkbenchWriteConflict` 有稳定字段、默认中文 message、409 status 和 response payload。
+- `WorkbenchWriteConflict.to_response_payload()` 的 shape 与 PF-P027 文档一致。
+- `WorkbenchWriteConflict` 与 `WorkbenchIdempotencyKeyConflict` 的职责边界清楚，不能复用 idempotency error code。
+- 只移除 `test_target_workbench_write_conflict_response_shape_is_stable` 的 expectedFailure；其它 stale write expectedFailure 必须继续保留。
+- 相关测试通过。
+
+#### 审查结论
+
+- PF-P028 是 PF-P027 后的正确最小实现切片。
+- 它可以先建立统一 409 conflict contract，降低后续 cancel/ignore/cash/withdraw API 迁移时的 response 分歧风险。
+- PF-P028 仍不能修真实 stale write，因为真实修复需要 transaction-bound facts current-state reader 和 UoW precondition，必须拆到后续 prompt。
 
 ## 维护规则
 

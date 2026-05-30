@@ -8123,7 +8123,7 @@ PF-P026-MG 已 push 到 `origin/main`。已从最新 `main` 创建分支 `codex/
 
 ## PF-P027 - Workbench Stale Write Boundary Discovery and Planning
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -8310,4 +8310,163 @@ Post-Flight:
   - 必须等真实 UoW precondition/API migration：withdraw submit、cancel link、ignore row、cash special。
 - 已更新 `migration-state-log.md`，PF-P027 记录为 `implemented`，等待用户确认后才能标记 `verified`。
 
-下一步建议：生成并审查 `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`。PF-P028 仍不得迁移真实 Workbench 写 API。
+用户已确认 PF-P027 `verified`。PF-P028 已生成并审查，下一步只允许执行 PF-P028。PF-P028 仍不得迁移真实 Workbench 写 API。
+
+## PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract。
+
+Role: 你是一位严格的 Python 后端架构师，精通 Clean Architecture、Unit of Work、领域错误建模、HTTP 409 conflict contract、遗留系统 characterization tests 和 TDD。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- 当前分支是 `codex/workbench-stale-write-planning`，本分支已完成并 verified `PF-P027 - Workbench Stale Write Boundary Discovery and Planning`。
+- PF-P027 的结论是：下一步先建立统一 Workbench stale write 409 conflict primitive 和 expected_versions 契约，不迁移真实 Workbench 写 API。
+- 当前剩余 stale write / optimistic locking target expectedFailure 包括：
+  - `tests/test_workbench_stale_write_contract.py`
+    - `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions`
+    - `test_target_workbench_write_conflict_response_shape_is_stable`
+  - `tests/test_workbench_uow_contract.py`
+    - `test_withdraw_submit_rejects_stale_preview_relation_version`
+    - `test_cancel_link_rejects_stale_replaced_relation`
+    - `test_ignore_row_rejects_when_row_already_confirmed`
+    - `test_cash_special_rejects_changed_relation_version`
+- PF-P028 只允许处理 `test_target_workbench_write_conflict_response_shape_is_stable` 对应的 primitive contract。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-stale-write-planning` 或同一 PF-P027/PF-P028 stale write 分支。
+   - 当前 active prompt 是 `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` planned。
+   - 最近 verified prompt 是 `PF-P027 - Workbench Stale Write Boundary Discovery and Planning`。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+4. 必须先运行目标测试，确认当前仍是 expectedFailure 基线：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract.WorkbenchStaleWriteContractTests.test_target_workbench_write_conflict_response_shape_is_stable -v`
+
+Goal:
+建立 Workbench stale write 的统一 409 conflict primitive，并将 `test_target_workbench_write_conflict_response_shape_is_stable` 从 expectedFailure 转为普通通过。不得迁移真实 Workbench 写 API，不得实现 UoW stale precondition，不得修改 handler/facade 写入行为。
+
+Required Implementation Work:
+1. TDD / Test Handling
+   - 只允许移除 `test_target_workbench_write_conflict_response_shape_is_stable` 这个测试上的 `unittest.expectedFailure`。
+   - 其它 stale write expectedFailure 必须继续保留。
+   - 不得删除、弱化或跳过现有 expectedFailure。
+   - 如果新增测试，只能覆盖 pure primitive / response payload / expected_versions helper，不得触发真实 API migration。
+2. Conflict Primitive
+   - 实现 `WorkbenchWriteConflict`。
+   - 建议新增 `backend/src/fin_ops_platform/services/workbench_write_conflict.py`，并在 `workbench_uow.py` 中 re-export `WorkbenchWriteConflict`，保持现有测试中 `fin_ops_platform.services.workbench_uow.WorkbenchWriteConflict` 可用。
+   - 字段必须至少包含：
+     - `action: str`
+     - `reason: str`
+     - `expected: dict[str, object]`
+     - `actual: dict[str, object]`
+     - `message: str = "工作台数据已变化，请刷新后重试。"`
+     - `status_code: int = 409`
+   - 提供 `to_response_payload()`，返回：
+     - `{"status_code": 409, "payload": {...}}`
+   - payload 必须为：
+     - `error = "workbench_write_conflict"`
+     - `message`
+     - `conflict.action`
+     - `conflict.reason`
+     - `conflict.expected`
+     - `conflict.actual`
+3. Expected Versions Contract
+   - 可以新增轻量 helper 或类型说明，用于规范 expected_versions key shape。
+   - 不得在真实 UoW 中执行 expected_versions 校验。
+   - 不得读取数据库 facts。
+   - 不得引入 repository current-state reader。
+4. Boundary with Idempotency
+   - 必须保持 `WorkbenchWriteConflict` 与 `WorkbenchIdempotencyKeyConflict` 分离。
+   - 不得复用 idempotency 的 error code、fingerprint 字段或 replay/reserve/commit 行为。
+   - 若修改 `workbench_uow.py` import/export，必须确保现有 idempotency tests 不受影响。
+
+Allowed Scope:
+- 允许修改：
+  - `backend/src/fin_ops_platform/services/workbench_write_conflict.py`（如新增）
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`（仅允许 re-export/import conflict primitive，不允许改 `run()` 真实语义）
+  - `tests/test_workbench_stale_write_contract.py`（仅允许移除目标 conflict shape test 的 expectedFailure，或补充 pure primitive assertion）
+  - `tests/test_workbench_write_conflict.py`（如新增 pure primitive tests）
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`（如需补充执行发现）
+
+Forbidden Scope:
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改真实 Workbench write handler 路由。
+- 不迁移真实 Workbench 写 API。
+- 不实现 UoW stale precondition。
+- 不读取或写入 PostgreSQL facts。
+- 不新增 SQL migration。
+- 不修改前端代码。
+- 不移除其它 expectedFailure。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+- 不生成 PF-P029。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Target tests:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract.WorkbenchStaleWriteContractTests.test_target_workbench_write_conflict_response_shape_is_stable -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+2. Regression tests for adjacent primitives:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+3. Scope checks:
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - `(git diff --name-only; git ls-files --others --exclude-standard) | rg -v '^(backend/src/fin_ops_platform/services/workbench_write_conflict\.py$|backend/src/fin_ops_platform/services/workbench_uow\.py$|tests/test_workbench_stale_write_contract\.py$|tests/test_workbench_write_conflict\.py$|docs/architecture/backend-refactor/migration-state-log\.md$|docs/architecture/backend-refactor/refactor-prompts\.md$|docs/architecture/backend-refactor/workbench-stale-write-boundary-plan\.md$)'`
+     - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P028 记录为 `implemented` 或 `blocked`。
+  - 记录变更文件、验证命令和结果。
+  - 记录仍保留的 expectedFailure。
+  - 记录下一步建议。
+- 更新 `refactor-prompts.md` 的 PF-P028 执行结果。
+- 不生成 PF-P029。
+- 不执行 PF-P029。
+- 不 merge。
+- 不 push。
+- 未经用户确认，不得将 PF-P028 标记为 `verified`。
+- 最终回复必须说明：
+  - 是否只转绿了统一 409 conflict primitive；
+  - 真实 Workbench 写 API 是否仍未迁移；
+  - 哪些 expectedFailure 仍然保留；
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P028 的边界正确：它只建立统一 409 conflict primitive 和 expected_versions 契约，不修真实 stale write。
+- PF-P028 允许新增 `workbench_write_conflict.py`，并通过 `workbench_uow.py` re-export 兼容现有 target test。
+- PF-P028 只允许移除 `test_target_workbench_write_conflict_response_shape_is_stable` 的 expectedFailure；其它 stale write target tests 必须保留。
+- PF-P028 仍不得迁移真实 Workbench 写 API，不得修改 `server.py` 或 `workbench_write_facade.py` 的写入行为。
+- 未经用户确认，不得执行 PF-P028，也不得将 PF-P028 标记为 `verified`。
