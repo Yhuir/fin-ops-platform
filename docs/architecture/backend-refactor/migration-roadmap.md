@@ -1,158 +1,167 @@
-# 后端重构迁移路线
+# 后端架构重构路线图
 
-## 总原则
+## 总体策略
 
-这次重构不是一次性替换全部代码，而是按数据和流量风险分阶段切换：
+重构采用小步、可验证、可回滚的方式推进：
 
-```text
-expand -> backfill -> dual write / verify -> switch read -> contract
-```
+- 不在 `main` 上直接开发。
+- 不一次性重写后端。
+- 不默认引入 Go。
+- 每个模块先完成 discovery、调用链、契约测试，再重构。
+- 每个模块 merge 到 `main` 后必须在 `main` 重跑验证。
+- 生产流量不因 merge 自动变化。
 
-- `expand`：先增加新库、新表、新服务，不破坏旧系统。
-- `backfill`：从 Mongo 导出并导入 PostgreSQL，形成可比对数据。
-- `dual write / verify`：关键写入同时进入旧路径和新路径，持续比对。
-- `switch read`：只切换已经通过校验的读路径。
-- `contract`：确认稳定后移除旧路径和旧依赖。
+## 阶段 0：Fresh 文档锁定
 
-## 阶段 0：冻结目标和基线
+目标：
 
-### 目标
+- 移除旧 Axum/Go replacement 文档。
+- 建立 Python-first 目标架构。
+- 明确模块划分、外部服务契约、动态调用链和 AI 执行规则。
 
-- 明确 Axum/PostgreSQL 架构、数据边界、迁移策略和验收指标。
-- 保留当前 Python 后端作为生产可回滚版本。
-- 建立压测和业务数据规模基线。
+验收：
 
-### 交付物
+- `docs/architecture/backend-refactor/` 下不存在旧方向活跃文档。
+- 文档明确不建立 `backend-go`。
+- 文档明确 Go Fiber 只作为未来热点加速器选项。
+- 文档索引不再指向 Axum/PostgreSQL 计划。
 
-- 本目录重构文档。
-- PostgreSQL 初版 ERD 和 migration。
-- Mongo 备份与恢复演练记录。
-- 当前生产接口列表和主要页面 P95/P99 基线。
+## 阶段 1：全局架构盘点
 
-### 验收标准
+目标：
 
-- 能明确列出每个 Mongo collection 对应的新 PostgreSQL 表或废弃原因。
-- 能在 staging 环境完成 Mongo 备份恢复。
-- 能在 staging 环境启动 PostgreSQL、Redis、NATS、MinIO。
+- 用 CodeGraph 和代码阅读整理当前 API path、handler、service、repository、worker、read model。
+- 建立模块归属表。
+- 找出跨模块直接调用、外部服务散落调用、同步全量构建和 snapshot fallback。
 
-## 阶段 1：基础设施和骨架服务
+交付：
 
-### 范围
+- `architecture-inventory.md`。
+- 每个模块的 API ownership。
+- 外部服务 dependency matrix。
+- 高风险调用链清单。
 
-- 新建 Axum API 服务骨架。
-- 接入 PostgreSQL、Redis、NATS、MinIO。
-- 接入 tracing、OpenTelemetry、Prometheus。
-- 实现健康检查、配置加载、错误模型、认证上下文。
+验收：
 
-### 验收标准
+- 不改业务代码。
+- 只产出架构事实和问题清单。
+- 所有结论能回链到代码文件、测试或产品规格。
 
-- `/healthz`、`/readyz` 可以区分进程存活和依赖可用。
-- API 启动失败时能明确指出缺失配置。
-- 所有请求日志包含 trace id、用户、路径、状态码、耗时。
-- Prometheus 暴露 API latency、DB pool、队列发布失败数。
+## 阶段 2：Platform 边界收敛
 
-## 阶段 2：PostgreSQL schema 和迁移工具
+目标：
 
-### 范围
+- 在 Python 中固化 shared platform boundary。
+- 收敛 auth、db transaction、queue、cache、storage、observability。
+- 建立测试 fake/mock。
 
-- 建立主 schema、分区策略、索引、审计表、outbox 表。
-- 建立 `sqlx migrate` 目录和 CI 校验。
-- 建立 Mongo 到 PostgreSQL 的导出、转换、导入工具。
+验收：
 
-### 验收标准
+- 外部服务调用点可被测试替换。
+- 新模块不得直接 import Redis/RabbitMQ/driver/OA raw adapter。
+- Python unit tests 覆盖平台边界。
 
-- migration 可在空库重复执行到最新版本。
-- staging 数据迁移后，核心对象数量和金额汇总与 Mongo 一致。
-- 关键查询有 `EXPLAIN ANALYZE` 记录，满足初始 P95 目标。
+## 阶段 3：Read Model 和异步刷新基线
 
-## 阶段 3：文件存储迁移
+目标：
 
-### 范围
+- 固化 read model freshness contract。
+- 梳理 dirty scope、source version、outbox、RabbitMQ、worker refresh。
+- 补齐 consistency checker 和 App Health 暴露。
 
-- 新建 MinIO/S3 bucket、版本化、生命周期、访问账号。
-- 从 GridFS 迁移原始导入文件和附件。
-- PostgreSQL 建立 `file_objects`、`import_files`、`attachment_files`。
+验收：
 
-### 验收标准
+- 写操作同事务提交 facts、audit、dirty scope、outbox。
+- Worker 幂等刷新。
+- API 明确返回 fresh/refreshing/stale/failed/unavailable。
+- Redis key 包含 generation/source version。
 
-- 每个文件都有 checksum、size、content_type、storage_key。
-- 随机抽样文件可从 MinIO/S3 读取并与 GridFS 原始文件 checksum 一致。
-- 旧 GridFS 在迁移完成后进入只读归档，不立即删除。
+## 阶段 4：模块逐个重构
 
-## 阶段 4：导入和解析链路
+建议顺序：
 
-### 范围
+1. Workbench 只读 summary/groups。
+2. Workbench detail/group rows。
+3. Workbench writes：pair relation、exception、reconciliation。
+4. Bankdetail。
+5. Pending invoices / invoice usage / output collections。
+6. Imports。
+7. Tax / Cost / ETC。
+8. Search。
+9. Ops/runtime。
 
-- Axum API 接收导入请求、写入文件元数据、发布解析任务。
-- Python Worker 解析 Excel/PDF/OCR，结果写入 PostgreSQL staging 表。
-- 用户确认导入后写入正式事实表，并产生 outbox 事件。
+排序理由：
 
-### 验收标准
+- Workbench 是核心高频路径，最依赖 read model freshness。
+- Bankdetail 和 invoices 是 Workbench 的重要事实输入。
+- Imports 和 worker 影响多个下游模块。
+- Tax/Cost/ETC 聚合重、适合在 read model 基线稳定后推进。
 
-- 导入任务可查询进度、失败原因、重试次数。
-- 同一个文件重复提交通过 checksum 和 idempotency key 控制。
-- 导入确认、撤回、重放都有审计事件。
+## 阶段 5：性能优化和 Hot Path Gate
 
-## 阶段 5：OA 同步链路
+只有模块完成 Python-first 重构后，才评估是否需要 Go Fiber accelerator。
 
-### 范围
+Hot Path Gate 输入：
 
-- OA Mongo 读取从页面请求路径移出，改为后台同步。
-- 同步结果写入 `oa_applications`、`oa_application_items`、`oa_attachments` 等表。
-- 同步任务支持增量、水位、重试和人工补偿。
+- P95/P99 延迟。
+- SQL `EXPLAIN ANALYZE`。
+- CPU profile。
+- memory profile。
+- worker lag。
+- outbox backlog。
+- Redis hit/miss。
+- read model generation 发布耗时。
 
-### 验收标准
+Go Fiber accelerator 允许范围：
 
-- OA Mongo 短暂不可用不影响已缓存工作台页面。
-- 同步滞后时间可监控。
-- 同一 OA 单据多次同步不会产生重复业务事实。
+- 单个明确 API path 或内部计算服务。
+- 保持同一 PostgreSQL facts/read model/outbox 契约。
+- 保持同一 auth/session/trace id。
+- 可 shadow、可灰度、可回切 Python。
 
-## 阶段 6：核销工作台和 read model
+没有这些证据，不进入 Go。
 
-### 范围
+## Merge Gate
 
-- 迁移核销关系、候选匹配、忽略、备注、异常处理。
-- 建立按月份增量重建的工作台 read model。
-- 建立 `search_index_rows` 支持全局搜索。
+每个模块 merge 前：
 
-### 验收标准
+- 当前模块 unit tests 通过。
+- 相关 contract tests 通过。
+- 相关 integration tests 通过或明确记录跳过条件。
+- Python 全仓相关回归通过。
+- 文档和调用链记录已更新。
 
-- 单月工作台优先读 read model，不实时拼全量数据。
-- 操作一条核销关系只重建受影响月份和相关汇总。
-- all-time 视图不阻塞单月操作，必要时走后台聚合。
-- 10 万和 100 万级流水/发票数据下的 P95 达到目标。
+merge 到 `main` 后：
 
-## 阶段 7：切换、回滚和收尾
+- 重新运行同一套验证。
+- 如果失败，修复或回滚该 merge。
+- 不开始下一个模块，直到 `main` 验证通过。
 
-### 切换顺序
+## Traffic Gate
 
-1. 只读影子查询：Axum 查询 PostgreSQL，但用户仍看旧系统结果。
-2. 小范围读切换：内部用户或单个菜单切到 Axum。
-3. 写双写：关键写操作同时写旧 Mongo 路径和 PostgreSQL。
-4. 全量读切换：前端 API 指向 Axum。
-5. 停止旧写路径：旧 Python 后端只保留只读和回滚入口。
-6. 归档旧数据：app Mongo 和 GridFS 冻结归档。
+普通 Python 模块重构通常不需要 Traffic Gate。
 
-### 回滚原则
+以下情况必须单独 Traffic Gate：
 
-- 每次切换前必须有 Mongo 和 PostgreSQL 的时间点备份。
-- 只要 dual-write 校验失败，不进入下一阶段。
-- 切换读流量后发现口径差异，先回滚 API 路由，不手动修生产数据。
-- PostgreSQL 写入已经成为事实源后，回滚必须走补偿脚本，不直接恢复旧 Mongo 覆盖新库。
+- 引入 Go Fiber accelerator。
+- 修改 Nginx/Vite/Caddy path routing。
+- 修改 SSE 代理行为。
+- 改变 auth/session 边界。
+- 改变生产 worker 消费方式。
 
-## 压测目标
+Traffic Gate 必须包含：
 
-初始生产目标建议：
+- staging 或等价环境验证。
+- header/cookie/trace id 透传。
+- 回滚演练。
+- SSE 实时性验证。
+- App Health 和监控观察。
 
-| 场景 | 数据规模 | 目标 |
-| --- | --- | --- |
-| 健康检查 | 不依赖业务数据 | P95 < 20ms |
-| 设置读取 | 常规配置 | P95 < 80ms |
-| 单月工作台 read model 命中 | 10 万流水/发票 | P95 < 300ms |
-| 单月工作台 read model 命中 | 100 万流水/发票 | P95 < 800ms |
-| 全局搜索 | 100 万搜索行 | P95 < 500ms |
-| 导入确认 | 1 万行文件 | API 提交 < 500ms，后台异步完成 |
-| read model 重建 | 单月 10 万行 | 目标 < 60s，后台执行 |
+## 回滚口径
 
-这些目标需要在 staging 压测后修订，不能只按框架 benchmark 判断。
-
+- 文档和测试变更：通过普通 git revert 回滚。
+- Python 模块重构：回滚对应 merge commit。
+- Read model 问题：继续读取旧 active generation，修复 worker 后重建。
+- RabbitMQ 问题：回退 PostgreSQL polling/outbox。
+- Redis 问题：清空或关闭 Redis，不影响 PostgreSQL read model 正确性。
+- Go accelerator 问题：网关 path 回切 Python。
