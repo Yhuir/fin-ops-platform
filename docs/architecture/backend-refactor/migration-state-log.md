@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` 已由用户确认 `verified`，准备推送 `origin/main` |
-| 当前 active prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` (`verified`) |
+| 当前阶段 | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` (`planned`) |
 | 最近 verified prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P026-MG 已在本地 `main` 复验通过；merge commit `8c0013bf`；用户已确认 `verified` 并要求 push |
-| 下一条允许任务 | 执行 `git push origin main`。push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt |
+| 当前分支 | `codex/workbench-stale-write-planning` |
+| 最近验证 | PF-P026-MG 已 push 到 `origin/main`；当前分支从最新 `main` 创建 |
+| 下一条允许任务 | 只允许执行 PF-P027。PF-P027 只做 Workbench stale write / optimistic locking 的 discovery、边界设计和测试转绿顺序规划；不得迁移真实 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -2843,6 +2843,41 @@ PF-P026 已由用户确认 `verified`。PF-P026-MG 已生成并审查，下一�
 #### 下一条 Prompt 上下文
 
 PF-P026-MG 已由用户确认 `verified`，并要求执行 `git push origin main`。push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt。建议下一条 prompt 为 `PF-P027 - Workbench Stale Write Boundary Discovery and Planning`，先做 stale write / optimistic locking 的 discovery、边界设计和测试转绿顺序规划，不直接迁移真实 Workbench 写 API。
+
+PF-P026-MG 已 push 到 `origin/main`。已从最新 `main` 创建分支 `codex/workbench-stale-write-planning`。PF-P027 已生成并审查，下一步只允许执行 PF-P027，不得直接实现 stale write，不得迁移真实 Workbench 写 API。
+
+### PF-P027 - Workbench Stale Write Boundary Discovery and Planning
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Workbench stale write / optimistic locking 的 discovery、动态调用链梳理、边界设计和测试转绿顺序规划。
+- 聚焦 PF-P026-MG 后仍保留的 stale write / optimistic locking expectedFailure。
+- 产出 `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`。
+- 更新本文档和 `refactor-prompts.md`。
+
+#### 禁止范围
+
+- 不修改生产代码。
+- 不迁移真实 Workbench 写 API。
+- 不修改 `server.py` 或 `workbench_write_facade.py`。
+- 不新增 SQL migration。
+- 不实现 `WorkbenchWriteConflict`。
+- 不实现 stale precondition / expected_versions 校验。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+
+#### 验收标准
+
+- 明确剩余 expectedFailure 的当前行为、目标行为、依赖数据、缺口和分批转绿顺序。
+- 输出 withdraw preview/submit、cancel link、ignore row、cash special 的静态调用链和动态运行时序。
+- 明确是否需要先实现 conflict primitive、read model payload version identity、repository current-state reader、UoW precondition port。
+- 明确后续 prompt 的推荐顺序。
+
+#### 审查结论
+
+- PF-P027 是 PF-P026-MG 后的正确下一步。
+- 本 prompt 仍不能直接改真实 API，因为 stale write 会改变用户可见写入语义，必须先把边界、兼容策略、409 response contract 和测试转绿顺序定清楚。
 
 ## 维护规则
 

@@ -8118,3 +8118,183 @@ Main 上复验：
 - 用户已确认 PF-P026-MG `verified`，并要求执行 `git push origin main`。
 - push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt。
 - 建议下一条 prompt 为 `PF-P027 - Workbench Stale Write Boundary Discovery and Planning`，先做 stale write / optimistic locking 的 discovery、边界设计和测试转绿顺序规划，不直接迁移真实 Workbench 写 API。
+
+PF-P026-MG 已 push 到 `origin/main`。已从最新 `main` 创建分支 `codex/workbench-stale-write-planning`。PF-P027 已生成并审查，下一步只允许执行 PF-P027。
+
+## PF-P027 - Workbench Stale Write Boundary Discovery and Planning
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P027 - Workbench Stale Write Boundary Discovery and Planning。
+
+Role: 你是一位严格的 Python 后端架构师，精通 Clean Architecture、Unit of Work、乐观锁、409 conflict contract、遗留系统 characterization tests 和 CodeGraph 调用链分析。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P026-MG 已 verified 并 push 到 `origin/main`。
+- 当前分支必须从最新 `main` 创建。
+- Workbench 读路径和写路径 facade extraction 已合入。
+- Workbench UoW skeleton、transaction-bound dirty/outbox writer、idempotency primitive、UoW idempotency replay/reserve/commit skeleton 已合入。
+- 真实 Workbench 写 API 仍未迁入 UoW。
+- 真实 PostgreSQL durable idempotency repository 仍未实现。
+- 当前剩余 target expectedFailure 主要是 stale write / optimistic locking：
+  - `tests/test_workbench_stale_write_contract.py`
+    - `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions`
+    - `test_target_workbench_write_conflict_response_shape_is_stable`
+  - `tests/test_workbench_uow_contract.py`
+    - `test_withdraw_submit_rejects_stale_preview_relation_version`
+    - `test_cancel_link_rejects_stale_replaced_relation`
+    - `test_ignore_row_rejects_when_row_already_confirmed`
+    - `test_cash_special_rejects_changed_relation_version`
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_exception_case_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_override_service.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-stale-write-planning` 或同一 PF-P027 planning 分支。
+   - 当前 active prompt 是 `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` planned。
+   - 最近 verified prompt 是 `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate`。
+3. 必须优先使用 CodeGraph 做结构性分析：
+   - `codegraph_context`：Workbench stale write / optimistic locking boundary。
+   - `codegraph_trace` 或 `codegraph_callees`：追踪以下入口到 facade/service 的调用链：
+     - `_handle_api_workbench_withdraw_link_preview`
+     - `_handle_api_workbench_withdraw_link`
+     - `_handle_api_workbench_cancel_link`
+     - `_handle_api_workbench_ignore_row`
+     - `_handle_api_workbench_confirm_cash_pass_through`
+     - `_handle_api_workbench_confirm_cash_ticket_purchase`
+     - `_handle_api_workbench_cancel_cash_special`
+   - `codegraph_context` 或 `codegraph_explore`：查看 `WorkbenchWriteUnitOfWork.run()`、`WorkbenchWriteFacade`、pair relation / exception / override 服务的当前 public surface。
+4. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+
+Goal:
+只做 Workbench stale write / optimistic locking 的 discovery、动态调用链梳理、边界设计和后续测试转绿顺序规划。产出一份 `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`。不得修改生产代码，不得迁移真实 Workbench 写 API，不得新增 SQL migration，不得实现 `WorkbenchWriteConflict` 或 stale precondition。
+
+Required Discovery Work:
+1. ExpectedFailure Inventory
+   - 列出当前 6 个 stale write / optimistic locking target expectedFailure。
+   - 对每个 expectedFailure 写清：
+     - 当前测试期望。
+     - 当前生产行为。
+     - 目标行为。
+     - 需要的输入字段或版本身份。
+     - 需要读取的事实源。
+     - 是否需要真实 API migration 才能转绿。
+2. Runtime Sequence / Dynamic Call Chain
+   - 输出 Mermaid sequence diagrams，至少覆盖：
+     - withdraw preview -> withdraw submit stale relation version。
+     - cancel link stale replaced relation。
+     - ignore row after already confirmed。
+     - cash special changed relation version。
+   - 标注当前 handler、facade、service、repository、read model / relation facts 之间的实际调用顺序。
+   - 标注当前盲写或 stale overwrite 发生点。
+3. Version Identity / Expected Versions Design
+   - 设计统一 `expected_versions` contract。
+   - 明确 relation、exception case、row status、read model source_version 各自的 key shape。
+   - 明确 withdraw preview response 需要额外暴露哪些 relation identity/version 字段。
+   - 明确哪些字段可后端兼容性推导，哪些必须前端携带。
+4. Conflict Primitive Boundary
+   - 设计 `WorkbenchWriteConflict` 的目标字段、HTTP status、response payload。
+   - 明确该 primitive 应放在哪个模块，为什么。
+   - 明确它与 `WorkbenchIdempotencyKeyConflict` 的区别。
+   - 不实现代码。
+5. Repository / UoW Precondition Boundary
+   - 设计 UoW stale precondition port 或 repository current-state reader 的目标边界。
+   - 明确哪些检查应在 UoW transaction 内完成。
+   - 明确不能从 read model 作为最终事实源判断写入合法性。
+   - 明确是否需要新的 PostgreSQL facts repository 方法。
+6. Test Turn-Green Order
+   - 给出后续 prompt 顺序建议。
+   - 必须说明哪些 expectedFailure 可先通过 pure primitive / contract 转绿，哪些必须等真实 API migration。
+   - 不得建议一次性迁移所有 Workbench 写 API。
+
+Required Output:
+- 新增或更新 `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`。
+- 更新 `docs/architecture/backend-refactor/migration-state-log.md`，将 PF-P027 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+- 更新 `docs/architecture/backend-refactor/refactor-prompts.md` 的 PF-P027 执行结果。
+
+Allowed Scope:
+- 允许修改：
+  - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+
+Forbidden Scope:
+- 不修改生产代码。
+- 不修改测试代码。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 不修改 Workbench service/repository 实现。
+- 不新增 SQL migration。
+- 不实现 `WorkbenchWriteConflict`。
+- 不实现 stale precondition / expected_versions 校验。
+- 不迁移真实 Workbench 写 API。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+- 不生成 PF-P028。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Documentation / scope checks:
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - `(git diff --name-only; git ls-files --others --exclude-standard) | rg -v '^(docs/architecture/backend-refactor/workbench-stale-write-boundary-plan\.md$|docs/architecture/backend-refactor/migration-state-log\.md$|docs/architecture/backend-refactor/refactor-prompts\.md$)'`
+     - 该命令必须无输出；否则 blocked。
+2. Because PF-P027 is docs-only discovery/planning:
+   - 不要求运行 Workbench test suite。
+   - 但必须引用最近一次 PF-P026-MG 的 main 复验结果作为基线。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P027 记录为 `implemented` 或 `blocked`。
+  - 记录读取的关键文件和 CodeGraph 覆盖。
+  - 记录发现的 stale write 边界、剩余 expectedFailure、下一步建议。
+- 更新 `refactor-prompts.md` 的 PF-P027 执行结果。
+- 不生成 PF-P028。
+- 不执行 PF-P028。
+- 不 merge。
+- 不 push。
+- 未经用户确认，不得将 PF-P027 标记为 `verified`。
+- 最终回复必须说明：
+  - 产出的 stale write plan 文件；
+  - 哪些 expectedFailure 被纳入规划；
+  - 真实 API 是否仍未迁移；
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P027 的边界正确：它只做 stale write / optimistic locking 的 discovery、调用链、边界设计和测试转绿顺序规划。
+- PF-P027 不修改生产代码、不修改测试、不迁移真实 Workbench 写 API。
+- PF-P027 明确要求使用 CodeGraph 梳理动态调用链。
+- PF-P027 的产物应成为后续 stale write primitive / API migration prompt 的事实源。
+- 未经用户确认，不得将 PF-P027 标记为 `verified`。
