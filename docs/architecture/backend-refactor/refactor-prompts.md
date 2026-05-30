@@ -4791,7 +4791,7 @@ Post-Flight:
 
 ## PF-P015 - Workbench Remaining Write Facade Discovery and Planning
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -4969,7 +4969,7 @@ Post-Flight:
 
 ### 执行结果
 
-- 状态：`implemented`，等待用户确认后才能标记为 `verified`。
+- 状态：`verified`，用户已确认 PF-P015 可落锁。
 - 新增产物：`docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`。
 - 扫描覆盖：
   - `withdraw-link` / `withdraw-link-preview`
@@ -4988,3 +4988,152 @@ Post-Flight:
 - UoW readiness 结论：未来 UoW 必须覆盖 pair relation facts/history、exception facts/history、overrides、candidate consumption、dirty scope/outbox 和 read model scheduling/source versions；当前 blocker 是 in-memory mutation + Application snapshot/persist callback + post-fact derived lifecycle/read model scheduling + async thread switches + tests gaps。
 - 下一条建议 prompt：`PF-P016 - Workbench Remaining Write Characterization Tests`。
 - 本轮未修改业务代码、未新增测试、未执行 Merge Gate / Traffic Gate、未 push。
+
+## PF-P016 - Workbench Remaining Write Characterization Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P016 - Workbench Remaining Write Characterization Tests。
+
+Role: 你是一位精通 Python 遗留系统测试、行为锁定、事务一致性风险和 Clean Architecture 重构门禁的后端测试架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P015 已 verified，事实源是 `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`。
+- PF-P016 的目标是用 characterization tests 锁定剩余 Workbench 写入口的当前行为，为后续 facade extraction 或 UoW design 提供安全网。
+- 本轮不是修复 prompt。即使发现当前行为不理想，也必须先用测试和文档记录当前行为，不得顺手修正。
+
+Pre-Flight:
+1. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+2. 必须确认：
+   - 最近 verified prompt 是 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`。
+   - 当前 active prompt 是 `PF-P016 - Workbench Remaining Write Characterization Tests` planned。
+   - 当前分支不是 `main`。
+   - 当前分支仍是本模块任务分支，且未混入其它业务改动。
+3. 必须先记录当前 diff 范围：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - 若存在非本轮文件变更，必须停止并说明。
+4. 必须先读取现有测试模式，优先复用：
+   - `tests/test_workbench_v2_api.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_dirty_queue_wiring.py`
+   - `tests/test_workbench_pair_relation_service.py`
+   - `tests/test_workbench_exception_application_service.py`
+   - `tests/test_workbench_exception_case_service.py`
+
+Goal:
+新增最小但生产有效的 characterization tests，锁定 PF-P015 发现的剩余 Workbench 写入口当前行为。测试必须证明当前系统在 duplicate submit、stale/old-view submit、persistence failure、dirty/read model scheduling failure 场景下的实际响应和副作用。不得修改生产代码使测试通过；如果测试揭示当前行为与预期不一致，应把当前行为写入测试或将 prompt 标记 blocked 并说明。
+
+Allowed Scope:
+- 允许新增或修改测试文件：
+  - `tests/test_workbench_v2_api.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `tests/test_workbench_dirty_queue_wiring.py`
+- 允许新增小型 test helper，但必须放在上述测试文件内，除非已有项目模式要求单独 helper。
+- 允许更新文档：
+  - `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 允许使用 `mock.patch` 模拟持久化或调度失败，但不得 mock 掉整个 HTTP handler 或未来 facade 边界。
+
+Forbidden Scope:
+- 不修改 `backend/src/fin_ops_platform/**/*.py` 生产代码。
+- 不抽 facade。
+- 不设计或实现 Unit of Work、repository、transaction manager、outbox 或 dirty scope 变更。
+- 不修复 stale write、duplicate submit、blind write、rollback 或 failure propagation 语义。
+- 不修改 SQL migration、前端、网关、部署、生产配置或 CI/CD。
+- 不访问生产环境，不执行 Traffic Gate，不执行 Merge Gate，不 push。
+- 不使用 `git add .` 或 `git add -A`。
+- 不通过过度 mock 使测试脱离真实链路；HTTP / live handler tests 必须尽量覆盖 Handler -> existing App service orchestration 的真实路径。
+
+Required Test Work:
+1. Withdraw link characterization:
+   - duplicate submit：同一组 row_ids 连续 withdraw 两次，锁定第二次当前响应和 relation/history 副作用。
+   - stale preview submit：先 preview，再让同一 row 的 active relation 被其它操作替换或撤回，再 submit 旧 row_ids，锁定当前行为。
+   - scheduling failure：在 relation mutation 后让 `_execute_derived_data_lifecycle_event` 或 `_schedule_workbench_read_model_persist` 失败，锁定当前响应/异常与已变更事实。
+2. Cash special characterization:
+   - `confirm-cash-pass-through` success + duplicate submit。
+   - `confirm-cash-ticket-purchase` success + duplicate submit。
+   - `cancel-cash-special` success + duplicate submit。
+   - 至少一个 stale/conflict 场景：基于旧 relation 提交 special update 或 cancel，锁定当前行为。
+   - 至少一个 scheduling failure 场景，锁定 relation special metadata 是否已变更以及响应/异常。
+3. Update bank exception characterization:
+   - duplicate submit 当前行为。
+   - stale/conflict 当前行为：先对 row 做其它 exception/relation 操作，再提交旧视图 update-bank-exception。
+   - failure propagation：`_apply_workbench_exception_application` 后置持久化或 scheduling 失败时的当前响应和副作用。
+4. OA bank exception characterization:
+   - duplicate submit 当前行为，覆盖 OA+bank rows。
+   - invoice row compatibility 不得退化；如果已有测试足够，引用现有测试名并只补缺口。
+   - scheduling/failure propagation 当前行为。
+5. Personal advance repayment characterization:
+   - duplicate submit 当前行为：是否创建新 settlement case、是否替换 active relation、history 如何变化。
+   - stale/conflict 当前行为：参与 row 已被其它 relation 或 exception 改变后再提交。
+   - persistence/scheduling failure：锁定 exception case、pair relation、read model scheduling 之间当前是否可部分成功。
+6. Matching dirty worker boundary:
+   - 复查 PF-P015 的 worker test gap。若现有 `test_workbench_dirty_queue_wiring.py` 和 `test_workbench_write_characterization.py` 已足够覆盖本轮需要，文档中写明“本轮不新增 worker tests”的理由。
+   - 如果发现混合 RuntimeWorker + matching loop 仍有未锁定的可测试行为，可新增最小测试；不得修改 worker 代码。
+
+Characterization Test Rules:
+- 测试名称必须表达“current behavior”，避免写成未来理想语义。
+- 对当前不理想行为，使用注释标记 `TODO(PF-P017+)` 或类似格式，说明后续可在 UoW / optimistic locking prompt 中修复。
+- 不得把 backend-only 或 legacy response 字段随意删掉；当前 payload 形状应按实际行为断言。
+- 必须避免测试状态污染：
+  - Redis/PostgreSQL/状态存储相关 patch 必须在 context manager 内完成。
+  - 新测试不得依赖真实外部 Redis、RabbitMQ、OA Mongo 或生产数据。
+  - 新测试不得留下 `.pkl`、`.sqlite`、临时导出或其它 untracked 文件。
+- 优先使用现有 `build_application()`、payload builder、`flatten_groups()`、`patch.object(...)` 等测试模式。
+
+Required Documentation Work:
+- 更新 `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`：
+  - 增加 PF-P016 Characterization Results。
+  - 标记哪些 gap 已关闭，哪些仍留到后续。
+- 更新 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`：
+  - 补充 PF-P016 测试结果摘要。
+  - 更新 Next Slice Recommendation。
+- 更新 `docs/architecture/backend-refactor/migration-state-log.md`：
+  - 将 PF-P016 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 写明新增/修改测试、执行过的测试命令、失败或残余风险。
+- 更新 `docs/architecture/backend-refactor/refactor-prompts.md` 的 PF-P016 执行结果。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- 至少运行新增测试的精确 unittest 选择器。
+- 运行被修改测试文件的相关完整 unittest 文件；如果 `tests/test_workbench_v2_api.py` 运行时间过长，至少运行新增测试所在 class / selector，并说明未跑全文件的原因。
+- 建议命令格式：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`（如果修改该文件）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.<ClassName>.<test_name> -v`（按新增测试精确选择器）
+
+Post-Flight:
+- Do not merge to main.
+- Do not push.
+- Do not execute Merge Gate.
+- Do not mark PF-P016 as verified without user confirmation.
+- 最终回复必须说明：
+  - 新增/修改了哪些测试。
+  - 哪些当前行为被锁定。
+  - 哪些风险仍未关闭。
+  - 下一条 prompt 建议是什么。
+```
+
+### 审查结论
+
+- PF-P016 的边界正确：只补 characterization tests 和文档，不修改生产代码。
+- PF-P016 明确禁止修复 stale write、duplicate submit、rollback、UoW 或 facade extraction，符合“先锁当前行为”的重构节奏。
+- PF-P016 覆盖 PF-P015 发现的主要测试缺口：withdraw、cash special、update-bank-exception、OA-bank exception、personal advance repayment、matching dirty worker boundary。
+- PF-P016 要求精确测试选择器和状态污染防护，避免引入 flaky tests 或测试产物。
+- PF-P016 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。

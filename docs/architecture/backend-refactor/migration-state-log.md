@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` 已执行，等待用户确认 `verified` |
-| 当前 active prompt | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` (`implemented`) |
-| 最近 verified prompt | `PF-P014-MG - Workbench Exception Facade Merge Gate` |
+| 当前阶段 | `PF-P016 - Workbench Remaining Write Characterization Tests` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P016 - Workbench Remaining Write Characterization Tests` (`planned`) |
+| 最近 verified prompt | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` |
 | 当前分支 | `codex/workbench-remaining-write-facade-planning` |
 | 最近验证 | PF-P014-MG 已在功能分支和本地 `main` 复验：`compileall`、Workbench write characterization、Workbench v2 API、exception application/case、pair relation、derived lifecycle + platform guards 均通过；`main` 已 push 到 `origin/main`；未执行 Traffic Gate |
-| 下一条允许任务 | 用户确认 PF-P015 后，生成并审查 `PF-P016 - Workbench Remaining Write Characterization Tests`；不得直接进入 UoW 设计或业务代码实现 |
+| 下一条允许任务 | 执行 `PF-P016 - Workbench Remaining Write Characterization Tests`；不得修复业务语义、抽 facade 或进入 UoW 设计 |
 
 ## Prompt 执行日志
 
@@ -1816,7 +1816,7 @@ main 复验结果：
 
 ### PF-P015 - Workbench Remaining Write Facade Discovery and Planning
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -1867,7 +1867,42 @@ UoW readiness：
 - 未来 UoW 必须覆盖 pair relation facts/history、exception cases/history、overrides、candidate consumption、dirty scope/outbox 和 read model source versions。
 - 当前 blocker 是 in-memory service 先变更、Application snapshot/persist callbacks 后置、derived lifecycle/read model scheduling 与 facts commit 分离、async thread 配置和测试缺口。
 
-下一条建议 prompt：`PF-P016 - Workbench Remaining Write Characterization Tests`。PF-P016 应先锁定剩余入口 duplicate-submit、stale/conflict、persistence failure、dirty/read model scheduling failure 当前行为；仍不得修复 stale write 或实现 UoW。
+用户已确认 PF-P015 `verified`。下一条 prompt 已生成并审查：`PF-P016 - Workbench Remaining Write Characterization Tests`。PF-P016 应先锁定剩余入口 duplicate-submit、stale/conflict、persistence failure、dirty/read model scheduling failure 当前行为；仍不得修复 stale write、抽 facade 或实现 UoW。
+
+### PF-P016 - Workbench Remaining Write Characterization Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只新增或调整 Workbench 剩余写入口的 characterization tests 和必要文档回写。
+- 必须覆盖 PF-P015 发现的高风险缺口：
+  - `withdraw-link` preview stale submit、duplicate submit、scheduling failure。
+  - cash special 三个入口：success、duplicate submit、stale/conflict、scheduling failure。
+  - `update-bank-exception`：duplicate submit、stale/conflict、failure propagation。
+  - `oa-bank-exception`：duplicate submit、failure propagation。
+  - `confirm-personal-advance-repayment`：duplicate submit、stale/conflict、persistence / scheduling failure。
+  - matching dirty worker mixed runtime boundary 的必要补充测试，如当前测试已经足够，必须在文档中说明理由。
+
+#### 禁止范围
+
+- 不修改生产业务代码。
+- 不抽 facade。
+- 不设计或实现 UoW。
+- 不修复 stale write、duplicate submit、blind write、rollback 或调度失败语义。
+- 不修改 SQL migration、前端、网关、部署或生产配置。
+- 不执行 Merge Gate、Traffic Gate、deploy、push 或生产访问。
+
+#### 验收标准
+
+- PF-P016 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P016 prompt 明确只允许 tests 和文档变更。
+- PF-P016 prompt 明确测试必须锁定当前行为，而不是改成理想行为。
+- PF-P016 prompt 明确执行后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P016 已生成并审查。下一步允许在用户确认后执行 PF-P016。PF-P016 只做 characterization tests，不做行为修复；执行后根据测试结果决定是否继续 `PF-P017 - Workbench Remaining Write Facade Extraction`，或先拆更小的测试补丁。
 
 ## 维护规则
 

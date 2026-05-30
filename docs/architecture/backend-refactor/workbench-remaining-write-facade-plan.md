@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P015 - Workbench Remaining Write Facade Discovery and Planning`
 
-状态：`implemented`
+状态：`verified`
 
 本文档只记录 PF-P014 之后仍留在 `server.py` / runtime loop 中的 Workbench 写入口事实、调用链、测试缺口和 UoW readiness。本文档不包含业务代码改动、测试改动、UoW API 设计或实现方案。
 
@@ -324,5 +324,7 @@ Current blocker：`_execute_derived_data_lifecycle_event` and `_schedule_workben
   - update-bank-exception duplicate/stale/failure。
   - OA-bank exception duplicate/failure。
   - personal advance repayment duplicate/stale/persistence failure。
+
+用户已确认 PF-P015 `verified`。PF-P016 已生成并审查，等待执行。
 
 PF-P016 仍不应该修复 stale write 或实现 UoW。它的产物应是黑盒 characterization tests 和必要的文档回写。PF-P016 verified 后，才适合决定 PF-P017 是 remaining facade extraction 还是 Workbench Unit of Work Boundary Design。

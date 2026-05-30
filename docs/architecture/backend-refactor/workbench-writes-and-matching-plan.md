@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已执行，产物是 `workbench-remaining-write-facade-plan.md`，等待用户确认 `verified`。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已生成并审查，等待执行。
 
 ## 1. Scope Boundary
 
@@ -475,7 +475,7 @@ Required properties:
 
 ## 12. Next Slice Recommendation
 
-PF-P015 已执行并等待用户确认 `verified`。下一条建议 prompt：
+PF-P015 已由用户确认 `verified`。下一条已生成并审查的 prompt：
 
 `PF-P016 - Workbench Remaining Write Characterization Tests`
 
@@ -486,4 +486,4 @@ PF-P015 已执行并等待用户确认 `verified`。下一条建议 prompt：
 - Unit of Work 是必要方向，但必须先锁定剩余入口在重复提交、旧视图写入、持久化失败、dirty/read model scheduling 失败时的当前行为。
 - `/matching/run` 应保持 legacy/review，不进入 Workbench write facade；matching dirty worker 属于 worker/runtime boundary。
 
-PF-P016 应只新增 characterization tests 和文档回写，不修复 stale write，不抽 facade，不设计或实现 UoW。PF-P016 verified 后，再根据测试覆盖决定 PF-P017 是 remaining facade extraction 还是 Workbench Unit of Work Boundary Design。
+PF-P016 应只新增 characterization tests 和文档回写，不修复 stale write，不抽 facade，不设计或实现 UoW。PF-P016 执行后只能进入 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。PF-P016 verified 后，再根据测试覆盖决定 PF-P017 是 remaining facade extraction 还是 Workbench Unit of Work Boundary Design。
