@@ -3241,7 +3241,7 @@ Post-Flight:
 /goal
 执行 PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)。
 
-目标：只处理 Workbench Query Slice E：repository active generation/source_version 读边界、groups/summary/group detail/refresh status 的一致性测试和最小实现修正。必须先用测试锁定行为，再做小步修改。不得执行 Merge Gate、Traffic Gate、部署或 push。
+目标：只处理 Workbench Query Slice E：repository active generation/source_version 读边界、groups/summary/group detail/row detail/refresh status 的一致性测试和最小实现修正。必须先用测试锁定行为，再做小步修改。不得执行 Merge Gate、Traffic Gate、部署或 push。
 
 Role:
 你是一位精通 Python 后端、PostgreSQL read model、CQRS/active generation、遗留系统 characterization tests 和低风险重构的资深工程师。
@@ -3274,6 +3274,7 @@ Pre-Flight:
 - `PostgresReadModelRepository.get_workbench_group_detail(...)`
 - `PostgresReadModelRepository.get_workbench_refresh_status(...)`
 - `PostgresReadModelRepository.workbench_groups_cache_version(...)`
+- row detail cached read model 解析链路：`Application._get_api_workbench_row_detail_payload(...)`、`Application._resolve_rows_from_cached_read_models(...)` 及其 repository / cache 输入。
 - 上述方法的 handler / facade callers 和现有 tests。
 
 必须确认：
@@ -3301,31 +3302,40 @@ Forbidden Scope:
 - 不执行 Merge Gate、Traffic Gate、部署或 push。
 
 Required Test Work:
-必须采用 TDD。实现前先新增或调整 targeted tests，覆盖以下至少 4 类风险；如果某类已有等价覆盖，必须在执行结果中明确列出测试名和原因：
+必须采用 TDD。实现前先新增或调整 targeted tests，覆盖以下风险；如果某类已有等价覆盖，必须在执行结果中明确列出测试名和原因：
 
 1. Active generation isolation:
    - `get_workbench_groups_page(...)` 只读取当前 active generation。
    - 旧 generation、building generation、failed generation 中的数据不得混入 groups page/count/row counts。
+   - 必须覆盖 TOCTOU 风险：同一次 repository 方法调用内，page rows、total count、row counts、source_versions 必须使用同一个方法级固定的 `active_generation_id`，不得在多条 SQL 之间重新读取 active generation 导致新旧 generation 混读。
 
 2. Group detail consistency:
    - `get_workbench_group_detail(...)` 必须只返回 active generation 中的 group。
    - 如果 group 只存在于非 active generation，API/repository 应按当前契约返回 missing/not found/refreshing，而不是读旧数据。
 
-3. Summary / source_versions consistency:
+3. Row detail consistency:
+   - cached read model row detail 提取必须受当前 active generation/source_version 边界约束。
+   - 如果 row 只存在于旧 generation、building generation 或 failed generation，不得被 row detail fallback 当作当前行返回。
+   - 必须保留 PF-P008/PF-P009 已锁定的 live service -> cached read model -> route fallback 顺序和 production fallback gate，不得为了 active generation 修正改变既有 response contract。
+
+4. Summary / source_versions consistency:
    - `get_workbench_summary(...)` 返回的 `source_versions`、`read_model_status`、generation metadata 必须与 active generation 对齐。
    - stale / refreshing / unavailable 语义不得因为 repository 修正而漂移。
 
-4. Groups page count/filter/search consistency:
+5. Groups page count/filter/search consistency:
    - page rows、total、row counts、filter/search/sort 使用同一 active generation 和同一 filter 条件。
    - 不允许 page query 使用 active generation，但 count query 或 row-count query 跨 generation。
+   - 必须防止 count query 和 page query 之间后台 worker 切换 active generation 导致分页总数与页面数据不一致。
 
-5. Observability check:
+6. Observability check:
    - 检查 groups page/count/filter/search 是否缺少可定位慢查询的观测点。
    - 本轮若只记录 gap，不做生产指标改造，必须把 gap 写入 `workbench-read-model-query-plan.md`；不得为了指标改造扩大范围。
 
 Required Implementation Work:
 - 只做让上述 tests 通过所需的最小代码改动。
 - 优先复用现有 repository helper，例如 active generation lookup、scope filter、source_versions 读取、filter normalization。
+- 对涉及多条 SQL 的 repository 方法，必须先在方法开始处确定唯一的 `active_generation_id` / active source_versions，并将该值显式传递或复用到后续 page、count、row-count、detail 查询；不得在同一方法内多次读取 active generation。
+- 如果无法在当前 connection/read context 下保证同一方法内 generation 一致性，必须记录为 `blocked` 或后续事务边界 prompt，不得用宽泛 fallback 掩盖。
 - 如果发现现有 SQL 大块重复但不影响当前风险，不做大规模抽象。
 - 如果发现需要 SQL migration 才能保证一致性，必须停止并标记 `blocked`，不得偷偷改迁移。
 - 如果发现性能问题需要 `EXPLAIN` 或索引设计，先记录风险和后续 prompt，不在本轮改 schema。

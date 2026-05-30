@@ -491,11 +491,12 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 - 输入事实：
   - PF-P009-MG 已由用户确认 `verified`，`main` 已 push 到 `origin/main`，本轮分支从最新 `main` 创建。
   - CodeGraph 确认 Slice E 的主要入口是 `PostgresReadModelRepository.get_workbench_summary(...)`、`get_workbench_groups_page(...)`、`get_workbench_group_detail(...)`、`get_workbench_refresh_status(...)`、`workbench_groups_cache_version(...)`。
-  - `get_workbench_groups_page(...)` 当前会读取 active generation id / source_versions，并在 page/count/row-count 查询中使用多段 SQL；PF-P010 必须确认这些查询没有跨 generation 混读。
+  - `get_workbench_groups_page(...)` 当前会读取 active generation id / source_versions，并在 page/count/row-count 查询中使用多段 SQL；PF-P010 必须确认这些查询没有跨 generation 混读，并防止 count/page 查询之间发生 active generation 切换造成 TOCTOU 不一致。
+  - Row detail cached read model fallback 也必须受当前 active generation/source_version 边界约束，防止旧 generation 中的游离行被当作当前行返回。
   - 现有测试集中已有 Workbench SQL runtime、row detail targeted tests、query facade tests 和 platform runtime boundary guards；PF-P010 必须先补 targeted tests 再做最小实现。
 - 允许：
   - 修改 Workbench read model repository 读路径。
-  - 新增/调整 repository active generation、group detail、groups count/filter/search、summary/source_versions 的 targeted tests。
+  - 新增/调整 repository active generation、group detail、row detail、groups count/filter/search、summary/source_versions 的 targeted tests。
   - 记录 groups page/count/filter/search 慢查询观测性 gap。
 - 禁止：
   - 不修改 SQL migration。

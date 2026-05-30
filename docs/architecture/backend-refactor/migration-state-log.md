@@ -1271,6 +1271,8 @@ PF-P009-MG 已由用户确认 `verified`。`git push origin main` 已通过，`o
 
 - 只处理 Workbench query/read-model 的 repository 与 active generation/source_version 读边界。
 - 深挖 `PostgresReadModelRepository.get_workbench_summary(...)`、`get_workbench_groups_page(...)`、`get_workbench_group_detail(...)`、`get_workbench_refresh_status(...)`、`workbench_groups_cache_version(...)` 及其测试。
+- 明确补入 row detail cached read model 的 active generation/source_version 一致性测试。
+- 明确防范 repository 多 SQL 查询的 TOCTOU 风险：同一次方法调用内 page/count/row-count/detail 必须使用同一个固定 active generation id。
 - 先补 characterization / guard tests，再做最小实现修正。
 - 检查 groups page/count/filter/search 的 repository 慢查询与观测性粒度，但不得把 HTTP request context 的 `request_database_timing` 下沉到 facade/repository。
 
