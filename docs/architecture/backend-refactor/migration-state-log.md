@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` (`planned`) |
+| 当前阶段 | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` (`implemented`) |
 | 最近 verified prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P021-MG 已在最新 `main` 上完成本地 merge、复验和 `git push origin main`；`main...origin/main` 为 `0 0`；当前分支从最新 `main` 新建；默认后端 discover 通过，`1947 tests`，`skipped=25`，`expected failures=7` |
-| 下一条允许任务 | 只允许执行 `PF-P022`。PF-P022 仅做 Workbench 写路径 UoW 接入规划、stale write 策略、durable idempotency 策略和 7 个 expectedFailure 目标测试转绿分步计划；不得改生产代码、测试断言、SQL migration、部署配置或执行 merge/push |
+| 最近验证 | PF-P022 为 docs-only planning；已创建 `workbench-uow-integration-plan.md` 并回写 UoW 边界与 Workbench 写路径计划；未修改生产代码、测试、SQL migration、前端、部署或 CI/CD |
+| 下一条允许任务 | 等待用户确认 PF-P022 是否可标记为 `verified`。确认前不得生成 PF-P023、不得执行真实写路径迁移、不得 merge/push |
 
 ## Prompt 执行日志
 
@@ -2422,7 +2422,7 @@ PF-P021-CI 已由用户确认 `verified`。下一步重新执行 `PF-P021-MG - W
 
 ### PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2458,7 +2458,39 @@ PF-P021-CI 已由用户确认 `verified`。下一步重新执行 `PF-P021-MG - W
 
 #### 下一条 Prompt 上下文
 
-下一步只允许执行 PF-P022。执行完成后，必须将结果回写到状态机和相关架构文档，并将 PF-P022 记录为 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。PF-P022 verified 后，才允许根据其真实产物生成下一条实现或测试 prompt。
+PF-P022 已执行但未经用户确认，不得标记 `verified`。PF-P022 的主要产物是 `workbench-uow-integration-plan.md`，结论是下一步不应直接迁移真实写路径，而应先生成并审查 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`。
+
+#### 执行结果
+
+- 新增 `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`。
+- 回写 `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`，记录 PF-P022 产物和后续分步策略。
+- 回写 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`，记录真实写路径接入顺序。
+- 更新 `docs/architecture/backend-refactor/refactor-prompts.md` 的 PF-P022 执行结果。
+- 未修改生产代码、测试代码、SQL migration、前端、部署、CI/CD、Nginx 或 worker 运行配置。
+
+关键发现：
+
+- 真实 Workbench 写 API 仍未接入 `WorkbenchWriteUnitOfWork`。
+- 当前写入口仍是 `server.py` handler -> `WorkbenchWriteFacade` -> App Shell callback。
+- `confirm_link` / `cancel_link` 是第一批真实 UoW 迁移候选，但仍需先补 stale write contract 与 durable idempotency store contract。
+- Durable idempotency 需要持久化 store；纯内存 store 不能支撑多进程、重启或 HTTP retry。
+- Stale write 需要统一 `expected_versions`，并让前端/读模型 payload 暴露 relation/case/row/source version。
+- 7 个 `unittest.expectedFailure` 目标测试应拆成多个小切片转绿，不能一次性全部实现。
+
+验证结果：
+
+- `git status --short --branch`：已执行。
+- `git rev-list --left-right --count main...origin/main`：已执行。
+- `git ls-files --others --exclude-standard`：已执行。
+- `git diff --name-only`：已执行。
+- `git diff --check`：已执行。
+- `test ! -e backend-go`：已执行。
+- allowlist diff check：已执行。
+- 未运行 Python tests：PF-P022 是 docs-only planning，且没有修改生产代码或测试。
+
+#### 下一条 Prompt 上下文
+
+用户确认 PF-P022 `verified` 后，建议生成并审查 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`。PF-P023 应先补 expected relation/case/row versions、withdraw preview/submit 版本契约和 409 conflict response tests；仍不得直接迁移生产写路径。
 
 ## 维护规则
 

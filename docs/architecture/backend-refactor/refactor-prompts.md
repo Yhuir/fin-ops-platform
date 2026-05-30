@@ -6959,3 +6959,66 @@ Post-Flight:
 - PF-P022 必须把 7 个 `expectedFailure` 测试拆成多个小切片；一次性转绿会把事务、幂等、前端契约和 schema 风险混在一起。
 - PF-P022 允许使用 CodeGraph 梳理动态调用链和 handler/facade/service 关系，但输出必须落到文档事实源，供下一条 prompt 使用。
 - PF-P022 完成后只能进入 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`implemented`。等待用户确认后才能标记 `verified`。
+
+本轮只修改 backend-refactor 文档；未修改生产代码、测试代码、SQL migration、前端、部署、CI/CD、Nginx 或 worker 运行配置；未执行 merge、Traffic Gate、部署、生产访问或 push。
+
+已读取或覆盖：
+
+- `migration-state-log.md`
+- `refactor-prompts.md`
+- `workbench-write-uow-boundary-design.md`
+- `workbench-writes-and-matching-plan.md`
+- `platform-runtime-boundary-audit.md`
+- `read-model-and-external-services.md`
+- `tests/test_workbench_uow_contract.py`
+- `tests/test_workbench_write_characterization.py`
+- `tests/test_workbench_dirty_queue_wiring.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `backend/src/fin_ops_platform/services/runtime_queue.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+- `backend/src/fin_ops_platform/app/server.py` Workbench 写 handler 片段。
+
+CodeGraph 覆盖：
+
+- `codegraph_context`：Workbench write UoW integration planning。
+- `codegraph_explore`：`WorkbenchWriteFacade`、`RuntimeQueueRepository`、`tests/test_workbench_uow_contract.py`。
+- `codegraph_trace`：确认 `_handle_api_workbench_confirm_link` 到 facade 的静态链路在 dynamic dispatch 处断开，并由 `codegraph_node` 读取 `_handle_live_workbench_confirm_link` 证实其调用 `self._workbench_write_facade().confirm_link(...)`。
+- `codegraph_node`：`WorkbenchWriteUnitOfWork.run`、`_workbench_write_facade`、关键 live handlers。
+
+输出文件：
+
+- 新增 `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`。
+- 更新 `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`。
+- 更新 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`。
+- 更新 `docs/architecture/backend-refactor/migration-state-log.md`。
+- 更新 `docs/architecture/backend-refactor/refactor-prompts.md`。
+
+核心结论：
+
+- 真实 Workbench 写 API 仍未接入 `WorkbenchWriteUnitOfWork`。
+- 当前写路径仍是 handler -> `WorkbenchWriteFacade` -> service mutation -> App Shell persistence / derived lifecycle / read model scheduling callback。
+- `confirm_link` / `cancel_link` 是第一批真实 UoW 迁移候选，但仍需要先补 stale write contract 与 durable idempotency store contract。
+- Durable idempotency 需要持久化 store；纯内存 store 不能满足多进程、重启和 HTTP retry。
+- Stale write 需要统一 `expected_versions`，并逐步让前端/读模型 payload 暴露 relation/case/row/source version。
+- 7 个 `unittest.expectedFailure` 目标测试被拆为 stale write contract、durable idempotency store、pair relation UoW、ignore row UoW、cash special UoW、exception apply UoW、withdraw/personal advance UoW 等后续小切片。
+- 发现 schema/migration 前置需求：durable idempotency 可能需要 `app.workbench_write_idempotency_keys` 或等价持久化表；PF-P022 只记录设计草案，不写 SQL。
+
+验证结果：
+
+- `git status --short --branch`：执行。
+- `git rev-list --left-right --count main...origin/main`：执行。
+- `git ls-files --others --exclude-standard`：执行。
+- `git diff --name-only`：执行。
+- `git diff --check`：执行。
+- `test ! -e backend-go`：执行。
+- allowlist diff check：执行。
+- 未运行 Python tests：本轮为 docs-only planning，且未修改代码或测试。
+
+下一步建议：
+
+用户确认 PF-P022 `verified` 后，生成并审查 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`。PF-P023 仍不应直接迁移生产写路径。

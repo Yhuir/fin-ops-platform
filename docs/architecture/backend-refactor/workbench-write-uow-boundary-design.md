@@ -396,3 +396,20 @@ PF-P021-CI 已执行并记录为 `implemented`，等待用户确认后才能标�
 - 未修改生产代码，未执行 merge、Traffic Gate、部署或 push。
 
 PF-P021-CI 经用户确认 `verified` 后，应重新执行 PF-P021-MG，确认默认 CI blocker 已解除后再考虑合入 `main`。在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。
+
+## 14. PF-P022 UoW Integration Planning Result
+
+PF-P022 已生成真实写路径 UoW 接入规划，产物为：
+
+- `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+
+核心结论：
+
+- 真实 Workbench 写 API 仍未接入 `WorkbenchWriteUnitOfWork`；PF-P022 只做规划，不改生产代码。
+- `confirm_link` / `cancel_link` 是第一批真实 UoW 迁移候选，因为它们的事实边界相对集中在 pair relation/history。
+- `ignore_row`、exception apply、cash special、withdraw、personal advance repayment 应在 stale write 与 durable idempotency 基础能力明确后分批迁移。
+- Durable idempotency 需要持久化 store；纯内存 store 不足以支撑多进程、重启和 HTTP retry。
+- Stale write 需要统一 `expected_versions` 语义，并逐步扩展前端/读模型 payload，使写请求能携带用户看到的 relation/case/row/source version。
+- 7 个 `unittest.expectedFailure` 目标测试不应一次性转绿，应拆成 stale write contract、idempotency store contract、pair relation UoW、ignore row UoW、cash special UoW、exception apply UoW、withdraw/personal advance UoW 等小切片。
+
+下一步建议：PF-P023 先补 Workbench stale write contract and compatibility tests，不直接迁移生产写路径。
