@@ -2092,7 +2092,7 @@ Post-Flight:
 
 ## PF-P006-MG - Workbench Query Facade Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### 目标
 
@@ -2263,3 +2263,15 @@ Post-Flight:
 - Prompt 包含 upstream sync rule；如果 main/origin/main 有新提交，必须同步并重跑 Mandatory Checks。
 - Prompt 明确不执行 Traffic Gate、不部署服务器、不访问生产外部服务、不默认 push。
 - PF-P006-MG 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。
+
+### 执行结果
+
+- 已执行 PF-P006-MG，并将状态设为 `implemented`；未标记 `verified`。
+- Feature branch `codex/workbench-query-facade-prompt` 上精准 staging 了 Expected Changed Files，未使用 `git add .` 或 `git add -A`。
+- 创建 commit：`8937bb15 refactor(workbench): extract query read model facade`。
+- `main` 和 `origin/main` 执行前均为 `fd75f9ee`，通过 fast-forward 将 `8937bb15` 合入 `main`。
+- 合入范围只包含 PF-P006 Expected Changed Files。
+- 未修改 SQL migration、前端、网关、部署配置或生产配置。
+- 未执行 Traffic Gate、未部署服务器、未 push 到 `origin/main`。
+- Feature branch 与 `main` 上均通过 mandatory checks：facade unit tests、compileall、`tests.test_workbench_sql_runtime`、`tests.test_platform_runtime_boundary_guards`、row detail targeted tests、`app.main --check`、`tests/test_workbench_sql_runtime.py` 无 diff 检查、Facade god-object injection 检查、Facade mock 检查、`request_database_timing` 边界检查。
+- 下一步：等待用户确认 PF-P006-MG verified；随后用户决定是否 push `main` 到 `origin/main` 或生成 Slice C prompt。

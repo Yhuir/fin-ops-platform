@@ -1,6 +1,6 @@
 # Workbench Read Model Query 发现与边界计划
 
-状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `planned`
+状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `implemented`
 
 对应 prompt：`PF-P004 - Workbench Read Model Query Discovery / Boundary Plan`
 
@@ -430,8 +430,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 - 禁止：改变 API contract、改写 worker、重写 repository SQL。
 - Rollback：切回旧 handler 调度。
 - 验证：Slice A tests + affected API tests。
-- 当前 prompt：`PF-P006 - Workbench Query Facade Extraction (Slice B)` 已由用户确认 `verified`；`PF-P006-MG - Workbench Query Facade Merge Gate` 已生成，等待执行。
-- 执行结果：新增 `WorkbenchQueryFacade`，summary / groups / group detail / refresh-status handler 已薄化；PF-P005 characterization tests、platform guards、row detail targeted tests 和 `app.main --check` 均通过。
+- 当前 prompt：`PF-P006-MG - Workbench Query Facade Merge Gate` 已执行，状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- 执行结果：新增 `WorkbenchQueryFacade`，summary / groups / group detail / refresh-status handler 已薄化；`8937bb15` 已 fast-forward 合入 `main`；PF-P005 characterization tests、facade unit tests、platform guards、row detail targeted tests 和 `app.main --check` 均在 feature branch 与 `main` 上通过。
 
 ### Slice C：收口 Read Model Repository / Cache / Freshness Boundary
 

@@ -49,12 +49,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P006-MG - Workbench Query Facade Merge Gate` 已生成，等待执行 |
-| 当前 active prompt | `PF-P006-MG - Workbench Query Facade Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P006-MG - Workbench Query Facade Merge Gate` 已执行，等待用户确认 verified |
+| 当前 active prompt | `PF-P006-MG - Workbench Query Facade Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P006 - Workbench Query Facade Extraction (Slice B)` |
-| 当前分支 | `codex/workbench-query-facade-prompt` |
-| 最近验证 | PF-P006 已通过 facade unit tests、compileall、`tests.test_workbench_sql_runtime`、row detail targeted tests、PF-P003 platform guards、`app.main --check` 和三条 facade 静态门禁；用户已确认 PF-P006 verified；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `PF-P006-MG`；不得直接 merge、commit、push 或进入 Slice C |
+| 当前分支 | `main` |
+| 最近验证 | PF-P006-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`8937bb15` 已 fast-forward 合入 `main`；未 push `origin/main`；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 用户确认后将 `PF-P006-MG` 标记为 `verified`；随后用户决定是否 push `main` 到 `origin/main` 或生成 Slice C prompt |
 
 ## Prompt 执行日志
 
@@ -778,7 +778,7 @@ PF-P006 已由用户确认 `verified`。PF-P006-MG 已生成并审查，下一�
 
 ### PF-P006-MG - Workbench Query Facade Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -832,7 +832,48 @@ PF-P006-MG 允许合入的文件仅限：
 
 #### 下一条 Prompt 上下文
 
-PF-P006-MG 执行后只能进入 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。PF-P006-MG verified 后，下一步再考虑 push `main` 到 `origin/main` 或生成 Slice C prompt；不得在 PF-P006-MG 中默认执行 Traffic Gate。
+PF-P006-MG 已执行完成，状态停在 `implemented`，必须等待用户确认后才能标记 `verified`。PF-P006-MG verified 后，下一步再考虑 push `main` 到 `origin/main` 或生成 Slice C prompt；不得在 PF-P006-MG 中默认执行 Traffic Gate。
+
+#### 执行结果
+
+- Feature branch：`codex/workbench-query-facade-prompt`。
+- Commit：`8937bb15 refactor(workbench): extract query read model facade`。
+- Merge 方式：`main` 与 `origin/main` 执行前均为 `fd75f9ee`，`main` 通过 fast-forward 合入 `8937bb15`。
+- 合入范围只包含 Expected Changed Files：`server.py`、`workbench_query_facade.py`、`test_workbench_query_facade.py` 和三份 backend-refactor 文档。
+- 未修改 SQL migration、前端、网关、部署配置或生产配置。
+- 未执行 Traffic Gate，未部署服务器，未 push 到 `origin/main`。
+
+#### Feature branch 验证结果
+
+- `git status --short --branch`：仅 PF-P006 expected files。
+- `git ls-files --others --exclude-standard`：仅本轮预期新增 `workbench_query_facade.py` 和 `test_workbench_query_facade.py`。
+- `git diff --name-only` / `git diff --stat` / `git diff --check`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`：通过，2 tests passed。
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，102 tests passed。
+- `git diff --quiet -- tests/test_workbench_sql_runtime.py`：通过，该文件无变更。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，9 tests passed。
+- Row detail targeted tests：通过，4 tests passed。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过，status `ready`。
+- Facade 上帝对象注入静态检查：无输出，通过。
+- Facade mock 静态检查：无输出，通过。
+- `request_database_timing` 边界静态检查：通过。
+
+#### main 上验证结果
+
+- `git status --short --branch`：`main...origin/main [ahead 1]`，工作区干净。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --name-only` / `git diff --stat` / `git diff --check`：无输出 / 通过。
+- `git diff --quiet -- tests/test_workbench_sql_runtime.py`：通过，该文件无变更。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`：通过，2 tests passed。
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，102 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，9 tests passed。
+- Row detail targeted tests：通过，4 tests passed。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过，status `ready`。
+- Facade 上帝对象注入静态检查：无输出，通过。
+- Facade mock 静态检查：无输出，通过。
+- `request_database_timing` 边界静态检查：通过。
 
 ## 维护规则
 
