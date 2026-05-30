@@ -1,6 +1,6 @@
 # Workbench Read Model Query 发现与边界计划
 
-状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `verified`；PF-P007 `verified`；PF-P007-MG `verified`；PF-P008 `verified`；PF-P009 `verified`；PF-P009-MG `verified`；PF-P010 `verified`；PF-P010-MG `planned`
+状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `verified`；PF-P007 `verified`；PF-P007-MG `verified`；PF-P008 `verified`；PF-P009 `verified`；PF-P009-MG `verified`；PF-P010 `verified`；PF-P010-MG `implemented`
 
 对应 prompt：`PF-P004 - Workbench Read Model Query Discovery / Boundary Plan`
 
@@ -487,7 +487,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 ### Slice E：Repository active generation 与查询一致性边界
 
 - 目标：收口 `PostgresReadModelRepository` 的 Workbench query/read-model 读路径，确保 summary、groups page、group detail、refresh status、source_versions 和 cache version 都围绕 active generation/source_version 一致读取。
-- 当前 prompt：`PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已由用户确认 `verified`；`PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已生成并审查，状态 `planned`。
+- 当前 prompt：`PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已由用户确认 `verified`；`PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已执行完成，状态 `implemented`，等待用户确认是否标记 `verified`。
 - 输入事实：
   - PF-P009-MG 已由用户确认 `verified`，`main` 已 push 到 `origin/main`，本轮分支从最新 `main` 创建。
   - CodeGraph 确认 Slice E 的主要入口是 `PostgresReadModelRepository.get_workbench_summary(...)`、`get_workbench_groups_page(...)`、`get_workbench_group_detail(...)`、`get_workbench_refresh_status(...)`、`workbench_groups_cache_version(...)`。
@@ -524,7 +524,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
   - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
 - 仍未关闭风险：
   - groups page/count/filter/search 仍缺少 repository 子查询级慢查询指标；当前保留 `Application.handle_request` 的 app-shell `request_database_timing` 边界，后续如要做 SQL 级性能观测，应另立 prompt，避免把 HTTP request context 下沉到 repository。
-  - PF-P010 尚未执行 Merge Gate；合入 `main` 前必须执行已生成并审查的 `PF-P010-MG`，覆盖完整 diff、精准 commit、main 同步和 main 上复验。
+  - PF-P010-MG 已将 Slice E fast-forward 合入本地 `main`，但尚未 push `origin/main`，也未执行 Traffic Gate 或部署。
 
 ## Guard Compatibility
 

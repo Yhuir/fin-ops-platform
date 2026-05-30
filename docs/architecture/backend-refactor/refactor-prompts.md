@@ -3409,7 +3409,7 @@ Post-Flight:
 
 ## PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### 目标
 
@@ -3565,3 +3565,14 @@ Post-Flight:
 - Prompt 保留正式合入主干所需门禁：untracked 检查、精准 staging、禁止 `git add .` / `git add -A`、上游同步、feature branch 与 main 双重复验。
 - Prompt 明确禁止 Traffic Gate、部署、默认 push、SQL migration、前端、worker/builder、Outbox/Dirty Scope、Redis/RabbitMQ 和 Workbench 写路径。
 - Prompt 明确执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。
+
+### 执行结果
+
+- Feature branch：`codex/workbench-query-slice-e-prompt`。
+- 功能提交：`3edaf335 refactor(workbench): pin query read models to active generation`。
+- Merge：本地 `main` 已通过 fast-forward merge 合入 feature branch。
+- 变更范围：只包含 Expected Changed Files；未修改 SQL migration、前端、网关、部署配置、生产配置、Worker refresh、builder、RabbitMQ、Outbox、Dirty Scope、Redis cache key/TTL、Workbench 写路径或 matching/candidates。
+- Feature branch 验证通过：`git status --short --branch`、`git ls-files --others --exclude-standard`、`git diff --name-only`、`git diff --stat`、`git diff --check`、`tests.test_workbench_sql_runtime -v`、`tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`、row detail targeted tests、`compileall`、`app.main --check`、production diff / forbidden surface / Facade mock / SSE PubSub 静态检查。
+- `main` 复验通过：`git status --short --branch`、`git ls-files --others --exclude-standard`、`git diff --check`、`git diff --name-only origin/main..HEAD`、`git diff --stat origin/main..HEAD`、`tests.test_workbench_sql_runtime -v`、`tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`、row detail targeted tests、`compileall`、`app.main --check`、production diff / forbidden surface / Facade mock / SSE PubSub 静态检查。
+- 未执行 Traffic Gate、未部署服务器、未修改网关或生产配置、未 push `origin/main`。
+- 状态：`implemented`，等待用户确认，不得直接标记 `verified`。下一步如用户确认，可将 PF-P010-MG 标记为 `verified`；push `origin/main` 仍需要用户明确确认。
