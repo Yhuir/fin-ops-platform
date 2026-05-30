@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` (`implemented`) |
-| 最近 verified prompt | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` |
+| 当前阶段 | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` (`planned`) |
+| 最近 verified prompt | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` |
 | 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | PF-P028 目标测试和相邻 UoW/idempotency 回归通过；真实 Workbench 写 API 未迁移 |
-| 下一条允许任务 | 等待用户确认 PF-P028 是否可标记 `verified`。确认后建议生成并审查 PF-P029；不得直接执行 PF-P029 |
+| 最近验证 | 用户确认 PF-P028 可标记 `verified`；PF-P029 已生成并审查但未执行 |
+| 下一条允许任务 | 只允许执行 PF-P029。PF-P029 只处理 withdraw preview 的 relation identity/version response contract，不迁移真实 submit/cancel/ignore/cash special 写路径 |
 
 ## Prompt 执行日志
 
@@ -2922,7 +2922,7 @@ PF-P027 已由用户确认 `verified`。PF-P028 已生成并审查，下一步�
 
 ### PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2997,7 +2997,44 @@ PF-P027 已由用户确认 `verified`。PF-P028 已生成并审查，下一步�
 
 #### 下一条 Prompt 上下文
 
-PF-P028 已执行并记录为 `implemented`，不得标记 `verified`，直到用户确认。下一步建议生成并审查 `PF-P029 - Workbench Withdraw Preview Version Identity Contract`，只让 withdraw preview response 暴露 `active_relation` identity/version 和 `submit_expected_versions`，优先转绿 `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions`；仍不得迁移 withdraw submit、cancel link、ignore row 或 cash special 真实写 API。
+PF-P028 已由用户确认 `verified`。PF-P029 已生成并审查，下一步只允许执行 `PF-P029 - Workbench Withdraw Preview Version Identity Contract`。PF-P029 只让 withdraw preview response 暴露 `active_relation` identity/version 和 `submit_expected_versions`，优先转绿 `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions`；仍不得迁移 withdraw submit、cancel link、ignore row 或 cash special 真实写 API。
+
+### PF-P029 - Workbench Withdraw Preview Version Identity Contract
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 withdraw preview response contract。
+- 让 `/api/workbench/actions/withdraw-link/preview` 返回稳定的 `active_relation` identity/version 和 `submit_expected_versions`。
+- 优先让 `tests/test_workbench_stale_write_contract.py::WorkbenchStaleWriteContractTests::test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions` 从 expectedFailure 转为普通通过。
+- 可以在 `workbench_write_facade.py` 中新增小型 helper，用于构造 withdraw preview 的 active relation identity/version。
+- 更新本文档和 `refactor-prompts.md`。
+
+#### 禁止范围
+
+- 不迁移 withdraw submit。
+- 不修改 cancel link、ignore row 或 cash special 写路径。
+- 不实现 stale precondition / optimistic locking enforcement。
+- 不修改 `WorkbenchWriteUnitOfWork.run()` 语义。
+- 不新增 repository current-state reader。
+- 不新增 SQL migration。
+- 不修改前端。
+- 不执行 Merge Gate、Traffic Gate、部署、merge 或 push。
+
+#### 验收标准
+
+- withdraw preview response 包含 `active_relation.case_id`。
+- withdraw preview response 包含 integer `active_relation.version`。
+- withdraw preview response 包含 `submit_expected_versions = {"relation:<case_id>": <version>}`。
+- 只移除 `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions` 的 expectedFailure；UoW stale write expectedFailure 必须继续保留。
+- 真实 withdraw submit 仍保持当前兼容行为：携带 `expected_versions` 不破坏成功响应，但不会执行 stale rejection。
+
+#### 审查结论
+
+- PF-P029 是 PF-P028 后的正确最小实现切片。
+- 它只补齐两阶段 withdraw 的 preview response contract，为后续 submit stale guard 提供前端可回传的版本身份。
+- PF-P029 不能修真实 stale write，因为 submit 拒绝 stale 需要 transaction-bound facts current-state reader 和 UoW precondition，应放到后续 prompt。
 
 ## 维护规则
 

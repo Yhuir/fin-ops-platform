@@ -8314,7 +8314,7 @@ Post-Flight:
 
 ## PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -8490,4 +8490,145 @@ Post-Flight:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
 
-下一步建议：用户确认 PF-P028 `verified` 后，生成并审查 `PF-P029 - Workbench Withdraw Preview Version Identity Contract`。PF-P029 仍不得迁移真实 Workbench 写 API。
+用户已确认 PF-P028 `verified`。PF-P029 已生成并审查，下一步只允许执行 PF-P029。PF-P029 仍不得迁移真实 Workbench 写 API。
+
+## PF-P029 - Workbench Withdraw Preview Version Identity Contract
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P029 - Workbench Withdraw Preview Version Identity Contract。
+
+Role: 你是一位严格的 Python 后端架构师，精通 Clean Architecture、TDD、HTTP response contract、乐观锁前置契约和遗留系统兼容性测试。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- 当前分支是 `codex/workbench-stale-write-planning`，本分支已完成并 verified：
+  - `PF-P027 - Workbench Stale Write Boundary Discovery and Planning`
+  - `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`
+- PF-P028 已建立 `WorkbenchWriteConflict` 409 primitive，但真实 Workbench 写 API 仍未迁移。
+- PF-P029 只处理 withdraw preview response contract：让 preview 暴露 active relation identity/version 和 submit 可回传的 `submit_expected_versions`。
+- PF-P029 不处理 withdraw submit 的 stale rejection，不迁移 cancel link、ignore row 或 cash special。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
+   - `backend/src/fin_ops_platform/app/server.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-stale-write-planning` 或同一 stale write 分支。
+   - 当前 active prompt 是 `PF-P029 - Workbench Withdraw Preview Version Identity Contract` planned。
+   - 最近 verified prompt 是 `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+4. 必须先运行目标测试，确认当前仍是 expectedFailure 基线：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract.WorkbenchStaleWriteContractTests.test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions -v`
+
+Goal:
+让 withdraw preview response 暴露稳定的 `active_relation` identity/version 和 `submit_expected_versions`，并将 `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions` 从 expectedFailure 转为普通通过。不得迁移 withdraw submit，不得实现 stale rejection，不得修改 cancel link、ignore row 或 cash special 真实写路径。
+
+Required Implementation Work:
+1. TDD / Test Handling
+   - 只允许移除 `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions` 这个测试上的 `unittest.expectedFailure`。
+   - `tests/test_workbench_uow_contract.py` 中 4 个 stale write expectedFailure 必须继续保留。
+   - 不得删除、弱化或跳过现有 stale write expectedFailure。
+   - 必须保留 `test_withdraw_submit_accepts_expected_versions_payload_without_breaking_existing_success_shape`，证明 submit 仍保持兼容行为。
+2. Withdraw Preview Response Contract
+   - 修改 `WorkbenchWriteFacade.preview_withdraw_link()` 的 response payload。
+   - response 必须新增：
+     - `active_relation.case_id`
+     - `active_relation.version`
+     - `submit_expected_versions`
+   - `submit_expected_versions` 必须等于：
+     - `{f"relation:{active_relation['case_id']}": active_relation["version"]}`
+   - `active_relation.version` 必须是 `int`。
+3. Version Source Rule
+   - 必须先检查当前 `active_relation` payload 是否已有可靠 integer `version`。
+   - 如果当前 relation facts 尚无持久化 version 字段，只允许添加兼容期 helper，生成稳定的 preview-only integer version，并在代码注释或文档中标明该 version 只是 submit contract 占位，不代表已完成 facts-level optimistic locking。
+   - 不得把 read model generation、Redis cache version 或前端传入值当作最终 facts version。
+   - 不得在 submit 中使用该 version 执行拒绝逻辑。
+4. Compatibility
+   - 不得移除 preview response 现有字段：`operation`、`can_submit`、`requires_note`、`message`、`before`、`after`、`amount_summary`、`restored_relations`。
+   - 不得改变 withdraw submit 成功 response shape。
+   - 不得改变 `_workbench_write_freshness_guard()`。
+
+Allowed Scope:
+- 允许修改：
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `tests/test_workbench_stale_write_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`（如需补充执行发现）
+
+Forbidden Scope:
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_conflict.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`，除非目标测试无法通过且必须先回报用户重新审查。
+- 不迁移 withdraw submit。
+- 不修改 cancel link、ignore row、cash special 真实写路径。
+- 不实现 stale precondition / expected_versions 校验。
+- 不新增 repository current-state reader。
+- 不读取或写入 PostgreSQL facts。
+- 不新增 SQL migration。
+- 不修改前端代码。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+- 不生成 PF-P030。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Target tests:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract.WorkbenchStaleWriteContractTests.test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+2. Regression tests:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+3. Scope checks:
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - `(git diff --name-only; git ls-files --others --exclude-standard) | rg -v '^(backend/src/fin_ops_platform/services/workbench_write_facade\.py$|tests/test_workbench_stale_write_contract\.py$|docs/architecture/backend-refactor/migration-state-log\.md$|docs/architecture/backend-refactor/refactor-prompts\.md$|docs/architecture/backend-refactor/workbench-stale-write-boundary-plan\.md$)'`
+     - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P029 记录为 `implemented` 或 `blocked`。
+  - 记录变更文件、验证命令和结果。
+  - 记录仍保留的 expectedFailure。
+  - 记录下一步建议。
+- 更新 `refactor-prompts.md` 的 PF-P029 执行结果。
+- 不生成 PF-P030。
+- 不执行 PF-P030。
+- 不 merge。
+- 不 push。
+- 未经用户确认，不得将 PF-P029 标记为 `verified`。
+- 最终回复必须说明：
+  - withdraw preview 是否已暴露 relation identity/version；
+  - withdraw submit 是否仍未迁移；
+  - 哪些 expectedFailure 仍然保留；
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P029 的边界正确：它只补 withdraw preview response contract，不修 submit stale rejection。
+- PF-P029 允许修改 `workbench_write_facade.py` 的 preview response，但禁止修改真实 submit/cancel/ignore/cash special 写路径。
+- PF-P029 必须保留 submit 兼容测试，确保携带 `expected_versions` 不破坏当前成功响应。
+- PF-P029 只允许移除 withdraw preview 目标测试的 expectedFailure；UoW stale write target tests 必须保留。
+- 未经用户确认，不得执行 PF-P029，也不得将 PF-P029 标记为 `verified`。
