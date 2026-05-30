@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` 已执行并合入本地 `main`，等待用户确认 |
+| 当前 active prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` |
-| 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P026 已由用户确认 `verified`；UoW replay、fingerprint conflict、reserve/commit skeleton 已转绿，真实 API 未迁移 |
-| 下一条允许任务 | 只允许执行 PF-P026-MG。PF-P026-MG 只处理 PF-P023 到 PF-P026 这组 Workbench UoW/idempotency 基础切片的 Merge Gate；不得生成 PF-P027，不得迁移真实 Workbench 写 API |
+| 当前分支 | `main` |
+| 最近验证 | PF-P026-MG 已在本地 `main` 复验通过；merge commit `8c0013bf`，未 push |
+| 下一条允许任务 | 等待用户确认 PF-P026-MG 是否可标记 `verified`。确认前不得生成 PF-P027，不得迁移真实 Workbench 写 API，不得 push |
 
 ## Prompt 执行日志
 
@@ -2753,7 +2753,7 @@ PF-P026 已由用户确认 `verified`。PF-P026-MG 已生成并审查，下一�
 
 ### PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2785,6 +2785,64 @@ PF-P026 已由用户确认 `verified`。PF-P026-MG 已生成并审查，下一�
 - PF-P026-MG 是当前分支的正确下一步：PF-P023 到 PF-P026 已形成可合并的 UoW/idempotency 基础切片。
 - 本 MG 不应继续扩大实现范围，不应进入真实 API migration 或 stale write 实现。
 - 由于当前切片没有切生产流量，也没有改变真实 Workbench HTTP handler，Traffic Gate 不适用。
+
+#### 执行结果
+
+- 已合入本地 `main`。
+- Merge commit：`8c0013bf feat(workbench): establish uow idempotency foundation`。
+- 合入覆盖 PF-P023、PF-P024、PF-P025、PF-P026，并纳入同分支前置 PF-P022 UoW integration planning 文档。
+- 未执行 Traffic Gate、部署、生产访问或 push。
+- 未迁移真实 Workbench 写 API。
+- 未修改 `server.py` 或 `workbench_write_facade.py`。
+- 未新增 SQL migration。
+- 未实现真实 PostgreSQL idempotency repository。
+- 未修 stale write / optimistic locking。
+
+#### 合入前验证
+
+- Scope allowlist：通过。
+- `git diff --check main...HEAD`：通过。
+- `test ! -e backend-go`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_stale_write_contract.py' -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### Main 上复验
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_stale_write_contract.py' -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### 仍保留的 expectedFailure
+
+- `tests/test_workbench_stale_write_contract.py`
+  - `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions`
+  - `test_target_workbench_write_conflict_response_shape_is_stable`
+- `tests/test_workbench_uow_contract.py`
+  - `test_withdraw_submit_rejects_stale_preview_relation_version`
+  - `test_cancel_link_rejects_stale_replaced_relation`
+  - `test_ignore_row_rejects_when_row_already_confirmed`
+  - `test_cash_special_rejects_changed_relation_version`
+
+这些均属于 stale write / optimistic locking 目标语义，不属于 PF-P026-MG 本轮合入范围。
+
+#### 下一条 Prompt 上下文
+
+PF-P026-MG 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。确认后可按用户指令决定是否 `git push origin main`。push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt。确认前不得生成 PF-P027，不得迁移真实 Workbench 写 API。
 
 ## 维护规则
 

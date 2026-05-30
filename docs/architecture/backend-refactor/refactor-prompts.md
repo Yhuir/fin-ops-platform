@@ -7876,7 +7876,7 @@ Post-Flight:
 
 ## PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -8047,3 +8047,74 @@ Post-Flight:
 - 本 MG 不迁移真实 Workbench 写 API，不修改 `server.py`，不修改 `workbench_write_facade.py`。
 - 本 MG 不实现 stale write / optimistic locking，也不实现真实 PostgreSQL idempotency repository。
 - 未经用户确认，不得将 PF-P026-MG 标记为 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+已完成：
+
+- 已合入本地 `main`。
+- Merge commit：`8c0013bf feat(workbench): establish uow idempotency foundation`。
+- 合入范围覆盖 PF-P023/PF-P024/PF-P025/PF-P026，并纳入同分支前置 PF-P022 UoW integration planning 文档。
+- 已在合入前和合入后的 `main` 上执行要求的目标测试、default discover 兼容检查和 safety net。
+
+明确未执行：
+
+- 未 push。
+- 未执行 Traffic Gate。
+- 未部署、未访问生产。
+- 未生成或执行 PF-P027。
+- 未迁移真实 Workbench 写 API。
+- 未修改 `server.py` 或 `workbench_write_facade.py`。
+- 未新增 SQL migration。
+- 未实现真实 PostgreSQL idempotency repository。
+- 未修 stale write / optimistic locking。
+
+合入前验证：
+
+- Scope allowlist：通过。
+- `git diff --check main...HEAD`：通过。
+- `test ! -e backend-go`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_stale_write_contract.py' -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+Main 上复验：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_stale_write_contract.py' -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+仍保留的 expectedFailure：
+
+- `tests/test_workbench_stale_write_contract.py`
+  - `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions`
+  - `test_target_workbench_write_conflict_response_shape_is_stable`
+- `tests/test_workbench_uow_contract.py`
+  - `test_withdraw_submit_rejects_stale_preview_relation_version`
+  - `test_cancel_link_rejects_stale_replaced_relation`
+  - `test_ignore_row_rejects_when_row_already_confirmed`
+  - `test_cash_special_rejects_changed_relation_version`
+
+这些 expectedFailure 都属于 stale write / optimistic locking 目标语义，不属于本次 Merge Gate 覆盖范围。
+
+下一步：
+
+- 等待用户确认 PF-P026-MG 是否可标记 `verified`。
+- 用户确认后，可按用户指令决定是否执行 `git push origin main`。
+- push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt。
