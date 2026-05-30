@@ -337,4 +337,4 @@ PF-P031 已完成第一条真实写 API stale guard 迁移：`cancel link`。
 
 从最新 `main` 新建分支后生成下一条 Workbench prompt。
 
-PF-P034-MG 已完成本地 merge gate 并合入本地 `main`。功能分支和本地 `main` 均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试，并已由用户确认 verified。下一步执行 `git push origin main`；push 完成后，后续 prompt 必须从最新 `main` 新建分支生成。本轮未执行 Traffic Gate 或部署。
+PF-P034-MG 已完成本地 merge gate 并合入本地 `main`。功能分支和本地 `main` 均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试，并已由用户确认 verified。`main` 已同步到 `origin/main`；后续 prompt 必须从最新 `main` 新建分支生成。本轮未执行 Traffic Gate 或部署。

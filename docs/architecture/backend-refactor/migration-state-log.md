@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已由用户确认 verified，准备推送 `origin/main` |
+| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已 verified 并同步到 `origin/main` |
 | 当前 active prompt | 无；`PF-P034-MG - Workbench Stale Guard Group Merge Gate` (`verified`) |
 | 最近 verified prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P034-MG 在功能分支和本地 `main` 上均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试；用户确认 verified；未部署、未 Traffic Gate |
-| 下一条允许任务 | 执行 `git push origin main`；push 完成后从最新 `main` 新建分支，再生成并审查下一条 Workbench prompt |
+| 最近验证 | PF-P034-MG 在功能分支和本地 `main` 上均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试；用户确认 verified；`main` 已 push 到 `origin/main`；未部署、未 Traffic Gate |
+| 下一条允许任务 | 从最新 `main` 新建分支，再生成并审查下一条 Workbench prompt；不得直接在 `main` 上实现 |
 
 ## Prompt 执行日志
 
@@ -3679,7 +3679,7 @@ PF-P034 已完成实现和验证，并已由用户确认 `verified`。下一步�
 
 #### 下一条 Prompt 上下文
 
-PF-P034-MG 已完成本地 merge gate、合入本地 `main`，并已由用户确认 `verified`。下一步执行 `git push origin main`；push 完成后，后续 prompt 必须从最新 `main` 新建分支生成。
+PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认 `verified`，并已同步到 `origin/main`。后续 prompt 必须从最新 `main` 新建分支生成，不得直接在 `main` 上实现。
 
 ## 维护规则
 

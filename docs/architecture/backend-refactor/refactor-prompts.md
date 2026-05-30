@@ -10115,4 +10115,5 @@ Post-Flight:
 - 已执行：本地 `main` 非快进合并。
 - 用户确认：PF-P034-MG verified。
 - 未执行：Traffic Gate、部署、生产访问。
-- 下一步：执行 `git push origin main`；push 完成后，后续 prompt 必须从最新 `main` 新建分支生成。
+- Push 结果：`main` 已同步到 `origin/main`。
+- 下一步：从最新 `main` 新建分支，再生成并审查下一条 Workbench prompt；不得直接在 `main` 上实现。
