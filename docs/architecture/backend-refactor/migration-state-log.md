@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` (`planned`) |
+| 当前阶段 | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` (`implemented`) |
 | 最近 verified prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` |
 | 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | PF-P026-MG 已 push 到 `origin/main`；当前分支从最新 `main` 创建 |
-| 下一条允许任务 | 只允许执行 PF-P027。PF-P027 只做 Workbench stale write / optimistic locking 的 discovery、边界设计和测试转绿顺序规划；不得迁移真实 Workbench 写 API |
+| 最近验证 | PF-P027 已完成 docs-only discovery/scope checks；未修改生产代码或测试代码 |
+| 下一条允许任务 | 等待用户确认 PF-P027 是否可标记 `verified`。确认后才允许生成并审查 PF-P028；不得直接执行 PF-P028 |
 
 ## Prompt 执行日志
 
@@ -2848,7 +2848,7 @@ PF-P026-MG 已 push 到 `origin/main`。已从最新 `main` 创建分支 `codex/
 
 ### PF-P027 - Workbench Stale Write Boundary Discovery and Planning
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2878,6 +2878,47 @@ PF-P026-MG 已 push 到 `origin/main`。已从最新 `main` 创建分支 `codex/
 
 - PF-P027 是 PF-P026-MG 后的正确下一步。
 - 本 prompt 仍不能直接改真实 API，因为 stale write 会改变用户可见写入语义，必须先把边界、兼容策略、409 response contract 和测试转绿顺序定清楚。
+
+#### 执行结果
+
+- 新增 `workbench-stale-write-boundary-plan.md`，作为 Workbench stale write / optimistic locking 后续切片事实源。
+- 确认当前 `_workbench_write_freshness_guard()` 只检查 OA sync dirty scopes / rebuild scheduled，不等价于 facts 级乐观锁。
+- 确认 withdraw、cancel link、ignore row、cash special 的 stale write 风险都发生在 facade/service 按当前 facts 执行写入前缺少 expected_versions 对比。
+- 确认 `WorkbenchWriteUnitOfWork.run()` 当前已有 transaction、dirty/outbox writer 和 idempotency skeleton，但尚未执行 stale precondition。
+- 建议下一条 prompt 为 `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`，先实现 pure primitive / contract，优先转绿统一 409 response shape，不迁移真实 Workbench 写 API。
+
+#### CodeGraph 覆盖
+
+- `_handle_api_workbench_withdraw_link_preview` -> `WorkbenchWriteFacade.preview_withdraw_link`
+- `_handle_api_workbench_withdraw_link` -> `_workbench_write_freshness_guard` -> `WorkbenchWriteFacade.withdraw_link`
+- `_handle_api_workbench_cancel_link` -> `_workbench_write_freshness_guard` -> `_handle_live_workbench_cancel_link` -> `WorkbenchWriteFacade.cancel_link`
+- `_handle_api_workbench_ignore_row` -> `_workbench_write_freshness_guard` -> `_handle_workbench_ignore_row_payload` -> `WorkbenchWriteFacade.ignore_row`
+- `_handle_api_workbench_confirm_cash_pass_through` -> `_workbench_write_freshness_guard` -> `WorkbenchWriteFacade.confirm_cash_pass_through`
+- `_handle_api_workbench_confirm_cash_ticket_purchase` -> `_workbench_write_freshness_guard` -> `WorkbenchWriteFacade.confirm_cash_ticket_purchase`
+- `_handle_api_workbench_cancel_cash_special` -> `_workbench_write_freshness_guard` -> `WorkbenchWriteFacade.cancel_cash_special`
+- `WorkbenchWriteUnitOfWork.run()`、`WorkbenchWriteFacade`、`WorkbenchPairRelationService`、`WorkbenchOverrideService` 当前 public surface。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 验证
+
+- `git status --short --branch`：通过，当前在 `codex/workbench-stale-write-planning`。
+- `git rev-list --left-right --count main...origin/main`：`0 0`，main 与 origin/main 对齐。
+- `git ls-files --others --exclude-standard`：执行，检查 untracked files。
+- `git diff --name-only`：仅限 backend-refactor 文档。
+- `git diff --check`：通过。
+- `test ! -e backend-go`：通过。
+- Scope allowlist：通过，仅允许 PF-P027 三个文档文件。
+
+PF-P027 是 docs-only discovery/planning，不运行 Workbench test suite；测试基线引用 PF-P026-MG 在 main 上的复验结果。
+
+#### 下一条 Prompt 上下文
+
+PF-P027 已执行并记录为 `implemented`，不得标记 `verified`，直到用户确认。下一步建议生成并审查 `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`。PF-P028 应只实现 `WorkbenchWriteConflict` primitive、409 response payload contract 和 expected_versions contract 文档/测试，优先转绿 `test_target_workbench_write_conflict_response_shape_is_stable`；不得迁移真实 Workbench 写 API，不得修 withdraw submit/cancel/ignore/cash special 的真实写路径。
 
 ## 维护规则
 

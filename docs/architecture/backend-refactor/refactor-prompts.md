@@ -8123,7 +8123,7 @@ PF-P026-MG 已 push 到 `origin/main`。已从最新 `main` 创建分支 `codex/
 
 ## PF-P027 - Workbench Stale Write Boundary Discovery and Planning
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -8298,3 +8298,16 @@ Post-Flight:
 - PF-P027 明确要求使用 CodeGraph 梳理动态调用链。
 - PF-P027 的产物应成为后续 stale write primitive / API migration prompt 的事实源。
 - 未经用户确认，不得将 PF-P027 标记为 `verified`。
+
+### 执行结果
+
+- 已新增 `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`。
+- 已用 CodeGraph 覆盖 withdraw preview/submit、cancel link、ignore row、cash special 到 `WorkbenchWriteFacade` / service / UoW 的调用边界。
+- 已确认当前 `_workbench_write_freshness_guard()` 不是 facts 级 optimistic locking，只能阻止 OA sync dirty/rebuild 期间写入。
+- 已将 6 个 stale write / optimistic locking expectedFailure 分解为：
+  - pure primitive / contract 可先转绿：`WorkbenchWriteConflict` response shape。
+  - preview response contract 可先转绿：withdraw preview 暴露 relation identity/version。
+  - 必须等真实 UoW precondition/API migration：withdraw submit、cancel link、ignore row、cash special。
+- 已更新 `migration-state-log.md`，PF-P027 记录为 `implemented`，等待用户确认后才能标记 `verified`。
+
+下一步建议：生成并审查 `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`。PF-P028 仍不得迁移真实 Workbench 写 API。
