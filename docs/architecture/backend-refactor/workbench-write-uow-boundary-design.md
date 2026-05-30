@@ -343,11 +343,11 @@ PF-P021 的目标边界：
 - 不修 stale write / optimistic locking。
 - 不实现 durable idempotency replay。
 
-PF-P021 verified 后，应根据剩余红灯再决定下一步是 stale write guard 还是 durable idempotency；不要在 PF-P021-MG 前继续迁移更多 Workbench 写路径。
+PF-P021 已由用户确认 `verified`。PF-P021-MG 已生成并审查；在 PF-P021-MG 执行并通过前，不要继续迁移更多 Workbench 写路径。
 
 ## 13. PF-P021 Minimal UoW Skeleton Result
 
-PF-P021 已按上述边界执行，当前状态为 `implemented`，等待用户确认：
+PF-P021 已按上述边界执行，并已由用户确认 `verified`：
 
 - 新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
 - 新增 `WorkbenchWriteUnitOfWorkContext`，包含 `transaction`、`pair_relations`、`exception_cases`、`row_overrides`、`candidate_matches`、`idempotency_store`。
@@ -370,4 +370,10 @@ PF-P021 已按上述边界执行，当前状态为 `implemented`，等待用户�
 - 未实现 durable idempotency replay。
 - 未修改 SQL migration、前端、部署或 CI/CD。
 
-下一步不应继续扩大实现范围。PF-P021 经用户确认 `verified` 后，应先生成 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。
+下一步不应继续扩大实现范围。PF-P021-MG 已生成并审查，必须先执行 Merge Gate。
+
+PF-P021-MG 的关键额外门禁：
+
+- 覆盖 PF-P019/PF-P020/PF-P021 这条 UoW 基础切片相对 `main` 的完整 diff。
+- 不执行 Traffic Gate、部署或 push。
+- 必须确认 `tests/test_workbench_uow_contract.py` 当前 expected-red failures 不会破坏默认 CI；若默认 CI 会发现并执行该文件导致失败，则 MG 必须 blocked，不能 merge。

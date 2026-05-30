@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P021 - Workbench Minimal Unit of Work Skeleton` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P021 - Workbench Minimal Unit of Work Skeleton` (`implemented`) |
-| 最近 verified prompt | `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` |
+| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P021 - Workbench Minimal Unit of Work Skeleton` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | PF-P021 已新增最小 `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton；4 个 UoW atomicity tests 通过；PF-P020 writer group 通过；PF-P019 全量仍为 Expected Red，剩余 7 个失败均为 stale write / durable idempotency 目标语义；runtime queue、Workbench characterization、dirty queue wiring、platform guard tests 全部通过 |
-| 下一条允许任务 | 用户确认后将 PF-P021 标记为 `verified`；随后生成并审查 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，不得在 PF-P021-MG 前继续迁移更多 Workbench 写路径 |
+| 最近验证 | PF-P021 已由用户确认 `verified`；4 个 UoW atomicity tests 通过；PF-P020 writer group 通过；PF-P019 全量仍为 Expected Red，剩余 7 个失败均为 stale write / durable idempotency 目标语义；runtime queue、Workbench characterization、dirty queue wiring、platform guard tests 全部通过 |
+| 下一条允许任务 | 执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`；必须先处理/阻断 expected-red contract tests 是否会破坏默认 CI 的风险，不得在 MG 前继续迁移 Workbench 写路径 |
 
 ## Prompt 执行日志
 
@@ -2208,7 +2208,7 @@ PF-P020 已由用户确认 `verified`。PF-P021 已生成并审查，下一步�
 
 ### PF-P021 - Workbench Minimal Unit of Work Skeleton
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2263,11 +2263,41 @@ PF-P020 已由用户确认 `verified`。PF-P021 已生成并审查，下一步�
 - `tests.test_workbench_write_characterization`：Pass，29 tests。
 - `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
 - `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
-- PF-P021 当前为 `implemented`，等待用户确认后才能标记 `verified`。
+- PF-P021 已由用户确认 `verified`。
 
 #### 下一条 Prompt 上下文
 
-PF-P021 已执行，等待用户确认。PF-P021 verified 后，下一步应生成并审查 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，统一覆盖 PF-P019/PF-P020/PF-P021 这条 UoW 基础切片中尚未合入 `main` 的完整 diff。不得在 PF-P021-MG 前继续迁移更多 Workbench 写路径。
+PF-P021 已由用户确认 `verified`。PF-P021-MG 已生成并审查，下一步允许执行 PF-P021-MG。PF-P021-MG 必须统一覆盖 PF-P019/PF-P020/PF-P021 这条 UoW 基础切片中尚未合入 `main` 的完整 diff，并明确处理 `tests/test_workbench_uow_contract.py` 仍有 expected-red failures 的 CI 合入风险。不得在 PF-P021-MG 前继续迁移更多 Workbench 写路径。
+
+### PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 UoW 基础切片的 Merge Gate。
+- 覆盖当前分支相对 `main` 的完整 diff：
+  - `backend/src/fin_ops_platform/services/runtime_queue.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_runtime_queue.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 只允许做范围检查、验证、必要的 upstream sync、merge to main、main 上复验和状态机回写。
+
+#### 硬门禁
+
+- 必须确认 PF-P019、PF-P020、PF-P021 均已 `verified`。
+- 必须确认不包含 `server.py`、`workbench_write_facade.py`、Workbench facts repositories、SQL migration、前端、网关、部署或 CI/CD 变更。
+- 必须确认 `tests/test_workbench_uow_contract.py` 的 expected-red failures 不会破坏默认 CI；如果默认 CI 或 `python -m unittest discover` 会执行该文件并失败，PF-P021-MG 必须 `blocked`，不得 merge。
+- 不执行 Traffic Gate、生产访问、部署或 push，除非用户在 MG 执行后另行明确要求。
+- 未经用户确认，不得将 PF-P021-MG 标记为 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P021-MG 尚未执行。执行后若通过并合入 `main`，应等待用户确认 verified，再根据剩余 UoW contract failures 选择下一条：stale write guard 或 durable idempotency。若 MG 因 expected-red tests 会破坏默认 CI 而 blocked，应先生成修正 prompt，处理 target contract tests 的默认 CI 策略。
 
 ## 维护规则
 

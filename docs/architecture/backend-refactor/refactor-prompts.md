@@ -6401,3 +6401,165 @@ Post-Flight:
 下一步建议：
 - 用户确认后，将 PF-P021 标记为 `verified`。
 - 然后生成并审查 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，统一覆盖本 UoW 基础切片尚未合入 `main` 的完整 diff。
+
+用户已确认 PF-P021 `verified`。
+
+## PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate。
+
+Role: 你是一位严格的生产级 Merge Gate reviewer，精通 Python unittest、Git 主干合并、CI 门禁、PostgreSQL transaction/outbox 架构和遗留系统渐进式重构。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P019 已 verified，新增 Workbench UoW target contract tests。
+- PF-P020 已 verified，新增 transaction-bound read model dirty/outbox writer。
+- PF-P021 已 verified，新增最小 `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton。
+- 本 MG 只处理 UoW 基础切片合入 `main` 的门禁，不开始下一轮业务迁移。
+- 当前分支相对 `main` 的完整 diff 必须覆盖且只覆盖：
+  - `backend/src/fin_ops_platform/services/runtime_queue.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_runtime_queue.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-boundary-design` 或同一 UoW 分支。
+   - PF-P019、PF-P020、PF-P021 均已 `verified`。
+   - 当前 active prompt 是 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` planned。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --cached --name-only`
+   - `git log --oneline main..HEAD`
+   - `git diff --name-only main...HEAD`
+4. 如果存在 unstaged/staged/untracked 文件，必须先判断是否属于本 MG 文档回写；否则 blocked。
+
+Gate Scope:
+- 这是 Merge Gate，不是 Traffic Gate。
+- 允许执行范围检查、测试验证、upstream sync、merge 到 `main`、main 上复验和状态机回写。
+- 不允许执行 staging/prod Traffic Gate。
+- 不允许部署、push、生产访问、Nginx/网关切流。
+- 不允许开始 stale write guard、durable idempotency 或更多 Workbench 写路径迁移。
+
+Branch and Diff Scope:
+1. `git diff --name-only main...HEAD` 必须只包含 Expected Changed Files。
+2. Expected Changed Files:
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `tests/test_runtime_queue.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+3. 如果出现以下文件，必须 blocked：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - Workbench facts repositories
+   - SQL migrations
+   - frontend files
+   - gateway / deploy / CI/CD files
+   - Redis/RabbitMQ/OA Mongo/MySQL adapter files，除非已在本切片明示
+4. 严禁使用 `git add .` 或 `git add -A`。
+
+Critical CI Gate for Expected-Red Contract Tests:
+- 本分支包含 `tests/test_workbench_uow_contract.py`，且 PF-P021 后该文件全量仍是 Expected Red：16 tests，7 failures，9 ok。
+- PF-P021-MG 必须确认这些 expected-red failures 不会破坏默认 CI。
+- 必须运行或审计默认测试入口：
+  - 查看项目 README、CI 配置或现有验证脚本，确认默认 CI 是否运行 `python -m unittest discover` 或等价全量测试。
+  - 如果默认 CI 会发现并执行 `tests/test_workbench_uow_contract.py` 且导致失败，PF-P021-MG 必须 `blocked`，不得 merge。
+  - 不允许为了通过 MG 临时删除测试、修改测试期望、隐藏失败或跳过测试，除非另起 prompt 专门设计 target contract tests 的默认 CI 策略并通过用户审查。
+- 允许的合入前提：
+  - 默认 CI 不运行该 expected-red target file；或
+  - 该文件被明确归类为手动 target contract suite，且默认发现不会失败；或
+  - 后续修正 prompt 先将 expected-red 目标测试用显式、可审查的方式从默认 CI 中隔离，同时保留手动执行入口。
+
+Required Verification:
+1. Scope and hygiene:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only main...HEAD`
+   - `git diff --check main...HEAD`
+   - `test ! -e backend-go`
+2. UoW targeted green checks:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_commits_pair_relation_history_dirty_scope_and_outbox_in_one_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_exception_apply_commits_case_override_candidate_dirty_scope_and_outbox_in_one_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_personal_advance_repayment_rolls_back_case_and_relation_when_dirty_scope_fails -v`
+3. PF-P020 writer group:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+4. Expected-red characterization:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - 允许失败，但必须严格记录：16 tests，7 failures，9 ok；剩余 failures 只能是 stale write / durable idempotency 目标语义。
+   - 该命令失败本身不能被叫做 pass；它只证明目标契约剩余红灯符合预期。
+5. Existing safety net:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+6. Default CI safety check:
+   - 必须运行或审计默认 CI 等价命令。
+   - 如果默认 CI 会因 `tests.test_workbench_uow_contract` 失败而红，MG blocked。
+
+Upstream Sync:
+- 如果用户要求合入 `main`，必须先同步最新 `main`。
+- 若远端可用，应先 `git fetch origin`，确认 `main` 与 `origin/main` 关系。
+- 当前分支必须包含最新 `main`，可以通过 rebase main 或 merge main 到当前分支解决。
+- 一旦同步 main 产生新提交或冲突解决，必须重新执行 Required Verification。
+
+Merge Execution:
+1. 只有所有 Required Verification 满足，且 expected-red contract tests 不会破坏默认 CI，才允许 merge。
+2. 合入前建议 commit message：
+   - `feat(workbench): establish transaction-bound uow skeleton`
+3. 如果当前已经在 `main`，不得做无意义 merge，只做范围检查、验证、必要 commit 和状态机更新。
+4. 合入后必须在 `main` 上重新执行 Required Verification 中的绿色测试和默认 CI safety check。
+5. 合入后不要 push，除非用户另行明确要求 `git push origin main`。
+
+Forbidden Scope:
+- 不修改生产业务逻辑来通过 MG。
+- 不修改 `server.py`。
+- 不修改 `workbench_write_facade.py`。
+- 不继续迁移 Workbench 写路径。
+- 不修 stale write / optimistic locking。
+- 不实现 durable idempotency。
+- 不修改 SQL migration、前端、网关、部署、CI/CD。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不把 expected-red 测试静默隐藏或改期望。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 如果 merge gate 通过并 main 复验通过，记录 PF-P021-MG `implemented`，等待用户确认后才可标记 `verified`。
+  - 如果因 expected-red contract tests 会破坏默认 CI、范围污染或测试失败而无法合入，记录 PF-P021-MG `blocked`，并写清 blocker。
+- 更新 `refactor-prompts.md` 的 PF-P021-MG 执行结果。
+- 不生成下一条业务实现 prompt，直到用户确认 PF-P021-MG verified。
+- 最终回复必须说明：
+  - 是否 merge 到 main；
+  - 是否发现 expected-red contract tests 会破坏默认 CI；
+  - 哪些测试通过，哪些 expected-red 保留；
+  - 是否需要用户确认 verified；
+  - 下一步建议。
+```
+
+### 审查结论
+
+- PF-P021-MG 的边界正确：它只覆盖 PF-P019/PF-P020/PF-P021 形成的 UoW 基础切片，不进入 stale write、durable idempotency 或真实写路径迁移。
+- 该 MG 必须显式处理 `tests/test_workbench_uow_contract.py` 仍有 expected-red failures 的 CI 风险；如果默认 CI 会执行并失败，合入应 blocked，而不是强行 merge。
+- Expected Changed Files 与当前分支相对 `main` 的真实 diff 对齐。
+- PF-P021-MG 不触发 Traffic Gate、不部署、不 push；push 需要用户另行确认。
+- 未经用户确认，不得将 PF-P021-MG 标记为 `verified`。
