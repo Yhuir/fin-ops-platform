@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` (`implemented`) |
-| 最近 verified prompt | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` |
+| 当前阶段 | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` (`planned`) |
+| 最近 verified prompt | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` |
 | 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | PF-P029 目标测试和 Workbench write characterization 回归通过；真实 submit/cancel/ignore/cash special 写路径未迁移 |
-| 下一条允许任务 | 等待用户确认 PF-P029 是否可标记 `verified`。确认后建议生成并审查 PF-P030；不得直接执行 PF-P030 |
+| 最近验证 | 用户确认 PF-P029 可标记 `verified`；PF-P030 已生成并审查但未执行 |
+| 下一条允许任务 | 只允许执行 PF-P030。PF-P030 只建立 fake/in-memory stale precondition port 和 UoW target contract，不迁移真实 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -3001,7 +3001,7 @@ PF-P028 已由用户确认 `verified`。PF-P029 已生成并审查，下一步�
 
 ### PF-P029 - Workbench Withdraw Preview Version Identity Contract
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3078,7 +3078,45 @@ PF-P028 已由用户确认 `verified`。PF-P029 已生成并审查，下一步�
 
 #### 下一条 Prompt 上下文
 
-PF-P029 已执行并记录为 `implemented`，不得标记 `verified`，直到用户确认。下一步建议生成并审查 `PF-P030 - Workbench UoW Stale Precondition Port Skeleton`，只建立 fake/in-memory stale precondition port 和 UoW target contract，不迁移真实 Workbench 写 API。PF-P030 必须继续保留真实 submit/cancel/ignore/cash special 当前行为 characterization，直到对应 API migration prompt。
+PF-P029 已由用户确认 `verified`。PF-P030 已生成并审查，下一步只允许执行 `PF-P030 - Workbench UoW Stale Precondition Port Skeleton`。PF-P030 只建立 fake/in-memory stale precondition port 和 UoW target contract，不迁移真实 Workbench 写 API。PF-P030 必须继续保留真实 submit/cancel/ignore/cash special 当前行为 characterization，直到对应 API migration prompt。
+
+### PF-P030 - Workbench UoW Stale Precondition Port Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 只建立 Workbench UoW 层 stale precondition port skeleton。
+- 使用 fake/in-memory current-state provider 或 command-carried target state 验证 UoW contract。
+- 目标是把 `tests/test_workbench_uow_contract.py` 中 4 个 stale write target expectedFailure 转为普通通过。
+- 只验证 UoW 在 handler 执行前拒绝 stale write，并抛出 `WorkbenchWriteConflict`。
+- 更新本文档和 `refactor-prompts.md`。
+
+#### 禁止范围
+
+- 不迁移任何真实 Workbench 写 API。
+- 不修改 `server.py`。
+- 不修改 `workbench_write_facade.py`。
+- 不读取或写入 PostgreSQL facts。
+- 不新增 repository current-state reader 的真实数据库实现。
+- 不新增 SQL migration。
+- 不改变 Workbench HTTP response shape。
+- 不修改前端。
+- 不执行 Merge Gate、Traffic Gate、部署、merge 或 push。
+
+#### 验收标准
+
+- `WorkbenchWriteUnitOfWork.run()` 在 handler 前执行 stale precondition 检查。
+- fake/in-memory precondition source 能表达 relation version mismatch、relation replaced、row already confirmed、cash special relation changed。
+- stale precondition 失败时抛出 `WorkbenchWriteConflict`，且 handler 不执行、dirty/outbox 不写入、idempotency 不 commit。
+- `tests/test_workbench_uow_contract.py` 中 4 个 stale write tests 转为普通通过。
+- 真实 Workbench 写 API 当前行为 characterization 必须继续通过，证明没有迁移真实 API。
+
+#### 审查结论
+
+- PF-P030 是 PF-P029 后的正确最小 UoW 层切片。
+- 它只建立 UoW target contract 和 fake/in-memory port，为后续真实 repository current-state reader 做接口准备。
+- PF-P030 仍不能迁移真实 submit/cancel/ignore/cash special，因为真实迁移需要对应 API prompt、facts reader、兼容策略和回归门禁。
 
 ## 维护规则
 

@@ -8494,7 +8494,7 @@ Post-Flight:
 
 ## PF-P029 - Workbench Withdraw Preview Version Identity Contract
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -8651,4 +8651,163 @@ Post-Flight:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
 
-下一步建议：用户确认 PF-P029 `verified` 后，生成并审查 `PF-P030 - Workbench UoW Stale Precondition Port Skeleton`。PF-P030 仍不得迁移真实 Workbench 写 API。
+用户已确认 PF-P029 `verified`。PF-P030 已生成并审查，下一步只允许执行 PF-P030。PF-P030 仍不得迁移真实 Workbench 写 API。
+
+## PF-P030 - Workbench UoW Stale Precondition Port Skeleton
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P030 - Workbench UoW Stale Precondition Port Skeleton。
+
+Role: 你是一位严格的 Python 后端架构师，精通 Clean Architecture、Unit of Work、TDD、乐观锁 precondition port、领域冲突建模和遗留系统兼容性测试。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- 当前分支是 `codex/workbench-stale-write-planning`，本分支已完成并 verified：
+  - `PF-P027 - Workbench Stale Write Boundary Discovery and Planning`
+  - `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract`
+  - `PF-P029 - Workbench Withdraw Preview Version Identity Contract`
+- PF-P028 已建立 `WorkbenchWriteConflict` 409 primitive。
+- PF-P029 已让 withdraw preview 暴露 `active_relation.case_id`、`active_relation.version` 和 `submit_expected_versions`，但真实 submit stale rejection 仍未实现。
+- 真实 Workbench 写 API 仍未迁入 UoW stale precondition。
+- PF-P030 只建立 UoW 层 fake/in-memory stale precondition port 和 target contract，不迁移真实 Workbench 写 API。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-stale-write-planning` 或同一 stale write 分支。
+   - 当前 active prompt 是 `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` planned。
+   - 最近 verified prompt 是 `PF-P029 - Workbench Withdraw Preview Version Identity Contract`。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+4. 必须先运行目标测试，确认当前 4 个 UoW stale write tests 仍是 expectedFailure 基线：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+
+Goal:
+建立 UoW 层 stale precondition port skeleton，用 fake/in-memory current-state source 或 command-carried target state 验证 UoW 在 handler 前拒绝 stale write。目标是将 `tests/test_workbench_uow_contract.py` 中 4 个 stale write expectedFailure 转为普通通过。不得迁移真实 Workbench 写 API，不得接入真实数据库 facts reader。
+
+Required Implementation Work:
+1. TDD / Test Handling
+   - 只允许移除以下 4 个 tests 的 `unittest.expectedFailure`：
+     - `test_withdraw_submit_rejects_stale_preview_relation_version`
+     - `test_cancel_link_rejects_stale_replaced_relation`
+     - `test_ignore_row_rejects_when_row_already_confirmed`
+     - `test_cash_special_rejects_changed_relation_version`
+   - 不得删除、弱化或跳过这些 tests。
+   - 必须保持 `tests/test_workbench_stale_write_contract.py` 全绿。
+   - 必须保持 `tests/test_workbench_write_characterization.py` 全绿，证明真实 API 当前行为未迁移。
+2. Stale Precondition Port Skeleton
+   - 可以新增 `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`。
+   - 设计最小 port / helper，用于在 UoW handler 执行前比较：
+     - `command.expected_versions`
+     - fake/in-memory current-state 或 `command.payload` 中的 current state。
+   - 必须支持以下 target reasons：
+     - `stale_relation_version`
+     - `stale_relation_identity`
+     - `stale_row_status`
+   - stale 时必须抛出 `WorkbenchWriteConflict`。
+   - 非 stale 或没有 `expected_versions` 时必须保持当前 UoW 行为。
+3. UoW Integration
+   - 允许修改 `WorkbenchWriteUnitOfWork.run()`，但只允许在 handler 执行前调用 stale precondition skeleton。
+   - stale precondition 失败时：
+     - handler 不执行。
+     - dirty/outbox 不写入。
+     - idempotency 不 commit。
+   - 不得改变 transaction-bound dirty/outbox writer 的既有行为。
+   - 不得改变 idempotency replay/reserve/commit 的既有语义，除非目标 tests 暴露出明确顺序问题；如需改变顺序，必须在文档中说明。
+4. Fake/In-Memory Boundary
+   - 不得实现真实 PostgreSQL current-state reader。
+   - 不得新增 SQL migration。
+   - 允许在 tests 中通过 command payload 或 fake provider 表达当前 relation/row state。
+   - 如果增加 UoW constructor dependency，必须给现有 tests 和 production construction 提供兼容默认值，避免影响真实 API。
+5. Documentation
+   - 必须在 `workbench-stale-write-boundary-plan.md` 记录 PF-P030 的结果和限制：UoW precondition skeleton 已存在，但真实 facts reader / API migration 尚未完成。
+
+Allowed Scope:
+- 允许修改：
+  - `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`（如新增）
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_conflict.py`（仅允许补充必要字段/typing；不得改变 PF-P028 response shape）
+  - `tests/test_workbench_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+
+Forbidden Scope:
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改真实 Workbench write handler 路由。
+- 不迁移 withdraw submit、cancel link、ignore row 或 cash special。
+- 不实现真实 PostgreSQL facts current-state reader。
+- 不新增 SQL migration。
+- 不修改 repository 实现。
+- 不修改前端代码。
+- 不改变 HTTP response shape。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+- 不生成 PF-P031。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Target tests:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+2. Regression tests:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+3. Scope checks:
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - `(git diff --name-only; git ls-files --others --exclude-standard) | rg -v '^(backend/src/fin_ops_platform/services/workbench_stale_precondition\.py$|backend/src/fin_ops_platform/services/workbench_uow\.py$|backend/src/fin_ops_platform/services/workbench_write_conflict\.py$|tests/test_workbench_uow_contract\.py$|docs/architecture/backend-refactor/migration-state-log\.md$|docs/architecture/backend-refactor/refactor-prompts\.md$|docs/architecture/backend-refactor/workbench-stale-write-boundary-plan\.md$)'`
+     - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P030 记录为 `implemented` 或 `blocked`。
+  - 记录变更文件、验证命令和结果。
+  - 记录真实 API 是否仍未迁移。
+  - 记录下一步建议。
+- 更新 `refactor-prompts.md` 的 PF-P030 执行结果。
+- 更新 `workbench-stale-write-boundary-plan.md` 的 PF-P030 执行补充。
+- 不生成 PF-P031。
+- 不执行 PF-P031。
+- 不 merge。
+- 不 push。
+- 未经用户确认，不得将 PF-P030 标记为 `verified`。
+- 最终回复必须说明：
+  - 4 个 UoW stale target tests 是否转为普通通过；
+  - fake/in-memory precondition port 是否已建立；
+  - 真实 Workbench 写 API 是否仍未迁移；
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P030 的边界正确：它只建立 UoW 层 fake/in-memory stale precondition port，不迁移真实 API。
+- PF-P030 可以让 UoW target contract 转绿，但必须继续用 `test_workbench_write_characterization.py` 锁住真实 submit/cancel/ignore/cash special 当前行为。
+- PF-P030 不得新增 SQL migration，不得实现真实 PostgreSQL current-state reader。
+- PF-P030 是后续真实 API migration 前的必要中间层，避免直接在 handler/facade 中写散落的 stale 判断。
+- 未经用户确认，不得执行 PF-P030，也不得将 PF-P030 标记为 `verified`。
