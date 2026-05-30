@@ -156,6 +156,18 @@ outbox/durable queue event
 - Redis page cache 是否以 active generation 为版本边界。
 - `PF-P001` 必须扫描并显式列出 Workbench 全量 service 文件，尤其是 `workbench_candidate_grouping.py`、`workbench_sql_projection.py`、`workbench_query_service.py`、`workbench_free_matching_engine.py`、`workbench_matching_rules.py`、`live_workbench_service.py`、`workbench_exception_case_service.py`、`workbench_special_pair_rule_service.py`、`workbench_matching_orchestrator.py` 等大文件。
 
+PF-P004 已补充 Workbench `query/read-model` 子域事实链路，完整计划见 `workbench-read-model-query-plan.md`：
+
+- `GET /api/workbench/summary` 由 `_handle_api_workbench_summary` 读取 `PostgresReadModelRepository.get_workbench_summary(scope_key)`；missing 或 source_version stale 时 enqueue `workbench.read_model.refresh`，不在请求线程同步 rebuild。
+- `GET /api/workbench/groups` 由 `_handle_api_workbench_groups` 读取 refresh status，fresh 时才允许使用 Redis versioned page cache；cache miss 后读取 `get_workbench_groups_page(...)`，底层 pin active generation 并读结构化 `workbench_groups` / `workbench_group_rows`。
+- `GET /api/workbench/groups/detail` 由 `_handle_api_workbench_group_detail` 读取 `get_workbench_group_detail(...)`；当前 stale/missing 语义不如 summary/groups 明确，后续必须先补 characterization tests。
+- `GET /api/workbench/refresh-status` 聚合 dirty scope、source_version、outbox backlog、worker heartbeat、active/building/failed generation 和 consistency 状态。
+- `GET /api/workbench/events` 是 SSE status polling，不是 Redis PubSub；已经设置 `X-Accel-Buffering: no`，但断连退出、线程占用和 heartbeat event 契约需要测试锁定。
+- 兼容期 `GET /api/workbench` 仍可能在 SQL read model unavailable 时 fallback legacy builder；这是高风险读路径，后续必须先锁定 response contract 再收口。
+- Row detail 当前存在 `LiveWorkbenchService`、cached read model、`WorkbenchQueryService` route 多级 fallback；后续不得直接重写，必须先锁定 fallback 顺序、字段完整度和 override 应用顺序。
+- Worker refresh 由 `app/worker.py` 在启用 `--enable-workbench-read-model-refresh` 时注册 `workbench.read_model.refresh` handler，`RuntimeQueueRepository.enqueue_read_model_refresh` 同步维护 dirty scope source_version 和 outbox event，`WorkbenchReadModelRefreshService` 调用 `WorkbenchSqlProjectionBuilder` 写 building generation，验证后切 active generation。
+- `all` scope 只能从 active month shards 聚合；`YYYY-MM` scope 负责当月 facts 到 rows/groups/summary 的生成。
+
 ### Turnover Ledger
 
 - `GET /api/turnover-ledger`

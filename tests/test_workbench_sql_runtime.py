@@ -2256,6 +2256,100 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(queue.refreshes, [])
 
+    def test_workbench_api_sql_contract_preserves_backend_only_fields(self) -> None:
+        app = object.__new__(Application)
+        queue = QueueRecorder()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_view": lambda _self, **_kwargs: {
+                    "payload": {
+                        "month": "2026-05",
+                        "open": {"groups": []},
+                        "diagnostics": {"read_model_source": "sql"},
+                        "invoice_inventory": {"system_total": 9},
+                        # TODO: PF-P006 verify safe to remove.
+                        "active_generation_id": "gen-sql-1",
+                        "read_model_version": 17,
+                    },
+                    "refresh_status": "fresh",
+                    "generated_at": "2026-05-22T09:30:00+00:00",
+                    "source_versions": fresh_workbench_sql_source_versions(app),
+                    "rows_page": {
+                        "page": 1,
+                        "page_size": 50,
+                        "rows": [{"id": "bank-row-1", "source_kind": "bank_transaction"}],
+                        "has_more": False,
+                    },
+                }
+            },
+        )()
+        app._build_api_workbench_payload = lambda _month: (_ for _ in ()).throw(
+            AssertionError("SQL read model hit must not fallback to legacy builder")
+        )
+
+        response = app._handle_api_workbench("2026-05")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(payload["read_model_generated_at"], "2026-05-22T09:30:00+00:00")
+        self.assertEqual(payload["diagnostics"], {"read_model_source": "sql"})
+        self.assertEqual(payload["invoice_inventory"], {"system_total": 9})
+        self.assertEqual(payload["active_generation_id"], "gen-sql-1")
+        self.assertEqual(payload["read_model_version"], 17)
+        self.assertEqual(payload["rows_page"]["rows"][0]["id"], "bank-row-1")
+        self.assertEqual(queue.refreshes, [])
+
+    def test_workbench_api_legacy_endpoint_falls_back_when_sql_runtime_not_required(self) -> None:
+        app = object.__new__(Application)
+        app._bootstrap_mode = "legacy"
+        app._workbench_sql_read_repository = None
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()
+        builder_calls: list[str] = []
+
+        def legacy_builder(month: str) -> dict[str, object]:
+            builder_calls.append(month)
+            return {
+                "month": month,
+                "summary": {"oa_count": 1},
+                "open": {"groups": []},
+                # TODO: PF-P006 verify safe to remove.
+                "diagnostics": {"legacy_builder": True},
+            }
+
+        app._build_api_workbench_payload = legacy_builder
+
+        response = app._handle_api_workbench("2026-05")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(builder_calls, ["2026-05"])
+        self.assertEqual(payload["diagnostics"], {"legacy_builder": True})
+
+    def test_workbench_api_production_runtime_without_sql_repository_returns_unavailable(self) -> None:
+        app = object.__new__(Application)
+        queue = QueueRecorder()
+        app._bootstrap_mode = "production"
+        app._state_store = SimpleNamespace(storage_backend="postgres")
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._workbench_sql_read_repository = None
+        app._build_api_workbench_payload = lambda _month: (_ for _ in ()).throw(
+            AssertionError("PostgreSQL production runtime must not fallback to legacy builder")
+        )
+
+        response = app._handle_api_workbench("2026-05")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
+        self.assertEqual(payload["error"], "read_model_unavailable")
+        self.assertEqual(payload["read_model_status"], "unavailable")
+        self.assertEqual(payload["scope_key"], "2026-05")
+        self.assertEqual(queue.refreshes, [("workbench", "2026-05", "api_sql_repository_unavailable")])
+
     def test_workbench_summary_api_uses_sql_summary_contract(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()
@@ -2284,6 +2378,69 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["bank_count"], 2)
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(queue.refreshes, [])
+
+    def test_workbench_summary_api_missing_payload_enqueues_refreshing_contract(self) -> None:
+        app = object.__new__(Application)
+        queue = QueueRecorder()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {"get_workbench_summary": lambda _self, **_kwargs: None},
+        )()
+
+        response = app._handle_api_workbench_summary("all")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["month"], "all")
+        self.assertEqual(payload["scope_key"], "all")
+        self.assertEqual(payload["summary"]["oa_count"], 0)
+        self.assertEqual(payload["summary"]["bank_count"], 0)
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertIsNone(payload["generated_at"])
+        self.assertEqual(queue.refreshes, [("workbench", "all", "api_summary_miss")])
+
+    def test_workbench_summary_api_stale_source_versions_preserves_backend_only_fields(self) -> None:
+        app = object.__new__(Application)
+        queue = QueueRecorder()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
+        app._workbench_query_service = type(
+            "WorkbenchQueryService",
+            (),
+            {"oa_status_payload": lambda _self: {"code": "ready", "message": "OA projection ready"}},
+        )()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_summary": lambda _self, **_kwargs: {
+                    "month": "all",
+                    "scope_key": "all",
+                    "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 3, "paired_count": 4, "open_count": 5, "exception_count": 0},
+                    "read_model_status": "fresh",
+                    "generated_at": "2026-05-22T09:30:00+00:00",
+                    "diagnostics": {"bank_detail_reconciliation_status": "stale"},
+                    "invoice_inventory": {"system_total": 9},
+                    # TODO: PF-P006 verify safe to remove.
+                    "active_generation_id": "gen-summary-1",
+                    "source_versions": {"builder": "old-builder"},
+                }
+            },
+        )()
+
+        response = app._handle_api_workbench_summary("all")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertIn("builder_mismatch", payload["read_model_stale_reasons"])
+        self.assertIn("bank_auto_tag_rules_version_missing", payload["read_model_stale_reasons"])
+        self.assertEqual(payload["diagnostics"], {"bank_detail_reconciliation_status": "stale"})
+        self.assertEqual(payload["invoice_inventory"], {"system_total": 9})
+        self.assertEqual(payload["active_generation_id"], "gen-summary-1")
+        self.assertEqual(payload["oa_status"], {"code": "ready", "message": "OA projection ready"})
+        self.assertEqual(queue.refreshes, [("workbench", "all", "api_summary_source_versions_stale")])
 
     def test_workbench_summary_api_reports_missing_groups_table_as_unavailable(self) -> None:
         app = object.__new__(Application)
@@ -2467,6 +2624,71 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["groups"][0]["group_id"], "cached")
         self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
+
+    def test_workbench_groups_api_stale_refresh_status_bypasses_redis_payload(self) -> None:
+        app = object.__new__(Application)
+        cache_key = app._workbench_groups_redis_cache_key_from_version(
+            cache_version="v7",
+            scope_key="all",
+            zone="open",
+            page="1",
+            page_size="50",
+            status=None,
+            source_kind=None,
+            search=None,
+            sort=None,
+            detail_level="full",
+        )
+        self.assertIsNotNone(cache_key)
+        redis = RedisRecorder(
+            text_values={"workbench:groups:version:all": "v7"},
+            json_values={
+                cache_key: {
+                    "payload": {
+                        "month": "all",
+                        "zone": "open",
+                        "groups": [{"group_id": "stale-cached"}],
+                    }
+                }
+            },
+        )
+        queue = QueueRecorder()
+        page_calls: list[dict[str, object]] = []
+
+        class SqlWorkbench:
+            def get_workbench_refresh_status(self, **_kwargs):
+                return {"read_model_status": "refreshing", "dirty_scopes": [{"scope_key": "all"}]}
+
+            def get_workbench_groups_page(self, **kwargs):
+                page_calls.append(kwargs)
+                return {
+                    "month": "all",
+                    "zone": "open",
+                    "page": 1,
+                    "page_size": 50,
+                    "total": 1,
+                    "has_more": False,
+                    "groups": [{"group_id": "fresh-db", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
+                    "read_model_status": "fresh",
+                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
+                }
+
+            def workbench_groups_cache_version(self, **_kwargs):
+                raise AssertionError("version key should be resolved from Redis text value")
+
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": redis})()
+        app._workbench_sql_read_repository = SqlWorkbench()
+
+        response = app._handle_api_workbench_groups("all", zone="open", page="1", page_size="50")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["groups"][0]["group_id"], "fresh-db")
+        self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
+        self.assertEqual(redis.get_json_calls, [])
+        self.assertEqual(redis.set_json_calls[0][1]["payload"]["groups"][0]["group_id"], "fresh-db")
+        self.assertEqual(page_calls[0]["scope_key"], "all")
+        self.assertEqual(queue.refreshes, [("workbench", "all", "api_groups_source_versions_stale")])
 
     def test_workbench_groups_api_redis_cache_is_separated_by_detail_level(self) -> None:
         app = object.__new__(Application)
@@ -2681,6 +2903,39 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.headers["Content-Type"], "text/event-stream; charset=utf-8")
         self.assertIn("event: workbench.read_model.completed", first_event)
         self.assertIn('"read_model_status": "fresh"', first_event)
+
+    def test_workbench_events_stream_exposes_no_buffering_headers_and_heartbeat(self) -> None:
+        app = object.__new__(Application)
+        app._app_health_service = AppHealthService()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_refresh_status": lambda _self, **_kwargs: {
+                    "scope_key": "all",
+                    "read_model_status": "fresh",
+                    "generated_at": "2026-05-28T10:00:00+08:00",
+                    "dirty_scopes": [],
+                    "worker_lag_seconds": 1.5,
+                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
+                }
+            },
+        )()
+
+        response = app._handle_api_workbench_events("all")
+        stream = iter(response.body)
+        first_event = next(stream)
+        heartbeat = next(stream)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertTrue(response.stream)
+        self.assertEqual(response.headers["Content-Type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(response.headers["Cache-Control"], "no-cache, no-transform")
+        self.assertEqual(response.headers["X-Accel-Buffering"], "no")
+        self.assertIn("event: workbench.read_model.completed", first_event)
+        self.assertIn("event: heartbeat", heartbeat)
+        self.assertIn('"scope_key": "all"', heartbeat)
+        self.assertIn('"read_model_status": "fresh"', heartbeat)
 
     def test_workbench_api_miss_enqueues_refresh_and_returns_refreshing(self) -> None:
         app = object.__new__(Application)

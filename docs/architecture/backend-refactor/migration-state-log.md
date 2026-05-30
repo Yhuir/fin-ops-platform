@@ -49,12 +49,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Platform Runtime Boundary Guard Merge Gate 已 verified |
-| 当前 active prompt | 无 |
-| 最近 verified prompt | `PF-P003-MG - Platform Runtime Boundary Guard Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | 用户已确认 `PF-P003-MG` verified；已本地 merge 到 main；main 上指定测试均已通过；未 push，未执行 Traffic Gate |
-| 下一条允许任务 | 决定是否 push `main` 到 origin；或生成第一个业务模块 Micro-JIT prompt |
+| 当前阶段 | Workbench Query Characterization Tests 已 verified；PF-P005-MG 已生成，等待执行 |
+| 当前 active prompt | `PF-P005-MG - Workbench Query Characterization Tests Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P005 - Workbench Query Characterization Tests` |
+| 当前分支 | `codex/workbench-read-model-query-plan` |
+| 最近验证 | PF-P005 targeted tests、`tests.test_workbench_sql_runtime` 全文件、row detail targeted tests、PF-P003 platform guards 均已通过；用户已确认 PF-P005 verified；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 执行 `PF-P005-MG`；只处理 Workbench Query Characterization Tests 的 Merge Gate，不开始 PF-P006 生产代码重构 |
 
 ## Prompt 执行日志
 
@@ -433,12 +433,233 @@ PF-P003 已由用户确认 verified。下一步只能执行 `PF-P003-MG - Platfo
 - Feature commit：`b31ee8aa feat(platform): establish runtime boundary guards and baseline tests`。
 - Local merge commit：`58535cab Merge branch 'codex/python-first-refactor-reset': establish platform runtime guards`。
 - 已本地 merge 到 `main`。
-- 未 push `main` 到 origin。
+- 已 push `main` 到 origin。
 - 未执行 Traffic Gate。
+
+#### Post-Push 记录
+
+- `git push origin main`：通过，`origin/main` 已更新到 `3075986d`。
+- `git rev-parse --short HEAD` 与 `git rev-parse --short origin/main`：均为 `3075986d`。
+- 本次 push 只推送 Git 远端主干；未推送或重启服务器，未修改部署配置，未执行 Traffic Gate。
 
 #### 下一条 Prompt 上下文
 
-PF-P003-MG 已由用户确认 verified，已本地合入 `main`，并在 `main` 上通过指定验证。下一步可以决定是否 push `main` 到 origin；也可以生成第一个业务模块 Micro-JIT prompt。下一条业务模块 prompt 必须读取 `architecture-inventory.md` 和 `platform-runtime-boundary-audit.md`，并继续遵守 PF-P003 固化的 8 类平台 guard。
+PF-P003-MG 已由用户确认 verified，已本地合入 `main`，已 push 到 `origin/main`，并在 `main` 上通过指定验证。用户确认下一步做 `Workbench Read Model Query`。下一条业务模块 prompt 必须读取 `architecture-inventory.md` 和 `platform-runtime-boundary-audit.md`，并继续遵守 PF-P003 固化的 8 类平台 guard。
+
+### PF-P004 - Workbench Read Model Query Discovery / Boundary Plan
+
+状态：`verified`
+
+#### 范围
+
+- 作为第一个业务模块 Micro-JIT 的发现和边界计划 prompt。
+- 只处理 Workbench `query/read-model` 子域的真实代码事实、API contract、运行时调用链、风险、测试矩阵和后续执行切片。
+- 必须覆盖 `/api/workbench/summary`、`/api/workbench/groups`、`/api/workbench/groups/detail`、`/api/workbench/refresh-status`、`/api/workbench/events`、兼容期 `GET /api/workbench` 和 row detail 查询的只读边界。
+- 必须梳理 worker refresh 到 `read_model.workbench_*` active generation 发布的动态时序。
+- 必须显式覆盖 `app/worker.py`，避免只看到 API 到 builder 的半条 read model 链路。
+- 必须比对后端 response 与 `web/src/features/workbench/api.ts`、`web/src/features/workbench/types.ts`，标记契约偏差、类型不符和前端未使用字段。
+- 必须检查 SSE 长连接线程占用、断连退出、订阅释放、heartbeat/timeout/backpressure/cancellation 等资源风险。
+- 必须检查 Workbench query/read-model 的可观测性基线，包括慢查询、DB timing、endpoint latency、Redis/cache、worker lag/backlog 和 freshness 状态。
+- 产物应为 `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`，并可按真实发现更新 `runtime-call-chain.md`、`module-refactor-plan.md`、本文档和 `refactor-prompts.md`。
+
+#### 禁止范围
+
+- 不修改 Python 业务代码。
+- 不修改 tests。
+- 不修改 SQL migration。
+- 不修改前端、网关、部署配置或生产配置。
+- 不开始 Workbench 写操作、pair relation、exception、reconciliation、matching/candidates 或其他业务模块迁移。
+- 不执行 Merge Gate 或 Traffic Gate。
+- 不运行需要生产外部服务的命令。
+
+#### 预期产物
+
+- `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+- `docs/architecture/backend-refactor/runtime-call-chain.md`（如 PF-P004 发现真实调用链，需要补 Workbench 章节）
+- `docs/architecture/backend-refactor/module-refactor-plan.md`（如 PF-P004 校准子域顺序或边界）
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+
+#### 验收标准
+
+- `refactor-prompts.md` 已包含完整 PF-P004 prompt。
+- PF-P004 prompt 明确 Pre-Flight、Allowed Scope、Forbidden Scope、Required Discovery Output、Mandatory Checks、Verification、Post-Flight 和 Gate Scope。
+- PF-P004 prompt 明确必须优先使用 CodeGraph 梳理静态调用链，再用 `rg` 补充 path、event、table、Redis key 和测试覆盖。
+- PF-P004 prompt 明确补齐 4 个深水区侦察盲点：`app/worker.py`、前后端契约一致性、SSE 资源风险、可观测性埋点。
+- PF-P004 prompt 明确只做发现和文档计划，不做业务代码或测试改动。
+- PF-P004 prompt 明确执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P004 已执行完成，并已由用户确认 `verified`。本轮只做文档发现和计划，没有修改业务代码、测试、SQL migration、前端或部署配置。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+- `docs/architecture/backend-refactor/runtime-call-chain.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+
+#### CodeGraph / 文件覆盖
+
+- 使用 CodeGraph 梳理 Workbench Query / Read Model 上下文，覆盖 `WorkbenchReadModelService`、`WorkbenchSqlProjectionBuilder`、`WorkbenchQueryService`、`WorkbenchReadModelRefreshService`。
+- 使用 CodeGraph 定位 `server.py` 中 `_handle_api_workbench_summary`、`_handle_api_workbench_groups`、`_handle_api_workbench_group_detail`、`_handle_api_workbench_refresh_status`、`_handle_api_workbench_events`、`_handle_api_workbench`、`_handle_api_workbench_row_detail`。
+- 覆盖 `app/worker.py` 中 `workbench.read_model.refresh` handler 注册链路。
+- 覆盖 `PostgresReadModelRepository` 的 summary、groups page、group detail、refresh-status 和 save generation 边界。
+- 使用 literal search 补充 API path、Redis key、`read_model.workbench_*` 表、dirty scope、outbox、source_version 和前端契约事实。
+
+#### 关键发现
+
+- Summary 和 groups 已基本走 SQL read model，missing/stale 时 enqueue refresh，不应在请求线程同步 rebuild。
+- Groups Redis page cache 只在 refresh status fresh 时使用，key 需要继续保持 active generation / source_version 版本边界。
+- Group detail 的 stale/missing 语义不如 summary/groups 明确，需要 PF-P005 先补 characterization tests。
+- Row detail 仍存在 `LiveWorkbenchService`、cached read model、`WorkbenchQueryService` route 多级 fallback，是最高风险读路径之一。
+- 兼容期 `GET /api/workbench` 仍可能 fallback legacy builder，需要先冻结响应契约再收口。
+- SSE 当前是 refresh status polling，不是 Redis PubSub；没有 PubSub 订阅释放问题，但存在长连接线程占用、断连退出和 heartbeat 契约测试缺口。
+- Worker refresh 通过 `app/worker.py` 注册 `workbench.read_model.refresh`，由 dirty scope source_version 和 outbox event 驱动 builder 写 building generation 并切 active generation。
+- `all` scope 只应从 active month shards 聚合，相关 dirty scope completion 语义需要 PF-P005 用测试锁定。
+
+#### 验证
+
+- `git status --short --branch`：通过，当前仅文档文件变更。
+- `git diff --check`：通过。
+- `test -f docs/architecture/backend-refactor/workbench-read-model-query-plan.md`：通过。
+- `rg -n "Scope Boundary|API Contract Matrix|Runtime Call Chain|Read Model Data Boundary|Current Risk|Test Matrix|Next Execution Slices|Guard Compatibility" docs/architecture/backend-refactor/workbench-read-model-query-plan.md`：通过。
+- `rg -n "summary|groups|groups/detail|refresh-status|events|active generation|source_version|Redis|SSE|worker refresh|worker.py|contract-mismatch|frontend-used|PubSub|request_database_timing|api_performance_metrics" docs/architecture/backend-refactor/workbench-read-model-query-plan.md`：通过。
+- 未运行 Python unit tests：PF-P004 禁止修改业务代码和测试，本轮只做文档发现。
+
+#### 下一条 Prompt 上下文
+
+PF-P004 已 verified。PF-P005 已生成并审查，下一步允许执行 PF-P005。PF-P005 只能先补/固定 Workbench query/read-model 的 characterization tests，重点覆盖 summary、groups、group detail、row detail fallback、refresh-status、SSE、worker refresh `all` scope 和 Redis versioned cache。PF-P005 不得开始 handler 薄化、repository 重构、legacy fallback 删除或 Traffic Gate。
+
+### PF-P005 - Workbench Query Characterization Tests
+
+状态：`verified`
+
+#### 范围
+
+- 作为 Workbench `query/read-model` 子域真正改代码前的测试锁定阶段。
+- 只允许新增或调整 characterization tests、必要的 test fakes / fixtures，以及执行结果相关文档。
+- 必须基于 PF-P004 的 `workbench-read-model-query-plan.md`，锁定现有行为，而不是按理想架构改写行为。
+- 必须覆盖 summary、groups、group detail、row detail fallback、refresh-status、SSE、worker refresh `YYYY-MM` / `all` scope、Redis versioned cache、active generation 和 PF-P003 guard compatibility。
+- 必须覆盖兼容期 `GET /api/workbench` / `_handle_api_workbench` legacy endpoint，锁定 SQL read model、refreshing/unavailable 和 legacy builder fallback 条件。
+- 对 PF-P004 标记为 `backend-only` 或 `contract-mismatch` 的字段，测试必须保留字段断言；不得只断言前端当前使用字段。易变诊断字段只能断言 key/type/语义，不硬断言不稳定精确值。
+- 必须防止测试状态污染（State Bleed）：PostgreSQL、Redis、dirty scope、outbox、generation 和 worker heartbeat 测试必须事务隔离、唯一 scope key、独立 fake 或显式清理。
+- SSE 和 worker tests 必须 deterministic：不得使用真实 sleep、无限 generator 或不可控线程等待。
+- 如果当前行为与 PF-P004 预期不一致，PF-P005 必须记录 discrepancy；不得修改生产代码来让测试通过。
+
+#### 禁止范围
+
+- 不修改 Python 生产代码。
+- 不修改 SQL migration。
+- 不修改前端、网关、部署配置或生产配置。
+- 不薄化 handler，不新增 query facade，不重构 repository，不删除 legacy fallback。
+- 不修改 Workbench 写路径、matching/candidates、pair relation、exception、reconciliation 或其他业务模块。
+- 不执行 Merge Gate 或 Traffic Gate。
+- 不访问生产 DB、Redis、RabbitMQ、OA Mongo、OA MySQL、MinIO/S3。
+
+#### 预期产物
+
+- 更新或新增 Workbench query/read-model characterization tests。
+- 可按测试事实更新 `workbench-read-model-query-plan.md` 的测试矩阵或风险记录。
+- 更新 `refactor-prompts.md` 和本文档。
+
+#### 变更文件
+
+- `tests/test_workbench_sql_runtime.py`
+- `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 执行结果
+
+- 已实现，用户已确认，当前状态为 `verified`。
+- 本轮只修改测试和重构文档；未修改 `backend/src/fin_ops_platform/` 生产代码、SQL migration、前端、网关、部署或生产配置。
+- 已在 `tests/test_workbench_sql_runtime.py` 新增 7 个 characterization tests：
+  - 兼容期 `GET /api/workbench` SQL read-model path 保留 `diagnostics`、`invoice_inventory`、`active_generation_id`、`read_model_version`、`rows_page`、`read_model_generated_at` 等 backend-only / contract-mismatch 字段。
+  - 兼容期 `GET /api/workbench` 在 legacy bootstrap 且 SQL runtime 非强制时 fallback `_build_api_workbench_payload`。
+  - PostgreSQL production runtime 缺失 SQL read repository 时返回 `503 read_model_unavailable`，并 enqueue `api_sql_repository_unavailable`，不 fallback legacy builder。
+  - Summary missing payload 返回 `202 refreshing`，并 enqueue `api_summary_miss`。
+  - Summary stale source_versions 保留 backend-only 字段，并锁定当前 stale reasons 为 `builder_mismatch`、`bank_auto_tag_rules_version_missing` 等现状行为。
+  - Groups refresh status stale/refreshing 时绕过旧 Redis cached payload，读取 DB page，并 enqueue `api_groups_source_versions_stale`。
+  - SSE response 锁定 `text/event-stream`、`Cache-Control: no-cache, no-transform`、`X-Accel-Buffering: no` 和 deterministic heartbeat event。
+- 已复用 `tests/test_workbench_v2_api.py` 现有 row detail targeted tests 覆盖 live/cached/404/多来源 row detail 路径。
+- 发现并记录一个现状差异：PF-P004 预期中的 stale reason 名称不是当前实现实际输出；当前实现使用 `builder_mismatch`，同时会补齐多个 parser/rules version missing reasons。
+- 发现并记录一个现状行为：Groups 在 refresh status stale/refreshing 时不会读取旧 Redis JSON payload，但仍会把 fresh DB payload 写回 Redis；PF-P006 需要判断是否继续保留。
+
+#### 验收标准
+
+- PF-P005 prompt 已写入 `refactor-prompts.md`。
+- PF-P005 prompt 明确 Pre-Flight、Allowed Scope、Forbidden Scope、Required Test Work、Mandatory Checks、Post-Flight 和 Gate Scope。
+- PF-P005 prompt 明确禁止生产代码改动。
+- PF-P005 prompt 明确如果新增测试不能在现有实现上通过，必须先判断是否测试假设错误；不能直接改生产逻辑。
+- PF-P005 prompt 明确 legacy compatibility、backend-only / contract-mismatch 字段保留、State Bleed 防范和 deterministic tests 规则。
+- PF-P005 prompt 明确执行后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能 `verified`。
+
+#### 验证
+
+- 新增 PF-P005 tests targeted run：通过，7 tests passed。
+- Workbench query/read-model targeted suite：通过，24 tests passed。
+- Row detail targeted suite：通过，4 tests passed。
+- PF-P003 platform runtime boundary guards：通过，9 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，102 tests passed。
+- `git diff --check`：通过。
+- `rg` 文档门禁：通过。
+
+#### 未覆盖 / 风险
+
+- 本轮未新增生产代码，未修复 row detail fallback、group detail stale/missing 语义、legacy fallback 或 SSE cancellation。
+- SSE 只锁定 headers、首个 event 和 heartbeat；当前实现的长连接断开退出仍需 PF-P006 在不引入真实 sleep / 无限等待的前提下继续设计。
+- Worker refresh `all` scope 已由现有 tests 覆盖关键路径，本轮未新增 worker 生产路径测试。
+- `tests/test_workbench_query_service.py` 和 `tests/test_workbench_read_model_service.py` 未新增测试；现有 row detail 和 SQL runtime targeted tests 已覆盖本轮选择的高风险读路径。
+
+#### 下一条 Prompt 上下文
+
+PF-P005 已 verified。PF-P005-MG 已生成并审查，下一步允许执行 PF-P005-MG。PF-P005-MG 只允许做范围检查、上游同步、精准 staging、commit、merge 到 main 前后验证和状态机回写；不得开始 handler/facade/repository 生产代码重构，不得执行 Traffic Gate。
+
+### PF-P005-MG - Workbench Query Characterization Tests Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 PF-P005 已 verified 的 test-only / docs-only 变更合入主干门禁。
+- 必须确认 PF-P005 状态为 `verified`。
+- 必须确认本次变更范围只包含：
+  - `tests/test_workbench_sql_runtime.py`
+  - `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+  - `docs/architecture/backend-refactor/runtime-call-chain.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 必须把未跟踪文件纳入范围审计，严禁误提交临时文件、缓存文件、`.pkl`、`.sqlite`、导出物或测试产物。
+- 必须显式执行 `git ls-files --others --exclude-standard` 审计 untracked files。
+- `tests/test_workbench_v2_api.py` 只是 PF-P005 复用并运行的现有测试文件，不在当前白名单中；如果它被修改，PF-P005-MG 必须阻断并重新审查。
+- 必须精准 `git add <具体文件>`，严禁 `git add .` 或 `git add -A`。
+- 必须先同步最新 `origin/main` / `main`，如果同步后发生变化，必须重新执行 PF-P005-MG 验证测试。
+- 如果当前已经在 `main`，不得做无意义 merge，只做范围检查、必要 commit、验证和状态机更新。
+
+#### 禁止范围
+
+- 不修改生产代码。
+- 不修改 SQL migration。
+- 不修改前端、网关、部署配置或生产配置。
+- 不开始 PF-P006 handler/facade/repository 重构。
+- 不执行 Traffic Gate。
+- 不部署服务器，不推送生产，不访问生产外部服务。
+
+#### 预期验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- Row detail targeted tests。
+- `rg` 检查 PF-P005 / PF-P005-MG 状态和文档门禁。
+
+#### 下一条 Prompt 上下文
+
+执行 PF-P005-MG 后，必须先等待用户确认才能标记 `verified`。PF-P005-MG verified 后，下一步建议生成并审查 PF-P006 的实现型 prompt；PF-P006 才能开始 Workbench Query handler/facade/repository 的最小生产代码切片。
 
 ## 维护规则
 
