@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P014-MG - Workbench Exception Facade Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P014-MG - Workbench Exception Facade Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P014-MG - Workbench Exception Facade Merge Gate` 已执行并合入本地 `main`，等待用户确认 `verified` |
+| 当前 active prompt | `PF-P014-MG - Workbench Exception Facade Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P014 - Workbench Exception Facade Extraction` |
-| 当前分支 | `codex/workbench-exception-facade-prompt` |
-| 最近验证 | PF-P014 已执行：`mark-exception`、`exception/apply`、`cancel-exception`、`ignore-row`、`unignore-row` 已通过 `WorkbenchWriteFacade`；`compileall`、Workbench write characterization、Workbench v2 API、exception service/case、pair relation、derived lifecycle + platform guards 均通过；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `PF-P014-MG - Workbench Exception Facade Merge Gate`；不得直接进入 PF-P015、UoW 或其它业务切片 |
+| 当前分支 | `main` |
+| 最近验证 | PF-P014-MG 已在功能分支和本地 `main` 复验：`compileall`、Workbench write characterization、Workbench v2 API、exception application/case、pair relation、derived lifecycle + platform guards 均通过；未执行 Traffic Gate |
+| 下一条允许任务 | 用户确认 PF-P014-MG `verified`；随后确认是否执行 `git push origin main`。push 完成后必须从最新 `main` 新建分支，再生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -1738,7 +1738,7 @@ PF-P014 已执行。已迁移到 `WorkbenchWriteFacade` 的入口：
 
 ### PF-P014-MG - Workbench Exception Facade Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -1774,7 +1774,45 @@ PF-P014 已执行。已迁移到 `WorkbenchWriteFacade` 的入口：
 
 #### 下一条 Prompt 上下文
 
-PF-P014-MG 已生成并审查。下一步允许在用户确认后执行 PF-P014-MG。PF-P014-MG 必须覆盖 PF-P014 尚未合入 `main` 的完整 diff；不得执行 Traffic Gate，不得部署，不得修改生产配置，不得混入 PF-P015、Unit of Work 或 stale write 修复。
+PF-P014-MG 已执行并合入本地 `main`。本轮覆盖 PF-P014 的完整 diff：Workbench exception/ignore facade extraction、`server.py` 对应 handler 最小 wiring、platform guard 更新、文档和状态机更新。
+
+执行记录：
+
+- 功能分支：`codex/workbench-exception-facade-prompt`。
+- 功能提交：`4031a1d5` (`refactor(workbench): extract exception write facade`)。
+- 本地 main merge commit：`6fb77dc3` (`Merge branch 'codex/workbench-exception-facade-prompt': workbench exception facade`)。
+- upstream sync：`origin/main` 与本地 `main` 均为 `f37c32ca`，且 `origin/main` 是功能分支祖先；合并前 `git pull --ff-only origin main` 显示 `Already up to date`。
+- push：未执行。当前本地 `main` ahead `origin/main`。
+- Traffic Gate / deploy / 生产配置：未执行、未修改。
+
+功能分支验证结果：
+
+- `git ls-files --others --exclude-standard`：无输出。
+- diff scope gate：通过，只包含 PF-P014 允许文件。
+- forbidden surface check：通过，未触碰 `web/`、`postgres/`、`deploy/`、`backend-go/`、`runtime_redis.py`、`rabbitmq_runtime.py`。
+- `git diff --check`：通过。
+- `python3 -m compileall -q backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：13 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -v`：147 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`：11 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_case_service -v`：8 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`：4 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：25 tests OK。
+
+main 复验结果：
+
+- `git status --short --branch`：`main...origin/main [ahead 3]`，无工作区改动。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --check`：通过。
+- `python3 -m compileall -q backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：13 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -v`：147 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`：11 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_case_service -v`：8 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`：4 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：25 tests OK。
+
+下一步：用户确认 PF-P014-MG `verified` 后，再确认是否执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt；不得直接在当前 `main` 上进入 PF-P015 / Unit of Work。
 
 ## 维护规则
 
