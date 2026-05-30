@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` (`implemented`) |
-| 最近 verified prompt | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` |
+| 当前阶段 | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` |
 | 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | PF-P030 UoW/stale/idempotency/characterization 回归通过；真实 Workbench 写 API 未迁移 |
-| 下一条允许任务 | 等待用户确认 PF-P030 是否可标记 `verified`。确认后建议生成并审查 PF-P030-MG，统一覆盖 PF-P027 到 PF-P030 的 stale write 基础切片 |
+| 最近验证 | 用户确认 PF-P030 可标记 `verified`；PF-P030-MG 已生成并审查但未执行 |
+| 下一条允许任务 | 只允许执行 PF-P030-MG。PF-P030-MG 统一覆盖 PF-P027 到 PF-P030 的完整 diff；不得进入真实 API migration |
 
 ## Prompt 执行日志
 
@@ -3082,7 +3082,7 @@ PF-P029 已由用户确认 `verified`。PF-P030 已生成并审查，下一步�
 
 ### PF-P030 - Workbench UoW Stale Precondition Port Skeleton
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3165,7 +3165,43 @@ PF-P029 已由用户确认 `verified`。PF-P030 已生成并审查，下一步�
 
 #### 下一条 Prompt 上下文
 
-PF-P030 已执行并记录为 `implemented`，不得标记 `verified`，直到用户确认。下一步建议生成并审查 `PF-P030-MG - Workbench Stale Write Foundation Merge Gate`，统一覆盖 PF-P027、PF-P028、PF-P029、PF-P030 在当前分支上的完整 diff；不得直接进入真实 API migration，也不得跳过 Merge Gate。
+PF-P030 已由用户确认 `verified`。PF-P030-MG 已生成并审查，下一步只允许执行 `PF-P030-MG - Workbench Stale Write Foundation Merge Gate`。PF-P030-MG 统一覆盖 PF-P027、PF-P028、PF-P029、PF-P030 在当前分支上的完整 diff；不得直接进入真实 API migration，也不得跳过 Merge Gate。
+
+### PF-P030-MG - Workbench Stale Write Foundation Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理当前分支 `codex/workbench-stale-write-planning` 的 Merge Gate。
+- 统一覆盖 PF-P027、PF-P028、PF-P029、PF-P030 的完整 diff。
+- 检查 stale write foundation 是否满足合入 main 的生产级门禁。
+- 如验证通过，允许 commit 当前 MG 文档变更并按用户确认执行 merge 到 `main`。
+
+#### 禁止范围
+
+- 不进入真实 Workbench API migration。
+- 不生成或执行 PF-P031。
+- 不修改业务逻辑、测试逻辑或 SQL migration。
+- 不执行 Traffic Gate、部署、生产访问或服务器操作。
+- 不默认 push；push 必须等用户确认。
+- 不使用 `git add .` 或 `git add -A`。
+
+#### 验收标准
+
+- 当前分支包含最新 `main`。
+- Diff scope 只包含 PF-P027 到 PF-P030 允许的 stale write foundation 文件。
+- 没有 `backend-go`。
+- 没有临时文件、`.pkl`、`.sqlite`、`__pycache__` 或 untracked 脏文件混入。
+- 指定 Workbench stale/UoW/idempotency/write characterization 测试全部通过。
+- 合入 main 后必须在 main 上重跑同一套验证。
+- 合入后仍不代表生产 Traffic Gate 或真实 API migration 完成。
+
+#### 审查结论
+
+- PF-P030-MG 是当前分支进入下一个真实 API migration 前的必要门禁。
+- 该分支已经包含 production code 变更，因此 commit message 应使用 `feat(workbench): ...` 或等价语义，不能使用纯 docs 前缀描述整个合入。
+- 没有 staging 环境不阻塞本 Merge Gate，因为本分支没有切换流量、没有部署拓扑变更、没有网关或 auth/session 变更。
 
 ## 维护规则
 
