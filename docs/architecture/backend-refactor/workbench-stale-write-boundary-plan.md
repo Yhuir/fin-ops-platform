@@ -322,6 +322,7 @@ PF-P031 已完成第一条真实写 API stale guard 迁移：`cancel link`。
    - MG：不单独执行，延后到累计 MG；`PF-P032-MG deferred; cumulative MG will cover PF-P032 through PF-P034`。
 6. `PF-P033 - Workbench Cash Special Stale Guard Migration`
    - 覆盖 pass-through、ticket purchase、cancel special 的 relation version guard。
+   - 状态：已实现 relation identity mismatch guard；三个 cash special 入口在携带 stale `expected_versions` 时返回 `409 workbench_write_conflict`，不更新或清空 `special_metadata`；等待用户确认后进入 PF-P034。
 7. `PF-P034 - Workbench Withdraw Submit Stale Guard Migration`
    - 最后处理 withdraw submit，因为它涉及 preview/submit 两阶段契约、撤销当前 relation 和恢复历史 relation，风险最高。
 
@@ -329,6 +330,6 @@ PF-P031 已完成第一条真实写 API stale guard 迁移：`cancel link`。
 
 下一条 prompt 建议为：
 
-`PF-P033 - Workbench Cash Special Stale Guard Migration`
+`PF-P034 - Workbench Withdraw Submit Stale Guard Migration`
 
-PF-P032 已完成实现和验证。按当前策略，PF-P032-MG 延后，最终累计 MG 将覆盖 PF-P032 到 PF-P034。下一步应迁移 cash special 三个入口的 stale guard；仍不得迁移 `withdraw submit`。
+PF-P033 已完成实现和验证。按当前策略，PF-P032-MG 仍延后，最终累计 MG 将覆盖 PF-P032 到 PF-P034。下一步应迁移 `withdraw submit` stale guard；不得扩大到其它 Workbench 写路径。

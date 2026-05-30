@@ -75,6 +75,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         case_id: str,
         row_ids: list[str],
         row_types: list[str],
+        special_metadata: dict[str, object] | None = None,
     ) -> None:
         app._workbench_pair_relation_service.replace_with_confirmed_relation(
             case_id=case_id,
@@ -83,6 +84,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             relation_mode="manual_confirmed",
             created_by="test",
             month_scope="2026-03",
+            special_metadata=special_metadata,
         )
 
     def _personal_advance_raw_payload(self) -> dict[str, object]:
@@ -698,6 +700,75 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertIsNone(old_relation)
         assert new_relation is not None
         self.assertEqual(new_relation["special_metadata"]["special_type"], "cash_pass_through")
+
+    def test_cash_special_with_stale_expected_relation_rejects_all_entrypoints(self) -> None:
+        scenarios = [
+            (
+                "confirm_cash_pass_through",
+                "/api/workbench/actions/confirm-cash-pass-through",
+                ["oa-cash-stale-pass", "bank-cash-stale-pass"],
+                ["oa", "bank"],
+                {"cash_amount": "1.00"},
+            ),
+            (
+                "confirm_cash_ticket_purchase",
+                "/api/workbench/actions/confirm-cash-ticket-purchase",
+                ["oa-cash-stale-ticket", "bank-cash-stale-ticket", "invoice-cash-stale-ticket"],
+                ["oa", "bank", "invoice"],
+                {"cash_amount": "500.00", "ticket_cost_amount": "300.00", "project_name": "测试项目"},
+            ),
+            (
+                "cancel_cash_special",
+                "/api/workbench/actions/cancel-cash-special",
+                ["oa-cash-stale-cancel", "bank-cash-stale-cancel"],
+                ["oa", "bank"],
+                {},
+            ),
+        ]
+        for action, path, row_ids, row_types, extra_payload in scenarios:
+            with self.subTest(action=action):
+                app = self._build_app()
+                self._create_cash_special_relation(
+                    app,
+                    case_id=f"CASE-{action.upper()}-OLD",
+                    row_ids=row_ids,
+                    row_types=row_types,
+                )
+                existing_metadata = {"special_type": "existing", "note": "keep"}
+                self._create_cash_special_relation(
+                    app,
+                    case_id=f"CASE-{action.upper()}-NEW",
+                    row_ids=row_ids,
+                    row_types=row_types,
+                    special_metadata=existing_metadata,
+                )
+                history_count = len(app._workbench_pair_relation_service.list_history())
+
+                with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+                    response = self._post(
+                        app,
+                        path,
+                        {
+                            "month": "2026-03",
+                            "row_ids": row_ids,
+                            "expected_versions": {f"relation:CASE-{action.upper()}-OLD": None},
+                            **extra_payload,
+                        },
+                    )
+
+                self.assertEqual(response.status_code, 409, response.body)
+                payload = _json_response(response)
+                self.assertEqual(payload["error"], "workbench_write_conflict")
+                self.assertEqual(payload["conflict"]["action"], action)
+                self.assertIn(payload["conflict"]["reason"], {"stale_relation_identity", "stale_relation_version"})
+                old_relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(f"CASE-{action.upper()}-OLD")
+                new_relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(f"CASE-{action.upper()}-NEW")
+                self.assertIsNone(old_relation)
+                assert new_relation is not None
+                self.assertEqual(new_relation["special_metadata"], existing_metadata)
+                self.assertEqual(len(app._workbench_pair_relation_service.list_history()), history_count)
+                self.assertEqual(pair_relation_persist.call_count, 0)
+                self.assertEqual(read_model_persist.call_count, 0)
 
     def test_cash_special_scheduling_failure_propagates_after_metadata_mutation(self) -> None:
         app = self._build_app()

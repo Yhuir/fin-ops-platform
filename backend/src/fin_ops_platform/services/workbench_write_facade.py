@@ -359,6 +359,31 @@ class WorkbenchWriteFacade:
             return exc
         return None
 
+    def _cash_special_stale_conflict(
+        self,
+        *,
+        action_name: str,
+        payload: dict[str, object],
+        relation: dict[str, object],
+    ) -> WorkbenchWriteConflict | None:
+        expected_versions = payload.get("expected_versions")
+        if not isinstance(expected_versions, dict) or not expected_versions:
+            return None
+        try:
+            assert_workbench_stale_preconditions(
+                _WorkbenchWritePreconditionCommand(
+                    action_name=action_name,
+                    expected_versions=dict(expected_versions),
+                    payload={
+                        "current_relation_case_id": str(relation.get("case_id") or ""),
+                        "current_relation_version": relation.get("version"),
+                    },
+                )
+            )
+        except WorkbenchWriteConflict as exc:
+            return exc
+        return None
+
     def preview_withdraw_link(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
@@ -512,6 +537,14 @@ class WorkbenchWriteFacade:
             row_ids = self._cash_special_row_ids(payload)
             note = str(payload.get("note") or payload.get("comment") or "").strip()
             relation = self._active_relation_for_cash_special(row_ids)
+            conflict = self._cash_special_stale_conflict(
+                action_name="confirm_cash_pass_through",
+                payload=payload,
+                relation=relation,
+            )
+            if conflict is not None:
+                conflict_payload = conflict.to_response_payload()
+                return WorkbenchWriteResult(HTTPStatus(conflict.status_code), dict(conflict_payload["payload"]))
             self._validate_cash_pass_through_relation(relation)
             cash_amount = self._cash_special_cash_amount(payload, relation)
             special_metadata = {
@@ -564,6 +597,14 @@ class WorkbenchWriteFacade:
             row_ids = self._cash_special_row_ids(payload)
             note = str(payload.get("note") or payload.get("comment") or "").strip()
             relation = self._active_relation_for_cash_special(row_ids)
+            conflict = self._cash_special_stale_conflict(
+                action_name="confirm_cash_ticket_purchase",
+                payload=payload,
+                relation=relation,
+            )
+            if conflict is not None:
+                conflict_payload = conflict.to_response_payload()
+                return WorkbenchWriteResult(HTTPStatus(conflict.status_code), dict(conflict_payload["payload"]))
             self._validate_cash_ticket_purchase_relation(relation)
             ticket_cost_amount = self._required_non_negative_amount(payload.get("ticket_cost_amount"), "ticket_cost_amount")
             cash_amount = self._required_non_negative_amount(payload.get("cash_amount"), "cash_amount")
@@ -622,6 +663,15 @@ class WorkbenchWriteFacade:
             month = str(payload["month"])
             row_ids = self._cash_special_row_ids(payload)
             note = str(payload.get("note") or payload.get("comment") or "").strip()
+            relation = self._active_relation_for_cash_special(row_ids)
+            conflict = self._cash_special_stale_conflict(
+                action_name="cancel_cash_special",
+                payload=payload,
+                relation=relation,
+            )
+            if conflict is not None:
+                conflict_payload = conflict.to_response_payload()
+                return WorkbenchWriteResult(HTTPStatus(conflict.status_code), dict(conflict_payload["payload"]))
             updated_relation, _history = self._pair_relation_service.clear_special_metadata_for_row_ids(
                 row_ids,
                 updated_by="system",

@@ -6202,7 +6202,7 @@ Post-Flight:
 
 ## PF-P021 - Workbench Minimal Unit of Work Skeleton
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -9759,3 +9759,24 @@ Post-Flight:
 - PF-P033 必须保持 legacy no-expected-versions 行为，避免破坏旧前端请求。
 - 当前 relation 缺少明确 durable version 字段时，本轮先完成 relation identity guard 是合理的；如果代码中可读取 version，再补 version 校验。不得伪造 schema 或新增 SQL migration。
 - PF-P033 完成后不单独 MG，应继续 PF-P034；最终累计 MG 必须覆盖 PF-P032 到 PF-P034 的完整 diff。
+
+### 执行结果
+
+- RED：新增 `test_cash_special_with_stale_expected_relation_rejects_all_entrypoints` 后，三个 cash special 入口都会返回 200，并更新或清空当前 active relation 的 `special_metadata`。
+- GREEN：三个 cash special 入口在携带 `expected_versions` 时复用 `_cash_special_stale_conflict` helper；当前 active relation identity 不匹配时返回 `409 workbench_write_conflict`，并在 metadata mutation 前退出。
+- 保持未携带 `expected_versions` 的 legacy cash special 行为不变。
+- 未迁移 `withdraw submit`。
+- 未修改 `server.py`、前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- PF-P032-MG 仍然 deferred；累计 MG 将覆盖 PF-P032 到 PF-P034。
+
+### 验证结果
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，32 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+### 下一步
+
+等待用户确认 PF-P033 后，生成并审查 `PF-P034 - Workbench Withdraw Submit Stale Guard Migration`；不得直接执行 Merge Gate。
