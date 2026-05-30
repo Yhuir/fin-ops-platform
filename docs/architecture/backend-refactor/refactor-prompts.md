@@ -6406,7 +6406,7 @@ Post-Flight:
 
 ## PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -6601,6 +6601,46 @@ Blocker:
 - 在该 blocker 解决前，不得 merge，不得继续迁移 Workbench 写路径。
 
 用户同意生成默认 CI 策略修正 prompt。
+
+### 重新执行结果（PF-P021-CI 后）
+
+状态：`implemented`，等待用户确认后才能标记 `verified`。
+
+本轮已 merge 到本地 `main`：
+
+- Merge commit：`387ee0d1 feat(workbench): establish transaction-bound uow skeleton`。
+- 未执行 Traffic Gate、部署、生产访问或 push。
+- `git fetch origin` 后确认 `main` 与 `origin/main` 无分歧。
+- Branch/diff scope：通过，合入 diff 只包含 PF-P019/PF-P020/PF-P021/PF-P021-CI 预期文件。
+- `git diff --check main...HEAD`（合入前）：通过。
+- `test ! -e backend-go`：通过。
+- 默认测试入口审计：`README.md`、`backend/README.md`、`docs/dev/testing.md` 均记录默认后端测试为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`。
+- 默认 CI blocker 已解除：`tests/test_workbench_uow_contract.py` 被默认 discover 执行时退出码为 0，并显示 `expected failures=7`。
+
+合入前验证：
+
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`：Pass，1947 tests，`skipped=25`，`expected failures=7`。
+
+main 上复验：
+
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`：Pass，1947 tests，`skipped=25`，`expected failures=7`。
+
+下一步：等待用户确认 PF-P021-MG `verified`；确认前不生成下一条业务实现 prompt，不 push。
 
 ## PF-P021-CI - Workbench UoW Contract Test CI Isolation
 

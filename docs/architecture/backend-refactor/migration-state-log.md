@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 准备重新执行 |
-| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P021-CI - Workbench UoW Contract Test CI Isolation` |
-| 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | 用户已确认 PF-P021-CI `verified`：7 个尚未实现的 stale write / durable idempotency target contract tests 已标记为 `unittest.expectedFailure`；`test_workbench_uow_contract.py` 默认 discover 与 direct module suite 均退出码 0，并显示 `expected failures=7`；runtime queue、Workbench write characterization、dirty queue wiring、platform guard 安全网均通过 |
-| 下一条允许任务 | 重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，确认默认 CI blocker 已解除后再考虑 merge 到 `main`；不得继续迁移 Workbench 写路径 |
+| 当前分支 | `main` |
+| 最近验证 | PF-P021-MG 已在最新 `main` 上完成本地 merge 和复验；默认后端 discover 通过，`1947 tests`，`skipped=25`，`expected failures=7`；UoW targeted、PF-P020 writer group、runtime queue、Workbench write characterization、dirty queue wiring、platform guard 均通过 |
+| 下一条允许任务 | 等待用户确认 PF-P021-MG 是否标记为 `verified`；确认前不得生成下一条业务实现 prompt，不得 push，除非用户另行明确要求 |
 
 ## Prompt 执行日志
 
@@ -2271,7 +2271,7 @@ PF-P021 已由用户确认 `verified`。PF-P021-MG 已生成并审查，下一�
 
 ### PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2318,6 +2318,42 @@ PF-P021-MG 已执行并被阻断。Blocker：仓库 README、`backend/README.md`
 #### 下一条 Prompt 上下文
 
 下一步必须先生成并审查一个修正 prompt，处理 `tests/test_workbench_uow_contract.py` 的默认 CI 策略。建议方向：将尚未实现的 target contract cases 用显式、可审查的 `unittest.expectedFailure` 或等价机制隔离，使默认 CI 不失败，同时保留手动 target contract suite 和 unexpected success 信号。修正前不得 merge，不得继续迁移 Workbench 写路径。
+
+#### 重新执行结果（PF-P021-CI 后）
+
+- 已 merge 到本地 `main`，merge commit：`387ee0d1 feat(workbench): establish transaction-bound uow skeleton`。
+- 未执行 Traffic Gate、部署、生产访问或 push。
+- `git fetch origin` 后确认 `main` 与 `origin/main` 无分歧；合入前当前 UoW 分支只比 `origin/main` 超前。
+- Branch/diff scope：通过，合入 diff 只包含 PF-P019/PF-P020/PF-P021/PF-P021-CI 预期文件。
+- `git diff --check main...HEAD`（合入前）：通过。
+- `test ! -e backend-go`：通过。
+- 默认测试入口审计：`README.md`、`backend/README.md`、`docs/dev/testing.md` 均记录默认后端测试为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`。
+- 默认 CI blocker 已解除：`tests/test_workbench_uow_contract.py` 现在被默认 discover 执行时退出码为 0，并显示 `expected failures=7`。
+
+合入前验证：
+
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，`expected failures=7`。
+- `tests.test_runtime_queue`：Pass，31 tests。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`：Pass，1947 tests，`skipped=25`，`expected failures=7`。
+
+main 上复验：
+
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- `tests.test_runtime_queue`：Pass，31 tests。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`：Pass，1947 tests，`skipped=25`，`expected failures=7`。
+
+PF-P021-MG 记录为 `implemented`，等待用户确认后才能标记 `verified`。确认前不得生成下一条业务实现 prompt。
 
 ### PF-P021-CI - Workbench UoW Contract Test CI Isolation
 
