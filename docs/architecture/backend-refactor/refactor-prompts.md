@@ -3409,7 +3409,7 @@ Post-Flight:
 
 ## PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### 目标
 
@@ -3574,5 +3574,5 @@ Post-Flight:
 - 变更范围：只包含 Expected Changed Files；未修改 SQL migration、前端、网关、部署配置、生产配置、Worker refresh、builder、RabbitMQ、Outbox、Dirty Scope、Redis cache key/TTL、Workbench 写路径或 matching/candidates。
 - Feature branch 验证通过：`git status --short --branch`、`git ls-files --others --exclude-standard`、`git diff --name-only`、`git diff --stat`、`git diff --check`、`tests.test_workbench_sql_runtime -v`、`tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`、row detail targeted tests、`compileall`、`app.main --check`、production diff / forbidden surface / Facade mock / SSE PubSub 静态检查。
 - `main` 复验通过：`git status --short --branch`、`git ls-files --others --exclude-standard`、`git diff --check`、`git diff --name-only origin/main..HEAD`、`git diff --stat origin/main..HEAD`、`tests.test_workbench_sql_runtime -v`、`tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`、row detail targeted tests、`compileall`、`app.main --check`、production diff / forbidden surface / Facade mock / SSE PubSub 静态检查。
-- 未执行 Traffic Gate、未部署服务器、未修改网关或生产配置、未 push `origin/main`。
-- 状态：`implemented`，等待用户确认，不得直接标记 `verified`。下一步如用户确认，可将 PF-P010-MG 标记为 `verified`；push `origin/main` 仍需要用户明确确认。
+- 未执行 Traffic Gate、未部署服务器、未修改网关或生产配置。
+- 状态：`verified`，已由用户确认。用户已明确要求执行 `git push origin main`；push 完成后下一条 prompt 必须从最新 `main` 新建分支生成。
