@@ -402,6 +402,47 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-OLD"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-NEW"))
 
+    def test_cancel_link_with_expected_relation_rejects_replaced_active_relation(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+
+        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+            old_response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CANCEL-OLD"},
+            )
+            replacement_response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CANCEL-NEW"},
+            )
+            cancel_response = self._post(
+                app,
+                "/api/workbench/actions/cancel-link",
+                {
+                    "month": "2026-03",
+                    "row_id": row_ids[1],
+                    "expected_versions": {"relation:CASE-CANCEL-OLD": 1},
+                },
+            )
+
+        self.assertEqual(old_response.status_code, 200, old_response.body)
+        self.assertEqual(replacement_response.status_code, 200, replacement_response.body)
+        self.assertEqual(cancel_response.status_code, 409, cancel_response.body)
+        cancel_payload = _json_response(cancel_response)
+        self.assertEqual(cancel_payload["error"], "workbench_write_conflict")
+        self.assertEqual(cancel_payload["conflict"]["action"], "cancel_link")
+        self.assertIn(cancel_payload["conflict"]["reason"], {"stale_relation_identity", "stale_relation_version"})
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-OLD"))
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-NEW"))
+        self.assertEqual(
+            [entry["operation_type"] for entry in app._workbench_pair_relation_service.list_history()],
+            ["confirm_link", "confirm_link"],
+        )
+        self.assertEqual(pair_relation_persist.call_count, 2)
+        self.assertEqual(read_model_persist.call_count, 2)
+
     def test_stale_exception_after_relation_returns_conflict_and_preserves_relation(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)

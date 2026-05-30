@@ -5601,7 +5601,7 @@ Main 复验命令：
 
 ## PF-P018 - Workbench Write Unit of Work Boundary Design
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -9199,3 +9199,53 @@ Post-Flight:
 - PF-P031 必须保持 legacy no-expected-versions 行为，避免破坏旧前端请求。
 - 如果当前没有 durable relation version，本轮先完成 relation identity mismatch guard 是合理的；不能伪造 schema 或引入 SQL migration。
 - PF-P031 完成后应优先进入 `PF-P031-MG`，不应直接开始 PF-P032。
+
+### 执行结果
+
+状态：`implemented`
+
+已完成：
+
+- 已补充真实 Workbench cancel link HTTP/facade 链路特征测试。
+- 已确认 RED：新增测试在实现前失败，当前代码返回 200 并取消新的 active relation。
+- 已实现最小 cancel link stale guard。
+- 当请求携带 `expected_versions={"relation:<old_case_id>": ...}` 且当前 row active relation 已替换为其它 relation 时，返回 `409 workbench_write_conflict`。
+- 冲突在 mutation 前返回，不会取消当前新 relation，也不会触发 pair/read-model persistence scheduling。
+- 未携带 `expected_versions` 的 legacy cancel link 行为保持不变。
+
+明确未执行：
+
+- 未迁移 `ignore row` stale guard。
+- 未迁移 `cash special` stale guard。
+- 未迁移 `withdraw submit` stale guard。
+- 未修改 `server.py`。
+- 未修改前端。
+- 未新增 SQL migration。
+- 未修改部署、网关、auth/session 或 worker routing。
+- 未执行 Traffic Gate、部署、生产访问或 push。
+- 未生成或执行 PF-P032。
+
+变更文件：
+
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_cancel_link_with_expected_relation_rejects_replaced_active_relation -v`：RED 后 GREEN。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，30 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+
+下一步：
+
+- 等待用户确认 PF-P031 可标记为 `verified`。
+- 用户确认后生成并审查 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate`。
+- 不直接进入 PF-P032。

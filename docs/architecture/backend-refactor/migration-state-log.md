@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P031 - Workbench Cancel Link Stale Guard Migration` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P031 - Workbench Cancel Link Stale Guard Migration` (`planned`) |
+| 当前阶段 | `PF-P031 - Workbench Cancel Link Stale Guard Migration` 已执行，等待用户确认 verified |
+| 当前 active prompt | `PF-P031 - Workbench Cancel Link Stale Guard Migration` (`implemented`) |
 | 最近 verified prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` |
 | 当前分支 | `codex/workbench-cancel-link-stale-guard` |
-| 最近验证 | PF-P030-MG 合入前与合入后 `main` 复验全部通过；已 push；PF-P031 已生成但未执行 |
-| 下一条允许任务 | 等待用户确认后执行 PF-P031；PF-P031 只迁移 cancel link stale guard，不迁移 ignore row、cash special 或 withdraw submit |
+| 最近验证 | PF-P031 指定测试全部通过；只迁移 cancel link stale guard；未迁移 ignore row、cash special 或 withdraw submit |
+| 下一条允许任务 | 等待用户确认 PF-P031 可标记 verified；确认后生成并审查 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -3247,7 +3247,7 @@ PF-P030-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确�
 
 ### PF-P031 - Workbench Cancel Link Stale Guard Migration
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3277,6 +3277,43 @@ PF-P030-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确�
 - PF-P031 是 PF-P030-MG 后的正确下一步，因为 stale write 计划把 cancel link 列为第一条真实写 API 迁移候选。
 - PF-P031 必须保持小切片，只处理 cancel link；其它 stale write 写路径留给后续 PF-P032/PF-P033/PF-P034。
 - 当前分支已从最新 `main` 创建：`codex/workbench-cancel-link-stale-guard`。
+
+#### 执行结果
+
+- 已实现 cancel link stale guard。
+- 当 `cancel-link` 请求携带 `expected_versions` 且当前 row active relation 已从 expected relation 替换为其它 relation 时，返回 `409 workbench_write_conflict`。
+- stale guard 在 mutation 前执行；冲突时不会调用 `cancel_relation_for_row_id` 取消当前新 relation。
+- 未携带 `expected_versions` 的 legacy cancel link 行为保持不变。
+- 未迁移 `ignore row`、`cash special` 或 `withdraw submit`。
+- 未修改 `server.py`、前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- 未执行 Traffic Gate、部署、生产访问或 push。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### RED/GREEN 记录
+
+- RED：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_cancel_link_with_expected_relation_rejects_replaced_active_relation -v` 失败，当前代码返回 200 并取消 `CASE-CANCEL-NEW`。
+- GREEN：同一测试通过，返回 409 且 `CASE-CANCEL-NEW` 保持 active。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，30 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P031 已完成实现和验证，但尚未由用户确认 `verified`。下一步应先等待用户确认 PF-P031 `verified`，然后生成并审查 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate`。不要直接进入 PF-P032，不要迁移 ignore row、cash special 或 withdraw submit。
 
 ## 维护规则
 

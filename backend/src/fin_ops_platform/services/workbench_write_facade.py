@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
+from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
+from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
 
 class _WorkbenchWritePersistenceError(RuntimeError):
@@ -17,6 +19,13 @@ class _WorkbenchWritePersistenceError(RuntimeError):
 @dataclass(frozen=True)
 class WorkbenchWriteResult:
     status_code: HTTPStatus
+    payload: dict[str, object]
+
+
+@dataclass(frozen=True)
+class _WorkbenchWritePreconditionCommand:
+    action_name: str
+    expected_versions: dict[str, object]
     payload: dict[str, object]
 
 
@@ -244,6 +253,13 @@ class WorkbenchWriteFacade:
                 HTTPStatus.NOT_FOUND,
                 {"error": "workbench_pair_relation_not_found", "message": row_id},
             )
+        conflict = self._cancel_link_stale_conflict(payload, active_relation)
+        if conflict is not None:
+            conflict_payload = conflict.to_response_payload()
+            return WorkbenchWriteResult(
+                HTTPStatus(conflict.status_code),
+                dict(conflict_payload["payload"]),
+            )
         affected_row_ids = self._normalize_row_ids(list(active_relation.get("row_ids") or []))
         self._emit_timing_if_requested(
             request_id=request_id,
@@ -296,6 +312,29 @@ class WorkbenchWriteFacade:
                 "message": "已取消关联并回退为待处理。",
             },
         )
+
+    def _cancel_link_stale_conflict(
+        self,
+        payload: dict[str, object],
+        active_relation: dict[str, object],
+    ) -> WorkbenchWriteConflict | None:
+        expected_versions = payload.get("expected_versions")
+        if not isinstance(expected_versions, dict) or not expected_versions:
+            return None
+        try:
+            assert_workbench_stale_preconditions(
+                _WorkbenchWritePreconditionCommand(
+                    action_name="cancel_link",
+                    expected_versions=dict(expected_versions),
+                    payload={
+                        "current_relation_case_id": str(active_relation.get("case_id") or ""),
+                        "current_relation_version": active_relation.get("version"),
+                    },
+                )
+            )
+        except WorkbenchWriteConflict as exc:
+            return exc
+        return None
 
     def preview_withdraw_link(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:

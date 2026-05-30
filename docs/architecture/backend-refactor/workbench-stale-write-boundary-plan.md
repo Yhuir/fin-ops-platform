@@ -210,6 +210,22 @@ PF-P030 已在 UoW 层引入 fake/in-memory stale precondition skeleton。当前
 
 该 skeleton 仍不是生产 facts reader。真实 Workbench API 还没有迁移进这个 precondition，HTTP 写路径仍保持 PF-P012/PF-P016/PF-P017/PF-P029 之前锁定的当前行为。后续迁移真实 submit/cancel/ignore/cash special 时，必须把当前 command-carried state 替换为 transaction-bound PostgreSQL facts current-state reader。
 
+### PF-P031 执行补充
+
+PF-P031 已完成第一条真实写 API stale guard 迁移：`cancel link`。
+
+当前行为：
+
+- 如果 `cancel-link` 请求没有携带 `expected_versions`，继续走 legacy 行为；重复 cancel 仍按当前 contract 返回 404。
+- 如果请求携带 `expected_versions`，且当前 row active relation 已从 expected relation 替换为其它 relation，返回 `409 workbench_write_conflict`。
+- 冲突在 mutation 前返回，不会取消新的 active relation，也不会触发 pair relation / read model persistence scheduling。
+
+限制：
+
+- 本轮只使用当前 `WorkbenchPairRelationService` active relation 作为 facts/service state。
+- 当前仍没有 durable PostgreSQL relation version；因此 PF-P031 主要完成 relation identity mismatch guard，不能视为完整 durable optimistic locking。
+- `ignore row`、`cash special`、`withdraw submit` 仍未迁移。
+
 ## Conflict Primitive Boundary
 
 目标 primitive：`WorkbenchWriteConflict`。
@@ -299,6 +315,7 @@ PF-P030 已在 UoW 层引入 fake/in-memory stale precondition skeleton。当前
 4. `PF-P031 - Workbench Cancel Link Stale Guard Migration`
    - 第一条真实写 API 迁移候选，因为 cancel link 风险清晰：row id 当前 relation 已替换时必须 409。
    - 必须带 characterization + UoW transaction-bound facts check。
+   - 状态：已实现 relation identity mismatch guard；等待 PF-P031-MG 合入。
 5. `PF-P032 - Workbench Ignore Row Stale Guard Migration`
    - 处理 row 已 confirmed/paired 时仍 ignore 的风险。
 6. `PF-P033 - Workbench Cash Special Stale Guard Migration`
