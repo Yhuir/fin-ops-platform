@@ -198,6 +198,12 @@ sequenceDiagram
 - 高风险写路径迁入 UoW 后，应逐步要求前端携带 expected_versions；在强制前必须先有兼容期和前端契约更新。
 - read model 可以承载用户看到的版本身份，但最终写入判断必须回到 transaction 内 facts repository。
 
+### PF-P029 执行补充
+
+PF-P029 已让 withdraw preview 暴露 `active_relation.case_id`、`active_relation.version` 和 `submit_expected_versions`。当前 in-memory pair relation facts 尚未提供 durable facts-level relation version，因此 preview 使用兼容期的 preview-only integer token。这个 token 只用于建立前端可回传的 submit contract，不代表已经具备 facts 级 optimistic locking。
+
+后续实现 submit stale rejection 时，必须用 transaction-bound facts current-state reader 提供真实 relation version 或等价 identity；不得把 PF-P029 的 preview-only fallback 当作最终并发控制依据。
+
 ## Conflict Primitive Boundary
 
 目标 primitive：`WorkbenchWriteConflict`。

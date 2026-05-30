@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` (`planned`) |
+| 当前阶段 | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` (`implemented`) |
 | 最近 verified prompt | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` |
 | 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | 用户确认 PF-P028 可标记 `verified`；PF-P029 已生成并审查但未执行 |
-| 下一条允许任务 | 只允许执行 PF-P029。PF-P029 只处理 withdraw preview 的 relation identity/version response contract，不迁移真实 submit/cancel/ignore/cash special 写路径 |
+| 最近验证 | PF-P029 目标测试和 Workbench write characterization 回归通过；真实 submit/cancel/ignore/cash special 写路径未迁移 |
+| 下一条允许任务 | 等待用户确认 PF-P029 是否可标记 `verified`。确认后建议生成并审查 PF-P030；不得直接执行 PF-P030 |
 
 ## Prompt 执行日志
 
@@ -3001,7 +3001,7 @@ PF-P028 已由用户确认 `verified`。PF-P029 已生成并审查，下一步�
 
 ### PF-P029 - Workbench Withdraw Preview Version Identity Contract
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3035,6 +3035,50 @@ PF-P028 已由用户确认 `verified`。PF-P029 已生成并审查，下一步�
 - PF-P029 是 PF-P028 后的正确最小实现切片。
 - 它只补齐两阶段 withdraw 的 preview response contract，为后续 submit stale guard 提供前端可回传的版本身份。
 - PF-P029 不能修真实 stale write，因为 submit 拒绝 stale 需要 transaction-bound facts current-state reader 和 UoW precondition，应放到后续 prompt。
+
+#### 执行结果
+
+- 修改 `WorkbenchWriteFacade.preview_withdraw_link()`，withdraw preview response 新增：
+  - `active_relation.case_id`
+  - `active_relation.version`
+  - `submit_expected_versions`
+- 新增 `_withdraw_preview_active_relation_identity()` helper。
+- 当前 pair relation facts 尚未提供 durable facts-level version，因此 helper 在缺少 relation `version` 时返回兼容期 preview-only integer token `1`。
+- 已在 `workbench-stale-write-boundary-plan.md` 记录：PF-P029 的 preview-only token 只建立前端 submit contract，不能作为最终 optimistic locking 事实源。
+- 只移除了 `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions` 的 `unittest.expectedFailure`。
+- 未迁移 withdraw submit。
+- 未修改 cancel link、ignore row 或 cash special 写路径。
+- 未实现 UoW stale precondition、repository current-state reader 或 SQL migration。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_stale_write_contract.py`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract.WorkbenchStaleWriteContractTests.test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `git diff --check`：通过。
+- `test ! -e backend-go`：通过。
+- Scope allowlist：通过。
+
+#### 仍保留的 expectedFailure
+
+- `tests/test_workbench_uow_contract.py`
+  - `test_withdraw_submit_rejects_stale_preview_relation_version`
+  - `test_cancel_link_rejects_stale_replaced_relation`
+  - `test_ignore_row_rejects_when_row_already_confirmed`
+  - `test_cash_special_rejects_changed_relation_version`
+
+#### 下一条 Prompt 上下文
+
+PF-P029 已执行并记录为 `implemented`，不得标记 `verified`，直到用户确认。下一步建议生成并审查 `PF-P030 - Workbench UoW Stale Precondition Port Skeleton`，只建立 fake/in-memory stale precondition port 和 UoW target contract，不迁移真实 Workbench 写 API。PF-P030 必须继续保留真实 submit/cancel/ignore/cash special 当前行为 characterization，直到对应 API migration prompt。
 
 ## 维护规则
 

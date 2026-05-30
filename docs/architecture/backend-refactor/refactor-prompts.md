@@ -8494,7 +8494,7 @@ Post-Flight:
 
 ## PF-P029 - Workbench Withdraw Preview Version Identity Contract
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -8632,3 +8632,23 @@ Post-Flight:
 - PF-P029 必须保留 submit 兼容测试，确保携带 `expected_versions` 不破坏当前成功响应。
 - PF-P029 只允许移除 withdraw preview 目标测试的 expectedFailure；UoW stale write target tests 必须保留。
 - 未经用户确认，不得执行 PF-P029，也不得将 PF-P029 标记为 `verified`。
+
+### 执行结果
+
+- 已修改 `WorkbenchWriteFacade.preview_withdraw_link()`，withdraw preview response 新增：
+  - `active_relation.case_id`
+  - `active_relation.version`
+  - `submit_expected_versions`
+- 已新增 `_withdraw_preview_active_relation_identity()` helper。
+- 当前 relation facts 尚未提供 durable facts-level version，helper 缺省返回 preview-only integer token `1`；该 token 只建立前端可回传 contract，不代表已完成 optimistic locking。
+- 已移除 `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions` 的 `unittest.expectedFailure`，该测试已转为普通通过。
+- 真实 withdraw submit 仍未迁移；cancel link、ignore row、cash special 写路径未修改。
+
+验证结果：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract.WorkbenchStaleWriteContractTests.test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+
+下一步建议：用户确认 PF-P029 `verified` 后，生成并审查 `PF-P030 - Workbench UoW Stale Precondition Port Skeleton`。PF-P030 仍不得迁移真实 Workbench 写 API。

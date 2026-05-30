@@ -74,7 +74,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
         self.assertIn("restored_relations", payload)
 
-    @unittest.expectedFailure
     def test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
