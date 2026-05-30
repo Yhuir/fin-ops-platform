@@ -6024,7 +6024,7 @@ Post-Flight:
 
 ## PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -9951,4 +9951,135 @@ Post-Flight:
 
 ### 下一步
 
-等待用户确认 PF-P034 后，生成并审查 cumulative Merge Gate，统一覆盖 PF-P032 到 PF-P034 的完整 diff；不得直接 merge 或 push。
+PF-P034 已由用户确认 `verified`。下一步应执行 cumulative Merge Gate，统一覆盖 PF-P032 到 PF-P034 的完整 diff；不得直接 merge 或 push。
+
+## PF-P034-MG - Workbench Stale Guard Group Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P034-MG - Workbench Stale Guard Group Merge Gate。
+
+Role: 你是一位严格的 Python 遗留系统重构 Merge Gate 审查员，重点关注范围控制、测试门禁、主干合入安全和回滚风险。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-ignore-row-stale-guard`。
+- 本 MG 是累计 Merge Gate，统一覆盖 PF-P032 到 PF-P034：
+  - PF-P032：ignore row stale guard。
+  - PF-P033：cash special stale guard。
+  - PF-P034：withdraw submit stale guard。
+- PF-P032-MG、PF-P033-MG 均已明确 deferred。
+- 最近 verified prompt 是 `PF-P034 - Workbench Withdraw Submit Stale Guard Migration`。
+- 本 MG 不等于 Traffic Gate，不等于部署，不等于 push。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_idempotency_contract.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-ignore-row-stale-guard`。
+   - 当前 active prompt 是 `PF-P034-MG - Workbench Stale Guard Group Merge Gate` planned。
+   - PF-P032、PF-P033、PF-P034 状态均为 `verified`。
+   - `main...origin/main` 为 `0 0`；如果不是，先停止并说明需要同步。
+3. 必须列出并确认本分支相对 `main` 的 commit 列表只包含：
+   - `353a30a7 docs(backend-refactor): plan workbench ignore row stale guard`
+   - `6fbe97e5 feat(workbench): reject stale ignore row writes`
+   - `af61744b docs(backend-refactor): plan workbench cash special stale guard`
+   - `adc438b3 feat(workbench): reject stale cash special writes`
+   - `a04231c9 docs(backend-refactor): plan workbench withdraw submit stale guard`
+   - `f4b7029d feat(workbench): reject stale withdraw submit`
+
+Gate Scope:
+本 MG 只允许验证并合入 Workbench stale guard group：
+- ignore row：携带 stale row expected_versions 时返回 `409 workbench_write_conflict`，不创建 ignored case/override。
+- cash special：携带 stale relation expected_versions 时返回 `409 workbench_write_conflict`，不更新或清空 `special_metadata`。
+- withdraw submit：携带旧 preview expected_versions 且当前 relation 已替换时返回 `409 workbench_write_conflict`，不撤销当前 relation、不恢复旧 relation。
+
+Expected Changed Files:
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+
+Required Diff Checks:
+1. 执行并审查：
+   - `git diff --name-only main...HEAD`
+   - `git diff --stat main...HEAD`
+   - `git diff main...HEAD -- backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `git diff main...HEAD -- tests/test_workbench_write_characterization.py`
+2. 必须确认：
+   - 没有修改 `backend/src/fin_ops_platform/app/server.py`。
+   - 没有修改前端。
+   - 没有新增 SQL migration。
+   - 没有新增/修改部署、网关、auth/session、worker routing。
+   - 没有 `backend-go`。
+   - 没有引入新的外部依赖。
+   - 没有开始 PF-P035 或其它 Workbench 写路径迁移。
+3. 必须确认新增 guard 都位于 mutation 前：
+   - `ignore_row` guard 在创建 ignored exception case / override 前。
+   - cash special guard 在 `update_special_metadata_for_row_ids` / `clear_special_metadata_for_row_ids` 前。
+   - withdraw submit guard 在 `withdraw_latest_for_row_ids` 前。
+4. 必须确认 legacy no-expected-versions 行为仍由 characterization tests 覆盖。
+
+Required Verification:
+1. Scope / hygiene:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only main...HEAD`
+   - `git diff --check`
+   - `test ! -e backend-go`
+2. Target tests:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Merge Procedure:
+1. 只有上述 checks 和 tests 全部通过，才允许准备合入本地 `main`。
+2. 合入前必须确认 `main` 与 `origin/main` 对齐；如远端有新提交，必须先同步，并在当前分支 rebase/merge 最新 `main` 后重跑完整验证。
+3. 合入本地 `main` 时，使用非交互式 git 命令；不得使用破坏性命令。
+4. 合入后必须在 `main` 上重跑同一套 Required Verification。
+5. 本 MG 不执行 `git push origin main`；push 必须等用户单独确认。
+
+Forbidden Scope:
+- 不执行 Traffic Gate。
+- 不部署。
+- 不访问生产服务。
+- 不 push。
+- 不开始下一条 prompt。
+- 不修改业务代码补救测试，除非发现当前分支测试失败；若发现失败，应停止并报告 blocker，不得在 MG 中顺手扩大实现。
+- 不使用 `git add .` 或 `git add -A`。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 如 MG checks 和合入复验通过，PF-P034-MG 状态记录为 `implemented`，等待用户确认后才能标记 `verified`。
+  - 记录合入前和合入后验证结果。
+  - 记录是否已合入本地 `main`。
+  - 记录未 push、未部署、未 Traffic Gate。
+  - 记录下一步建议：用户确认 PF-P034-MG verified 后，再决定是否 `git push origin main`。
+- 更新 `refactor-prompts.md` 的 PF-P034-MG 执行结果。
+- 未经用户确认，不得把 PF-P034-MG 标记为 `verified`。
+```
+
+### 审查结论
+
+- PF-P034-MG 的范围正确：它累计覆盖 PF-P032、PF-P033、PF-P034，而不是只检查最后一个提交。
+- Expected Changed Files 与 `git diff --name-only main...HEAD` 当前结果一致，只有 5 个文件。
+- MG 明确包含合入前验证、主干同步安全锁、本地 main 合入后复验。
+- MG 明确不执行 Traffic Gate、部署、生产访问或 push。
+- MG 执行后也不能自动标记 verified，必须等待用户确认。

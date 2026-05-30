@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` 已实现，等待用户确认后生成累计 Merge Gate |
-| 当前 active prompt | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` (`implemented`) |
-| 最近 verified prompt | `PF-P033 - Workbench Cash Special Stale Guard Migration` (`MG deferred`) |
+| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` (`MG pending`) |
 | 当前分支 | `codex/workbench-ignore-row-stale-guard` |
-| 最近验证 | PF-P034 指定 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试全部通过 |
-| 下一条允许任务 | 等待用户确认 PF-P034；确认后生成并审查 cumulative MG，覆盖 PF-P032 到 PF-P034 的完整 diff |
+| 最近验证 | PF-P034 指定 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试全部通过；用户确认 PF-P034 verified |
+| 下一条允许任务 | 执行 PF-P034-MG；该 MG 只验证并合入 PF-P032 到 PF-P034 的 Workbench stale guard group，不执行 Traffic Gate、部署或 push |
 
 ## Prompt 执行日志
 
@@ -3526,7 +3526,7 @@ PF-P033 已完成实现和验证，并已由用户确认 `verified`。PF-P032-MG
 
 ### PF-P034 - Workbench Withdraw Submit Stale Guard Migration
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3589,7 +3589,60 @@ PF-P033 已完成实现和验证，并已由用户确认 `verified`。PF-P032-MG
 
 #### 下一条 Prompt 上下文
 
-PF-P034 已完成实现和验证，等待用户确认。下一步应生成并审查 cumulative Merge Gate，统一覆盖 PF-P032 ignore row、PF-P033 cash special、PF-P034 withdraw submit 的完整 diff；不得直接 merge 或 push。
+PF-P034 已完成实现和验证，并已由用户确认 `verified`。下一步应执行 `PF-P034-MG - Workbench Stale Guard Group Merge Gate`，统一覆盖 PF-P032 ignore row、PF-P033 cash special、PF-P034 withdraw submit 的完整 diff；不得执行 Traffic Gate、部署或 push。
+
+### PF-P034-MG - Workbench Stale Guard Group Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 累计验证 PF-P032 到 PF-P034 的完整 diff。
+- 覆盖提交：
+  - `353a30a7 docs(backend-refactor): plan workbench ignore row stale guard`
+  - `6fbe97e5 feat(workbench): reject stale ignore row writes`
+  - `af61744b docs(backend-refactor): plan workbench cash special stale guard`
+  - `adc438b3 feat(workbench): reject stale cash special writes`
+  - `a04231c9 docs(backend-refactor): plan workbench withdraw submit stale guard`
+  - `f4b7029d feat(workbench): reject stale withdraw submit`
+- 只允许 Workbench stale guard group 相关变更：
+  - ignore row stale guard
+  - cash special stale guard
+  - withdraw submit stale guard
+  - 对应 characterization tests
+  - 对应状态机 / prompt 库 / stale-write 计划文档
+
+#### 预期变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+
+#### 禁止范围
+
+- 不修改 `server.py`。
+- 不修改前端。
+- 不新增 SQL migration。
+- 不修改部署、网关、auth/session 或 worker routing。
+- 不引入 Go / `backend-go`。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不开始 PF-P035 或其它 Workbench 写路径迁移。
+
+#### 验收标准
+
+- 确认 PF-P032、PF-P033、PF-P034 均已 verified。
+- 确认相对 `main` 的 diff 只包含预期 5 个文件。
+- 完整验证目标测试全部通过。
+- 如果合入本地 `main`，必须先同步最新 `main`，解决冲突后重跑同一套验证。
+- 未经用户确认，不得把 PF-P034-MG 标记为 `verified`。
+
+#### 审查结论
+
+- PF-P034-MG 是正确的下一步，因为 Workbench stale guard group 的三条真实写 API 小切片已全部实现并 verified。
+- MG 应统一覆盖 PF-P032 到 PF-P034，而不是只检查最后一个 prompt。
+- 本 MG 只做 Merge Gate，不是 Traffic Gate，不等于上线，不应 push 远端或生产服务器。
 
 ## 维护规则
 
