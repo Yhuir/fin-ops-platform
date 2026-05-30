@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`；当前已从最新 `main` 新建分支，生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已执行，产物是 `workbench-remaining-write-facade-plan.md`，等待用户确认 `verified`。
 
 ## 1. Scope Boundary
 
@@ -475,15 +475,15 @@ Required properties:
 
 ## 12. Next Slice Recommendation
 
-PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。下一条已生成并审查的 prompt：
+PF-P015 已执行并等待用户确认 `verified`。下一条建议 prompt：
 
-`PF-P015 - Workbench Remaining Write Facade Discovery and Planning`
+`PF-P016 - Workbench Remaining Write Characterization Tests`
 
 理由：
 
-- PF-P013/PF-P014 已经把 `confirm-link`、`cancel-link`、`mark-exception`、`exception/apply`、`cancel-exception`、`ignore-row`、`unignore-row` 迁入 `WorkbenchWriteFacade`。
-- 剩余写入口的业务差异更大，包括 `withdraw-link`、cash special、`update-bank-exception`、`oa-bank-exception`、`confirm-personal-advance-repayment`、matching run / dirty worker，不应直接盲抽 facade。
-- Unit of Work 是必要方向，但当前还缺少每个剩余入口的 facts、audit/history、dirty scope、outbox/read model scheduling、失败传播和测试缺口清单。
-- PF-P015 只做 discovery / planning 和文档回写，不修改业务代码，不新增测试，不设计或实现 UoW API。
+- PF-P015 已确认 `withdraw-link` 和 `oa-bank-exception` 可以作为后续 facade extraction 候选，但仍缺 duplicate-submit、stale submit 和 failure propagation tests。
+- cash special、`update-bank-exception`、`confirm-personal-advance-repayment` 的测试缺口更大，直接抽 facade 会降低行为保真度。
+- Unit of Work 是必要方向，但必须先锁定剩余入口在重复提交、旧视图写入、持久化失败、dirty/read model scheduling 失败时的当前行为。
+- `/matching/run` 应保持 legacy/review，不进入 Workbench write facade；matching dirty worker 属于 worker/runtime boundary。
 
-PF-P015 必须包含 `UoW Readiness Assessment`：评估未来 UoW 需要包住哪些 facts、audit/history、dirty scope、outbox、read model scheduling，以及当前 blocker。PF-P015 执行后，下一条 prompt 才能根据真实发现结果决定是先补 characterization tests、继续 remaining facade extraction，还是进入 `Workbench Unit of Work Boundary Design`。
+PF-P016 应只新增 characterization tests 和文档回写，不修复 stale write，不抽 facade，不设计或实现 UoW。PF-P016 verified 后，再根据测试覆盖决定 PF-P017 是 remaining facade extraction 还是 Workbench Unit of Work Boundary Design。

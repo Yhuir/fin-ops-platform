@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` (`planned`) |
+| 当前阶段 | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` 已执行，等待用户确认 `verified` |
+| 当前 active prompt | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` (`implemented`) |
 | 最近 verified prompt | `PF-P014-MG - Workbench Exception Facade Merge Gate` |
 | 当前分支 | `codex/workbench-remaining-write-facade-planning` |
 | 最近验证 | PF-P014-MG 已在功能分支和本地 `main` 复验：`compileall`、Workbench write characterization、Workbench v2 API、exception application/case、pair relation、derived lifecycle + platform guards 均通过；`main` 已 push 到 `origin/main`；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`；不得直接进入 UoW 设计或业务代码实现 |
+| 下一条允许任务 | 用户确认 PF-P015 后，生成并审查 `PF-P016 - Workbench Remaining Write Characterization Tests`；不得直接进入 UoW 设计或业务代码实现 |
 
 ## Prompt 执行日志
 
@@ -1816,7 +1816,7 @@ main 复验结果：
 
 ### PF-P015 - Workbench Remaining Write Facade Discovery and Planning
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -1851,7 +1851,23 @@ main 复验结果：
 
 #### 下一条 Prompt 上下文
 
-PF-P015 已生成并审查。下一步允许在用户确认后执行 PF-P015。PF-P015 只能发现和规划，不得写业务代码；执行后应根据发现结果决定下一步是 characterization tests、remaining facade extraction，还是进入 Workbench Unit of Work Boundary Design。
+PF-P015 已执行并产出 `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`。本轮只修改文档，未修改 Python 业务代码、测试、SQL migration、前端、部署或生产配置；未执行 Merge Gate、Traffic Gate、push 或生产访问。
+
+主要发现：
+
+- `withdraw-link` 适合后续移动到 `WorkbenchWriteFacade`，但应先补 duplicate submit、stale preview submit 和 scheduling failure characterization tests。
+- cash special 三个入口缺少 targeted black-box tests，必须先补测试，不能直接抽 facade。
+- `update-bank-exception` 和 `confirm-personal-advance-repayment` 都是 UoW 热点，当前测试不足，不能直接进入 UoW 或抽取。
+- `oa-bank-exception` 已有较多行解析和 read model invalidation 测试，但仍缺 duplicate-submit 和 failure propagation tests。
+- `/matching/run` 是 legacy `MatchingService`，不应进入 Workbench write facade。
+- matching dirty worker 属于 worker/runtime boundary，不是 HTTP write facade 候选。
+
+UoW readiness：
+
+- 未来 UoW 必须覆盖 pair relation facts/history、exception cases/history、overrides、candidate consumption、dirty scope/outbox 和 read model source versions。
+- 当前 blocker 是 in-memory service 先变更、Application snapshot/persist callbacks 后置、derived lifecycle/read model scheduling 与 facts commit 分离、async thread 配置和测试缺口。
+
+下一条建议 prompt：`PF-P016 - Workbench Remaining Write Characterization Tests`。PF-P016 应先锁定剩余入口 duplicate-submit、stale/conflict、persistence failure、dirty/read model scheduling failure 当前行为；仍不得修复 stale write 或实现 UoW。
 
 ## 维护规则
 

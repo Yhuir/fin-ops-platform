@@ -4791,7 +4791,7 @@ Post-Flight:
 
 ## PF-P015 - Workbench Remaining Write Facade Discovery and Planning
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -4966,3 +4966,25 @@ Post-Flight:
 - PF-P015 要求覆盖 `withdraw-link`、cash special、`update-bank-exception`、`oa-bank-exception`、personal advance repayment、matching run / dirty worker。
 - PF-P015 要求输出 characterization test gap matrix，防止后续 facade extraction 或 UoW 变更缺少行为锁定。
 - PF-P015 明确不执行 Merge Gate、Traffic Gate、deploy、push 或生产访问。
+
+### 执行结果
+
+- 状态：`implemented`，等待用户确认后才能标记为 `verified`。
+- 新增产物：`docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`。
+- 扫描覆盖：
+  - `withdraw-link` / `withdraw-link-preview`
+  - cash special：`confirm-cash-pass-through`、`confirm-cash-ticket-purchase`、`cancel-cash-special`
+  - `update-bank-exception`
+  - `oa-bank-exception`
+  - `confirm-personal-advance-repayment`
+  - legacy `/matching/run`
+  - HTTP process matching dirty worker
+  - standalone worker matching dirty loop
+- 分类结果：
+  - `move_to_workbench_write_facade_next` after targeted tests：`withdraw-link`、`withdraw-link-preview`、`oa-bank-exception`。
+  - `needs_characterization_tests_first`：cash special、`update-bank-exception`、`confirm-personal-advance-repayment`。
+  - `separate_domain_or_not_workbench_write_facade`：legacy `/matching/run`。
+  - `worker_or_runtime_boundary_only`：matching dirty worker loops。
+- UoW readiness 结论：未来 UoW 必须覆盖 pair relation facts/history、exception facts/history、overrides、candidate consumption、dirty scope/outbox 和 read model scheduling/source versions；当前 blocker 是 in-memory mutation + Application snapshot/persist callback + post-fact derived lifecycle/read model scheduling + async thread switches + tests gaps。
+- 下一条建议 prompt：`PF-P016 - Workbench Remaining Write Characterization Tests`。
+- 本轮未修改业务代码、未新增测试、未执行 Merge Gate / Traffic Gate、未 push。
