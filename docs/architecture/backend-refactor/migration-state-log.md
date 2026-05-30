@@ -53,7 +53,7 @@
 | 当前 active prompt | `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)` (`planned`) |
 | 最近 verified prompt | `PF-P006-MG - Workbench Query Facade Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P006-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`8937bb15` 和 `87d738de` 已 push 到 `origin/main`；未部署服务器；未执行 Traffic Gate |
+| 最近验证 | PF-P006-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`8937bb15`、`87d738de` 和 `6c62a404` 已 push 到 `origin/main`；未部署服务器；未执行 Traffic Gate |
 | 下一条允许任务 | 审查并执行 `PF-P007`；不得直接开始 Slice D、Traffic Gate、部署或生产变更 |
 
 ## Prompt 执行日志
@@ -832,7 +832,7 @@ PF-P006-MG 允许合入的文件仅限：
 
 #### 下一条 Prompt 上下文
 
-PF-P006-MG 已由用户确认 `verified`。`main` 已 push 到 `origin/main`，远端基线包含 `8937bb15` 和 `87d738de`。下一步允许执行已生成并审查的 `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)`；不得直接开始 Slice D、Traffic Gate、部署或生产变更。
+PF-P006-MG 已由用户确认 `verified`。`main` 已 push 到 `origin/main`，远端基线包含 `8937bb15`、`87d738de` 和 `6c62a404`。下一步允许执行已生成并审查的 `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)`；不得直接开始 Slice D、Traffic Gate、部署或生产变更。
 
 #### 执行结果
 
