@@ -4405,7 +4405,7 @@ Post-Flight:
 
 ### 执行结果
 
-- 状态：`implemented`，等待用户确认后才可标记为 `verified`。
+- 状态：`verified`，用户已确认 PF-P013-MG 可落锁。
 - 功能分支：`codex/workbench-writes-matching-discovery`。
 - 功能提交：`a50b1525` (`refactor(workbench): extract confirm cancel write facade`)。
 - 本地 main merge commit：`ab74c28a` (`Merge branch 'codex/workbench-writes-matching-discovery': workbench write facade`)。
@@ -4413,4 +4413,4 @@ Post-Flight:
 - push：未执行；当前本地 `main` ahead `origin/main`，需用户单独确认。
 - Traffic Gate / deploy / 生产配置：未执行、未修改。
 - 主干验证：`compileall`、Workbench write characterization、Workbench v2 API、derived lifecycle、platform runtime guards、exception service、pair relation / exception case、matching orchestrator / candidate / dirty queue 全部通过。
-- 下一步：用户确认 PF-P013-MG `verified` 后，如需要远端同步，执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查 `PF-P014 - Workbench Exception Facade Extraction`。
+- 下一步：执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查 `PF-P014 - Workbench Exception Facade Extraction`。

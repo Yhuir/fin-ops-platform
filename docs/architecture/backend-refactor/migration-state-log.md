@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P013-MG - Workbench Write Facade Merge Gate` 已执行并合入本地 `main`，等待用户确认 `verified` |
-| 当前 active prompt | `PF-P013-MG - Workbench Write Facade Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P013 - Workbench Write Facade Extraction` |
+| 当前阶段 | `PF-P013-MG - Workbench Write Facade Merge Gate` 已由用户确认 `verified`，等待 push 到 `origin/main` |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P013-MG - Workbench Write Facade Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P013-MG 已在本地 `main` 复验通过：`compileall`、Workbench write characterization、Workbench v2 API、derived lifecycle、platform runtime guards、exception service、pair relation / exception case、matching orchestrator / candidate / dirty queue 全部通过；未 push，未执行 Traffic Gate |
-| 下一条允许任务 | 用户确认 PF-P013-MG `verified`；如需要远端同步，再执行 `git push origin main`。push 后必须从最新 `main` 新建分支，再生成并审查 PF-P014 |
+| 最近验证 | 用户确认 PF-P013-MG `verified`；PF-P013-MG 已在本地 `main` 复验通过：`compileall`、Workbench write characterization、Workbench v2 API、derived lifecycle、platform runtime guards、exception service、pair relation / exception case、matching orchestrator / candidate / dirty queue 全部通过；未执行 Traffic Gate |
+| 下一条允许任务 | 执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查 PF-P014 |
 
 ## Prompt 执行日志
 
@@ -1596,7 +1596,7 @@ PF-P013-MG 已生成并审查。下一步允许在用户确认后执行 PF-P013-
 
 ### PF-P013-MG - Workbench Write Facade Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -1655,7 +1655,7 @@ PF-P013-MG 已执行并合入本地 `main`。本轮覆盖 PF-P012 + PF-P013 的�
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service tests.test_workbench_exception_case_service -v`：12 tests OK。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_orchestrator tests.test_workbench_candidate_match_service tests.test_workbench_reconciliation_dirty_queue -v`：34 tests OK。
 
-下一步必须由用户确认 PF-P013-MG 是否可标记为 `verified`。确认后，如需要远端基线同步，再执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查 `PF-P014 - Workbench Exception Facade Extraction`。
+PF-P013-MG 已由用户确认 `verified`。下一步执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查 `PF-P014 - Workbench Exception Facade Extraction`。
 
 ## 维护规则
 
