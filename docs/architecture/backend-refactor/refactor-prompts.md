@@ -6599,3 +6599,135 @@ Blocker:
 - 生成并审查一个修正 prompt，处理 `tests/test_workbench_uow_contract.py` 的默认 CI 策略。
 - 建议方向：对尚未实现的 target contract cases 使用显式 `unittest.expectedFailure` 或等价机制，确保默认 CI 不失败，同时保留手动 target contract suite 和 unexpected success 信号。
 - 在该 blocker 解决前，不得 merge，不得继续迁移 Workbench 写路径。
+
+用户同意生成默认 CI 策略修正 prompt。
+
+## PF-P021-CI - Workbench UoW Contract Test CI Isolation
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P021-CI - Workbench UoW Contract Test CI Isolation。
+
+Role: 你是一位精通 Python unittest、CI 门禁和渐进式目标契约测试管理的后端测试架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P019 已 verified，新增 `tests/test_workbench_uow_contract.py`，用于描述 Workbench UoW 目标契约。
+- PF-P020 已 verified，transaction-bound dirty/outbox writer 已落地。
+- PF-P021 已 verified，minimal `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton 已落地。
+- PF-P021-MG 已执行但 blocked：默认后端测试入口 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v` 会发现 `tests/test_workbench_uow_contract.py`，而该文件当前 16 tests，7 failures，9 ok，会导致默认 CI 失败。
+- PF-P021-CI 的目标是让 expected-red target contract tests 与默认 CI 共存，同时保留这些目标契约作为后续实现的机械门禁。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `tests/test_workbench_uow_contract.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-boundary-design` 或同一 UoW 分支。
+   - 最近 verified prompt 是 `PF-P021 - Workbench Minimal Unit of Work Skeleton`。
+   - 当前 active prompt 是 `PF-P021-CI - Workbench UoW Contract Test CI Isolation` planned。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --cached --name-only`
+
+Goal:
+在不删除目标契约、不修改生产代码、不改变测试断言语义的前提下，将 `tests/test_workbench_uow_contract.py` 中 7 个尚未实现的 target contract cases 标记为显式 expected failures，使默认 `unittest discover` 退出码为 0；后续如果实现使这些测试意外通过，unittest 必须报告 unexpected success，从而提醒我们移除 expected-failure 标记。
+
+Required Test Classification:
+必须只把以下 7 个当前 expected-red tests 标记为 `unittest.expectedFailure` 或等价 unittest 机制：
+- `test_withdraw_submit_rejects_stale_preview_relation_version`
+- `test_cancel_link_rejects_stale_replaced_relation`
+- `test_ignore_row_rejects_when_row_already_confirmed`
+- `test_cash_special_rejects_changed_relation_version`
+- `test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history`
+- `test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox`
+- `test_cash_special_idempotency_key_does_not_append_duplicate_history`
+
+必须保持以下 9 个 tests 为普通 pass，不得标记 expectedFailure：
+- 3 个 transaction-bound writer tests。
+- 4 个 PF-P021 UoW atomicity skeleton tests。
+- `test_outbox_payload_contains_source_version_for_each_dirty_scope`
+- `test_worker_completion_cannot_mark_newer_dirty_scope_done_from_older_event`
+
+Allowed Scope:
+- 允许修改：
+  - `tests/test_workbench_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 可以增加少量测试文件注释，说明 expectedFailure 是临时 target-contract marker，后续实现对应语义后必须移除。
+
+Forbidden Scope:
+- 不修改生产代码。
+- 不修改 `backend/src/fin_ops_platform/services/runtime_queue.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改 Workbench facts repositories。
+- 不删除 target contract tests。
+- 不使用 `unittest.skip`、条件 skip、环境变量 skip、文件重命名或 discovery 规避来隐藏债务。
+- 不改变 expected-red tests 的断言内容来伪造通过。
+- 不修改 README、backend README、docs/dev/testing 默认测试入口。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Baseline / targeted contract suite:
+   - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`
+   - 必须退出码为 0。
+   - 输出必须显示 16 tests，其中 7 个 expected failures，0 failures，0 errors。
+2. Direct module suite:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - 必须退出码为 0。
+   - 输出必须显示 16 tests，其中 7 个 expected failures，0 failures，0 errors。
+3. PF-P021 targeted UoW tests must remain ordinary pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_commits_pair_relation_history_dirty_scope_and_outbox_in_one_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_exception_apply_commits_case_override_candidate_dirty_scope_and_outbox_in_one_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_personal_advance_repayment_rolls_back_case_and_relation_when_dirty_scope_fails -v`
+4. PF-P020 writer group must remain ordinary pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+5. Existing safety net must remain green:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+6. Scope verification:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - `git diff --name-only | rg -v '^(tests/test_workbench_uow_contract\\.py$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$)'`
+     - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P021-CI 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录 default discover 现在是否退出码为 0，以及 expected failures 数量。
+- 更新 `refactor-prompts.md` 的 PF-P021-CI 执行结果。
+- 更新 `workbench-write-uow-boundary-design.md` 或 `workbench-writes-and-matching-plan.md`，记录 expectedFailure 是默认 CI 隔离机制，不是删除目标契约。
+- 不 merge 到 `main`。
+- 不 push。
+- 不执行 PF-P021-MG。
+- 未经用户确认，不得将 PF-P021-CI 标记为 `verified`。
+- 最终回复必须说明：
+  - 哪 7 个 tests 被标记为 expectedFailure；
+  - 默认 discover 是否通过；
+  - 绿色安全网是否通过；
+  - 下一步建议是否重新执行 PF-P021-MG。
+```
+
+### 审查结论
+
+- PF-P021-CI 的边界正确：它只处理默认 CI 与 target contract tests 的共存问题，不修改生产代码。
+- 使用 `unittest.expectedFailure` 比 skip 更合适：expected failure 不会让默认 CI 失败，但对应语义实现后会产生 unexpected success，提醒后续移除标记。
+- 该 prompt 明确禁止删除测试、改断言、改默认测试入口或继续迁移 Workbench 写路径。
+- PF-P021-CI 执行完成后只能到 `implemented` 或 `blocked`；必须等待用户确认后才能标记 `verified`。

@@ -370,10 +370,18 @@ PF-P021 已按上述边界执行，并已由用户确认 `verified`：
 - 未实现 durable idempotency replay。
 - 未修改 SQL migration、前端、部署或 CI/CD。
 
-下一步不应继续扩大实现范围。PF-P021-MG 已执行但 blocked，必须先处理 target contract tests 的默认 CI 策略。
+下一步不应继续扩大实现范围。PF-P021-MG 已执行但 blocked。PF-P021-CI 已生成并审查，必须先处理 target contract tests 的默认 CI 策略。
 
 PF-P021-MG 的关键额外门禁：
 
 - 覆盖 PF-P019/PF-P020/PF-P021 这条 UoW 基础切片相对 `main` 的完整 diff。
 - 不执行 Traffic Gate、部署或 push。
 - 必须确认 `tests/test_workbench_uow_contract.py` 当前 expected-red failures 不会破坏默认 CI；本轮审计已确认默认 `unittest discover` 会发现该文件并失败，因此 PF-P021-MG blocked，不能 merge。
+
+PF-P021-CI 的修正策略：
+
+- 只允许修改 `tests/test_workbench_uow_contract.py` 和 backend-refactor 文档。
+- 将 7 个尚未实现的 stale write / durable idempotency target tests 标记为 `unittest.expectedFailure`。
+- 已实现的 writer、UoW atomicity、worker/source_version tests 必须保持普通 pass。
+- 不删除 target tests，不使用 skip，不改变断言语义。
+- 修正后默认 discover 应退出码为 0，并显示 7 个 expected failures。

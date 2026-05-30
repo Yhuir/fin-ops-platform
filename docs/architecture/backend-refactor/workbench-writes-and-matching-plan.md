@@ -564,4 +564,6 @@ PF-P021 已执行：
 
 PF-P021 已由用户确认 `verified`。PF-P021-MG 已执行，但被默认 CI 风险阻断。
 
-PF-P021-MG 发现 `README.md`、`backend/README.md` 和 `docs/dev/testing.md` 的默认后端测试入口均为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`；`tests/test_workbench_uow_contract.py` 会被默认 discover，且当前 16 tests，7 failures，9 ok。因此本轮不能 merge。下一步必须先处理 target contract tests 的默认 CI 策略，不得继续迁移更多 Workbench 写路径。
+PF-P021-MG 发现 `README.md`、`backend/README.md` 和 `docs/dev/testing.md` 的默认后端测试入口均为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`；`tests/test_workbench_uow_contract.py` 会被默认 discover，且当前 16 tests，7 failures，9 ok。因此本轮不能 merge。PF-P021-CI 已生成并审查，用于先处理 target contract tests 的默认 CI 策略；不得继续迁移更多 Workbench 写路径。
+
+PF-P021-CI 的目标是只把 7 个尚未实现的 stale write / durable idempotency target tests 标记为 `unittest.expectedFailure`，让默认 discover 不失败，同时保留目标契约和 unexpected success 信号。已通过的 writer、UoW atomicity 和 worker/source_version tests 必须保持普通绿色测试。

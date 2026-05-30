@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 已执行但被阻断 |
-| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`blocked`) |
+| 当前阶段 | `PF-P021-CI - Workbench UoW Contract Test CI Isolation` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P021-CI - Workbench UoW Contract Test CI Isolation` (`planned`) |
 | 最近 verified prompt | `PF-P021 - Workbench Minimal Unit of Work Skeleton` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
 | 最近验证 | PF-P021-MG 发现默认测试入口 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v` 会发现 `tests/test_workbench_uow_contract.py`；该文件当前 16 tests，7 failures，9 ok，会破坏默认 CI；绿色子集仍通过 |
-| 下一条允许任务 | 生成并审查 UoW target contract tests 默认 CI 隔离/expected-failure 策略 prompt；在解决默认 CI 阻断前不得 merge，不得继续迁移 Workbench 写路径 |
+| 下一条允许任务 | 执行 `PF-P021-CI - Workbench UoW Contract Test CI Isolation`；只允许处理 UoW target contract tests 的默认 CI 隔离策略，不得改生产代码或继续迁移 Workbench 写路径 |
 
 ## Prompt 执行日志
 
@@ -2318,6 +2318,38 @@ PF-P021-MG 已执行并被阻断。Blocker：仓库 README、`backend/README.md`
 #### 下一条 Prompt 上下文
 
 下一步必须先生成并审查一个修正 prompt，处理 `tests/test_workbench_uow_contract.py` 的默认 CI 策略。建议方向：将尚未实现的 target contract cases 用显式、可审查的 `unittest.expectedFailure` 或等价机制隔离，使默认 CI 不失败，同时保留手动 target contract suite 和 unexpected success 信号。修正前不得 merge，不得继续迁移 Workbench 写路径。
+
+### PF-P021-CI - Workbench UoW Contract Test CI Isolation
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 `tests/test_workbench_uow_contract.py` 中尚未实现目标契约的 expected-red cases 如何与默认 `unittest discover` 共存。
+- 建议使用 `unittest.expectedFailure` 标记 7 个尚未实现的 stale write / durable idempotency target tests。
+- 保留 9 个已通过的 writer、UoW atomicity 和 worker/source_version tests 为普通绿色测试。
+- 允许更新 backend-refactor 状态机、prompt 库和 UoW 设计文档。
+
+#### 禁止范围
+
+- 不修改生产代码。
+- 不修改 `runtime_queue.py`、`workbench_uow.py`、`server.py`、`workbench_write_facade.py` 或 Workbench facts repositories。
+- 不删除 target tests。
+- 不使用 `unittest.skip` 或条件跳过隐藏债务。
+- 不改变 expected-red target tests 的断言语义。
+- 不执行 Merge Gate、Traffic Gate、部署、push 或生产访问。
+
+#### 验收标准
+
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v` 必须退出码为 0，并显示 7 个 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v` 必须退出码为 0，并显示 7 个 expected failures。
+- PF-P021 targeted UoW tests 与 PF-P020 writer group 保持普通 pass，不被标记为 expectedFailure。
+- 现有 runtime queue、Workbench write characterization、dirty queue wiring 和 platform guard tests 保持绿色。
+- PF-P021-CI 执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P021-CI 已生成并审查。下一步允许执行 PF-P021-CI。PF-P021-CI verified 后，应重新生成或执行 PF-P021-MG，确认默认 CI blocker 已解除后再考虑 merge 到 `main`。
 
 ## 维护规则
 
