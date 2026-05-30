@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` 已执行并合入本地 `main`，等待用户确认 verified |
+| 当前 active prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P031 - Workbench Cancel Link Stale Guard Migration` |
-| 当前分支 | `codex/workbench-cancel-link-stale-guard` |
-| 最近验证 | 用户确认 PF-P031 verified；PF-P031-MG 已生成但未执行 |
-| 下一条允许任务 | 只允许执行 PF-P031-MG；不得直接进入 PF-P032，不得迁移 ignore row、cash special 或 withdraw submit |
+| 当前分支 | `main` |
+| 最近验证 | PF-P031-MG 合入前与合入后 `main` 复验全部通过；未 push；仍未迁移 ignore row、cash special 或 withdraw submit |
+| 下一条允许任务 | 等待用户确认 PF-P031-MG 可标记 verified；确认后再执行 `git push origin main`，push 后从最新 `main` 新建分支生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -3317,7 +3317,7 @@ PF-P031 已完成实现和验证，并已由用户确认 `verified`。PF-P031-MG
 
 ### PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3354,6 +3354,47 @@ PF-P031 已完成实现和验证，并已由用户确认 `verified`。PF-P031-MG
 - PF-P031-MG 是当前分支的正确下一步：PF-P031 已形成一个可合并的小切片。
 - 本 MG 不应扩大实现范围，不应进入 PF-P032。
 - 本分支没有部署拓扑、网关、auth/session、worker routing 或前端变更，因此不需要 Traffic Gate。
+
+#### 执行结果
+
+- 已合入本地 `main`。
+- Merge commit：`e81bd551 feat(workbench): merge cancel link stale guard`。
+- 合入覆盖 PF-P031 prompt 规划提交和 cancel link stale guard 实现提交。
+- 未 push。
+- 未执行 Traffic Gate、部署、生产访问或服务器操作。
+- 未进入 PF-P032。
+- 未迁移 `ignore row`、`cash special` 或 `withdraw submit`。
+- 未修改前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- 没有 `backend-go`。
+
+#### 合入前验证
+
+- `git status --short --branch`：当前分支干净。
+- `git rev-list --left-right --count main...origin/main`：`0 0`。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --name-only`：无输出。
+- `git diff --name-only main...HEAD`：只包含 PF-P031 允许文件。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，30 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### Main 上复验
+
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，30 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### 下一条 Prompt 上下文
+
+PF-P031-MG 已合入本地 `main` 并完成 main 上复验，但尚未由用户确认 `verified`，也尚未 push 到 `origin/main`。下一步应先由用户确认 PF-P031-MG `verified`；随后执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。不要直接进入 PF-P032，直到 PF-P031-MG verified 并 push。
 
 ## 维护规则
 

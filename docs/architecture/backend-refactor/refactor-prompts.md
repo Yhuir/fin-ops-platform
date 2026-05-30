@@ -5835,7 +5835,7 @@ Post-Flight:
 
 ## PF-P019 - Workbench UoW Contract Tests
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -9387,3 +9387,59 @@ Post-Flight:
 - PF-P031-MG 必须验证本分支没有扩大到 ignore row、cash special 或 withdraw submit。
 - PF-P031-MG 不执行 Traffic Gate，因为本分支没有网关、部署、auth/session、worker routing 或前端变更。
 - PF-P031-MG 完成后才能考虑下一条 prompt；不得直接进入 PF-P032。
+
+### 执行结果
+
+状态：`implemented`
+
+已完成：
+
+- 已合入本地 `main`。
+- Merge commit：`e81bd551 feat(workbench): merge cancel link stale guard`。
+- 合入范围覆盖 PF-P031 prompt 规划提交和 cancel link stale guard 实现提交。
+- 已在合入前和合入后的 `main` 上执行要求的 scope 检查、diff 检查和测试门禁。
+
+明确未执行：
+
+- 未 push。
+- 未执行 Traffic Gate。
+- 未部署、未访问生产。
+- 未进入 PF-P032。
+- 未迁移 `ignore row`、`cash special` 或 `withdraw submit`。
+- 未修改前端。
+- 未新增 SQL migration。
+- 未修改部署、网关、auth/session 或 worker routing。
+- 未创建或恢复 `backend-go`。
+
+合入前验证：
+
+- `git status --short --branch`：分支干净。
+- `git rev-list --left-right --count main...origin/main`：`0 0`。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --name-only`：无输出。
+- `git log --oneline main..HEAD`：确认包含 PF-P031 planning、implementation 和 MG planning commit。
+- `git diff --name-only main...HEAD`：只包含允许的 PF-P031 文件。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，30 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+Main 上复验：
+
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，30 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+下一步：
+
+- 等待用户确认 PF-P031-MG 可标记为 `verified`。
+- 用户确认后执行 `git push origin main`。
+- push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。
+- 不直接进入 PF-P032。
