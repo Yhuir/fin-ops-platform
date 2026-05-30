@@ -2937,6 +2937,90 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn('"scope_key": "all"', heartbeat)
         self.assertIn('"read_model_status": "fresh"', heartbeat)
 
+    def test_workbench_events_stream_maps_statuses_without_redis_pubsub(self) -> None:
+        app = object.__new__(Application)
+        app._app_health_service = AppHealthService()
+
+        class ExplodingRedisHelper:
+            def __getattr__(self, name: str):
+                raise AssertionError(f"SSE polling path must not use Redis PubSub helper: {name}")
+
+        app._runtime_repositories = SimpleNamespace(redis_helper=ExplodingRedisHelper())
+
+        expected_events = {
+            "fresh": "workbench.read_model.completed",
+            "refreshing": "workbench.read_model.progress",
+            "stale": "workbench.read_model.progress",
+            "failed": "workbench.read_model.failed",
+        }
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class SqlWorkbench:
+            def __init__(self, status: str) -> None:
+                self.status = status
+
+            def get_workbench_refresh_status(self, **kwargs):
+                calls.append((self.status, kwargs))
+                return {
+                    "scope_key": "all",
+                    "read_model_status": self.status,
+                    "generated_at": "2026-05-28T10:00:00+08:00",
+                    "dirty_scopes": [],
+                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
+                }
+
+        for status, event_name in expected_events.items():
+            app._workbench_sql_read_repository = SqlWorkbench(status)
+
+            response = app._handle_api_workbench_events("all")
+            first_event = next(iter(response.body))
+
+            self.assertEqual(response.status_code, int(HTTPStatus.OK))
+            self.assertEqual(response.headers["X-Accel-Buffering"], "no")
+            self.assertIn(f"event: {event_name}", first_event)
+            self.assertIn(f'"read_model_status": "{status}"', first_event)
+
+        self.assertEqual(
+            calls,
+            [
+                ("fresh", {"scope_key": "all"}),
+                ("refreshing", {"scope_key": "all"}),
+                ("stale", {"scope_key": "all"}),
+                ("failed", {"scope_key": "all"}),
+            ],
+        )
+
+    def test_workbench_events_stream_close_releases_active_stream_slot(self) -> None:
+        app = object.__new__(Application)
+        app._app_health_service = AppHealthService()
+        app._workbench_events_active_streams = {}
+        app._workbench_events_active_streams_lock = None
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_refresh_status": lambda _self, **_kwargs: {
+                    "scope_key": "all",
+                    "read_model_status": "fresh",
+                    "generated_at": "2026-05-28T10:00:00+08:00",
+                    "dirty_scopes": [],
+                    "worker_lag_seconds": 1.5,
+                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
+                }
+            },
+        )()
+
+        response = app._handle_api_workbench_events("all")
+        stream = iter(response.body)
+
+        first_event = next(stream)
+        self.assertIn("event: workbench.read_model.completed", first_event)
+        self.assertEqual(app._workbench_events_active_streams, {"all": 1})
+
+        stream.close()
+
+        self.assertEqual(app._workbench_events_active_streams, {})
+
     def test_workbench_api_miss_enqueues_refresh_and_returns_refreshing(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()
@@ -3006,6 +3090,123 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_row_detail_prefers_live_service_and_applies_override_without_fallback(self) -> None:
+        app = object.__new__(Application)
+        app._etc_invoice_summary_row_detail = lambda _row_id: None
+        app._live_workbench_service = type(
+            "LiveWorkbench",
+            (),
+            {"get_row_detail": lambda _self, row_id: {"id": row_id, "source": "live"}},
+        )()
+        app._resolve_rows_from_cached_read_models = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("live row detail hit must not read cached read models")
+        )
+        app._workbench_api_routes = type(
+            "Routes",
+            (),
+            {
+                "get_row_detail": lambda _self, _row_id: (_ for _ in ()).throw(
+                    AssertionError("live row detail hit must not fallback to route service")
+                )
+            },
+        )()
+        override_calls: list[str] = []
+
+        def apply_live_override(row: dict[str, object]) -> dict[str, object]:
+            override_calls.append(str(row["id"]))
+            return {**row, "override_applied": True}
+
+        app._workbench_override_service = type(
+            "Overrides",
+            (),
+            {"apply_to_row": lambda _self, row: apply_live_override(row)},
+        )()
+
+        payload = app._get_api_workbench_row_detail_payload("bank-row-live")
+
+        self.assertEqual(payload["row"], {"id": "bank-row-live", "source": "live", "override_applied": True})
+        self.assertEqual(override_calls, ["bank-row-live"])
+
+    def test_row_detail_route_fallback_applies_override_after_live_and_cache_miss(self) -> None:
+        app = object.__new__(Application)
+        live_calls: list[str] = []
+        cache_calls: list[tuple[list[str], str | None]] = []
+        route_calls: list[str] = []
+        override_calls: list[str] = []
+        app._etc_invoice_summary_row_detail = lambda _row_id: None
+
+        def live_miss(row_id: str) -> dict[str, object]:
+            live_calls.append(row_id)
+            raise KeyError(row_id)
+
+        app._live_workbench_service = type(
+            "LiveWorkbench",
+            (),
+            {"get_row_detail": lambda _self, row_id: live_miss(row_id)},
+        )()
+        app._row_month_scope_from_row_id = lambda _row_id: None
+
+        def cached_miss(row_ids: list[str], *, month_hint: str | None = None) -> dict[str, dict[str, object]]:
+            cache_calls.append((list(row_ids), month_hint))
+            return {}
+
+        app._resolve_rows_from_cached_read_models = cached_miss
+        app._workbench_query_service = SimpleNamespace(_looks_like_oa_row_id=lambda _row_id: False)
+
+        def route_detail(row_id: str) -> dict[str, object]:
+            route_calls.append(row_id)
+            return {"row": {"id": row_id, "source": "route"}}
+
+        app._workbench_api_routes = SimpleNamespace(get_row_detail=route_detail)
+
+        def apply_override(row: dict[str, object]) -> dict[str, object]:
+            override_calls.append(str(row["id"]))
+            return {**row, "override_applied": True}
+
+        app._workbench_override_service = SimpleNamespace(apply_to_row=apply_override)
+
+        payload = app._get_api_workbench_row_detail_payload("bank-row-route")
+
+        self.assertEqual(live_calls, ["bank-row-route"])
+        self.assertEqual(cache_calls, [(["bank-row-route"], None)])
+        self.assertEqual(route_calls, ["bank-row-route"])
+        self.assertEqual(override_calls, ["bank-row-route"])
+        self.assertEqual(payload["row"], {"id": "bank-row-route", "source": "route", "override_applied": True})
+
+    def test_row_detail_production_sql_runtime_blocks_route_fallback_after_live_and_cache_miss(self) -> None:
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = SimpleNamespace(storage_backend="postgres")
+        app._etc_invoice_summary_row_detail = lambda _row_id: None
+        app._live_workbench_service = SimpleNamespace(
+            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
+        )
+        app._row_month_scope_from_row_id = lambda _row_id: None
+        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
+        app._workbench_query_service = SimpleNamespace(
+            _looks_like_oa_row_id=lambda _row_id: False,
+            _records_by_id={},
+        )
+        route_calls: list[str] = []
+
+        def route_detail(row_id: str) -> dict[str, object]:
+            route_calls.append(row_id)
+            return {"row": {"id": row_id, "source": "route"}}
+
+        app._workbench_api_routes = SimpleNamespace(get_row_detail=route_detail)
+        app._workbench_override_service = SimpleNamespace(
+            apply_to_row=lambda row: (_ for _ in ()).throw(
+                AssertionError("production SQL runtime route fallback must not produce a row")
+            )
+        )
+
+        response = app._handle_api_workbench_row_detail("bank-row-route")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
+        self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-route"})
+        self.assertEqual(route_calls, [])
 
     def test_repository_persists_workbench_rows_alongside_snapshot(self) -> None:
         connection = WorkbenchWriteConnection()

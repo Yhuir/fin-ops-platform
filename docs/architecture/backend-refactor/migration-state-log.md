@@ -35,6 +35,10 @@
 - 当前模块未完成测试和验收前，不进入下一个模块。
 - 每次只生成一个 prompt；下一条 prompt 必须基于上一条 prompt 的真实输出和本文档的下一步上下文生成。
 - prompt 生成、prompt 审查、状态机更新、对应实现和该实现的 Merge Gate 必须在同一条 `codex/` 功能分支内完成。
+- Merge Gate 的粒度是一个可合并的模块任务、platform 边界任务或明确命名的模块切片，不是每个 prompt；同一任务可以由多个已确认 `verified` 的 prompt 组成。
+- 测试锁定 prompt、发现 prompt 和实现 prompt 可以在同一功能分支连续推进；只有该模块任务/切片达到可合并状态后，才生成对应的 `*-MG`。
+- 不得因为跳过单个 prompt 的 MG 而跳过最终 MG；最终 MG 必须覆盖该功能分支内尚未合入 `main` 的全部 prompt diff。
+- 未完成当前模块任务/切片的 MG 并合入 `main` 前，不得进入下一个模块或无关切片。
 - Merge Gate 合入并复验 `main` 后，下一条 prompt 必须从最新 `main` 新建分支再生成；不得在 `main` 或旧功能分支上继续生成下一个模块的 prompt。
 - 每次 prompt 完成后，最终回复必须告诉用户下一步建议做什么。
 - 每次 prompt 执行后，必须精准回写本文档和受执行结果影响的架构文档；未完成回写前不得生成或执行下一条 prompt。
@@ -51,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)` (`planned`) |
-| 最近 verified prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` |
+| 当前阶段 | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已生成，等待审查/执行 |
+| 当前 active prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P009 - Workbench Query Fallback and SSE Mitigation (Slice D-B)` |
 | 当前分支 | `codex/workbench-query-slice-d-prompt` |
-| 最近验证 | 用户已确认 PF-P007-MG verified；PF-P007-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`git push origin main` 已通过；当前分支从最新 `origin/main` 创建；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 等待用户确认后执行 PF-P008；不得直接执行 Slice D 实现或删除 fallback |
+| 最近验证 | PF-P009 已由用户确认 `verified`；mandatory checks 全部通过；未执行 Merge Gate、Traffic Gate、部署或 push |
+| 下一条允许任务 | 审查并执行 PF-P009-MG；PF-P009-MG 必须统一覆盖 PF-P008 + PF-P009 的完整 diff |
 
 ## Prompt 执行日志
 
@@ -1024,7 +1028,7 @@ PF-P007-MG 已由用户确认 `verified`，并已同步到 `origin/main`。本�
 
 ### PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -1053,7 +1057,178 @@ PF-P007-MG 已由用户确认 `verified`，并已同步到 `origin/main`。本�
 
 #### 下一条 Prompt 上下文
 
-PF-P008 必须先执行测试锁定。只有 PF-P008 verified 后，才能根据真实测试结果生成后续实现型 prompt，用于逐项缩小 legacy `GET /api/workbench` fallback、row detail fallback 或 SSE cancellation 风险。
+PF-P008 已由用户确认 `verified`。本轮不单独执行 PF-P008-MG；按照“同一功能分支可承载一个或多个连续实现，最后统一 MG”的工作流，下一步允许在当前分支生成并审查 PF-P009。PF-P009-MG 必须在后续统一覆盖 PF-P008 测试基线与 PF-P009 生产代码变更，不得跳过 main 合入门禁。
+
+#### 执行结果
+
+- 分支：`codex/workbench-query-slice-d-prompt`。
+- 变更文件：
+  - `tests/test_workbench_sql_runtime.py`
+  - `tests/test_api_performance_metrics.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+- 新增 characterization：
+  - SSE status event mapping：`fresh -> workbench.read_model.completed`、`refreshing/stale -> workbench.read_model.progress`、`failed -> workbench.read_model.failed`，并用 exploding Redis helper 锁定当前 SSE 不走 Redis PubSub。
+  - Row detail live hit 优先级和 `apply_to_row` 最终应用。
+  - Row detail live miss + cached read model miss 后 route service fallback 触发条件和 `apply_to_row` 最终应用。
+  - `Application.handle_request` 对 Workbench groups route 的 `ApiPerformanceRecorder` / `request_database_timing` 基线。
+- 已有等价覆盖继续作为 PF-P008 输入：
+  - legacy `GET /api/workbench` SQL hit 不调用 legacy builder。
+  - SQL read model missing 返回 `202 refreshing` 并 enqueue `api_miss`。
+  - PostgreSQL production runtime 下 repository unavailable 返回 `503 read_model_unavailable` 并 enqueue `api_sql_repository_unavailable`。
+  - legacy / non-production runtime 下仍允许 fallback legacy builder。
+  - opaque OA row detail 无 cached read model 时返回 404，且不触发 full OA sync。
+- 未修改 `backend/src/fin_ops_platform/` 生产代码、SQL migration、前端、网关、部署或生产配置。
+- 未执行 Merge Gate，未执行 Traffic Gate，未 push `origin/main`。
+
+#### 验证结果
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，105 tests passed。
+- Row detail targeted tests：通过，4 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`：通过，3 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_api_performance_metrics -v`：通过，3 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，9 tests passed。
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`：通过。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过，status `ready`。
+- Production code immutability check：通过，`backend/src/fin_ops_platform`、`web`、`postgres`、`deploy` 无 diff。
+- Facade 上帝对象注入静态检查：无输出，通过。
+- Facade mock 静态检查：无输出，通过。
+- `request_database_timing` 边界静态检查：通过。
+
+#### 仍未关闭风险
+
+- SSE 客户端断开后的 generator cancellation / 线程占用仍未通过生产代码关闭；本轮只锁定当前可测试行为。
+- legacy `GET /api/workbench` fallback 仍存在；本轮只锁定行为，不收口。
+- row detail 多级 fallback 仍存在；本轮只锁定顺序和 override 应用，不收口到 active generation。
+- Observability 仍只有 app-shell route 级基线；未新增 groups page/count/filter/search 子查询细粒度标签。
+
+#### 下一条 Prompt 上下文
+
+PF-P008 是 Slice D-A 的测试锁定，已 verified，但尚未合入 main。用户明确允许跳过单独的 PF-P008-MG，在同一功能分支继续生成 Slice D-B 实现 prompt。PF-P009 必须复用 PF-P008 测试护城河，先补充任何必要的 failing tests，再逐项收口 legacy fallback、row detail fallback 和 SSE 资源风险。PF-P009 不得一次性删除 legacy path，不得改变 API response contract，不得执行 Merge Gate / Traffic Gate / 部署 / push。PF-P009 完成后若要合入 main，必须生成 PF-P009-MG，统一验证并合并 PF-P008 + PF-P009 的完整 diff。
+
+### PF-P009 - Workbench Query Fallback and SSE Mitigation (Slice D-B)
+
+状态：`verified`
+
+#### 范围
+
+- 在 PF-P008 verified 的测试护城河下，逐项缩小 Workbench query/read-model 的请求线程 fallback 风险。
+- 处理 legacy `GET /api/workbench` 在 production PostgreSQL runtime 下的 legacy builder fallback 边界。
+- 处理 row detail 多级 fallback 的触发条件和 `apply_to_row` 一次性应用边界。
+- 缓解 SSE streaming generator 的资源释放 / cancellation 风险；如果当前 HTTP abstraction 无法可靠感知客户端断开，必须记录 limitation，不得伪造完成。
+- 保持 app-shell observability，不把 `request_database_timing` 下沉到 facade；只在必要时补低基数模块级指标。
+
+#### 禁止范围
+
+- 不开始 Workbench 写路径、matching/candidates、Turnover Ledger、Batch Accounting 或其他模块迁移。
+- 不修改 SQL migration、前端、网关、部署配置或生产配置。
+- 不修改 worker refresh、builder、read model repository SQL、RabbitMQ、Outbox、Dirty Scope 事实源。
+- 不执行 Merge Gate、Traffic Gate、部署或 push。
+- 不访问生产 DB、Redis、RabbitMQ、OA Mongo、OA MySQL、MinIO/S3。
+
+#### 验收标准
+
+- PF-P009 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P009 必须声明 PF-P008 已 verified 但未单独合入 main，本分支后续需要 PF-P009-MG 统一合并。
+- PF-P009 必须包含 Pre-Flight、TDD、Allowed Scope、Forbidden Scope、Mandatory Checks、Post-Flight 和 Gate Scope。
+- PF-P009 必须明确执行后只能到 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
+
+#### 执行结果
+
+- 分支：`codex/workbench-query-slice-d-prompt`。
+- 生产代码变更：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `Application.__init__` 增加 Workbench SSE active stream registry 和 lock。
+  - `_handle_api_workbench_events(...)` 在 generator 第一次迭代时记录 active stream，并在 `close()` / generator finalization 时释放 active slot。
+  - `_get_api_workbench_row_detail_payload(...)` 增加 `_workbench_row_detail_route_fallback_allowed(...)` gate：production PostgreSQL runtime 下，live miss + cached read model miss 后，仅当 route query service 已有本地 row record 时才允许 route fallback；否则返回 404。
+  - `_requires_sql_read_model_runtime(...)` 改为使用 `getattr` 读取 `_bootstrap_mode`，让局部 helper / tests 在未完整初始化的 `Application` 上保持 legacy-compatible false。
+- 测试变更：
+  - `tests/test_workbench_sql_runtime.py`
+  - 新增 `test_workbench_events_stream_close_releases_active_stream_slot`，锁定 Workbench SSE generator close cleanup。
+  - 新增 `test_row_detail_production_sql_runtime_blocks_route_fallback_after_live_and_cache_miss`，锁定 production PostgreSQL runtime 下 row detail 不进入可能触发 full sync 的 route fallback。
+- 文档变更：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+- 不需要为 legacy `GET /api/workbench` 再改生产代码：PF-P008 现有 tests 已证明 production PostgreSQL runtime 下 SQL missing 返回 `202 refreshing`，repository unavailable 返回 `503 read_model_unavailable`，non-production / legacy runtime 才保留 legacy builder fallback。
+- 未修改 `WorkbenchQueryFacade`，未移动 `request_database_timing`，未修改 SQL migration、前端、网关、部署、worker、builder、repository SQL、RabbitMQ、Outbox、Dirty Scope 或 Workbench 写路径。
+- 未执行 Merge Gate，未执行 Traffic Gate，未部署服务器，未 push `origin/main`。
+
+#### TDD 记录
+
+- RED：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_events_stream_close_releases_active_stream_slot tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_production_sql_runtime_blocks_route_fallback_after_live_and_cache_miss -v` 失败，原因分别为 SSE active stream registry 未记录、production SQL runtime 仍进入 route fallback。
+- GREEN：同一 targeted command 通过。
+
+#### 验证结果
+
+- PF-P008 baseline pre-flight：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，105 tests passed。
+  - Row detail targeted tests：通过，4 tests passed。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_api_performance_metrics tests.test_platform_runtime_boundary_guards -v`：通过，15 tests passed。
+- PF-P009 implementation checks：
+  - 新增 targeted tests：通过，2 tests passed。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，107 tests passed。
+  - Row detail targeted tests：通过，4 tests passed。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_api_performance_metrics tests.test_platform_runtime_boundary_guards -v`：通过，15 tests passed。
+- 最终 mandatory checks：
+  - `git status --short --branch`：当前分支 `codex/workbench-query-slice-d-prompt...origin/main [ahead 1]`，存在本轮未提交工作区 diff。
+  - `git ls-files --others --exclude-standard`：无输出。
+  - `git diff --name-only` / `git diff --stat`：只包含允许范围内的生产代码、tests 和 backend-refactor 文档。
+  - `git diff --check`：通过。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，107 tests passed。
+  - Row detail targeted tests：通过，4 tests passed。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_api_performance_metrics tests.test_platform_runtime_boundary_guards -v`：通过，15 tests passed。
+  - `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`：通过。
+  - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过，status `ready`。
+  - Allowed production diff check：通过；`backend/src/fin_ops_platform` 下除 `app/server.py` 外无其他生产文件 diff。
+  - No forbidden surface diff：通过；`web`、`postgres`、`deploy` 无 diff。
+  - Facade 上帝对象注入静态检查：无输出，通过。
+  - Facade mock 静态检查：无输出，通过。
+  - Observability 边界静态检查：通过；`request_database_timing` 未进入 `WorkbenchQueryFacade`。
+  - SSE PubSub 静态检查：无输出，通过。
+
+#### 仍未关闭风险
+
+- Workbench SSE generator 现在对 `close()` / generator finalization 有可测试 cleanup，但当前 `ThreadingHTTPServer` streaming loop 仍无法在 `sleep(5)` 期间主动感知客户端断开；这属于 HTTP server abstraction limitation，后续如要强实时释放线程需要独立 infra/handler 设计。
+- App Health SSE 不是 PF-P009 范围，仍保持原行为。
+- Row detail 在 legacy / non-production runtime 下仍保留 route fallback；这是兼容期行为，不在本轮一次性删除。
+- Observability 保持 app-shell route-level baseline；未新增 groups page/count/filter/search 子查询细粒度标签。
+
+#### 下一条 Prompt 上下文
+
+PF-P009 已由用户确认 `verified`。下一步应执行已生成并审查的 `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate`。PF-P009-MG 必须统一覆盖 PF-P008 测试锁定和 PF-P009 生产代码变更的完整 diff；不得执行 Traffic Gate、部署或默认 push。
+
+### PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 PF-P008 + PF-P009 在当前功能分支上的完整 diff 合入 `main` 的 Merge Gate。
+- 覆盖 PF-P008 的 fallback / SSE / observability characterization tests。
+- 覆盖 PF-P009 的 Workbench SSE cleanup、production SQL runtime row detail fallback gate 和相关 tests/docs。
+- 执行范围检查、untracked 检查、精准 staging、feature branch 验证、上游同步、commit、合入 `main` 和 main 上复验。
+
+#### 禁止范围
+
+- 不开始新的业务模块或 Slice E。
+- 不修改 PF-P008/PF-P009 范围之外的生产代码。
+- 不执行 Traffic Gate、部署或生产切流。
+- 不默认 push `origin/main`；push 必须等用户明确确认。
+- 不访问生产 DB、Redis、RabbitMQ、OA Mongo、OA MySQL、MinIO/S3。
+
+#### 验收标准
+
+- PF-P009-MG prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P009-MG 必须确认 PF-P008 和 PF-P009 均为 `verified`。
+- PF-P009-MG 必须列出完整 Expected Changed Files，包含 PF-P008 测试/文档、PF-P009 生产代码/测试/文档，以及同分支流程规则文档。
+- PF-P009-MG 必须包含禁止 `git add .` / `git add -A`、untracked 文件检查、上游同步、feature branch 和 main 双重复验、Post-Flight 状态回写。
+- 未经用户确认，不得把 PF-P009-MG 标记为 `verified`。
+
+#### 下一条 Prompt 上下文
+
+下一步允许执行 PF-P009-MG。执行完成后状态只能为 `implemented` 或 `blocked`，必须等待用户确认后才能 `verified`。PF-P009-MG verified 并按用户确认 push `origin/main` 后，下一条 prompt 必须从最新 `main` 新建分支生成。
 
 ## 维护规则
 

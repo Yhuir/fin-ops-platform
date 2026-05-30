@@ -59,8 +59,10 @@ prompt 必须写明：
 3. 在这条功能分支内生成并审查下一条 prompt，更新 `refactor-prompts.md` 和 `migration-state-log.md`。
 4. 用户确认后，在同一条功能分支内执行该 prompt 的代码、测试和文档回写。
 5. 同一模块或同一切片可以在同一分支内连续完成一个或多个实现型 prompt，但每个 prompt 都必须先 `implemented`、经用户确认 `verified`，再进入下一个 prompt 或 Merge Gate。
-6. 进入 Merge Gate 后，仍在同一功能分支内完成范围检查、上游同步、commit、合并前验证、合入 `main` 和 main 上复验。
-7. Merge Gate 完成并按用户确认推送 `origin/main` 后，下一轮必须重新从最新 `main` 创建新分支，再生成下一条 prompt。
+6. Merge Gate 的粒度是一个可合并的模块任务、platform 边界任务或明确命名的模块切片，不是每个 prompt。测试锁定、发现、实现和文档回写 prompt 可以连续留在同一分支，最终由一个 `*-MG` 统一覆盖尚未合入 `main` 的完整 diff。
+7. 不得用“跳过中间 prompt 的 MG”来跳过最终 MG；最终 MG 必须列出它覆盖的全部 prompt、变更文件、验证命令、未关闭风险和 rollback 方式。
+8. 进入 Merge Gate 后，仍在同一功能分支内完成范围检查、上游同步、commit、合并前验证、合入 `main` 和 main 上复验。
+9. Merge Gate 完成并按用户确认推送 `origin/main` 后，下一轮必须重新从最新 `main` 创建新分支，再生成下一条 prompt。
 
 禁止工作流：
 
@@ -68,6 +70,7 @@ prompt 必须写明：
 - 不得把下一条 prompt 放在一个“prompt-only”分支，而把对应实现放在另一条分支。
 - 不得让状态机中的 active prompt 指向当前工作分支之外的未合入文档事实。
 - 不得在旧功能分支继续生成下一个模块的 prompt，除非它仍属于同一模块/切片且用户明确允许。
+- 不得在当前模块任务/切片尚未最终 MG 并合入 `main` 前，切换到下一个无关模块继续开发。
 
 例外：
 

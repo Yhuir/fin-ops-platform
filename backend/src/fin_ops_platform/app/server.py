@@ -353,6 +353,8 @@ class Application:
         self._workbench_matching_dirty_worker_started = False
         self._workbench_matching_run_lock = Lock()
         self._workbench_matching_running_scope_months: set[str] = set()
+        self._workbench_events_active_streams_lock = Lock()
+        self._workbench_events_active_streams: dict[str, int] = {}
         self._etc_business_oa_detection_loop_lock = Lock()
         self._etc_business_oa_detection_loop_batch_ids: set[str] = set()
         self._seed_payload = build_demo_seed()
@@ -388,7 +390,7 @@ class Application:
         return self._legacy_bootstrap.load_full_snapshot(reason=reason)
 
     def _requires_sql_read_model_runtime(self) -> bool:
-        if self._bootstrap_mode not in {"production", "lightweight"}:
+        if getattr(self, "_bootstrap_mode", None) not in {"production", "lightweight"}:
             return False
         return str(getattr(self._state_store, "storage_backend", "") or "").strip() == "postgres"
 
@@ -2163,19 +2165,23 @@ class Application:
         scope_key = self._workbench_read_model_scope_key(current_month)
 
         def event_stream() -> Iterable[str]:
-            while True:
-                status_payload = self._workbench_refresh_status_payload_for_scope(scope_key)
-                event_name = self._workbench_refresh_status_event_name(status_payload)
-                yield self._app_health_service.serialize_sse_event(event_name, status_payload)
-                yield self._app_health_service.serialize_sse_event(
-                    "heartbeat",
-                    {
-                        "scope_key": scope_key,
-                        "generated_at": status_payload.get("generated_at"),
-                        "read_model_status": status_payload.get("read_model_status"),
-                    },
-                )
-                sleep(5)
+            self._mark_workbench_events_stream_started(scope_key)
+            try:
+                while True:
+                    status_payload = self._workbench_refresh_status_payload_for_scope(scope_key)
+                    event_name = self._workbench_refresh_status_event_name(status_payload)
+                    yield self._app_health_service.serialize_sse_event(event_name, status_payload)
+                    yield self._app_health_service.serialize_sse_event(
+                        "heartbeat",
+                        {
+                            "scope_key": scope_key,
+                            "generated_at": status_payload.get("generated_at"),
+                            "read_model_status": status_payload.get("read_model_status"),
+                        },
+                    )
+                    sleep(5)
+            finally:
+                self._mark_workbench_events_stream_closed(scope_key)
 
         return Response(
             status_code=int(HTTPStatus.OK),
@@ -2191,6 +2197,29 @@ class Application:
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
+
+    def _mark_workbench_events_stream_started(self, scope_key: str) -> None:
+        lock = getattr(self, "_workbench_events_active_streams_lock", None)
+        with (lock if lock is not None else nullcontext()):
+            active_streams = self._workbench_events_active_streams_registry()
+            active_streams[scope_key] = int(active_streams.get(scope_key, 0)) + 1
+
+    def _mark_workbench_events_stream_closed(self, scope_key: str) -> None:
+        lock = getattr(self, "_workbench_events_active_streams_lock", None)
+        with (lock if lock is not None else nullcontext()):
+            active_streams = self._workbench_events_active_streams_registry()
+            current_count = int(active_streams.get(scope_key, 0))
+            if current_count <= 1:
+                active_streams.pop(scope_key, None)
+            else:
+                active_streams[scope_key] = current_count - 1
+
+    def _workbench_events_active_streams_registry(self) -> dict[str, int]:
+        active_streams = getattr(self, "_workbench_events_active_streams", None)
+        if not isinstance(active_streams, dict):
+            active_streams = {}
+            self._workbench_events_active_streams = active_streams
+        return active_streams
 
     def _workbench_refresh_status_payload_for_scope(self, scope_key: str) -> dict[str, object]:
         repository = getattr(self, "_workbench_sql_read_repository", None)
@@ -8966,10 +8995,24 @@ class Application:
                 payload = {"row": cached_rows[row_id]}
             elif month_hint is None and self._workbench_query_service._looks_like_oa_row_id(row_id):
                 raise KeyError(row_id)
-            else:
+            elif self._workbench_row_detail_route_fallback_allowed(row_id, month_hint):
                 payload = self._workbench_api_routes.get_row_detail(row_id)
+            else:
+                raise KeyError(row_id)
         payload["row"] = self._workbench_override_service.apply_to_row(payload["row"])
         return payload
+
+    def _workbench_row_detail_route_fallback_allowed(
+        self,
+        row_id: str,
+        _month_hint: str | None,
+    ) -> bool:
+        if not self._requires_sql_read_model_runtime():
+            return True
+        route_query_service = getattr(getattr(self, "_workbench_api_routes", None), "_query_service", None)
+        query_service = route_query_service or getattr(self, "_workbench_query_service", None)
+        records_by_id = getattr(query_service, "_records_by_id", None)
+        return isinstance(records_by_id, dict) and row_id in records_by_id
 
     def _handle_api_cost_statistics(self, month: str | None, project_scope: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")

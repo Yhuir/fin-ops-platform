@@ -448,12 +448,38 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 ### Slice D：优化请求线程重算或 fallback 风险
 
 - 目标：处理 `GET /api/workbench` legacy fallback、row detail fallback、SSE long polling cancellation、观测性粒度。
-- 执行策略：先做 Slice D-A characterization tests，锁定当前 fallback / SSE / observability 行为；PF-P008 verified 后再生成 Slice D-B 实现型 prompt，逐项缩小 fallback 或优化 SSE。
+- 执行策略：先做 Slice D-A characterization tests，锁定当前 fallback / SSE / observability 行为；PF-P008 verified 后可在同一功能分支生成 Slice D-B 实现型 prompt，逐项缩小 fallback 或优化 SSE。PF-P008 不单独 MG 时，后续 PF-P009-MG 必须统一覆盖 PF-P008 + PF-P009 完整 diff。
 - 允许：在测试锁定后逐项缩小 fallback。
 - 禁止：一次性删除 legacy path；禁止无测试地改 SSE 行为。
 - Rollback：按 feature flag 或小提交回退单项风险。
 - 验证：compatibility tests、SSE tests、dashboard/metrics tests。
-- 当前 prompt：`PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)` 已生成并审查，状态 `planned`，等待用户确认执行。
+- 当前 prompt：`PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已生成，状态 `planned`，等待审查/执行。
+- Slice D-B：`PF-P009 - Workbench Query Fallback and SSE Mitigation (Slice D-B)` 已由用户确认 `verified`。
+- Slice D-A：`PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)` 已由用户确认 `verified`；本轮不单独执行 PF-P008-MG，后续由 PF-P009-MG 统一合并。
+- Slice D-A 已锁定：
+  - legacy `GET /api/workbench` SQL hit / missing / production unavailable / legacy fallback 由既有测试覆盖。
+  - row detail live hit、cached read model、route service fallback 顺序和最终 `apply_to_row` 应用由新增 tests 覆盖。
+  - SSE status event mapping、heartbeat/no-buffering 既有契约和非 Redis PubSub polling 行为由 tests 覆盖。
+  - `Application.handle_request` 对 Workbench groups route 的 route-level API performance recorder 和 database timing 由新增 test 覆盖。
+- Slice D-B 输入：
+  - 可以在 PF-P008 verified 后逐项设计实现，但不得一次性删除 legacy fallback。
+  - SSE cancellation / 客户端断开退出仍是未关闭风险，需要单独实现 prompt。
+  - row detail 仍未收口到 active generation；后续实现必须保留 PF-P008 fallback 顺序测试。
+  - observability 仍缺少 groups page/count/filter/search 子查询细粒度标签；后续实现需在 app-shell 指标之外补模块级指标。
+- Slice D-B 计划：
+  - PF-P009 必须先复跑 PF-P008 测试基线，再按 TDD 补充任何必要的新 failing tests。
+  - production PostgreSQL runtime / require SQL read model 条件下，legacy `GET /api/workbench` 不得在 SQL missing 或 repository unavailable 时触发请求线程 legacy builder。
+  - row detail fallback 必须集中表达触发 policy；opaque OA row id、缺少 active/read-model 上下文的请求不得触发昂贵 full sync 或不透明 route fallback。
+  - SSE 必须保持 headers、event name、heartbeat 和 polling refresh status 语义；只允许补可测试的 close / cancellation cleanup。若当前 HTTP abstraction 无法可靠感知客户端断开，必须记录 limitation，不得伪造解决。
+  - `request_database_timing` 仍属于 `Application.handle_request` app-shell 边界，不得下沉到 `WorkbenchQueryFacade`。
+- Slice D-B 执行结果：
+  - legacy `GET /api/workbench` production fallback policy 无需新增生产代码：PF-P008 tests 已覆盖 SQL hit、SQL missing、repository unavailable 和 legacy runtime fallback。
+  - Row detail production fallback 已收口：production PostgreSQL runtime 下，live miss + cached read model miss 后，只有 route query service 已持有本地 row record 才允许 route fallback，否则返回 404，避免请求线程触发 full sync。
+  - Row detail legacy / non-production fallback 保留，兼容期不一次性删除。
+  - Workbench SSE generator 已增加 active stream registry，并在 generator `close()` / finalization 时释放 active slot；SSE headers、event names、heartbeat、polling refresh status 和非 Redis PubSub 语义保持不变。
+  - 仍未解决的 limitation：`ThreadingHTTPServer` 当前 streaming loop 不能在 `sleep(5)` 期间主动感知客户端断开；如需更强实时释放线程，需要后续独立 HTTP/SSE 基础设施设计。
+  - Observability 保持 `Application.handle_request` app-shell `request_database_timing` 边界；本轮未新增子查询级细粒度指标。
+  - 下一步：执行已生成并审查的 PF-P009-MG，统一覆盖 PF-P008 + PF-P009 完整 diff；不得执行 Traffic Gate、部署或默认 push。
 
 ## Guard Compatibility
 

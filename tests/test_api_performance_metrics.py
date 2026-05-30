@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.api_performance_metrics import (
     ApiPerformanceRecorder,
     current_request_database_metrics,
@@ -54,6 +55,32 @@ class ApiPerformanceMetricsTests(unittest.TestCase):
         self.assertEqual(timing.total_duration_ms, 22.75)
         self.assertEqual(timing.max_query_duration_ms, 12.5)
         self.assertIsNone(current_request_database_metrics())
+
+    def test_application_handle_request_records_workbench_route_and_database_timing(self) -> None:
+        app = object.__new__(Application)
+        app._api_performance_recorder = ApiPerformanceRecorder()
+
+        def handle_untracked(_method: str, _path: str, body=None, headers=None) -> Response:
+            record_database_connection_acquire(2.0)
+            record_database_query(11.0)
+            return Response(status_code=202, body="{}")
+
+        app._handle_request_untracked = handle_untracked
+
+        response = app.handle_request(
+            "GET",
+            "/fin-ops-api/api/workbench/groups?month=2026-05&zone=open",
+        )
+        summary = app._api_performance_recorder.summary()
+        endpoint = summary["endpoints"]["GET /api/workbench/groups"]
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(endpoint["sample_count"], 1)
+        self.assertEqual(endpoint["last_status_code"], 202)
+        self.assertEqual(endpoint["connection_acquire_ms"], {"p50": 2.0, "p95": 2.0, "p99": 2.0})
+        self.assertEqual(endpoint["sql_execute_fetch_ms"], {"p50": 11.0, "p95": 11.0, "p99": 11.0})
+        self.assertEqual(endpoint["database_duration_ms"], {"p50": 13.0, "p95": 13.0, "p99": 13.0})
+        self.assertEqual(endpoint["database_query_count"], {"p50": 1.0, "p95": 1.0, "p99": 1.0})
 
 
 if __name__ == "__main__":
