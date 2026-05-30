@@ -5578,7 +5578,7 @@ Post-Flight:
 - Untracked gate：Pass。`git ls-files --others --exclude-standard` 无输出。
 - Feature branch verification：Pass。
 - Main verification：Pass。
-- Push：已推送 `origin/main`，远端 `main` 更新到 `232615b7`。
+- Push：已推送 `origin/main`，远端 `main` 最终更新到 `06c6fd43`。
 - Traffic Gate：未执行；未部署、未切流、未修改生产配置、未访问生产服务器。
 - User confirmation：2026-05-30 用户确认 PF-P017-MG `verified`。
 
@@ -5597,3 +5597,206 @@ Main 复验命令：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`
 
 下一步：从最新 `main` 新建分支，再生成并审查 `PF-P018 - Workbench Write Unit of Work Boundary Design`。PF-P018 只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
+
+## PF-P018 - Workbench Write Unit of Work Boundary Design
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P018 - Workbench Write Unit of Work Boundary Design。
+
+Role: 你是一位精通 Python 遗留系统重构、PostgreSQL 事务一致性、Transactional Outbox、Read Model freshness 和 Clean Architecture 的后端架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P013/PF-P014/PF-P017 已将 Workbench 写入口的主要非 HTTP 编排抽入 `WorkbenchWriteFacade`。
+- PF-P012/PF-P016 已用 characterization tests 锁定当前 duplicate-submit、stale write、persistence failure、scheduling failure 行为。
+- 当前仍未解决的核心风险是：facts、audit/history、dirty scope、outbox/read model scheduling 不在同一个 PostgreSQL transaction 中提交。
+- PF-P018 是设计/文档 prompt，不是代码实现 prompt。
+
+Pre-Flight:
+1. 必须先确认当前工作流：
+   - 当前分支不是 `main`。
+   - 当前分支必须从最新 `origin/main` 新建。
+   - 最近 verified prompt 是 `PF-P017-MG - Workbench Remaining Write Facade Merge Gate`。
+   - 当前 active prompt 是 `PF-P018 - Workbench Write Unit of Work Boundary Design` planned。
+2. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/target-architecture.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+3. 必须读取或通过 CodeGraph 覆盖当前实现和测试：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/runtime_worker.py`
+   - `backend/src/fin_ops_platform/app/worker.py`
+   - `backend/src/fin_ops_platform/services/postgres_connection.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/core.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+   - `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_exception_case_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_override_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_exception_application_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_candidate_match_service.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_dirty_queue_wiring.py`
+   - `tests/test_workbench_v2_api.py`
+   - `tests/test_workbench_exception_application_service.py`
+   - `tests/test_workbench_exception_case_service.py`
+   - `tests/test_workbench_pair_relation_service.py`
+   - `tests/test_derived_data_lifecycle_service.py`
+   - `tests/test_platform_runtime_boundary_guards.py`
+4. 必须先记录工作区状态：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - 若存在非本轮文件变更，必须停止并说明。
+
+Goal:
+产出 Workbench 写路径 Unit of Work 目标边界设计，明确未来实现时每个写 API 必须如何在同一 PostgreSQL transaction 中提交 facts、audit/history、dirty scope、outbox/read model scheduling 和 source_version，并明确实现前还必须补哪些测试门禁。PF-P018 只做设计和文档，不修改生产逻辑。
+
+Required Design Work:
+1. Current State Inventory
+   - 列出 `WorkbenchWriteFacade` 当前所有写入口：
+     - `confirm_link`
+     - `cancel_link`
+     - `preview_withdraw_link`（read-only，不进入 UoW，但要说明 submit parity）
+     - `withdraw_link`
+     - `confirm_cash_pass_through`
+     - `confirm_cash_ticket_purchase`
+     - `cancel_cash_special`
+     - `mark_exception`
+     - `cancel_exception`
+     - `ignore_row`
+     - `unignore_row`
+     - `apply_exception`
+     - `update_bank_exception`
+     - `oa_bank_exception`
+     - `confirm_personal_advance_repayment`
+   - 对每个入口记录当前调用的 service、persistence callback、derived lifecycle callback、read model scheduling callback 和 known failure mode。
+2. UoW Boundary Matrix
+   - 对每个 write API 输出矩阵：
+     - facts tables / facts service state；
+     - audit/history；
+     - dirty scope；
+     - outbox event / read model scheduling；
+     - source_version 或 expected version；
+     - idempotency key / duplicate submit contract；
+     - stale write precondition / optimistic locking candidate；
+     - rollback expectations；
+     - 是否需要更新 characterization tests。
+3. Transaction Sequence Design
+   - 用 Mermaid sequence diagram 输出目标写路径时序：
+     - HTTP handler parse/freshness guard；
+     - facade 调用；
+     - UoW begin；
+     - facts + audit/history；
+     - dirty scope + outbox/read model scheduling；
+     - source_version bump；
+     - commit；
+     - post-commit side effects only for safe async notification；
+     - response。
+   - 必须明确哪些操作必须在 transaction 内，哪些只能在 post-commit 后执行。
+4. Postgres / Repository Boundary Design
+   - 审计当前 `postgres_connection.py` 和 `postgres_repositories/core.py` 是否已有可复用 transaction helper。
+   - 设计未来最小可行接口，例如 `WorkbenchWriteUnitOfWork` / transaction callback / repository bundle，但不得写代码。
+   - 明确禁止把 `Application`、`RuntimeRepositories`、`state_store` 或外部 client 作为 UoW 上帝对象。
+5. Read Model / Dirty Scope / Outbox Contract
+   - 基于 `read-model-and-external-services.md` 和 PF-P003/PF-P004 既有规则，明确 Workbench 写路径的最低一致性规则：
+     - facts、audit/history、dirty scope、outbox 必须同事务；
+     - dirty scope 的 source_version 必须单调递增；
+     - worker 必须按 `(scope_type, scope_key, source_version)` 幂等刷新；
+     - API 读路径必须能识别 stale/refreshing；
+     - Redis key 必须包含 generation/source_version。
+   - 如果当前 Python 代码尚未有完整 outbox writer，必须记录 blocker，不得虚构已有实现。
+6. Failure Mode Matrix
+   - 基于 PF-P012/PF-P016 当前测试，列出未来 UoW 必须改变或保持的失败语义：
+     - persistence failure；
+     - scheduling failure after mutation；
+     - duplicate submit；
+     - stale write / blind overwrite；
+     - partial pair relation + exception case mutation；
+     - worker/read model lag；
+     - outbox enqueue failure。
+   - 必须区分：
+     - 当前行为已锁定但不理想；
+     - 未来 UoW 应修复；
+     - 修复前必须先补测试。
+7. Test Strategy / Next Prompt Recommendation
+   - 输出下一步测试 prompt 的建议，不直接进入实现：
+     - 推荐优先生成 `PF-P019 - Workbench UoW Contract Tests` 或等价名称。
+   - 明确哪些测试必须先写：
+     - facts + audit + dirty scope + outbox 同事务成功；
+     - scheduling failure 不得留下 partial mutation；
+     - duplicate submit idempotency；
+     - stale write conflict；
+     - source_version monotonicity；
+     - worker idempotent refresh compatibility。
+
+Required Documentation Output:
+- 新增：
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- 更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`（只补充 UoW next-slice 摘要；如无必要可说明未改）
+
+Forbidden Scope:
+- 不实现 UoW、transaction manager、repository rewrite、outbox writer、dirty scope writer 或 source_version 更新逻辑。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改任何 Workbench service 生产代码。
+- 不新增或修改 tests。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不修复 stale write、duplicate submit、blind write、rollback 或 scheduling failure 当前语义。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+- 不使用 `git add .` 或 `git add -A`。
+
+Expected Changed Files:
+- 允许修改：
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 如需修改其它文件，必须停止并说明原因。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$)'`
+  - 该命令必须无输出；否则 blocked。
+- 本轮不需要运行 Python tests，因为 PF-P018 不改生产代码或测试代码；如实际修改了任何 `.py` 文件，必须停止并说明违规范围。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P018 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 写明变更文件、验证命令、风险和下一条 prompt 建议。
+- 更新 `refactor-prompts.md` 的 PF-P018 执行结果。
+- 不 merge 到 main。
+- 不 push。
+- 不执行 Merge Gate。
+- 未经用户确认，不得将 PF-P018 标记为 `verified`。
+- 最终回复必须说明：
+  - 产出了哪些 UoW 设计内容；
+  - 哪些 blocker 仍存在；
+  - 下一条建议 prompt 是什么。
+```
+
+### 审查结论
+
+- PF-P018 的边界正确：它只做 UoW 边界设计、测试策略和风险清单，不改生产逻辑。
+- PF-P018 明确读取当前 Workbench facade、server handlers、derived lifecycle、runtime queue、Postgres transaction 基础设施和 characterization tests，能基于真实代码制定设计。
+- PF-P018 明确禁止实现 UoW、修改事务语义、修复 stale write 或新增测试，避免越过设计阶段直接动生产逻辑。
+- PF-P018 要求输出逐 API UoW matrix、目标事务时序、failure mode matrix 和下一步测试 prompt，为后续实现前的机械门禁做准备。
+- PF-P018 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。

@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` 已 verified 并推送 `origin/main` |
-| 当前 active prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` (`verified`) |
+| 当前阶段 | `PF-P018 - Workbench Write Unit of Work Boundary Design` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P018 - Workbench Write Unit of Work Boundary Design` (`planned`) |
 | 最近 verified prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P017-MG 已在功能分支和本地 `main` 上运行完整门禁验证，均通过；已 merge 并 push 到 `origin/main`；未执行 Traffic Gate / 部署 / 生产访问 |
-| 下一条允许任务 | 从最新 `main` 新建分支，生成并审查 `PF-P018 - Workbench Write Unit of Work Boundary Design`；不得直接执行 PF-P018 |
+| 当前分支 | `codex/workbench-uow-boundary-design` |
+| 最近验证 | PF-P018 分支已从最新 `origin/main` (`06c6fd43`) 创建；已读取状态机、prompt 库、Workbench 写路径规划，并用 CodeGraph 校准 `WorkbenchWriteFacade` 当前边界；未改业务代码 |
+| 下一条允许任务 | 执行 `PF-P018 - Workbench Write Unit of Work Boundary Design`；只能产出 UoW 边界设计、测试策略和文档回写，不得实现 UoW 或修改事务语义 |
 
 ## Prompt 执行日志
 
@@ -2053,7 +2053,7 @@ UoW readiness：
 - 合入范围：PF-P015/PF-P016/PF-P017 的完整 diff，包括 Workbench remaining write facade、对应 characterization tests、remaining write planning 文档与状态机/prompt 记录。
 - Diff scope 检查：只包含 PF-P017-MG allowed files；未发现前端、SQL migration、网关、CI/CD、worker topology、生产配置或 `backend-go` 变更。
 - Untracked 检查：`git ls-files --others --exclude-standard` 无输出；未使用 `git add .` 或 `git add -A`。
-- Push：已推送 `origin/main`，远端 `main` 更新到 `232615b7`。
+- Push：已推送 `origin/main`，远端 `main` 最终更新到 `06c6fd43`。
 - Traffic Gate：未执行；未部署、未切流、未访问生产服务器。
 - User confirmation：2026-05-30 用户确认 `PF-P017-MG verified`。
 
@@ -2073,7 +2073,37 @@ UoW readiness：
 
 #### 下一条 Prompt 上下文
 
-PF-P017-MG 已 verified 并推送 `origin/main`。下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P018 - Workbench Write Unit of Work Boundary Design`。PF-P018 只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
+PF-P017-MG 已 verified 并推送 `origin/main`。已从最新 `main` 新建分支 `codex/workbench-uow-boundary-design`，并生成/审查 PF-P018。下一步允许执行 PF-P018。PF-P018 只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
+
+### PF-P018 - Workbench Write Unit of Work Boundary Design
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Workbench 写路径 Unit of Work 边界设计。
+- 产出 `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`。
+- 基于 PF-P012/PF-P016 的 characterization 结果和 PF-P013/PF-P014/PF-P017 的 facade extraction 结果，梳理未来 UoW 必须包住的 facts、audit/history、dirty scope、outbox/read model scheduling、source_version、idempotency/stale write precondition。
+- 输出后续测试 prompt 的拆分建议和验收门槛。
+
+#### 禁止范围
+
+- 不实现 UoW、transaction manager、repository rewrite、outbox writer、dirty scope writer 或 source_version 更新逻辑。
+- 不修改 Workbench 生产代码、测试代码、SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不修复 stale write、duplicate submit、blind write、rollback 或 scheduling failure 当前语义。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+
+#### 验收标准
+
+- PF-P018 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P018 明确它是设计/文档 prompt，不是实现 prompt。
+- PF-P018 明确必须读取 `WorkbenchWriteFacade`、`server.py`、derived lifecycle、runtime queue、Postgres repository 基础设施和 characterization tests。
+- PF-P018 明确必须输出逐 API 的 UoW boundary matrix、transaction sequence、failure mode matrix、test strategy 和 blocker list。
+- PF-P018 执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P018 已生成并审查。下一步允许执行 PF-P018。PF-P018 verified 后，才允许根据其真实设计结果生成下一条 prompt。预期下一条可能是 Workbench UoW characterization/contract tests，而不是直接实现 UoW，除非 PF-P018 明确证明已有测试门禁足够。
 
 ## 维护规则
 
