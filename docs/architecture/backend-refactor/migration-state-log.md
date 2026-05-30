@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P031 - Workbench Cancel Link Stale Guard Migration` 已执行，等待用户确认 verified |
-| 当前 active prompt | `PF-P031 - Workbench Cancel Link Stale Guard Migration` (`implemented`) |
-| 最近 verified prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` |
+| 当前阶段 | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P031 - Workbench Cancel Link Stale Guard Migration` |
 | 当前分支 | `codex/workbench-cancel-link-stale-guard` |
-| 最近验证 | PF-P031 指定测试全部通过；只迁移 cancel link stale guard；未迁移 ignore row、cash special 或 withdraw submit |
-| 下一条允许任务 | 等待用户确认 PF-P031 可标记 verified；确认后生成并审查 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` |
+| 最近验证 | 用户确认 PF-P031 verified；PF-P031-MG 已生成但未执行 |
+| 下一条允许任务 | 只允许执行 PF-P031-MG；不得直接进入 PF-P032，不得迁移 ignore row、cash special 或 withdraw submit |
 
 ## Prompt 执行日志
 
@@ -3247,7 +3247,7 @@ PF-P030-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确�
 
 ### PF-P031 - Workbench Cancel Link Stale Guard Migration
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3313,7 +3313,47 @@ PF-P030-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确�
 
 #### 下一条 Prompt 上下文
 
-PF-P031 已完成实现和验证，但尚未由用户确认 `verified`。下一步应先等待用户确认 PF-P031 `verified`，然后生成并审查 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate`。不要直接进入 PF-P032，不要迁移 ignore row、cash special 或 withdraw submit。
+PF-P031 已完成实现和验证，并已由用户确认 `verified`。PF-P031-MG 已生成并审查，下一步只允许执行 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate`。不要直接进入 PF-P032，不要迁移 ignore row、cash special 或 withdraw submit。
+
+### PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理当前分支 `codex/workbench-cancel-link-stale-guard` 的 Merge Gate。
+- 统一覆盖 PF-P031 prompt 规划提交和 cancel link stale guard 实现提交。
+- 检查本分支是否可以合入 `main`。
+- 如验证通过，允许合入本地 `main` 并在 `main` 上复验。
+
+#### 禁止范围
+
+- 不进入 PF-P032。
+- 不迁移 `ignore row`、`cash special` 或 `withdraw submit`。
+- 不修改前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- 不执行 Traffic Gate、部署、生产访问或服务器操作。
+- 不默认 push；push 必须等用户确认。
+- 不使用 `git add .` 或 `git add -A`。
+
+#### 验收标准
+
+- 当前分支包含最新 `main`。
+- Diff scope 只包含 PF-P031 允许文件：
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 没有 `backend-go`。
+- 没有 untracked 临时文件、`.pkl`、`.sqlite`、`__pycache__` 或真实业务样本混入。
+- PF-P031 指定测试在合入前和合入后的 `main` 上全部通过。
+- 合入后仍不代表 Traffic Gate、部署或下一条真实写 API 迁移完成。
+
+#### 审查结论
+
+- PF-P031-MG 是当前分支的正确下一步：PF-P031 已形成一个可合并的小切片。
+- 本 MG 不应扩大实现范围，不应进入 PF-P032。
+- 本分支没有部署拓扑、网关、auth/session、worker routing 或前端变更，因此不需要 Traffic Gate。
 
 ## 维护规则
 

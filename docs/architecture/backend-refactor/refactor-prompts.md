@@ -4246,7 +4246,7 @@ TDD 记录：
 
 ## PF-P013-MG - Workbench Write Facade Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -9065,7 +9065,7 @@ Main 上复验：
 
 ## PF-P031 - Workbench Cancel Link Stale Guard Migration
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -9202,7 +9202,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`
+状态：`verified`
 
 已完成：
 
@@ -9246,6 +9246,144 @@ Post-Flight:
 
 下一步：
 
-- 等待用户确认 PF-P031 可标记为 `verified`。
-- 用户确认后生成并审查 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate`。
+- 用户已确认 PF-P031 `verified`。
+- 下一步只允许执行 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate`。
 - 不直接进入 PF-P032。
+
+## PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate。
+
+Role: 你是一位严格的 Git / CI / Python 后端合入门禁负责人，精通 merge gate、scope audit、测试门禁、回滚风险评估和生产级主干保护。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支是 `codex/workbench-cancel-link-stale-guard`。
+- 当前分支包含并已由用户确认 verified：
+  - `PF-P031 - Workbench Cancel Link Stale Guard Migration`
+- PF-P031 只迁移 `cancel link` stale guard：
+  - 带 `expected_versions` 的 stale cancel-link 返回 `409 workbench_write_conflict`。
+  - 当前新 active relation 不会被取消。
+  - 未带 `expected_versions` 的 legacy cancel-link 行为保持不变。
+- 本 Merge Gate 不等于 Traffic Gate，不等于部署，不等于 PF-P032。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `tests/test_workbench_write_characterization.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-cancel-link-stale-guard`。
+   - 当前 active prompt 是 `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` planned。
+   - 最近 verified prompt 是 `PF-P031 - Workbench Cancel Link Stale Guard Migration`。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git log --oneline main..HEAD`
+   - `git diff --name-only main...HEAD`
+
+Goal:
+对当前分支执行 Merge Gate，验证 PF-P031 的 cancel link stale guard 小切片是否可以合入 `main`。如验证通过，可以合入本地 `main` 并在 `main` 上重跑同一套验证。不得进入 PF-P032，不得迁移其它 Workbench 写 API。
+
+Required Merge Gate Work:
+1. Branch / Upstream Sync
+   - 确认 `main...origin/main` 为 `0 0`；如果不是，必须先同步 main 并重新评估。
+   - 确认当前分支包含最新 `main`。
+   - 如果需要 rebase/merge latest main 到当前分支，必须在同步后重新运行所有验证。
+2. Diff Scope Audit
+   - 必须列出 `git diff --name-only main...HEAD`。
+   - 允许文件只包括：
+     - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+     - `tests/test_workbench_write_characterization.py`
+     - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+     - `docs/architecture/backend-refactor/migration-state-log.md`
+     - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - 如果出现其它 production/test/docs 文件，必须 blocked 并说明原因。
+3. Prohibited Scope Audit
+   - 确认没有修改：
+     - `backend/src/fin_ops_platform/app/server.py`
+     - PostgreSQL migration
+     - frontend files
+     - deployment / nginx / auth / session / worker routing files
+   - 确认没有 `backend-go`。
+   - 确认没有 untracked 临时文件、`.pkl`、`.sqlite`、`__pycache__`、导出物或真实业务样本混入。
+   - 确认没有进入 `ignore row`、`cash special` 或 `withdraw submit` stale guard migration。
+4. Verification Before Merge
+   - 必须运行：
+     - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+     - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+     - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+     - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+     - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+   - 必须运行：
+     - `git diff --check`
+     - `test ! -e backend-go`
+5. Commit / Merge Preparation
+   - 如有 PF-P031-MG 文档状态更新，必须精准 `git add` 相关文档文件；禁止 `git add .` / `git add -A`。
+   - 合入 main 的 merge commit / fast-forward 语义必须体现代码变更，例如：
+     - `feat(workbench): merge cancel link stale guard`
+   - 不得用纯 `docs:` 描述包含 production code/test 变更的最终主干合入。
+6. Merge to Main
+   - 如果门禁通过：
+     - 切换到 `main`。
+     - 确保 `main` 与 `origin/main` 对齐。
+     - 合入当前分支。
+     - 在 `main` 上重跑第 4 步完整验证。
+     - 更新 `migration-state-log.md`，PF-P031-MG 只能标记 `implemented`，必须等待用户确认才能标记 `verified`。
+   - 如果当前已经在 `main`，不得做无意义 merge；只做范围检查、验证、必要提交和状态机更新。
+
+Allowed Scope:
+- 允许修改：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`（仅限 MG 状态/验证补充，如必要）
+
+Forbidden Scope:
+- 不修改生产代码。
+- 不修改测试代码。
+- 不修改 SQL migration。
+- 不修改前端。
+- 不修改部署、网关、auth/session、worker routing。
+- 不进入 PF-P032。
+- 不迁移 `ignore row`、`cash special` 或 `withdraw submit`。
+- 不执行 Traffic Gate、部署、生产访问或服务器操作。
+- 不默认 push；push 必须等待用户确认。
+- 不使用 `git add .` 或 `git add -A`。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P031-MG 记录为 `implemented` 或 `blocked`。
+  - 记录 diff scope、验证命令和结果。
+  - 记录是否已合入 `main`。
+  - 记录是否已 push；默认不 push。
+  - 记录下一步上下文。
+- 更新 `refactor-prompts.md` 的 PF-P031-MG 执行结果。
+- 不生成 PF-P032。
+- 不执行 PF-P032。
+- 未经用户确认，不得将 PF-P031-MG 标记为 `verified`。
+- 最终回复必须说明：
+  - 是否合入 main；
+  - main 上验证是否通过；
+  - 是否 push；
+  - 是否仍未迁移 ignore row、cash special、withdraw submit；
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P031-MG 的边界正确：它只处理 PF-P031 cancel link stale guard 的合入门禁。
+- PF-P031-MG 必须验证本分支没有扩大到 ignore row、cash special 或 withdraw submit。
+- PF-P031-MG 不执行 Traffic Gate，因为本分支没有网关、部署、auth/session、worker routing 或前端变更。
+- PF-P031-MG 完成后才能考虑下一条 prompt；不得直接进入 PF-P032。
