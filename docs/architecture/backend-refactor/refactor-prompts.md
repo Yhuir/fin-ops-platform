@@ -2595,9 +2595,9 @@ Post-Flight:
 - 状态：`verified`，已由用户确认。
 - Feature branch：`codex/workbench-query-cache-freshness`。
 - Commit：`08ccad92 refactor(workbench): enforce query cache freshness gate`。
-- Merge 方式：`main` fast-forward 合入 `08ccad92`；本地 `main` 尚未 push 到 `origin/main`。
+- Merge 方式：`main` fast-forward 合入 `08ccad92`；`git push origin main` 已通过。
 - 合入范围只包含 Expected Changed Files。
 - Feature branch mandatory checks 全部通过。
 - main 上 mandatory checks 全部通过。
-- 未执行 Traffic Gate，未部署服务器，未 push 到 `origin/main`。
-- 后续：用户已同意 push `origin/main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
+- 未执行 Traffic Gate，未部署服务器。
+- 后续：下一条 prompt 必须从最新 `main` 新建分支生成，不得在 `main` 或旧功能分支继续实现 Slice D。

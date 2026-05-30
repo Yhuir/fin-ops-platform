@@ -51,12 +51,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已验证，等待远端同步 |
-| 当前 active prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` (`verified`) |
+| 当前阶段 | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已验证并已同步到 `origin/main` |
+| 当前 active prompt | 无，等待从最新 `main` 新建分支生成下一条 prompt |
 | 最近 verified prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | 用户已确认 PF-P007-MG verified；PF-P007-MG 已在 feature branch 和 `main` 上通过 mandatory checks；用户已同意 push `origin/main`；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | push `origin/main`；push 完成后必须从最新 `main` 新建分支生成下一条 prompt |
+| 最近验证 | 用户已确认 PF-P007-MG verified；PF-P007-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`git push origin main` 已通过；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 从最新 `main` 新建分支生成下一条 prompt；不得在 `main` 或旧功能分支继续实现 Slice D |
 
 ## Prompt 执行日志
 
@@ -982,7 +982,7 @@ PF-P007-MG 允许合入的文件仅限：
 
 #### 下一条 Prompt 上下文
 
-PF-P007-MG 已由用户确认 `verified`。本次 verified 状态只代表 Merge Gate 完成，不代表 Traffic Gate 或部署完成。用户已同意 push `origin/main`；push 完成后，下一步必须从最新 `main` 创建新分支，再生成下一条 prompt；不得在旧功能分支继续开始 Slice D。
+PF-P007-MG 已由用户确认 `verified`，并已同步到 `origin/main`。本次 verified 状态只代表 Merge Gate 完成，不代表 Traffic Gate 或部署完成。下一步必须从最新 `main` 创建新分支，再生成下一条 prompt；不得在旧功能分支继续开始 Slice D。
 
 #### 执行结果
 
@@ -991,7 +991,8 @@ PF-P007-MG 已由用户确认 `verified`。本次 verified 状态只代表 Merge
 - Merge 方式：`main` 与 `origin/main` 执行前均为 `be04b10c`，`main` 通过 fast-forward 合入 `08ccad92`。
 - 合入范围只包含 Expected Changed Files：`workbench_query_facade.py`、`test_workbench_query_facade.py`、`test_workbench_sql_runtime.py`、`ai-execution-rules.md`、`migration-state-log.md`、`refactor-prompts.md`、`workbench-read-model-query-plan.md`。
 - 未修改 SQL migration、前端、网关、部署配置、生产配置、SSE、worker、builder、repository SQL 或 Workbench 写路径。
-- 未执行 Traffic Gate，未部署服务器，未 push 到 `origin/main`。
+- `git push origin main` 已通过，`origin/main` 已包含 PF-P007 和 PF-P007-MG 结果。
+- 未执行 Traffic Gate，未部署服务器。
 
 #### Feature branch 验证结果
 

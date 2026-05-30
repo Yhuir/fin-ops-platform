@@ -440,7 +440,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 - 禁止：引入新的缓存格式破坏兼容；禁止读 building/failed generation。
 - Rollback：恢复旧 helper 和 cache key version，保留 TTL 自然过期。
 - 验证：Redis cache tests、active generation tests、refresh-status tests。
-- 当前 prompt：`PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)` 已由用户确认 `verified`；`PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已由用户确认 `verified`。
+- 当前 prompt：`PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)` 已由用户确认 `verified`；`PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已由用户确认 `verified` 并已同步到 `origin/main`。
 - 执行结果：`WorkbenchQueryFacade.groups(...)` 写 Redis JSON payload 的条件现在同时要求 freshness gate 允许使用 groups Redis cache；stale / refreshing / unavailable 状态下只允许读取 DB payload 作为当前响应，不允许把它写入可复用缓存。
 - TTL 决策：继续保留现有 bounded TTL 默认 `600s`。虽然 active generation / read model version 化 key 具备 immutable cache 语义，但是否放宽 TTL 需要后续结合 Redis key cardinality、memory、eviction 和 hit-rate 指标单独判断。
 - Slice D 输入：legacy `GET /api/workbench` fallback、row detail fallback、SSE long polling cancellation 与观测性粒度仍未处理；不得把 PF-P007 的 cache/freshness 结果误当成这些风险已关闭。
