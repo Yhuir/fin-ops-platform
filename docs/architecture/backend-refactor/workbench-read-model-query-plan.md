@@ -487,7 +487,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 ### Slice E：Repository active generation 与查询一致性边界
 
 - 目标：收口 `PostgresReadModelRepository` 的 Workbench query/read-model 读路径，确保 summary、groups page、group detail、refresh status、source_versions 和 cache version 都围绕 active generation/source_version 一致读取。
-- 当前 prompt：`PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已由用户确认 `verified`；`PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已由用户确认 `verified`，等待 push `origin/main`。
+- 当前 prompt：`PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已由用户确认 `verified`；`PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已由用户确认 `verified`，并已同步到 `origin/main`。
 - 输入事实：
   - PF-P009-MG 已由用户确认 `verified`，`main` 已 push 到 `origin/main`，本轮分支从最新 `main` 创建。
   - CodeGraph 确认 Slice E 的主要入口是 `PostgresReadModelRepository.get_workbench_summary(...)`、`get_workbench_groups_page(...)`、`get_workbench_group_detail(...)`、`get_workbench_refresh_status(...)`、`workbench_groups_cache_version(...)`。
@@ -524,7 +524,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
   - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
 - 仍未关闭风险：
   - groups page/count/filter/search 仍缺少 repository 子查询级慢查询指标；当前保留 `Application.handle_request` 的 app-shell `request_database_timing` 边界，后续如要做 SQL 级性能观测，应另立 prompt，避免把 HTTP request context 下沉到 repository。
-  - PF-P010-MG 已将 Slice E fast-forward 合入本地 `main`，用户已明确要求 push `origin/main`；未执行 Traffic Gate 或部署。
+  - PF-P010-MG 已将 Slice E fast-forward 合入本地 `main` 并 push 到 `origin/main`；未执行 Traffic Gate 或部署。
 
 ## Guard Compatibility
 

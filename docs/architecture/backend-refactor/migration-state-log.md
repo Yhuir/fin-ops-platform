@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已由用户确认 `verified`，等待 push 到 `origin/main` |
+| 当前阶段 | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已由用户确认 `verified`，并已 push 到 `origin/main` |
 | 当前 active prompt | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` (`verified`) |
 | 最近 verified prompt | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P010-MG 已执行：feature branch 与 main 上 Workbench SQL runtime、facade/platform guard、row detail targeted tests、compileall、`app.main --check`、禁止面静态检查均通过；未执行 Traffic Gate、部署或 push |
-| 下一条允许任务 | 执行用户已确认的 `git push origin main`；push 完成后下一条 prompt 必须从最新 `main` 新建分支生成 |
+| 最近验证 | PF-P010-MG 已执行并 push 到 `origin/main`；feature branch 与 main 上 Workbench SQL runtime、facade/platform guard、row detail targeted tests、compileall、`app.main --check`、禁止面静态检查均通过；未执行 Traffic Gate 或部署 |
+| 下一条允许任务 | 从最新 `main` 新建 `codex/` 分支，再生成并审查下一条 prompt；不得在 `main` 上直接开始新业务 slice |
 
 ## Prompt 执行日志
 
@@ -1323,7 +1323,7 @@ PF-P009-MG 已由用户确认 `verified`。`git push origin main` 已通过，`o
 
 #### 下一条 Prompt 上下文
 
-PF-P010 已由用户确认 `verified`。PF-P010-MG 已由用户确认 `verified`。本地 `main` 已包含 PF-P010-MG 合入结果，用户已明确要求执行 `git push origin main`；未执行 Traffic Gate 或部署。
+PF-P010 已由用户确认 `verified`。PF-P010-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。未执行 Traffic Gate 或部署。
 
 ### PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate
 
@@ -1381,11 +1381,11 @@ PF-P010 已由用户确认 `verified`。PF-P010-MG 已由用户确认 `verified`
   - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
   - production diff / forbidden surface / Facade mock / SSE PubSub 静态检查。
 - 未执行 Traffic Gate、未部署服务器、未修改网关或生产配置。
-- 用户已确认 PF-P010-MG 为 `verified`，并明确要求执行 `git push origin main`。
+- 用户已确认 PF-P010-MG 为 `verified`，并已执行 `git push origin main`。
 
 #### 下一条 Prompt 上下文
 
-PF-P010-MG 已由用户确认 `verified`。下一步执行 `git push origin main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
+PF-P010-MG 已由用户确认 `verified`，并已同步到 `origin/main`。下一条 prompt 必须从最新 `main` 新建分支生成；不得在 `main` 上直接开始新业务 slice。
 
 ## 维护规则
 
