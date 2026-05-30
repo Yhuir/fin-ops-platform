@@ -5578,7 +5578,7 @@ Post-Flight:
 - Untracked gate：Pass。`git ls-files --others --exclude-standard` 无输出。
 - Feature branch verification：Pass。
 - Main verification：Pass。
-- Push：用户已确认执行 `git push origin main`。
+- Push：已推送 `origin/main`，远端 `main` 更新到 `232615b7`。
 - Traffic Gate：未执行；未部署、未切流、未修改生产配置、未访问生产服务器。
 - User confirmation：2026-05-30 用户确认 PF-P017-MG `verified`。
 
@@ -5596,4 +5596,4 @@ Main 复验命令：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`
 
-下一步：执行用户已确认的 `git push origin main`。push 完成后必须从最新 `main` 新建分支，再生成并审查下一条 prompt。建议下一条 prompt：`PF-P018 - Workbench Write Unit of Work Boundary Design`，只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
+下一步：从最新 `main` 新建分支，再生成并审查 `PF-P018 - Workbench Write Unit of Work Boundary Design`。PF-P018 只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。

@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` 已由用户确认 verified，准备推送 `origin/main` |
+| 当前阶段 | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` 已 verified 并推送 `origin/main` |
 | 当前 active prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` (`verified`) |
 | 最近 verified prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P017-MG 已在功能分支和本地 `main` 上运行完整门禁验证，均通过；已 merge 到本地 `main`；用户已确认 verified；未执行 Traffic Gate / 部署 / 生产访问 |
-| 下一条允许任务 | 执行用户已确认的 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查下一条 prompt |
+| 最近验证 | PF-P017-MG 已在功能分支和本地 `main` 上运行完整门禁验证，均通过；已 merge 并 push 到 `origin/main`；未执行 Traffic Gate / 部署 / 生产访问 |
+| 下一条允许任务 | 从最新 `main` 新建分支，生成并审查 `PF-P018 - Workbench Write Unit of Work Boundary Design`；不得直接执行 PF-P018 |
 
 ## Prompt 执行日志
 
@@ -2053,7 +2053,7 @@ UoW readiness：
 - 合入范围：PF-P015/PF-P016/PF-P017 的完整 diff，包括 Workbench remaining write facade、对应 characterization tests、remaining write planning 文档与状态机/prompt 记录。
 - Diff scope 检查：只包含 PF-P017-MG allowed files；未发现前端、SQL migration、网关、CI/CD、worker topology、生产配置或 `backend-go` 变更。
 - Untracked 检查：`git ls-files --others --exclude-standard` 无输出；未使用 `git add .` 或 `git add -A`。
-- Push：用户已确认执行 `git push origin main`。
+- Push：已推送 `origin/main`，远端 `main` 更新到 `232615b7`。
 - Traffic Gate：未执行；未部署、未切流、未访问生产服务器。
 - User confirmation：2026-05-30 用户确认 `PF-P017-MG verified`。
 
@@ -2073,7 +2073,7 @@ UoW readiness：
 
 #### 下一条 Prompt 上下文
 
-PF-P017-MG 已由用户确认 `verified`，并允许执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成并审查下一条 prompt。建议下一条 prompt：`PF-P018 - Workbench Write Unit of Work Boundary Design`，只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
+PF-P017-MG 已 verified 并推送 `origin/main`。下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P018 - Workbench Write Unit of Work Boundary Design`。PF-P018 只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
 
 ## 维护规则
 
