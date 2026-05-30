@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import os
 from pathlib import Path
 import re
@@ -187,6 +188,72 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 name="MongoOAAdapter",
             ) and rel_path not in allowed_paths | known_violations:
                 violations.append(rel_path)
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_write_and_matching_services_do_not_import_external_clients_directly(self) -> None:
+        workbench_boundary_files = {
+            "backend/src/fin_ops_platform/services/workbench_action_service.py",
+            "backend/src/fin_ops_platform/services/workbench_write_facade.py",
+            "backend/src/fin_ops_platform/services/workbench_pair_relation_service.py",
+            "backend/src/fin_ops_platform/services/workbench_override_service.py",
+            "backend/src/fin_ops_platform/services/workbench_exception_case_service.py",
+            "backend/src/fin_ops_platform/services/workbench_exception_application_service.py",
+            "backend/src/fin_ops_platform/services/workbench_exception_projection.py",
+            "backend/src/fin_ops_platform/services/workbench_exception_classifier.py",
+            "backend/src/fin_ops_platform/services/workbench_exception_rules.py",
+            "backend/src/fin_ops_platform/services/workbench_matching_orchestrator.py",
+            "backend/src/fin_ops_platform/services/workbench_candidate_grouping.py",
+            "backend/src/fin_ops_platform/services/workbench_free_matching_engine.py",
+            "backend/src/fin_ops_platform/services/workbench_matching_rules.py",
+            "backend/src/fin_ops_platform/services/workbench_candidate_match_service.py",
+            "backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_service.py",
+            "backend/src/fin_ops_platform/services/workbench_amount_check_service.py",
+            "backend/src/fin_ops_platform/services/workbench_special_pair_rule_service.py",
+            "backend/src/fin_ops_platform/services/workbench_special_rule_detectors.py",
+            "backend/src/fin_ops_platform/services/workbench_special_reconciliation_adapter.py",
+            "backend/src/fin_ops_platform/services/workbench_reconciliation_engine.py",
+            "backend/src/fin_ops_platform/services/workbench_reconciliation_decision_store.py",
+            "backend/src/fin_ops_platform/services/workbench_reconciliation_dirty_queue.py",
+        }
+        violations: list[str] = []
+        for rel_path in sorted(workbench_boundary_files):
+            path = REPO_ROOT / rel_path
+            if not path.exists():
+                violations.append(f"{rel_path} is missing")
+                continue
+            tree = _parse(path)
+            modules = _imported_modules(tree)
+            external_imports = sorted({"redis", "pika", "pymysql"} & modules)
+            if external_imports:
+                violations.append(f"{rel_path} imports {external_imports}")
+            if _imports_name_from_module(
+                tree,
+                module="fin_ops_platform.services.mongo_oa_adapter",
+                name="MongoOAAdapter",
+            ):
+                violations.append(f"{rel_path} imports MongoOAAdapter")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_write_facade_uses_granular_constructor_dependencies(self) -> None:
+        from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
+
+        signature = inspect.signature(WorkbenchWriteFacade)
+        forbidden_terms = {
+            "app",
+            "application",
+            "runtime_repositories",
+            "runtime_repository_context",
+            "runtime_container",
+            "state_store",
+            "application_state_store",
+        }
+        violations = [
+            parameter.name
+            for parameter in signature.parameters.values()
+            if any(term in parameter.name.lower() for term in forbidden_terms)
+        ]
 
         self.assertEqual(violations, [])
 

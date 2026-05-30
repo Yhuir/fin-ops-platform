@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已由用户确认 `verified`，并已 push 到 `origin/main` |
-| 当前 active prompt | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` (`verified`) |
-| 最近 verified prompt | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P010-MG 已执行并 push 到 `origin/main`；feature branch 与 main 上 Workbench SQL runtime、facade/platform guard、row detail targeted tests、compileall、`app.main --check`、禁止面静态检查均通过；未执行 Traffic Gate 或部署 |
-| 下一条允许任务 | 从最新 `main` 新建 `codex/` 分支，再生成并审查下一条 prompt；不得在 `main` 上直接开始新业务 slice |
+| 当前阶段 | `PF-P013-MG - Workbench Write Facade Merge Gate` 已生成并完成审查，等待用户确认执行 |
+| 当前 active prompt | `PF-P013-MG - Workbench Write Facade Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P013 - Workbench Write Facade Extraction` |
+| 当前分支 | `codex/workbench-writes-matching-discovery` |
+| 最近验证 | 用户已确认 PF-P013 `verified`；PF-P013 已完成 confirm/cancel thin facade 抽取，PF-P012/PF-P013 指定测试通过；未修改 API 语义、migration、前端或部署 |
+| 下一条允许任务 | 用户确认后执行 PF-P013-MG；PF-P013-MG 只能做 PF-P012 + PF-P013 完整 diff 的 merge gate，不得加入新功能、不得执行 Traffic Gate |
 
 ## Prompt 执行日志
 
@@ -1386,6 +1386,252 @@ PF-P010 已由用户确认 `verified`。PF-P010-MG 已由用户确认 `verified`
 #### 下一条 Prompt 上下文
 
 PF-P010-MG 已由用户确认 `verified`，并已同步到 `origin/main`。下一条 prompt 必须从最新 `main` 新建分支生成；不得在 `main` 上直接开始新业务 slice。
+
+### PF-P011 - Workbench Matching Engine / Writes Discovery and Planning
+
+状态：`verified`
+
+#### 范围
+
+- 只做 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope、worker matching refresh 的 discovery/planning。
+- 必须使用 CodeGraph 或等价结构分析梳理静态调用链和动态运行时序。
+- 必须读取 Workbench 写路径 handler、service、repository、worker、runtime queue 和现有测试。
+- 必须产出 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`，作为后续 Workbench 写路径/匹配引擎 Micro-JIT 的事实源。
+
+#### 禁止范围
+
+- 不修改 Python 业务代码。
+- 不修改 tests。
+- 不修改 SQL migration。
+- 不修改前端、网关、部署、生产配置或外部服务配置。
+- 不执行 Merge Gate、Traffic Gate、部署、push 或生产访问。
+- 不开始实现 Workbench 写路径、matching/candidates、exception、pair relation 或 worker 重构。
+
+#### 验收标准
+
+- PF-P011 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P011 必须明确执行前读取本文档、prompt 库、模块计划、inventory、platform runtime boundary 审计和 Workbench query 计划。
+- PF-P011 必须输出 action/API matrix、API 幂等性审计、file ownership、call chain、Mermaid runtime sequence、transaction/outbox/dirty scope 边界审计、内存级后台触发源审计、external dependency 审计、测试缺口和下一条 slice 建议。
+- PF-P011 执行完成后只能标记 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P011 已执行并产出 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`。本轮使用 CodeGraph 和源码扫描覆盖 Workbench 写 API、pair-relations/actions、exceptions、matching/candidates、dirty scope、worker refresh、in-memory loop 和现有测试。核心结论：
+
+- Workbench 写路径仍集中在 `server.py` App Shell；handler 之后由 pair relation / exception / override services 变更内存或 snapshot，再通过 state store / repository 持久化。
+- `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 本身具备 dirty scope + outbox 同事务和 source_version 递增能力，但 Workbench 写 API 当前没有显式 Unit of Work 覆盖 facts、audit/history、dirty scope、outbox。
+- API 级幂等性不一致：exception application service 有 idempotency key；confirm/cancel/ignore/unignore HTTP 重复提交行为需要 characterization tests 锁定。
+- Stale write / blind overwrite 行为未锁定：由于 read model 异步刷新，后续 PF-P012 必须 characterization 已被其他请求修改过的 row/pair/exception 再被写入时的当前冲突处理行为。
+- Workbench matching/candidates 仍应作为 Workbench 内部子域推进，不应直接升格为独立顶层模块。
+- 存在 HTTP 进程 dirty worker、standalone worker dirty loop、async pair relation persist、async read model persist、OA sync hot rebuild 等 in-memory trigger，需要在后续测试中锁定并发/重叠行为。
+
+变更文件：
+
+- `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+验证：
+
+- `git status --short --branch`：通过，当前只显示 backend-refactor 文档改动和新增 `workbench-writes-and-matching-plan.md`。
+- `git ls-files --others --exclude-standard`：通过，唯一 untracked 文件是 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`。
+- `git diff --name-only`：通过，tracked diff 只包含 `migration-state-log.md` 和 `refactor-prompts.md`。
+- `git diff --stat`：通过，tracked diff 只包含 backend-refactor 文档。
+- `git diff --check`：通过。
+- `rg -n "PF-P011|Workbench Matching Engine / Writes|workbench-writes-and-matching-plan" docs/architecture/backend-refactor`：通过。
+- `test -f docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`：通过。
+- 非文档变更检查：通过，未出现 `backend/src`、`tests`、`web`、`postgres`、`deploy` 变更。
+
+下一条 prompt 建议：`PF-P012 - Workbench Write API Characterization Tests`。PF-P012 应先补写 API 幂等性、stale write / optimistic state assertion、持久化顺序/回滚、derived lifecycle/read model scheduling failure、in-memory dirty worker trigger 和 platform boundary guard 的 characterization tests，不得直接重构实现。
+
+用户已确认 PF-P011 `verified`。该确认只代表 discovery/planning 文档和状态机回写通过，不代表 Workbench 写路径已重构或可合入 `main`。
+
+### PF-P012 - Workbench Write API Characterization Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只新增或调整 Workbench 写路径 characterization tests，锁定当前行为。
+- 覆盖 PF-P011 发现的最高风险缺口：duplicate-submit / retry、stale write / optimistic state assertion、持久化顺序/回滚、derived lifecycle/read model scheduling failure、in-memory dirty worker trigger、platform boundary guard。
+- 允许更新 `migration-state-log.md`、`refactor-prompts.md` 和 `workbench-writes-and-matching-plan.md` 中由测试发现直接影响的事实。
+
+#### 禁止范围
+
+- 不修改 Python 业务实现。
+- 不修改 SQL migration。
+- 不修改前端、网关、部署、生产配置或外部服务配置。
+- 不执行 Merge Gate、Traffic Gate、部署、push 或生产访问。
+- 不开始 Workbench write facade、Unit of Work、matching engine 或 repository 重构。
+
+#### 验收标准
+
+- PF-P012 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P012 必须先读取 PF-P011 产物 `workbench-writes-and-matching-plan.md`。
+- PF-P012 执行时只能写 characterization tests，测试必须描述当前真实行为，不允许把期望行为伪装成现状。
+- PF-P012 执行完成后只能标记 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
+
+#### 执行结果
+
+PF-P012 已执行完成。本轮只新增/调整 tests 与 backend-refactor 文档；未修改 `backend/src` 业务实现、SQL migration、前端、网关、部署或生产配置。
+
+新增/修改测试：
+
+- 新增 `tests/test_workbench_write_characterization.py`，独立承载 Workbench 写路径 characterization tests，避免继续膨胀 `tests/test_workbench_v2_api.py`。
+- 更新 `tests/test_platform_runtime_boundary_guards.py`，新增 Workbench write/matching services 直接 import Redis/RabbitMQ/MongoOAAdapter/pymysql 的静态门禁。
+
+锁定的当前真实行为：
+
+- Duplicate submit：
+  - `confirm-link` 显式同一 `case_id` 重复提交：两次均 `200`，同一 active relation 保留，但会重复记录 `confirm_link` history 并重复调度 persistence/read model。
+  - `confirm-link` 不传 `case_id` 重复提交：两次均 `200`，自动生成 `CASE-AUTO-0001` 与 `CASE-AUTO-0002`，第二次替换 active relation。
+  - `cancel-link` 重复提交：第一次 `200`，第二次 `404 workbench_pair_relation_not_found`。
+  - `ignore-row` 重复提交：两次均 `200`，复用同一 ignored exception case；`unignore-row` 第二次为 `404 workbench_row_not_found`。
+  - `mark-exception` legacy HTTP wrapper 重复提交：两次均 `200`，复用同一 exception case。
+  - `exception/apply` 重复提交：第二次 `200` 且 `idempotent=True`，复用同一 case。
+- Stale write / optimistic state assertion：
+  - `confirm-after-ignore`：当前为 blind write，`confirm-link` 仍 `200` 创建 pair relation，ignored case 仍保持 `ignored`。
+  - `ignore-after-confirm`：当前为 blind write，`ignore-row` 仍 `200` 创建 ignored case，原 active relation 仍保持 active。
+  - `cancel-after-replaced`：cancel 只按当前 active row relation 执行，会取消替换后的 `CASE-NEW`。
+  - `exception-after-relation`：当前有明确冲突保护，返回 `409 active_pair_relation_conflict`，active relation 保留。
+- Persistence ordering / failure：
+  - `_schedule_workbench_read_model_persist` 抛错时，异常会向外传播，且 pair relation fact 已经在内存服务中变更；这证明当前没有单一 UoW 覆盖 facts 与 read model scheduling。
+- In-memory trigger：
+  - HTTP process dirty worker 必须显式 opt-in，`interval_seconds <= 0` 不启动；启动后最小 interval 为 `60.0`，重复调用不会重复启动线程。
+  - standalone matching dirty loop 在 `max_iterations=1` 时只执行一次并不会进入 sleep，避免测试 hang。
+- Platform boundary：
+  - Workbench write/matching services 当前没有直接 import Redis、RabbitMQ、MongoOAAdapter 或 pymysql。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，13 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，10 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -v`：通过，147 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`：通过，11 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service tests.test_workbench_exception_case_service -v`：通过，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_orchestrator tests.test_workbench_candidate_match_service tests.test_workbench_reconciliation_dirty_queue -v`：通过，34 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：通过，23 tests。
+
+用户已确认 PF-P012 `verified`。该确认只代表 characterization tests、platform guard 和文档回写通过，不代表 Workbench 写路径已经完成重构或具备目标语义。
+
+#### 下一条 Prompt 上下文
+
+PF-P013 已生成并审查，下一步允许在用户确认后执行。PF-P013 必须保持 PF-P012 锁定的当前行为不变，只抽 thin facade/usecase 边界；不得在同一 prompt 中修复 stale write 或重写 Unit of Work。Stale write 与 UoW 修复应作为后续明确语义变更 prompt，基于 PF-P012 的 characterization tests 逐项调整。
+
+### PF-P013 - Workbench Write Facade Extraction
+
+状态：`verified`
+
+#### 范围
+
+- 在 `backend/src/fin_ops_platform/services/` 下建立 Workbench 写路径 thin facade / usecase 边界，例如 `workbench_write_facade.py`。
+- 第一轮只允许抽取最小可验证切片：`confirm-link` 与 `cancel-link` 的 handler 编排边界，以及它们共享的 payload/result 转换辅助。
+- `server.py` handler 继续负责 HTTP body 解析、request id、auth/freshness gate、HTTP response construction 和带 HTTP route context 的 timing/observability wrapper。
+- Facade 只能通过细粒度依赖注入访问现有 services/repositories/schedulers，不得接收 `Application`、`RuntimeRepositories`、`ApplicationStateStore` 或 `self` 这类上帝对象。
+- 必须保持 PF-P012 锁定的 duplicate-submit、stale write、scheduling failure、history/audit 和 dirty/read model scheduling 当前行为不变。
+
+#### 禁止范围
+
+- 不修复 stale write / optimistic locking / blind write 语义。
+- 不引入 Workbench Unit of Work，不重写 transaction、repository、dirty scope、outbox 或 read model refresh 机制。
+- 不迁移 `mark-exception`、`exception/apply`、`ignore-row`、`unignore-row`，除非只是为了保持 confirm/cancel 共享 helper 的最小 wiring 且不改变行为。
+- 不修改 SQL migration、前端、网关、部署、生产配置或外部服务配置。
+- 不执行 Merge Gate、Traffic Gate、部署、push 或生产访问。
+
+#### 验收标准
+
+- PF-P013 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- 执行时必须先跑或补充最小 characterization tests，证明 handler -> facade -> current service/repository/fake 链路仍被黑盒测试覆盖。
+- 严禁在 `tests/test_workbench_write_characterization.py` 中 mock 掉整个 facade。
+- 必须运行 PF-P012 已通过的 Workbench write/matching 相关 unittest 与 platform guard。
+- 执行完成后只能标记 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 执行结果
+
+PF-P013 已执行完成。本轮做了行为保持型 thin facade 抽取，只覆盖 `confirm-link` 与 `cancel-link`。
+
+新增/修改代码：
+
+- 新增 `backend/src/fin_ops_platform/services/workbench_write_facade.py`：
+  - 新增 `WorkbenchWriteFacade`。
+  - 新增 `WorkbenchWriteResult`。
+  - 将 confirm/cancel 的非 HTTP 编排移入 facade，包括 payload validation、pair relation mutation、history/audit 触发、dirty/read model scheduling callback、confirm 持久化失败回滚 callback。
+- 修改 `backend/src/fin_ops_platform/app/server.py`：
+  - 新增 `_workbench_write_facade()`，只注入细粒度依赖和 callback。
+  - 新增 `_workbench_write_response()`，保留 HTTP response construction 在 App Shell。
+  - 新增 `_restore_workbench_pair_relation_snapshot()`，保留 pair relation service 替换和 legacy snapshot restore 行为。
+  - `_handle_live_workbench_confirm_link()` 与 `_handle_live_workbench_cancel_link()` 改为委托 facade。
+- 修改 `tests/test_platform_runtime_boundary_guards.py`：
+  - 将 `workbench_write_facade.py` 纳入 Workbench write/matching external client import guard。
+  - 新增 constructor signature guard，禁止 `Application`、`RuntimeRepositories`、`ApplicationStateStore`、`state_store` 等上帝对象注入。
+
+保持不变的范围：
+
+- 未迁移 `mark-exception`、`exception/apply`、`ignore-row`、`unignore-row`。
+- 未修复 stale write / optimistic locking / blind write。
+- 未引入 Workbench Unit of Work。
+- 未重写 repository、transaction manager、dirty scope、outbox、read model refresh 或 worker。
+- 未修改 SQL migration、前端、网关、部署或生产配置。
+- 未执行 Merge Gate、Traffic Gate、deploy、push 或生产访问。
+
+验证：
+
+- TDD red：新增 facade 门禁后，`test_workbench_write_and_matching_services_do_not_import_external_clients_directly` 失败，原因是 `workbench_write_facade.py is missing`；`test_workbench_write_facade_uses_granular_constructor_dependencies` 因模块不存在报错。
+- TDD green：实现 facade 后，上述两个 targeted tests 通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，13 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -v`：通过，147 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`：通过，11 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service tests.test_workbench_exception_case_service -v`：通过，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_orchestrator tests.test_workbench_candidate_match_service tests.test_workbench_reconciliation_dirty_queue -v`：通过，34 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：通过，24 tests。
+- `python3 -m compileall -q backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py`：通过。
+
+#### 下一条 Prompt 上下文
+
+用户已确认 PF-P013 `verified`。该确认只代表 confirm/cancel thin facade 抽取、行为保持测试、platform guard 和文档回写通过，不代表 Workbench 写路径全部完成重构，也不代表 stale write / Unit of Work 已修复。
+
+#### 下一条 Prompt 上下文
+
+PF-P013-MG 已生成并审查。下一步允许在用户确认后执行 PF-P013-MG。PF-P013-MG 必须覆盖 PF-P012 + PF-P013 尚未合入 `main` 的完整 diff；不得执行 Traffic Gate，不得部署，不得修改生产配置，不得混入 PF-P014 或任何新功能。
+
+### PF-P013-MG - Workbench Write Facade Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 PF-P012 + PF-P013 的完整 Merge Gate。
+- 确认 PF-P012 与 PF-P013 均已由用户确认 `verified`。
+- 检查当前分支 diff 是否只包含：
+  - Workbench write characterization tests。
+  - Workbench write facade 与 `server.py` confirm/cancel 最小 wiring。
+  - platform runtime guard 中与 Workbench write facade 相关的静态门禁。
+  - backend-refactor 文档和状态机回写。
+- 执行 merge 前必须做 upstream sync：确认当前分支包含最新 `main`；如同步了 main，必须重新运行 MG 验证。
+- 允许在验证通过后 commit、合并到 `main`，并在 `main` 上复跑指定验证。
+
+#### 禁止范围
+
+- 不新增或修改业务功能。
+- 不执行 PF-P014。
+- 不迁移 `mark-exception`、`exception/apply`、`ignore-row`、`unignore-row`。
+- 不修复 stale write / optimistic locking / blind write。
+- 不引入 Workbench Unit of Work。
+- 不修改 SQL migration、前端、网关、部署或生产配置。
+- 不执行 Traffic Gate、deploy 或生产访问。
+- 不使用 `git add .` 或 `git add -A`；必须精准 add 文件。
+
+#### 验收标准
+
+- PF-P013-MG prompt 已写入 `refactor-prompts.md` 并完成审查。
+- 执行时必须运行 PF-P012 + PF-P013 指定测试和静态检查。
+- 必须检查 `git ls-files --others --exclude-standard`，防止临时文件混入。
+- 如果当前已经在 `main`，不得做无意义 merge；只执行范围检查、必要验证、commit 或状态机更新。
+- 未经用户确认，不得把 PF-P013-MG 标记为 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P013-MG 尚未执行。用户若确认执行，下一步应执行 PF-P013-MG。MG 通过并合入 `main` 后，下一条 prompt 必须从最新 `main` 新建分支生成，建议为 `PF-P014 - Workbench Exception Facade Extraction`。
 
 ## 维护规则
 

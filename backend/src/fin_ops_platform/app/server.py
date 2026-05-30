@@ -213,6 +213,7 @@ from fin_ops_platform.services.workbench_matching_rules import (
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
+from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade, WorkbenchWriteResult
 from fin_ops_platform.services.workbench_exception_application_service import (
     WorkbenchExceptionApplicationConflict,
     WorkbenchExceptionApplicationService,
@@ -2072,6 +2073,49 @@ class Application:
             oa_status_provider=getattr(query_service, "oa_status_payload", None),
             serialize_value=Application._serialize_value,
         )
+
+    def _workbench_write_facade(self) -> WorkbenchWriteFacade:
+        return WorkbenchWriteFacade(
+            pair_relation_service=self._workbench_pair_relation_service,
+            next_case_id=self._workbench_override_service._next_case_id,
+            normalize_row_ids=self._normalize_row_ids,
+            resolved_row_types_for_row_ids=self._resolved_row_types_for_row_ids,
+            can_confirm_link_row_types=self._can_confirm_link_row_types,
+            expand_confirm_link_row_ids_for_existing_context=self._expand_confirm_link_row_ids_for_existing_context,
+            amount_check_for_row_ids=self._amount_check_for_row_ids,
+            resolve_rows_for_amount_check=self._resolve_rows_for_amount_check,
+            merge_relation_snapshots=self._merge_relation_snapshots,
+            synthetic_existing_case_relations=self._synthetic_existing_case_relations,
+            month_scope_for_selected_row_ids=self._month_scope_for_selected_row_ids,
+            scope_keys_for_row_ids=self._scope_keys_for_row_ids,
+            schedule_pair_relation_persist=self._schedule_workbench_pair_relation_persist,
+            consume_reconciliation_decisions=self._consume_workbench_reconciliation_decisions,
+            restore_pair_relation_snapshot=self._restore_workbench_pair_relation_snapshot,
+            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
+            schedule_read_model_persist=self._schedule_workbench_read_model_persist,
+            emit_action_timing=self._emit_workbench_action_timing,
+        )
+
+    def _workbench_write_response(self, result: WorkbenchWriteResult) -> Response:
+        return self._json_response(result.status_code, result.payload)
+
+    def _restore_workbench_pair_relation_snapshot(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: list[str],
+    ) -> None:
+        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(snapshot)
+        self._configure_workbench_exception_application_service()
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_workbench_pair_relations(
+                snapshot,
+                changed_case_ids=changed_case_ids,
+            )
+        except Exception:
+            pass
 
     def _handle_api_workbench_summary(self, month: str | None) -> Response:
         result = self._workbench_query_facade().summary(month)
@@ -13065,151 +13109,8 @@ class Application:
         *,
         request_id: str | None = None,
     ) -> Response:
-        action_name = "confirm_link"
-        try:
-            month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
-            case_id = str(payload["case_id"]) if payload.get("case_id") is not None else None
-            note = str(payload.get("note") or payload.get("comment") or "").strip()
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_confirm_link_request", "message": str(exc)},
-            )
-
-        requested_row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=requested_row_types, month=month):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_confirm_link_request",
-                    "message": "confirm link requires rows from at least two panes.",
-                },
-            )
-        row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
-        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        amount_check = self._amount_check_for_row_ids(row_ids, month=month, allow_direct=False)
-        if amount_check.get("requires_note") and not note:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "workbench_pair_relation_note_required",
-                    "message": "金额不一致或方向不确定，请填写备注。",
-                    "amount_check": amount_check,
-                },
-            )
-
-        resolve_rows_started_at = monotonic()
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="resolve_rows",
-                duration_ms=self._duration_ms(resolve_rows_started_at),
-                detail=f"rows={len(row_ids)}",
-            )
-
-        resolved_case_id = case_id or self._workbench_override_service._next_case_id()
-        before_relations = self._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
-        selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=False)
-        history_before_relations = self._merge_relation_snapshots(
-            before_relations,
-            self._synthetic_existing_case_relations(
-                selected_rows,
-                existing_relations=before_relations,
-                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-            ),
-        )
-        previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
-        pair_relation_started_at = monotonic()
-        self._workbench_pair_relation_service.replace_with_confirmed_relation(
-            case_id=resolved_case_id,
-            row_ids=row_ids,
-            row_types=row_types,
-            relation_mode="manual_confirmed",
-            created_by="system",
-            month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-            note=note,
-            amount_check=amount_check,
-            before_relations=history_before_relations,
-        )
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="pair_relation_update",
-                duration_ms=self._duration_ms(pair_relation_started_at),
-                detail=f"case_id={resolved_case_id}",
-            )
-        changed_scope_keys = list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids))
-        changed_case_ids = [
-            *[str(relation.get("case_id", "")) for relation in before_relations if str(relation.get("case_id", "")).strip()],
-            resolved_case_id,
-        ]
-        schedule_started_at = monotonic()
-        try:
-            self._schedule_workbench_pair_relation_persist(
-                changed_case_ids=changed_case_ids,
-                request_id=request_id,
-                action_name=action_name,
-            )
-            self._consume_workbench_reconciliation_decisions(
-                row_ids=row_ids,
-                relation_id=resolved_case_id,
-            )
-        except Exception as exc:
-            self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
-            self._configure_workbench_exception_application_service()
-            if self._state_store is not None:
-                try:
-                    self._state_store.save_workbench_pair_relations(
-                        previous_pair_snapshot,
-                        changed_case_ids=changed_case_ids,
-                    )
-                except Exception:
-                    pass
-            return self._workbench_persistence_unavailable_response(
-                StatePersistenceError("工作台关联关系暂时无法保存，请稍后重试。")
-            )
-        invalidate_started_at = monotonic()
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": resolved_case_id},
-        )
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="invalidate_read_model_scopes",
-                duration_ms=self._duration_ms(invalidate_started_at),
-                detail=",".join(changed_scope_keys),
-            )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="schedule_background_persist",
-                duration_ms=self._duration_ms(schedule_started_at),
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "confirm_link",
-                "month": month,
-                "case_id": resolved_case_id,
-                "affected_row_ids": row_ids,
-                "affected_months": changed_scope_keys,
-                "amount_check": amount_check,
-                "message": f"已确认 {len(row_ids)} 条记录关联。",
-            },
-        )
+        result = self._workbench_write_facade().confirm_link(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _preview_confirm_link(self, payload: dict[str, object]) -> dict[str, object]:
         month = str(payload["month"])
@@ -13281,97 +13182,8 @@ class Application:
         *,
         request_id: str | None = None,
     ) -> Response:
-        action_name = "cancel_link"
-        try:
-            month = str(payload["month"])
-            row_id = str(payload["row_id"])
-            comment = str(payload["comment"]) if payload.get("comment") is not None else None
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cancel_link_request", "message": str(exc)},
-            )
-
-        resolve_rows_started_at = monotonic()
-        active_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
-        if not isinstance(active_relation, dict):
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_pair_relation_not_found", "message": row_id},
-            )
-        affected_row_ids = self._normalize_row_ids(list(active_relation.get("row_ids") or []))
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="resolve_rows",
-                duration_ms=self._duration_ms(resolve_rows_started_at),
-                detail=f"rows={len(affected_row_ids)}",
-            )
-        pair_relation_started_at = monotonic()
-        cancelled_relation = self._workbench_pair_relation_service.cancel_relation_for_row_id(row_id)
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="pair_relation_update",
-                duration_ms=self._duration_ms(pair_relation_started_at),
-                detail=f"row_id={row_id}",
-            )
-        changed_scope_keys = list(
-            self._scope_keys_for_row_ids(
-                month=month,
-                row_ids=affected_row_ids,
-                month_scope=str(active_relation.get("month_scope") or ""),
-            )
-        )
-        changed_case_ids = []
-        if isinstance(cancelled_relation, dict):
-            changed_case_ids.append(str(cancelled_relation.get("case_id", "")))
-        schedule_started_at = monotonic()
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        invalidate_started_at = monotonic()
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
-        )
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="invalidate_read_model_scopes",
-                duration_ms=self._duration_ms(invalidate_started_at),
-                detail=",".join(changed_scope_keys),
-            )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        if request_id is not None:
-            self._emit_workbench_action_timing(
-                request_id=request_id,
-                action_name=action_name,
-                phase="schedule_background_persist",
-                duration_ms=self._duration_ms(schedule_started_at),
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "cancel_link",
-                "month": month,
-                "case_id": str(active_relation.get("case_id") or ""),
-                "affected_row_ids": affected_row_ids,
-                "affected_months": changed_scope_keys,
-                "message": "已取消关联并回退为待处理。",
-            },
-        )
+        result = self._workbench_write_facade().cancel_link(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _handle_live_workbench_withdraw_link(
         self,
