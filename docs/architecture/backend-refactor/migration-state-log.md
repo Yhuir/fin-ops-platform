@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` 已执行并合入本地 `main`，等待用户确认 verified |
+| 当前 active prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P017 - Workbench Remaining Write Facade Extraction` |
-| 当前分支 | `codex/workbench-remaining-write-facade-planning` |
-| 最近验证 | PF-P017 已运行 Workbench write characterization、dirty queue wiring、4 个精确 v2 API 回归、platform runtime guard，均通过；未执行 Merge Gate / Traffic Gate / push |
-| 下一条允许任务 | 执行 `PF-P017-MG - Workbench Remaining Write Facade Merge Gate`；不得开始 UoW、stale write 修复、Traffic Gate、部署或生产访问 |
+| 当前分支 | `main` |
+| 最近验证 | PF-P017-MG 已在功能分支和本地 `main` 上运行完整门禁验证，均通过；已 merge 到本地 `main`；未 push；未执行 Traffic Gate / 部署 / 生产访问 |
+| 下一条允许任务 | 等待用户确认 `PF-P017-MG` verified；确认后才允许按用户指令 `git push origin main`；push 后必须从最新 `main` 新建分支再生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -2015,7 +2015,7 @@ UoW readiness：
 
 ### PF-P017-MG - Workbench Remaining Write Facade Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2045,9 +2045,34 @@ UoW readiness：
 - PF-P017-MG prompt 明确 allowed diff scope 覆盖当前实际完整 diff。
 - PF-P017-MG prompt 明确执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
 
+#### 执行结果
+
+- 功能分支：`codex/workbench-remaining-write-facade-planning`
+- 功能分支合入前 HEAD：`291d5805`
+- 本地 `main` merge commit：`355bb8af`
+- 合入范围：PF-P015/PF-P016/PF-P017 的完整 diff，包括 Workbench remaining write facade、对应 characterization tests、remaining write planning 文档与状态机/prompt 记录。
+- Diff scope 检查：只包含 PF-P017-MG allowed files；未发现前端、SQL migration、网关、CI/CD、worker topology、生产配置或 `backend-go` 变更。
+- Untracked 检查：`git ls-files --others --exclude-standard` 无输出；未使用 `git add .` 或 `git add -A`。
+- Push：未执行。
+- Traffic Gate：未执行；未部署、未切流、未访问生产服务器。
+
+#### Main 复验
+
+- `python3 -m compileall -q backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation -v`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background -v`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`：Pass，11 tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_case_service -v`：Pass，8 tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`：Pass，4 tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：Pass，25 tests
+
 #### 下一条 Prompt 上下文
 
-PF-P017-MG 已生成并审查。下一步允许执行 PF-P017-MG。PF-P017-MG 通过并由用户确认 `verified` 后，才能 push `origin/main`；push 后必须从最新 main 新建分支，再生成 UoW 或 stale write 相关 prompt。
+PF-P017-MG 已执行并合入本地 `main`，但尚未由用户确认 `verified`，也尚未 push。下一步只允许用户确认 PF-P017-MG verified；确认后可按用户明确指令执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。建议方向仍是 UoW 或 stale write 相关 prompt，但不得在 push 前生成或执行。
 
 ## 维护规则
 

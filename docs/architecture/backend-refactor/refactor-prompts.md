@@ -5564,3 +5564,35 @@ Post-Flight:
 - PF-P017-MG 明确要求 upstream sync，避免在过期 main 上合并。
 - PF-P017-MG 明确禁止 `git add .` / `git add -A`，并要求检查 untracked files，防止测试产物混入。
 - PF-P017-MG 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+- 执行分支：`codex/workbench-remaining-write-facade-planning`
+- 合入目标：本地 `main`
+- 功能分支合入前 HEAD：`291d5805`
+- 本地 `main` merge commit：`355bb8af`
+- 覆盖范围：PF-P015/PF-P016/PF-P017 的完整 diff。
+- Scope gate：Pass。实际 diff 只包含 PF-P017-MG allowed files。
+- Untracked gate：Pass。`git ls-files --others --exclude-standard` 无输出。
+- Feature branch verification：Pass。
+- Main verification：Pass。
+- Push：未执行。
+- Traffic Gate：未执行；未部署、未切流、未修改生产配置、未访问生产服务器。
+
+Main 复验命令：
+
+- `python3 -m compileall -q backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_case_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`
+
+下一步：等待用户确认 PF-P017-MG `verified`。确认后才允许按用户明确指令 `git push origin main`；push 完成后必须从最新 `main` 新建分支，再生成下一条 prompt。
