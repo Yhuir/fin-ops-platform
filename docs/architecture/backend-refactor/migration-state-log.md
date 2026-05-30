@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 已确认 verified，等待推送远端 |
-| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`verified`) |
+| 当前阶段 | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` (`planned`) |
 | 最近 verified prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P021-MG 已在最新 `main` 上完成本地 merge 和复验；默认后端 discover 通过，`1947 tests`，`skipped=25`，`expected failures=7`；UoW targeted、PF-P020 writer group、runtime queue、Workbench write characterization、dirty queue wiring、platform guard 均通过 |
-| 下一条允许任务 | 执行用户已明确要求的 `git push origin main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支后生成，不得直接在 `main` 或旧分支继续实现 |
+| 当前分支 | `codex/workbench-uow-integration-planning` |
+| 最近验证 | PF-P021-MG 已在最新 `main` 上完成本地 merge、复验和 `git push origin main`；`main...origin/main` 为 `0 0`；当前分支从最新 `main` 新建；默认后端 discover 通过，`1947 tests`，`skipped=25`，`expected failures=7` |
+| 下一条允许任务 | 只允许执行 `PF-P022`。PF-P022 仅做 Workbench 写路径 UoW 接入规划、stale write 策略、durable idempotency 策略和 7 个 expectedFailure 目标测试转绿分步计划；不得改生产代码、测试断言、SQL migration、部署配置或执行 merge/push |
 
 ## Prompt 执行日志
 
@@ -2353,7 +2353,7 @@ main 上复验：
 - `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
 - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`：Pass，1947 tests，`skipped=25`，`expected failures=7`。
 
-PF-P021-MG 已由用户确认 `verified`。用户已明确要求执行 `git push origin main`。push 完成后，下一条 prompt 必须从最新 `main` 新建分支后生成，不得直接在 `main` 或旧分支继续实现。
+PF-P021-MG 已由用户确认 `verified`，并已推送到 `origin/main`。当前 `main...origin/main` 为 `0 0`。下一条 prompt 已按规则从最新 `main` 新建分支 `codex/workbench-uow-integration-planning` 后生成；不得直接在 `main` 或旧分支继续实现。
 
 ### PF-P021-CI - Workbench UoW Contract Test CI Isolation
 
@@ -2419,6 +2419,46 @@ PF-P021-MG 已由用户确认 `verified`。用户已明确要求执行 `git push
 #### 下一条 Prompt 上下文
 
 PF-P021-CI 已由用户确认 `verified`。下一步重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，确认默认 CI blocker 已解除后再考虑 merge 到 `main`。在 PF-P021-MG 通过前，不得继续迁移 Workbench 写路径。
+
+### PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Workbench 写路径接入 UoW 的规划和策略设计。
+- 梳理真实写 API、`WorkbenchWriteFacade` 方法、UoW 接入点、facts/audit/history/dirty/outbox 事务包裹范围。
+- 明确 stale write / optimistic locking 策略，包括所需 expected version 字段、冲突状态码、响应契约和兼容路径。
+- 明确 durable idempotency 策略，包括 storage owner、key 语义、request fingerprint、result replay、mismatched replay conflict、retention/TTL 和事务语义。
+- 将 `tests/test_workbench_uow_contract.py` 中 7 个 `expectedFailure` 目标测试拆分为后续可执行的转绿阶段。
+- 产出或更新 `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`，并按需要回写 UoW 边界设计和 Workbench 写路径计划。
+
+#### 禁止范围
+
+- 不修改生产代码。
+- 不修改测试代码、测试断言或 `unittest.expectedFailure` 标记。
+- 不修改 SQL migration 或数据库 schema。
+- 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
+- 不执行 stale write、durable idempotency 或真实写 API 的实现。
+- 不执行 merge、push、Traffic Gate、部署或生产访问。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已写入完整 PF-P022 prompt。
+- `migration-state-log.md` 当前 active prompt 指向 PF-P022 planned。
+- prompt 明确要求 Pre-Flight、Allowed Scope、Forbidden Scope、Required Output、Verification 和 Post-Flight。
+- prompt 明确要求 7 个 expectedFailure 目标测试的分阶段转绿计划。
+- prompt 只允许 backend-refactor 文档变更；不允许生产代码、测试、SQL migration 或部署配置变更。
+
+#### 审查结论
+
+- PF-P022 的方向合理：PF-P021 只建立了 minimal UoW skeleton，尚未迁移真实 Workbench 写路径；直接实现 stale write 或 idempotency 会过早扩大 blast radius。
+- 当前更安全的下一步是规划真实写 API 如何分批接入 UoW，并先确定 7 个 target contract tests 的转绿顺序、所需数据契约和潜在 schema 需求。
+- PF-P022 不应修复任何 `expectedFailure` 测试；它只为后续 PF-P023/PF-P024/PF-P025 等执行 prompt 提供事实源。
+
+#### 下一条 Prompt 上下文
+
+下一步只允许执行 PF-P022。执行完成后，必须将结果回写到状态机和相关架构文档，并将 PF-P022 记录为 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。PF-P022 verified 后，才允许根据其真实产物生成下一条实现或测试 prompt。
 
 ## 维护规则
 

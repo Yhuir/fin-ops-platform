@@ -6807,3 +6807,155 @@ Post-Flight:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 
 下一步：重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。
+
+## PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy。
+
+Role: 你是一位精通 Python 遗留系统重构、PostgreSQL 事务一致性、Transactional Outbox、幂等写接口和 Clean Architecture 的后端架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P019 已建立 Workbench UoW target contract tests，其中 7 个 stale write / durable idempotency 目标测试仍为 `unittest.expectedFailure`。
+- PF-P020 已建立 transaction-bound dirty/outbox writer。
+- PF-P021 已建立 minimal `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton。
+- PF-P021-MG 已 verified 并推送到 `origin/main`；当前 prompt 必须从最新 `main` 新建的 `codex/` 分支执行。
+- PF-P022 只做真实 Workbench 写 API 接入 UoW 的规划与策略设计，不执行实现。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_dirty_queue_wiring.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/app/server.py` 中 Workbench 写接口相关 handler 片段。
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支从最新 `main` 新建。
+   - 最近 verified prompt 是 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。
+   - 当前 active prompt 是 `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` planned。
+3. 必须优先使用 CodeGraph 做结构性分析：
+   - 追踪 Workbench 写 handler 到 `WorkbenchWriteFacade`、底层 service、dirty/outbox writer 的调用链。
+   - 对 symbol 调用关系使用 `codegraph_context` / `codegraph_trace` / `codegraph_explore`；只有字面字符串搜索才使用 `rg`。
+4. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+
+Goal:
+产出一个生产级 Workbench 写路径 UoW 接入规划，明确真实写 API 应如何分批接入 `WorkbenchWriteUnitOfWork`，并明确 7 个 `expectedFailure` 目标测试应该分几步转绿。PF-P022 不写生产代码、不改测试、不改 schema。
+
+Required Planning Work:
+1. Real Write API Integration Map
+   - 梳理当前 Workbench 写接口、server handler、`WorkbenchWriteFacade` 方法、底层 service/repository 调用、dirty/outbox/scheduler 路径。
+   - 每个 action 必须标注：当前入口、当前事务边界、当前 dirty/outbox 写入方式、目标 UoW command、目标 handler、目标 response contract。
+   - 至少覆盖 confirm link、cancel link、ignore row、mark exception、exception apply、cash special、withdraw submit、personal advance repayment 等 PF-P019/PF-P017 相关写路径。
+2. Transaction Boundary Map
+   - 对每个写 action 明确必须在同一 PostgreSQL transaction 中提交的 facts、audit/history、dirty scope、outbox、read model scheduling。
+   - 标注当前哪些部分已经具备 transaction-bound writer，哪些仍依赖 app shell callback、全局 repository、外部 scheduler 或事务外 side effect。
+3. Stale Write / Optimistic Locking Strategy
+   - 明确每类写 action 需要的前置状态断言：row version、relation version、case version、read model source_version、expected active generation 或等价字段。
+   - 判断哪些字段当前 API 已具备，哪些需要前端契约新增，哪些可先用后端事实表当前状态做兼容期冲突检测。
+   - 明确 stale write 冲突响应：建议状态码、JSON body、错误码、前端可恢复行为。
+   - 明确“不允许盲写覆盖”的强规则。
+4. Durable Idempotency Strategy
+   - 明确 idempotency storage owner：属于 Workbench 写模块、Platform UoW、还是通用 platform service。
+   - 明确 idempotency key 来源、request fingerprint、actor/scope 绑定、result replay、mismatched replay conflict、retention/TTL 和清理策略。
+   - 明确 idempotency record 必须和 facts/audit/dirty/outbox 处于同一事务还是采用外层 reservation；如需要两阶段策略，必须写清失败恢复语义。
+5. Seven ExpectedFailure Turn-Green Plan
+   - 必须逐条列出以下 7 个 tests 的当前失败原因、目标语义、需要的代码/数据契约、建议实现顺序、预期 prompt 编号：
+     - `test_withdraw_submit_rejects_stale_preview_relation_version`
+     - `test_cancel_link_rejects_stale_replaced_relation`
+     - `test_ignore_row_rejects_when_row_already_confirmed`
+     - `test_cash_special_rejects_changed_relation_version`
+     - `test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history`
+     - `test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox`
+     - `test_cash_special_idempotency_key_does_not_append_duplicate_history`
+   - 不允许建议一次性全部转绿；必须拆成小的可验证切片。
+6. Schema / Migration Readiness
+   - 判断 stale write 和 durable idempotency 是否需要新增 PostgreSQL 表、索引、唯一约束或列。
+   - 如果需要，只能输出 migration 设计草案和风险，不得写 SQL migration。
+   - 必须考虑回滚、幂等 migration、线上已有数据、历史请求无 idempotency key 的兼容。
+7. Runtime Sequence Diagrams
+   - 输出 Mermaid sequence diagram：当前写路径。
+   - 输出 Mermaid sequence diagram：目标 UoW 写路径。
+   - 输出 Mermaid sequence diagram：stale write rejected。
+   - 输出 Mermaid sequence diagram：idempotency replay。
+8. Risk Matrix
+   - 覆盖 stale write、duplicate submit、outbox failure、dirty scope failure、worker lag、read model stale、partial history write、callback side effect、schema rollout、frontend contract mismatch。
+
+Required Output:
+- 创建或更新 `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`。
+- 如发现 `workbench-write-uow-boundary-design.md` 或 `workbench-writes-and-matching-plan.md` 中已有结论过时，允许小范围回写摘要和链接，但不得重写整份文档。
+- 更新 `migration-state-log.md`：
+  - 将 PF-P022 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录主要发现、输出文件、验证命令和下一条 prompt 上下文。
+- 更新 `refactor-prompts.md` 的 PF-P022 执行结果。
+
+Allowed Scope:
+- 只允许修改：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+
+Forbidden Scope:
+- 不修改生产代码。
+- 不修改测试代码、测试断言或 `unittest.expectedFailure` 标记。
+- 不新增或修改 SQL migration、schema、seed、fixture。
+- 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
+- 不修 stale write。
+- 不实现 durable idempotency。
+- 不迁移真实写 API 到 UoW。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Scope verification:
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+2. Allowlist verification:
+   - `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$|docs/architecture/backend-refactor/workbench-uow-integration-plan\\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$)'`
+   - 该命令必须无输出；否则 blocked。
+3. No test execution is required because PF-P022 is docs-only planning. If code or tests are modified accidentally, revert only those accidental PF-P022 changes and re-run the relevant tests before continuing.
+
+Post-Flight:
+- 更新 `migration-state-log.md` 和 `refactor-prompts.md`。
+- 不生成下一条 prompt。
+- 不执行 PF-P023。
+- 不 merge。
+- 不 push。
+- 未经用户确认，不得将 PF-P022 标记为 `verified`。
+- 最终回复必须说明：
+  - 已读取哪些文档和代码；
+  - 输出的 UoW integration plan 覆盖了哪些写路径；
+  - 7 个 expectedFailure 目标测试被拆成哪些后续转绿阶段；
+  - 是否发现 schema/migration 前置需求；
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P022 的边界正确：它只做 Workbench 写路径 UoW 接入规划，不实现 stale write、durable idempotency 或真实写 API 迁移。
+- PF-P022 必须把 7 个 `expectedFailure` 测试拆成多个小切片；一次性转绿会把事务、幂等、前端契约和 schema 风险混在一起。
+- PF-P022 允许使用 CodeGraph 梳理动态调用链和 handler/facade/service 关系，但输出必须落到文档事实源，供下一条 prompt 使用。
+- PF-P022 完成后只能进入 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
