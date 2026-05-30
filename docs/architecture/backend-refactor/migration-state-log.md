@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` 已执行并合入本地 `main`，等待用户确认 verified |
-| 当前 active prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` |
+| 当前阶段 | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` 已由用户确认 verified，准备 push 到 `origin/main` |
+| 当前 active prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P030-MG 合入前与合入后 `main` 复验全部通过；未 push；未迁移真实 Workbench API |
-| 下一条允许任务 | 等待用户确认 PF-P030-MG 可标记 `verified`；确认后再执行 `git push origin main`，push 后必须从最新 `main` 新建分支生成下一条 prompt |
+| 最近验证 | PF-P030-MG 合入前与合入后 `main` 复验全部通过；用户已确认 verified；未迁移真实 Workbench API |
+| 下一条允许任务 | 执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -3169,7 +3169,7 @@ PF-P030 已由用户确认 `verified`。PF-P030-MG 已生成并审查，下一�
 
 ### PF-P030-MG - Workbench Stale Write Foundation Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3243,7 +3243,7 @@ PF-P030 已由用户确认 `verified`。PF-P030-MG 已生成并审查，下一�
 
 #### 下一条 Prompt 上下文
 
-PF-P030-MG 已合入本地 `main` 并完成 main 上复验，但尚未由用户确认 `verified`，也尚未 push 到 `origin/main`。下一步应先由用户确认 PF-P030-MG `verified`；随后执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。真实 Workbench API migration 仍未开始。
+PF-P030-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确认 `verified`。下一步执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。真实 Workbench API migration 仍未开始。
 
 ## 维护规则
 

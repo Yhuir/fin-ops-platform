@@ -9053,9 +9053,12 @@ Main 上复验：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 
+用户确认：
+
+- 用户已确认 PF-P030-MG `verified`。
+
 下一步：
 
-- 等待用户确认 PF-P030-MG 可标记为 `verified`。
-- 用户确认后再执行 `git push origin main`。
+- 执行 `git push origin main`。
 - push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。
 - 真实 Workbench API migration 仍未开始。
