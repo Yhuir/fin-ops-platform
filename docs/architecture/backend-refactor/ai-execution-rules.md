@@ -42,6 +42,7 @@ Prompt 必须一次只生成一个。不得一次性生成整条重构链路的�
 
 prompt 必须写明：
 
+- `/goal` 作为 prompt 正文第一行。后续所有新生成的执行 prompt 必须以 `/goal` 开头，方便 Codex/Gemini 明确进入目标执行语境。
 - Pre-Flight。
 - Allowed Scope。
 - Forbidden Scope。

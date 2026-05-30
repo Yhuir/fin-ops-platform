@@ -396,3 +396,98 @@ PF-P021-CI 已执行并记录为 `implemented`，等待用户确认后才能标�
 - 未修改生产代码，未执行 merge、Traffic Gate、部署或 push。
 
 PF-P021-CI 经用户确认 `verified` 后，应重新执行 PF-P021-MG，确认默认 CI blocker 已解除后再考虑合入 `main`。在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。
+
+## 14. PF-P022 UoW Integration Planning Result
+
+PF-P022 已生成真实写路径 UoW 接入规划，产物为：
+
+- `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+
+核心结论：
+
+- 真实 Workbench 写 API 仍未接入 `WorkbenchWriteUnitOfWork`；PF-P022 只做规划，不改生产代码。
+- `confirm_link` / `cancel_link` 是第一批真实 UoW 迁移候选，因为它们的事实边界相对集中在 pair relation/history。
+- `ignore_row`、exception apply、cash special、withdraw、personal advance repayment 应在 stale write 与 durable idempotency 基础能力明确后分批迁移。
+- Durable idempotency 需要持久化 store；纯内存 store 不足以支撑多进程、重启和 HTTP retry。
+- Stale write 需要统一 `expected_versions` 语义，并逐步扩展前端/读模型 payload，使写请求能携带用户看到的 relation/case/row/source version。
+- 7 个 `unittest.expectedFailure` 目标测试不应一次性转绿，应拆成 stale write contract、idempotency store contract、pair relation UoW、ignore row UoW、cash special UoW、exception apply UoW、withdraw/personal advance UoW 等小切片。
+
+下一步建议：PF-P023 先补 Workbench stale write contract and compatibility tests，不直接迁移生产写路径。
+
+## 15. PF-P024 Durable Idempotency Boundary Update
+
+PF-P024 has been executed as a contract-only slice. It does not change production write behavior.
+
+Boundary decisions now locked by tests:
+
+- Durable Workbench idempotency persistence unique identity is `(tenant_id, actor_id, idempotency_key)`.
+- PF-P024 currently also uses an action-scoped `record.identity` assertion shaped as `(tenant_id, action_name, idempotency_key)`; PF-P025 must split or rename these identities before implementation hardens the API.
+- Idempotency records must store only replay-safe response payloads and must include `source_versions` plus `outbox_event_ids` so replay returns the same read-model freshness metadata as the first committed write.
+- Request fingerprint must be deterministic over action, tenant, actor and business payload, while excluding trace ids, request timestamps and non-business headers.
+- Same key and same fingerprint must replay without calling the handler or writing dirty/outbox again.
+- Same key and different fingerprint must be represented as a stable 409 conflict.
+- The future reserve/commit flow must live inside the same PostgreSQL transaction as facts, audit, dirty scope, outbox and source version writes.
+
+Current implementation gaps remain intentional:
+
+- no durable repository or SQL table;
+- no production fingerprint helper;
+- no conflict exception/response primitive;
+- no UoW idempotency get/reserve/commit/replay integration;
+- no real Workbench write API migration.
+
+The next implementation is now planned as `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`. It should build reusable idempotency primitives first. It should not connect real Workbench write actions until those primitives have their own contract tests and default CI stays green.
+
+## 16. PF-P025 Durable Idempotency Primitive Update
+
+PF-P025 has been executed as a primitive-only slice. It does not change production Workbench write behavior.
+
+Implemented reusable primitives:
+
+- `WorkbenchIdempotencyRecord`
+- `workbench_request_fingerprint`
+- `WorkbenchIdempotencyKeyConflict`
+- `InMemoryWorkbenchIdempotencyRepository`
+
+Identity terms are now separated:
+
+- `unique_identity`: `(tenant_id, actor_id, idempotency_key)` for durable persistence uniqueness.
+- `action_identity`: `(tenant_id, action_name, idempotency_key)` for action-scoped routing and diagnostics.
+- `identity`: compatibility alias for `action_identity`.
+
+What is still intentionally not implemented:
+
+- no real PostgreSQL idempotency table;
+- no SQL migration;
+- no production repository wired to the database;
+- no `WorkbenchWriteUnitOfWork.run()` idempotency replay/reserve/commit integration;
+- no real Workbench write API migration.
+
+The next safe implementation step is UoW idempotency integration against fake/in-memory contracts only. Real API migration should still wait until UoW replay/conflict behavior is mechanically green.
+
+PF-P025 has been confirmed `verified`. PF-P026 is now planned as `Workbench UoW Idempotency Integration Skeleton`.
+
+PF-P026 must only wire the idempotency primitive into `WorkbenchWriteUnitOfWork.run()` under fake/in-memory repository contracts. It must not migrate real Workbench write APIs, introduce SQL migrations, or add a real PostgreSQL idempotency repository.
+
+## 17. PF-P026 UoW Idempotency Skeleton Boundary Update
+
+PF-P026 has been executed as a UoW skeleton-only slice. It does not change real Workbench HTTP write behavior.
+
+The UoW boundary now includes fake/in-memory idempotency semantics:
+
+- pre-transaction idempotency lookup for commands with `idempotency_key`;
+- committed same-fingerprint replay without handler execution;
+- same-key different-fingerprint conflict without handler execution;
+- transaction-scoped reserve before handler execution;
+- commit after facts handler plus dirty/outbox/source_version writes.
+
+This strengthens the target UoW boundary but does not make idempotency durable across processes yet. A production-grade rollout still requires a future PostgreSQL repository and SQL migration before real Workbench write APIs can rely on replay after process restart.
+
+Remaining boundary gaps:
+
+- no real PostgreSQL idempotency table;
+- no real Workbench write API migrated into UoW;
+- no stale write / optimistic locking checks;
+- no frontend contract for expected versions.
+
+PF-P026 should be followed by a Merge Gate after user confirmation, because PF-P023 through PF-P026 now form a coherent Workbench stale-write/idempotency foundation slice.

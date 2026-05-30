@@ -25,6 +25,9 @@ class _Command:
     scope_keys: list[str] = field(default_factory=list)
     expected_versions: dict[str, object] = field(default_factory=dict)
     idempotency_key: str | None = None
+    request_fingerprint: str | None = None
+    tenant_id: str = "default"
+    actor_id: str = "system"
     payload: dict[str, object] = field(default_factory=dict)
 
 
@@ -399,6 +402,12 @@ class WorkbenchUoWContractTests(unittest.TestCase):
     @unittest.expectedFailure
     def test_cancel_link_rejects_stale_replaced_relation(self) -> None:
         uow = self._new_uow()
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"affected_scope_keys": ["2026-05"]}
 
         with self.assertRaisesRegex(Exception, "409|stale|conflict|version"):
             self._run_uow(
@@ -408,27 +417,41 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                     expected_versions={"relation:CASE-OLD": 2},
                     payload={"current_relation_case_id": "CASE-NEW", "current_relation_version": 5},
                 ),
-                lambda ctx: {"affected_scope_keys": ["2026-05"]},
+                handler,
             )
+        self.assertFalse(called)
 
     @unittest.expectedFailure
     def test_ignore_row_rejects_when_row_already_confirmed(self) -> None:
         uow = self._new_uow()
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"affected_scope_keys": ["2026-05"]}
 
         with self.assertRaisesRegex(Exception, "409|stale|conflict|already"):
             self._run_uow(
                 uow,
                 _Command(
                     action_name="ignore_row",
-                    expected_versions={"row:bank-1": "open"},
+                    expected_versions={"row:invoice-1": "open", "relation:CASE-CONFIRMED": None},
                     payload={"current_row_status": "confirmed"},
                 ),
-                lambda ctx: {"affected_scope_keys": ["2026-05"]},
+                handler,
             )
+        self.assertFalse(called)
 
     @unittest.expectedFailure
     def test_cash_special_rejects_changed_relation_version(self) -> None:
         uow = self._new_uow()
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"affected_scope_keys": ["2026-05"]}
 
         with self.assertRaisesRegex(Exception, "409|stale|conflict|version"):
             self._run_uow(
@@ -436,12 +459,12 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 _Command(
                     action_name="confirm_cash_pass_through",
                     expected_versions={"relation:CASE-CASH": 1},
-                    payload={"current_relation_version": 2},
+                    payload={"current_relation_case_id": "CASE-CASH", "current_relation_version": 2},
                 ),
-                lambda ctx: {"affected_scope_keys": ["2026-05"]},
+                handler,
             )
+        self.assertFalse(called)
 
-    @unittest.expectedFailure
     def test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history(self) -> None:
         idempotency = _RecordingIdempotencyStore()
         uow = self._new_uow(idempotency_store=idempotency)
@@ -453,14 +476,21 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             ctx.pair_relations.record("append_history", case_id="CASE-IDEMPOTENT")
             return {"case_id": "CASE-IDEMPOTENT", "affected_scope_keys": ["2026-05"]}
 
-        command = _Command(action_name="confirm_link", scope_keys=["2026-05"], idempotency_key="confirm:idem-1")
+        command = _Command(
+            action_name="confirm_link",
+            scope_keys=["2026-05"],
+            idempotency_key="confirm:idem-1",
+            request_fingerprint="fp:confirm-link:case-idempotent",
+            actor_id="finance-1",
+            payload={"case_id": "CASE-IDEMPOTENT", "row_ids": ["oa-1", "bank-1"]},
+        )
         first = self._run_uow(uow, command, handler)
         second = self._run_uow(uow, command, handler)
 
         self.assertEqual(first, second)
         self.assertEqual(call_count, 1)
+        self.assertEqual(idempotency.records.get("confirm:idem-1"), first)
 
-    @unittest.expectedFailure
     def test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox(self) -> None:
         idempotency = _RecordingIdempotencyStore()
         writer = _RecordingDirtyOutboxWriter()
@@ -477,16 +507,20 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             action_name="exception_apply",
             scope_keys=["2026-05"],
             idempotency_key="exception:idem-1",
+            request_fingerprint="fp:exception-apply:ex-idempotent",
+            actor_id="finance-1",
+            payload={"case_id": "EX-IDEMPOTENT", "row_ids": ["bank-1"], "scenario_code": "manual"},
         )
         self._run_uow(uow, command, handler)
         self._run_uow(uow, command, handler)
 
         self.assertEqual(call_count, 1)
         self.assertEqual(len(writer.calls), 1)
+        self.assertIn("exception:idem-1", idempotency.records)
 
-    @unittest.expectedFailure
     def test_cash_special_idempotency_key_does_not_append_duplicate_history(self) -> None:
-        uow = self._new_uow()
+        idempotency = _RecordingIdempotencyStore()
+        uow = self._new_uow(idempotency_store=idempotency)
         history_appends = 0
 
         def handler(ctx: object) -> dict[str, object]:
@@ -499,11 +533,15 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             action_name="confirm_cash_pass_through",
             scope_keys=["2026-05"],
             idempotency_key="cash:idem-1",
+            request_fingerprint="fp:cash-special:case-cash",
+            actor_id="finance-1",
+            payload={"case_id": "CASE-CASH", "bank_row_ids": ["bank-in-1", "bank-out-1"]},
         )
         self._run_uow(uow, command, handler)
         self._run_uow(uow, command, handler)
 
         self.assertEqual(history_appends, 1)
+        self.assertIn("cash:idem-1", idempotency.records)
 
     def test_outbox_payload_contains_source_version_for_each_dirty_scope(self) -> None:
         connection = _RecordingConnection(_RecordingTransaction(dirty_source_version=9))

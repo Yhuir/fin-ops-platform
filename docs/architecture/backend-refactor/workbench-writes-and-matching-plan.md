@@ -578,3 +578,12 @@ PF-P021-CI 已按该边界执行：
 - 未修改生产代码，未执行 merge、Traffic Gate、部署或 push。
 
 PF-P021-CI 需要用户确认后才能标记 `verified`。确认后应重新执行 PF-P021-MG；在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。
+
+PF-P021-MG 已由用户确认 `verified` 并推送到 `origin/main`。PF-P022 已执行并产出 `workbench-uow-integration-plan.md`，用于规划真实 Workbench 写 API 如何分批接入 UoW。
+
+PF-P022 的模块顺序结论：
+
+- 第一批真实迁移候选是 `confirm_link` / `cancel_link`，但仍需先补 stale write contract tests 和 idempotency store contract。
+- `ignore_row` 是第二批 stale row status 冲突候选。
+- cash special、exception apply、withdraw、personal advance repayment 涉及更复杂的 relation metadata、case/override/candidate 或复合 relation/case 事务，必须在 UoW conflict primitive 和 durable idempotency store 后推进。
+- 下一条建议 prompt 是 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`；它仍然不应直接迁移生产写路径。
