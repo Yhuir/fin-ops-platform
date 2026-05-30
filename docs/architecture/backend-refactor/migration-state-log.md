@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` 已 verified 并 push 到 `origin/main` |
-| 当前 active prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` (`verified`) |
+| 当前阶段 | `PF-P031 - Workbench Cancel Link Stale Guard Migration` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P031 - Workbench Cancel Link Stale Guard Migration` (`planned`) |
 | 最近 verified prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P030-MG 合入前与合入后 `main` 复验全部通过；已 push；未迁移真实 Workbench API |
-| 下一条允许任务 | 从最新 `main` 新建分支，再生成并审查 `PF-P031 - Workbench Cancel Link Stale Guard Migration`；不得直接执行 |
+| 当前分支 | `codex/workbench-cancel-link-stale-guard` |
+| 最近验证 | PF-P030-MG 合入前与合入后 `main` 复验全部通过；已 push；PF-P031 已生成但未执行 |
+| 下一条允许任务 | 等待用户确认后执行 PF-P031；PF-P031 只迁移 cancel link stale guard，不迁移 ignore row、cash special 或 withdraw submit |
 
 ## Prompt 执行日志
 
@@ -3244,6 +3244,39 @@ PF-P030 已由用户确认 `verified`。PF-P030-MG 已生成并审查，下一�
 #### 下一条 Prompt 上下文
 
 PF-P030-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确认 `verified`。`git push origin main` 已完成，`main` 与 `origin/main` 对齐。下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P031 - Workbench Cancel Link Stale Guard Migration`。真实 Workbench API migration 仍未开始；PF-P031 是第一条真实写 API stale guard 迁移候选，生成后仍需单独审查，不得直接执行。
+
+### PF-P031 - Workbench Cancel Link Stale Guard Migration
+
+状态：`planned`
+
+#### 范围
+
+- 只迁移 Workbench `cancel link` 的 stale guard。
+- 目标：当请求携带 `expected_versions` 且当前 row active relation 已从用户预期 relation 替换为其它 relation 时，返回 `409 workbench_write_conflict`，并且不得取消新的 active relation。
+- 保持未携带 `expected_versions` 的 legacy cancel link 行为不变。
+- 复用 PF-P028/PF-P030 已建立的 `WorkbenchWriteConflict` 和 stale precondition primitive。
+
+#### 禁止范围
+
+- 不迁移 `ignore row`。
+- 不迁移 `cash special`。
+- 不迁移 `withdraw submit`。
+- 不修改前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不生成或执行 PF-P032。
+
+#### 验收标准
+
+- 先写或补充针对真实 HTTP/facade cancel link 行为的测试，再实现。
+- 新增测试必须覆盖 stale expected relation identity 返回 409 且不取消当前 active relation。
+- 现有 duplicate cancel/current behavior characterization 仍通过，除非 prompt 内明确将其拆成 legacy/no-expected-versions 与 guarded/expected-versions 两种行为。
+- 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试通过。
+
+#### 审查结论
+
+- PF-P031 是 PF-P030-MG 后的正确下一步，因为 stale write 计划把 cancel link 列为第一条真实写 API 迁移候选。
+- PF-P031 必须保持小切片，只处理 cancel link；其它 stale write 写路径留给后续 PF-P032/PF-P033/PF-P034。
+- 当前分支已从最新 `main` 创建：`codex/workbench-cancel-link-stale-guard`。
 
 ## 维护规则
 
