@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P021-CI - Workbench UoW Contract Test CI Isolation` |
+| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 已确认 verified，等待推送远端 |
+| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` |
 | 当前分支 | `main` |
 | 最近验证 | PF-P021-MG 已在最新 `main` 上完成本地 merge 和复验；默认后端 discover 通过，`1947 tests`，`skipped=25`，`expected failures=7`；UoW targeted、PF-P020 writer group、runtime queue、Workbench write characterization、dirty queue wiring、platform guard 均通过 |
-| 下一条允许任务 | 等待用户确认 PF-P021-MG 是否标记为 `verified`；确认前不得生成下一条业务实现 prompt，不得 push，除非用户另行明确要求 |
+| 下一条允许任务 | 执行用户已明确要求的 `git push origin main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支后生成，不得直接在 `main` 或旧分支继续实现 |
 
 ## Prompt 执行日志
 
@@ -2271,7 +2271,7 @@ PF-P021 已由用户确认 `verified`。PF-P021-MG 已生成并审查，下一�
 
 ### PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2353,7 +2353,7 @@ main 上复验：
 - `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
 - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`：Pass，1947 tests，`skipped=25`，`expected failures=7`。
 
-PF-P021-MG 记录为 `implemented`，等待用户确认后才能标记 `verified`。确认前不得生成下一条业务实现 prompt。
+PF-P021-MG 已由用户确认 `verified`。用户已明确要求执行 `git push origin main`。push 完成后，下一条 prompt 必须从最新 `main` 新建分支后生成，不得直接在 `main` 或旧分支继续实现。
 
 ### PF-P021-CI - Workbench UoW Contract Test CI Isolation
 

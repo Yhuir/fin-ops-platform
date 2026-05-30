@@ -6406,7 +6406,7 @@ Post-Flight:
 
 ## PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -6604,7 +6604,7 @@ Blocker:
 
 ### 重新执行结果（PF-P021-CI 后）
 
-状态：`implemented`，等待用户确认后才能标记 `verified`。
+状态：`verified`。用户已确认 PF-P021-MG verified，并要求执行 `git push origin main`。
 
 本轮已 merge 到本地 `main`：
 
@@ -6640,7 +6640,7 @@ main 上复验：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`：Pass，1947 tests，`skipped=25`，`expected failures=7`。
 
-下一步：等待用户确认 PF-P021-MG `verified`；确认前不生成下一条业务实现 prompt，不 push。
+下一步：执行 `git push origin main`。push 完成后，下一条 prompt 必须从最新 `main` 新建分支后生成，不得直接在 `main` 或旧分支继续实现。
 
 ## PF-P021-CI - Workbench UoW Contract Test CI Isolation
 
