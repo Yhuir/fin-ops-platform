@@ -420,7 +420,8 @@ PF-P024 has been executed as a contract-only slice. It does not change productio
 
 Boundary decisions now locked by tests:
 
-- Durable Workbench idempotency identity is `(tenant_id, actor_id, idempotency_key)`.
+- Durable Workbench idempotency persistence unique identity is `(tenant_id, actor_id, idempotency_key)`.
+- PF-P024 currently also uses an action-scoped `record.identity` assertion shaped as `(tenant_id, action_name, idempotency_key)`; PF-P025 must split or rename these identities before implementation hardens the API.
 - Idempotency records must store only replay-safe response payloads and must include `source_versions` plus `outbox_event_ids` so replay returns the same read-model freshness metadata as the first committed write.
 - Request fingerprint must be deterministic over action, tenant, actor and business payload, while excluding trace ids, request timestamps and non-business headers.
 - Same key and same fingerprint must replay without calling the handler or writing dirty/outbox again.
@@ -435,4 +436,4 @@ Current implementation gaps remain intentional:
 - no UoW idempotency get/reserve/commit/replay integration;
 - no real Workbench write API migration.
 
-The next implementation should build reusable idempotency primitives first. It should not connect real Workbench write actions until those primitives have their own contract tests and default CI stays green.
+The next implementation is now planned as `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`. It should build reusable idempotency primitives first. It should not connect real Workbench write actions until those primitives have their own contract tests and default CI stays green.

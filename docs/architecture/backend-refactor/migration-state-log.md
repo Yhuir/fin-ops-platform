@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P024 - Workbench Durable Idempotency Store Contract` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P024 - Workbench Durable Idempotency Store Contract` (`implemented`) |
-| 最近 verified prompt | `PF-P023 - Workbench Stale Write Contract and Compatibility Tests` |
+| 当前阶段 | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` (`planned`) |
+| 最近 verified prompt | `PF-P024 - Workbench Durable Idempotency Store Contract` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P023 已由用户确认 `verified`；PF-P024 targeted tests 已通过，包含 durable idempotency target `expectedFailure` |
-| 下一条允许任务 | 等待用户确认 PF-P024 是否可标记 `verified`。确认前不得生成 PF-P025，不得迁移真实 Workbench 写路径 |
+| 最近验证 | PF-P024 已由用户确认 `verified`；durable idempotency contract tests 已锁定且默认 CI 保持绿色 |
+| 下一条允许任务 | 只允许执行 PF-P025。PF-P025 只能实现 record / fingerprint / conflict / repository skeleton，不得迁移真实 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -2536,7 +2536,7 @@ PF-P023 已由用户确认 `verified`。下一步允许执行已生成并审查�
 
 ### PF-P024 - Workbench Durable Idempotency Store Contract
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2587,10 +2587,55 @@ PF-P023 已由用户确认 `verified`。下一步允许执行已生成并审查�
 - PF-P024 不应写 SQL migration 或实现 store；真实 store 实现应进入后续 prompt。
 - PF-P024 不应把任何 Workbench 写 API 接入 UoW；真实迁移必须等待 stale write 与 durable idempotency contracts 都稳定。
 - PF-P024 执行后确认的实现缺口：尚无 `WorkbenchIdempotencyRecord`、`workbench_request_fingerprint`、`WorkbenchIdempotencyKeyConflict`、durable idempotency repository、同事务 reserve/commit/replay 生产逻辑，也没有对应 SQL migration。
+- PF-P024 已由用户确认 `verified`。
 
 #### 下一条 Prompt 上下文
 
-PF-P024 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。确认后，下一步应生成并审查 PF-P025；PF-P025 应优先处理 durable idempotency 的实现前置，而不是直接迁移真实 Workbench 写 API。可选方向是 `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`：只实现 record/fingerprint/conflict/repository skeleton 和 fake/contract tests，不接入真实 `confirm_link`、`exception_apply` 或 cash special 写路径。
+PF-P024 已由用户确认 `verified`。PF-P025 已生成并审查，下一步只允许执行 PF-P025。PF-P025 应优先处理 durable idempotency 的实现前置，而不是直接迁移真实 Workbench 写 API。
+
+### PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 只实现 Workbench durable idempotency 的可复用基础原语：
+  - `WorkbenchIdempotencyRecord`
+  - `workbench_request_fingerprint`
+  - `WorkbenchIdempotencyKeyConflict`
+  - repository port / skeleton 或 in-memory contract adapter
+- 让 PF-P024 中 record、fingerprint、conflict 相关目标测试转绿。
+- 可新增 repository skeleton contract tests，但不得要求真实 PostgreSQL migration。
+- 保持 UoW replay / reserve / commit 集成测试为 `expectedFailure`，除非 prompt 明确允许最小 skeleton wiring；本轮默认不接入真实写路径。
+- 必须澄清 PF-P024 中 `record.identity` action-scoped 断言与 durable persistence unique key `(tenant_id, actor_id, idempotency_key)` 的命名边界，避免后续实现混用。
+
+#### 禁止范围
+
+- 不迁移 `confirm_link`、`cancel_link`、`exception_apply`、cash special、ignore、withdraw 或任何真实 Workbench 写 API。
+- 不修改 `app/server.py` 的 Workbench handler 行为。
+- 不实现完整 `WorkbenchWriteUnitOfWork.run()` idempotency replay / reserve / commit 流程。
+- 不新增或修改 SQL migration。
+- 不把 repository 接到真实 PostgreSQL 表。
+- 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+
+#### 验收标准
+
+- `tests/test_workbench_idempotency_contract.py` 中 record、fingerprint、conflict 测试应转为普通通过测试。
+- 任何仍未实现的 UoW replay / reserve / commit 目标语义必须继续用 `unittest.expectedFailure` 显示保留，不得 skip。
+- `tests/test_workbench_uow_contract.py` 仍保持默认 CI 绿色。
+- production 代码变更只允许在 Workbench UoW/idempotency primitive 边界内。
+- 不得改变真实 Workbench 写 API 的响应和副作用。
+
+#### 审查结论
+
+- PF-P025 是 PF-P024 后的正确下一步：它补齐实现前置 primitive，避免直接把复杂写路径接入 UoW。
+- 真实 durable PostgreSQL repository、SQL migration 和 UoW replay/commit 集成仍应进入后续 prompt。
+- PF-P025 通过后，再评估是否进入 `PF-P026 - Workbench UoW Idempotency Integration Skeleton` 或先补 `PF-P025-MG`，取决于本分支是否达到可合并切片边界。
+
+#### 下一条 Prompt 上下文
+
+下一步只允许执行 PF-P025，不得生成 PF-P026，不得执行真实 Workbench 写 API 迁移。PF-P025 完成后必须回写状态机和相关架构文档，记录哪些 PF-P024 expectedFailure 已转绿、哪些仍是目标契约。
 
 ## 维护规则
 

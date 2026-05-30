@@ -293,7 +293,7 @@ sequenceDiagram
 
 | Test | Current missing behavior | Target semantics | Required contract/data | Suggested prompt |
 | --- | --- | --- | --- | --- |
-| `test_withdraw_submit_rejects_stale_preview_relation_version` | UoW does not evaluate `expected_versions`; withdraw submit does not carry preview relation version | If active relation version differs from preview, handler is not called and response is 409 | Preview response must expose relation id/version; submit payload must send expected relation version | `PF-P023 - Workbench Stale Write Contract Tests` then `PF-P025 - Withdraw Stale Guard` |
+| `test_withdraw_submit_rejects_stale_preview_relation_version` | UoW does not evaluate `expected_versions`; withdraw submit does not carry preview relation version | If active relation version differs from preview, handler is not called and response is 409 | Preview response must expose relation id/version; submit payload must send expected relation version | `PF-P023 - Workbench Stale Write Contract Tests` then a later stale guard prompt |
 | `test_cancel_link_rejects_stale_replaced_relation` | UoW does not compare expected relation with current active relation | Cancel must reject if user saw CASE-OLD but current active relation is CASE-NEW | Pair relation repository needs current active relation lookup by row id with version | `PF-P023` then `PF-P026 - Pair Relation UoW Integration` |
 | `test_ignore_row_rejects_when_row_already_confirmed` | UoW does not assert row is still open/unpaired | Ignore must reject if row already confirmed/paired | Read model/facts repository must expose current row relation status or active relation lookup | `PF-P023` then `PF-P027 - Ignore Row UoW Integration` |
 | `test_cash_special_rejects_changed_relation_version` | Cash special writes metadata on current relation without expected version check | Cash special must reject if relation version changed | Payload or active relation read must include expected relation version | `PF-P023` then `PF-P028 - Cash Special UoW Integration` |
@@ -305,12 +305,14 @@ Suggested sequencing:
 
 1. `PF-P023 - Workbench Stale Write Contract Tests`: add/adjust target tests and API compatibility tests only; no implementation.
 2. `PF-P024 - Workbench Durable Idempotency Store Contract`: test/store design and migration draft; no production migration unless separately approved.
-3. `PF-P025 - Workbench UoW Conflict Primitive`: implement reusable UoW stale precondition check and conflict exception; no real API migration.
-4. `PF-P026 - Confirm/Cancel Link UoW Integration`: first real write path migration.
-5. `PF-P027 - Ignore Row UoW Integration`: row-status conflict path.
-6. `PF-P028 - Cash Special UoW Integration`: relation metadata and idempotent history.
-7. `PF-P029 - Exception Apply UoW Integration`: durable exception apply idempotency and case/outbox atomicity.
-8. `PF-P030 - Withdraw and Personal Advance UoW Integration`: complex relation restoration and mixed case/relation transaction.
+3. `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`: implement reusable idempotency primitives; no real API migration.
+4. A later UoW stale/conflict primitive prompt: implement reusable stale precondition check and conflict exception; no real API migration.
+5. A later UoW idempotency integration skeleton prompt: connect repository primitive to `WorkbenchWriteUnitOfWork` with fake/contract tests; no real API migration unless explicitly authorized.
+6. Confirm/Cancel Link UoW Integration: first real write path migration candidate.
+7. Ignore Row UoW Integration: row-status conflict path.
+8. Cash Special UoW Integration: relation metadata and idempotent history.
+9. Exception Apply UoW Integration: durable exception apply idempotency and case/outbox atomicity.
+10. Withdraw and Personal Advance UoW Integration: complex relation restoration and mixed case/relation transaction.
 
 ## 9. Schema / Migration Readiness
 
@@ -383,8 +385,8 @@ Do not inject:
 
 | Risk | Current exposure | Target control | Next validation |
 | --- | --- | --- | --- |
-| Stale write / blind overwrite | Multiple write paths operate on current active state without checking what user saw | `expected_versions` + 409 conflict | PF-P023/PF-P025 |
-| Duplicate submit | Current behavior varies: replay, 404, duplicate history, or duplicate scheduling | Durable idempotency key + fingerprint + replay | PF-P024/PF-P026/PF-P028/PF-P029 |
+| Stale write / blind overwrite | Multiple write paths operate on current active state without checking what user saw | `expected_versions` + 409 conflict | PF-P023 plus later stale conflict primitive prompt |
+| Duplicate submit | Current behavior varies: replay, 404, duplicate history, or duplicate scheduling | Durable idempotency key + fingerprint + replay | PF-P024/PF-P025 plus later UoW idempotency integration |
 | Outbox failure after facts | Current dirty/outbox scheduling is after facts persistence for many paths | Dirty/outbox writer inside UoW transaction | Already skeletoned; verify per migrated path |
 | Dirty scope failure | Same as outbox failure | UoW rollback | Path-specific tests |
 | Worker lag / read model stale | Existing async model can show refreshing/stale | Write response returns `source_versions`; read path can compare expected versions | Later read/write integration tests |
@@ -423,7 +425,7 @@ Then use PF-P024 for durable idempotency store contract and schema readiness bef
 
 ## 13. PF-P024 Durable Idempotency Contract Result
 
-PF-P024 has been executed and is waiting for user confirmation before it can be marked `verified`.
+PF-P024 has been executed and confirmed `verified` by the user.
 
 Implemented scope:
 
@@ -434,7 +436,8 @@ Implemented scope:
 
 The new idempotency contract file locks these future requirements:
 
-- Durable idempotency record identity is `(tenant_id, actor_id, idempotency_key)`.
+- Durable idempotency persistence unique identity is `(tenant_id, actor_id, idempotency_key)`.
+- PF-P024's current `record.identity` assertion uses `(tenant_id, action_name, idempotency_key)` as an action-scoped identity; PF-P025 must either split this into `unique_identity` / `action_identity` or update tests and docs so the terms no longer conflict.
 - Record fields must include tenant, actor, action name, idempotency key, request fingerprint, status, response payload, source versions, outbox event ids, created/completed/expiry timestamps.
 - Stored replay payload must not include token, cookie, auth header, production URL, or other secrets.
 - Request fingerprint must be canonical and stable across JSON key ordering.
@@ -462,4 +465,4 @@ Next prompt should not migrate a real Workbench write path yet. Recommended next
 
 `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`
 
-PF-P025 should implement the reusable idempotency primitives and make the PF-P024 record/fingerprint/conflict skeleton tests green. It should still avoid migrating `confirm_link`, `exception_apply`, cash special, or any other real Workbench write API unless a separate prompt explicitly authorizes that scope.
+PF-P025 should implement the reusable idempotency primitives and make the PF-P024 record/fingerprint/conflict skeleton tests green. It must also resolve the identity naming boundary above. It should still avoid migrating `confirm_link`, `exception_apply`, cash special, or any other real Workbench write API unless a separate prompt explicitly authorizes that scope.
