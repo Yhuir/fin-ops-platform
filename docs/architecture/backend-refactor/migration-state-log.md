@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` 已执行并合入本地 `main`，等待用户确认 |
-| 当前 active prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` |
+| 当前阶段 | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` 已由用户确认 `verified`，准备推送 `origin/main` |
+| 当前 active prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P026-MG 已在本地 `main` 复验通过；merge commit `8c0013bf`，未 push |
-| 下一条允许任务 | 等待用户确认 PF-P026-MG 是否可标记 `verified`。确认前不得生成 PF-P027，不得迁移真实 Workbench 写 API，不得 push |
+| 最近验证 | PF-P026-MG 已在本地 `main` 复验通过；merge commit `8c0013bf`；用户已确认 `verified` 并要求 push |
+| 下一条允许任务 | 执行 `git push origin main`。push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -2753,7 +2753,7 @@ PF-P026 已由用户确认 `verified`。PF-P026-MG 已生成并审查，下一�
 
 ### PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2842,7 +2842,7 @@ PF-P026 已由用户确认 `verified`。PF-P026-MG 已生成并审查，下一�
 
 #### 下一条 Prompt 上下文
 
-PF-P026-MG 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。确认后可按用户指令决定是否 `git push origin main`。push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt。确认前不得生成 PF-P027，不得迁移真实 Workbench 写 API。
+PF-P026-MG 已由用户确认 `verified`，并要求执行 `git push origin main`。push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt。建议下一条 prompt 为 `PF-P027 - Workbench Stale Write Boundary Discovery and Planning`，先做 stale write / optimistic locking 的 discovery、边界设计和测试转绿顺序规划，不直接迁移真实 Workbench 写 API。
 
 ## 维护规则
 

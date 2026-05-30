@@ -7876,7 +7876,7 @@ Post-Flight:
 
 ## PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -8050,7 +8050,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`
+状态：`verified`
 
 已完成：
 
@@ -8115,6 +8115,6 @@ Main 上复验：
 
 下一步：
 
-- 等待用户确认 PF-P026-MG 是否可标记 `verified`。
-- 用户确认后，可按用户指令决定是否执行 `git push origin main`。
+- 用户已确认 PF-P026-MG `verified`，并要求执行 `git push origin main`。
 - push 完成后，下一轮必须从最新 `main` 新建分支，再生成下一条 prompt。
+- 建议下一条 prompt 为 `PF-P027 - Workbench Stale Write Boundary Discovery and Planning`，先做 stale write / optimistic locking 的 discovery、边界设计和测试转绿顺序规划，不直接迁移真实 Workbench 写 API。
