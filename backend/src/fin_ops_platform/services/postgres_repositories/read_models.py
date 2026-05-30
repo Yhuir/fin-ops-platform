@@ -1817,6 +1817,30 @@ class PostgresReadModelRepository:
         return dict(source_versions) if isinstance(source_versions, dict) else {}
 
     @staticmethod
+    def _workbench_generation_source_versions(
+        executor: Any,
+        *,
+        scope_key: str,
+        generation_id: str | None,
+    ) -> dict[str, Any]:
+        normalized_generation_id = text(generation_id)
+        if not normalized_generation_id:
+            return {}
+        row = executor.fetch_one(
+            """
+            select source_versions
+            from read_model.workbench_generations
+            where tenant_id = 'default'
+              and scope_key = %s
+              and generation_id = %s
+            limit 1
+            """,
+            (scope_key, normalized_generation_id),
+        )
+        source_versions = row.get("source_versions") if isinstance(row, dict) else {}
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
+
+    @staticmethod
     def _workbench_generation_metadata(executor: Any, *, scope_key: str) -> dict[str, Any]:
         rows = executor.fetch_all(
             """
@@ -2227,6 +2251,11 @@ class PostgresReadModelRepository:
     def get_workbench_summary(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        active_source_versions = self._workbench_generation_source_versions(
+            self._connection,
+            scope_key=normalized_scope_key,
+            generation_id=active_generation_id,
+        )
         if active_generation_id:
             materialized_row = self._connection.fetch_one(
                 """
@@ -2308,10 +2337,7 @@ class PostgresReadModelRepository:
             ),
             "read_model_status": refresh_status["read_model_status"],
             "generated_at": generated_at,
-            "source_versions": self._active_workbench_generation_source_versions(
-                self._connection,
-                scope_key=normalized_scope_key,
-            ),
+            "source_versions": active_source_versions,
             "active_generation_id": active_generation_id,
             "read_model_version": active_generation_id,
         }
@@ -2585,7 +2611,11 @@ class PostgresReadModelRepository:
         where_sql, params = self._workbench_scope_filter(normalized_scope_key)
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
         active_source_versions = (
-            self._active_workbench_generation_source_versions(self._connection, scope_key=normalized_scope_key)
+            self._workbench_generation_source_versions(
+                self._connection,
+                scope_key=normalized_scope_key,
+                generation_id=active_generation_id,
+            )
             if active_generation_id
             else {}
         )
@@ -2798,9 +2828,10 @@ class PostgresReadModelRepository:
         offset = (normalized_page - 1) * normalized_page_size
         scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
-        active_source_versions = self._active_workbench_generation_source_versions(
+        active_source_versions = self._workbench_generation_source_versions(
             self._connection,
             scope_key=normalized_scope_key,
+            generation_id=active_generation_id,
         )
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)

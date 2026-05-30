@@ -19607,6 +19607,8 @@ class Application:
             read_model = self._workbench_read_model_service.get_read_model(scope_key)
             if not isinstance(read_model, dict):
                 continue
+            if not self._cached_workbench_read_model_allows_row_detail(read_model, scope_key=scope_key):
+                continue
             payload = read_model.get("payload")
             if not isinstance(payload, dict):
                 continue
@@ -20426,6 +20428,8 @@ class Application:
             read_model = self._workbench_read_model_service.get_read_model(scope_key)
             if not isinstance(read_model, dict):
                 continue
+            if not self._cached_workbench_read_model_allows_row_detail(read_model, scope_key=scope_key):
+                continue
             payload = read_model.get("payload")
             if not isinstance(payload, dict):
                 continue
@@ -20437,6 +20441,28 @@ class Application:
                 if row is not None:
                     resolved_rows[row_id] = self._serialize_value(row)
         return resolved_rows
+
+    def _cached_workbench_read_model_allows_row_detail(
+        self,
+        read_model: dict[str, object],
+        *,
+        scope_key: str,
+    ) -> bool:
+        status = str(
+            read_model.get("read_model_status")
+            or read_model.get("status")
+            or read_model.get("cache_status")
+            or ""
+        ).strip().lower()
+        if status in {"building", "failed", "stale", "refreshing", "unavailable"}:
+            return False
+        if not self._requires_sql_read_model_runtime():
+            return True
+        stale_reasons = self._workbench_sql_read_model_stale_reasons(
+            read_model.get("source_versions"),
+            scope_key=scope_key,
+        )
+        return not stale_reasons
 
     def _resolve_live_rows_direct(self, row_ids: list[str], *, month_hint: str | None = None) -> list[dict[str, object]]:
         normalized_row_ids = [str(row_id) for row_id in row_ids]

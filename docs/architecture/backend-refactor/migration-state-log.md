@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已生成并审查，等待用户确认是否执行 |
-| 当前 active prompt | `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` (`planned`) |
-| 最近 verified prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` |
+| 当前阶段 | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已生成并审查，等待用户确认是否执行 |
+| 当前 active prompt | `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` |
 | 当前分支 | `codex/workbench-query-slice-e-prompt` |
-| 最近验证 | PF-P009-MG 已由用户确认 `verified`，`main` 已 push 到 `origin/main`，本地与远端均为 `dfd42c16`；未执行 Traffic Gate 或部署 |
-| 下一条允许任务 | 用户审查并确认后执行 PF-P010；PF-P010 只允许处理 Workbench query repository / active generation / source_version 读边界，不得进入 Workbench 写路径、matching/candidates、worker rebuild 或 Traffic Gate |
+| 最近验证 | PF-P010 已由用户确认 `verified`；targeted tests、Workbench SQL runtime tests、facade/platform guard tests、row detail targeted tests、compileall、`app.main --check` 均通过；未执行 Merge Gate、Traffic Gate、部署或 push |
+| 下一条允许任务 | 用户确认后执行 PF-P010-MG；PF-P010-MG 只允许处理 PF-P010 完整 diff 的范围审计、精准提交、上游同步、合入 `main` 和 main 上复验；不得执行 Traffic Gate、部署、默认 push 或开始下一业务 slice |
 
 ## Prompt 执行日志
 
@@ -1265,7 +1265,7 @@ PF-P009-MG 已由用户确认 `verified`。`git push origin main` 已通过，`o
 
 ### PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -1289,9 +1289,70 @@ PF-P009-MG 已由用户确认 `verified`。`git push origin main` 已通过，`o
 - PF-P010 必须包含 TDD：先新增或调整 targeted failing tests，再做实现。
 - PF-P010 执行完成后只能标记 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
 
+#### 执行结果
+
+- 已使用 CodeGraph/结构分析确认 Slice E 的主要调用点：`PostgresReadModelRepository.get_workbench_summary(...)`、`get_workbench_groups_page(...)`、`get_workbench_group_detail(...)`、`get_workbench_refresh_status(...)`、`workbench_groups_cache_version(...)`，以及 row detail cached read model fallback 链路。
+- 已按 TDD 先新增 targeted failing tests，再做最小实现；red 阶段覆盖 groups page/source_versions TOCTOU、summary source_versions pinning、group detail active generation、row detail stale cached read model。
+- `PostgresReadModelRepository` 现在通过 generation id 精确读取 active generation 的 `source_versions`，避免同一方法内 active generation id 与 source_versions 分别读取造成混读。
+- row detail cached read model fallback 增加 active/freshness gate：production SQL runtime 下会跳过 building/failed/stale/refreshing/unavailable 或 source_versions 不匹配的 cached read model，避免旧 generation 游离行被返回。
+- 未修改 SQL migration、前端、部署、网关、Worker refresh、builder、Outbox、Dirty Scope、RabbitMQ、Redis cache key/TTL 或 Workbench 写路径。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
+- `backend/src/fin_ops_platform/app/server.py`
+- `tests/test_workbench_sql_runtime.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`：Pass。
+- Row detail targeted tests：Pass。
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/services/postgres_repositories/read_models.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_query_facade.py`：Pass。
+- 禁止面静态检查：Pass。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：Pass。
+
+#### 开放风险 / 待处理
+
+- PF-P010 不是 Merge Gate，当前变更尚未合入 `main`。
+- 本轮只记录 groups page/count/filter/search 子查询级慢查询观测性 gap，未新增 repository 级性能指标。
+- PF-P010 已由用户确认 `verified`；仍需 PF-P010-MG 才能合入 `main`。
+
 #### 下一条 Prompt 上下文
 
-下一步允许用户审查并执行 PF-P010。PF-P010 是 Slice E 的执行型 prompt，不是 Merge Gate；完成后如需合入 `main`，必须另行生成 Slice E 的 MG，且 MG 覆盖 PF-P010 的完整 diff。
+PF-P010 已由用户确认 `verified`。PF-P010-MG 已生成并审查，下一步允许执行 `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate`。PF-P010-MG 必须覆盖 PF-P010 的完整 diff，并复跑 Workbench SQL runtime、facade/platform guards、row detail targeted tests、compileall、禁止面静态检查、`app.main --check` 和 main 上复验；不得执行 Traffic Gate、部署或默认 push。
+
+### PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 PF-P010 已 verified 变更进入 `main` 的 Merge Gate。
+- 覆盖 Slice E 的 repository active generation/source_versions 修正、row detail cached read model freshness gate、targeted tests 和三份 backend-refactor 文档回写。
+- 执行范围检查、untracked 检查、精准 staging、feature branch 验证、上游同步、commit、合入 `main` 和 main 上复验。
+
+#### 禁止范围
+
+- 不开始 Workbench 写路径、matching/candidates、worker rebuild、builder、Outbox、Dirty Scope、Redis/RabbitMQ、前端、SQL migration、网关或部署变更。
+- 不执行 Traffic Gate、部署、生产切流或访问生产外部服务。
+- 不默认 push `origin/main`；push 必须等用户明确确认。
+- 不开始下一条业务 slice 或其它模块迁移。
+
+#### 验收标准
+
+- PF-P010-MG prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P010-MG 必须确认 PF-P010 为 `verified`。
+- PF-P010-MG 必须列出完整 Expected Changed Files。
+- PF-P010-MG 必须包含禁止 `git add .` / `git add -A`、untracked 文件检查、上游同步、feature branch 和 main 双重复验、Post-Flight 状态回写。
+- 未经用户确认，不得把 PF-P010-MG 标记为 `verified`。
+
+#### 下一条 Prompt 上下文
+
+下一步允许执行 PF-P010-MG。执行完成后只能标记为 `implemented` 或 `blocked`，必须等待用户确认才能标记 `verified`。PF-P010-MG verified 并按用户确认 push `origin/main` 后，下一条 prompt 必须从最新 `main` 新建分支生成。
 
 ## 维护规则
 

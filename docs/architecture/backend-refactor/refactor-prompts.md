@@ -3229,7 +3229,7 @@ Post-Flight:
 
 ## PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)
 
-状态：`planned`
+状态：`verified`
 
 ### 目标
 
@@ -3377,10 +3377,191 @@ Post-Flight:
 - Traffic Gate：不涉及。PF-P010 不切流、不部署、不修改网关。
 - Test Gate：涉及。PF-P010 必须先用 tests 锁定 active generation/source_version 边界，再做最小实现。
 
+### 执行结果
+
+- PF-P010 已执行完成，并已由用户确认 `verified`。
+- 已使用 CodeGraph/结构分析确认 repository 与 row detail fallback 真实调用链。
+- 已按 TDD 增加 targeted tests，先得到预期失败，再最小修改生产代码让测试通过。
+- 生产代码变更范围：
+  - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`：active generation 的 `source_versions` 改为按固定 `generation_id` 读取，避免同一 repository 方法内 source_versions 与 generation id 混读。
+  - `backend/src/fin_ops_platform/app/server.py`：row detail cached read model fallback 增加 active/freshness gate，production SQL runtime 下跳过 stale/building/failed/refreshing/unavailable 或 source_versions 不匹配的 cached read model。
+- 测试变更范围：
+  - `tests/test_workbench_sql_runtime.py`：新增 Slice E targeted tests，覆盖 groups page/source_versions TOCTOU、summary source_versions pinning、group detail active generation、row detail stale cached read model。
+- 文档变更范围：
+  - 更新 `migration-state-log.md`、`refactor-prompts.md`、`workbench-read-model-query-plan.md`。
+- 已通过 Mandatory Checks：
+  - `git diff --check`
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`
+  - Row detail targeted tests
+  - `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/services/postgres_repositories/read_models.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_query_facade.py`
+  - 禁止面静态检查
+  - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
 ### 审查结论
 
 - PF-P010 的边界合理：它延续 Slice D 后仍未关闭的 repository / active generation 风险，不直接进入 Workbench 写路径或 matching/candidates。
 - Prompt 明确要求 CodeGraph/结构分析，不允许凭记忆修改 repository SQL。
 - Prompt 强制 TDD，并把 active generation isolation、group detail consistency、summary/source_versions consistency、groups count/filter/search consistency 和 observability gap 作为必检项。
 - Prompt 禁止 SQL migration、前端、worker rebuild、builder、cache key、Outbox/Dirty Scope、Traffic Gate、部署和 push。
-- 执行完成后只能进入 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。
+- PF-P010 已由用户确认 `verified`；合入 `main` 前必须执行单独的 PF-P010-MG。
+
+## PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate
+
+状态：`planned`
+
+### 目标
+
+只处理 PF-P010 已 verified 变更进入 `main` 的 Merge Gate。确认 Slice E 完整 diff 范围、复跑关键测试、精准 commit、同步最新 main、合入 main 并在 main 上复验。不得执行 Traffic Gate、部署、默认 push 或开始下一条业务 slice。
+
+### Prompt
+
+```text
+/goal
+执行 PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate。
+
+目标：只处理 PF-P010 已 verified 变更进入 `main` 的 Merge Gate。确认完整 diff 范围、复跑关键测试、精准 commit、同步最新 main、合入 main 并在 main 上复验。不得执行 Traffic Gate、部署、默认 push 或开始下一条业务 slice。
+
+Role:
+你是一位严格执行 Git Merge Gate、测试门禁、范围审计和 Python 后端重构交付纪律的资深工程师。
+
+Context:
+当前仓库执行 Python-first 后端架构模块化重构。PF-P010 已 verified，完成 Workbench Query Slice E：repository active generation/source_versions pinning、row detail cached read model freshness gate、以及对应 targeted tests。PF-P010 尚未合入 `main`，本轮只负责 Merge Gate。
+
+Pre-Flight:
+必须先读取：
+- AGENTS.md
+- README.md
+- ARCHITECTURE.md
+- backend/README.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/workbench-read-model-query-plan.md
+- docs/architecture/backend-refactor/ai-execution-rules.md
+- backend/src/fin_ops_platform/services/postgres_repositories/read_models.py
+- backend/src/fin_ops_platform/app/server.py
+- tests/test_workbench_sql_runtime.py
+
+必须确认：
+- `migration-state-log.md` 中 PF-P010 状态为 `verified`。
+- 当前 active prompt 是 `PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate`。
+- 当前分支必须是 `codex/workbench-query-slice-e-prompt` 或同一 Slice E 功能分支；不得在 `main` 上直接执行 merge gate 准备。
+- PF-P009-MG 已 verified 且 `origin/main` 基线为 PF-P010 分支起点。
+- 本轮只处理 Merge Gate，不是 Traffic Gate。
+- 本轮不允许开始下一条 business slice、Workbench 写路径、matching/candidates、worker refresh、builder、Outbox、Dirty Scope、Redis/RabbitMQ 或任何新模块迁移。
+
+Expected Changed Files:
+本轮允许合入的文件仅限：
+- backend/src/fin_ops_platform/services/postgres_repositories/read_models.py
+- backend/src/fin_ops_platform/app/server.py
+- tests/test_workbench_sql_runtime.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/workbench-read-model-query-plan.md
+
+如出现其它 changed / staged / untracked 文件，必须阻断并说明来源；不得临时扩大白名单。
+
+Required Scope Checks:
+1. 确认 repository diff 只包含 Workbench query/read-model 读边界修正：
+   - 新增或复用按固定 `generation_id` 读取 `workbench_generations.source_versions` 的 helper。
+   - `get_workbench_summary(...)`、groups schema/status、`get_workbench_groups_page(...)` 的 source_versions 与当前 active generation 对齐。
+   - 不修改 SQL migration、schema、writer、builder、refresh worker、Outbox、Dirty Scope 或 Redis cache key/TTL。
+2. 确认 app-shell diff 只包含 row detail cached read model active/freshness gate：
+   - production SQL runtime 下跳过 stale/building/failed/refreshing/unavailable 或 source_versions 不匹配的 cached read model。
+   - 不改变 PF-P008/PF-P009 已锁定的 live service -> cached read model -> route fallback 顺序和 response contract。
+   - 不引入 Redis PubSub、长连接逻辑或新外部依赖。
+3. 确认 tests diff 只包含 PF-P010 targeted tests：
+   - groups page/source_versions TOCTOU 与 page/count/row-count 同 active generation。
+   - summary source_versions pinning。
+   - group detail active generation。
+   - row detail stale cached read model 不返回旧 generation 游离行。
+4. 确认文档 diff 只记录：
+   - PF-P010 verified。
+   - PF-P010-MG planned。
+   - Slice E 执行结果、验证结果、剩余 observability gap 和下一步上下文。
+5. 确认没有修改：
+   - SQL migration。
+   - 前端代码。
+   - Nginx、Vite、Caddy、部署配置或生产配置。
+   - Worker refresh、builder、RabbitMQ、Outbox、Dirty Scope。
+   - Workbench 写路径、actions、matching/candidates、candidate grouping、free matching engine。
+   - Redis cache key 语义或 TTL 策略。
+
+Mandatory Checks Before Commit:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --stat`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`
+- Row detail targeted tests：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_row_detail_prefers_cached_read_model_before_query_service_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_opaque_oa_row_detail_prefers_month_read_model_without_full_oa_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_opaque_oa_row_detail_without_cache_returns_404_without_full_oa_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_row_detail_supports_oa_bank_and_invoice -v`
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/services/postgres_repositories/read_models.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_query_facade.py`
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- Allowed production diff check：
+  - `test -z "$(git diff --name-only -- backend/src/fin_ops_platform | rg -v '^(backend/src/fin_ops_platform/app/server.py|backend/src/fin_ops_platform/services/postgres_repositories/read_models.py)$' || true)"`
+- No forbidden surface diff：
+  - `test -z "$(git diff --name-only -- web postgres deploy)"`
+- Facade mock 静态检查：
+  - `! rg -n "mock\\.patch\\(.+WorkbenchQueryFacade|patch\\(.+workbench_query_facade|monkeypatch.+WorkbenchQueryFacade|WorkbenchQueryFacade.*Mock|Mock.*WorkbenchQueryFacade" tests/test_workbench_sql_runtime.py`
+- SSE PubSub 静态检查：
+  - `! rg -n "PubSub|pubsub|subscribe\\(" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_query_facade.py`
+
+Commit / Merge Preparation:
+- 严禁使用 `git add .` 或 `git add -A`。
+- 必须精准 staging Expected Changed Files。
+- 建议 commit message：
+  - `refactor(workbench): pin query read models to active generation`
+- commit body 必须说明：
+  - active generation source_versions pinning。
+  - row detail cached read model freshness gate。
+  - targeted tests 与文档状态机更新。
+- commit 前后都必须确认 `git status --short --branch`。
+- commit 后执行 `git fetch origin main`。
+- merge 到 `main` 前必须确认当前分支包含最新 `origin/main`；如果 `origin/main` 有新提交，必须先 rebase 或 merge 最新 main 到当前分支，解决冲突后重新运行 Mandatory Checks。
+- 切到 `main` 后先确认 `main` 与 `origin/main` 关系；不得覆盖远端主干。
+- 合入 `main` 时优先使用 fast-forward；如果不能 fast-forward，必须说明原因并停止等待用户确认。
+- 合入 `main` 后必须在 `main` 上重新运行 Mandatory Checks。
+
+Forbidden Scope:
+- 不执行 Traffic Gate。
+- 不部署服务器。
+- 不 push 到 `origin/main`，除非用户在 PF-P010-MG 执行期间明确允许。
+- 不修改生产配置或网关配置。
+- 不开始下一条业务 slice 或任何新业务模块重构。
+- 不访问生产 DB、Redis、RabbitMQ、OA Mongo、OA MySQL、MinIO/S3。
+- 不记录 DB password、JWT secret、OA token、cookie 实值或生产敏感 URL。
+- 未经用户确认，不得把 PF-P010-MG 标记为 `verified`。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 记录 PF-P010-MG 执行结果。
+  - 记录 commit、merge 方式、变更范围、验证命令和结果。
+  - 将 PF-P010-MG 状态设为 `implemented` 或 `blocked`，不得直接设为 `verified`。
+  - 记录下一步建议：用户确认后标记 PF-P010-MG verified；push origin/main 需要用户明确确认；下一条 prompt 必须从最新 main 新建分支生成。
+- 更新 `refactor-prompts.md` 的 PF-P010-MG 状态和执行结果。
+- 必要时更新 `workbench-read-model-query-plan.md`，但不得开始下一条 slice 设计或实现。
+- 最终回复必须明确：
+  - 是否只合入 Expected Changed Files。
+  - 是否修改了 SQL migration、前端、网关、部署或生产配置。
+  - 是否执行 Traffic Gate。
+  - 哪些验证在 feature branch 和 main 上通过。
+  - 是否 push 到 origin/main。
+  - 下一步建议做什么。
+```
+
+### Gate Scope
+
+- Merge Gate：涉及。PF-P010-MG 负责 PF-P010 已 verified 变更的 main 合入门禁。
+- Traffic Gate：不涉及。PF-P010-MG 不切流、不部署、不修改网关、不改变 worker 启动方式。
+- Test Gate：涉及。PF-P010-MG 必须在合入前后确认 Workbench SQL runtime、facade/platform guards、row detail targeted tests、compileall、`app.main --check` 和禁止面静态检查通过。
+
+### 审查结论
+
+- PF-P010-MG 的边界正确：它只覆盖 Slice E 的完整 diff，不扩大到下一条业务 slice。
+- Expected Changed Files 覆盖当前真实 diff：两个生产代码文件、一个 Workbench SQL runtime test 文件和三份 backend-refactor 文档。
+- Prompt 保留正式合入主干所需门禁：untracked 检查、精准 staging、禁止 `git add .` / `git add -A`、上游同步、feature branch 与 main 双重复验。
+- Prompt 明确禁止 Traffic Gate、部署、默认 push、SQL migration、前端、worker/builder、Outbox/Dirty Scope、Redis/RabbitMQ 和 Workbench 写路径。
+- Prompt 明确执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。

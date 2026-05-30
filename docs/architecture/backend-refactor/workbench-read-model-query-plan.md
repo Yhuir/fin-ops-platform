@@ -1,6 +1,6 @@
 # Workbench Read Model Query 发现与边界计划
 
-状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `verified`；PF-P007 `verified`；PF-P007-MG `verified`
+状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `verified`；PF-P007 `verified`；PF-P007-MG `verified`；PF-P008 `verified`；PF-P009 `verified`；PF-P009-MG `verified`；PF-P010 `verified`；PF-P010-MG `planned`
 
 对应 prompt：`PF-P004 - Workbench Read Model Query Discovery / Boundary Plan`
 
@@ -487,7 +487,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 ### Slice E：Repository active generation 与查询一致性边界
 
 - 目标：收口 `PostgresReadModelRepository` 的 Workbench query/read-model 读路径，确保 summary、groups page、group detail、refresh status、source_versions 和 cache version 都围绕 active generation/source_version 一致读取。
-- 当前 prompt：`PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已生成并审查，状态 `planned`，等待用户确认是否执行。
+- 当前 prompt：`PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已由用户确认 `verified`；`PF-P010-MG - Workbench Query Repository and Active Generation Merge Gate` 已生成并审查，状态 `planned`。
 - 输入事实：
   - PF-P009-MG 已由用户确认 `verified`，`main` 已 push 到 `origin/main`，本轮分支从最新 `main` 创建。
   - CodeGraph 确认 Slice E 的主要入口是 `PostgresReadModelRepository.get_workbench_summary(...)`、`get_workbench_groups_page(...)`、`get_workbench_group_detail(...)`、`get_workbench_refresh_status(...)`、`workbench_groups_cache_version(...)`。
@@ -508,6 +508,23 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
   - `tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`
   - row detail targeted tests
   - `compileall` 针对 `read_models.py`、`server.py`、`workbench_query_facade.py`
+- 执行结果：
+  - `PostgresReadModelRepository` 已增加按固定 `generation_id` 读取 active generation `source_versions` 的 helper，`get_workbench_summary(...)`、`_workbench_groups_schema_status(...)` 和 `get_workbench_groups_page(...)` 不再把 active generation id 与 source_versions 分开读取。
+  - `get_workbench_groups_page(...)` 的 page rows、total count、row counts 和 source_versions 由 targeted tests 锁定为同一次方法调用内的固定 active generation，覆盖 worker 在查询间隙切换 active generation 的 TOCTOU 风险。
+  - `get_workbench_group_detail(...)` 现有实现已只读 active generation，本轮新增 targeted test 明确锁定该契约。
+  - row detail cached read model fallback 已增加 active/freshness gate：production SQL runtime 下跳过 building、failed、stale、refreshing、unavailable 或 source_versions 不匹配的 cached read model，避免旧 generation 游离行被返回。
+  - PF-P008/PF-P009 已锁定的 row detail fallback 顺序和 response contract 未改变。
+  - 本轮未修改 Redis cache key/TTL、SQL migration、worker refresh、builder、Outbox、Dirty Scope、Workbench 写路径、前端、网关或部署配置。
+- 已通过验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`
+  - row detail targeted tests
+  - `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/services/postgres_repositories/read_models.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_query_facade.py`
+  - 禁止面静态检查
+  - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- 仍未关闭风险：
+  - groups page/count/filter/search 仍缺少 repository 子查询级慢查询指标；当前保留 `Application.handle_request` 的 app-shell `request_database_timing` 边界，后续如要做 SQL 级性能观测，应另立 prompt，避免把 HTTP request context 下沉到 repository。
+  - PF-P010 尚未执行 Merge Gate；合入 `main` 前必须执行已生成并审查的 `PF-P010-MG`，覆盖完整 diff、精准 commit、main 同步和 main 上复验。
 
 ## Guard Compatibility
 

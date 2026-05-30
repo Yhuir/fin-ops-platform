@@ -333,6 +333,37 @@ class ActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
         return super().fetch_all(sql, params)
 
 
+class SwitchingActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_generations" in normalized and "select generation_id" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            return {"generation_id": "gen-active"}
+        if "from read_model.workbench_generations" in normalized and "select source_versions" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            if "generation_id = %s" in normalized:
+                return {"source_versions": {"source_version": 12}}
+            return {"source_versions": {"source_version": 99}}
+        return super().fetch_one(sql, params)
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_generations" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [
+                {
+                    "generation_id": "gen-active",
+                    "status": "active",
+                    "activated_at": "2026-05-28T09:00:00+00:00",
+                    "source_versions": {"source_version": 12},
+                    "row_count": 100,
+                    "group_count": 20,
+                    "build_metadata": {},
+                }
+            ]
+        return super().fetch_all(sql, params)
+
+
 class WorkbenchGenerationStatsConnection(ActiveWorkbenchGenerationConnection):
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
@@ -1153,6 +1184,45 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(any("g.generation_id = %s" in sql and "gen-active" in params for sql, params in all_queries))
         self.assertTrue(any("r.generation_id = g.generation_id" in sql for sql, _params in all_queries))
 
+    def test_repository_groups_page_pins_versions_counts_and_rows_to_single_active_generation(self) -> None:
+        connection = SwitchingActiveWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        active_generation_queries = [
+            sql
+            for sql, _params in all_queries
+            if "from read_model.workbench_generations" in sql and "status = 'active'" in sql
+        ]
+        self.assertEqual(page["active_generation_id"], "gen-active")
+        self.assertEqual(page["source_versions"], {"source_version": 12})
+        self.assertEqual(len(active_generation_queries), 1)
+        self.assertTrue(
+            any(
+                "count(*) as total_count" in sql and "g.generation_id = %s" in sql and "gen-active" in params
+                for sql, params in connection.fetch_one_calls
+            )
+        )
+        self.assertTrue(
+            any(
+                "select group_id, zone, payload, raw_payload" in sql
+                and "g.generation_id = %s" in sql
+                and "gen-active" in params
+                for sql, params in connection.fetch_all_calls
+            )
+        )
+
+    def test_repository_summary_source_versions_are_pinned_to_active_generation(self) -> None:
+        connection = SwitchingActiveWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        summary = repository.get_workbench_summary(scope_key="all")
+
+        self.assertEqual(summary["active_generation_id"], "gen-active")
+        self.assertEqual(summary["source_versions"], {"source_version": 12})
+
     def test_repository_uses_materialized_generation_stats_for_default_groups_counts(self) -> None:
         connection = WorkbenchGenerationStatsConnection()
         repository = PostgresReadModelRepository(connection)
@@ -1810,6 +1880,24 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(group["group_id"], "case:1")
         self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
         self.assertTrue(any("group_id = %s" in sql for sql, _params in connection.fetch_one_calls))
+
+    def test_repository_group_detail_reads_only_active_generation(self) -> None:
+        connection = ActiveWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        group = repository.get_workbench_group_detail(scope_key="all", zone="open", group_id="case:1")
+
+        self.assertIsNotNone(group)
+        self.assertEqual(group["active_generation_id"], "gen-active")
+        self.assertEqual(group["read_model_version"], "gen-active")
+        self.assertTrue(
+            any(
+                "from read_model.workbench_groups" in sql
+                and "generation_id = %s" in sql
+                and "gen-active" in params
+                for sql, params in connection.fetch_one_calls
+            )
+        )
 
     def test_repository_reports_workbench_refresh_status(self) -> None:
         connection = WorkbenchSummaryGroupsConnection(dirty_status="failed")
@@ -3207,6 +3295,51 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
         self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-route"})
         self.assertEqual(route_calls, [])
+
+    def test_row_detail_production_sql_runtime_ignores_stale_cached_read_model_row(self) -> None:
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = SimpleNamespace(storage_backend="postgres")
+        app._etc_invoice_summary_row_detail = lambda _row_id: None
+        app._live_workbench_service = SimpleNamespace(
+            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
+        )
+        app._row_month_scope_from_row_id = lambda _row_id: "2026-05"
+        app._workbench_read_model_service = SimpleNamespace(
+            get_read_model=lambda _scope_key: {
+                "scope_key": "2026-05",
+                "source_versions": {"builder": "old-builder"},
+                "payload": {
+                    "open": {
+                        "groups": [
+                            {
+                                "bank_rows": [
+                                    {"id": "bank-row-stale", "source_kind": "bank_transaction", "amount": "100.00"}
+                                ]
+                            }
+                        ]
+                    }
+                },
+            },
+            list_scope_keys=lambda: ["2026-05"],
+        )
+        app._workbench_sql_read_model_stale_reasons = lambda _source_versions, **_kwargs: ["builder_mismatch"]
+        app._workbench_query_service = SimpleNamespace(
+            _looks_like_oa_row_id=lambda _row_id: False,
+            _records_by_id={},
+        )
+        app._workbench_api_routes = SimpleNamespace(
+            get_row_detail=lambda row_id: (_ for _ in ()).throw(
+                AssertionError(f"stale cached row must not fallback to route detail: {row_id}")
+            )
+        )
+        app._workbench_override_service = SimpleNamespace(apply_to_row=lambda row: row)
+
+        response = app._handle_api_workbench_row_detail("bank-row-stale")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
+        self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-stale"})
 
     def test_repository_persists_workbench_rows_alongside_snapshot(self) -> None:
         connection = WorkbenchWriteConnection()
