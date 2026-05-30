@@ -6368,3 +6368,36 @@ Post-Flight:
 - PF-P021 明确禁止 stale write、durable idempotency、facade/server 接入和 SQL migration，避免把多个语义变更混在同一 prompt。
 - PF-P021 不要求修改 PF-P019 target tests；执行时应使用现有红灯测试完成 TDD red/green。
 - PF-P021 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+变更：
+- 新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 实现最小 `WorkbenchWriteUnitOfWork` 与 `WorkbenchWriteUnitOfWorkContext`。
+- `run(command, handler)` 现在会打开 `connection.transaction()`，创建 transaction-bound repository context，调用 handler，并在同一 transaction 中调用 PF-P020 writer 写 read model dirty/outbox。
+- 返回结果会补充 `source_versions` 和 `outbox_event_ids`。
+- 未接入真实 Workbench write facade/server 写路径。
+- 未实现 stale write / optimistic locking。
+- 未实现 durable idempotency replay。
+- 未修改 PF-P019 tests。
+
+验证：
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `tests.test_workbench_uow_contract`：Expected Red，16 tests，7 failures，9 ok；剩余 failures 均为 stale write / durable idempotency 目标语义。
+- `tests.test_runtime_queue`：Pass，31 tests。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+
+范围：
+- 未修改 `backend/src/fin_ops_platform/app/server.py`。
+- 未修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 未修改 `backend/src/fin_ops_platform/services/runtime_queue.py`。
+- 未修改 Workbench facts repositories、SQL migration、前端、网关、部署或 CI/CD。
+
+下一步建议：
+- 用户确认后，将 PF-P021 标记为 `verified`。
+- 然后生成并审查 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，统一覆盖本 UoW 基础切片尚未合入 `main` 的完整 diff。

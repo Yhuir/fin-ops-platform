@@ -344,3 +344,30 @@ PF-P021 的目标边界：
 - 不实现 durable idempotency replay。
 
 PF-P021 verified 后，应根据剩余红灯再决定下一步是 stale write guard 还是 durable idempotency；不要在 PF-P021-MG 前继续迁移更多 Workbench 写路径。
+
+## 13. PF-P021 Minimal UoW Skeleton Result
+
+PF-P021 已按上述边界执行，当前状态为 `implemented`，等待用户确认：
+
+- 新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 新增 `WorkbenchWriteUnitOfWorkContext`，包含 `transaction`、`pair_relations`、`exception_cases`、`row_overrides`、`candidate_matches`、`idempotency_store`。
+- 新增 `WorkbenchWriteUnitOfWork.run(command, handler)`，负责打开 transaction、创建 transaction-bound repository context、执行 handler，并在同一 transaction 内调用 PF-P020 writer 写 read model dirty/outbox。
+- `run()` 返回 handler result 的副本，并补充 `source_versions` 与 `outbox_event_ids`。
+- handler 或 writer 抛错时不吞异常，由 transaction context rollback。
+
+验证结果：
+
+- PF-P021 指定的 4 个 UoW atomicity tests：Pass。
+- PF-P020 writer group：Pass。
+- `tests.test_workbench_uow_contract`：Expected Red，16 tests，7 failures，9 ok；剩余 failures 均为 stale write / durable idempotency 目标语义。
+- `tests.test_runtime_queue`、`tests.test_workbench_write_characterization`、`tests.test_workbench_dirty_queue_wiring`、`tests.test_platform_runtime_boundary_guards`：均通过。
+
+边界仍然保持：
+
+- 未迁移任何真实 Workbench write API。
+- 未修改 `server.py` 或 `workbench_write_facade.py`。
+- 未实现 stale write / optimistic locking。
+- 未实现 durable idempotency replay。
+- 未修改 SQL migration、前端、部署或 CI/CD。
+
+下一步不应继续扩大实现范围。PF-P021 经用户确认 `verified` 后，应先生成 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。
