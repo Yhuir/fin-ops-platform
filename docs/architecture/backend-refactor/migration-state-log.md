@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P013-MG - Workbench Write Facade Merge Gate` 已由用户确认 `verified`，等待 push 到 `origin/main` |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P014 - Workbench Exception Facade Extraction` 已生成并完成审查，等待用户确认执行 |
+| 当前 active prompt | `PF-P014 - Workbench Exception Facade Extraction` (`planned`) |
 | 最近 verified prompt | `PF-P013-MG - Workbench Write Facade Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | 用户确认 PF-P013-MG `verified`；PF-P013-MG 已在本地 `main` 复验通过：`compileall`、Workbench write characterization、Workbench v2 API、derived lifecycle、platform runtime guards、exception service、pair relation / exception case、matching orchestrator / candidate / dirty queue 全部通过；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查 PF-P014 |
+| 当前分支 | `codex/workbench-exception-facade-prompt` |
+| 最近验证 | PF-P013-MG 已由用户确认 `verified`，并已 push 到 `origin/main` (`f37c32ca`)；新分支已从最新 `main` 创建；未执行 Traffic Gate |
+| 下一条允许任务 | 用户确认后执行 PF-P014。PF-P014 只做 Workbench exception/ignore 写路径 facade extraction，不引入 UoW，不修 stale write，不改事务模型 |
 
 ## Prompt 执行日志
 
@@ -1656,6 +1656,50 @@ PF-P013-MG 已执行并合入本地 `main`。本轮覆盖 PF-P012 + PF-P013 的�
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_orchestrator tests.test_workbench_candidate_match_service tests.test_workbench_reconciliation_dirty_queue -v`：34 tests OK。
 
 PF-P013-MG 已由用户确认 `verified`。下一步执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查 `PF-P014 - Workbench Exception Facade Extraction`。
+
+#### Push 记录
+
+- 已执行 `git push origin main`。
+- 远端 `origin/main` 已从 `b897a3b6` 更新到 `f37c32ca`。
+- push 后从最新 `main` 新建分支：`codex/workbench-exception-facade-prompt`。
+
+### PF-P014 - Workbench Exception Facade Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Workbench exception/ignore 写路径的 facade extraction。
+- 目标入口：
+  - `POST /api/workbench/actions/mark-exception`
+  - `POST /api/workbench/exception/apply`
+  - `POST /api/workbench/actions/cancel-exception`
+  - `POST /api/workbench/actions/ignore-row`
+  - `POST /api/workbench/actions/unignore-row`
+- 保留 `server.py` 的 HTTP body 解析、freshness guard、request id、HTTP response wrapper 和 route dispatch。
+- 将上述入口的非 HTTP 编排逻辑迁入 facade 边界，继续使用细粒度依赖注入。
+- 延续 PF-P012 锁定的 duplicate submit、stale write、blind write、read model scheduling failure 等当前行为，不改变 API 语义。
+
+#### 禁止范围
+
+- 不引入 Workbench Unit of Work。
+- 不修复 stale write / optimistic locking / blind write。
+- 不改变事务模型、dirty scope / outbox 语义或 read model scheduling 顺序。
+- 不迁移 `update-bank-exception`、`oa-bank-exception`、cash special、personal advance repayment、withdraw-link 等其它写入口。
+- 不修改 SQL migration、前端、网关、部署或生产配置。
+- 不执行 Merge Gate、Traffic Gate、deploy、push 或生产访问。
+
+#### 验收标准
+
+- PF-P014 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- 执行 PF-P014 时必须先读取状态机、prompt 库和 `workbench-writes-and-matching-plan.md`。
+- 执行 PF-P014 时必须保持 `server.py` handler 为薄入口，不允许在 facade 中注入 `Application`、`RuntimeRepositories`、`ApplicationStateStore`、`state_store` 等上帝对象。
+- 执行 PF-P014 后必须运行 Workbench write characterization、Workbench v2 API、exception service、exception case、platform runtime boundary guards 等指定测试。
+- 未经用户确认，不得把 PF-P014 标记为 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P014 已生成并审查。用户若确认执行，下一步应执行 PF-P014。PF-P014 完成后不要立刻进入每 prompt MG；应根据本轮是否完成一个可合并模块切片决定是否生成 `PF-P014-MG`。如果 exception/ignore facade extraction 已完成且测试通过，下一条建议为 `PF-P014-MG - Workbench Exception Facade Merge Gate`；如发现范围过大，应先生成更小的 follow-up implementation prompt。
 
 ## 维护规则
 
