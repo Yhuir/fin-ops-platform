@@ -9059,6 +9059,6 @@ Main 上复验：
 
 下一步：
 
-- 执行 `git push origin main`。
-- push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。
+- `git push origin main` 已完成。
+- 下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P031 - Workbench Cancel Link Stale Guard Migration`。
 - 真实 Workbench API migration 仍未开始。
