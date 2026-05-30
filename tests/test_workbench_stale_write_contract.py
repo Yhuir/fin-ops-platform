@@ -74,7 +74,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
         self.assertIn("restored_relations", payload)
 
-    @unittest.expectedFailure
     def test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
@@ -107,7 +106,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
             {f"relation:{payload['active_relation']['case_id']}": payload["active_relation"]["version"]},
         )
 
-    @unittest.expectedFailure
     def test_target_workbench_write_conflict_response_shape_is_stable(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_uow")
         conflict_cls = getattr(module, "WorkbenchWriteConflict")

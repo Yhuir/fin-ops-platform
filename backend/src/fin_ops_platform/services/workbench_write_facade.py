@@ -318,6 +318,7 @@ class WorkbenchWriteFacade:
                 active_relation=active_relation,
                 rows=rows,
             )
+            active_relation_identity = self._withdraw_preview_active_relation_identity(active_relation)
         except KeyError as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
@@ -343,8 +344,30 @@ class WorkbenchWriteFacade:
                     **amount_check,
                 },
                 "restored_relations": after_relations,
+                "active_relation": active_relation_identity,
+                "submit_expected_versions": {
+                    f"relation:{active_relation_identity['case_id']}": active_relation_identity["version"],
+                },
             },
         )
+
+    @staticmethod
+    def _withdraw_preview_active_relation_identity(active_relation: dict[str, object]) -> dict[str, object]:
+        case_id = str(active_relation.get("case_id") or "").strip()
+        if not case_id:
+            raise ValueError("active relation case_id is required for withdraw preview.")
+        version = active_relation.get("version")
+        if type(version) is int:
+            resolved_version = version
+        elif isinstance(version, str) and version.strip().isdigit():
+            resolved_version = int(version.strip())
+        else:
+            # Compatibility bridge: current in-memory relation facts do not yet
+            # expose a durable facts-level version. This preview-only token gives
+            # the frontend a stable submit contract; real stale rejection remains
+            # a later UoW/facts precondition slice.
+            resolved_version = 1
+        return {"case_id": case_id, "version": resolved_version}
 
     def withdraw_link(self, payload: dict[str, object], *, request_id: str | None = None) -> WorkbenchWriteResult:
         action_name = "withdraw_link"

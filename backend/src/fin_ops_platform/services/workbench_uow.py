@@ -9,6 +9,8 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyRecord,
     workbench_request_fingerprint,
 )
+from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
+from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,8 @@ class WorkbenchWriteUnitOfWork:
                     return replayed
 
         with self._connection.transaction() as transaction:
+            assert_workbench_stale_preconditions(command)
+
             if idempotency is not None:
                 _idempotency_reserve(self._idempotency_store, idempotency)
 
