@@ -4779,12 +4779,12 @@ Post-Flight:
 
 ### 执行结果
 
-- 状态：`implemented`，等待用户确认后才可标记为 `verified`。
+- 状态：`verified`，用户已确认 PF-P014-MG 可落锁。
 - 功能分支：`codex/workbench-exception-facade-prompt`。
 - 功能提交：`4031a1d5` (`refactor(workbench): extract exception write facade`)。
 - 本地 main merge commit：`6fb77dc3` (`Merge branch 'codex/workbench-exception-facade-prompt': workbench exception facade`)。
 - 合入范围：PF-P014 完整 diff，包括 Workbench exception/ignore facade extraction、`server.py` 对应 handler 最小 wiring、platform guard 更新、重构文档和状态机。
-- push：未执行；当前本地 `main` ahead `origin/main`。
+- push：待执行；用户已确认执行 `git push origin main`。
 - Traffic Gate / deploy / 生产配置：未执行、未修改。
 - 主干验证：`compileall`、Workbench write characterization、Workbench v2 API、exception application/case、pair relation、derived lifecycle、platform runtime guards 全部通过。
-- 下一步：用户确认 PF-P014-MG `verified`；随后确认是否执行 `git push origin main`。push 完成后必须从最新 `main` 新建分支，再生成下一条 prompt。
+- 下一步：执行 `git push origin main`。push 完成后必须从最新 `main` 新建分支，再生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`。

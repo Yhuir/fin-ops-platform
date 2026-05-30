@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P014-MG - Workbench Exception Facade Merge Gate` 已执行并合入本地 `main`，等待用户确认 `verified` |
-| 当前 active prompt | `PF-P014-MG - Workbench Exception Facade Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P014 - Workbench Exception Facade Extraction` |
+| 当前阶段 | `PF-P014-MG - Workbench Exception Facade Merge Gate` 已由用户确认 `verified`，准备 push `origin/main` |
+| 当前 active prompt | 无，等待 push 后从最新 `main` 新建分支生成下一条 prompt |
+| 最近 verified prompt | `PF-P014-MG - Workbench Exception Facade Merge Gate` |
 | 当前分支 | `main` |
 | 最近验证 | PF-P014-MG 已在功能分支和本地 `main` 复验：`compileall`、Workbench write characterization、Workbench v2 API、exception application/case、pair relation、derived lifecycle + platform guards 均通过；未执行 Traffic Gate |
-| 下一条允许任务 | 用户确认 PF-P014-MG `verified`；随后确认是否执行 `git push origin main`。push 完成后必须从最新 `main` 新建分支，再生成下一条 prompt |
+| 下一条允许任务 | 执行 `git push origin main`；push 完成后从最新 `main` 新建分支，再生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` |
 
 ## Prompt 执行日志
 
@@ -1738,7 +1738,7 @@ PF-P014 已执行。已迁移到 `WorkbenchWriteFacade` 的入口：
 
 ### PF-P014-MG - Workbench Exception Facade Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -1782,7 +1782,7 @@ PF-P014-MG 已执行并合入本地 `main`。本轮覆盖 PF-P014 的完整 diff
 - 功能提交：`4031a1d5` (`refactor(workbench): extract exception write facade`)。
 - 本地 main merge commit：`6fb77dc3` (`Merge branch 'codex/workbench-exception-facade-prompt': workbench exception facade`)。
 - upstream sync：`origin/main` 与本地 `main` 均为 `f37c32ca`，且 `origin/main` 是功能分支祖先；合并前 `git pull --ff-only origin main` 显示 `Already up to date`。
-- push：未执行。当前本地 `main` ahead `origin/main`。
+- push：待执行。用户已确认执行 `git push origin main`。
 - Traffic Gate / deploy / 生产配置：未执行、未修改。
 
 功能分支验证结果：
@@ -1812,7 +1812,7 @@ main 复验结果：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`：4 tests OK。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：25 tests OK。
 
-下一步：用户确认 PF-P014-MG `verified` 后，再确认是否执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt；不得直接在当前 `main` 上进入 PF-P015 / Unit of Work。
+用户已确认 PF-P014-MG `verified`。下一步执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`；不得直接在当前 `main` 上进入 PF-P015 / Unit of Work。
 
 ## 维护规则
 
