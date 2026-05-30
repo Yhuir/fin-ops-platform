@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` (`implemented`) |
-| 最近 verified prompt | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` |
+| 当前阶段 | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P026 targeted tests 已通过；UoW replay、fingerprint conflict、reserve/commit skeleton 已转绿，真实 API 未迁移 |
-| 下一条允许任务 | 等待用户确认 PF-P026 是否可标记 `verified`。确认前不得生成 PF-P027，不得迁移真实 Workbench 写 API |
+| 最近验证 | PF-P026 已由用户确认 `verified`；UoW replay、fingerprint conflict、reserve/commit skeleton 已转绿，真实 API 未迁移 |
+| 下一条允许任务 | 只允许执行 PF-P026-MG。PF-P026-MG 只处理 PF-P023 到 PF-P026 这组 Workbench UoW/idempotency 基础切片的 Merge Gate；不得生成 PF-P027，不得迁移真实 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -2670,7 +2670,7 @@ PF-P025 已由用户确认 `verified`。PF-P026 已生成并审查，下一步�
 
 ### PF-P026 - Workbench UoW Idempotency Integration Skeleton
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2749,7 +2749,42 @@ PF-P025 已由用户确认 `verified`。PF-P026 已生成并审查，下一步�
 
 #### 下一条 Prompt 上下文
 
-PF-P026 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。确认后，建议生成并审查 `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate`，统一覆盖 PF-P023/PF-P024/PF-P025/PF-P026 这组 Workbench UoW/idempotency 基础切片。确认前不得生成 PF-P027，不得迁移真实 Workbench 写 API。
+PF-P026 已由用户确认 `verified`。PF-P026-MG 已生成并审查，下一步只允许执行 PF-P026-MG。PF-P026-MG 统一覆盖 PF-P023/PF-P024/PF-P025/PF-P026 这组 Workbench UoW/idempotency 基础切片，并纳入同分支尚未合入的 PF-P022 规划文档 diff。不得生成 PF-P027，不得迁移真实 Workbench 写 API。
+
+### PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理当前分支上 Workbench UoW/idempotency 基础切片合入 `main` 的 Merge Gate。
+- 核心覆盖 PF-P023、PF-P024、PF-P025、PF-P026。
+- 同时纳入同分支尚未合入的 PF-P022 UoW integration planning 文档 diff，避免 merge scope 漏文件。
+- 允许执行范围检查、上游同步、必要验证、merge 到本地 `main`、main 上复验和状态机回写。
+
+#### 禁止范围
+
+- 不迁移真实 Workbench 写 API。
+- 不修改 `server.py` 或 `workbench_write_facade.py`。
+- 不新增 SQL migration。
+- 不实现真实 PostgreSQL idempotency repository。
+- 不修 stale write / optimistic locking。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不生成 PF-P027。
+
+#### 验收标准
+
+- PF-P023、PF-P024、PF-P025、PF-P026 均已 `verified`。
+- 当前分支相对 `main` 的 diff 只包含 Workbench UoW/idempotency 基础切片及 backend-refactor 文档。
+- 所有目标测试、安全网、default discover 兼容检查通过。
+- `tests/test_workbench_uow_contract.py` 仅保留 4 个 stale write / optimistic locking expectedFailure。
+- 合入 `main` 后必须在 `main` 上复验通过。
+
+#### 审查结论
+
+- PF-P026-MG 是当前分支的正确下一步：PF-P023 到 PF-P026 已形成可合并的 UoW/idempotency 基础切片。
+- 本 MG 不应继续扩大实现范围，不应进入真实 API migration 或 stale write 实现。
+- 由于当前切片没有切生产流量，也没有改变真实 Workbench HTTP handler，Traffic Gate 不适用。
 
 ## 维护规则
 

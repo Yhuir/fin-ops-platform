@@ -7665,7 +7665,7 @@ Post-Flight:
 
 ## PF-P026 - Workbench UoW Idempotency Integration Skeleton
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -7824,7 +7824,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`
+状态：`verified`
 
 已完成：
 
@@ -7871,3 +7871,179 @@ Post-Flight:
 
 - 等待用户确认 PF-P026 是否可标记 `verified`。
 - 用户确认后，建议生成并审查 `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate`，统一覆盖 PF-P023/PF-P024/PF-P025/PF-P026 这组 Workbench UoW/idempotency 基础切片。
+
+用户已确认 PF-P026 `verified`。PF-P026-MG 已生成并审查，下一步只允许执行 PF-P026-MG。
+
+## PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate。
+
+Role: 你是一位严格的生产级 Merge Gate reviewer，精通 Python unittest、Git 主干合并、CI 门禁、Clean Architecture、Unit of Work、幂等请求设计和遗留系统渐进式重构。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P023 已 verified，新增 Workbench stale write / optimistic locking contract and compatibility tests。
+- PF-P024 已 verified，新增 durable idempotency store contract tests。
+- PF-P025 已 verified，新增 idempotency record、fingerprint、conflict 和 in-memory repository skeleton。
+- PF-P026 已 verified，把 idempotency primitive 接入 `WorkbenchWriteUnitOfWork.run()` 的 fake/in-memory repository contract。
+- 本 MG 只处理 Workbench UoW/idempotency 基础切片合入 `main` 的门禁。
+- 本 MG 核心覆盖 PF-P023、PF-P024、PF-P025、PF-P026。
+- 当前分支还包含 PF-P022 UoW integration planning 文档提交；它是本切片的同分支前置规划事实，也必须纳入 diff scope，避免合并时漏掉文档事实。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-integration-planning` 或同一 Workbench UoW/idempotency integration 分支。
+   - PF-P023、PF-P024、PF-P025、PF-P026 均已 `verified`。
+   - 当前 active prompt 是 `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate` planned。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --cached --name-only`
+   - `git log --oneline main..HEAD`
+   - `git diff --name-only main...HEAD`
+4. 如果存在 unstaged/staged/untracked 文件：
+   - 只允许先处理本 MG 的文档回写。
+   - 任何非本 MG 相关变更都必须 blocked。
+
+Gate Scope:
+- 这是 Merge Gate，不是 Traffic Gate。
+- 允许执行范围检查、测试验证、upstream sync、merge 到本地 `main`、main 上复验和状态机回写。
+- 不允许执行 staging/prod Traffic Gate。
+- 不允许部署、生产访问、Nginx/网关切流或 push。
+- 不允许生成或执行 PF-P027。
+- 不允许开始真实 Workbench 写 API 迁移。
+- 不允许修 stale write / optimistic locking。
+- 不允许实现真实 PostgreSQL idempotency repository 或 SQL migration。
+
+Branch and Diff Scope:
+1. `git diff --name-only main...HEAD` 必须只包含 Expected Changed Files。
+2. Expected Changed Files:
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+3. 如果出现以下文件，必须 blocked：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - SQL migration 文件
+   - frontend files
+   - gateway / deploy / CI/CD files
+   - Redis/RabbitMQ/OA Mongo/MySQL adapter files
+   - 任何真实 Workbench facts repository 迁移文件，除非本分支已在前置 prompt 明确允许；当前未允许。
+4. 严禁使用 `git add .` 或 `git add -A`。
+5. 必须使用 `git ls-files --others --exclude-standard` 单独排查 untracked files；临时文件、`.pkl`、`.sqlite`、测试输出、`__pycache__` 均不得进入提交。
+
+Required Verification:
+1. Scope and hygiene:
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only main...HEAD`
+   - `git diff --check main...HEAD`
+   - `test ! -e backend-go`
+2. Targeted UoW/idempotency checks:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+3. Default CI compatibility for target contract files:
+   - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_stale_write_contract.py' -v`
+   - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`
+   - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`
+   - 退出码必须为 0。
+   - `tests/test_workbench_uow_contract.py` 只允许保留 4 个 expectedFailure，且它们必须是 stale write / optimistic locking：
+     - `test_withdraw_submit_rejects_stale_preview_relation_version`
+     - `test_cancel_link_rejects_stale_replaced_relation`
+     - `test_ignore_row_rejects_when_row_already_confirmed`
+     - `test_cash_special_rejects_changed_relation_version`
+   - `tests/test_workbench_stale_write_contract.py` 允许保留 2 个 expectedFailure，且必须是 withdraw preview version identity 与 target conflict response shape。
+   - `tests/test_workbench_idempotency_contract.py` 不应再有 expectedFailure。
+4. Existing safety net:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+5. Optional but recommended if time allows:
+   - 审计默认后端测试入口（`README.md`、`backend/README.md`、`docs/dev/testing.md` 或 CI 配置），确认本切片不会让默认 discover 红。
+
+Upstream Sync:
+- 如果用户要求合入 `main`，必须先同步最新 `main`。
+- 若远端可用，应先 `git fetch origin`，确认 `main` 与 `origin/main` 关系。
+- 当前分支必须包含最新 `main`，可以通过 rebase main 或 merge main 到当前分支解决。
+- 一旦同步 main 产生新提交或冲突解决，必须重新执行 Required Verification。
+
+Merge Execution:
+1. 只有 Required Verification 全部通过，且 scope 只包含 Expected Changed Files，才允许 merge。
+2. 合入前建议 commit message：
+   - `feat(workbench): establish uow idempotency foundation`
+3. 如果当前已经在 `main`，不得做无意义 merge；只做范围检查、必要 commit、验证和状态机更新。
+4. 合入 `main` 后必须在 `main` 上重新执行 Required Verification 中的绿色测试和 default CI compatibility checks。
+5. 合入后不要 push，除非用户另行明确要求 `git push origin main`。
+
+Forbidden Scope:
+- 不修改生产业务逻辑来通过 MG。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不继续迁移 Workbench 写路径。
+- 不修 stale write / optimistic locking。
+- 不实现真实 PostgreSQL durable idempotency repository。
+- 不新增或修改 SQL migration。
+- 不修改前端、网关、部署、CI/CD。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不删除 target tests。
+- 不使用 skip、条件 skip 或环境变量规避 target tests。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 如果 merge gate 通过并 main 复验通过，记录 PF-P026-MG `implemented`，等待用户确认后才可标记 `verified`。
+  - 如果范围污染、测试失败、默认 CI 兼容失败、上游同步冲突或其它门禁失败，记录 PF-P026-MG `blocked`，并写清 blocker。
+- 更新 `refactor-prompts.md` 的 PF-P026-MG 执行结果。
+- 不生成 PF-P027。
+- 不执行 PF-P027。
+- 不 push。
+- 未经用户确认，不得将 PF-P026-MG 标记为 `verified`。
+- 最终回复必须说明：
+  - 是否 merge 到 main；
+  - 当前切片覆盖了哪些 prompt；
+  - 哪些测试通过；
+  - 哪些 expectedFailure 仍保留且为什么可接受；
+  - 是否需要用户确认 verified；
+  - 下一步建议。
+```
+
+### 审查结论
+
+- PF-P026-MG 的边界正确：它统一覆盖 PF-P023/PF-P024/PF-P025/PF-P026 这组 Workbench UoW/idempotency 基础切片。
+- 当前分支还包含 PF-P022 规划文档提交，因此 Expected Changed Files 显式纳入 `workbench-uow-integration-plan.md`，防止合并时出现“文档事实漏合入”。
+- 本 MG 不触发 Traffic Gate、不部署、不 push。
+- 本 MG 不迁移真实 Workbench 写 API，不修改 `server.py`，不修改 `workbench_write_facade.py`。
+- 本 MG 不实现 stale write / optimistic locking，也不实现真实 PostgreSQL idempotency repository。
+- 未经用户确认，不得将 PF-P026-MG 标记为 `verified`。
