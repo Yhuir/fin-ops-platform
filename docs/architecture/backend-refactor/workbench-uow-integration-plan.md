@@ -466,3 +466,53 @@ Next prompt should not migrate a real Workbench write path yet. Recommended next
 `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`
 
 PF-P025 should implement the reusable idempotency primitives and make the PF-P024 record/fingerprint/conflict skeleton tests green. It must also resolve the identity naming boundary above. It should still avoid migrating `confirm_link`, `exception_apply`, cash special, or any other real Workbench write API unless a separate prompt explicitly authorizes that scope.
+
+## 14. PF-P025 Durable Idempotency Skeleton Result
+
+PF-P025 has been executed and is waiting for user confirmation before it can be marked `verified`.
+
+Implemented scope:
+
+- Added `backend/src/fin_ops_platform/services/workbench_idempotency.py`.
+- Re-exported idempotency primitives from `workbench_uow.py` to preserve the PF-P024 import contract.
+- Turned the PF-P024 record, fingerprint and conflict target tests green.
+- Added an in-memory repository skeleton contract test.
+- Did not modify real Workbench write API behavior.
+- Did not add SQL migrations or connect to a real PostgreSQL table.
+
+Implemented primitives:
+
+- `WorkbenchIdempotencyRecord`
+- `workbench_request_fingerprint`
+- `WorkbenchIdempotencyKeyConflict`
+- `InMemoryWorkbenchIdempotencyRepository`
+
+Identity boundary is now explicit:
+
+- `unique_identity = (tenant_id, actor_id, idempotency_key)` is the persistence unique key target.
+- `action_identity = (tenant_id, action_name, idempotency_key)` is action-scoped routing identity.
+- `identity` remains an action identity compatibility alias for the existing PF-P024 test contract.
+
+Verification summary:
+
+- `tests.test_workbench_idempotency_contract`: Pass, 7 tests, 2 expected failures.
+- `tests.test_workbench_uow_contract`: Pass, 16 tests, 7 expected failures.
+- Workbench stale write contract, write characterization, dirty queue wiring, runtime queue and platform guard safety net: Pass.
+
+Remaining expected failures:
+
+- `test_uow_replays_committed_same_fingerprint_without_handler_or_outbox`
+- `test_uow_reserves_and_commits_idempotency_record_inside_same_transaction_after_outbox`
+
+Confirmed implementation gaps after PF-P025:
+
+- UoW still does not call idempotency `get/reserve/commit`.
+- UoW still does not replay committed records.
+- UoW still does not reject same key / different fingerprint conflicts.
+- There is no durable PostgreSQL idempotency repository or SQL migration.
+
+Recommended next prompt after PF-P025 is confirmed `verified`:
+
+`PF-P026 - Workbench UoW Idempotency Integration Skeleton`
+
+PF-P026 should connect the PF-P025 primitive to `WorkbenchWriteUnitOfWork.run()` using fake/in-memory repository contract tests only. It should still avoid real Workbench write API migration.

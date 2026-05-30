@@ -437,3 +437,30 @@ Current implementation gaps remain intentional:
 - no real Workbench write API migration.
 
 The next implementation is now planned as `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`. It should build reusable idempotency primitives first. It should not connect real Workbench write actions until those primitives have their own contract tests and default CI stays green.
+
+## 16. PF-P025 Durable Idempotency Primitive Update
+
+PF-P025 has been executed as a primitive-only slice. It does not change production Workbench write behavior.
+
+Implemented reusable primitives:
+
+- `WorkbenchIdempotencyRecord`
+- `workbench_request_fingerprint`
+- `WorkbenchIdempotencyKeyConflict`
+- `InMemoryWorkbenchIdempotencyRepository`
+
+Identity terms are now separated:
+
+- `unique_identity`: `(tenant_id, actor_id, idempotency_key)` for durable persistence uniqueness.
+- `action_identity`: `(tenant_id, action_name, idempotency_key)` for action-scoped routing and diagnostics.
+- `identity`: compatibility alias for `action_identity`.
+
+What is still intentionally not implemented:
+
+- no real PostgreSQL idempotency table;
+- no SQL migration;
+- no production repository wired to the database;
+- no `WorkbenchWriteUnitOfWork.run()` idempotency replay/reserve/commit integration;
+- no real Workbench write API migration.
+
+The next safe implementation step is UoW idempotency integration against fake/in-memory contracts only. Real API migration should still wait until UoW replay/conflict behavior is mechanically green.

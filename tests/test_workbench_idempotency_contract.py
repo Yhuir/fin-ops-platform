@@ -18,12 +18,11 @@ from tests.test_workbench_uow_contract import (
 
 
 """
-PF-P024 durable idempotency target contracts.
+PF-P024/PF-P025 durable idempotency contracts.
 
-The expected-failure tests describe the durable idempotency store that must
-eventually protect Workbench writes from duplicate client retries. They stay in
-default CI as expected failures until the idempotency table, request fingerprint,
-conflict mapping, and UoW integration are implemented.
+PF-P025 turns the record, fingerprint, conflict, and in-memory repository
+primitive contracts green. The remaining expected failures describe the future
+UoW replay / reserve / commit integration, not a skipped test suite.
 """
 
 
@@ -76,7 +75,6 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             self.fail("WorkbenchWriteUnitOfWork.run must return a dict response payload.")
         return result
 
-    @unittest.expectedFailure
     def test_idempotency_record_contract_exposes_required_fields_and_identity(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_uow")
         record_class = getattr(module, "WorkbenchIdempotencyRecord")
@@ -94,13 +92,13 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             status="committed",
         )
 
-        self.assertEqual(record.identity, ("default", "confirm_link", "confirm:idem-1"))
+        self.assertEqual(record.unique_identity, ("default", "finance-1", "confirm:idem-1"))
+        self.assertEqual(record.action_identity, ("default", "confirm_link", "confirm:idem-1"))
         self.assertEqual(record.request_fingerprint, "fp-1")
         self.assertEqual(record.source_versions, {"2026-05": 7})
         self.assertEqual(record.outbox_event_ids, ["event-7"])
         self.assertNotIn("SECRET", json.dumps(record.to_storage_payload(), sort_keys=True))
 
-    @unittest.expectedFailure
     def test_request_fingerprint_is_stable_for_json_order_and_excludes_trace_context(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_uow")
         fingerprint = getattr(module, "workbench_request_fingerprint")
@@ -137,7 +135,6 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotEqual(first, different_actor)
 
-    @unittest.expectedFailure
     def test_same_key_different_fingerprint_maps_to_409_conflict_payload(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_uow")
         conflict_class = getattr(module, "WorkbenchIdempotencyKeyConflict")
@@ -154,6 +151,41 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertEqual(payload["error"], "idempotency_key_conflict")
         self.assertEqual(payload["idempotency_key"], "confirm:idem-1")
         self.assertIn("same idempotency key", payload["message"].lower())
+
+    def test_in_memory_idempotency_repository_reserves_commits_and_detects_fingerprint_conflict(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        record_class = getattr(module, "WorkbenchIdempotencyRecord")
+        repository_class = getattr(module, "InMemoryWorkbenchIdempotencyRepository")
+
+        repository = repository_class()
+        reserved = repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:idem-1",
+            request_fingerprint="fp-1",
+            request_payload={"case_id": "CASE-1", "cookie": "session=SECRET"},
+        )
+
+        self.assertEqual(reserved.status, "reserved")
+        self.assertEqual(repository.get_committed_or_reserved(*reserved.unique_identity), reserved)
+
+        committed = repository.commit(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:idem-1",
+            request_fingerprint="fp-1",
+            response_payload={"case_id": "CASE-1"},
+            source_versions={"2026-05": 9},
+            outbox_event_ids=["event-9"],
+        )
+
+        self.assertIsInstance(committed, record_class)
+        self.assertEqual(committed.status, "committed")
+        self.assertEqual(committed.response_payload, {"case_id": "CASE-1"})
+        self.assertTrue(repository.has_fingerprint_conflict(committed.unique_identity, "fp-2"))
+        self.assertNotIn("SECRET", json.dumps(committed.to_storage_payload(), sort_keys=True))
 
     @unittest.expectedFailure
     def test_uow_replays_committed_same_fingerprint_without_handler_or_outbox(self) -> None:

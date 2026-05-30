@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` (`planned`) |
+| 当前阶段 | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` (`implemented`) |
 | 最近 verified prompt | `PF-P024 - Workbench Durable Idempotency Store Contract` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P024 已由用户确认 `verified`；durable idempotency contract tests 已锁定且默认 CI 保持绿色 |
-| 下一条允许任务 | 只允许执行 PF-P025。PF-P025 只能实现 record / fingerprint / conflict / repository skeleton，不得迁移真实 Workbench 写 API |
+| 最近验证 | PF-P024 已由用户确认 `verified`；PF-P025 targeted tests 已通过，record/fingerprint/conflict/repository skeleton 已转绿 |
+| 下一条允许任务 | 等待用户确认 PF-P025 是否可标记 `verified`。确认前不得生成 PF-P026，不得迁移真实 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -2595,7 +2595,7 @@ PF-P024 已由用户确认 `verified`。PF-P025 已生成并审查，下一步�
 
 ### PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2627,15 +2627,44 @@ PF-P024 已由用户确认 `verified`。PF-P025 已生成并审查，下一步�
 - production 代码变更只允许在 Workbench UoW/idempotency primitive 边界内。
 - 不得改变真实 Workbench 写 API 的响应和副作用。
 
+#### 执行结果
+
+- 新增 `backend/src/fin_ops_platform/services/workbench_idempotency.py`，实现 durable idempotency primitive 和 in-memory repository skeleton。
+- `backend/src/fin_ops_platform/services/workbench_uow.py` 仅 re-export idempotency primitive；未修改 `WorkbenchWriteUnitOfWork.run()` 的 replay / reserve / commit 行为。
+- `tests/test_workbench_idempotency_contract.py` 中 record、fingerprint、conflict 相关目标测试已转为普通通过测试。
+- 新增 repository skeleton contract test：覆盖 reserve、commit、replay-safe payload、same key different fingerprint conflict 检测和敏感字段过滤。
+- 已拆分 identity 命名：
+  - `unique_identity = (tenant_id, actor_id, idempotency_key)` 用于 durable persistence unique key；
+  - `action_identity = (tenant_id, action_name, idempotency_key)` 用于 action-scoped routing identity；
+  - `identity` 保持 action identity 兼容，避免破坏既有 PF-P024 测试语义。
+- 未新增 SQL migration，未接真实 PostgreSQL 表，未迁移任何真实 Workbench 写 API。
+
+#### 验证
+
+- RED 验证：移除 record/fingerprint/conflict expectedFailure 后，4 个目标测试因缺少 `WorkbenchIdempotencyRecord`、`workbench_request_fingerprint`、`WorkbenchIdempotencyKeyConflict`、repository skeleton 失败。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：通过，7 tests，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：通过，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：通过，3 tests，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：通过，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：通过，7 tests，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：通过，16 tests，`expected failures=7`。
+- `git diff --check`：通过。
+- `test ! -e backend-go`：通过。
+- scope allowlist check：通过；除 PF-P025 允许的 Workbench UoW/idempotency tests/docs 文件外无其他改动。
+
 #### 审查结论
 
 - PF-P025 是 PF-P024 后的正确下一步：它补齐实现前置 primitive，避免直接把复杂写路径接入 UoW。
 - 真实 durable PostgreSQL repository、SQL migration 和 UoW replay/commit 集成仍应进入后续 prompt。
 - PF-P025 通过后，再评估是否进入 `PF-P026 - Workbench UoW Idempotency Integration Skeleton` 或先补 `PF-P025-MG`，取决于本分支是否达到可合并切片边界。
+- PF-P025 执行后确认的剩余缺口：UoW 仍不会调用 idempotency `get/reserve/commit`，不会 replay committed records，不会拒绝 fingerprint conflict；durable PostgreSQL repository / SQL migration 仍未实现。
 
 #### 下一条 Prompt 上下文
 
-下一步只允许执行 PF-P025，不得生成 PF-P026，不得执行真实 Workbench 写 API 迁移。PF-P025 完成后必须回写状态机和相关架构文档，记录哪些 PF-P024 expectedFailure 已转绿、哪些仍是目标契约。
+PF-P025 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。确认后，下一步建议生成并审查 `PF-P026 - Workbench UoW Idempotency Integration Skeleton`；PF-P026 仍不应迁移真实 Workbench 写 API，只应把 PF-P025 的 primitive 以 fake/repository contract 方式接入 `WorkbenchWriteUnitOfWork.run()`，让 UoW replay / reserve / commit 集成测试转绿。
 
 ## 维护规则
 

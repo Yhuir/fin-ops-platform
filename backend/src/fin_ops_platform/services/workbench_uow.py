@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from fin_ops_platform.services.workbench_idempotency import (
+    InMemoryWorkbenchIdempotencyRepository,
+    WorkbenchIdempotencyKeyConflict,
+    WorkbenchIdempotencyRecord,
+    workbench_request_fingerprint,
+)
+
 
 @dataclass(frozen=True)
 class WorkbenchWriteUnitOfWorkContext:

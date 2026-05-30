@@ -7618,3 +7618,46 @@ Post-Flight:
 - PF-P025 可以修改生产代码，但只能在 `workbench_uow.py` / 可选 `workbench_idempotency.py` 的 primitive 边界内。
 - PF-P025 不应新增 SQL migration；真实 durable PostgreSQL repository 应在后续 prompt 中带 migration、rollback、cleanup policy 一起处理。
 - PF-P025 不应实现完整 UoW replay/reserve/commit 集成；该集成应在 primitive 转绿后作为独立 prompt 推进。
+
+### 执行结果
+
+状态：`implemented`，等待用户确认后才能标记 `verified`。
+
+变更范围：
+
+- 新增 `backend/src/fin_ops_platform/services/workbench_idempotency.py`。
+- 在 `backend/src/fin_ops_platform/services/workbench_uow.py` re-export idempotency primitive，保持 PF-P024 import contract 兼容。
+- 更新 `tests/test_workbench_idempotency_contract.py`，将 record/fingerprint/conflict 相关 target tests 转为普通通过测试，并新增 in-memory repository skeleton contract test。
+- 回写 `migration-state-log.md`、`workbench-uow-integration-plan.md`、`workbench-write-uow-boundary-design.md`。
+
+已实现：
+
+- `WorkbenchIdempotencyRecord`
+- `workbench_request_fingerprint`
+- `WorkbenchIdempotencyKeyConflict`
+- `InMemoryWorkbenchIdempotencyRepository`
+- identity 命名拆分：
+  - `unique_identity = (tenant_id, actor_id, idempotency_key)`
+  - `action_identity = (tenant_id, action_name, idempotency_key)`
+  - `identity` 作为 action identity 兼容属性
+
+验证结果：
+
+- RED 验证：移除 PF-P024 record/fingerprint/conflict `expectedFailure` 后，4 个目标测试按预期失败，缺少对应 primitive。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：通过，7 tests，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：通过，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：通过，3 tests，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：通过，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：通过，7 tests，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：通过，16 tests，`expected failures=7`。
+- `git diff --check`、`test ! -e backend-go` 和 scope allowlist check：通过。
+
+确认的缺口：
+
+- `WorkbenchWriteUnitOfWork.run()` 尚未执行 idempotency `get/reserve/commit`。
+- UoW committed replay / fingerprint conflict 拦截仍是 `expectedFailure`。
+- 真实 durable PostgreSQL repository 和 SQL migration 尚未实现。
+- 未迁移任何真实 Workbench 写 API。
