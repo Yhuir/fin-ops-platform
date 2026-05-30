@@ -385,3 +385,14 @@ PF-P021-CI 的修正策略：
 - 已实现的 writer、UoW atomicity、worker/source_version tests 必须保持普通 pass。
 - 不删除 target tests，不使用 skip，不改变断言语义。
 - 修正后默认 discover 应退出码为 0，并显示 7 个 expected failures。
+
+PF-P021-CI 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`：
+
+- 7 个尚未实现的 stale write / durable idempotency target contract tests 已标记为 `unittest.expectedFailure`。
+- 该标记只是默认 CI 隔离机制，不是删除目标契约；后续实现对应语义后，unittest 的 unexpected success 信号应提醒移除标记。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- PF-P021 targeted UoW tests、PF-P020 writer group、runtime queue、Workbench write characterization、dirty queue wiring 和 platform guard safety net 均保持通过。
+- 未修改生产代码，未执行 merge、Traffic Gate、部署或 push。
+
+PF-P021-CI 经用户确认 `verified` 后，应重新执行 PF-P021-MG，确认默认 CI blocker 已解除后再考虑合入 `main`。在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。

@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已由用户确认 `verified`，新增 transaction-bound dirty/outbox writer。PF-P021 已由用户确认 `verified`，新增 minimal UoW skeleton。PF-P021-MG 已执行但 blocked，未合入 `main`。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已由用户确认 `verified`，新增 transaction-bound dirty/outbox writer。PF-P021 已由用户确认 `verified`，新增 minimal UoW skeleton。PF-P021-MG 已执行但 blocked，未合入 `main`。PF-P021-CI 已执行并记录为 `implemented`，等待用户确认。
 
 ## 1. Scope Boundary
 
@@ -567,3 +567,14 @@ PF-P021 已由用户确认 `verified`。PF-P021-MG 已执行，但被默认 CI �
 PF-P021-MG 发现 `README.md`、`backend/README.md` 和 `docs/dev/testing.md` 的默认后端测试入口均为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`；`tests/test_workbench_uow_contract.py` 会被默认 discover，且当前 16 tests，7 failures，9 ok。因此本轮不能 merge。PF-P021-CI 已生成并审查，用于先处理 target contract tests 的默认 CI 策略；不得继续迁移更多 Workbench 写路径。
 
 PF-P021-CI 的目标是只把 7 个尚未实现的 stale write / durable idempotency target tests 标记为 `unittest.expectedFailure`，让默认 discover 不失败，同时保留目标契约和 unexpected success 信号。已通过的 writer、UoW atomicity 和 worker/source_version tests 必须保持普通绿色测试。
+
+PF-P021-CI 已按该边界执行：
+
+- 7 个尚未实现的 stale write / durable idempotency target contract tests 已标记为 `unittest.expectedFailure`。
+- 该机制是默认 CI 隔离，不是删除目标契约；后续实现对应语义后，应根据 unexpected success 信号移除 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- PF-P021 targeted UoW tests、PF-P020 writer group、runtime queue、Workbench write characterization、dirty queue wiring 和 platform guard safety net 均保持通过。
+- 未修改生产代码，未执行 merge、Traffic Gate、部署或 push。
+
+PF-P021-CI 需要用户确认后才能标记 `verified`。确认后应重新执行 PF-P021-MG；在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。

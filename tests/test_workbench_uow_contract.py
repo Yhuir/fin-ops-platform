@@ -372,6 +372,9 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(connection.commits, 0)
         self.assertEqual(connection.rollbacks, 1)
 
+    # PF-P021-CI: target contract tests stay visible in default CI as
+    # expected failures until the corresponding UoW semantics are implemented.
+    @unittest.expectedFailure
     def test_withdraw_submit_rejects_stale_preview_relation_version(self) -> None:
         uow = self._new_uow()
         called = False
@@ -393,6 +396,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             )
         self.assertFalse(called)
 
+    @unittest.expectedFailure
     def test_cancel_link_rejects_stale_replaced_relation(self) -> None:
         uow = self._new_uow()
 
@@ -407,6 +411,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 lambda ctx: {"affected_scope_keys": ["2026-05"]},
             )
 
+    @unittest.expectedFailure
     def test_ignore_row_rejects_when_row_already_confirmed(self) -> None:
         uow = self._new_uow()
 
@@ -421,6 +426,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 lambda ctx: {"affected_scope_keys": ["2026-05"]},
             )
 
+    @unittest.expectedFailure
     def test_cash_special_rejects_changed_relation_version(self) -> None:
         uow = self._new_uow()
 
@@ -435,6 +441,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 lambda ctx: {"affected_scope_keys": ["2026-05"]},
             )
 
+    @unittest.expectedFailure
     def test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history(self) -> None:
         idempotency = _RecordingIdempotencyStore()
         uow = self._new_uow(idempotency_store=idempotency)
@@ -453,6 +460,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(call_count, 1)
 
+    @unittest.expectedFailure
     def test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox(self) -> None:
         idempotency = _RecordingIdempotencyStore()
         writer = _RecordingDirtyOutboxWriter()
@@ -476,6 +484,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(call_count, 1)
         self.assertEqual(len(writer.calls), 1)
 
+    @unittest.expectedFailure
     def test_cash_special_idempotency_key_does_not_append_duplicate_history(self) -> None:
         uow = self._new_uow()
         history_appends = 0

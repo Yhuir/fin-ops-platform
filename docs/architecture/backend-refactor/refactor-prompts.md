@@ -6604,7 +6604,7 @@ Blocker:
 
 ## PF-P021-CI - Workbench UoW Contract Test CI Isolation
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -6731,3 +6731,39 @@ Post-Flight:
 - 使用 `unittest.expectedFailure` 比 skip 更合适：expected failure 不会让默认 CI 失败，但对应语义实现后会产生 unexpected success，提醒后续移除标记。
 - 该 prompt 明确禁止删除测试、改断言、改默认测试入口或继续迁移 Workbench 写路径。
 - PF-P021-CI 执行完成后只能到 `implemented` 或 `blocked`；必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`implemented`，等待用户确认后才能标记 `verified`。
+
+本轮只修改 `tests/test_workbench_uow_contract.py` 与 backend-refactor 文档；未修改生产代码、默认测试入口、README、部署或 CI/CD 配置；未执行 merge、Traffic Gate、push 或生产访问。
+
+已将以下 7 个尚未实现的 target contract tests 标记为 `unittest.expectedFailure`：
+
+- `test_withdraw_submit_rejects_stale_preview_relation_version`
+- `test_cancel_link_rejects_stale_replaced_relation`
+- `test_ignore_row_rejects_when_row_already_confirmed`
+- `test_cash_special_rejects_changed_relation_version`
+- `test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history`
+- `test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox`
+- `test_cash_special_idempotency_key_does_not_append_duplicate_history`
+
+以下测试保持普通绿色测试，未被标记为 expectedFailure：
+
+- PF-P021 targeted UoW 4 tests。
+- PF-P020 writer group 3 tests。
+- `test_outbox_payload_contains_source_version_for_each_dirty_scope`。
+- `test_worker_completion_cannot_mark_newer_dirty_scope_done_from_older_event`。
+
+验证结果：
+
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- PF-P021 targeted UoW 4 tests：Pass。
+- PF-P020 writer group 3 tests：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+下一步：用户确认 PF-P021-CI `verified` 后，重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。
