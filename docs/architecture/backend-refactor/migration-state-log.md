@@ -49,12 +49,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Workbench Query Characterization Tests Merge Gate 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P005-MG - Workbench Query Characterization Tests Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P005 - Workbench Query Characterization Tests` |
-| 当前分支 | `codex/workbench-read-model-query-plan` |
-| 最近验证 | PF-P005-MG 已在 `main` 上 fast-forward merge；`tests.test_workbench_sql_runtime`、row detail targeted tests、PF-P003 platform guards 均已通过；未 push；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 用户确认后将 `PF-P005-MG` 标记为 verified；随后生成并审查 `PF-P006`，不得在 PF-P005-MG verified 前开始生产代码重构 |
+| 当前阶段 | Workbench Query Characterization Tests Merge Gate 已 verified；等待推送远端基线或生成 PF-P006 |
+| 当前 active prompt | 无执行中 prompt；下一步可生成并审查 `PF-P006 - Workbench Query Facade Extraction (Slice B)` |
+| 最近 verified prompt | `PF-P005-MG - Workbench Query Characterization Tests Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P005-MG 已在 `main` 上 fast-forward merge；`tests.test_workbench_sql_runtime`、row detail targeted tests、PF-P003 platform guards 均已通过；用户已确认 PF-P005-MG verified；未 push；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 建议先 push `main` 到 `origin/main` 让测试基线生效；随后生成并审查 `PF-P006`，不得直接执行 PF-P006 |
 
 ## Prompt 执行日志
 
@@ -619,7 +619,7 @@ PF-P005 已 verified。PF-P005-MG 已生成并审查，下一步允许执行 PF-
 
 ### PF-P005-MG - Workbench Query Characterization Tests Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -659,7 +659,7 @@ PF-P005 已 verified。PF-P005-MG 已生成并审查，下一步允许执行 PF-
 
 #### 执行结果
 
-- 已执行，等待用户确认后才能标记 `verified`。
+- 已执行，用户已确认，当前状态为 `verified`。
 - PF-P005 变更已精准 stage 并提交，提交为 `2bb3ac17`（`test(workbench): lock query read model characterization baseline`）。
 - 当前分支已切回 `main`，并通过 fast-forward merge 将 `codex/workbench-read-model-query-plan` 合入 `main`。
 - `main` 未 push 到 `origin/main`。
@@ -688,7 +688,7 @@ PF-P005 已 verified。PF-P005-MG 已生成并审查，下一步允许执行 PF-
 
 #### 下一条 Prompt 上下文
 
-PF-P005-MG 已执行到 `implemented`，必须先等待用户确认才能标记 `verified`。PF-P005-MG verified 后，下一步建议生成并审查 PF-P006 的实现型 prompt；PF-P006 才能开始 Workbench Query handler/facade/repository 的最小生产代码切片。当前 `main` 只在本地 ahead，尚未 push 到 `origin/main`。
+PF-P005-MG 已 verified。当前 `main` 只在本地 ahead，尚未 push 到 `origin/main`。下一步建议先执行 `git push origin main` 让远端测试基线生效；随后生成并审查 PF-P006 的实现型 prompt。PF-P006 应从 Workbench Query Facade Extraction (Slice B) 开始，目标是在 PF-P005 characterization tests 保护下薄化 summary/groups/group detail/refresh-status handler；生成 PF-P006 后必须先审查，不能直接执行。
 
 ## 维护规则
 

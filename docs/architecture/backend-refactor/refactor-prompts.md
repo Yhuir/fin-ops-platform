@@ -1665,7 +1665,7 @@ Post-Flight:
 
 ## PF-P005-MG - Workbench Query Characterization Tests Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### 目标
 
@@ -1822,7 +1822,7 @@ Post-Flight:
 
 ### 执行结果
 
-- 已执行，当前状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- 已执行，用户已确认，当前状态为 `verified`。
 - PF-P005 tests/docs 变更已精准 stage 并提交，提交为 `2bb3ac17`：
   - `test(workbench): lock query read model characterization baseline`
 - 已切回 `main` 并 fast-forward merge `codex/workbench-read-model-query-plan`。
@@ -1838,4 +1838,4 @@ Post-Flight:
   - Row detail targeted tests，4 tests passed
   - PF-P005 / PF-P005-MG 文档门禁 `rg`
   - 新增 characterization test 锚点 `rg`
-- 下一步建议：用户确认后将 PF-P005-MG 标记为 `verified`；随后生成并审查 PF-P006，不要在 PF-P005-MG verified 前开始生产代码重构。
+- 下一步建议：先 push `main` 到 `origin/main` 让测试基线生效；随后生成并审查 `PF-P006 - Workbench Query Facade Extraction (Slice B)`，不要直接执行 PF-P006。
