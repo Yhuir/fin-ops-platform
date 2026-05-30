@@ -280,16 +280,42 @@ PF-P019 不应直接改当前 behavior tests 的期望。应新增 target contra
 6. Read model source_version 和 matching dirty scope source_version 的关系需要明确，避免一条写操作产生两套互相不可比较的 freshness 口径。
 7. Existing characterization tests 锁定了当前非理想行为，目标 contract tests 必须与它们并存，直到实现 prompt 明确切换语义。
 
-## 11. Next Slice Recommendation
+## 11. PF-P019 Target Contract Test Results
+
+PF-P019 已新增 `tests/test_workbench_uow_contract.py`，用于锁定 UoW 目标契约，不改变当前生产行为。
+
+覆盖范围：
+
+- transaction-bound dirty/outbox writer：必须能接收外层 transaction，不得自己开启嵌套 transaction；dirty scope 与 outbox event 必须共享 source_version。
+- Workbench UoW atomicity：`confirm_link`、`exception_apply`、personal advance repayment 等写路径必须把 facts、history/audit、dirty scope、outbox 放入同一 PostgreSQL transaction。
+- stale write：withdraw、cancel、ignore、cash special 必须在 expected version 不匹配时返回冲突语义，不得盲写覆盖。
+- durable idempotency：confirm、exception apply、cash special 必须能用持久 idempotency key 重放首个结果，且不重复追加 history、case 或 outbox。
+- worker/source_version：outbox payload 必须携带 source_version，worker completion 不能用旧 event 完成更新版本的 dirty scope。
+
+验证结果：
+
+- `tests.test_workbench_uow_contract`：Expected Red，16 tests，14 failures，2 ok。失败均指向缺失 `WorkbenchWriteUnitOfWork` 或 transaction-bound read model refresh writer。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+
+新的实现顺序建议：
+
+1. 先实现 transaction-bound dirty/outbox writer，让 read model refresh 写入可加入外层 PostgreSQL transaction。
+2. 再实现最小 `WorkbenchWriteUnitOfWork.run(command, handler)`。
+3. 再逐步把已抽出的 Workbench write facade 写路径迁入 UoW。
+
+## 12. Next Slice Recommendation
 
 推荐下一条 prompt：
 
-`PF-P019 - Workbench UoW Contract Tests`
+`PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`
 
 边界：
 
-- 只新增目标 contract tests。
-- 不实现 UoW。
+- 只实现可加入外层 transaction 的 dirty scope / outbox writer。
+- 优先让 PF-P019 中 platform transaction-bound writer contract 变绿。
+- 不把完整 Workbench write facade 切入 UoW。
+- 不修 stale write，不实现 durable idempotency store。
 - 不修改生产逻辑。
-- 可以新增 fake transaction / fake writer 测试辅助，但不得改真实 repository 行为。
-- 测试应明确标注哪些是目标语义，避免和现有 characterization tests 混淆。
+- 必须保持现有 characterization、dirty queue wiring 和 platform guard tests 绿色。

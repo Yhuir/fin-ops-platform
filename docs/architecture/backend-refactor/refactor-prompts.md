@@ -4245,7 +4245,7 @@ TDD 记录：
 
 ## PF-P013-MG - Workbench Write Facade Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -5995,3 +5995,26 @@ Post-Flight:
 - PF-P019 明确现有 characterization、dirty queue 和 platform guard tests 必须保持绿色，防止红灯契约测试污染现有安全网。
 - PF-P019 禁止修改生产代码、SQL migration、前端、部署和现有 characterization 期望。
 - PF-P019 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+- 已新增 `tests/test_workbench_uow_contract.py`，共 16 个 Workbench UoW 目标契约测试。
+- Contract coverage:
+  - transaction-bound dirty/outbox writer：3 tests。
+  - Workbench UoW atomicity：4 tests。
+  - stale write target behavior：4 tests。
+  - durable idempotency target behavior：3 tests。
+  - worker/source_version compatibility：2 tests。
+- Expected Red:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+  - 结果：FAIL，16 tests，14 failures，2 ok。
+  - 失败原因符合预期：缺失 `fin_ops_platform.services.workbench_uow.WorkbenchWriteUnitOfWork`，以及缺失 transaction-bound read model refresh writer / `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=...)`。
+- Existing Green:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- Scope:
+  - 未修改生产 `.py` 文件。
+  - 未修改 `server.py`、`workbench_write_facade.py`、`runtime_queue.py`。
+  - 未修改 SQL migration、前端、部署、CI/CD 或现有 characterization 期望。
+- 下一步建议：用户确认 PF-P019 `verified` 后，生成并审查 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`，先补齐可加入外层 PostgreSQL transaction 的 dirty scope/outbox writer，再进入完整 UoW 实现。

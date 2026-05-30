@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P019 - Workbench UoW Contract Tests` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P019 - Workbench UoW Contract Tests` (`planned`) |
+| 当前阶段 | `PF-P019 - Workbench UoW Contract Tests` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P019 - Workbench UoW Contract Tests` (`implemented`) |
 | 最近 verified prompt | `PF-P018 - Workbench Write Unit of Work Boundary Design` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | PF-P018 已由用户确认 verified；PF-P019 已生成并审查；未执行 PF-P019；未改业务代码、测试、SQL migration、前端、部署或生产配置 |
-| 下一条允许任务 | 执行 `PF-P019 - Workbench UoW Contract Tests`；只允许新增目标契约测试和文档回写，不得实现 UoW 或修改生产逻辑 |
+| 最近验证 | PF-P019 已新增目标 contract tests；新测试 16 个运行，14 个按预期失败、2 个通过；既有 Workbench characterization、dirty queue wiring、platform guard tests 全部通过；未改生产代码、SQL migration、前端、部署或生产配置 |
+| 下一条允许任务 | 用户确认后将 PF-P019 标记为 `verified`；随后生成并审查 PF-P020，建议先做 transaction-bound dirty/outbox writer 最小实现，不直接跳到完整 UoW |
 
 ## Prompt 执行日志
 
@@ -2133,7 +2133,7 @@ PF-P018 已执行并由用户确认 `verified`，产物是 `workbench-write-uow-
 
 ### PF-P019 - Workbench UoW Contract Tests
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2152,14 +2152,17 @@ PF-P018 已执行并由用户确认 `verified`，产物是 `workbench-write-uow-
 
 #### 验收标准
 
-- PF-P019 prompt 已写入 `refactor-prompts.md` 并完成审查。
-- PF-P019 明确它只新增目标 contract tests，不实现生产逻辑。
-- PF-P019 明确新测试可红，但必须是“目标契约红灯”，现有 characterization / platform guard tests 必须保持通过。
-- PF-P019 明确执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+- 已新增 `tests/test_workbench_uow_contract.py`，共 16 个目标契约测试。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Expected Red，运行 16 个测试，14 个失败、2 个通过。失败均指向缺失的 `fin_ops_platform.services.workbench_uow.WorkbenchWriteUnitOfWork` 或 transaction-bound read model refresh writer，不是语法错误、夹具错误或外部依赖错误。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 本轮未修改任何生产 `.py` 文件、SQL migration、前端、部署或 CI/CD。
+- PF-P019 执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
 
 #### 下一条 Prompt 上下文
 
-PF-P019 已生成并审查。下一步允许执行 PF-P019。PF-P019 verified 后，才允许根据红灯测试结果生成 UoW 最小实现 prompt，预计为 `PF-P020 - Workbench UoW Minimal Implementation` 或先补平台 transaction-bound dirty/outbox writer 的更小 prompt。
+PF-P019 已执行，等待用户确认。新增测试显示当前最先阻塞点是 transaction-bound dirty/outbox writer 和 `WorkbenchWriteUnitOfWork` 目标接口缺失。用户确认 PF-P019 `verified` 后，建议生成并审查 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`，先让 read model refresh writer 能复用外层 PostgreSQL transaction，再进入完整 UoW 实现。
 
 ## 维护规则
 
