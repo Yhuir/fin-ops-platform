@@ -49,12 +49,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P006-MG - Workbench Query Facade Merge Gate` 已执行，等待用户确认 verified |
-| 当前 active prompt | `PF-P006-MG - Workbench Query Facade Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P006 - Workbench Query Facade Extraction (Slice B)` |
+| 当前阶段 | `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)` 已生成，等待执行 |
+| 当前 active prompt | `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)` (`planned`) |
+| 最近 verified prompt | `PF-P006-MG - Workbench Query Facade Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P006-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`8937bb15` 已 fast-forward 合入 `main`；未 push `origin/main`；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 用户确认后将 `PF-P006-MG` 标记为 `verified`；随后用户决定是否 push `main` 到 `origin/main` 或生成 Slice C prompt |
+| 最近验证 | PF-P006-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`8937bb15` 和 `87d738de` 已 push 到 `origin/main`；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 审查并执行 `PF-P007`；不得直接开始 Slice D、Traffic Gate、部署或生产变更 |
 
 ## Prompt 执行日志
 
@@ -778,7 +778,7 @@ PF-P006 已由用户确认 `verified`。PF-P006-MG 已生成并审查，下一�
 
 ### PF-P006-MG - Workbench Query Facade Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -832,7 +832,7 @@ PF-P006-MG 允许合入的文件仅限：
 
 #### 下一条 Prompt 上下文
 
-PF-P006-MG 已执行完成，状态停在 `implemented`，必须等待用户确认后才能标记 `verified`。PF-P006-MG verified 后，下一步再考虑 push `main` 到 `origin/main` 或生成 Slice C prompt；不得在 PF-P006-MG 中默认执行 Traffic Gate。
+PF-P006-MG 已由用户确认 `verified`。`main` 已 push 到 `origin/main`，远端基线包含 `8937bb15` 和 `87d738de`。下一步允许执行已生成并审查的 `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)`；不得直接开始 Slice D、Traffic Gate、部署或生产变更。
 
 #### 执行结果
 
@@ -841,7 +841,7 @@ PF-P006-MG 已执行完成，状态停在 `implemented`，必须等待用户确�
 - Merge 方式：`main` 与 `origin/main` 执行前均为 `fd75f9ee`，`main` 通过 fast-forward 合入 `8937bb15`。
 - 合入范围只包含 Expected Changed Files：`server.py`、`workbench_query_facade.py`、`test_workbench_query_facade.py` 和三份 backend-refactor 文档。
 - 未修改 SQL migration、前端、网关、部署配置或生产配置。
-- 未执行 Traffic Gate，未部署服务器，未 push 到 `origin/main`。
+- 未执行 Traffic Gate，未部署服务器；随后按用户确认已 push 到 `origin/main`。
 
 #### Feature branch 验证结果
 
@@ -858,6 +858,43 @@ PF-P006-MG 已执行完成，状态停在 `implemented`，必须等待用户确�
 - Facade 上帝对象注入静态检查：无输出，通过。
 - Facade mock 静态检查：无输出，通过。
 - `request_database_timing` 边界静态检查：通过。
+
+#### 远端同步结果
+
+- `git push origin main`：通过，`origin/main` 从 `fd75f9ee` 更新到 `87d738de`。
+- 本次 push 只推送 Git 远端主干；未推送或重启服务器，未修改部署配置，未执行 Traffic Gate。
+
+### PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 Workbench query/read-model 的 cache 与 freshness 边界。
+- 允许在 PF-P006 已抽出的 `WorkbenchQueryFacade` 周边补测试并做最小实现。
+- 目标是统一 active generation、source_version、Redis key、stale/refreshing 语义。
+- 不执行 Traffic Gate、不部署服务器、不修改生产配置、不访问生产外部服务。
+- 不开始 Slice D，不修改 legacy `GET /api/workbench`、row detail fallback、SSE 断连语义、worker refresh、builder 或写路径。
+
+#### 预期产物
+
+- 补齐或调整 Workbench cache/freshness 相关测试。
+- 如测试要求，最小调整 `WorkbenchQueryFacade` 或其细粒度 helper / adapter 调度。
+- 更新 `workbench-read-model-query-plan.md` 中 Slice C 的执行结果和后续 Slice D 输入。
+- 更新本文档和 `refactor-prompts.md`。
+
+#### 预期验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- Row detail targeted tests。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- Facade god-object injection / mock / observability 边界静态检查。
+
+#### 下一条 Prompt 上下文
+
+PF-P007 是实现型 prompt，不是 Merge Gate，也不是 Traffic Gate。执行后只能进入 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。PF-P007 verified 后，下一步再生成 `PF-P007-MG` 或继续 Slice D prompt。
 
 #### main 上验证结果
 

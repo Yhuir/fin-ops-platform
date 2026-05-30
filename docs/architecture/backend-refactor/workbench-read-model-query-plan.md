@@ -1,6 +1,6 @@
 # Workbench Read Model Query 发现与边界计划
 
-状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `implemented`
+状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `verified`；PF-P007 `planned`
 
 对应 prompt：`PF-P004 - Workbench Read Model Query Discovery / Boundary Plan`
 
@@ -430,7 +430,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 - 禁止：改变 API contract、改写 worker、重写 repository SQL。
 - Rollback：切回旧 handler 调度。
 - 验证：Slice A tests + affected API tests。
-- 当前 prompt：`PF-P006-MG - Workbench Query Facade Merge Gate` 已执行，状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- 当前状态：`PF-P006-MG - Workbench Query Facade Merge Gate` 已由用户确认 `verified`，`main` 已 push 到 `origin/main`。
 - 执行结果：新增 `WorkbenchQueryFacade`，summary / groups / group detail / refresh-status handler 已薄化；`8937bb15` 已 fast-forward 合入 `main`；PF-P005 characterization tests、facade unit tests、platform guards、row detail targeted tests 和 `app.main --check` 均在 feature branch 与 `main` 上通过。
 
 ### Slice C：收口 Read Model Repository / Cache / Freshness Boundary
@@ -440,6 +440,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 - 禁止：引入新的缓存格式破坏兼容；禁止读 building/failed generation。
 - Rollback：恢复旧 helper 和 cache key version，保留 TTL 自然过期。
 - 验证：Redis cache tests、active generation tests、refresh-status tests。
+- 当前 prompt：`PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)` 已生成，等待执行。
 
 ### Slice D：优化请求线程重算或 fallback 风险
 

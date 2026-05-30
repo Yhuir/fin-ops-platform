@@ -2092,7 +2092,7 @@ Post-Flight:
 
 ## PF-P006-MG - Workbench Query Facade Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### 目标
 
@@ -2266,12 +2266,168 @@ Post-Flight:
 
 ### 执行结果
 
-- 已执行 PF-P006-MG，并将状态设为 `implemented`；未标记 `verified`。
+- 已执行 PF-P006-MG，并由用户确认标记为 `verified`。
 - Feature branch `codex/workbench-query-facade-prompt` 上精准 staging 了 Expected Changed Files，未使用 `git add .` 或 `git add -A`。
 - 创建 commit：`8937bb15 refactor(workbench): extract query read model facade`。
 - `main` 和 `origin/main` 执行前均为 `fd75f9ee`，通过 fast-forward 将 `8937bb15` 合入 `main`。
 - 合入范围只包含 PF-P006 Expected Changed Files。
 - 未修改 SQL migration、前端、网关、部署配置或生产配置。
-- 未执行 Traffic Gate、未部署服务器、未 push 到 `origin/main`。
+- 未执行 Traffic Gate、未部署服务器；随后按用户确认已 push 到 `origin/main`。
 - Feature branch 与 `main` 上均通过 mandatory checks：facade unit tests、compileall、`tests.test_workbench_sql_runtime`、`tests.test_platform_runtime_boundary_guards`、row detail targeted tests、`app.main --check`、`tests/test_workbench_sql_runtime.py` 无 diff 检查、Facade god-object injection 检查、Facade mock 检查、`request_database_timing` 边界检查。
-- 下一步：等待用户确认 PF-P006-MG verified；随后用户决定是否 push `main` 到 `origin/main` 或生成 Slice C prompt。
+- `git push origin main` 已通过，`origin/main` 从 `fd75f9ee` 更新到 `87d738de`。
+- 下一步：审查并执行 `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)`；不得直接开始 Slice D、Traffic Gate、部署或生产变更。
+
+## PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)
+
+状态：`planned`
+
+### 目标
+
+在 PF-P006 已抽出 `WorkbenchQueryFacade` 且 PF-P006-MG 已 verified / pushed 的基础上，执行 Workbench `query/read-model` 子域的 Slice C：收口 Read Model Repository / Cache / Freshness Boundary。目标是统一 active generation、source_version、Redis key、stale/refreshing 语义，并保持外部 API contract 不变。
+
+### Prompt
+
+```text
+/goal
+执行 PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)。
+
+目标：在不改变 Workbench query/read-model API contract 的前提下，收口 cache 与 freshness 边界，统一 active generation、source_version、Redis key、stale/refreshing 语义。只做 Slice C，不执行 Merge Gate，不执行 Traffic Gate，不开始 Slice D。
+
+Role:
+你是一位精通 Python 后端、Read Model freshness、Redis 版本化缓存、Clean Architecture 和遗留系统 TDD 重构的架构工程师。
+
+Context:
+当前仓库执行 Python-first 后端架构模块化重构。PF-P005 characterization tests 已合入远端，PF-P006 已抽出 `WorkbenchQueryFacade` 并薄化 summary / groups / group detail / refresh-status handler，PF-P006-MG 已 verified 并 push 到 `origin/main`。PF-P007 对应 `workbench-read-model-query-plan.md` 的 Slice C：收口 Read Model Repository / Cache / Freshness Boundary。
+
+Pre-Flight:
+必须先读取：
+- AGENTS.md
+- README.md
+- ARCHITECTURE.md
+- backend/README.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/workbench-read-model-query-plan.md
+- docs/architecture/backend-refactor/runtime-call-chain.md
+- docs/architecture/backend-refactor/platform-runtime-boundary-audit.md
+- docs/architecture/backend-refactor/ai-execution-rules.md
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/workbench_query_facade.py
+- tests/test_workbench_query_facade.py
+- tests/test_workbench_sql_runtime.py
+
+必须确认：
+- `migration-state-log.md` 中 PF-P006-MG 状态为 `verified`。
+- 当前 active prompt 是 `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)`。
+- 本轮是实现型 prompt，不是 Merge Gate，也不是 Traffic Gate。
+- 本轮不允许开始 Slice D，不允许修改 legacy `GET /api/workbench` fallback、row detail fallback、SSE 断连行为、worker refresh、builder、repository SQL 重写或任何写路径。
+- 如果当前在 `main`，必须先创建新分支，建议分支名：`codex/workbench-query-cache-freshness`。不得在 `main` 上直接实现业务代码。
+
+Required Discovery:
+执行前必须用代码和测试确认以下现状，并在执行结果中记录：
+- Groups stale/refreshing 时是否仍绕过旧 Redis JSON payload。
+- Fresh DB payload 是否仍会写入 Redis；如果会，判断它是否只在 freshness 通过后发生。
+- Redis cache key 是否包含 active generation / read model version / schema version / detail_level / search / filter / sort 等必要维度。
+- Summary / groups / group detail / refresh-status 的 stale/refreshing/unavailable 响应语义是否一致。
+- API 是否只读取 active generation，不读取 building / failed generation。
+- PF-P005 backend-only / contract-mismatch 字段是否仍被保留。
+
+Allowed Scope:
+- 允许新增或调整 Workbench query/read-model cache/freshness tests。
+- 允许最小调整：
+  - `backend/src/fin_ops_platform/services/workbench_query_facade.py`
+  - 与 Workbench query cache/freshness 直接相关的细粒度 helper / fake / adapter 调度。
+  - 必要时只做很小范围的 `server.py` 调用点修正，以保持 handler thin。
+- 允许更新：
+  - `tests/test_workbench_query_facade.py`
+  - `tests/test_workbench_sql_runtime.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+- 必须先补测试，再实现；如果无法写出会失败的测试，必须记录原因并停止实现。
+
+Required Test Work:
+至少补齐以下测试或证明已有测试等价覆盖：
+1. Redis freshness gating：
+   - stale / refreshing / unavailable 时不得读取旧 Redis JSON payload 作为用户响应。
+   - 只有 freshness 通过并成功读取 DB payload 后，才允许写入 Redis。
+2. Redis cache key contract：
+   - key 必须包含 active generation 或 read model version，以及 schema version、detail_level、search/filter/sort 等维度。
+   - 不允许不同 freshness state、filter 或 detail level 共享同一 key。
+3. Active generation boundary：
+   - API 只读 active generation。
+   - building / failed generation 只能出现在诊断或 refresh-status 元数据中，不能进入用户 payload。
+4. Source version semantics：
+   - source_versions stale 时返回 stale/refreshing contract，并 enqueue refresh。
+   - 不得把过期 read model 包装成 fresh。
+5. Contract preservation：
+   - 保留 PF-P005 标记的 backend-only / contract-mismatch 字段。
+   - 不删除 `TODO: PF-P006 verify safe to remove` 类字段或语义，除非另有专门 prompt。
+
+Forbidden Scope:
+- 不修改 SQL migration。
+- 不修改前端代码。
+- 不修改 Nginx、Vite、Caddy、部署配置或生产配置。
+- 不修改 legacy `GET /api/workbench` fallback。
+- 不修改 row detail fallback。
+- 不修改 SSE / events 长连接行为。
+- 不修改 worker refresh、builder、repository SQL 重写、RabbitMQ、Outbox、Dirty Scope 事实源。
+- 不修改 Workbench 写路径，包括 confirm/cancel、ignore/unignore、exception apply/revert、reconciliation write、pair relation write。
+- 不开始 Slice D 或 Workbench matching/candidates 重构。
+- 不开始 Turnover Ledger、Batch Accounting、Bankdetail、Invoices、Imports、Tax / Cost / ETC、Search 或 Ops 模块迁移。
+- 不执行 Traffic Gate。
+- 不部署服务器。
+- 不 push 到 `origin/main`。
+- 不访问生产 DB、Redis、RabbitMQ、OA Mongo、OA MySQL、MinIO/S3。
+- 不记录 DB password、JWT secret、OA token、cookie 实值或生产敏感 URL。
+- 未经用户确认，不得把 PF-P007 标记为 `verified`。
+
+Mandatory Checks:
+- `git status --short --branch`
+- `git diff --name-only`
+- `git diff --stat`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- Row detail targeted tests：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_row_detail_prefers_cached_read_model_before_query_service_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_opaque_oa_row_detail_prefers_month_read_model_without_full_oa_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_opaque_oa_row_detail_without_cache_returns_404_without_full_oa_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_row_detail_supports_oa_bank_and_invoice -v`
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- Facade 上帝对象注入静态检查：
+  - `rg -n "WorkbenchQueryFacade\\([^\\n]*(Application|RuntimeRepositories|RuntimeRepositoryContext|ApplicationStateStore|StateStoreProtocol|state_store)" backend/src/fin_ops_platform tests` 必须无输出。
+- Facade mock 静态检查：
+  - `rg -n "mock\\.patch\\(.+WorkbenchQueryFacade|patch\\(.+workbench_query_facade|monkeypatch.+WorkbenchQueryFacade|WorkbenchQueryFacade.*Mock|Mock.*WorkbenchQueryFacade" tests/test_workbench_sql_runtime.py` 必须无输出。
+- Observability 边界静态检查：
+  - `test ! -f backend/src/fin_ops_platform/services/workbench_query_facade.py || ! rg -n "request_database_timing" backend/src/fin_ops_platform/services/workbench_query_facade.py`
+- 文档状态检查：
+  - `rg -n "PF-P006-MG|PF-P007|状态：`verified`|状态：`planned`" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 记录 PF-P007 执行结果。
+  - 记录变更文件、测试命令和结果、发现的 cache/freshness 事实、风险和下一步建议。
+  - 将 PF-P007 状态设为 `implemented` 或 `blocked`，不得直接设为 `verified`。
+- 更新 `refactor-prompts.md` 的 PF-P007 状态和执行结果。
+- 更新 `workbench-read-model-query-plan.md` 的 Slice C 执行结果和 Slice D 输入。
+- 最终回复必须明确：
+  - 是否只修改了 Slice C 范围内文件。
+  - 是否修改了 SQL migration、前端、网关、部署或生产配置。
+  - 是否执行 Traffic Gate。
+  - 哪些验证通过。
+  - 下一步建议做什么。
+```
+
+### Gate Scope
+
+- Merge Gate：不涉及。PF-P007 只实现并验证，不 commit/merge 到 `main`。
+- Traffic Gate：不涉及。PF-P007 不切流、不部署、不修改网关或 worker 启动方式。
+- Test Gate：涉及。PF-P007 必须先补 cache/freshness tests，再做最小实现，并保留 PF-P005/PF-P006/PF-P003 既有门禁。
+
+### 审查结论
+
+- PF-P007 的边界正确：它只处理 Slice C 的 cache/freshness boundary，不开始 Slice D。
+- Prompt 明确要求在非 `main` 分支执行，避免在主干直接做业务代码重构。
+- Prompt 继承了 PF-P006 的 Facade 边界：禁止上帝对象注入、禁止 mock facade 降级 characterization tests、禁止把 `request_database_timing` 下沉到 facade。
+- Prompt 明确保留 PF-P005 backend-only / contract-mismatch 字段，不允许借 Slice C 清理 API contract。
+- Prompt 明确不修改 SQL migration、前端、网关、部署配置、worker、builder、写路径，不执行 Traffic Gate。
+- PF-P007 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。
