@@ -257,6 +257,24 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_write_facade_exposes_exception_write_entrypoints(self) -> None:
+        from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
+
+        expected_methods = {
+            "apply_exception",
+            "mark_exception",
+            "cancel_exception",
+            "ignore_row",
+            "unignore_row",
+        }
+        missing_methods = [
+            method_name
+            for method_name in sorted(expected_methods)
+            if not callable(getattr(WorkbenchWriteFacade, method_name, None))
+        ]
+
+        self.assertEqual(missing_methods, [])
+
     def test_external_oa_mysql_client_is_confined_to_role_sync_adapter(self) -> None:
         allowed_paths = {
             "backend/src/fin_ops_platform/services/oa_role_sync_service.py",

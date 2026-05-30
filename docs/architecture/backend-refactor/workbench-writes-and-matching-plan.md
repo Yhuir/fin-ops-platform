@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已生成并审查，等待用户确认执行。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 已执行，等待用户确认 `verified`；本轮只做 Workbench exception/ignore facade extraction。
 
 ## 1. Scope Boundary
 
@@ -418,6 +418,17 @@ PF-P013 已完成首轮行为保持型 facade 抽取：
 - PF-P012 锁定的 duplicate submit、stale write、cancel-after-replaced、read model scheduling failure propagation、history/audit 和 dirty/read model scheduling 当前行为保持不变。
 - `mark-exception`、`exception/apply`、`ignore-row`、`unignore-row` 尚未迁移。
 - Stale write / optimistic locking 和 Workbench Unit of Work 仍是后续独立语义变更。
+
+### PF-P014 Exception Facade Extraction Results
+
+PF-P014 已完成第二轮行为保持型 facade 抽取：
+
+- `WorkbenchWriteFacade` 新增 `apply_exception`、`mark_exception`、`cancel_exception`、`ignore_row`、`unignore_row` entrypoints。
+- `server.py` 对 `mark-exception`、`exception/apply`、`cancel-exception`、`ignore-row`、`unignore-row` 保留 HTTP body parsing、freshness guard、request id 和 response wrapper；非 HTTP 编排迁入 facade。
+- Facade 继续使用细粒度依赖注入，未注入 `Application`、`RuntimeRepositories`、`ApplicationStateStore`、`state_store` 或外部客户端。
+- PF-P012 锁定的 duplicate submit、stale write、blind write、read model scheduling failure 和异常映射行为保持不变。
+- 本轮未引入 Workbench Unit of Work，未修复 stale write / optimistic locking，未改变事务模型、dirty scope / outbox、derived lifecycle 或 read model scheduling 顺序。
+- `update-bank-exception`、`oa-bank-exception`、cash special、personal advance repayment、withdraw-link、matching run / dirty worker 仍在 `server.py` 后续切片中处理。
 
 ## 10. Risk / Optimization Findings
 
