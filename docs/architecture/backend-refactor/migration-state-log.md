@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` (`planned`) |
-| 最近 verified prompt | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` (`MG pending`) |
-| 当前分支 | `codex/workbench-ignore-row-stale-guard` |
-| 最近验证 | PF-P034 指定 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试全部通过；用户确认 PF-P034 verified |
-| 下一条允许任务 | 执行 PF-P034-MG；该 MG 只验证并合入 PF-P032 到 PF-P034 的 Workbench stale guard group，不执行 Traffic Gate、部署或 push |
+| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已执行并合入本地 `main`，等待用户确认 verified |
+| 当前 active prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` (`implemented`) |
+| 最近 verified prompt | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P034-MG 在功能分支和本地 `main` 上均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试；未 push、未部署、未 Traffic Gate |
+| 下一条允许任务 | 等待用户确认 PF-P034-MG verified；确认后再决定是否执行 `git push origin main`，不得直接开始下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -3593,7 +3593,7 @@ PF-P034 已完成实现和验证，并已由用户确认 `verified`。下一步�
 
 ### PF-P034-MG - Workbench Stale Guard Group Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3643,6 +3643,42 @@ PF-P034 已完成实现和验证，并已由用户确认 `verified`。下一步�
 - PF-P034-MG 是正确的下一步，因为 Workbench stale guard group 的三条真实写 API 小切片已全部实现并 verified。
 - MG 应统一覆盖 PF-P032 到 PF-P034，而不是只检查最后一个 prompt。
 - 本 MG 只做 Merge Gate，不是 Traffic Gate，不等于上线，不应 push 远端或生产服务器。
+
+#### 执行结果
+
+- 执行分支：`codex/workbench-ignore-row-stale-guard`。
+- 合入目标：本地 `main`。
+- 远端基线：合入前 `main...origin/main` 为 `0 0`。
+- 分支提交范围：PF-P032/PF-P033/PF-P034 实现与文档提交，加上 `1802761e docs(backend-refactor): plan workbench stale guard merge gate` 作为本 MG 的 prompt 文档提交。
+- 实际变更文件：
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- Scope / hygiene：
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - 未修改 `server.py`、前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- 功能分支验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，33 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 本地 `main` 合入复验：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，33 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 已执行本地 merge：`git merge --no-ff codex/workbench-ignore-row-stale-guard`。
+- 未执行：`git push origin main`、Traffic Gate、部署、生产访问。
+
+#### 下一条 Prompt 上下文
+
+PF-P034-MG 已完成本地 merge gate 并合入本地 `main`，但未经用户确认前不得标记为 `verified`。用户确认后，下一步应先决定是否 `git push origin main`；push 完成后，后续 prompt 必须从最新 `main` 新建分支生成。
 
 ## 维护规则
 

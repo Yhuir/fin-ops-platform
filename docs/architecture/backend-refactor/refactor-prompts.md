@@ -9955,7 +9955,7 @@ PF-P034 已由用户确认 `verified`。下一步应执行 cumulative Merge Gate
 
 ## PF-P034-MG - Workbench Stale Guard Group Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -10083,3 +10083,35 @@ Post-Flight:
 - MG 明确包含合入前验证、主干同步安全锁、本地 main 合入后复验。
 - MG 明确不执行 Traffic Gate、部署、生产访问或 push。
 - MG 执行后也不能自动标记 verified，必须等待用户确认。
+
+### 执行结果
+
+- 执行分支：`codex/workbench-ignore-row-stale-guard`。
+- 合入目标：本地 `main`。
+- 远端基线：合入前 `main...origin/main` 为 `0 0`。
+- 实际 diff 范围只包含预期 5 个文件：
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- 范围确认：
+  - 未修改 `backend/src/fin_ops_platform/app/server.py`。
+  - 未修改前端、SQL migration、部署、网关、auth/session 或 worker routing。
+  - 未引入 `backend-go`。
+  - 未新增外部依赖。
+- 功能分支验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，33 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 本地 `main` 合入复验：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，33 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 已执行：本地 `main` 非快进合并。
+- 未执行：`git push origin main`、Traffic Gate、部署、生产访问。
+- 状态：PF-P034-MG 只能记录为 `implemented`；等待用户确认后才可标记 `verified`。

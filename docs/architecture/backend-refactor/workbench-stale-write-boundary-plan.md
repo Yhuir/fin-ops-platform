@@ -329,7 +329,7 @@ PF-P031 已完成第一条真实写 API stale guard 迁移：`cancel link`。
    - 状态：已验证 relation identity mismatch guard；旧 preview 的 `submit_expected_versions` 遇到 replacement relation 时返回 `409 workbench_write_conflict`，不撤销当前 relation、不恢复旧 relation。
 8. `PF-P034-MG - Workbench Stale Guard Group Merge Gate`
    - 累计覆盖 PF-P032 ignore row、PF-P033 cash special、PF-P034 withdraw submit 的完整 diff。
-   - 状态：已生成并审查，等待执行。
+   - 状态：已执行；功能分支和本地 `main` 复验通过，已合入本地 `main`，等待用户确认 verified。
 
 ## 下一步建议
 
@@ -337,4 +337,4 @@ PF-P031 已完成第一条真实写 API stale guard 迁移：`cancel link`。
 
 `PF-P034-MG - Workbench Stale Guard Group Merge Gate`
 
-PF-P034 已完成实现和验证并由用户确认。下一步应执行 cumulative Merge Gate，统一覆盖 PF-P032 ignore row、PF-P033 cash special、PF-P034 withdraw submit 的完整 diff；不得执行 Traffic Gate、部署或 push。
+PF-P034-MG 已完成本地 merge gate 并合入本地 `main`。功能分支和本地 `main` 均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试。当前不得自动标记 verified；下一步等待用户确认 PF-P034-MG verified 后，再决定是否执行 `git push origin main`。本轮未执行 Traffic Gate、部署或 push。
