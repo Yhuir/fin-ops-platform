@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P024 - Workbench Durable Idempotency Store Contract` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P024 - Workbench Durable Idempotency Store Contract` (`planned`) |
+| 当前阶段 | `PF-P024 - Workbench Durable Idempotency Store Contract` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P024 - Workbench Durable Idempotency Store Contract` (`implemented`) |
 | 最近 verified prompt | `PF-P023 - Workbench Stale Write Contract and Compatibility Tests` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P023 已由用户确认 `verified`；已锁定 stale write / optimistic locking contract 和 preview/conflict response 缺口 |
-| 下一条允许任务 | 只允许执行 `PF-P024`。PF-P024 只能处理 durable idempotency store contract、schema/repository readiness、request fingerprint 和 replay/conflict tests；不得迁移真实 Workbench 写路径 |
+| 最近验证 | PF-P023 已由用户确认 `verified`；PF-P024 targeted tests 已通过，包含 durable idempotency target `expectedFailure` |
+| 下一条允许任务 | 等待用户确认 PF-P024 是否可标记 `verified`。确认前不得生成 PF-P025，不得迁移真实 Workbench 写路径 |
 
 ## Prompt 执行日志
 
@@ -2536,7 +2536,7 @@ PF-P023 已由用户确认 `verified`。下一步允许执行已生成并审查�
 
 ### PF-P024 - Workbench Durable Idempotency Store Contract
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2558,22 +2558,39 @@ PF-P023 已由用户确认 `verified`。下一步允许执行已生成并审查�
 - 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
 - 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
 
-#### 验收标准
+#### 执行结果
 
-- `refactor-prompts.md` 已写入完整 PF-P024 prompt。
-- PF-P024 prompt 明确读取 PF-P023/PF-P022 产物和 UoW contract tests。
-- PF-P024 prompt 明确 expectedFailure 策略、default CI 绿色要求和 no-production-code 边界。
-- PF-P024 prompt 明确不得执行真实写路径迁移。
+- 已补强 `tests/test_workbench_uow_contract.py` 中 3 个 durable idempotency target tests，使 command 契约显式携带 `tenant_id`、`actor_id`、`request_fingerprint` 和业务 payload。
+- 已新增 `tests/test_workbench_idempotency_contract.py`，覆盖 durable idempotency record、request fingerprint、same key different fingerprint 409 conflict、committed replay、同事务 reserve/commit 顺序，以及 HTTP 写接口兼容额外 `idempotency_key` / `request_idempotency_key` 字段。
+- 新增 target contract tests 使用 `unittest.expectedFailure` 保留目标语义；没有使用 skip、条件 skip 或环境变量规避。
+- 当前默认 CI 兼容性保持绿色；新目标语义尚未实现，因此仍表现为 expected failures。
+- 未修改生产代码、SQL migration、前端、部署、worker 或真实 Workbench 写路径。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：通过，6 tests，`expected failures=5`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：通过，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization tests.test_workbench_stale_write_contract tests.test_workbench_uow_contract tests.test_workbench_idempotency_contract tests.test_workbench_dirty_queue_wiring tests.test_runtime_queue -v`：通过，102 tests，`expected failures=14`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：通过，3 tests，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：通过，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：通过，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：通过，6 tests，`expected failures=5`。
+- `git diff --check`：通过。
+- `test ! -e backend-go`：通过。
+- scope allowlist check：通过；除允许的 PF-P024 tests/docs 之外无其他改动。`tests/test_workbench_idempotency_contract.py` 是本轮允许新增文件。
 
 #### 审查结论
 
 - PF-P024 是 PF-P023 后的正确下一步：stale write contract 已锁定，下一步应先把 durable idempotency 的 record/replay/fingerprint/conflict 契约固定为机械测试门禁。
 - PF-P024 不应写 SQL migration 或实现 store；真实 store 实现应进入后续 prompt。
 - PF-P024 不应把任何 Workbench 写 API 接入 UoW；真实迁移必须等待 stale write 与 durable idempotency contracts 都稳定。
+- PF-P024 执行后确认的实现缺口：尚无 `WorkbenchIdempotencyRecord`、`workbench_request_fingerprint`、`WorkbenchIdempotencyKeyConflict`、durable idempotency repository、同事务 reserve/commit/replay 生产逻辑，也没有对应 SQL migration。
 
 #### 下一条 Prompt 上下文
 
-下一步只允许执行 PF-P024。执行完成后，必须回写本文档和相关架构文档，将 PF-P024 记录为 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+PF-P024 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。确认后，下一步应生成并审查 PF-P025；PF-P025 应优先处理 durable idempotency 的实现前置，而不是直接迁移真实 Workbench 写 API。可选方向是 `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`：只实现 record/fingerprint/conflict/repository skeleton 和 fake/contract tests，不接入真实 `confirm_link`、`exception_apply` 或 cash special 写路径。
 
 ## 维护规则
 

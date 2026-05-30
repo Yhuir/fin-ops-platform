@@ -7400,3 +7400,33 @@ Post-Flight:
 - PF-P024 必须保持默认 CI 绿色；目标语义未实现时继续使用 `unittest.expectedFailure`，不能使用 skip。
 - PF-P024 不应新增 SQL migration。真实 idempotency table / repository 应进入后续实现 prompt。
 - PF-P024 不应迁移任何 Workbench 写 API 到 UoW；真实迁移必须等待 stale write contract 和 durable idempotency contract 都稳定。
+
+### 执行结果
+
+状态：`implemented`，等待用户确认后才能标记 `verified`。
+
+变更范围：
+
+- 补强 `tests/test_workbench_uow_contract.py` 中 3 个 durable idempotency target tests，command 契约新增 `tenant_id`、`actor_id`、`request_fingerprint` 和业务 payload。
+- 新增 `tests/test_workbench_idempotency_contract.py`，覆盖 durable idempotency record、request fingerprint、409 conflict、committed replay、同事务 reserve/commit 顺序，以及写 API 对额外 idempotency 字段的兼容性。
+- 回写 `migration-state-log.md` 和 `workbench-uow-integration-plan.md`。
+
+验证结果：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：通过，6 tests，`expected failures=5`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：通过，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization tests.test_workbench_stale_write_contract tests.test_workbench_uow_contract tests.test_workbench_idempotency_contract tests.test_workbench_dirty_queue_wiring tests.test_runtime_queue -v`：通过，102 tests，`expected failures=14`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：通过，3 tests，`expected failures=2`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：通过，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：通过，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：通过，6 tests，`expected failures=5`。
+- `git diff --check`、`test ! -e backend-go` 和 scope allowlist check：通过。
+
+确认的缺口：
+
+- 尚无 `WorkbenchIdempotencyRecord`、`workbench_request_fingerprint`、`WorkbenchIdempotencyKeyConflict`。
+- 尚无 durable idempotency repository / SQL migration。
+- `WorkbenchWriteUnitOfWork.run()` 尚未执行 idempotency get/reserve/commit/replay/conflict。
+- 本轮未迁移任何真实 Workbench 写 API。

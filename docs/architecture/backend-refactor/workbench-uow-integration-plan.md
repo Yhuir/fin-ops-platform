@@ -420,3 +420,46 @@ PF-P023 has been confirmed `verified` by the user. It added stale write / optimi
 PF-P024 has been generated and reviewed in `refactor-prompts.md`. It must handle durable idempotency store contract, request fingerprint, replay/conflict semantics, and schema/repository readiness before any real Workbench write path migration.
 
 Then use PF-P024 for durable idempotency store contract and schema readiness before the first real write path UoW integration.
+
+## 13. PF-P024 Durable Idempotency Contract Result
+
+PF-P024 has been executed and is waiting for user confirmation before it can be marked `verified`.
+
+Implemented scope:
+
+- Strengthened the 3 durable idempotency target tests in `tests/test_workbench_uow_contract.py`.
+- Added `tests/test_workbench_idempotency_contract.py`.
+- Preserved default CI compatibility by using `unittest.expectedFailure` for target semantics that are not implemented yet.
+- Did not modify production code, SQL migrations, frontend, deployment, worker runtime, or real Workbench write paths.
+
+The new idempotency contract file locks these future requirements:
+
+- Durable idempotency record identity is `(tenant_id, actor_id, idempotency_key)`.
+- Record fields must include tenant, actor, action name, idempotency key, request fingerprint, status, response payload, source versions, outbox event ids, created/completed/expiry timestamps.
+- Stored replay payload must not include token, cookie, auth header, production URL, or other secrets.
+- Request fingerprint must be canonical and stable across JSON key ordering.
+- `trace_id`, request timestamp, and non-business request context must not affect fingerprint.
+- Action name, tenant, actor, and business payload must affect fingerprint.
+- Same key + same fingerprint must replay the committed response without invoking handler or writing dirty/outbox.
+- Same key + different fingerprint must map to stable `409 idempotency_key_conflict`.
+- First write must reserve and commit idempotency state inside the same PostgreSQL transaction as facts/audit/dirty/outbox/source_versions.
+
+Verification summary:
+
+- `tests.test_workbench_idempotency_contract`: Pass, 6 tests, 5 expected failures.
+- `tests.test_workbench_uow_contract`: Pass, 16 tests, 7 expected failures.
+- Workbench write characterization, stale write contract, dirty queue wiring, runtime queue and platform guard safety net: Pass.
+
+Confirmed implementation gaps after PF-P024:
+
+- No `WorkbenchIdempotencyRecord` production type exists.
+- No `workbench_request_fingerprint` production helper exists.
+- No `WorkbenchIdempotencyKeyConflict` production exception/response object exists.
+- No durable idempotency repository or SQL migration exists.
+- `WorkbenchWriteUnitOfWork.run()` still does not call idempotency `get/reserve/commit`, does not replay committed records, and does not reject fingerprint conflicts.
+
+Next prompt should not migrate a real Workbench write path yet. Recommended next prompt:
+
+`PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`
+
+PF-P025 should implement the reusable idempotency primitives and make the PF-P024 record/fingerprint/conflict skeleton tests green. It should still avoid migrating `confirm_link`, `exception_apply`, cash special, or any other real Workbench write API unless a separate prompt explicitly authorizes that scope.
