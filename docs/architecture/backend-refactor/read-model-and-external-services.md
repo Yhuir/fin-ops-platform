@@ -4,12 +4,14 @@
 
 需要。Redis、RabbitMQ、Read Model、PostgreSQL、OA Mongo、MinIO/S3、OA Auth 都必须模块化。
 
+PF-P002 已将 Platform / Ops / Runtime 边界审计固化到 `platform-runtime-boundary-audit.md`。后续模块 prompt 判断外部服务是否可直接调用时，必须先读取该审计文档中的“允许的 platform adapter 调用”和“禁止或可疑的业务层直接调用”。
+
 原因：
 
 - 业务逻辑不应该知道具体 Redis/RabbitMQ/client driver。
 - 单元测试必须能 mock 外部服务。
 - 外部服务失败不能破坏业务事实正确性。
-- Go Fiber accelerator 如果未来出现，也只能复用同一契约，而不是重写业务规则。
+- 模块边界必须稳定，避免 Python 业务逻辑散落依赖具体外部服务实现。
 
 ## PostgreSQL
 
@@ -30,6 +32,8 @@ Read Model 不是事实源，而是可重建投影。它服务高频读路径。
 适用场景：
 
 - Workbench summary/groups/rows。
+- Turnover Ledger rows/groups/export source payload。
+- Batch Accounting submitted/unsubmitted projection and Workbench payload。
 - Search index。
 - Pending invoice rows。
 - Bank detail rows。
@@ -145,7 +149,7 @@ Python 模块化后仍需统一鉴权上下文：
 - 每个写请求必须携带 actor 和 trace id。
 - 模块 service 不直接读取 HTTP header；由 app 层注入 auth context。
 
-如果未来 Go accelerator 承接单个 path，必须复刻同一 auth/session 语义，不能发明新登录态。
+所有 Python 模块必须复用同一 auth/session 语义，不能在模块内发明新的登录态或权限判断。
 
 ## Consistency Checker
 

@@ -1,5 +1,19 @@
 # Python-first 后端目标架构
 
+## 当前完成度
+
+本文档已经整理出目标优化后的高层架构：Python-first、模块化、外部服务边界、Read Model consistency、Worker 异步化和可观测性。
+
+但该目标架构仍需要下一步用代码事实校准：
+
+- 真实 API path ownership。
+- 真实 handler/service/repository 调用关系。
+- 真实 Redis/RabbitMQ/read model 使用点。
+- 当前同步全量构建、snapshot fallback 和跨模块耦合点。
+- 首批性能热点和优化优先级。
+
+这些事实由 `PF-P001 - Architecture Inventory / Dynamic Call Chain Discovery` 的 Macro-Inventory 产出后，再反向修订本文档。后续每个模块的详细目标设计必须走 Micro-JIT-Planning，不得在全局阶段一次性写完。
+
 ## 目标
 
 后端重构目标不是替换语言，而是把现有 Python 后端重构成边界清晰、低耦合、可测试、可观测、可按热点优化的生产架构。
@@ -11,12 +25,13 @@
 - PostgreSQL facts、audit、dirty scope、outbox 和 read model 形成一致的写读闭环。
 - Redis、RabbitMQ、OA Mongo、MinIO/S3、PostgreSQL driver 都被平台边界封装。
 - Worker、Read Model、SSE、App Health、监控和一致性巡检共同暴露异步系统状态。
-- 只有经过 Hot Path Gate 的热点模块，才允许引入 Go Fiber accelerator。
+- 性能优化在 Python、PostgreSQL、Read Model、Redis、RabbitMQ 和 worker 边界内完成。
 
 ## 非目标
 
-- 不做全量 Python 到 Go、Rust 或其他语言的重写。
+- 不做全量 Python 到其他语言的重写。
 - 不新建 `backend-go` 作为默认目标系统。
+- 不为单个业务模块创建新语言后端。
 - 不让前端感知两套业务 API。
 - 不把 Redis 或 RabbitMQ 当业务事实源。
 - 不在 API 请求热路径读取 app Mongo snapshot、local pickle、full state 或 OA Mongo fallback。
@@ -41,6 +56,8 @@ Python API
   +-- platform/observability：trace id、structured log、metrics
   |
   +-- workbench
+  +-- turnover-ledger
+  +-- batch-accounting
   +-- bankdetail
   +-- invoices
   +-- imports
@@ -71,6 +88,8 @@ backend/src/fin_ops_platform/
   services/
     platform_*      # shared platform ports/adapters where appropriate
     workbench_*     # workbench module
+    turnover_*      # turnover ledger module
+    batch_accounting* # batch accounting module
     bank_*          # bank detail module
     invoice_*       # invoice module
     imports*        # import module
@@ -102,22 +121,17 @@ backend/src/fin_ops_platform/
 
 单元测试默认 mock 这些边界。集成测试才连接真实 PostgreSQL、Redis、RabbitMQ 或对象存储。
 
-## Go Fiber accelerator 规则
+## 性能优化规则
 
-Go Fiber 不是当前重构默认路线。只有满足以下条件，才允许生成 Go accelerator 设计：
+本轮重构只在 Python 系统内优化，不引入新语言后端。
 
-- 已有 P95/P99、CPU profile、SQL `EXPLAIN ANALYZE`、worker lag 或 read model freshness 指标证明 Python 路径是瓶颈。
-- Python 版本的业务契约和测试已经固化。
-- 模块 API contract、auth/session、trace id、read model freshness、错误码和回滚方案已经明确。
-- Gateway 能按 path 或 shadow path 灰度，并能快速回切 Python。
-- 数据库写入仍遵守同一 PostgreSQL transaction、outbox、dirty scope 和 audit 规则。
-
-优先考虑优化顺序：
+优化顺序：
 
 1. SQL/index/read model 优化。
 2. Python 模块边界和算法复杂度优化。
 3. Worker 异步化和 cache key 版本化。
-4. 只有上述仍不足时，才考虑 Go Fiber accelerator。
+4. 批处理、并发控制、后台预热和 worker lag 限流。
+5. 如果仍不达标，先回到架构评审重新评估业务口径、数据模型和缓存策略；不得直接创建新语言后端。
 
 ## Sidecar 取舍
 

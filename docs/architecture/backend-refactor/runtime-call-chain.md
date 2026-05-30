@@ -1,5 +1,29 @@
 # 运行时调用链与优化规则
 
+## 当前完成度
+
+本文档当前定义运行时调用链的分析方法、模板和优先级。它不是最终的逐模块调用链事实清单。
+
+已完成：
+
+- 已使用 CodeGraph 做过一次全局上下文探索。
+- 已阅读 `backend/src/fin_ops_platform/app/`、`backend/src/fin_ops_platform/services/`、PostgreSQL migrations、Read Model、Redis/RabbitMQ 相关代码和架构文档入口。
+- 已确认系统存在 HTTP、PostgreSQL transaction、outbox、RabbitMQ、Python worker、Read Model generation、Redis cache、SSE/App Health 等动态链路。
+- `PF-P001` 已产出 `architecture-inventory.md`，完成全局 API path ownership、文件族归属、外部依赖矩阵和第一批运行时序候选。
+- `PF-P002` 已产出 `platform-runtime-boundary-audit.md`，完成 Platform / Ops / Runtime 的第一批代码事实调用链，包括 auth context、DB transaction、outbox/dirty scope、RabbitMQ/worker、App Health/SSE、DB migration/backfill。
+
+未完成：
+
+- 尚未逐模块产出真实 API path -> handler -> service -> repository -> queue/cache/worker/read model 的完整调用链。
+- 尚未对 Workbench、Turnover Ledger、Batch Accounting、Bankdetail、Invoices、Tax/Cost/ETC、Search、Imports、Ops 分别画出 Mermaid sequence diagram。
+- 尚未给出每条链路的具体优化结论。
+
+下一步：
+
+- 先审查并确认 `PF-P002`。在 PF-P002 verified 前，不生成业务模块重构 prompt。
+- PF-P002 verified 后，建议先生成 `PF-P003 - Platform Runtime Boundary Enforcement / Guard Tests`，补强生产 storage backend、legacy snapshot、auth context、transaction boundary 和 Redis/RabbitMQ 直接依赖的机械门禁。
+- 模块级函数时序和最终重构计划必须在后续 Micro-JIT prompt 中逐个模块产出，不能一次性写完所有模块详设。
+
 ## 为什么必须整理动态调用链
 
 本项目大量关键行为不是简单的 HTTP 调用函数返回，而是：
@@ -130,6 +154,41 @@ outbox/durable queue event
 - `workbench_read_model_service.py` 和 `workbench_sql_projection.py`。
 - 写操作如何触发 `workbench_matching_dirty_scope_service.py`、outbox 和 worker。
 - Redis page cache 是否以 active generation 为版本边界。
+- `PF-P001` 必须扫描并显式列出 Workbench 全量 service 文件，尤其是 `workbench_candidate_grouping.py`、`workbench_sql_projection.py`、`workbench_query_service.py`、`workbench_free_matching_engine.py`、`workbench_matching_rules.py`、`live_workbench_service.py`、`workbench_exception_case_service.py`、`workbench_special_pair_rule_service.py`、`workbench_matching_orchestrator.py` 等大文件。
+
+### Turnover Ledger
+
+- `GET /api/turnover-ledger`
+- `GET /api/turnover-ledger?view=grouped`
+- `GET /api/turnover-ledger/relations/{relation_id}`
+- `GET|PUT /api/turnover-ledger/relations/{relation_id}/extra`
+- `POST /api/turnover-ledger/relations/confirm`
+- `POST /api/turnover-ledger/relations/{relation_id}/withdraw`
+- `POST /api/turnover-ledger/bank-row-tags/batch`
+- `GET /api/turnover-ledger/export-preview`
+- `GET /api/turnover-ledger/export`
+
+重点看：
+
+- `server.py` 中 `_handle_api_turnover_ledger*` 到 `TurnoverLedgerApiRoutes`、`TurnoverLedgerService`、`TurnoverRelationService`。
+- 读路径是否优先读取 PostgreSQL `read_model.turnover_ledger_rows`，stale 时是否降级到同步重建。
+- confirm/withdraw 是否同事务写 relation、audit、dirty scope 和 derived lifecycle event。
+- `turnover_relation_changed` 如何影响 Workbench candidate grouping 和 source version。
+- `turnover_ledger_extras` 是否仍存在 legacy full snapshot fallback。
+
+### Batch Accounting
+
+- `GET /api/batch-accounting`
+- `POST /api/batch-accounting/submit`
+- `POST /api/batch-accounting/{relation_id}/withdraw`
+
+重点看：
+
+- `server.py` 中 `_handle_api_batch_accounting*` 到 `BatchAccountingService`。
+- `load_batch_accounting_workbench_payload` 与 Workbench SQL read model 的读取边界。
+- submit/withdraw 是否同事务写 relation、audit、dirty scope 和 `batch_accounting_relation_changed`。
+- `repair_legacy_case_id_collisions` 是否应从读请求热路径迁出。
+- Workbench 如何识别 `special_metadata.source == "batch_accounting"` 并投影到候选分组。
 
 ### Bankdetail
 
@@ -177,9 +236,9 @@ outbox/durable queue event
 3. 改成 read model / background worker。
 4. 增加 Redis 短 TTL、版本化 cache。
 5. 通过批处理、并发控制和 worker lag 限流优化。
-6. 仍不达标时，才进入 Go Fiber Hot Path Gate。
+6. 仍不达标时，回到架构评审重新评估数据模型、read model 粒度、缓存策略和业务口径。
 
-不得直接因为“性能要求高”就重写为 Go。必须先有指标和调用链证据。
+不得直接因为“性能要求高”就引入新语言后端。本轮计划只做 Python 系统内重构和优化。
 
 ## 输出格式
 
