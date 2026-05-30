@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P018 - Workbench Write Unit of Work Boundary Design` 已执行，等待用户确认 verified |
-| 当前 active prompt | `PF-P018 - Workbench Write Unit of Work Boundary Design` (`implemented`) |
-| 最近 verified prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` |
+| 当前阶段 | `PF-P019 - Workbench UoW Contract Tests` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P019 - Workbench UoW Contract Tests` (`planned`) |
+| 最近 verified prompt | `PF-P018 - Workbench Write Unit of Work Boundary Design` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | PF-P018 已产出 Workbench UoW 边界设计文档；只修改 backend-refactor 文档；未改业务代码、测试、SQL migration、前端、部署或生产配置 |
-| 下一条允许任务 | 等待用户确认 PF-P018 verified；确认后才能生成并审查 `PF-P019 - Workbench UoW Contract Tests` |
+| 最近验证 | PF-P018 已由用户确认 verified；PF-P019 已生成并审查；未执行 PF-P019；未改业务代码、测试、SQL migration、前端、部署或生产配置 |
+| 下一条允许任务 | 执行 `PF-P019 - Workbench UoW Contract Tests`；只允许新增目标契约测试和文档回写，不得实现 UoW 或修改生产逻辑 |
 
 ## Prompt 执行日志
 
@@ -2077,7 +2077,7 @@ PF-P017-MG 已 verified 并推送 `origin/main`。已从最新 `main` 新建分�
 
 ### PF-P018 - Workbench Write Unit of Work Boundary Design
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2103,7 +2103,7 @@ PF-P017-MG 已 verified 并推送 `origin/main`。已从最新 `main` 新建分�
 
 #### 下一条 Prompt 上下文
 
-PF-P018 已执行，产物是 `workbench-write-uow-boundary-design.md`。下一步等待用户确认 PF-P018 `verified`。PF-P018 verified 后，建议生成并审查 `PF-P019 - Workbench UoW Contract Tests`。PF-P019 应只新增目标契约测试，不实现 UoW，不修改生产逻辑。
+PF-P018 已执行并由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已生成并审查。下一步允许执行 PF-P019。PF-P019 应只新增目标契约测试，不实现 UoW，不修改生产逻辑。
 
 #### 变更文件
 
@@ -2130,6 +2130,36 @@ PF-P018 已执行，产物是 `workbench-write-uow-boundary-design.md`。下一�
 - `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/workbench-write-uow-boundary-design\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\.md$|docs/architecture/backend-refactor/migration-state-log\.md$|docs/architecture/backend-refactor/refactor-prompts\.md$)'`：Pass，无输出。
 
 未经用户确认不得标记 `verified`。
+
+### PF-P019 - Workbench UoW Contract Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只新增 Workbench UoW 目标契约测试。
+- 允许新增 `tests/test_workbench_uow_contract.py`。
+- 允许更新 backend-refactor 文档和状态机。
+- PF-P019 是 TDD red phase：新增目标契约测试预期在当前实现上失败；失败必须指向缺失的 UoW / transaction-bound dirty-outbox writer / stale-write guard / durable idempotency，而不是语法错误、导入路径错误或测试夹具错误。
+
+#### 禁止范围
+
+- 不实现 UoW、transaction manager、repository rewrite、outbox writer、dirty scope writer、source_version writer、durable idempotency store 或 stale-write guard。
+- 不修改任何生产 `.py` 文件。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不修改现有 characterization tests 的期望来适配目标语义。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+
+#### 验收标准
+
+- PF-P019 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P019 明确它只新增目标 contract tests，不实现生产逻辑。
+- PF-P019 明确新测试可红，但必须是“目标契约红灯”，现有 characterization / platform guard tests 必须保持通过。
+- PF-P019 明确执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P019 已生成并审查。下一步允许执行 PF-P019。PF-P019 verified 后，才允许根据红灯测试结果生成 UoW 最小实现 prompt，预计为 `PF-P020 - Workbench UoW Minimal Implementation` 或先补平台 transaction-bound dirty/outbox writer 的更小 prompt。
 
 ## 维护规则
 

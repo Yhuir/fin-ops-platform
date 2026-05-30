@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P018 - Workbench Write Unit of Work Boundary Design`
 
-状态：`implemented`
+状态：`verified`
 
 本文档只定义 Workbench 写路径未来 Unit of Work 目标边界、事务范围、失败语义和测试策略。本文档不修改生产代码，不实现 UoW，不修复 stale write、duplicate submit、rollback 或 read model scheduling 当前语义。
 
