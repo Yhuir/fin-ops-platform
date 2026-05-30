@@ -2449,7 +2449,7 @@ Post-Flight:
 
 ## PF-P007-MG - Workbench Query Cache and Freshness Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### 目标
 
@@ -2592,7 +2592,7 @@ Post-Flight:
 
 ### 执行结果
 
-- 状态：`implemented`，等待用户确认，不得直接标记 `verified`。
+- 状态：`verified`，已由用户确认。
 - Feature branch：`codex/workbench-query-cache-freshness`。
 - Commit：`08ccad92 refactor(workbench): enforce query cache freshness gate`。
 - Merge 方式：`main` fast-forward 合入 `08ccad92`；本地 `main` 尚未 push 到 `origin/main`。
@@ -2600,4 +2600,4 @@ Post-Flight:
 - Feature branch mandatory checks 全部通过。
 - main 上 mandatory checks 全部通过。
 - 未执行 Traffic Gate，未部署服务器，未 push 到 `origin/main`。
-- 后续：用户确认后可标记 PF-P007-MG verified；push `origin/main` 需要用户明确确认；下一条 prompt 必须从最新 `main` 新建分支生成。
+- 后续：用户已同意 push `origin/main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。

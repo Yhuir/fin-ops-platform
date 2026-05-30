@@ -51,12 +51,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)` |
+| 当前阶段 | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已验证，等待远端同步 |
+| 当前 active prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P007-MG 已在 feature branch 和 `main` 上通过 mandatory checks；本地 `main` 尚未 push 到 `origin/main`；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 用户确认后可将 PF-P007-MG 标记为 `verified`；push `origin/main` 需要用户明确确认；随后必须从最新 `main` 新建分支生成下一条 prompt |
+| 最近验证 | 用户已确认 PF-P007-MG verified；PF-P007-MG 已在 feature branch 和 `main` 上通过 mandatory checks；用户已同意 push `origin/main`；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | push `origin/main`；push 完成后必须从最新 `main` 新建分支生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -929,7 +929,7 @@ PF-P007 已由用户确认 `verified`。PF-P007-MG 已生成并审查，下一�
 
 ### PF-P007-MG - Workbench Query Cache and Freshness Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -982,7 +982,7 @@ PF-P007-MG 允许合入的文件仅限：
 
 #### 下一条 Prompt 上下文
 
-PF-P007-MG 是 Merge Gate，不是 Traffic Gate。当前已执行并停在 `implemented`，必须等待用户确认后才能标记 `verified`。PF-P007-MG verified 且 `main` 推送完成后，下一步必须从最新 `main` 创建新分支，再生成下一条 prompt；不得在旧功能分支继续开始 Slice D。
+PF-P007-MG 已由用户确认 `verified`。本次 verified 状态只代表 Merge Gate 完成，不代表 Traffic Gate 或部署完成。用户已同意 push `origin/main`；push 完成后，下一步必须从最新 `main` 创建新分支，再生成下一条 prompt；不得在旧功能分支继续开始 Slice D。
 
 #### 执行结果
 
