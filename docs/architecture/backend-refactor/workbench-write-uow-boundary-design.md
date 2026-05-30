@@ -464,3 +464,7 @@ What is still intentionally not implemented:
 - no real Workbench write API migration.
 
 The next safe implementation step is UoW idempotency integration against fake/in-memory contracts only. Real API migration should still wait until UoW replay/conflict behavior is mechanically green.
+
+PF-P025 has been confirmed `verified`. PF-P026 is now planned as `Workbench UoW Idempotency Integration Skeleton`.
+
+PF-P026 must only wire the idempotency primitive into `WorkbenchWriteUnitOfWork.run()` under fake/in-memory repository contracts. It must not migrate real Workbench write APIs, introduce SQL migrations, or add a real PostgreSQL idempotency repository.

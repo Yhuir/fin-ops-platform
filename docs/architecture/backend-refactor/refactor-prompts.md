@@ -10,6 +10,7 @@
 - 任何执行型 prompt 前，必须先生成并审查 prompt 本身。
 - 每次只生成一个 prompt；不得一次性生成所有后续 prompt。
 - 下一条 prompt 必须基于上一条 prompt 的 verified 输出、状态机中的下一步上下文和真实代码发现生成。
+- 后续所有新生成的执行 prompt 正文必须以 `/goal` 开头；历史 prompt 不强制回填，但新 prompt 不得省略。
 - prompt 必须包含 Pre-Flight、Allowed Scope、Forbidden Scope、Tests、Post-Flight。
 - prompt 必须声明是否影响 Merge Gate 或 Traffic Gate。
 - prompt 执行后必须更新 `migration-state-log.md`。
@@ -7433,7 +7434,7 @@ Post-Flight:
 
 ## PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -7621,7 +7622,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`，等待用户确认后才能标记 `verified`。
+状态：`verified`，已由用户确认。
 
 变更范围：
 
@@ -7661,3 +7662,162 @@ Post-Flight:
 - UoW committed replay / fingerprint conflict 拦截仍是 `expectedFailure`。
 - 真实 durable PostgreSQL repository 和 SQL migration 尚未实现。
 - 未迁移任何真实 Workbench 写 API。
+
+## PF-P026 - Workbench UoW Idempotency Integration Skeleton
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P026 - Workbench UoW Idempotency Integration Skeleton。
+
+Role: 你是一位精通 Python、Clean Architecture、Unit of Work、幂等请求设计和 contract testing 的后端架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P025 已 verified，并实现：
+  - `WorkbenchIdempotencyRecord`
+  - `workbench_request_fingerprint`
+  - `WorkbenchIdempotencyKeyConflict`
+  - `InMemoryWorkbenchIdempotencyRepository`
+- PF-P025 未接真实 PostgreSQL 表，未新增 SQL migration，未迁移任何真实 Workbench 写 API。
+- 当前剩余关键缺口：`WorkbenchWriteUnitOfWork.run()` 尚未执行 idempotency `get/reserve/commit`，不会 replay committed records，也不会拒绝 same key / different fingerprint conflict。
+- PF-P026 仍然不是业务 API 迁移 prompt。它只允许把 PF-P025 primitive 以 fake/in-memory repository contract 方式接入 `WorkbenchWriteUnitOfWork.run()`。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_stale_write_contract.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前 active prompt 是 `PF-P026 - Workbench UoW Idempotency Integration Skeleton` planned。
+   - 最近 verified prompt 是 `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton`。
+3. 必须优先使用 CodeGraph 做结构性分析：
+   - 查看 `WorkbenchWriteUnitOfWork.run()` 当前 public surface 和调用方式。
+   - 查看 PF-P024/PF-P025 的 idempotency contract tests 中哪些 expectedFailure 应在本轮转绿。
+   - 确认没有真实 Workbench HTTP handler 需要改动。
+4. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+
+Goal:
+把 PF-P025 的 idempotency primitive 接入 `WorkbenchWriteUnitOfWork.run()` 的最小 skeleton，使 fake/in-memory repository contract 下的 committed replay、fingerprint conflict、reserve/commit 顺序测试转绿。不得迁移真实 Workbench 写 API，不得新增 SQL migration，不得接真实 PostgreSQL idempotency 表。
+
+Required Implementation Work:
+1. TDD red check
+   - 先运行目标测试，确认当前 UoW idempotency 集成仍失败或仍为 expectedFailure。
+   - 如果测试已意外转绿，必须解释原因并调整 expectedFailure 标记，不能保留 unexpected success。
+2. UoW idempotency read/replay
+   - `WorkbenchWriteUnitOfWork.run()` 对带 `idempotency_key` 的 command，应先查询 idempotency store。
+   - 如果找到 `status == committed` 且 `request_fingerprint` 相同：
+     - 直接 replay stored `response_payload`。
+     - 必须带回 stored `source_versions` 和 `outbox_event_ids`。
+     - 不得调用 handler。
+     - 不得写 dirty/outbox。
+   - 如果找到 committed/reserved record 但 fingerprint 不同：
+     - 抛出或返回稳定 `WorkbenchIdempotencyKeyConflict` 语义。
+     - 不得调用 handler。
+     - 不得写 dirty/outbox。
+3. UoW reserve/commit skeleton
+   - 如果没有既有 idempotency record：
+     - 在同一 UoW transaction 语义内 reserve。
+     - 执行 handler。
+     - 写 dirty/outbox/source_versions 后 commit idempotency record。
+   - 本轮允许 repository 是 in-memory/fake；不得要求真实 PostgreSQL 表。
+   - 必须支持 PF-P024/PF-P025 测试里的 fake store method shape，或小范围更新测试 fake 以匹配清晰的 repository port。
+4. ExpectedFailure update
+   - `tests/test_workbench_idempotency_contract.py` 中 UoW replay / reserve / commit 集成测试应转为普通通过测试。
+   - `tests/test_workbench_uow_contract.py` 中 confirm_link / exception_apply / cash special durable idempotency 测试如果已被本轮实现覆盖，应移除 `unittest.expectedFailure` 并转为普通通过测试。
+   - stale write / optimistic locking 相关 expectedFailure 不属于 PF-P026，必须保留。
+5. Documentation update
+   - 更新 `migration-state-log.md`。
+   - 更新 `refactor-prompts.md` 的 PF-P026 执行结果。
+   - 更新 `workbench-uow-integration-plan.md` 和/或 `workbench-write-uow-boundary-design.md`，记录 UoW idempotency skeleton 已做到的层次和仍未做的真实 repository / API migration。
+
+Allowed Scope:
+- 允许修改：
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `backend/src/fin_ops_platform/services/workbench_idempotency.py`（仅限支持 UoW skeleton 所需的小范围 primitive/port 调整）
+  - `tests/test_workbench_idempotency_contract.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+
+Forbidden Scope:
+- 不迁移 `confirm_link`、`cancel_link`、`exception_apply`、cash special、ignore、withdraw、personal advance repayment 或任何真实 Workbench 写 API。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不新增或修改 SQL migration。
+- 不实现真实 PostgreSQL durable idempotency repository。
+- 不把 repository 接到真实 PostgreSQL 表。
+- 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+- 不删除目标测试。
+- 不使用 skip、条件 skip 或环境变量规避目标测试。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Targeted tests:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+2. Safety net:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+3. Default CI compatibility:
+   - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`
+   - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`
+   - 退出码必须为 0；remaining expected failures 允许，但 failures/errors 不允许。
+4. Scope verification:
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - `(git diff --name-only; git ls-files --others --exclude-standard) | rg -v '^(backend/src/fin_ops_platform/services/workbench_uow\.py$|backend/src/fin_ops_platform/services/workbench_idempotency\.py$|tests/test_workbench_idempotency_contract\.py$|tests/test_workbench_uow_contract\.py$|docs/architecture/backend-refactor/migration-state-log\.md$|docs/architecture/backend-refactor/refactor-prompts\.md$|docs/architecture/backend-refactor/workbench-uow-integration-plan\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\.md$)'`
+     - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P026 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录哪些 expectedFailure 已转绿，哪些仍保留。
+  - 记录验证结果和下一步 prompt 上下文。
+- 更新 `refactor-prompts.md` 的 PF-P026 执行结果。
+- 更新相关 Workbench UoW 文档。
+- 不生成 PF-P027。
+- 不执行 PF-P027。
+- 不 merge。
+- 不 push。
+- 未经用户确认，不得将 PF-P026 标记为 `verified`。
+- 最终回复必须说明：
+  - UoW replay 是否转绿；
+  - UoW reserve/commit 是否转绿；
+  - 真实 API 是否仍未迁移；
+  - 是否仍无 SQL migration / real PostgreSQL repository；
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P026 的边界正确：它只把 PF-P025 primitive 接入 `WorkbenchWriteUnitOfWork.run()` 的 fake/in-memory repository contract。
+- PF-P026 不迁移真实 Workbench 写 API，不修改 `server.py`，不修改 `workbench_write_facade.py`。
+- PF-P026 不新增 SQL migration，不实现真实 PostgreSQL idempotency repository。
+- PF-P026 完成后应优先评估是否生成 `PF-P026-MG`，因为 PF-P023 到 PF-P026 已形成一个可合并的 Workbench UoW/idempotency 基础切片。

@@ -516,3 +516,13 @@ Recommended next prompt after PF-P025 is confirmed `verified`:
 `PF-P026 - Workbench UoW Idempotency Integration Skeleton`
 
 PF-P026 should connect the PF-P025 primitive to `WorkbenchWriteUnitOfWork.run()` using fake/in-memory repository contract tests only. It should still avoid real Workbench write API migration.
+
+PF-P025 has been confirmed `verified` by the user. PF-P026 has been generated and reviewed in `refactor-prompts.md`.
+
+PF-P026 must remain a UoW skeleton integration prompt:
+
+- it may connect `WorkbenchIdempotencyRecord`, `workbench_request_fingerprint`, `WorkbenchIdempotencyKeyConflict`, and `InMemoryWorkbenchIdempotencyRepository` to `WorkbenchWriteUnitOfWork.run()`;
+- it may turn UoW replay / reserve / commit target tests green;
+- it must not modify `server.py`;
+- it must not migrate any real Workbench write API;
+- it must not add SQL migrations or a real PostgreSQL idempotency repository.

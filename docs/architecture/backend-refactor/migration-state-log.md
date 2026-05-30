@@ -42,6 +42,7 @@
 - Merge Gate 合入并复验 `main` 后，下一条 prompt 必须从最新 `main` 新建分支再生成；不得在 `main` 或旧功能分支上继续生成下一个模块的 prompt。
 - 每次 prompt 完成后，最终回复必须告诉用户下一步建议做什么。
 - 每次 prompt 执行后，必须精准回写本文档和受执行结果影响的架构文档；未完成回写前不得生成或执行下一条 prompt。
+- 后续所有新生成的执行 prompt 正文必须以 `/goal` 开头。
 - 先执行 Macro-Inventory，再执行 Micro-JIT-Planning。
 - Macro-Inventory 只做全局文件级分拣和架构事实清单，不修改业务代码。
 - Micro-JIT-Planning 每次只深挖一个模块，不一次性生成所有模块详细设计。
@@ -55,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` (`implemented`) |
-| 最近 verified prompt | `PF-P024 - Workbench Durable Idempotency Store Contract` |
+| 当前阶段 | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` (`planned`) |
+| 最近 verified prompt | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P024 已由用户确认 `verified`；PF-P025 targeted tests 已通过，record/fingerprint/conflict/repository skeleton 已转绿 |
-| 下一条允许任务 | 等待用户确认 PF-P025 是否可标记 `verified`。确认前不得生成 PF-P026，不得迁移真实 Workbench 写 API |
+| 最近验证 | PF-P025 已由用户确认 `verified`；record/fingerprint/conflict/repository skeleton 已转绿，真实 API 未迁移 |
+| 下一条允许任务 | 只允许执行 PF-P026。PF-P026 只能把 PF-P025 primitive 以 fake/in-memory repository contract 接入 `WorkbenchWriteUnitOfWork.run()`；不得迁移真实 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -2595,7 +2596,7 @@ PF-P024 已由用户确认 `verified`。PF-P025 已生成并审查，下一步�
 
 ### PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2661,10 +2662,50 @@ PF-P024 已由用户确认 `verified`。PF-P025 已生成并审查，下一步�
 - 真实 durable PostgreSQL repository、SQL migration 和 UoW replay/commit 集成仍应进入后续 prompt。
 - PF-P025 通过后，再评估是否进入 `PF-P026 - Workbench UoW Idempotency Integration Skeleton` 或先补 `PF-P025-MG`，取决于本分支是否达到可合并切片边界。
 - PF-P025 执行后确认的剩余缺口：UoW 仍不会调用 idempotency `get/reserve/commit`，不会 replay committed records，不会拒绝 fingerprint conflict；durable PostgreSQL repository / SQL migration 仍未实现。
+- PF-P025 已由用户确认 `verified`。
 
 #### 下一条 Prompt 上下文
 
-PF-P025 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。确认后，下一步建议生成并审查 `PF-P026 - Workbench UoW Idempotency Integration Skeleton`；PF-P026 仍不应迁移真实 Workbench 写 API，只应把 PF-P025 的 primitive 以 fake/repository contract 方式接入 `WorkbenchWriteUnitOfWork.run()`，让 UoW replay / reserve / commit 集成测试转绿。
+PF-P025 已由用户确认 `verified`。PF-P026 已生成并审查，下一步只允许执行 PF-P026。PF-P026 仍不应迁移真实 Workbench 写 API，只应把 PF-P025 的 primitive 以 fake/in-memory repository contract 方式接入 `WorkbenchWriteUnitOfWork.run()`，让 UoW replay / reserve / commit 集成测试转绿。
+
+### PF-P026 - Workbench UoW Idempotency Integration Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 只把 PF-P025 的 idempotency primitive 接入 `WorkbenchWriteUnitOfWork.run()`。
+- 只使用 fake/in-memory repository contract，不接真实 PostgreSQL idempotency 表。
+- 目标是让 UoW committed replay、same key different fingerprint conflict、reserve/commit 顺序相关测试转绿。
+- 可以移除已经转绿的 durable idempotency `expectedFailure` 标记，但不得删除测试或弱化断言。
+
+#### 禁止范围
+
+- 不迁移 `confirm_link`、`cancel_link`、`exception_apply`、cash special、ignore、withdraw 或任何真实 Workbench 写 API。
+- 不修改 `app/server.py`。
+- 不修改 `workbench_write_facade.py`。
+- 不新增或修改 SQL migration。
+- 不实现真实 PostgreSQL durable idempotency repository。
+- 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+
+#### 验收标准
+
+- `tests/test_workbench_idempotency_contract.py` 中 UoW replay / reserve / commit 集成测试应转为普通通过测试。
+- `tests/test_workbench_uow_contract.py` 中 durable idempotency 相关目标测试如已被本轮实现覆盖，应移除 `expectedFailure` 并转为普通通过测试。
+- stale write / optimistic locking 相关 expectedFailure 不属于 PF-P026，必须保留。
+- 不改变真实 Workbench HTTP API 行为。
+- 不引入数据库 migration。
+
+#### 审查结论
+
+- PF-P026 是 PF-P025 后的正确下一步：先把 primitive 接到 UoW skeleton，再考虑真实写路径迁移。
+- PF-P026 仍然不是业务 API 迁移 prompt；它只处理 UoW 层的幂等集成骨架。
+- PF-P026 完成后，应评估本分支是否已经达到可合并切片，优先考虑生成 `PF-P026-MG`，而不是继续无限扩展。
+
+#### 下一条 Prompt 上下文
+
+下一步只允许执行 PF-P026，不得生成 PF-P027，不得迁移真实 Workbench 写 API。PF-P026 完成后必须回写状态机和相关架构文档，记录哪些 UoW idempotency expectedFailure 已转绿、哪些 stale write expectedFailure 仍保留。
 
 ## 维护规则
 
