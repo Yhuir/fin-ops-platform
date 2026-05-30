@@ -49,12 +49,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Workbench Query Characterization Tests Merge Gate 已 verified；等待推送远端基线或生成 PF-P006 |
-| 当前 active prompt | 无执行中 prompt；下一步可生成并审查 `PF-P006 - Workbench Query Facade Extraction (Slice B)` |
-| 最近 verified prompt | `PF-P005-MG - Workbench Query Characterization Tests Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P005-MG 已在 `main` 上 fast-forward merge；`tests.test_workbench_sql_runtime`、row detail targeted tests、PF-P003 platform guards 均已通过；用户已确认 PF-P005-MG verified；未 push；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 建议先 push `main` 到 `origin/main` 让测试基线生效；随后生成并审查 `PF-P006`，不得直接执行 PF-P006 |
+| 当前阶段 | `PF-P006-MG - Workbench Query Facade Merge Gate` 已生成，等待执行 |
+| 当前 active prompt | `PF-P006-MG - Workbench Query Facade Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P006 - Workbench Query Facade Extraction (Slice B)` |
+| 当前分支 | `codex/workbench-query-facade-prompt` |
+| 最近验证 | PF-P006 已通过 facade unit tests、compileall、`tests.test_workbench_sql_runtime`、row detail targeted tests、PF-P003 platform guards、`app.main --check` 和三条 facade 静态门禁；用户已确认 PF-P006 verified；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 执行 `PF-P006-MG`；不得直接 merge、commit、push 或进入 Slice C |
 
 ## Prompt 执行日志
 
@@ -688,7 +688,151 @@ PF-P005 已 verified。PF-P005-MG 已生成并审查，下一步允许执行 PF-
 
 #### 下一条 Prompt 上下文
 
-PF-P005-MG 已 verified。当前 `main` 只在本地 ahead，尚未 push 到 `origin/main`。下一步建议先执行 `git push origin main` 让远端测试基线生效；随后生成并审查 PF-P006 的实现型 prompt。PF-P006 应从 Workbench Query Facade Extraction (Slice B) 开始，目标是在 PF-P005 characterization tests 保护下薄化 summary/groups/group detail/refresh-status handler；生成 PF-P006 后必须先审查，不能直接执行。
+PF-P005-MG 已 verified。`main` 已 push 到 `origin/main`，远端测试基线已生效，`main` 与 `origin/main` 均为 `fd75f9ee`。PF-P006 已生成并审查，下一步必须等待用户确认后才能执行 PF-P006。PF-P006 从 Workbench Query Facade Extraction (Slice B) 开始，目标是在 PF-P005 characterization tests 保护下薄化 summary/groups/group detail/refresh-status handler；不得直接执行。
+
+### PF-P006 - Workbench Query Facade Extraction (Slice B)
+
+状态：`verified`
+
+#### 范围
+
+- 在 PF-P005 characterization tests 保护下，做 Workbench `query/read-model` 子域的第一轮生产代码最小切片。
+- 目标是抽取 Query Facade，薄化以下只读 handler 的 orchestration：
+  - `_handle_api_workbench_summary`
+  - `_handle_api_workbench_groups`
+  - `_handle_api_workbench_group_detail`
+  - `_handle_api_workbench_refresh_status`
+- handler 仍负责 HTTP 参数入口、Response 包装和 server 层错误边界；facade 负责 read repository、freshness、refresh enqueue、Redis page cache 和 payload contract 的调度。
+- Facade 不得 import `Application` 或 HTTP `Response`，必须通过显式依赖、callable 或轻量 data/result object 与 `server.py` 解耦，避免反向依赖。
+- Facade 必须使用细粒度依赖注入；不得接收 `Application`、`RuntimeRepositories`、`RuntimeRepositoryContext`、`ApplicationStateStore`、`StateStoreProtocol` 或其他全局 runtime container，避免把 `server.py` 的耦合搬到新的上帝对象。
+- HTTP route/request 上下文相关的 observability wrapper（例如 `request_database_timing`）必须留在 `server.py` handler 层；纯 Workbench read-model 状态指标（例如 `_emit_workbench_read_model_status_metric`）可以移动或通过 metric emitter 注入 Facade，但指标语义必须保持。
+
+#### 禁止范围
+
+- 不改写 `GET /api/workbench` legacy compatibility endpoint。
+- 不改写 row detail fallback。
+- 不改写 SSE / events 长连接行为。
+- 不改写 worker refresh、builder、repository SQL 或 SQL migration。
+- 不修改 Workbench 写路径、matching/candidates、pair relations、exceptions、reconciliation。
+- 不修改前端、网关、部署配置或生产配置。
+- 不执行 Merge Gate 或 Traffic Gate。
+
+#### 执行约束
+
+- 必须先跑 PF-P005 已建立的 baseline tests。
+- 必须保持 API response contract、status code、stale reason、Redis key 格式、refresh enqueue reason 和 backend-only / contract-mismatch 字段不变。
+- 如果 extraction 导致测试需要改 expected payload，默认视为行为变更，必须停止并记录 discrepancy，不得为了让测试通过而顺手改契约。
+- 不得用 mock/patch 绕过 `WorkbenchQueryFacade` 来修改 `tests/test_workbench_sql_runtime.py`；PF-P005 characterization tests 必须继续覆盖 `Application handler -> WorkbenchQueryFacade -> repository / queue / redis fake` 的真实链路。
+- 如果新建 facade public methods，优先补充低成本 facade unit tests；不得复制巨型端到端测试。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_query_facade.py`：新增 `WorkbenchQueryFacade` 和 `WorkbenchQueryResult`，收口 summary / groups / group detail / refresh-status orchestration。
+- `backend/src/fin_ops_platform/app/server.py`：四个 Workbench query/read-model handler 改为薄 wrapper，继续负责 HTTP 参数校验和 `_json_response` 包装。
+- `tests/test_workbench_query_facade.py`：新增低成本 facade unit tests，验证细粒度依赖和 Redis cache hit 行为。
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+
+#### 执行结果
+
+- PF-P006 已按 TDD 执行：先新增 `tests/test_workbench_query_facade.py`，确认因 `ModuleNotFoundError: fin_ops_platform.services.workbench_query_facade` 失败，再实现 facade。
+- `Application` 没有注入给 Facade；`RuntimeRepositories` / `RuntimeRepositoryContext` 没有作为 Facade constructor 参数传入。
+- `tests/test_workbench_sql_runtime.py` 未改成 mock facade 测试；PF-P005 黑盒 characterization tests 仍覆盖 handler 到 facade 再到 fake repository / queue / redis 的路径。
+- `request_database_timing` 未进入 `workbench_query_facade.py`；HTTP route timing wrapper 仍归 handler/app shell 边界。
+- 未修改 SQL migration、前端、网关、部署配置或生产配置。
+- 未执行 Merge Gate、Traffic Gate 或 push。
+
+#### 预期验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- Row detail targeted tests。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- 静态检查 Facade 上帝对象注入风险：`WorkbenchQueryFacade(...)` 不得出现 `Application`、`RuntimeRepositories`、`RuntimeRepositoryContext`、`ApplicationStateStore`、`StateStoreProtocol` 或 `state_store` 依赖。
+- 静态检查测试保真度：`tests/test_workbench_sql_runtime.py` 不得 mock/patch `WorkbenchQueryFacade` 或 `workbench_query_facade`。
+- 静态检查 observability 边界：如存在 `workbench_query_facade.py`，`request_database_timing` 不得进入该文件。
+
+#### 已执行验证
+
+- `git status --short --branch`：通过；显示预期变更文件和两个新增文件。
+- `git ls-files --others --exclude-standard`：输出 `backend/src/fin_ops_platform/services/workbench_query_facade.py`、`tests/test_workbench_query_facade.py`，均为本轮预期新增文件，不是临时产物。
+- `git diff --check`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`：通过，2 tests passed。
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，102 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，9 tests passed。
+- Row detail targeted tests：通过，4 tests passed。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过，status `ready`。
+- `rg -n "WorkbenchQueryFacade\\([^\\n]*(Application|RuntimeRepositories|RuntimeRepositoryContext|ApplicationStateStore|StateStoreProtocol|state_store)" backend/src/fin_ops_platform tests`：无输出，符合上帝对象注入门禁。
+- `rg -n "mock\\.patch\\(.+WorkbenchQueryFacade|patch\\(.+workbench_query_facade|monkeypatch.+WorkbenchQueryFacade|WorkbenchQueryFacade.*Mock|Mock.*WorkbenchQueryFacade" tests/test_workbench_sql_runtime.py`：无输出，符合测试保真门禁。
+- `test ! -f backend/src/fin_ops_platform/services/workbench_query_facade.py || ! rg -n "request_database_timing" backend/src/fin_ops_platform/services/workbench_query_facade.py`：通过，符合 observability 边界。
+
+#### 下一条 Prompt 上下文
+
+PF-P006 已由用户确认 `verified`。PF-P006-MG 已生成并审查，下一步允许执行 `PF-P006-MG - Workbench Query Facade Merge Gate`。PF-P006-MG 只处理本轮 facade extraction 的范围审计、上游同步、精准提交、合并前后验证和状态机回写；不得执行 Traffic Gate，不得部署服务器，不得直接进入 Slice C。
+
+### PF-P006-MG - Workbench Query Facade Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 PF-P006 已 verified 的 Workbench Query Facade extraction 合入 `main` 的 Merge Gate。
+- 允许范围审计、上游同步检查、精准 staging、commit、merge 到 main 前后验证和状态机回写。
+- 不执行 Traffic Gate、不部署服务器、不修改生产配置、不访问生产外部服务。
+- 不开始 Slice C、Workbench cache/freshness 语义改造、SSE、row detail、legacy `GET /api/workbench` 或任何写路径重构。
+
+#### Expected Changed Files
+
+PF-P006-MG 允许合入的文件仅限：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_query_facade.py`
+- `tests/test_workbench_query_facade.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+
+`tests/test_workbench_sql_runtime.py` 是 PF-P005 characterization baseline 和 PF-P006-MG 验证目标，不属于本轮 Expected Changed Files。若该文件出现 changed / staged 状态，PF-P006-MG 必须阻断并审查原因，不得临时加入白名单。
+
+如出现其它 changed / untracked 文件，必须先阻断并审查来源；不得静默加入白名单。
+
+#### 必须保留的门禁
+
+- 不得使用 `git add .` 或 `git add -A`，只能精准 `git add <具体文件>`。
+- 必须运行 `git ls-files --others --exclude-standard`，并确认未跟踪文件只包含本轮预期新增文件。
+- 必须确认 `tests/test_workbench_sql_runtime.py` 未被改成 mock facade 测试。
+- 必须确认 `WorkbenchQueryFacade` 没有注入 `Application`、`RuntimeRepositories`、`RuntimeRepositoryContext`、`ApplicationStateStore`、`StateStoreProtocol` 或 `state_store`。
+- 必须确认 `request_database_timing` 未进入 `workbench_query_facade.py`。
+- merge 到 `main` 前必须同步最新 `origin/main`；如同步带来变化，必须重新执行 mandatory checks。
+- Push 到 `origin/main` 需要用户明确允许；PF-P006-MG 不默认 push。
+
+#### 预期验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --stat`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+- `git diff --quiet -- tests/test_workbench_sql_runtime.py`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- Row detail targeted tests。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- Facade 上帝对象注入静态检查。
+- Facade mock 静态检查。
+- `request_database_timing` 边界静态检查。
+
+#### 下一条 Prompt 上下文
+
+PF-P006-MG 执行后只能进入 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。PF-P006-MG verified 后，下一步再考虑 push `main` 到 `origin/main` 或生成 Slice C prompt；不得在 PF-P006-MG 中默认执行 Traffic Gate。
 
 ## 维护规则
 
