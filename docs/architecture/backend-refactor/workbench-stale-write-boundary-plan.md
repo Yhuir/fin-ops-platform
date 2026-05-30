@@ -204,6 +204,12 @@ PF-P029 已让 withdraw preview 暴露 `active_relation.case_id`、`active_relat
 
 后续实现 submit stale rejection 时，必须用 transaction-bound facts current-state reader 提供真实 relation version 或等价 identity；不得把 PF-P029 的 preview-only fallback 当作最终并发控制依据。
 
+### PF-P030 执行补充
+
+PF-P030 已在 UoW 层引入 fake/in-memory stale precondition skeleton。当前实现基于 `command.expected_versions` 与 `command.payload` 中的 `current_relation_*` / `current_row_status` 做 target contract 校验，可以表达 relation version mismatch、relation identity changed 和 row status changed，并在 handler 执行前抛出 `WorkbenchWriteConflict`。
+
+该 skeleton 仍不是生产 facts reader。真实 Workbench API 还没有迁移进这个 precondition，HTTP 写路径仍保持 PF-P012/PF-P016/PF-P017/PF-P029 之前锁定的当前行为。后续迁移真实 submit/cancel/ignore/cash special 时，必须把当前 command-carried state 替换为 transaction-bound PostgreSQL facts current-state reader。
+
 ## Conflict Primitive Boundary
 
 目标 primitive：`WorkbenchWriteConflict`。

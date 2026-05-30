@@ -8655,7 +8655,7 @@ Post-Flight:
 
 ## PF-P030 - Workbench UoW Stale Precondition Port Skeleton
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -8811,3 +8811,26 @@ Post-Flight:
 - PF-P030 不得新增 SQL migration，不得实现真实 PostgreSQL current-state reader。
 - PF-P030 是后续真实 API migration 前的必要中间层，避免直接在 handler/facade 中写散落的 stale 判断。
 - 未经用户确认，不得执行 PF-P030，也不得将 PF-P030 标记为 `verified`。
+
+### 执行结果
+
+- 已新增 `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`。
+- 已在 `WorkbenchWriteUnitOfWork.run()` 中接入 handler 前 stale precondition 检查。
+- 当前 precondition 只使用 fake/in-memory command state，不读取 PostgreSQL facts：
+  - `expected_versions`
+  - `payload.current_relation_case_id`
+  - `payload.current_relation_version`
+  - `payload.current_row_status`
+- 4 个 UoW stale target tests 已从 expectedFailure 转为普通通过。
+- 真实 Workbench 写 API 仍未迁移；`server.py` 和 `workbench_write_facade.py` 未修改。
+
+验证结果：
+
+- Baseline：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：16 tests，4 expected failures。
+- RED：移除 4 个 expectedFailure 后，4 个 stale tests 因未抛出异常失败。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+
+下一步建议：用户确认 PF-P030 `verified` 后，生成并审查 `PF-P030-MG - Workbench Stale Write Foundation Merge Gate`，统一覆盖 PF-P027 到 PF-P030 的完整 diff。不要直接进入真实 API migration。

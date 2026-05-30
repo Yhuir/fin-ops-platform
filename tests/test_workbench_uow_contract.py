@@ -375,11 +375,11 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(connection.commits, 0)
         self.assertEqual(connection.rollbacks, 1)
 
-    # PF-P021-CI: target contract tests stay visible in default CI as
-    # expected failures until the corresponding UoW semantics are implemented.
-    @unittest.expectedFailure
     def test_withdraw_submit_rejects_stale_preview_relation_version(self) -> None:
-        uow = self._new_uow()
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        idempotency = _RecordingIdempotencyStore()
+        uow = self._new_uow(connection=connection, read_model_writer=writer, idempotency_store=idempotency)
         called = False
 
         def handler(ctx: object) -> dict[str, object]:
@@ -393,13 +393,18 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 _Command(
                     action_name="withdraw_link",
                     expected_versions={"relation:CASE-1": 3},
+                    idempotency_key="withdraw:stale-preview",
                     payload={"current_relation_version": 4},
                 ),
                 handler,
             )
         self.assertFalse(called)
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(idempotency.reserved, [])
+        self.assertEqual(idempotency.records, {})
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_cancel_link_rejects_stale_replaced_relation(self) -> None:
         uow = self._new_uow()
         called = False
@@ -421,7 +426,6 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             )
         self.assertFalse(called)
 
-    @unittest.expectedFailure
     def test_ignore_row_rejects_when_row_already_confirmed(self) -> None:
         uow = self._new_uow()
         called = False
@@ -443,7 +447,6 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             )
         self.assertFalse(called)
 
-    @unittest.expectedFailure
     def test_cash_special_rejects_changed_relation_version(self) -> None:
         uow = self._new_uow()
         called = False

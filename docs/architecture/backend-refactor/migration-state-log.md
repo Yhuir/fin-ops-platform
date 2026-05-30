@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` (`planned`) |
+| 当前阶段 | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` (`implemented`) |
 | 最近 verified prompt | `PF-P029 - Workbench Withdraw Preview Version Identity Contract` |
 | 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | 用户确认 PF-P029 可标记 `verified`；PF-P030 已生成并审查但未执行 |
-| 下一条允许任务 | 只允许执行 PF-P030。PF-P030 只建立 fake/in-memory stale precondition port 和 UoW target contract，不迁移真实 Workbench 写 API |
+| 最近验证 | PF-P030 UoW/stale/idempotency/characterization 回归通过；真实 Workbench 写 API 未迁移 |
+| 下一条允许任务 | 等待用户确认 PF-P030 是否可标记 `verified`。确认后建议生成并审查 PF-P030-MG，统一覆盖 PF-P027 到 PF-P030 的 stale write 基础切片 |
 
 ## Prompt 执行日志
 
@@ -3082,7 +3082,7 @@ PF-P029 已由用户确认 `verified`。PF-P030 已生成并审查，下一步�
 
 ### PF-P030 - Workbench UoW Stale Precondition Port Skeleton
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3117,6 +3117,55 @@ PF-P029 已由用户确认 `verified`。PF-P030 已生成并审查，下一步�
 - PF-P030 是 PF-P029 后的正确最小 UoW 层切片。
 - 它只建立 UoW target contract 和 fake/in-memory port，为后续真实 repository current-state reader 做接口准备。
 - PF-P030 仍不能迁移真实 submit/cancel/ignore/cash special，因为真实迁移需要对应 API prompt、facts reader、兼容策略和回归门禁。
+
+#### 执行结果
+
+- 新增 `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`。
+- `WorkbenchWriteUnitOfWork.run()` 在 transaction 内、handler 执行前调用 `assert_workbench_stale_preconditions(command)`。
+- stale precondition 当前只使用 fake/in-memory command state：
+  - `command.expected_versions`
+  - `command.payload.current_relation_case_id`
+  - `command.payload.current_relation_version`
+  - `command.payload.current_row_status`
+- 支持并验证：
+  - relation version mismatch -> `stale_relation_version`
+  - relation identity changed -> `stale_relation_identity`
+  - row status changed -> `stale_row_status`
+- stale 时抛出 `WorkbenchWriteConflict`，handler 不执行；withdraw stale target test 同时断言 dirty/outbox 不写、idempotency 不 reserve/commit、transaction rollback。
+- 未迁移任何真实 Workbench 写 API。
+- 未修改 `server.py` 或 `workbench_write_facade.py`。
+- 未实现真实 PostgreSQL facts current-state reader 或 SQL migration。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `tests/test_workbench_uow_contract.py`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 验证
+
+- Baseline：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：初始为 16 tests，4 expected failures。
+- RED：移除 4 个 expectedFailure 后，4 个 stale tests 均因未抛出异常失败。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `git diff --check`：通过。
+- `test ! -e backend-go`：通过。
+- Scope allowlist：通过。
+
+#### 仍保留的限制
+
+- 当前 stale precondition source 不是 PostgreSQL facts reader。
+- 真实 submit/cancel/ignore/cash special HTTP 写路径尚未迁移进 UoW stale precondition。
+- PF-P030 只证明 UoW target contract 可行，不能视为生产 stale write 已修复。
+
+#### 下一条 Prompt 上下文
+
+PF-P030 已执行并记录为 `implemented`，不得标记 `verified`，直到用户确认。下一步建议生成并审查 `PF-P030-MG - Workbench Stale Write Foundation Merge Gate`，统一覆盖 PF-P027、PF-P028、PF-P029、PF-P030 在当前分支上的完整 diff；不得直接进入真实 API migration，也不得跳过 Merge Gate。
 
 ## 维护规则
 
