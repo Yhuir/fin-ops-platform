@@ -4418,7 +4418,7 @@ Post-Flight:
 
 ## PF-P014 - Workbench Exception Facade Extraction
 
-状态：`implemented`
+状态：`verified`
 
 ```text
 请执行 PF-P014 - Workbench Exception Facade Extraction。
@@ -5385,7 +5385,7 @@ Post-Flight:
 
 ## PF-P017-MG - Workbench Remaining Write Facade Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -9439,7 +9439,7 @@ Main 上复验：
 
 下一步：
 
-- 等待用户确认 PF-P031-MG 可标记为 `verified`。
-- 用户确认后执行 `git push origin main`。
+- 用户已确认 PF-P031-MG `verified`。
+- 下一步执行 `git push origin main`。
 - push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。
-- 不直接进入 PF-P032。
+- 建议下一条 prompt 为 `PF-P032 - Workbench Ignore Row Stale Guard Migration`，但不得直接执行。

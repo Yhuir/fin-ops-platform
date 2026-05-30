@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` 已执行并合入本地 `main`，等待用户确认 verified |
-| 当前 active prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P031 - Workbench Cancel Link Stale Guard Migration` |
+| 当前阶段 | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` 已由用户确认 verified，准备 push 到 `origin/main` |
+| 当前 active prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P031-MG 合入前与合入后 `main` 复验全部通过；未 push；仍未迁移 ignore row、cash special 或 withdraw submit |
-| 下一条允许任务 | 等待用户确认 PF-P031-MG 可标记 verified；确认后再执行 `git push origin main`，push 后从最新 `main` 新建分支生成下一条 prompt |
+| 最近验证 | PF-P031-MG 合入前与合入后 `main` 复验全部通过；用户已确认 verified；仍未迁移 ignore row、cash special 或 withdraw submit |
+| 下一条允许任务 | 执行 `git push origin main`；push 后从最新 `main` 新建分支生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -3317,7 +3317,7 @@ PF-P031 已完成实现和验证，并已由用户确认 `verified`。PF-P031-MG
 
 ### PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3394,7 +3394,7 @@ PF-P031 已完成实现和验证，并已由用户确认 `verified`。PF-P031-MG
 
 #### 下一条 Prompt 上下文
 
-PF-P031-MG 已合入本地 `main` 并完成 main 上复验，但尚未由用户确认 `verified`，也尚未 push 到 `origin/main`。下一步应先由用户确认 PF-P031-MG `verified`；随后执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。不要直接进入 PF-P032，直到 PF-P031-MG verified 并 push。
+PF-P031-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确认 `verified`。下一步执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。建议下一条 prompt 为 `PF-P032 - Workbench Ignore Row Stale Guard Migration`，但生成前必须先新建分支并审查 prompt；不得直接执行。
 
 ## 维护规则
 
