@@ -330,4 +330,17 @@ PF-P020 已按上述边界执行：
 - PF-P019 中 3 个 writer target tests 已转绿。
 - PF-P019 全量 contract file 仍为 Expected Red，剩余失败集中在缺失 `WorkbenchWriteUnitOfWork`，符合本轮边界。
 
-PF-P020 verified 后，下一步才适合进入 `PF-P021 - Workbench Minimal Unit of Work Skeleton` 或等价 prompt。PF-P021 应只接入最小 UoW skeleton 与 transaction-bound writer，不应一次性迁移全部 Workbench 写路径，也不应同时修 stale write 或 durable idempotency。
+PF-P020 已由用户确认 `verified`。PF-P021 已生成并审查：
+
+`PF-P021 - Workbench Minimal Unit of Work Skeleton`
+
+PF-P021 的目标边界：
+
+- 新增最小 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- `WorkbenchWriteUnitOfWork.run(command, handler)` 打开一个 PostgreSQL transaction，创建 transaction-bound repository context，执行 handler，然后用 PF-P020 的 writer 在同一 transaction 写 dirty scope/outbox。
+- 只让 PF-P019 中 UoW atomicity contract 子集转绿。
+- 不迁移任何真实 Workbench write API。
+- 不修 stale write / optimistic locking。
+- 不实现 durable idempotency replay。
+
+PF-P021 verified 后，应根据剩余红灯再决定下一步是 stale write guard 还是 durable idempotency；不要在 PF-P021-MG 前继续迁移更多 Workbench 写路径。

@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已执行，新增 transaction-bound dirty/outbox writer，等待用户确认。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已由用户确认 `verified`，新增 transaction-bound dirty/outbox writer。PF-P021 已生成并审查，等待执行。
 
 ## 1. Scope Boundary
 
@@ -539,8 +539,16 @@ PF-P020 已执行：
 - PF-P019 全量 contract file 仍是 Expected Red：16 tests，11 failures，5 ok；剩余红灯为缺失 `WorkbenchWriteUnitOfWork` / UoW 语义。
 - 现有 runtime queue、Workbench characterization、dirty queue wiring 和 platform guard tests 全部通过。
 
-用户确认 PF-P020 `verified` 后，下一条建议 prompt：
+PF-P020 已由用户确认 `verified`。下一条 prompt 已生成并审查：
 
 `PF-P021 - Workbench Minimal Unit of Work Skeleton`
 
 PF-P021 应只建立最小 `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton，并接入 PF-P020 的 transaction-bound writer。不要在同一 prompt 中迁移全部 Workbench 写路径、修 stale write 或实现 durable idempotency store。
+
+PF-P021 的边界：
+
+- 只允许新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- `run(command, handler)` 负责打开 PostgreSQL transaction、创建 repository context、执行 handler，并通过 PF-P020 的 transaction-bound writer 在同一 transaction 内写入 dirty scope/outbox。
+- 只让 PF-P019 中 4 个 UoW atomicity skeleton tests 转绿。
+- 不迁移 `server.py` 或 `WorkbenchWriteFacade` 的真实写路径。
+- 不实现 stale write guard、durable idempotency replay 或新的数据库 schema。
