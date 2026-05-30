@@ -9,6 +9,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyRecord,
     workbench_request_fingerprint,
 )
+from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
 
 @dataclass(frozen=True)

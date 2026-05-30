@@ -8314,7 +8314,7 @@ Post-Flight:
 
 ## PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -8470,3 +8470,24 @@ Post-Flight:
 - PF-P028 只允许移除 `test_target_workbench_write_conflict_response_shape_is_stable` 的 expectedFailure；其它 stale write target tests 必须保留。
 - PF-P028 仍不得迁移真实 Workbench 写 API，不得修改 `server.py` 或 `workbench_write_facade.py` 的写入行为。
 - 未经用户确认，不得执行 PF-P028，也不得将 PF-P028 标记为 `verified`。
+
+### 执行结果
+
+- 已新增 `backend/src/fin_ops_platform/services/workbench_write_conflict.py`。
+- 已在 `workbench_uow.py` re-export `WorkbenchWriteConflict`，保持 `fin_ops_platform.services.workbench_uow.WorkbenchWriteConflict` 兼容。
+- 已移除 `test_target_workbench_write_conflict_response_shape_is_stable` 的 `unittest.expectedFailure`，该测试已转为普通通过。
+- `WorkbenchWriteConflict` 的 response shape 已固定为：
+  - `status_code = 409`
+  - `payload.error = "workbench_write_conflict"`
+  - `payload.message = "工作台数据已变化，请刷新后重试。"`
+  - `payload.conflict.action/reason/expected/actual`
+- 真实 Workbench 写 API 仍未迁移；未修改 `server.py` 或 `workbench_write_facade.py`。
+
+验证结果：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract.WorkbenchStaleWriteContractTests.test_target_workbench_write_conflict_response_shape_is_stable -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+
+下一步建议：用户确认 PF-P028 `verified` 后，生成并审查 `PF-P029 - Workbench Withdraw Preview Version Identity Contract`。PF-P029 仍不得迁移真实 Workbench 写 API。

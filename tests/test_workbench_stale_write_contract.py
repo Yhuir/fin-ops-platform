@@ -107,7 +107,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
             {f"relation:{payload['active_relation']['case_id']}": payload["active_relation"]["version"]},
         )
 
-    @unittest.expectedFailure
     def test_target_workbench_write_conflict_response_shape_is_stable(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_uow")
         conflict_cls = getattr(module, "WorkbenchWriteConflict")

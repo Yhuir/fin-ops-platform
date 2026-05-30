@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` (`planned`) |
+| 当前阶段 | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract` (`implemented`) |
 | 最近 verified prompt | `PF-P027 - Workbench Stale Write Boundary Discovery and Planning` |
 | 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | 用户确认 PF-P027 可标记 `verified`；PF-P028 已生成并审查但未执行 |
-| 下一条允许任务 | 只允许执行 PF-P028。PF-P028 只处理统一 409 conflict primitive 和 expected_versions contract，不迁移真实 Workbench 写 API |
+| 最近验证 | PF-P028 目标测试和相邻 UoW/idempotency 回归通过；真实 Workbench 写 API 未迁移 |
+| 下一条允许任务 | 等待用户确认 PF-P028 是否可标记 `verified`。确认后建议生成并审查 PF-P029；不得直接执行 PF-P029 |
 
 ## Prompt 执行日志
 
@@ -2922,7 +2922,7 @@ PF-P027 已由用户确认 `verified`。PF-P028 已生成并审查，下一步�
 
 ### PF-P028 - Workbench Write Conflict Primitive and Expected Versions Contract
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2956,6 +2956,48 @@ PF-P027 已由用户确认 `verified`。PF-P028 已生成并审查，下一步�
 - PF-P028 是 PF-P027 后的正确最小实现切片。
 - 它可以先建立统一 409 conflict contract，降低后续 cancel/ignore/cash/withdraw API 迁移时的 response 分歧风险。
 - PF-P028 仍不能修真实 stale write，因为真实修复需要 transaction-bound facts current-state reader 和 UoW precondition，必须拆到后续 prompt。
+
+#### 执行结果
+
+- 新增 `WorkbenchWriteConflict` primitive，放在 `backend/src/fin_ops_platform/services/workbench_write_conflict.py`。
+- `workbench_uow.py` re-export `WorkbenchWriteConflict`，保持 `fin_ops_platform.services.workbench_uow.WorkbenchWriteConflict` 可用。
+- `WorkbenchWriteConflict.to_response_payload()` 固化 409 response shape：`workbench_write_conflict`、默认中文 message、`conflict.action/reason/expected/actual`。
+- 只移除了 `test_target_workbench_write_conflict_response_shape_is_stable` 的 `unittest.expectedFailure`。
+- 未迁移真实 Workbench 写 API。
+- 未修改 `server.py` 或 `workbench_write_facade.py`。
+- 未实现 UoW stale precondition、repository current-state reader 或 SQL migration。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `tests/test_workbench_stale_write_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract.WorkbenchStaleWriteContractTests.test_target_workbench_write_conflict_response_shape_is_stable -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `git diff --check`：通过。
+- `test ! -e backend-go`：通过。
+- Scope allowlist：通过。
+
+#### 仍保留的 expectedFailure
+
+- `tests/test_workbench_stale_write_contract.py`
+  - `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions`
+- `tests/test_workbench_uow_contract.py`
+  - `test_withdraw_submit_rejects_stale_preview_relation_version`
+  - `test_cancel_link_rejects_stale_replaced_relation`
+  - `test_ignore_row_rejects_when_row_already_confirmed`
+  - `test_cash_special_rejects_changed_relation_version`
+
+#### 下一条 Prompt 上下文
+
+PF-P028 已执行并记录为 `implemented`，不得标记 `verified`，直到用户确认。下一步建议生成并审查 `PF-P029 - Workbench Withdraw Preview Version Identity Contract`，只让 withdraw preview response 暴露 `active_relation` identity/version 和 `submit_expected_versions`，优先转绿 `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions`；仍不得迁移 withdraw submit、cancel link、ignore row 或 cash special 真实写 API。
 
 ## 维护规则
 
