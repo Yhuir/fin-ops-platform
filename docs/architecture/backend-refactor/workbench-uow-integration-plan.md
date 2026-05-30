@@ -566,3 +566,35 @@ PF-P034-MG 已确认 `verified` 并推送到 `origin/main`。当前已从最新 
 PF-P035 是 stale guard foundation 之后第一条真实 Workbench 写 API 的 UoW 集成切片。它只能迁移 `confirm-link`，不得迁移 `cancel-link`、exception 路径、ignore/unignore、cash special、withdraw、personal advance repayment、matching/candidates、query/read-model 或 deployment/runtime routing。
 
 PF-P035 必须把 repository capability 当作硬门禁。如果不扩大 repository/schema 范围就无法让 `confirm-link` 具备 transaction-bound facts/history + dirty/outbox 能力，本轮必须停止并记录为 `blocked`，不能伪装成生产级 UoW 已完成。
+
+## 17. PF-P035 Confirm Link UoW Integration Result
+
+PF-P035 已执行，当前状态为 `implemented`，等待用户确认后才可标记 `verified`。
+
+实际完成：
+
+- `confirm-link` 是第一条接入 `WorkbenchWriteUnitOfWork` 的真实 Workbench 写 API。
+- `WorkbenchWriteFacade.confirm_link` 保持原有 validation、row expansion、amount check 与 response shape，然后进入 UoW。
+- UoW handler 在同一个 transaction 内完成：
+  - pair relation facts/history 持久化；
+  - reconciliation decision consumption；
+  - dirty scope / outbox / source_version 写入。
+- `server.py` 只负责组装细粒度依赖，不把业务计算写回 handler。
+- 非 PostgreSQL / 无 UoW 环境保留 legacy confirm-link 行为，保障现有本地 characterization tests。
+
+本轮验证覆盖：
+
+- confirm-link 使用 UoW 时不再调用 legacy pair relation/read model scheduler。
+- 同一 `idempotency_key` + 同 fingerprint replay 首次结果，不重复写 handler/outbox。
+- 同一 `idempotency_key` + 不同 payload/fingerprint 返回 409 conflict，不执行 handler/outbox。
+- 原有 duplicate confirm-link legacy characterization 行为保持不变。
+
+明确未完成：
+
+- 真实 PostgreSQL durable idempotency repository / SQL migration 仍未实现。当前生产组装使用 `InMemoryWorkbenchIdempotencyRepository` primitive，仅提供进程内 replay/conflict 能力。
+- actor/tenant 仍使用默认值；真实 auth context 传导需要后续 prompt。
+- 其它 Workbench 写 API 尚未接入 UoW。
+
+下一步建议：
+
+用户确认 PF-P035 `verified` 后，应生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`，统一检查 PF-P035 完整 diff 并合入本地 `main`。不要直接迁移下一条 API。

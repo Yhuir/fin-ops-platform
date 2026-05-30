@@ -10282,3 +10282,50 @@ Post-Flight:
 - PF-P035 的边界必须保持极窄，只迁移 `confirm-link`，不能顺手迁移 `cancel-link` 或 exception/cash/withdraw 等路径。
 - PF-P035 必须采用 TDD，并且不能用 mock 掉整个 UoW 的方式制造虚假通过。
 - 最大风险是当前 repository 仍偏 snapshot 保存。如果无法证明 facts/history 与 dirty/outbox 同事务，PF-P035 应记录 blocker，而不是伪装完成生产级 UoW。
+
+### 执行结果
+
+状态：`implemented`，等待用户确认后才可标记 `verified`。
+
+PF-P035 已按 TDD 执行：
+
+- RED：新增 `test_confirm_link_uses_uow_transaction_when_available`，先证明当前 confirm-link 仍调用 legacy pair/read-model scheduler。
+- GREEN：`WorkbenchWriteFacade.confirm_link` 接入 `WorkbenchWriteUnitOfWork`；UoW handler 在同一 transaction 内执行 pair relation/history 持久化、reconciliation decision consumption、dirty scope/outbox/source_version 写入。
+- 增补 idempotency 行为测试：
+  - 同一 `idempotency_key` + 同 fingerprint replay 首次结果，不重复执行 handler/outbox。
+  - 同一 `idempotency_key` + 不同 payload/fingerprint 返回 409 conflict，不重复执行 handler/outbox。
+
+实际变更：
+
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - 新增 confirm-link command shape。
+  - 新增 UoW 分支和 response filtering，保持 HTTP payload shape 兼容。
+  - idempotency conflict 映射到 409 primitive。
+- `backend/src/fin_ops_platform/app/server.py`
+  - 组装 confirm-link UoW 细粒度依赖。
+  - 新增 transaction-bound pair relation persistence。
+  - 新增 transaction-bound reconciliation decision consumption。
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - 新增 `RuntimeQueueReadModelRefreshWriter`，适配 `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction()`。
+- `tests/test_workbench_write_characterization.py`
+  - 新增 confirm-link UoW transaction、replay、conflict 三个 targeted characterization tests。
+
+验证结果：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，36 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+剩余风险：
+
+- 当前 confirm-link idempotency store 仍是 `InMemoryWorkbenchIdempotencyRepository` primitive，尚不是 PostgreSQL durable store；跨进程/重启 replay 仍需后续 schema + repository prompt。
+- actor/tenant 暂沿用默认值，尚未接入真实 auth context。
+- 未执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+下一步：用户确认 PF-P035 可标记 `verified` 后，生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`。

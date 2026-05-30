@@ -96,6 +96,42 @@ class WorkbenchWriteUnitOfWork:
             return result
 
 
+class RuntimeQueueReadModelRefreshWriter:
+    def __init__(
+        self,
+        queue_repository: Any,
+        *,
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+    ) -> None:
+        self._queue_repository = queue_repository
+        self._tenant_id = str(tenant_id or "default")
+        self._priority = str(priority or "normal")
+        self._trace_id = str(trace_id).strip() if trace_id else None
+
+    def enqueue_refresh(
+        self,
+        *,
+        transaction: Any,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+    ) -> Any:
+        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+        if not callable(enqueue):
+            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction.")
+        return enqueue(
+            transaction=transaction,
+            scope_type=scope_type,
+            scope_key=scope_key,
+            reason=reason,
+            tenant_id=self._tenant_id,
+            priority=self._priority,
+            trace_id=self._trace_id,
+        )
+
+
 def _scope_keys_for(command: Any, handler_result: dict[str, Any]) -> list[str]:
     raw_scope_keys = getattr(command, "scope_keys", None) or handler_result.get("affected_scope_keys") or []
     scope_keys: list[str] = []

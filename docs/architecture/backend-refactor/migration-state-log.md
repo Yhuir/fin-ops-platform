@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已从最新 `main` 新建分支并生成 `PF-P035 - Workbench Confirm Link UoW Integration Slice`，等待执行 |
-| 当前 active prompt | `PF-P035 - Workbench Confirm Link UoW Integration Slice` (`planned`) |
+| 当前阶段 | `PF-P035 - Workbench Confirm Link UoW Integration Slice` 已实现，等待用户确认是否可标记 `verified` |
+| 当前 active prompt | `PF-P035 - Workbench Confirm Link UoW Integration Slice` (`implemented`) |
 | 最近 verified prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` |
 | 当前分支 | `codex/workbench-confirm-link-uow` |
-| 最近验证 | PF-P034-MG 在功能分支和本地 `main` 上均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试；用户确认 verified；`main` 已 push 到 `origin/main`；未部署、未 Traffic Gate |
-| 下一条允许任务 | 等待用户确认后执行 PF-P035；PF-P035 只迁移 `confirm-link` 真实写 API 到 UoW，不得迁移其它 Workbench 写路径 |
+| 最近验证 | PF-P035 在功能分支通过 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试；未执行 MG、未部署、未 Traffic Gate、未 push |
+| 下一条允许任务 | 等待用户确认 PF-P035 是否可标记 `verified`；确认后生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`，不得直接迁移下一条 API |
 
 ## Prompt 执行日志
 
@@ -3683,7 +3683,7 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 
 ### PF-P035 - Workbench Confirm Link UoW Integration Slice
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3719,6 +3719,41 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 - PF-P035 是 PF-P034-MG 后的合理下一步，因为 `confirm-link` 是 Workbench 写路径的核心入口，也是 UoW 目标矩阵中的第一批迁移对象。
 - 本 prompt 必须小切片推进，不得顺手迁移 `cancel-link`、exception、ignore/unignore、cash special、withdraw、personal advance repayment 或 matching/candidates。
 - 该 prompt 是实现 prompt，不是 Merge Gate；完成后只能标记 `implemented`，等待用户确认后再决定是否生成对应 MG。
+
+#### 执行结果
+
+- 状态：`implemented`，等待用户确认后才可标记 `verified`。
+- 完成范围：
+  - `WorkbenchWriteFacade.confirm_link` 在通过现有 validation、row expansion 和 amount check 后接入 `WorkbenchWriteUnitOfWork`。
+  - `Application._workbench_write_facade()` 只负责组装细粒度依赖，新增 confirm-link UoW factory、transaction-bound pair relation persistence、transaction-bound reconciliation decision consumption。
+  - `RuntimeQueueReadModelRefreshWriter` 将 UoW dirty/outbox/source_version 写入代理到 `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction()`。
+  - legacy 非 PostgreSQL / 无 UoW 环境仍保留原 confirm-link response shape 与 legacy 调度行为。
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- 验证结果：
+  - `git status --short --branch`：Pass，当前分支 `codex/workbench-confirm-link-uow`，仅本轮文件变更。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，36 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 剩余风险：
+  - confirm-link 的 idempotency 仍依赖当前 `InMemoryWorkbenchIdempotencyRepository` primitive；真实 PostgreSQL durable idempotency store / SQL migration 仍未实现。
+  - actor/tenant 仍使用现有默认值；后续需要接入真实 auth context 后再提升到生产级审计身份。
+  - 本轮没有迁移 cancel-link、exception、ignore/unignore、cash special、withdraw 或其它 Workbench 写路径。
+- 下一条 Prompt 上下文：
+  - 用户确认 PF-P035 verified 后，应生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`。
+  - PF-P035-MG 必须覆盖本轮完整 diff、重新执行验证、合入本地 `main`；不得执行 Traffic Gate、部署或 push，除非用户另行确认。
 
 ## 维护规则
 

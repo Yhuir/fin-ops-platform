@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock, Thread
 from time import monotonic, sleep
+from types import SimpleNamespace
 from typing import Callable, Iterable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from uuid import uuid4
@@ -171,6 +172,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
 )
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions, source_version_mismatch_reasons
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
@@ -223,9 +225,14 @@ from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_P
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
+    PostgresReadModelRepository,
+)
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
+from fin_ops_platform.services.workbench_uow import RuntimeQueueReadModelRefreshWriter, WorkbenchWriteUnitOfWork
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     CASH_TURNOVER_DETECTED,
     CASH_TURNOVER_TAG,
@@ -2114,6 +2121,44 @@ class Application:
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             schedule_read_model_persist=self._schedule_workbench_read_model_persist,
             emit_action_timing=self._emit_workbench_action_timing,
+            confirm_link_uow=self._workbench_confirm_link_unit_of_work(),
+            persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
+            consume_reconciliation_decisions_in_transaction=self._consume_workbench_reconciliation_decisions_in_transaction,
+        )
+
+    def _workbench_confirm_link_unit_of_work(self) -> WorkbenchWriteUnitOfWork | None:
+        override = getattr(self, "_workbench_confirm_link_uow_override", None)
+        if override is not None:
+            return override
+        state_store = getattr(self, "_state_store", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
+            return None
+        connection = getattr(state_store, "_connection", None)
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if connection is None or queue_repository is None:
+            return None
+        idempotency_store = getattr(self, "_workbench_confirm_link_idempotency_store", None)
+        if idempotency_store is None:
+            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+            self._workbench_confirm_link_idempotency_store = idempotency_store
+        return WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=self._workbench_uow_repository_factory,
+            read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
+                queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            ),
+            idempotency_store=idempotency_store,
+        )
+
+    @staticmethod
+    def _workbench_uow_repository_factory(transaction: object) -> SimpleNamespace:
+        workbench_repository = PostgresWorkbenchRepository(transaction)
+        return SimpleNamespace(
+            pair_relations=workbench_repository,
+            exception_cases=workbench_repository,
+            row_overrides=workbench_repository,
+            candidate_matches=workbench_repository,
         )
 
     def _workbench_write_response(self, result: WorkbenchWriteResult) -> Response:
@@ -15131,6 +15176,45 @@ class Application:
         self._state_store.save_workbench_pair_relations(
             snapshot,
             changed_case_ids=changed_case_ids,
+        )
+
+    def _persist_workbench_pair_relations_in_transaction(
+        self,
+        *,
+        transaction: object,
+        changed_case_ids: list[str] | None = None,
+    ) -> None:
+        if transaction is None:
+            raise StatePersistenceError("transaction is required for Workbench pair relation persistence.")
+        self._search_service.clear_cache()
+        snapshot = (
+            self._workbench_pair_relation_service.snapshot_case_ids(changed_case_ids)
+            if changed_case_ids is not None
+            else self._workbench_pair_relation_service.snapshot()
+        )
+        PostgresWorkbenchRepository(transaction).save_workbench_pair_relations(
+            snapshot,
+            changed_case_ids={str(case_id) for case_id in list(changed_case_ids or []) if str(case_id).strip()}
+            if changed_case_ids is not None
+            else None,
+        )
+
+    def _consume_workbench_reconciliation_decisions_in_transaction(
+        self,
+        *,
+        transaction: object,
+        row_ids: list[str],
+        relation_id: str,
+    ) -> int:
+        if transaction is None:
+            raise StatePersistenceError("transaction is required for Workbench reconciliation decision consumption.")
+        return int(
+            PostgresReadModelRepository(transaction).consume_workbench_reconciliation_decisions_by_row_ids(
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+                row_ids=row_ids,
+                relation_id=relation_id,
+            )
+            or 0
         )
 
     def _schedule_workbench_pair_relation_persist(

@@ -491,3 +491,27 @@ Remaining boundary gaps:
 - no frontend contract for expected versions.
 
 PF-P026 should be followed by a Merge Gate after user confirmation, because PF-P023 through PF-P026 now form a coherent Workbench stale-write/idempotency foundation slice.
+
+## 18. PF-P035 Confirm Link UoW Boundary Update
+
+PF-P035 has been executed as the first real Workbench write API UoW integration slice. It is currently `implemented` and waiting for user confirmation before `verified`.
+
+Boundary now enforced for `confirm-link`:
+
+- HTTP handlers remain thin and still delegate to `WorkbenchWriteFacade.confirm_link`.
+- `confirm-link` validates the legacy request contract before entering the UoW path.
+- When a PostgreSQL runtime UoW is available, confirm-link no longer schedules pair relation persistence or read-model dirty/outbox writes outside the UoW transaction.
+- Pair relation facts/history persistence is transaction-bound through `PostgresWorkbenchRepository(transaction).save_workbench_pair_relations(...)`.
+- Reconciliation decision consumption is transaction-bound through `PostgresReadModelRepository(transaction).consume_workbench_reconciliation_decisions_by_row_ids(...)`.
+- Dirty scope, outbox and source_version writes are transaction-bound through `RuntimeQueueReadModelRefreshWriter`.
+- The public response shape filters out internal `source_versions` and `outbox_event_ids` to preserve frontend compatibility.
+
+Still outside this boundary:
+
+- PostgreSQL durable idempotency repository and schema migration remain future work.
+- Actor/tenant/auth context is still defaulted and must be upgraded before full production-grade audit semantics.
+- Cancel-link, exception/apply, ignore/unignore, cash special, withdraw and personal advance repayment remain outside UoW.
+
+Next boundary gate:
+
+After user confirmation, run `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`. Do not expand UoW integration to another write API until PF-P035 has passed its MG.
