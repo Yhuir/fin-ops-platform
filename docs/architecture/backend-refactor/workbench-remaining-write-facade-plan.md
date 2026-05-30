@@ -325,6 +325,52 @@ Current blocker：`_execute_derived_data_lifecycle_event` and `_schedule_workben
   - OA-bank exception duplicate/failure。
   - personal advance repayment duplicate/stale/persistence failure。
 
-用户已确认 PF-P015 `verified`。PF-P016 已生成并审查，等待执行。
+用户已确认 PF-P015 `verified`。PF-P016 已执行并进入 `implemented`，等待用户确认是否可标记 `verified`。
 
-PF-P016 仍不应该修复 stale write 或实现 UoW。它的产物应是黑盒 characterization tests 和必要的文档回写。PF-P016 verified 后，才适合决定 PF-P017 是 remaining facade extraction 还是 Workbench Unit of Work Boundary Design。
+PF-P016 未修复 stale write 或实现 UoW。它的产物是黑盒 characterization tests 和必要的文档回写。PF-P016 verified 后，下一步建议是 remaining facade extraction；UoW 仍应等剩余写入口完成行为保持型 facade 边界后再进入。
+
+## 8. PF-P016 Characterization Results
+
+PF-P016 新增 tests 位于 `tests/test_workbench_write_characterization.py`，未修改生产代码。
+
+### 已关闭的测试缺口
+
+| Entry | PF-P016 锁定的当前行为 |
+| --- | --- |
+| `withdraw-link` duplicate submit | 重复 withdraw 对同一组 row_ids 仍返回 `200`，第二次会继续针对已恢复的 active relation 生成 `withdraw_link` history，并重复调度 pair relation / read model persistence。 |
+| `withdraw-link` stale preview submit | preview 后如果同一组 rows 被新 relation 替换，submit 旧 row_ids 会作用在当前 relation 上，并把 preview 时的旧 relation 恢复为 active；当前没有 expected relation/version 检查。 |
+| `withdraw-link` scheduling failure | `_schedule_workbench_read_model_persist` 失败会向外抛出，但 relation 已经撤回并写入 history。 |
+| cash pass-through duplicate submit | 两次 `confirm-cash-pass-through` 均返回 `200`，第二次覆盖 `special_metadata.note` 并追加 `update_special_relation` history，重复调度。 |
+| cash ticket purchase duplicate submit | 两次 `confirm-cash-ticket-purchase` 均返回 `200`，第二次覆盖 ticket/cash metadata 并追加 history，重复调度。 |
+| cancel cash special duplicate submit | 两次 `cancel-cash-special` 均返回 `200`，第二次在已清空 metadata 的 relation 上继续追加 `clear_special_relation` history，重复调度。 |
+| cash special stale/current relation | stale submit 不携带 expected relation/version；当前会更新同 row_ids 的 current active relation。 |
+| cash special scheduling failure | read model scheduling failure 会向外抛出，但 relation `special_metadata` 已经变更。 |
+| `update-bank-exception` duplicate submit | 重复提交均返回 `200`，复用同一个 exception case，并重复调度 read model persistence。 |
+| `update-bank-exception` stale/conflict | 如果 row 已有 active pair relation，返回 `409 active_pair_relation_conflict`，保留 relation，不创建 exception case。 |
+| `update-bank-exception` scheduling failure | read model scheduling failure 会向外抛出，但 exception case 和 row override 已经存在。 |
+| `oa-bank-exception` duplicate submit | OA+bank rows 重复提交均返回 `200`，复用同一个 exception case，并重复调度 read model persistence。 |
+| `oa-bank-exception` stale/conflict | 如果 selected rows 已有 active pair relation，返回 `409 active_pair_relation_conflict`，保留 relation，不创建 exception case。 |
+| `oa-bank-exception` scheduling failure | read model scheduling failure 会向外抛出，但 exception case 和 OA/bank row overrides 已经存在。 |
+| `confirm-personal-advance-repayment` duplicate submit | 第一次 settlement 返回 `200` 并创建 `WEX-000001`/`CASE-WEX-000001`；第二次对同一 rows 返回 `404 workbench_row_not_found`，不创建第二个 case。 |
+| `confirm-personal-advance-repayment` stale/conflict | 参与 row 先被 mark-exception 后，旧视图提交 repayment 返回 `404 workbench_row_not_found`，保留原 exception case，不创建 relation。 |
+| `confirm-personal-advance-repayment` persistence failure | `_save_workbench_exception_cases_snapshot` 失败返回 `400 invalid_personal_advance_repayment_request`，exception case 和 pair relation 内存状态回滚。 |
+| `confirm-personal-advance-repayment` scheduling failure | read model scheduling failure 会向外抛出，但 settlement exception case 和 pair relation 已经创建。 |
+
+### 本轮未新增 worker tests 的理由
+
+本轮没有修改 `tests/test_workbench_dirty_queue_wiring.py`。原因是 PF-P012/PF-P015 已有 worker/runtime boundary 覆盖：
+
+- HTTP process dirty worker opt-in 和 start-once。
+- standalone matching loop `max_iterations` 行为。
+- DB dirty queue claim/complete/fail 与 retry delay。
+- dirty queue empty/claim failure 不回落 drain legacy dirty scopes。
+- write path marks DB dirty queue instead of inline matching。
+- startup stale scan 和 worker CLI options。
+
+PF-P016 的新增风险集中在剩余 HTTP write API 的 duplicate/stale/failure 当前行为，现有 worker tests 足够支撑本轮不新增 worker tests。
+
+### 仍留到后续的风险
+
+- 当前行为仍存在多个非理想语义：重复提交重复调度、stale submit 依赖当前 active relation、read model scheduling failure 发生在 facts 变更之后。
+- PF-P016 只锁定当前行为，不改变事务模型，不引入 optimistic locking，不实现 facts/audit/dirty/outbox 同事务。
+- `oa-bank-exception` invoice row compatibility 已由 `tests/test_workbench_v2_api.py::test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility` 覆盖，本轮未重复复制该测试。

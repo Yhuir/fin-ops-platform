@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P016 - Workbench Remaining Write Characterization Tests` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P016 - Workbench Remaining Write Characterization Tests` (`planned`) |
+| 当前阶段 | `PF-P016 - Workbench Remaining Write Characterization Tests` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P016 - Workbench Remaining Write Characterization Tests` (`implemented`) |
 | 最近 verified prompt | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` |
 | 当前分支 | `codex/workbench-remaining-write-facade-planning` |
-| 最近验证 | PF-P014-MG 已在功能分支和本地 `main` 复验：`compileall`、Workbench write characterization、Workbench v2 API、exception application/case、pair relation、derived lifecycle + platform guards 均通过；`main` 已 push 到 `origin/main`；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `PF-P016 - Workbench Remaining Write Characterization Tests`；不得修复业务语义、抽 facade 或进入 UoW 设计 |
+| 最近验证 | PF-P016 已运行 Workbench write characterization、dirty queue wiring、OA-bank invoice compatibility 精确测试，均通过；未执行 Merge Gate / Traffic Gate / push |
+| 下一条允许任务 | 等待用户确认 PF-P016 是否可标记 `verified`；确认后生成下一条 prompt，不得在确认前进入 facade extraction 或 UoW 设计 |
 
 ## Prompt 执行日志
 
@@ -1871,7 +1871,7 @@ UoW readiness：
 
 ### PF-P016 - Workbench Remaining Write Characterization Tests
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -1900,9 +1900,35 @@ UoW readiness：
 - PF-P016 prompt 明确测试必须锁定当前行为，而不是改成理想行为。
 - PF-P016 prompt 明确执行后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
 
+#### 变更文件
+
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+- `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+
+#### 执行结果
+
+- 新增 Workbench 剩余写入口 characterization tests，覆盖 `withdraw-link`、cash special 三个入口、`update-bank-exception`、`oa-bank-exception`、`confirm-personal-advance-repayment` 的 duplicate-submit、stale/conflict、persistence 或 scheduling failure 当前行为。
+- 未修改 `backend/src/fin_ops_platform/**/*.py` 生产代码。
+- matching dirty worker 本轮未新增测试；PF-P012/PF-P015 已覆盖 HTTP worker opt-in、standalone loop max iteration、DB dirty queue claim/complete/fail、failure retry 和 startup wiring。本轮新增内容集中在剩余 HTTP write API 行为锁定。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`：通过，1 test。
+- 仍需在收尾前运行 `git diff --check` 和 untracked 检查。
+
+#### 残余风险
+
+- PF-P016 只锁定当前行为，不修复 stale write、duplicate submit、副作用重复调度、facts 与 dirty/outbox 非同事务问题。
+- `tests/test_workbench_v2_api.py` 未被修改；已有 invoice compatibility 测试 `test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility` 继续作为该兼容行为的事实源。
+
 #### 下一条 Prompt 上下文
 
-PF-P016 已生成并审查。下一步允许在用户确认后执行 PF-P016。PF-P016 只做 characterization tests，不做行为修复；执行后根据测试结果决定是否继续 `PF-P017 - Workbench Remaining Write Facade Extraction`，或先拆更小的测试补丁。
+PF-P016 已执行但未由用户确认 `verified`。下一步应先由用户确认 PF-P016 是否可标记 `verified`。确认后，建议生成并审查 `PF-P017 - Workbench Remaining Write Facade Extraction`，继续以行为保持方式抽离 `withdraw-link`、cash special、bank exception、OA-bank exception、personal advance repayment；不得在 PF-P017 中引入 UoW 或修复 stale write。
 
 ## 维护规则
 

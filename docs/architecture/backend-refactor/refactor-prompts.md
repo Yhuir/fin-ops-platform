@@ -5137,3 +5137,34 @@ Post-Flight:
 - PF-P016 覆盖 PF-P015 发现的主要测试缺口：withdraw、cash special、update-bank-exception、OA-bank exception、personal advance repayment、matching dirty worker boundary。
 - PF-P016 要求精确测试选择器和状态污染防护，避免引入 flaky tests 或测试产物。
 - PF-P016 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+变更：
+
+- 新增 `tests/test_workbench_write_characterization.py` 中的剩余 Workbench 写入口 characterization tests。
+- 更新 `migration-state-log.md`、`workbench-remaining-write-facade-plan.md`、`workbench-writes-and-matching-plan.md` 记录测试结果和下一步上下文。
+- 未修改 `backend/src/fin_ops_platform/**/*.py` 生产代码。
+- 未修改 `tests/test_workbench_v2_api.py` 或 `tests/test_workbench_dirty_queue_wiring.py`。
+
+已锁定的当前行为：
+
+- `withdraw-link`：重复 submit 会继续返回 `200` 并追加 history；stale preview submit 会作用在当前 relation 并恢复旧 relation；read model scheduling failure 会在 relation 已撤回后抛出。
+- cash special：pass-through、ticket-purchase、cancel 均会在重复提交时返回 `200`、重复追加 history 并重复调度；scheduling failure 会在 metadata 已变更后抛出。
+- `update-bank-exception`：重复提交复用同一 exception case 并重复调度；active relation conflict 返回 `409`；scheduling failure 会在 case/override 已存在后抛出。
+- `oa-bank-exception`：OA+bank 重复提交复用同一 exception case 并重复调度；active relation conflict 返回 `409`；scheduling failure 会在 case/override 已存在后抛出。
+- `confirm-personal-advance-repayment`：重复提交当前第二次返回 `404 workbench_row_not_found`；stale after exception 返回 `404` 并保留 exception；persistence failure 会回滚 case/relation；scheduling failure 会在 settlement case/relation 已创建后抛出。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`：通过，1 test。
+
+残余风险：
+
+- PF-P016 只锁定当前行为，不修复 stale write、duplicate submit、重复调度、facts 与 dirty/outbox 非同事务等问题。
+- PF-P016 未执行 Merge Gate、Traffic Gate 或 push。
+- PF-P016 仍需用户确认后才能标记 `verified`。
