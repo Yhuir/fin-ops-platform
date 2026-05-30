@@ -4991,7 +4991,7 @@ Post-Flight:
 
 ## PF-P016 - Workbench Remaining Write Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -5140,7 +5140,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`
+状态：`verified`
 
 变更：
 
@@ -5167,4 +5167,177 @@ Post-Flight:
 
 - PF-P016 只锁定当前行为，不修复 stale write、duplicate submit、重复调度、facts 与 dirty/outbox 非同事务等问题。
 - PF-P016 未执行 Merge Gate、Traffic Gate 或 push。
-- PF-P016 仍需用户确认后才能标记 `verified`。
+- 用户已确认 PF-P016 `verified`；该确认只代表 characterization tests 和文档回写通过，不代表剩余写路径已完成 facade extraction 或目标语义修复。
+
+## PF-P017 - Workbench Remaining Write Facade Extraction
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P017 - Workbench Remaining Write Facade Extraction。
+
+Role: 你是一位精通 Python 遗留系统重构、Clean Architecture、行为保持型 facade extraction 和事务一致性风险控制的后端架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P016 已 verified，剩余 Workbench 写入口的 duplicate-submit、stale/conflict、persistence failure、scheduling failure 当前行为已由 characterization tests 锁定。
+- PF-P017 的目标是继续绞杀 `server.py` 中剩余 Workbench 写入口的非 HTTP 编排，把它们迁入 `WorkbenchWriteFacade`。
+- 本轮是行为保持型抽离，不是语义修复。所有 PF-P012 / PF-P016 锁定的非理想行为必须保持不变。
+
+Pre-Flight:
+1. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+2. 必须读取当前实现和测试：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_v2_api.py`
+   - `tests/test_workbench_dirty_queue_wiring.py`
+3. 必须确认：
+   - 最近 verified prompt 是 `PF-P016 - Workbench Remaining Write Characterization Tests`。
+   - 当前 active prompt 是 `PF-P017 - Workbench Remaining Write Facade Extraction` planned。
+   - 当前分支不是 `main`。
+   - 当前分支仍是本模块任务分支，且未混入其它业务改动。
+4. 必须先记录当前 diff 范围：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - 若存在非本轮文件变更，必须停止并说明。
+5. 必须先运行当前行为锁定测试，确认抽离前基线为绿：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+
+Goal:
+以行为保持方式扩展 `WorkbenchWriteFacade`，把剩余 Workbench 写入口的非 HTTP 编排从 `Application` / `server.py` 移入 facade。`server.py` 只保留 HTTP body parsing、freshness guard、request_id 透传、route-level timing wrapper 和 `WorkbenchWriteResult` 到 `Response` 的包装。
+
+Required Extraction Scope:
+1. `withdraw-link/preview`
+   - 在 `WorkbenchWriteFacade` 中新增 preview 方法。
+   - 迁移 `_preview_withdraw_link` 相关非 HTTP 编排，但保持当前返回 payload 完全兼容。
+   - 保留 `server.py` 的 JSON parse 和 HTTP error mapping。
+2. `withdraw-link`
+   - 在 `WorkbenchWriteFacade` 中新增 submit 方法。
+   - 迁移 `_handle_live_workbench_withdraw_link` 的非 HTTP 编排。
+   - 必须保持 PF-P016 锁定的 duplicate submit、stale preview submit、scheduling failure 行为。
+3. Cash special
+   - 在 `WorkbenchWriteFacade` 中新增：
+     - `confirm_cash_pass_through`
+     - `confirm_cash_ticket_purchase`
+     - `cancel_cash_special`
+   - 迁移 special metadata update / clear 编排和 `_after_cash_special_relation_update` 的非 HTTP 部分。
+   - 必须保持 PF-P016 锁定的 repeated update/clear history、current relation update、scheduling failure 行为。
+4. `update-bank-exception`
+   - 在 `WorkbenchWriteFacade` 中新增 `update_bank_exception`。
+   - 复用或扩展 facade 内已有 `_legacy_exception_result` / exception apply plumbing。
+   - 必须保持 PF-P016 锁定的 duplicate submit、active relation conflict、scheduling failure after case/override 行为。
+5. `oa-bank-exception`
+   - 在 `WorkbenchWriteFacade` 中新增 `oa_bank_exception`。
+   - 必须覆盖无 invoice legacy path 和 invoice compatibility path。
+   - 保持 `tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility` 当前行为。
+   - 必须保持 PF-P016 锁定的 duplicate submit、active relation conflict、scheduling failure after case/override 行为。
+6. `confirm-personal-advance-repayment`
+   - 在 `WorkbenchWriteFacade` 中新增 `confirm_personal_advance_repayment`。
+   - 迁移 settlement exception case + pair relation 编排。
+   - 必须保持 PF-P016 锁定的 duplicate second-submit 404、stale after exception 404、persistence rollback、scheduling failure after settlement facts 行为。
+
+Facade Boundary Rules:
+- `WorkbenchWriteFacade` 只能接收细粒度依赖：
+  - service instances already used by the facade;
+  - pure helper callbacks;
+  - persistence/scheduling callbacks.
+- 严禁向 facade 注入 `Application`、`RuntimeRepositories`、`ApplicationStateStore`、`state_store`、HTTP request/response object、Redis/RabbitMQ/OA Mongo/MySQL client。
+- Facade 不得 import `server.py`。
+- Facade 不得直接 import Redis、RabbitMQ、MongoOAAdapter、pymysql 或 PostgresConnection。
+- Handler 层继续负责：
+  - `_load_json_body`
+  - `_workbench_write_freshness_guard`
+  - request_id 透传
+  - HTTP route mapping
+  - `self._workbench_write_response(...)`
+- 不要在 `tests/test_workbench_write_characterization.py` 中 `mock.patch` 掉 facade；现有 tests 必须继续覆盖 HTTP Handler -> Facade -> existing services/callbacks 的真实链路。
+
+Forbidden Scope:
+- 不实现或设计 Unit of Work、repository、transaction manager、outbox、dirty scope 结构调整。
+- 不修复 stale write、duplicate submit、blind write、rollback 或 scheduling failure 当前语义。
+- 不改变 response payload shape、status code、error code、history operation type、case id generation、read model scheduling order 或 derived lifecycle event type。
+- 不迁移 `/matching/run`。
+- 不迁移 matching dirty worker、RuntimeWorker loop、worker topology 或 deployment wiring。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不访问生产环境，不执行 Merge Gate、Traffic Gate、push 或 deploy。
+- 不使用 `git add .` 或 `git add -A`。
+
+Expected Changed Files:
+- 允许修改：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `tests/test_workbench_write_characterization.py`（仅当需要增加 facade boundary/static assertions 或修正测试命名；不得弱化断言）
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 如需修改其它文件，必须先停止并说明原因。
+
+Required Implementation Work:
+1. 扩展 `WorkbenchWriteFacade.__init__` 的细粒度依赖列表，只添加真正需要的 helper/callback，不引入上帝对象。
+2. 在 `Application._workbench_write_facade()` 的构造处注入新增 helper/callback。
+3. 将目标 entrypoints 的非 HTTP 编排迁入 facade。
+4. 让 `server.py` 对目标 endpoints 变薄：
+   - parse body;
+   - freshness guard;
+   - call facade;
+   - wrap response.
+5. 删除或降级 `server.py` 中已迁移且不再被调用的 private helper，前提是测试确认无调用方。
+6. 保持 `_workbench_write_response` 和 `WorkbenchWriteResult` 作为统一输出边界。
+7. 保留 observability/timing 语义：
+   - route-level timing wrapper 仍在 handler/App shell；
+   - facade 内只使用已注入的 `emit_action_timing` callback，且不得新增外部 metrics dependency。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Required Documentation Work:
+- 更新 `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`：
+  - 增加 PF-P017 Extraction Results。
+  - 标记哪些 `server.py` entrypoints 已迁入 facade，哪些仍保留。
+- 更新 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`：
+  - 补充 PF-P017 结果摘要。
+  - 更新 Next Slice Recommendation。
+- 更新 `docs/architecture/backend-refactor/migration-state-log.md`：
+  - 将 PF-P017 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 写明变更文件、测试命令、失败或残余风险。
+- 更新 `docs/architecture/backend-refactor/refactor-prompts.md` 的 PF-P017 执行结果。
+
+Post-Flight:
+- Do not merge to main.
+- Do not push.
+- Do not execute Merge Gate.
+- Do not mark PF-P017 as verified without user confirmation.
+- 最终回复必须说明：
+  - 哪些 entrypoints 已迁入 facade。
+  - 哪些行为保持测试已通过。
+  - 哪些风险仍未关闭。
+  - 下一条 prompt 建议是什么。
+```
+
+### 审查结论
+
+- PF-P017 的边界正确：它是行为保持型 facade extraction，不是 UoW 或语义修复。
+- PF-P017 覆盖 PF-P016 已锁定的剩余写入口：withdraw、cash special、update-bank-exception、OA-bank exception、personal advance repayment。
+- PF-P017 明确排除 `/matching/run`、matching dirty worker、RuntimeWorker loop 和 worker topology，避免把 runtime 边界混入 HTTP write facade。
+- PF-P017 要求抽离前后都运行 PF-P016 characterization tests，且禁止在测试中 mock 掉 facade，保证真实 HTTP Handler -> Facade -> service/callback 链路仍被覆盖。
+- PF-P017 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。

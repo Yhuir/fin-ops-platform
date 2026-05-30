@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P016 - Workbench Remaining Write Characterization Tests` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P016 - Workbench Remaining Write Characterization Tests` (`implemented`) |
-| 最近 verified prompt | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` |
+| 当前阶段 | `PF-P017 - Workbench Remaining Write Facade Extraction` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P017 - Workbench Remaining Write Facade Extraction` (`planned`) |
+| 最近 verified prompt | `PF-P016 - Workbench Remaining Write Characterization Tests` |
 | 当前分支 | `codex/workbench-remaining-write-facade-planning` |
 | 最近验证 | PF-P016 已运行 Workbench write characterization、dirty queue wiring、OA-bank invoice compatibility 精确测试，均通过；未执行 Merge Gate / Traffic Gate / push |
-| 下一条允许任务 | 等待用户确认 PF-P016 是否可标记 `verified`；确认后生成下一条 prompt，不得在确认前进入 facade extraction 或 UoW 设计 |
+| 下一条允许任务 | 执行 `PF-P017 - Workbench Remaining Write Facade Extraction`；不得引入 UoW、修复 stale write 或修改事务模型 |
 
 ## Prompt 执行日志
 
@@ -1871,7 +1871,7 @@ UoW readiness：
 
 ### PF-P016 - Workbench Remaining Write Characterization Tests
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -1928,7 +1928,45 @@ UoW readiness：
 
 #### 下一条 Prompt 上下文
 
-PF-P016 已执行但未由用户确认 `verified`。下一步应先由用户确认 PF-P016 是否可标记 `verified`。确认后，建议生成并审查 `PF-P017 - Workbench Remaining Write Facade Extraction`，继续以行为保持方式抽离 `withdraw-link`、cash special、bank exception、OA-bank exception、personal advance repayment；不得在 PF-P017 中引入 UoW 或修复 stale write。
+用户已确认 PF-P016 `verified`。PF-P017 已生成并审查，下一步允许执行 PF-P017。PF-P017 应继续以行为保持方式抽离 `withdraw-link`、cash special、bank exception、OA-bank exception、personal advance repayment；不得在 PF-P017 中引入 UoW、修复 stale write 或改变事务/调度语义。
+
+### PF-P017 - Workbench Remaining Write Facade Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 只做行为保持型 facade extraction。
+- 将以下剩余 Workbench 写入口的非 HTTP 编排从 `Application` / `server.py` 迁入 `WorkbenchWriteFacade`：
+  - `withdraw-link/preview`
+  - `withdraw-link`
+  - `confirm-cash-pass-through`
+  - `confirm-cash-ticket-purchase`
+  - `cancel-cash-special`
+  - `update-bank-exception`
+  - `oa-bank-exception`，包含 invoice compatibility path
+  - `confirm-personal-advance-repayment`
+- 保留 `server.py` 的 HTTP body parsing、freshness guard、request_id、route timing wrapper 和 response wrapping。
+- 继续使用细粒度依赖注入，禁止向 facade 注入 `Application`、`RuntimeRepositories`、`ApplicationStateStore`、`state_store` 或外部客户端。
+
+#### 禁止范围
+
+- 不实现或设计 Unit of Work。
+- 不修复 stale write、duplicate submit、blind write、rollback 或 scheduling failure 当前语义。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不迁移 `/matching/run`、matching dirty worker、runtime worker loop 或 worker topology。
+- 不访问生产环境，不执行 Merge Gate、Traffic Gate、push 或 deploy。
+
+#### 验收标准
+
+- PF-P017 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P017 prompt 明确要求先跑 PF-P016/PF-P012 行为锁定测试，再做抽离。
+- PF-P017 prompt 明确禁止在 characterization tests 中 mock 掉 facade。
+- PF-P017 prompt 明确执行后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P017 已生成并审查。下一步允许在用户确认后执行 PF-P017。PF-P017 执行后若测试全绿并确认行为保持，再决定是否继续生成 PF-P017-MG 覆盖 PF-P015/PF-P016/PF-P017 的完整 diff，或先补极小范围修正 prompt。
 
 ## 维护规则
 

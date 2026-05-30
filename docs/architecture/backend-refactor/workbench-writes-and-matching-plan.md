@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已执行并进入 `implemented`，等待用户确认。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已生成并审查，等待执行。
 
 ## 1. Scope Boundary
 
@@ -475,7 +475,9 @@ Required properties:
 
 ## 12. Next Slice Recommendation
 
-PF-P015 已由用户确认 `verified`。PF-P016 已执行并进入 `implemented`，新增测试锁定剩余写入口当前行为：
+PF-P015 与 PF-P016 已由用户确认 `verified`。PF-P017 已生成并审查，等待执行。
+
+PF-P016 新增测试已锁定剩余写入口当前行为：
 
 - `withdraw-link` duplicate submit、stale preview submit、read model scheduling failure。
 - cash pass-through、cash ticket purchase、cancel cash special 的 duplicate submit、current relation update、scheduling failure。
@@ -485,7 +487,7 @@ PF-P015 已由用户确认 `verified`。PF-P016 已执行并进入 `implemented`
 
 PF-P016 未新增 worker tests：现有 `test_workbench_dirty_queue_wiring.py` 与 `test_workbench_write_characterization.py` 已覆盖本轮需要的 dirty worker start/loop/claim/complete/fail 基线，本轮风险集中在 HTTP write API。
 
-下一条建议 prompt：
+下一条允许执行的 prompt：
 
 `PF-P017 - Workbench Remaining Write Facade Extraction`
 
@@ -495,3 +497,5 @@ PF-P016 未新增 worker tests：现有 `test_workbench_dirty_queue_wiring.py` �
 - PF-P017 仍应是行为保持型 facade extraction，不引入 UoW，不修复 stale write，不改变 duplicate-submit 或 scheduling failure 语义。
 - UoW 是必要方向，但应在剩余写入口完成 facade 边界后再设计，否则会同时改变边界和语义，风险过高。
 - `/matching/run` 继续保持 legacy/review，不进入 Workbench write facade；matching dirty worker 继续属于 worker/runtime boundary。
+
+PF-P017 执行后，如果 PF-P012/PF-P016 行为锁定测试和平台边界 guard 仍全部通过，下一步再决定是否生成 `PF-P017-MG`，统一覆盖 PF-P015/PF-P016/PF-P017 的完整 diff；若发现极小边界缺口，应先生成修正 prompt，不直接进入 UoW。

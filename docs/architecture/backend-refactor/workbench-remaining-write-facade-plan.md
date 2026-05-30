@@ -325,9 +325,9 @@ Current blocker：`_execute_derived_data_lifecycle_event` and `_schedule_workben
   - OA-bank exception duplicate/failure。
   - personal advance repayment duplicate/stale/persistence failure。
 
-用户已确认 PF-P015 `verified`。PF-P016 已执行并进入 `implemented`，等待用户确认是否可标记 `verified`。
+用户已确认 PF-P015 `verified`。用户已确认 PF-P016 `verified`。PF-P017 已生成并审查，等待执行。
 
-PF-P016 未修复 stale write 或实现 UoW。它的产物是黑盒 characterization tests 和必要的文档回写。PF-P016 verified 后，下一步建议是 remaining facade extraction；UoW 仍应等剩余写入口完成行为保持型 facade 边界后再进入。
+PF-P016 未修复 stale write 或实现 UoW。它的产物是黑盒 characterization tests 和必要的文档回写。PF-P017 应执行 remaining facade extraction；UoW 仍应等剩余写入口完成行为保持型 facade 边界后再进入。
 
 ## 8. PF-P016 Characterization Results
 
@@ -374,3 +374,36 @@ PF-P016 的新增风险集中在剩余 HTTP write API 的 duplicate/stale/failur
 - 当前行为仍存在多个非理想语义：重复提交重复调度、stale submit 依赖当前 active relation、read model scheduling failure 发生在 facts 变更之后。
 - PF-P016 只锁定当前行为，不改变事务模型，不引入 optimistic locking，不实现 facts/audit/dirty/outbox 同事务。
 - `oa-bank-exception` invoice row compatibility 已由 `tests/test_workbench_v2_api.py::test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility` 覆盖，本轮未重复复制该测试。
+
+## 9. PF-P017 Planned Facade Extraction Boundary
+
+PF-P017 已生成并审查，目标是把 PF-P016 锁定过的剩余 HTTP 写入口非 HTTP 编排迁入 `WorkbenchWriteFacade`。
+
+### 必须迁入 facade 的 entrypoints
+
+- `withdraw-link/preview`
+- `withdraw-link`
+- `confirm-cash-pass-through`
+- `confirm-cash-ticket-purchase`
+- `cancel-cash-special`
+- `update-bank-exception`
+- `oa-bank-exception`，包含 invoice compatibility path
+- `confirm-personal-advance-repayment`
+
+### 必须保留在 `server.py` 的职责
+
+- HTTP route dispatch。
+- `_load_json_body`。
+- `_workbench_write_freshness_guard`。
+- `request_id` 透传。
+- route-level timing / response wrapping。
+- `_workbench_write_response(...)`。
+
+### PF-P017 不允许处理的事项
+
+- `/matching/run` legacy endpoint。
+- matching dirty worker / RuntimeWorker loop / worker topology。
+- UoW、transaction manager、outbox、dirty scope 结构调整。
+- stale write、duplicate submit、rollback、scheduling failure 语义修复。
+
+PF-P017 执行后，如果 PF-P016/PF-P012 行为锁定测试仍全部通过，下一步才考虑是否进入 PF-P017-MG 或先补极小修正 prompt。
