@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` 已执行并合入本地 `main`，等待用户确认 verified |
-| 当前 active prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P017 - Workbench Remaining Write Facade Extraction` |
+| 当前阶段 | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` 已由用户确认 verified，准备推送 `origin/main` |
+| 当前 active prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P017-MG 已在功能分支和本地 `main` 上运行完整门禁验证，均通过；已 merge 到本地 `main`；未 push；未执行 Traffic Gate / 部署 / 生产访问 |
-| 下一条允许任务 | 等待用户确认 `PF-P017-MG` verified；确认后才允许按用户指令 `git push origin main`；push 后必须从最新 `main` 新建分支再生成下一条 prompt |
+| 最近验证 | PF-P017-MG 已在功能分支和本地 `main` 上运行完整门禁验证，均通过；已 merge 到本地 `main`；用户已确认 verified；未执行 Traffic Gate / 部署 / 生产访问 |
+| 下一条允许任务 | 执行用户已确认的 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -2015,7 +2015,7 @@ UoW readiness：
 
 ### PF-P017-MG - Workbench Remaining Write Facade Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2053,8 +2053,9 @@ UoW readiness：
 - 合入范围：PF-P015/PF-P016/PF-P017 的完整 diff，包括 Workbench remaining write facade、对应 characterization tests、remaining write planning 文档与状态机/prompt 记录。
 - Diff scope 检查：只包含 PF-P017-MG allowed files；未发现前端、SQL migration、网关、CI/CD、worker topology、生产配置或 `backend-go` 变更。
 - Untracked 检查：`git ls-files --others --exclude-standard` 无输出；未使用 `git add .` 或 `git add -A`。
-- Push：未执行。
+- Push：用户已确认执行 `git push origin main`。
 - Traffic Gate：未执行；未部署、未切流、未访问生产服务器。
+- User confirmation：2026-05-30 用户确认 `PF-P017-MG verified`。
 
 #### Main 复验
 
@@ -2072,7 +2073,7 @@ UoW readiness：
 
 #### 下一条 Prompt 上下文
 
-PF-P017-MG 已执行并合入本地 `main`，但尚未由用户确认 `verified`，也尚未 push。下一步只允许用户确认 PF-P017-MG verified；确认后可按用户明确指令执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。建议方向仍是 UoW 或 stale write 相关 prompt，但不得在 push 前生成或执行。
+PF-P017-MG 已由用户确认 `verified`，并允许执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成并审查下一条 prompt。建议下一条 prompt：`PF-P018 - Workbench Write Unit of Work Boundary Design`，只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
 
 ## 维护规则
 

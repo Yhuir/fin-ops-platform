@@ -5567,7 +5567,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`
+状态：`verified`
 
 - 执行分支：`codex/workbench-remaining-write-facade-planning`
 - 合入目标：本地 `main`
@@ -5578,8 +5578,9 @@ Post-Flight:
 - Untracked gate：Pass。`git ls-files --others --exclude-standard` 无输出。
 - Feature branch verification：Pass。
 - Main verification：Pass。
-- Push：未执行。
+- Push：用户已确认执行 `git push origin main`。
 - Traffic Gate：未执行；未部署、未切流、未修改生产配置、未访问生产服务器。
+- User confirmation：2026-05-30 用户确认 PF-P017-MG `verified`。
 
 Main 复验命令：
 
@@ -5595,4 +5596,4 @@ Main 复验命令：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`
 
-下一步：等待用户确认 PF-P017-MG `verified`。确认后才允许按用户明确指令 `git push origin main`；push 完成后必须从最新 `main` 新建分支，再生成下一条 prompt。
+下一步：执行用户已确认的 `git push origin main`。push 完成后必须从最新 `main` 新建分支，再生成并审查下一条 prompt。建议下一条 prompt：`PF-P018 - Workbench Write Unit of Work Boundary Design`，只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
