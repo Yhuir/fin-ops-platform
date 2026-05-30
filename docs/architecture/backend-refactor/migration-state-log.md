@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P023 - Workbench Stale Write Contract and Compatibility Tests` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P023 - Workbench Stale Write Contract and Compatibility Tests` (`implemented`) |
-| 最近 verified prompt | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` |
+| 当前阶段 | `PF-P024 - Workbench Durable Idempotency Store Contract` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P024 - Workbench Durable Idempotency Store Contract` (`planned`) |
+| 最近 verified prompt | `PF-P023 - Workbench Stale Write Contract and Compatibility Tests` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P023 已实现并通过目标测试、safety net 和默认 discover 兼容性检查；尚未由用户确认 `verified` |
-| 下一条允许任务 | 等待用户确认 PF-P023 是否可标记为 `verified`。确认前不得生成或执行 PF-P024；确认后建议生成并审查 `PF-P024 - Workbench Durable Idempotency Store Contract` |
+| 最近验证 | PF-P023 已由用户确认 `verified`；已锁定 stale write / optimistic locking contract 和 preview/conflict response 缺口 |
+| 下一条允许任务 | 只允许执行 `PF-P024`。PF-P024 只能处理 durable idempotency store contract、schema/repository readiness、request fingerprint 和 replay/conflict tests；不得迁移真实 Workbench 写路径 |
 
 ## Prompt 执行日志
 
@@ -2494,7 +2494,7 @@ PF-P022 已由用户确认 `verified`。PF-P022 的主要产物是 `workbench-uo
 
 ### PF-P023 - Workbench Stale Write Contract and Compatibility Tests
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2532,7 +2532,48 @@ PF-P022 已由用户确认 `verified`。PF-P022 的主要产物是 `workbench-uo
 
 #### 下一条 Prompt 上下文
 
-PF-P023 已实现，等待用户确认后才能标记 `verified`。确认后建议生成并审查 `PF-P024 - Workbench Durable Idempotency Store Contract`，继续处理 3 个 durable idempotency `expectedFailure` 目标测试和 schema/repository readiness；仍不得直接迁移真实 Workbench 写路径。
+PF-P023 已由用户确认 `verified`。下一步允许执行已生成并审查的 `PF-P024 - Workbench Durable Idempotency Store Contract`。PF-P024 继续处理 3 个 durable idempotency `expectedFailure` 目标测试和 schema/repository readiness；仍不得直接迁移真实 Workbench 写路径。
+
+### PF-P024 - Workbench Durable Idempotency Store Contract
+
+状态：`planned`
+
+#### 范围
+
+- 只做 durable idempotency store 的测试契约、schema/readiness 设计和文档回写。
+- 覆盖 3 个 durable idempotency target tests：
+  - `confirm_link` same key/fingerprint replay，不重复 history/outbox；
+  - `exception_apply` same key/fingerprint replay，不重复 case/outbox；
+  - `cash_special` same key/fingerprint replay，不重复 relation history。
+- 覆盖 idempotency record 目标字段、request fingerprint、tenant/actor/key 隔离、committed replay、fingerprint mismatch conflict、in-progress/reserved 语义。
+- 必须保持默认 CI 绿色；尚未实现的目标语义必须使用 `unittest.expectedFailure`，不得使用 skip 隐藏。
+
+#### 禁止范围
+
+- 不修改生产代码。
+- 不新增或修改 SQL migration。
+- 不实现 durable idempotency store。
+- 不实现 replay 逻辑。
+- 不迁移 `confirm_link`、`exception_apply`、cash special 或任何真实 Workbench 写 API 到 UoW。
+- 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已写入完整 PF-P024 prompt。
+- PF-P024 prompt 明确读取 PF-P023/PF-P022 产物和 UoW contract tests。
+- PF-P024 prompt 明确 expectedFailure 策略、default CI 绿色要求和 no-production-code 边界。
+- PF-P024 prompt 明确不得执行真实写路径迁移。
+
+#### 审查结论
+
+- PF-P024 是 PF-P023 后的正确下一步：stale write contract 已锁定，下一步应先把 durable idempotency 的 record/replay/fingerprint/conflict 契约固定为机械测试门禁。
+- PF-P024 不应写 SQL migration 或实现 store；真实 store 实现应进入后续 prompt。
+- PF-P024 不应把任何 Workbench 写 API 接入 UoW；真实迁移必须等待 stale write 与 durable idempotency contracts 都稳定。
+
+#### 下一条 Prompt 上下文
+
+下一步只允许执行 PF-P024。执行完成后，必须回写本文档和相关架构文档，将 PF-P024 记录为 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
 
 ## 维护规则
 
