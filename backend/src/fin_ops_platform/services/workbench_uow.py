@@ -40,7 +40,19 @@ class WorkbenchWriteUnitOfWork:
         command: Any,
         handler: Callable[[WorkbenchWriteUnitOfWorkContext], dict[str, Any]],
     ) -> dict[str, Any]:
+        idempotency = _idempotency_request_for(command)
+        if idempotency is not None:
+            existing = _idempotency_get(self._idempotency_store, idempotency)
+            if existing is not None:
+                _raise_on_fingerprint_conflict(existing, idempotency)
+                replayed = _replay_committed_idempotency_response(existing)
+                if replayed is not None:
+                    return replayed
+
         with self._connection.transaction() as transaction:
+            if idempotency is not None:
+                _idempotency_reserve(self._idempotency_store, idempotency)
+
             repositories = self._repository_factory(transaction)
             context = WorkbenchWriteUnitOfWorkContext(
                 transaction=transaction,
@@ -69,6 +81,14 @@ class WorkbenchWriteUnitOfWork:
 
             result["source_versions"] = source_versions
             result["outbox_event_ids"] = outbox_event_ids
+            if idempotency is not None:
+                _idempotency_commit(
+                    self._idempotency_store,
+                    idempotency,
+                    result,
+                    source_versions=source_versions,
+                    outbox_event_ids=outbox_event_ids,
+                )
             return result
 
 
@@ -89,3 +109,171 @@ def _event_value(event: Any, name: str) -> Any:
     if isinstance(event, dict):
         return event[name]
     return getattr(event, name)
+
+
+@dataclass(frozen=True)
+class _IdempotencyRequest:
+    tenant_id: str
+    actor_id: str
+    action_name: str
+    idempotency_key: str
+    request_fingerprint: str
+    request_payload: dict[str, Any]
+
+
+def _idempotency_request_for(command: Any) -> _IdempotencyRequest | None:
+    idempotency_key = str(getattr(command, "idempotency_key", "") or "").strip()
+    if not idempotency_key:
+        return None
+
+    tenant_id = str(getattr(command, "tenant_id", "") or "default")
+    actor_id = str(getattr(command, "actor_id", "") or "system")
+    action_name = str(getattr(command, "action_name", "") or "")
+    request_payload = getattr(command, "payload", None)
+    if not isinstance(request_payload, dict):
+        request_payload = {}
+    request_fingerprint = str(getattr(command, "request_fingerprint", "") or "").strip()
+    if not request_fingerprint:
+        request_fingerprint = workbench_request_fingerprint(
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action_name=action_name,
+            payload=request_payload,
+        )
+    return _IdempotencyRequest(
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        action_name=action_name,
+        idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint,
+        request_payload=dict(request_payload),
+    )
+
+
+def _idempotency_get(store: Any, request: _IdempotencyRequest) -> Any:
+    get_committed_or_reserved = getattr(store, "get_committed_or_reserved", None)
+    if callable(get_committed_or_reserved):
+        return get_committed_or_reserved(request.tenant_id, request.actor_id, request.idempotency_key)
+
+    get = getattr(store, "get", None)
+    if not callable(get):
+        return None
+    try:
+        return get(
+            request.idempotency_key,
+            tenant_id=request.tenant_id,
+            actor_id=request.actor_id,
+            action_name=request.action_name,
+        )
+    except TypeError:
+        return get(request.idempotency_key)
+
+
+def _idempotency_reserve(store: Any, request: _IdempotencyRequest) -> None:
+    reserve = getattr(store, "reserve", None)
+    if not callable(reserve):
+        return
+    try:
+        reserve(
+            tenant_id=request.tenant_id,
+            actor_id=request.actor_id,
+            action_name=request.action_name,
+            idempotency_key=request.idempotency_key,
+            request_fingerprint=request.request_fingerprint,
+            request_payload=request.request_payload,
+        )
+        return
+    except TypeError:
+        pass
+    try:
+        reserve(
+            request.idempotency_key,
+            tenant_id=request.tenant_id,
+            actor_id=request.actor_id,
+            action_name=request.action_name,
+            request_fingerprint=request.request_fingerprint,
+            request_payload=request.request_payload,
+        )
+    except TypeError:
+        reserve(request.idempotency_key)
+
+
+def _idempotency_commit(
+    store: Any,
+    request: _IdempotencyRequest,
+    result: dict[str, Any],
+    *,
+    source_versions: dict[str, Any],
+    outbox_event_ids: list[Any],
+) -> None:
+    commit = getattr(store, "commit", None)
+    if not callable(commit):
+        return
+    try:
+        commit(
+            tenant_id=request.tenant_id,
+            actor_id=request.actor_id,
+            action_name=request.action_name,
+            idempotency_key=request.idempotency_key,
+            request_fingerprint=request.request_fingerprint,
+            response_payload=dict(result),
+            source_versions=dict(source_versions),
+            outbox_event_ids=list(outbox_event_ids),
+        )
+        return
+    except TypeError:
+        pass
+    try:
+        commit(
+            request.idempotency_key,
+            dict(result),
+            tenant_id=request.tenant_id,
+            actor_id=request.actor_id,
+            action_name=request.action_name,
+            request_fingerprint=request.request_fingerprint,
+            source_versions=dict(source_versions),
+            outbox_event_ids=list(outbox_event_ids),
+        )
+    except TypeError:
+        commit(request.idempotency_key, dict(result))
+
+
+def _raise_on_fingerprint_conflict(existing: Any, request: _IdempotencyRequest) -> None:
+    existing_fingerprint = _record_value(existing, "request_fingerprint")
+    if existing_fingerprint is None or str(existing_fingerprint) == request.request_fingerprint:
+        return
+    raise WorkbenchIdempotencyKeyConflict(
+        idempotency_key=request.idempotency_key,
+        existing_fingerprint=str(existing_fingerprint),
+        incoming_fingerprint=request.request_fingerprint,
+        action_name=request.action_name,
+    )
+
+
+def _replay_committed_idempotency_response(existing: Any) -> dict[str, Any] | None:
+    status = _record_value(existing, "status")
+    if status is not None and status != "committed":
+        return None
+
+    response_payload = _record_value(existing, "response_payload")
+    if response_payload is None and isinstance(existing, dict) and status is None:
+        response_payload = existing
+    if not isinstance(response_payload, dict):
+        return None
+
+    result = dict(response_payload)
+    source_versions = _record_value(existing, "source_versions")
+    outbox_event_ids = _record_value(existing, "outbox_event_ids")
+    if source_versions is not None:
+        result["source_versions"] = dict(source_versions)
+    if outbox_event_ids is not None:
+        result["outbox_event_ids"] = list(outbox_event_ids)
+    return result
+
+
+def _record_value(record: Any, name: str) -> Any:
+    if isinstance(record, WorkbenchIdempotencyRecord):
+        return getattr(record, name)
+    if isinstance(record, dict):
+        return record.get(name)
+    return getattr(record, name, None)

@@ -468,3 +468,26 @@ The next safe implementation step is UoW idempotency integration against fake/in
 PF-P025 has been confirmed `verified`. PF-P026 is now planned as `Workbench UoW Idempotency Integration Skeleton`.
 
 PF-P026 must only wire the idempotency primitive into `WorkbenchWriteUnitOfWork.run()` under fake/in-memory repository contracts. It must not migrate real Workbench write APIs, introduce SQL migrations, or add a real PostgreSQL idempotency repository.
+
+## 17. PF-P026 UoW Idempotency Skeleton Boundary Update
+
+PF-P026 has been executed as a UoW skeleton-only slice. It does not change real Workbench HTTP write behavior.
+
+The UoW boundary now includes fake/in-memory idempotency semantics:
+
+- pre-transaction idempotency lookup for commands with `idempotency_key`;
+- committed same-fingerprint replay without handler execution;
+- same-key different-fingerprint conflict without handler execution;
+- transaction-scoped reserve before handler execution;
+- commit after facts handler plus dirty/outbox/source_version writes.
+
+This strengthens the target UoW boundary but does not make idempotency durable across processes yet. A production-grade rollout still requires a future PostgreSQL repository and SQL migration before real Workbench write APIs can rely on replay after process restart.
+
+Remaining boundary gaps:
+
+- no real PostgreSQL idempotency table;
+- no real Workbench write API migrated into UoW;
+- no stale write / optimistic locking checks;
+- no frontend contract for expected versions.
+
+PF-P026 should be followed by a Merge Gate after user confirmation, because PF-P023 through PF-P026 now form a coherent Workbench stale-write/idempotency foundation slice.

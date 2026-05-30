@@ -187,7 +187,6 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertTrue(repository.has_fingerprint_conflict(committed.unique_identity, "fp-2"))
         self.assertNotIn("SECRET", json.dumps(committed.to_storage_payload(), sort_keys=True))
 
-    @unittest.expectedFailure
     def test_uow_replays_committed_same_fingerprint_without_handler_or_outbox(self) -> None:
         stored_response = {
             "status": "committed",
@@ -224,7 +223,41 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertEqual(result["source_versions"], {"2026-05": 11})
         self.assertEqual(result["outbox_event_ids"], ["event-11"])
 
-    @unittest.expectedFailure
+    def test_uow_rejects_same_key_with_different_fingerprint_without_handler_or_outbox(self) -> None:
+        stored_response = {
+            "status": "committed",
+            "request_fingerprint": "fp-confirm-old",
+            "response_payload": {"case_id": "CASE-IDEM"},
+            "source_versions": {"2026-05": 10},
+            "outbox_event_ids": ["event-10"],
+        }
+        idempotency = _OperationRecordingIdempotencyStore(committed={"confirm:idem-conflict": stored_response})
+        writer = _RecordingDirtyOutboxWriter()
+        uow = self._new_uow(idempotency_store=idempotency, read_model_writer=writer)
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"case_id": "SHOULD-NOT-RUN", "affected_scope_keys": ["2026-05"]}
+
+        with self.assertRaisesRegex(Exception, "idempotency|fingerprint|conflict"):
+            self._run_uow(
+                uow,
+                _Command(
+                    action_name="confirm_link",
+                    scope_keys=["2026-05"],
+                    idempotency_key="confirm:idem-conflict",
+                    request_fingerprint="fp-confirm-new",
+                    payload={"case_id": "CASE-IDEM", "row_ids": ["oa-2", "bank-2"]},
+                ),
+                handler,
+            )
+
+        self.assertFalse(called)
+        self.assertEqual(writer.calls, [])
+        self.assertEqual([operation["op"] for operation in idempotency.operations], ["get"])
+
     def test_uow_reserves_and_commits_idempotency_record_inside_same_transaction_after_outbox(self) -> None:
         connection = _RecordingConnection()
         idempotency = _OperationRecordingIdempotencyStore()

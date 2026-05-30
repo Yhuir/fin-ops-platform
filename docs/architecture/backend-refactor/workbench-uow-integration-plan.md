@@ -526,3 +526,33 @@ PF-P026 must remain a UoW skeleton integration prompt:
 - it must not modify `server.py`;
 - it must not migrate any real Workbench write API;
 - it must not add SQL migrations or a real PostgreSQL idempotency repository.
+
+## 15. PF-P026 UoW Idempotency Integration Skeleton Result
+
+PF-P026 has been executed and is waiting for user confirmation before it can be marked `verified`.
+
+Implemented scope:
+
+- `WorkbenchWriteUnitOfWork.run()` now performs idempotency get/replay/conflict checks before opening the UoW transaction.
+- A committed same-fingerprint record replays the stored response with `source_versions` and `outbox_event_ids` and does not call the handler or dirty/outbox writer.
+- A same-key different-fingerprint record raises `WorkbenchIdempotencyKeyConflict` and does not call the handler or dirty/outbox writer.
+- A new idempotency key is reserved inside the UoW transaction and committed after handler execution plus dirty/outbox/source_version writes.
+- The implementation supports the existing fake/in-memory repository contracts only.
+
+Still intentionally not implemented:
+
+- no real Workbench HTTP write API migration;
+- no `server.py` or `workbench_write_facade.py` change;
+- no SQL migration;
+- no real PostgreSQL durable idempotency repository;
+- no stale write / optimistic locking implementation.
+
+Test state after PF-P026:
+
+- `tests.test_workbench_idempotency_contract`: Pass, 8 tests.
+- `tests.test_workbench_uow_contract`: Pass, 16 tests, 4 expected failures.
+- Remaining expected failures are stale write / optimistic locking target contracts and are outside PF-P026.
+
+Next safe step after user confirmation is a Merge Gate prompt, not another implementation prompt:
+
+`PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate`

@@ -7821,3 +7821,53 @@ Post-Flight:
 - PF-P026 不迁移真实 Workbench 写 API，不修改 `server.py`，不修改 `workbench_write_facade.py`。
 - PF-P026 不新增 SQL migration，不实现真实 PostgreSQL idempotency repository。
 - PF-P026 完成后应优先评估是否生成 `PF-P026-MG`，因为 PF-P023 到 PF-P026 已形成一个可合并的 Workbench UoW/idempotency 基础切片。
+
+### 执行结果
+
+状态：`implemented`
+
+已完成：
+
+- `WorkbenchWriteUnitOfWork.run()` 已接入 idempotency get/reserve/commit/replay skeleton。
+- Same key / same fingerprint committed record 会 replay stored response，不调用 handler，不写 dirty/outbox。
+- Same key / different fingerprint 会抛出稳定 `WorkbenchIdempotencyKeyConflict`，不调用 handler，不写 dirty/outbox。
+- 新 idempotency request 会在 UoW transaction 内 reserve，handler + dirty/outbox/source_versions 完成后 commit idempotency record。
+- 本轮只使用 fake/in-memory repository contract，没有新增 SQL migration，没有接真实 PostgreSQL repository。
+- 未修改 `server.py`，未修改 `workbench_write_facade.py`，未迁移任何真实 Workbench 写 API。
+
+转绿测试：
+
+- `tests/test_workbench_idempotency_contract.py`
+  - `test_uow_replays_committed_same_fingerprint_without_handler_or_outbox`
+  - `test_uow_rejects_same_key_with_different_fingerprint_without_handler_or_outbox`
+  - `test_uow_reserves_and_commits_idempotency_record_inside_same_transaction_after_outbox`
+- `tests/test_workbench_uow_contract.py`
+  - `test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history`
+  - `test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox`
+  - `test_cash_special_idempotency_key_does_not_append_duplicate_history`
+
+仍保留的 expectedFailure：
+
+- `test_withdraw_submit_rejects_stale_preview_relation_version`
+- `test_cancel_link_rejects_stale_replaced_relation`
+- `test_ignore_row_rejects_when_row_already_confirmed`
+- `test_cash_special_rejects_changed_relation_version`
+
+这些属于 stale write / optimistic locking，不属于 PF-P026。
+
+已运行验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，4 expected failures。
+
+下一步：
+
+- 等待用户确认 PF-P026 是否可标记 `verified`。
+- 用户确认后，建议生成并审查 `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate`，统一覆盖 PF-P023/PF-P024/PF-P025/PF-P026 这组 Workbench UoW/idempotency 基础切片。

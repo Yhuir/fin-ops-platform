@@ -465,7 +465,6 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             )
         self.assertFalse(called)
 
-    @unittest.expectedFailure
     def test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history(self) -> None:
         idempotency = _RecordingIdempotencyStore()
         uow = self._new_uow(idempotency_store=idempotency)
@@ -492,7 +491,6 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(call_count, 1)
         self.assertEqual(idempotency.records.get("confirm:idem-1"), first)
 
-    @unittest.expectedFailure
     def test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox(self) -> None:
         idempotency = _RecordingIdempotencyStore()
         writer = _RecordingDirtyOutboxWriter()
@@ -520,7 +518,6 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(len(writer.calls), 1)
         self.assertIn("exception:idem-1", idempotency.records)
 
-    @unittest.expectedFailure
     def test_cash_special_idempotency_key_does_not_append_duplicate_history(self) -> None:
         idempotency = _RecordingIdempotencyStore()
         uow = self._new_uow(idempotency_store=idempotency)

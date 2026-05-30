@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` (`planned`) |
+| 当前阶段 | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P026 - Workbench UoW Idempotency Integration Skeleton` (`implemented`) |
 | 最近 verified prompt | `PF-P025 - Workbench Durable Idempotency Repository and Fingerprint Skeleton` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P025 已由用户确认 `verified`；record/fingerprint/conflict/repository skeleton 已转绿，真实 API 未迁移 |
-| 下一条允许任务 | 只允许执行 PF-P026。PF-P026 只能把 PF-P025 primitive 以 fake/in-memory repository contract 接入 `WorkbenchWriteUnitOfWork.run()`；不得迁移真实 Workbench 写 API |
+| 最近验证 | PF-P026 targeted tests 已通过；UoW replay、fingerprint conflict、reserve/commit skeleton 已转绿，真实 API 未迁移 |
+| 下一条允许任务 | 等待用户确认 PF-P026 是否可标记 `verified`。确认前不得生成 PF-P027，不得迁移真实 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -2670,7 +2670,7 @@ PF-P025 已由用户确认 `verified`。PF-P026 已生成并审查，下一步�
 
 ### PF-P026 - Workbench UoW Idempotency Integration Skeleton
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2703,9 +2703,53 @@ PF-P025 已由用户确认 `verified`。PF-P026 已生成并审查，下一步�
 - PF-P026 仍然不是业务 API 迁移 prompt；它只处理 UoW 层的幂等集成骨架。
 - PF-P026 完成后，应评估本分支是否已经达到可合并切片，优先考虑生成 `PF-P026-MG`，而不是继续无限扩展。
 
+#### 执行结果
+
+- `WorkbenchWriteUnitOfWork.run()` 已接入 idempotency get/reserve/commit/replay skeleton。
+- 对带 `idempotency_key` 的 command，UoW 会先查询 idempotency store。
+- 已 committed 且 fingerprint 相同的记录会直接 replay stored response，并带回 `source_versions` 与 `outbox_event_ids`。
+- 已存在记录但 fingerprint 不同会抛出 `WorkbenchIdempotencyKeyConflict`，不调用 handler，不写 dirty/outbox。
+- 新请求会在 transaction 内 reserve，执行 handler，写 dirty/outbox/source_versions 后 commit idempotency record。
+- 兼容 PF-P024/PF-P025 fake store shape 和 `InMemoryWorkbenchIdempotencyRepository`。
+
+#### 已转绿的 expectedFailure
+
+- `tests/test_workbench_idempotency_contract.py`
+  - `test_uow_replays_committed_same_fingerprint_without_handler_or_outbox`
+  - `test_uow_reserves_and_commits_idempotency_record_inside_same_transaction_after_outbox`
+- `tests/test_workbench_uow_contract.py`
+  - `test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history`
+  - `test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox`
+  - `test_cash_special_idempotency_key_does_not_append_duplicate_history`
+
+#### 新增目标测试
+
+- `test_uow_rejects_same_key_with_different_fingerprint_without_handler_or_outbox` 锁定 same key / different fingerprint 不调用 handler、不写 dirty/outbox，并返回稳定 conflict 语义。
+
+#### 仍保留的 expectedFailure
+
+- `test_withdraw_submit_rejects_stale_preview_relation_version`
+- `test_cancel_link_rejects_stale_replaced_relation`
+- `test_ignore_row_rejects_when_row_already_confirmed`
+- `test_cash_special_rejects_changed_relation_version`
+
+这些属于 stale write / optimistic locking，不属于 PF-P026 范围。
+
+#### 验证结果
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_idempotency_contract.py' -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，4 expected failures。
+
 #### 下一条 Prompt 上下文
 
-下一步只允许执行 PF-P026，不得生成 PF-P027，不得迁移真实 Workbench 写 API。PF-P026 完成后必须回写状态机和相关架构文档，记录哪些 UoW idempotency expectedFailure 已转绿、哪些 stale write expectedFailure 仍保留。
+PF-P026 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。确认后，建议生成并审查 `PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate`，统一覆盖 PF-P023/PF-P024/PF-P025/PF-P026 这组 Workbench UoW/idempotency 基础切片。确认前不得生成 PF-P027，不得迁移真实 Workbench 写 API。
 
 ## 维护规则
 
