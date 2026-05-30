@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P013-MG - Workbench Write Facade Merge Gate` 已生成并完成审查，等待用户确认执行 |
-| 当前 active prompt | `PF-P013-MG - Workbench Write Facade Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P013-MG - Workbench Write Facade Merge Gate` 已执行并合入本地 `main`，等待用户确认 `verified` |
+| 当前 active prompt | `PF-P013-MG - Workbench Write Facade Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P013 - Workbench Write Facade Extraction` |
-| 当前分支 | `codex/workbench-writes-matching-discovery` |
-| 最近验证 | 用户已确认 PF-P013 `verified`；PF-P013 已完成 confirm/cancel thin facade 抽取，PF-P012/PF-P013 指定测试通过；未修改 API 语义、migration、前端或部署 |
-| 下一条允许任务 | 用户确认后执行 PF-P013-MG；PF-P013-MG 只能做 PF-P012 + PF-P013 完整 diff 的 merge gate，不得加入新功能、不得执行 Traffic Gate |
+| 当前分支 | `main` |
+| 最近验证 | PF-P013-MG 已在本地 `main` 复验通过：`compileall`、Workbench write characterization、Workbench v2 API、derived lifecycle、platform runtime guards、exception service、pair relation / exception case、matching orchestrator / candidate / dirty queue 全部通过；未 push，未执行 Traffic Gate |
+| 下一条允许任务 | 用户确认 PF-P013-MG `verified`；如需要远端同步，再执行 `git push origin main`。push 后必须从最新 `main` 新建分支，再生成并审查 PF-P014 |
 
 ## Prompt 执行日志
 
@@ -1596,7 +1596,7 @@ PF-P013-MG 已生成并审查。下一步允许在用户确认后执行 PF-P013-
 
 ### PF-P013-MG - Workbench Write Facade Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -1631,7 +1631,31 @@ PF-P013-MG 已生成并审查。下一步允许在用户确认后执行 PF-P013-
 
 #### 下一条 Prompt 上下文
 
-PF-P013-MG 尚未执行。用户若确认执行，下一步应执行 PF-P013-MG。MG 通过并合入 `main` 后，下一条 prompt 必须从最新 `main` 新建分支生成，建议为 `PF-P014 - Workbench Exception Facade Extraction`。
+PF-P013-MG 已执行并合入本地 `main`。本轮覆盖 PF-P012 + PF-P013 的完整 diff：Workbench 写操作特征测试、confirm/cancel write facade、`server.py` 最小 wiring、platform guard 更新、文档和状态机更新。
+
+执行记录：
+
+- 功能分支：`codex/workbench-writes-matching-discovery`。
+- 功能提交：`a50b1525` (`refactor(workbench): extract confirm cancel write facade`)。
+- 本地 main merge commit：`ab74c28a` (`Merge branch 'codex/workbench-writes-matching-discovery': workbench write facade`)。
+- upstream sync：`origin/main` 已 fast-forward 检查，合并前 `main` 已是最新；功能分支合并 `main` 时 `Already up to date`。
+- push：未执行。当前本地 `main` ahead `origin/main`，等待用户单独确认。
+- Traffic Gate / deploy / 生产配置：未执行、未修改。
+
+验证结果：
+
+- `git status --short --branch`：本地 `main` ahead `origin/main`，无工作区改动。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --check`：通过。
+- `python3 -m compileall -q backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：13 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -v`：147 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：24 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`：11 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service tests.test_workbench_exception_case_service -v`：12 tests OK。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_orchestrator tests.test_workbench_candidate_match_service tests.test_workbench_reconciliation_dirty_queue -v`：34 tests OK。
+
+下一步必须由用户确认 PF-P013-MG 是否可标记为 `verified`。确认后，如需要远端基线同步，再执行 `git push origin main`；push 后必须从最新 `main` 新建分支，再生成并审查 `PF-P014 - Workbench Exception Facade Extraction`。
 
 ## 维护规则
 
