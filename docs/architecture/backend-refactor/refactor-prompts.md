@@ -5835,7 +5835,7 @@ Post-Flight:
 
 ## PF-P019 - Workbench UoW Contract Tests
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -9779,4 +9779,155 @@ Post-Flight:
 
 ### 下一步
 
-等待用户确认 PF-P033 后，生成并审查 `PF-P034 - Workbench Withdraw Submit Stale Guard Migration`；不得直接执行 Merge Gate。
+PF-P033 已由用户确认 `verified`。PF-P032-MG 和 PF-P033-MG 均不单独执行，继续延后到累计 Merge Gate；最终累计 MG 必须覆盖 PF-P032 到 PF-P034 的完整 diff。
+
+## PF-P034 - Workbench Withdraw Submit Stale Guard Migration
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P034 - Workbench Withdraw Submit Stale Guard Migration。
+
+Role: 你是一位精通 Python 遗留系统渐进式重构、Clean Architecture、事务边界、并发写冲突和 characterization testing 的后端架构师。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-ignore-row-stale-guard`。
+- 最近 verified prompt 是 `PF-P033 - Workbench Cash Special Stale Guard Migration`。
+- PF-P032 已完成 ignore row stale guard，PF-P033 已完成 cash special stale guard。
+- PF-P032-MG 和 PF-P033-MG 均已明确延后，累计 MG 将覆盖 PF-P032 到 PF-P034。
+- PF-P034 是 Workbench stale guard group 的最后一条真实写 API 迁移候选。
+- 本轮只迁移 `withdraw submit` stale guard，不迁移其它 Workbench 写路径。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+   - `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_idempotency_contract.py`
+2. 必须使用 CodeGraph 或等价结构化分析确认当前调用链：
+   - `_handle_api_workbench_withdraw_link_preview`
+   - `_handle_api_workbench_withdraw_link`
+   - `WorkbenchWriteFacade.preview_withdraw_link`
+   - `WorkbenchWriteFacade.withdraw_link`
+   - `WorkbenchWriteFacade._withdraw_row_ids`
+   - `WorkbenchWriteFacade._withdraw_preview_active_relation_identity`
+   - `WorkbenchPairRelationService.preview_withdraw_for_row_ids`
+   - `WorkbenchPairRelationService.withdraw_latest_for_row_ids`
+   - `assert_workbench_stale_preconditions`
+3. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-ignore-row-stale-guard`。
+   - 当前 active prompt 是 `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` planned。
+   - PF-P033 状态为 `verified`，且 PF-P032/PF-P033 MG 被记录为 deferred。
+   - 本轮仍处在同一 Workbench stale guard 功能分支中，最终累计 MG 将覆盖 PF-P032 到 PF-P034。
+
+Goal:
+为真实 Workbench `withdraw submit` 写路径接入最小 stale guard：当 submit 请求携带 `expected_versions`，且当前 active relation identity/version 不再匹配 preview 时暴露的 relation 时，返回 `409 workbench_write_conflict`，并且不得撤销当前 relation、不得恢复历史 relation、不得触发本次 pair relation persist 或 read-model scheduling。未携带 `expected_versions` 的 legacy withdraw 行为必须保持不变。
+
+Required Test Work:
+1. 先写或补充 characterization/contract tests，再实现。
+2. 必须新增或调整测试覆盖 stale preview submit：
+   - 先 confirm `CASE-WITHDRAW-OLD`。
+   - 调用 `/api/workbench/actions/withdraw-link/preview`，取得 `submit_expected_versions`。
+   - 再用同一批 row ids confirm replacement，例如 `CASE-WITHDRAW-NEW`。
+   - 用旧 preview 的 `submit_expected_versions` 调用 `/api/workbench/actions/withdraw-link`。
+   - 必须返回 HTTP 409。
+   - response payload 使用 `workbench_write_conflict`，`conflict.action == "withdraw_link"`。
+   - `conflict.reason` 必须表达 stale relation identity 或 stale relation version。
+   - 当前 active relation 必须仍为 replacement relation，例如 `CASE-WITHDRAW-NEW`。
+   - 旧 relation 不得被恢复为 active。
+   - 不得记录本次 withdraw history。
+   - 不得为本次 stale 请求触发 pair relation persistence 或 read-model scheduling。
+3. 必须保留现有 legacy 行为：
+   - 不携带 `expected_versions` 时，`test_stale_withdraw_preview_withdraws_current_relation_and_restores_previous_relation` 这类当前行为 characterization 不能被破坏，除非新增测试明确拆分 guarded 与 legacy 行为。
+   - duplicate withdraw 当前行为 characterization 仍通过。
+   - no active relation / no withdraw history 的现有错误行为保持不变。
+4. 必须保留 preview 契约：
+   - `test_withdraw_preview_exposes_relation_identity_and_version_for_submit_expected_versions` 继续通过。
+   - `test_withdraw_submit_accepts_expected_versions_payload_without_breaking_existing_success_shape` 继续通过，即 expected_versions 匹配当前 active relation 时仍允许提交。
+5. 不允许把测试写成只 mock facade 的拼图测试。HTTP/handler characterization 必须继续覆盖真实 handler -> facade -> service 链路或现有测试 fake 链路。
+
+Required Implementation Work:
+1. 只在 `withdraw_link` submit 路径加入 stale guard。
+2. 允许修改：
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`（仅当现有 primitive 无法表达 withdraw relation identity/version）
+   - `backend/src/fin_ops_platform/services/workbench_write_conflict.py`（仅当 response/primitive 需要小修）
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_stale_write_contract.py`（仅当需要补充 submit expected_versions contract）
+   - `tests/test_workbench_uow_contract.py`（仅当需要补充 withdraw contract）
+   - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+3. `server.py` 原则上不应修改。当前 handler 已把 JSON payload 传入 facade；除非发现 payload 未包含 `expected_versions`，否则不得改 `server.py`。
+4. 实现必须复用 `WorkbenchWriteConflict` / `assert_workbench_stale_preconditions` 语义，不要新建第二套 conflict payload。
+5. 对 withdraw submit 的 current-state 判断必须来自当前 Workbench facts/service state：
+   - 当前 row ids 对应的 active relation。
+   - 当前 active relation 的 `case_id`。
+   - 如可用，当前 active relation 的 version。
+   - 不得使用 Redis cache、前端 read model generation 或纯前端字段作为最终事实源。
+6. 如果 submit 请求携带 expected relation key，而当前 active relation 的 case_id 或 version 不匹配，必须在 `withdraw_latest_for_row_ids` 前返回 409。
+7. 如果当前系统缺少 durable relation version，本轮可以先完成 relation identity guard；不得伪造 PostgreSQL 版本字段或新增 SQL migration。
+
+Forbidden Scope:
+- 不修改 `cancel link`、`ignore row` 或 `cash special` 已完成 guard 的语义。
+- 不改 frontend。
+- 不新增 SQL migration。
+- 不修改部署、网关、auth/session、worker routing。
+- 不引入 Go / `backend-go`。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不生成或执行累计 Merge Gate；PF-P034 完成并经用户确认后再生成 cumulative MG。
+- 不迁移其它 Workbench 写路径。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Scope / hygiene:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+2. Target tests:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P034 状态只能记录为 `implemented` 或 `blocked`。
+  - 记录 changed files。
+  - 记录 RED/GREEN 和测试结果。
+  - 记录 PF-P032/PF-P033 MG 仍 deferred。
+  - 记录下一步建议；如果 PF-P034 通过，下一步应生成 cumulative MG，覆盖 PF-P032 到 PF-P034 的完整 diff。
+- 更新 `refactor-prompts.md` 的 PF-P034 执行结果。
+- 更新 `workbench-stale-write-boundary-plan.md` 的 withdraw submit 状态。
+- 如需提交，必须精准 `git add` 具体文件；禁止 `git add .` / `git add -A`。
+- 未经用户确认，不得把 PF-P034 标记为 `verified`。
+- 不执行 Merge Gate；PF-P034 完成后必须等待用户确认，再生成/执行 cumulative MG。
+```
+
+### 审查结论
+
+- PF-P034 的边界正确：它只迁移 withdraw submit stale guard。
+- PF-P034 不应顺手修改 cancel link、ignore row 或 cash special，因为这些 guard 已完成且属于累计 MG 覆盖范围。
+- PF-P034 必须保持 legacy no-expected-versions withdraw 行为，避免破坏旧前端请求。
+- PF-P029 已建立 preview `submit_expected_versions` 契约；PF-P034 应复用该契约并在 submit mutation 前校验当前 relation identity/version。
+- 当前 relation 缺少明确 durable version 字段时，本轮先完成 relation identity guard 是合理的；如果代码中可读取 version，再补 version 校验。不得伪造 schema 或新增 SQL migration。
+- PF-P034 完成后应生成 cumulative MG，统一覆盖 PF-P032 到 PF-P034 的完整 diff。

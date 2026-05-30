@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P033 - Workbench Cash Special Stale Guard Migration` 已实现，等待用户确认后进入 PF-P034 |
-| 当前 active prompt | `PF-P033 - Workbench Cash Special Stale Guard Migration` (`implemented`) |
-| 最近 verified prompt | `PF-P032 - Workbench Ignore Row Stale Guard Migration` (`MG deferred`) |
+| 当前阶段 | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` (`planned`) |
+| 最近 verified prompt | `PF-P033 - Workbench Cash Special Stale Guard Migration` (`MG deferred`) |
 | 当前分支 | `codex/workbench-ignore-row-stale-guard` |
-| 最近验证 | PF-P033 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试全部通过 |
-| 下一条允许任务 | 等待用户确认 PF-P033；确认后生成并审查 PF-P034；PF-P034 只迁移 withdraw submit stale guard；PF-P032-MG 仍延后，累计 MG 将覆盖 PF-P032 到 PF-P034 |
+| 最近验证 | PF-P033 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试全部通过；用户确认 PF-P033 verified |
+| 下一条允许任务 | 执行 PF-P034；PF-P034 只迁移 withdraw submit stale guard，不迁移其它 Workbench 写路径；PF-P032/PF-P033 MG 均已延后，累计 MG 将覆盖 PF-P032 到 PF-P034 |
 
 ## Prompt 执行日志
 
@@ -3459,7 +3459,7 @@ PF-P032 已完成实现和验证，并已由用户确认 `verified`。PF-P032-MG
 
 ### PF-P033 - Workbench Cash Special Stale Guard Migration
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3522,7 +3522,45 @@ PF-P032 已完成实现和验证，并已由用户确认 `verified`。PF-P032-MG
 
 #### 下一条 Prompt 上下文
 
-PF-P033 已完成实现和验证，等待用户确认。下一步应生成并审查 `PF-P034 - Workbench Withdraw Submit Stale Guard Migration`；不得直接执行 Merge Gate，不得扩大到其它 Workbench 写路径。最终累计 MG 必须覆盖 PF-P032 到 PF-P034 的完整 diff。
+PF-P033 已完成实现和验证，并已由用户确认 `verified`。PF-P032-MG 和 PF-P033-MG 均不单独执行，继续延后到累计 Merge Gate；最终累计 MG 必须覆盖 PF-P032 到 PF-P034 的完整 diff。下一步允许执行 PF-P034；PF-P034 只迁移 `withdraw submit` stale guard，不得扩大到其它 Workbench 写路径。
+
+### PF-P034 - Workbench Withdraw Submit Stale Guard Migration
+
+状态：`planned`
+
+#### 范围
+
+- 只迁移 Workbench `withdraw submit` stale guard。
+- 覆盖真实写入口：
+  - `POST /api/workbench/actions/withdraw-link`
+  - `WorkbenchWriteFacade.withdraw_link`
+- 目标：当 submit 请求携带 `expected_versions`，且当前 active relation identity/version 不再匹配 preview 时暴露的 relation 时，返回 `409 workbench_write_conflict`，并且不得撤销当前 relation、不得恢复历史 relation、不得触发本次 pair relation persist 或 read-model scheduling。
+- 保持未携带 `expected_versions` 的 legacy withdraw 行为不变。
+- 复用 PF-P028/PF-P029/PF-P030/PF-P031/PF-P032/PF-P033 已建立的 `WorkbenchWriteConflict`、preview `submit_expected_versions`、stale precondition primitive 和 Workbench write facade 约束。
+
+#### 禁止范围
+
+- 不修改 `cancel link`、`ignore row` 或 `cash special` 已完成 guard 的语义。
+- 不修改 withdraw preview response shape，除非发现 submit 无法使用现有 `submit_expected_versions`，且必须解释原因。
+- 不修改前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不生成或执行累计 MG。
+- 不迁移其它 Workbench 写路径。
+
+#### 验收标准
+
+- 先写或补充针对真实 HTTP/facade withdraw submit 行为的测试，再实现。
+- 新增测试必须覆盖 stale preview submit 返回 409 且不撤销当前 relation / 不恢复旧 relation。
+- 现有 legacy no-expected-versions withdraw characterization 仍通过。
+- `test_withdraw_submit_accepts_expected_versions_payload_without_breaking_existing_success_shape` 这类 expected_versions 正常匹配路径仍通过。
+- 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试通过。
+
+#### 审查结论
+
+- PF-P034 是 PF-P033 verified 后的正确下一步，因为 withdraw submit 是 Workbench stale guard group 中最后且风险最高的真实写 API。
+- PF-P034 必须保持小切片，只处理 withdraw submit；不得顺手修改其它 Workbench 写路径。
+- 当前 preview 使用兼容性 `version=1` 暴露 submit contract；PF-P034 应优先完成 relation identity guard。如当前 relation 可读取真实 version，则同时校验 version；不得伪造 PostgreSQL 版本字段或新增 SQL migration。
+- PF-P034 完成后应生成累计 Merge Gate，统一覆盖 PF-P032 到 PF-P034 的完整 diff。
 
 ## 维护规则
 
