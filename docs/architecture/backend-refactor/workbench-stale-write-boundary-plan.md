@@ -318,7 +318,8 @@ PF-P031 已完成第一条真实写 API stale guard 迁移：`cancel link`。
    - 状态：已实现 relation identity mismatch guard；等待 PF-P031-MG 合入。
 5. `PF-P032 - Workbench Ignore Row Stale Guard Migration`
    - 处理 row 已 confirmed/paired 时仍 ignore 的风险。
-   - 状态：已实现 expected row open guard；请求携带 `expected_versions` 且当前 invoice row 已有 active relation 时返回 `409 workbench_write_conflict`，不创建 ignored case/override；等待 PF-P032-MG。
+   - 状态：已验证 expected row open guard；请求携带 `expected_versions` 且当前 invoice row 已有 active relation 时返回 `409 workbench_write_conflict`，不创建 ignored case/override。
+   - MG：不单独执行，延后到累计 MG；`PF-P032-MG deferred; cumulative MG will cover PF-P032 through PF-P034`。
 6. `PF-P033 - Workbench Cash Special Stale Guard Migration`
    - 覆盖 pass-through、ticket purchase、cancel special 的 relation version guard。
 7. `PF-P034 - Workbench Withdraw Submit Stale Guard Migration`
@@ -328,6 +329,6 @@ PF-P031 已完成第一条真实写 API stale guard 迁移：`cancel link`。
 
 下一条 prompt 建议为：
 
-`PF-P032-MG - Workbench Ignore Row Stale Guard Merge Gate`
+`PF-P033 - Workbench Cash Special Stale Guard Migration`
 
-PF-P032 已完成实现和验证。下一步应先执行 Merge Gate，统一检查 PF-P032 diff、验证范围和 main 合入复验；不得直接进入 PF-P033，也不得迁移 `cash special` 或 `withdraw submit`。
+PF-P032 已完成实现和验证。按当前策略，PF-P032-MG 延后，最终累计 MG 将覆盖 PF-P032 到 PF-P034。下一步应迁移 cash special 三个入口的 stale guard；仍不得迁移 `withdraw submit`。

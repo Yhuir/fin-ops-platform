@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P032 - Workbench Ignore Row Stale Guard Migration` 已实现，等待用户确认后进入 Merge Gate |
-| 当前 active prompt | `PF-P032 - Workbench Ignore Row Stale Guard Migration` (`implemented`) |
-| 最近 verified prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` |
+| 当前阶段 | `PF-P033 - Workbench Cash Special Stale Guard Migration` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P033 - Workbench Cash Special Stale Guard Migration` (`planned`) |
+| 最近 verified prompt | `PF-P032 - Workbench Ignore Row Stale Guard Migration` (`MG deferred`) |
 | 当前分支 | `codex/workbench-ignore-row-stale-guard` |
-| 最近验证 | PF-P032 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试全部通过 |
-| 下一条允许任务 | 等待用户确认 PF-P032 后，生成并审查 `PF-P032-MG - Workbench Ignore Row Stale Guard Merge Gate`；不得直接进入 PF-P033 |
+| 最近验证 | PF-P032 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试全部通过；用户确认 PF-P032 verified |
+| 下一条允许任务 | 执行 PF-P033；PF-P033 只迁移 cash special stale guard，不迁移 withdraw submit；PF-P032-MG 已延后，累计 MG 将覆盖 PF-P032 到 PF-P034 |
 
 ## Prompt 执行日志
 
@@ -3398,7 +3398,7 @@ PF-P031-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确�
 
 ### PF-P032 - Workbench Ignore Row Stale Guard Migration
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3455,7 +3455,45 @@ PF-P031-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确�
 
 #### 下一条 Prompt 上下文
 
-PF-P032 已完成实现和验证，等待用户确认。下一步应生成并审查 `PF-P032-MG - Workbench Ignore Row Stale Guard Merge Gate`，统一检查 PF-P032 的完整 diff；不得直接进入 PF-P033，不得迁移 `cash special` 或 `withdraw submit`。
+PF-P032 已完成实现和验证，并已由用户确认 `verified`。PF-P032-MG 不单独执行，明确延后到累计 Merge Gate：`PF-P032-MG deferred; cumulative MG will cover PF-P032 through PF-P034`。下一步允许继续在当前功能分支生成并执行 PF-P033；PF-P033 只迁移 `cash special` stale guard，不得迁移 `withdraw submit`。
+
+### PF-P033 - Workbench Cash Special Stale Guard Migration
+
+状态：`planned`
+
+#### 范围
+
+- 只迁移 Workbench cash special stale guard。
+- 覆盖三个真实写入口：
+  - `confirm-cash-pass-through`
+  - `confirm-cash-ticket-purchase`
+  - `cancel-cash-special`
+- 目标：当请求携带 `expected_versions` 且当前 active relation identity/version 不再匹配用户看到的 relation 时，返回 `409 workbench_write_conflict`，并且不得更新或清空 `special_metadata`。
+- 保持未携带 `expected_versions` 的 legacy cash special 行为不变。
+- 复用 PF-P028/PF-P030/PF-P031/PF-P032 已建立的 `WorkbenchWriteConflict`、stale precondition primitive 和 Workbench write facade 约束。
+
+#### 禁止范围
+
+- 不迁移 `withdraw submit`。
+- 不修改 `ignore row` 或 `cancel link` 已完成 guard 的语义。
+- 不修改前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不生成或执行 PF-P034。
+
+#### 验收标准
+
+- 先写或补充针对真实 HTTP/facade cash special 行为的测试，再实现。
+- 新增测试必须覆盖 stale expected relation 返回 409 且不更新 / 不清空 special metadata。
+- 三个 cash special 入口必须共享同一 stale guard 语义，避免三个入口各写一套冲突判断。
+- 现有 legacy no-expected-versions cash special characterization 仍通过。
+- 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试通过。
+
+#### 审查结论
+
+- PF-P033 是 PF-P032 verified 后的正确下一步，因为 stale write 计划把 cash special 放在 ignore row 之后、withdraw submit 之前。
+- PF-P033 必须保持小切片，只处理 cash special 三个入口；withdraw submit 留给 PF-P034。
+- 当前系统没有明确 durable relation version 字段时，本轮必须先完成 relation identity guard；如代码中可读取当前 relation version，则同时校验 version。不得伪造版本字段或新增 SQL migration。
+- PF-P032-MG 已明确延后，最终累计 MG 必须覆盖 PF-P032 到 PF-P034 的完整 diff。
 
 ## 维护规则
 
