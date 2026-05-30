@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已生成并审查，等待执行。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已生成 Workbench 写路径 UoW 边界设计，产物是 `workbench-write-uow-boundary-design.md`。
 
 ## 1. Scope Boundary
 
@@ -430,6 +430,24 @@ PF-P014 已完成第二轮行为保持型 facade 抽取：
 - 本轮未引入 Workbench Unit of Work，未修复 stale write / optimistic locking，未改变事务模型、dirty scope / outbox、derived lifecycle 或 read model scheduling 顺序。
 - `update-bank-exception`、`oa-bank-exception`、cash special、personal advance repayment、withdraw-link、matching run / dirty worker 仍在 `server.py` 后续切片中处理。
 
+### PF-P017 Remaining Write Facade Extraction Results
+
+PF-P017 已完成第三轮行为保持型 facade 抽取：
+
+- `WorkbenchWriteFacade` 已承接 `withdraw-link/preview`、`withdraw-link`、cash special、`update-bank-exception`、`oa-bank-exception` 和 `confirm-personal-advance-repayment`。
+- `server.py` 对目标 Workbench 写入口只保留 parse、freshness guard、request id、facade call 和 response wrapping。
+- 本轮继续保持 PF-P012/PF-P016 锁定的 duplicate submit、stale write、blind write、read model scheduling failure 和 persistence failure 当前语义。
+- 本轮未引入 Workbench Unit of Work，未修复 stale write / optimistic locking，未改变 dirty scope / outbox 或 read model scheduling 顺序。
+
+### PF-P018 UoW Boundary Design Results
+
+PF-P018 已完成 Workbench 写路径 UoW 边界设计：
+
+- 新增 `workbench-write-uow-boundary-design.md`，明确逐 API UoW matrix、目标事务时序、PostgreSQL/repository 边界、read model/dirty scope/outbox contract、failure mode matrix 和测试策略。
+- 已确认核心 blocker：`RuntimeQueueRepository.enqueue_read_model_refresh()` 当前内部开启独立事务，不能直接加入 Workbench facts transaction；实现前需要 transaction-bound dirty/outbox writer 或拆出可复用 SQL writer。
+- 已确认未来 UoW 必须把 facts、audit/history、dirty scope、outbox、source_version 和 durable idempotency 置于同一 PostgreSQL transaction。
+- 已确认下一步应优先生成 `PF-P019 - Workbench UoW Contract Tests`，先写目标契约测试，不直接实现 UoW。
+
 ## 10. Risk / Optimization Findings
 
 | Risk | Severity | Evidence | Required Next Step |
@@ -475,7 +493,7 @@ Required properties:
 
 ## 12. Next Slice Recommendation
 
-PF-P015、PF-P016、PF-P017 已由用户确认 `verified`。PF-P017-MG 已生成并审查，等待执行。
+PF-P015、PF-P016、PF-P017、PF-P017-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。
 
 PF-P016 新增测试已锁定剩余写入口当前行为：
 
@@ -495,8 +513,8 @@ PF-P017 已完成行为保持型 facade extraction：
 - `confirm-personal-advance-repayment` 已迁入 `WorkbenchWriteFacade`。
 - `server.py` 目标 HTTP handlers 只保留 parse、freshness guard、request_id、facade call、response wrapping。
 
-下一条允许执行：
+PF-P018 已完成 UoW 边界设计。下一条建议生成并审查：
 
-`PF-P017-MG - Workbench Remaining Write Facade Merge Gate`
+`PF-P019 - Workbench UoW Contract Tests`
 
-PF-P017-MG 必须统一覆盖 PF-P015/PF-P016/PF-P017 的完整 diff；不得执行 Traffic Gate、部署、push 或 UoW/stale write 语义修复。UoW 是必要方向，但应在 PF-P017-MG verified 并 push 到 `origin/main` 后，从最新 main 新建分支再生成专门 prompt。
+PF-P019 应只新增目标 contract tests，不实现 UoW，不修改生产逻辑。测试应覆盖 facts/audit/dirty scope/outbox 同事务、source_version monotonicity、outbox failure rollback、duplicate submit durable idempotency、stale write conflict 和 worker idempotent refresh compatibility。

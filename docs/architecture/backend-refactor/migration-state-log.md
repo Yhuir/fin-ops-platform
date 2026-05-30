@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P018 - Workbench Write Unit of Work Boundary Design` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P018 - Workbench Write Unit of Work Boundary Design` (`planned`) |
+| 当前阶段 | `PF-P018 - Workbench Write Unit of Work Boundary Design` 已执行，等待用户确认 verified |
+| 当前 active prompt | `PF-P018 - Workbench Write Unit of Work Boundary Design` (`implemented`) |
 | 最近 verified prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | PF-P018 分支已从最新 `origin/main` (`06c6fd43`) 创建；已读取状态机、prompt 库、Workbench 写路径规划，并用 CodeGraph 校准 `WorkbenchWriteFacade` 当前边界；未改业务代码 |
-| 下一条允许任务 | 执行 `PF-P018 - Workbench Write Unit of Work Boundary Design`；只能产出 UoW 边界设计、测试策略和文档回写，不得实现 UoW 或修改事务语义 |
+| 最近验证 | PF-P018 已产出 Workbench UoW 边界设计文档；只修改 backend-refactor 文档；未改业务代码、测试、SQL migration、前端、部署或生产配置 |
+| 下一条允许任务 | 等待用户确认 PF-P018 verified；确认后才能生成并审查 `PF-P019 - Workbench UoW Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -2077,7 +2077,7 @@ PF-P017-MG 已 verified 并推送 `origin/main`。已从最新 `main` 新建分�
 
 ### PF-P018 - Workbench Write Unit of Work Boundary Design
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2103,7 +2103,33 @@ PF-P017-MG 已 verified 并推送 `origin/main`。已从最新 `main` 新建分�
 
 #### 下一条 Prompt 上下文
 
-PF-P018 已生成并审查。下一步允许执行 PF-P018。PF-P018 verified 后，才允许根据其真实设计结果生成下一条 prompt。预期下一条可能是 Workbench UoW characterization/contract tests，而不是直接实现 UoW，除非 PF-P018 明确证明已有测试门禁足够。
+PF-P018 已执行，产物是 `workbench-write-uow-boundary-design.md`。下一步等待用户确认 PF-P018 `verified`。PF-P018 verified 后，建议生成并审查 `PF-P019 - Workbench UoW Contract Tests`。PF-P019 应只新增目标契约测试，不实现 UoW，不修改生产逻辑。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 执行结果
+
+- 已新增 UoW 边界设计文档，覆盖 Current State Inventory、UoW Boundary Matrix、目标 transaction sequence、Postgres/repository boundary、read model/dirty scope/outbox contract、failure mode matrix、test strategy 和 blocker list。
+- 已确认当前最关键 blocker：`RuntimeQueueRepository.enqueue_read_model_refresh()` 自己开启事务，不能直接加入 Workbench facts transaction；实现前需要 transaction-bound dirty/outbox writer 或等价拆分。
+- 已确认未来 UoW 必须将 facts、audit/history、dirty scope、outbox、source_version 和 durable idempotency 放入同一 PostgreSQL transaction。
+- 未修改任何 `.py` 文件、tests、SQL migration、前端、部署、CI/CD 或生产配置。
+- 未执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+
+#### 验证
+
+- `git status --short --branch`：Pass，只显示 4 个允许文档变更。
+- `git ls-files --others --exclude-standard`：Pass，只显示新增允许文档 `workbench-write-uow-boundary-design.md`。
+- `git diff --name-only`：Pass，只显示允许文档。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/workbench-write-uow-boundary-design\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\.md$|docs/architecture/backend-refactor/migration-state-log\.md$|docs/architecture/backend-refactor/refactor-prompts\.md$)'`：Pass，无输出。
+
+未经用户确认不得标记 `verified`。
 
 ## 维护规则
 

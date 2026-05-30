@@ -5769,12 +5769,12 @@ Expected Changed Files:
 - 如需修改其它文件，必须停止并说明原因。
 
 Required Verification:
-- `git status --short --branch`
-- `git ls-files --others --exclude-standard`
-- `git diff --name-only`
-- `git diff --check`
-- `test ! -e backend-go`
-- `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$)'`
+- `git status --short --branch`：Pass，只显示允许文档变更。
+- `git ls-files --others --exclude-standard`：Pass，只显示新增允许文档。
+- `git diff --name-only`：Pass，只显示允许文档。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$)'`：Pass，无输出。
   - 该命令必须无输出；否则 blocked。
 - 本轮不需要运行 Python tests，因为 PF-P018 不改生产代码或测试代码；如实际修改了任何 `.py` 文件，必须停止并说明违规范围。
 
@@ -5800,3 +5800,32 @@ Post-Flight:
 - PF-P018 明确禁止实现 UoW、修改事务语义、修复 stale write 或新增测试，避免越过设计阶段直接动生产逻辑。
 - PF-P018 要求输出逐 API UoW matrix、目标事务时序、failure mode matrix 和下一步测试 prompt，为后续实现前的机械门禁做准备。
 - PF-P018 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+变更：
+
+- 新增 `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`。
+- 更新 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`，补充 PF-P017/PF-P018 结果和下一条测试 prompt 建议。
+- 更新 `docs/architecture/backend-refactor/migration-state-log.md`，记录 PF-P018 implemented 状态。
+- 未修改任何生产代码、测试代码、SQL migration、前端、部署或生产配置。
+
+设计结论：
+
+- Workbench 写路径下一步需要 UoW，但实现前必须先写目标 contract tests。
+- 当前最大 blocker 是 `RuntimeQueueRepository.enqueue_read_model_refresh()` 内部开启独立事务，无法直接加入 Workbench facts transaction。
+- 未来 UoW 必须把 facts、audit/history、dirty scope、outbox、source_version 和 durable idempotency 放到同一 PostgreSQL transaction。
+- 下一条建议 prompt：`PF-P019 - Workbench UoW Contract Tests`。PF-P019 只新增目标契约测试，不实现 UoW。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$)'`
+
+本轮不运行 Python tests，因为 PF-P018 只改文档，不改 `.py` 文件或测试文件。
