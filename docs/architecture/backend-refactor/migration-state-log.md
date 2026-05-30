@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P032 - Workbench Ignore Row Stale Guard Migration` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P032 - Workbench Ignore Row Stale Guard Migration` (`planned`) |
+| 当前阶段 | `PF-P032 - Workbench Ignore Row Stale Guard Migration` 已实现，等待用户确认后进入 Merge Gate |
+| 当前 active prompt | `PF-P032 - Workbench Ignore Row Stale Guard Migration` (`implemented`) |
 | 最近 verified prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` |
 | 当前分支 | `codex/workbench-ignore-row-stale-guard` |
-| 最近验证 | PF-P031-MG 合入前与合入后 `main` 复验全部通过；已 push；PF-P032 已生成但未执行 |
-| 下一条允许任务 | 等待用户确认后执行 PF-P032；PF-P032 只迁移 ignore row stale guard，不迁移 cash special 或 withdraw submit |
+| 最近验证 | PF-P032 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试全部通过 |
+| 下一条允许任务 | 等待用户确认 PF-P032 后，生成并审查 `PF-P032-MG - Workbench Ignore Row Stale Guard Merge Gate`；不得直接进入 PF-P033 |
 
 ## Prompt 执行日志
 
@@ -3398,7 +3398,7 @@ PF-P031-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确�
 
 ### PF-P032 - Workbench Ignore Row Stale Guard Migration
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3427,6 +3427,35 @@ PF-P031-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确�
 - PF-P032 是 PF-P031-MG 后的正确下一步，因为 stale write 计划把 ignore row 列为 cancel link 后的下一条真实写 API 迁移候选。
 - PF-P032 必须保持小切片，只处理 ignore row；cash special 和 withdraw submit 留给后续 prompt。
 - 当前分支已从最新 `main` 创建：`codex/workbench-ignore-row-stale-guard`。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+
+#### 执行结果
+
+- RED：新增 `test_ignore_row_with_expected_open_rejects_confirmed_row` 后，当前实现返回 200 并创建 ignored case/override，测试失败。
+- GREEN：`WorkbenchWriteFacade.ignore_row` 在携带 `expected_versions` 时复用 stale precondition primitive，发现当前 invoice row 已有 active relation 时返回 `409 workbench_write_conflict`，并在 mutation 前退出。
+- Legacy no-expected-versions ignore row characterization 保持不变。
+- 未迁移 `cash special`。
+- 未迁移 `withdraw submit`。
+- 未修改 `server.py`、前端、SQL migration、部署、网关、auth/session 或 worker routing。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### 下一条 Prompt 上下文
+
+PF-P032 已完成实现和验证，等待用户确认。下一步应生成并审查 `PF-P032-MG - Workbench Ignore Row Stale Guard Merge Gate`，统一检查 PF-P032 的完整 diff；不得直接进入 PF-P033，不得迁移 `cash special` 或 `withdraw submit`。
 
 ## 维护规则
 

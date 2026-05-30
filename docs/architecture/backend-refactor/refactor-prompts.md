@@ -6024,7 +6024,7 @@ Post-Flight:
 
 ## PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -9585,3 +9585,24 @@ Post-Flight:
 - PF-P032 必须保持 legacy no-expected-versions 行为，避免破坏旧前端请求。
 - 如果当前没有 durable row version，本轮先完成 row active relation / row status guard 是合理的；不能伪造 schema 或引入 SQL migration。
 - PF-P032 完成后应优先进入 `PF-P032-MG`，不应直接开始 PF-P033。
+
+### 执行结果
+
+- RED：新增 `test_ignore_row_with_expected_open_rejects_confirmed_row` 后，当前实现返回 200 并创建 ignored case/override，测试失败。
+- GREEN：`WorkbenchWriteFacade.ignore_row` 在携带 `expected_versions` 时复用 stale precondition primitive；当当前 invoice row 已有 active relation 时返回 `409 workbench_write_conflict`，并在创建 ignored case/override 前退出。
+- 保持未携带 `expected_versions` 的 legacy ignore row 行为不变。
+- 未迁移 `cash special`。
+- 未迁移 `withdraw submit`。
+- 未修改 `server.py`、前端、SQL migration、部署、网关、auth/session 或 worker routing。
+
+### 验证结果
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+### 下一步
+
+等待用户确认 PF-P032 后，生成并审查 `PF-P032-MG - Workbench Ignore Row Stale Guard Merge Gate`；不得直接进入 PF-P033。

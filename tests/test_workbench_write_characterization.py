@@ -378,6 +378,39 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         ignored_case_id = _json_response(ignore_response)["exception_case_id"]
         self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"][ignored_case_id]["status"], "ignored")
 
+    def test_ignore_row_with_expected_open_rejects_confirmed_row(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        invoice_row_id = row_ids[2]
+
+        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+            confirm_response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-IGNORE-CONFIRMED"},
+            )
+            ignore_response = self._post(
+                app,
+                "/api/workbench/actions/ignore-row",
+                {
+                    "month": "2026-03",
+                    "row_id": invoice_row_id,
+                    "expected_versions": {f"row:{invoice_row_id}": "open"},
+                },
+            )
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        self.assertEqual(ignore_response.status_code, 409, ignore_response.body)
+        ignore_payload = _json_response(ignore_response)
+        self.assertEqual(ignore_payload["error"], "workbench_write_conflict")
+        self.assertEqual(ignore_payload["conflict"]["action"], "ignore_row")
+        self.assertIn(ignore_payload["conflict"]["reason"], {"stale_row_status", "stale_relation_identity"})
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-IGNORE-CONFIRMED"))
+        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
+        self.assertNotIn(invoice_row_id, app._workbench_override_service.snapshot()["row_overrides"])
+        self.assertEqual(pair_relation_persist.call_count, 1)
+        self.assertEqual(read_model_persist.call_count, 1)
+
     def test_stale_cancel_after_replaced_cancels_current_relation_by_row_id(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)

@@ -336,6 +336,29 @@ class WorkbenchWriteFacade:
             return exc
         return None
 
+    def _ignore_row_stale_conflict(
+        self,
+        payload: dict[str, object],
+        row: dict[str, object],
+    ) -> WorkbenchWriteConflict | None:
+        expected_versions = payload.get("expected_versions")
+        if not isinstance(expected_versions, dict) or not expected_versions:
+            return None
+        row_id = str(row.get("id") or "")
+        active_relation = self._pair_relation_service.get_active_relation_by_row_id(row_id)
+        current_row_status = "confirmed" if isinstance(active_relation, dict) else "open"
+        try:
+            assert_workbench_stale_preconditions(
+                _WorkbenchWritePreconditionCommand(
+                    action_name="ignore_row",
+                    expected_versions=dict(expected_versions),
+                    payload={"current_row_status": current_row_status},
+                )
+            )
+        except WorkbenchWriteConflict as exc:
+            return exc
+        return None
+
     def preview_withdraw_link(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
@@ -1031,6 +1054,13 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_ignore_row_request", "message": "ignore_row only supports invoice rows."},
+            )
+        conflict = self._ignore_row_stale_conflict(payload, row)
+        if conflict is not None:
+            conflict_payload = conflict.to_response_payload()
+            return WorkbenchWriteResult(
+                HTTPStatus(conflict.status_code),
+                dict(conflict_payload["payload"]),
             )
         try:
             changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
