@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已执行，本地 `main` 已完成 fast-forward merge，等待用户确认 `verified` |
-| 当前 active prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P009 - Workbench Query Fallback and SSE Mitigation (Slice D-B)` |
+| 当前阶段 | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已由用户确认 `verified`，等待 push `origin/main` |
+| 当前 active prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P009-MG 已执行到 `implemented`：feature branch 与 `main` 双重复验通过；本地 `main` 已 fast-forward 到 `b58bd5a0`；未执行 Traffic Gate、部署或 push |
-| 下一条允许任务 | 用户确认后将 PF-P009-MG 标记为 `verified`；push `origin/main` 需要用户明确确认；下一条 prompt 必须从最新 `main` 新建分支生成 |
+| 最近验证 | PF-P009-MG 已由用户确认 `verified`：feature branch 与 `main` 双重复验通过；本地 `main` 已 fast-forward 到 `b58bd5a0`；未执行 Traffic Gate、部署或 push |
+| 下一条允许任务 | push `origin/main`；push 完成后从最新 `main` 新建分支，生成并审查 `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` |
 
 ## Prompt 执行日志
 
@@ -1201,7 +1201,7 @@ PF-P009 已由用户确认 `verified`。下一步应执行已生成并审查的 
 
 ### PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -1261,7 +1261,7 @@ PF-P009 已由用户确认 `verified`。下一步应执行已生成并审查的 
 
 #### 下一条 Prompt 上下文
 
-下一步等待用户确认 PF-P009-MG 是否可标记为 `verified`。push `origin/main` 需要用户明确确认；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
+PF-P009-MG 已由用户确认 `verified`。下一步 push `origin/main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成，建议生成并审查 `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)`。
 
 ## 维护规则
 

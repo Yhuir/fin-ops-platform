@@ -453,7 +453,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 - 禁止：一次性删除 legacy path；禁止无测试地改 SSE 行为。
 - Rollback：按 feature flag 或小提交回退单项风险。
 - 验证：compatibility tests、SSE tests、dashboard/metrics tests。
-- 当前 prompt：`PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已执行，状态 `implemented`，等待用户确认 `verified`。
+- 当前 prompt：`PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已由用户确认 `verified`，等待 push `origin/main`。
 - Slice D-B：`PF-P009 - Workbench Query Fallback and SSE Mitigation (Slice D-B)` 已由用户确认 `verified`。
 - Slice D-A：`PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)` 已由用户确认 `verified`；本轮不单独执行 PF-P008-MG，后续由 PF-P009-MG 统一合并。
 - Slice D-A 已锁定：
@@ -481,8 +481,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
   - Observability 保持 `Application.handle_request` app-shell `request_database_timing` 边界；本轮未新增子查询级细粒度指标。
   - PF-P009-MG 执行结果：本地 `main` 已 fast-forward merge `codex/workbench-query-slice-d-prompt`，功能提交为 `b58bd5a0 refactor(workbench): mitigate query fallback and sse stream cleanup`；feature branch 与 `main` 双重复验均通过。
   - PF-P009-MG 范围：只合入 PF-P008 + PF-P009 的 Expected Changed Files；未修改 SQL migration、前端、网关、部署配置、生产配置、Worker refresh、builder、read model repository SQL、RabbitMQ、Outbox、Dirty Scope、Workbench 写路径或 `WorkbenchQueryFacade`。
-  - PF-P009-MG 边界：未执行 Traffic Gate、未部署服务器、未 push `origin/main`；等待用户确认后才能标记 `verified`。
-  - 下一步：用户确认 PF-P009-MG `verified` 后，push `origin/main` 需要明确确认；下一条 prompt 必须从最新 `main` 新建分支生成。
+  - PF-P009-MG 边界：未执行 Traffic Gate、未部署服务器、未 push `origin/main`；已由用户确认 `verified`。
+  - 下一步：push `origin/main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
 
 ## Guard Compatibility
 
