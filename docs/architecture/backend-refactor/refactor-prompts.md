@@ -2601,3 +2601,195 @@ Post-Flight:
 - main 上 mandatory checks 全部通过。
 - 未执行 Traffic Gate，未部署服务器。
 - 后续：下一条 prompt 必须从最新 `main` 新建分支生成，不得在 `main` 或旧功能分支继续实现 Slice D。
+
+## PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)
+
+状态：`planned`
+
+### 目标
+
+生成 Workbench Query Slice D 的第一步测试锁定 prompt。PF-P008 只补充或整理 characterization tests 与文档，锁定 legacy `GET /api/workbench` fallback、row detail fallback、SSE 长连接行为和观测性基线；不做生产代码优化，不删除 fallback，不修改 SSE 行为。
+
+### Prompt
+
+```text
+/goal
+执行 PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)。
+
+目标：只为 Workbench Query Slice D 增加和整理 characterization tests，锁定当前 fallback、SSE 和 observability 行为，为后续逐项优化提供安全网。不得直接优化或删除 fallback，不得修改生产代码。
+
+Role:
+你是一位精通 Python 遗留系统 characterization testing、Read Model freshness、SSE 长连接测试、可观测性基线和 Clean Architecture 的资深后端工程师。
+
+Context:
+当前仓库执行 Python-first 后端架构模块化重构。PF-P005 已建立 Workbench query/read-model characterization tests；PF-P006 已抽出 `WorkbenchQueryFacade` 并薄化 summary / groups / group detail / refresh-status handler；PF-P007 已收口 groups Redis cache/freshness gate；PF-P007-MG 已 verified 并同步到 `origin/main`。当前进入 Slice D 的第一步，但本 prompt 只做测试锁定，不实现 fallback 优化。
+
+Pre-Flight:
+必须先读取：
+- AGENTS.md
+- README.md
+- ARCHITECTURE.md
+- backend/README.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/workbench-read-model-query-plan.md
+- docs/architecture/backend-refactor/runtime-call-chain.md
+- docs/architecture/backend-refactor/platform-runtime-boundary-audit.md
+- docs/architecture/backend-refactor/read-model-and-external-services.md
+- docs/architecture/backend-refactor/ai-execution-rules.md
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/workbench_query_facade.py
+- backend/src/fin_ops_platform/services/live_workbench_service.py
+- backend/src/fin_ops_platform/services/workbench_query_service.py
+- tests/test_workbench_sql_runtime.py
+- tests/test_workbench_v2_api.py
+- tests/test_workbench_query_facade.py
+- tests/test_api_performance_metrics.py
+- web/src/features/workbench/api.ts
+- web/src/features/workbench/types.ts
+
+必须确认：
+- `migration-state-log.md` 中 PF-P007-MG 状态为 `verified`。
+- 当前 active prompt 是 `PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)`。
+- 当前分支必须是 `codex/workbench-query-slice-d-prompt` 或同一 PF-P008 功能分支；不得在 `main` 上执行。
+- 本轮是 characterization-test prompt，不是业务实现 prompt、不是 Merge Gate、不是 Traffic Gate。
+- 本轮不得修改生产代码；如果发现必须改生产代码才能测试，必须停止并记录为 blocked。
+
+Required Discovery:
+执行前必须用代码、CodeGraph 或 targeted search 确认并在执行结果中记录：
+1. Legacy `GET /api/workbench`：
+   - `_handle_api_workbench(...)`。
+   - `_handle_api_workbench_from_sql_read_model(...)`。
+   - `_build_api_workbench_payload(...)`。
+   - `_requires_sql_read_model_runtime()` 和 `api_sql_repository_unavailable` refresh enqueue 行为。
+2. Row detail：
+   - `_handle_api_workbench_row_detail(...)`。
+   - `_get_api_workbench_row_detail_payload(...)`。
+   - `LiveWorkbenchService.get_row_detail(...)`。
+   - `_resolve_rows_from_cached_read_models(...)`。
+   - `_workbench_api_routes.get_row_detail(...)`。
+   - `_workbench_override_service.apply_to_row(...)` 应用顺序。
+3. SSE：
+   - `_handle_api_workbench_events(...)`。
+   - `_workbench_refresh_status_payload_for_scope(...)`。
+   - `_workbench_refresh_status_event_name(...)`。
+   - `AppHealthService.serialize_sse_event(...)`。
+   - 当前 SSE 是 polling refresh status，不是 Redis PubSub。
+4. Observability：
+   - `Application.handle_request(...)` 的 `request_database_timing()` 包裹。
+   - `ApiPerformanceRecorder.record_request(...)`。
+   - Workbench query path 是否在 app shell 层保留 route/method/status/database timing。
+
+Allowed Scope:
+- 允许新增或调整 Workbench query/read-model characterization tests。
+- 优先修改：
+  - `tests/test_workbench_sql_runtime.py`
+  - `tests/test_workbench_v2_api.py`
+  - `tests/test_api_performance_metrics.py`（仅当需要补 app-shell observability 基线）
+- 允许更新文档：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+- 允许复用现有 fake repository、fake Redis、fake queue、patch helpers。
+- 允许在测试中用 bounded generator、patched sleep 或手动关闭 stream 来锁定当前 SSE 可测试行为。
+
+Required Test Work:
+至少补齐以下测试或证明已有测试等价覆盖，并在 Post-Flight 中逐项记录：
+1. Legacy `GET /api/workbench` compatibility：
+   - SQL read model hit 时必须直接返回 SQL payload，且不得调用 legacy builder。
+   - SQL read model missing 时必须 enqueue refresh 并返回 `202 refreshing`。
+   - PostgreSQL production runtime / require SQL read model 时，repository 不可用不得 fallback legacy builder，必须返回 `503 read_model_unavailable` 并 enqueue `api_sql_repository_unavailable`。
+   - legacy / non-production runtime 下当前允许 fallback legacy builder 的行为必须被明确锁定，不能在本轮改掉。
+2. Row detail fallback：
+   - 优先使用 `LiveWorkbenchService.get_row_detail(...)`。
+   - live miss 后优先读取 cached read model。
+   - opaque OA row id 在没有 cached read model 时不得触发 full OA sync，必须保持 404/KeyError 行为。
+   - route service fallback 的触发条件必须被锁定。
+   - `apply_to_row(...)` 必须在最终 payload 返回前应用一次，且字段完整度保持当前契约。
+3. SSE characterization：
+   - Response 必须保留 `Content-Type: text/event-stream`、`Cache-Control: no-cache, no-transform`、`Connection: keep-alive`、`X-Accel-Buffering: no`。
+   - 必须锁定至少一个 refresh status event 和一个 `heartbeat` event 的格式。
+   - event name mapping 必须覆盖 fresh / refreshing / stale / failed 或记录已有测试覆盖。
+   - 必须确认当前 SSE 不使用 Redis PubSub；不得新增 PubSub。
+   - 如无法可靠测试客户端断开后的 generator cancellation，不得改生产代码，只能在 `workbench-read-model-query-plan.md` 记录为后续实现风险。
+4. Observability baseline：
+   - Workbench query request 经过 `Application.handle_request(...)` 时，`ApiPerformanceRecorder` 能记录 method、route path、status code、duration 和 database timing。
+   - `request_database_timing` 必须仍在 app shell 层，不得移动到 `WorkbenchQueryFacade`。
+   - 不要求本轮新增细粒度 SQL 子查询标签；只锁定当前 app-shell 观测基线和缺口。
+5. Contract preservation：
+   - PF-P005 标记的 backend-only / contract-mismatch 字段必须继续保留。
+   - 不得因为写测试而清理字段、改 response shape 或改前端 mapper。
+
+Forbidden Scope:
+- 不修改生产代码，包括 `backend/src/fin_ops_platform/app/server.py`、`workbench_query_facade.py`、`live_workbench_service.py`、`workbench_query_service.py`。
+- 不修改 SQL migration。
+- 不修改前端代码。
+- 不修改 Nginx、Vite、Caddy、部署配置或生产配置。
+- 不删除 legacy `GET /api/workbench` fallback。
+- 不收口 row detail fallback。
+- 不改变 SSE event stream、sleep interval、headers、heartbeat、event names 或 cancellation 行为。
+- 不修改 worker refresh、builder、repository SQL 重写、RabbitMQ、Outbox、Dirty Scope 事实源。
+- 不修改 Workbench 写路径，包括 confirm/cancel、ignore/unignore、exception apply/revert、reconciliation write、pair relation write。
+- 不开始 Workbench matching/candidates、Turnover Ledger、Batch Accounting、Bankdetail、Invoices、Imports、Tax / Cost / ETC、Search 或 Ops 模块迁移。
+- 不执行 Merge Gate。
+- 不执行 Traffic Gate。
+- 不部署服务器。
+- 不 push 到 `origin/main`。
+- 不访问生产 DB、Redis、RabbitMQ、OA Mongo、OA MySQL、MinIO/S3。
+- 不记录 DB password、JWT secret、OA token、cookie 实值或生产敏感 URL。
+- 未经用户确认，不得把 PF-P008 标记为 `verified`。
+
+Mandatory Checks:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --stat`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+- Row detail targeted tests：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_row_detail_prefers_cached_read_model_before_query_service_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_opaque_oa_row_detail_prefers_month_read_model_without_full_oa_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_opaque_oa_row_detail_without_cache_returns_404_without_full_oa_sync tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_row_detail_supports_oa_bank_and_invoice -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_api_performance_metrics -v`
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+- Production code immutability check：
+  - `test -z "$(git diff --name-only -- backend/src/fin_ops_platform web postgres deploy)"`
+  - 必须确认生产代码、前端、migration、deploy 没有 diff；本轮只允许测试和文档变化。
+- Facade 上帝对象注入静态检查：
+  - `rg -n "WorkbenchQueryFacade\\([^\\n]*(Application|RuntimeRepositories|RuntimeRepositoryContext|ApplicationStateStore|StateStoreProtocol|state_store)" backend/src/fin_ops_platform tests` 必须无输出。
+- Facade mock 静态检查：
+  - `rg -n "mock\\.patch\\(.+WorkbenchQueryFacade|patch\\(.+workbench_query_facade|monkeypatch.+WorkbenchQueryFacade|WorkbenchQueryFacade.*Mock|Mock.*WorkbenchQueryFacade" tests/test_workbench_sql_runtime.py` 必须无输出。
+- Observability 边界静态检查：
+  - `test ! -f backend/src/fin_ops_platform/services/workbench_query_facade.py || ! rg -n "request_database_timing" backend/src/fin_ops_platform/services/workbench_query_facade.py`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 记录 PF-P008 执行结果。
+  - 记录变更文件、测试命令和结果、fallback/SSE/observability 事实、风险和下一步建议。
+  - 将 PF-P008 状态设为 `implemented` 或 `blocked`，不得直接设为 `verified`。
+- 更新 `refactor-prompts.md` 的 PF-P008 状态和执行结果。
+- 更新 `workbench-read-model-query-plan.md` 的 Slice D-A 测试锁定结果和后续 Slice D-B 实现输入。
+- 最终回复必须明确：
+  - 是否只修改了测试和文档。
+  - 是否修改了生产代码、SQL migration、前端、网关、部署或生产配置。
+  - 是否执行 Merge Gate 或 Traffic Gate。
+  - 哪些验证通过。
+  - 哪些 Slice D 风险仍未关闭。
+  - 下一步建议做什么。
+```
+
+### Gate Scope
+
+- Merge Gate：不涉及。PF-P008 只生成和执行 characterization tests，不 commit/merge 到 `main`。
+- Traffic Gate：不涉及。PF-P008 不切流、不部署、不修改网关、不改变 SSE 代理配置。
+- Test Gate：涉及。PF-P008 必须先锁定 legacy fallback、row detail fallback、SSE 和 observability 当前行为，再允许后续实现型 prompt 缩小风险。
+
+### 审查结论
+
+- PF-P008 边界正确：它把 Slice D 拆成“先测试锁定，再实现优化”的生产级流程，避免直接删除 legacy path 或改 SSE。
+- Prompt 明确禁止生产代码变更，因此不会在本轮改变用户可见行为。
+- Prompt 覆盖 Slice D 的四个高风险点：legacy `GET /api/workbench` fallback、row detail 多级 fallback、SSE 长连接 / heartbeat / no-buffering header、app-shell observability。
+- Prompt 保留 PF-P005/PF-P006/PF-P007 约束：不删 backend-only 字段、不 mock facade 降级黑盒测试、不把 `request_database_timing` 下沉到 facade。
+- Prompt 明确不执行 Merge Gate、Traffic Gate、部署或 push。
+- PF-P008 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。

@@ -448,10 +448,12 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 ### Slice D：优化请求线程重算或 fallback 风险
 
 - 目标：处理 `GET /api/workbench` legacy fallback、row detail fallback、SSE long polling cancellation、观测性粒度。
+- 执行策略：先做 Slice D-A characterization tests，锁定当前 fallback / SSE / observability 行为；PF-P008 verified 后再生成 Slice D-B 实现型 prompt，逐项缩小 fallback 或优化 SSE。
 - 允许：在测试锁定后逐项缩小 fallback。
 - 禁止：一次性删除 legacy path；禁止无测试地改 SSE 行为。
 - Rollback：按 feature flag 或小提交回退单项风险。
 - 验证：compatibility tests、SSE tests、dashboard/metrics tests。
+- 当前 prompt：`PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)` 已生成并审查，状态 `planned`，等待用户确认执行。
 
 ## Guard Compatibility
 

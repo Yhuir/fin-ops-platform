@@ -51,12 +51,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已验证并已同步到 `origin/main` |
-| 当前 active prompt | 无，等待从最新 `main` 新建分支生成下一条 prompt |
+| 当前阶段 | `PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)` (`planned`) |
 | 最近 verified prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | 用户已确认 PF-P007-MG verified；PF-P007-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`git push origin main` 已通过；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 从最新 `main` 新建分支生成下一条 prompt；不得在 `main` 或旧功能分支继续实现 Slice D |
+| 当前分支 | `codex/workbench-query-slice-d-prompt` |
+| 最近验证 | 用户已确认 PF-P007-MG verified；PF-P007-MG 已在 feature branch 和 `main` 上通过 mandatory checks；`git push origin main` 已通过；当前分支从最新 `origin/main` 创建；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 等待用户确认后执行 PF-P008；不得直接执行 Slice D 实现或删除 fallback |
 
 ## Prompt 执行日志
 
@@ -1021,6 +1021,39 @@ PF-P007-MG 已由用户确认 `verified`，并已同步到 `origin/main`。本�
 - Facade 上帝对象注入静态检查：无输出，通过。
 - Facade mock 静态检查：无输出，通过。
 - `request_database_timing` 边界静态检查：通过。
+
+### PF-P008 - Workbench Query Fallback / SSE / Observability Characterization (Slice D-A)
+
+状态：`planned`
+
+#### 范围
+
+- 只生成和审查 Workbench Query Slice D 的第一步：fallback、SSE 和 observability characterization tests。
+- 锁定兼容期 `GET /api/workbench` 的 SQL read model / legacy builder fallback 行为。
+- 锁定 row detail 的 `LiveWorkbenchService`、cached read model、`WorkbenchQueryService` route fallback 顺序和字段一致性。
+- 锁定 `GET /api/workbench/events` SSE headers、event name、heartbeat 和有限迭代行为；记录客户端断开 / generator cancellation 未覆盖的缺口。
+- 锁定 `request_database_timing` / API performance recorder 对 Workbench query 关键路径的观测性基线。
+
+#### 分支
+
+- `codex/workbench-query-slice-d-prompt`
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+
+#### 计划约束
+
+- PF-P008 不是实现型 fallback 优化 prompt。
+- PF-P008 不得修改生产代码，不得删除 legacy path，不得改变 SSE 行为。
+- PF-P008 不执行 Merge Gate，不执行 Traffic Gate，不部署服务器，不 push `origin/main`。
+- PF-P008 只能增加或整理 tests 与文档；执行完成后状态只能为 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P008 必须先执行测试锁定。只有 PF-P008 verified 后，才能根据真实测试结果生成后续实现型 prompt，用于逐项缩小 legacy `GET /api/workbench` fallback、row detail fallback 或 SSE cancellation 风险。
 
 ## 维护规则
 
