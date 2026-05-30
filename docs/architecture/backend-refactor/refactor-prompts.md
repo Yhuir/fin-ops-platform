@@ -5341,3 +5341,43 @@ Post-Flight:
 - PF-P017 明确排除 `/matching/run`、matching dirty worker、RuntimeWorker loop 和 worker topology，避免把 runtime 边界混入 HTTP write facade。
 - PF-P017 要求抽离前后都运行 PF-P016 characterization tests，且禁止在测试中 mock 掉 facade，保证真实 HTTP Handler -> Facade -> service/callback 链路仍被覆盖。
 - PF-P017 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+变更：
+
+- 扩展 `backend/src/fin_ops_platform/services/workbench_write_facade.py`，新增以下 facade methods：
+  - `preview_withdraw_link`
+  - `withdraw_link`
+  - `confirm_cash_pass_through`
+  - `confirm_cash_ticket_purchase`
+  - `cancel_cash_special`
+  - `update_bank_exception`
+  - `oa_bank_exception`
+  - `confirm_personal_advance_repayment`
+- 薄化 `backend/src/fin_ops_platform/app/server.py` 中对应 HTTP handlers，使其只做 parse / freshness guard / request_id / facade call / response wrapping。
+- 保留 legacy private wrappers 作为兼容入口，但 wrapper 已降级为 facade delegate。
+- 更新 `migration-state-log.md`、`workbench-remaining-write-facade-plan.md`、`workbench-writes-and-matching-plan.md` 记录 PF-P017 结果。
+
+验证：
+
+- 抽离前：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，29 tests。
+- 抽离后：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`：通过，1 test。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation -v`：通过，1 test。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v`：通过，1 test。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background -v`：通过，1 test。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，12 tests。
+- `python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_write_facade.py`：通过。
+- `git diff --check`：通过。
+- `git ls-files --others --exclude-standard`：无输出。
+
+残余风险：
+
+- PF-P017 不修复 stale write、duplicate submit、facts 与 dirty/outbox 非同事务、scheduling failure after mutation。
+- PF-P017 未迁移 `/matching/run`、matching dirty worker 或 RuntimeWorker topology。
+- PF-P017 未执行 Merge Gate、Traffic Gate、push 或部署。
+- PF-P017 仍需用户确认后才能标记 `verified`。

@@ -325,7 +325,7 @@ Current blocker：`_execute_derived_data_lifecycle_event` and `_schedule_workben
   - OA-bank exception duplicate/failure。
   - personal advance repayment duplicate/stale/persistence failure。
 
-用户已确认 PF-P015 `verified`。用户已确认 PF-P016 `verified`。PF-P017 已生成并审查，等待执行。
+用户已确认 PF-P015 `verified`。用户已确认 PF-P016 `verified`。PF-P017 已执行并进入 `implemented`，等待用户确认。
 
 PF-P016 未修复 stale write 或实现 UoW。它的产物是黑盒 characterization tests 和必要的文档回写。PF-P017 应执行 remaining facade extraction；UoW 仍应等剩余写入口完成行为保持型 facade 边界后再进入。
 
@@ -406,4 +406,46 @@ PF-P017 已生成并审查，目标是把 PF-P016 锁定过的剩余 HTTP 写入
 - UoW、transaction manager、outbox、dirty scope 结构调整。
 - stale write、duplicate submit、rollback、scheduling failure 语义修复。
 
-PF-P017 执行后，如果 PF-P016/PF-P012 行为锁定测试仍全部通过，下一步才考虑是否进入 PF-P017-MG 或先补极小修正 prompt。
+PF-P017 执行后，PF-P016/PF-P012 行为锁定测试和平台边界 guard 均已通过。下一步应先等待用户确认 PF-P017 是否可标记 `verified`，确认后再生成 `PF-P017-MG`；不得在 MG 前进入 UoW 或 stale write 修复。
+
+## 10. PF-P017 Extraction Results
+
+PF-P017 将剩余 HTTP 写入口的非 HTTP 编排迁入 `WorkbenchWriteFacade`，未改变 PF-P016 锁定的当前行为。
+
+### 已迁入 `WorkbenchWriteFacade`
+
+| Entry | Facade method | 备注 |
+| --- | --- | --- |
+| `withdraw-link/preview` | `preview_withdraw_link` | 保持原 preview payload、bad request error code 和 relation group 结构。 |
+| `withdraw-link` | `withdraw_link` | 保持 duplicate submit、stale preview submit、scheduling failure after mutation 当前语义。 |
+| `confirm-cash-pass-through` | `confirm_cash_pass_through` | 保持 special metadata update、history append 和重复调度当前语义。 |
+| `confirm-cash-ticket-purchase` | `confirm_cash_ticket_purchase` | 保持 ticket/cash amount 校验、project 要求和 response payload。 |
+| `cancel-cash-special` | `cancel_cash_special` | 保持 clear special metadata、history append 和重复调度当前语义。 |
+| `update-bank-exception` | `update_bank_exception` | 复用 legacy exception application plumbing，保持 active relation conflict 和 scheduling failure 当前语义。 |
+| `oa-bank-exception` | `oa_bank_exception` | 覆盖普通 OA+bank path 和 invoice compatibility path。 |
+| `confirm-personal-advance-repayment` | `confirm_personal_advance_repayment` | 保持 settlement case、pair relation、rollback 和 scheduling failure 当前语义。 |
+
+### 仍保留在 `server.py`
+
+- HTTP route dispatch。
+- `_load_json_body`。
+- `_workbench_write_freshness_guard`。
+- request_id 透传。
+- `_workbench_write_response(...)`。
+- route-level timing / App Shell 层调度。
+- legacy private wrappers：`_handle_live_workbench_withdraw_link`、`_handle_live_workbench_update_bank_exception`、`_handle_live_workbench_oa_bank_exception`、`_handle_live_workbench_confirm_personal_advance_repayment` 仍保留给既有测试和内部兼容调用，但实现已降级为 facade delegate。
+
+### 本轮未处理
+
+- 未迁移 `/matching/run`。
+- 未改 matching dirty worker、RuntimeWorker loop 或 worker topology。
+- 未设计或实现 UoW。
+- 未修复 stale write、duplicate submit、rollback 或 scheduling failure 当前语义。
+
+### 验证结果
+
+- 抽离前后 `tests.test_workbench_write_characterization` 均通过，抽离后 29 tests。
+- `tests.test_workbench_dirty_queue_wiring` 通过，17 tests。
+- PF-P017 指定的 4 个 `tests.test_workbench_v2_api.WorkbenchV2ApiTests` 精确回归均通过。
+- `tests.test_platform_runtime_boundary_guards` 通过，12 tests。
+- `python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_write_facade.py` 通过。

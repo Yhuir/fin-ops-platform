@@ -2095,6 +2095,10 @@ class Application:
             scope_keys_for_rows=self._scope_keys_for_rows,
             resolve_live_rows_direct=self._resolve_live_rows_direct,
             resolve_live_row=self._resolve_live_row,
+            relation_groups=self._relation_groups,
+            withdraw_rows_and_after_relations=self._withdraw_rows_and_after_relations,
+            amount_check_for_rows_by_type=self._amount_check_for_rows_by_type,
+            transaction_amount_for_row_id=self._workbench_transaction_amount_for_row_id,
             build_workbench_payload=self._build_api_workbench_payload,
             build_ignored_rows_payload=self._build_api_workbench_ignored_rows_payload,
             save_exception_cases_snapshot=self._save_workbench_exception_cases_snapshot,
@@ -2103,6 +2107,7 @@ class Application:
             persist_candidate_matches_best_effort=self._persist_workbench_candidate_matches_best_effort,
             restore_exception_write_snapshots=self._restore_workbench_exception_write_snapshots,
             restore_exception_override_snapshots=self._restore_workbench_exception_override_snapshots,
+            restore_exception_pair_snapshots=self._restore_workbench_exception_pair_snapshots,
             schedule_pair_relation_persist=self._schedule_workbench_pair_relation_persist,
             consume_reconciliation_decisions=self._consume_workbench_reconciliation_decisions,
             restore_pair_relation_snapshot=self._restore_workbench_pair_relation_snapshot,
@@ -2127,6 +2132,19 @@ class Application:
         self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)
         self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
         self._configure_workbench_exception_application_service()
+
+    def _restore_workbench_exception_pair_snapshots(
+        self,
+        *,
+        previous_exception_snapshot: dict[str, object],
+        previous_pair_snapshot: dict[str, object],
+    ) -> None:
+        self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
+        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+        self._configure_workbench_exception_application_service()
+
+    def _workbench_transaction_amount_for_row_id(self, row_id: str) -> object:
+        return self._import_service.get_transaction(row_id).amount
 
     def _restore_workbench_exception_override_snapshots(
         self,
@@ -9812,19 +9830,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        try:
-            preview = self._preview_withdraw_link(payload)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": str(exc).strip("'") or "workbench_pair_relation_no_withdraw_history", "message": str(exc)},
-            )
-        except (TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_withdraw_link_preview_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, preview)
+        result = self._workbench_write_facade().preview_withdraw_link(payload)
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_withdraw_link(self, body: str | None, *, request_id: str | None = None) -> Response:
         payload, error = self._load_json_body(body)
@@ -9833,7 +9840,8 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        return self._handle_live_workbench_withdraw_link(payload, request_id=request_id)
+        result = self._workbench_write_facade().withdraw_link(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_confirm_cash_pass_through(
         self,
@@ -9847,51 +9855,8 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        try:
-            month = str(payload["month"])
-            row_ids = self._cash_special_row_ids(payload)
-            note = str(payload.get("note") or payload.get("comment") or "").strip()
-            relation = self._active_relation_for_cash_special(row_ids)
-            self._validate_cash_pass_through_relation(relation)
-            cash_amount = self._cash_special_cash_amount(payload, relation)
-            special_metadata = {
-                "special_type": CASH_PASS_THROUGH_MODE,
-                "cash_amount": cash_amount,
-                "ticket_cost_amount": "0.00",
-                "cost_policy": "exclude_all",
-                "note": note,
-                "created_by": "system",
-                "updated_by": "system",
-            }
-            updated_relation, _history = self._workbench_pair_relation_service.update_special_metadata_for_row_ids(
-                row_ids,
-                special_metadata=special_metadata,
-                updated_by="system",
-                note=note,
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cash_pass_through_request", "message": str(exc)},
-            )
-        self._after_cash_special_relation_update(
-            month=month,
-            relation=updated_relation,
-            request_id=request_id,
-            action_name="confirm_cash_pass_through",
-        )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "confirm_cash_pass_through",
-                "month": month,
-                "case_id": str(updated_relation.get("case_id") or ""),
-                "affected_row_ids": list(updated_relation.get("row_ids") or []),
-                "special_metadata": dict(updated_relation.get("special_metadata") or {}),
-                "message": "已确认现金往来过账。",
-            },
-        )
+        result = self._workbench_write_facade().confirm_cash_pass_through(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_confirm_cash_ticket_purchase(
         self,
@@ -9905,58 +9870,8 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        try:
-            month = str(payload["month"])
-            row_ids = self._cash_special_row_ids(payload)
-            note = str(payload.get("note") or payload.get("comment") or "").strip()
-            relation = self._active_relation_for_cash_special(row_ids)
-            self._validate_cash_ticket_purchase_relation(relation)
-            ticket_cost_amount = self._required_non_negative_amount(payload.get("ticket_cost_amount"), "ticket_cost_amount")
-            cash_amount = self._required_non_negative_amount(payload.get("cash_amount"), "cash_amount")
-            project_id = str(payload.get("project_id") or "").strip()
-            project_name = str(payload.get("project_name") or "").strip()
-            if Decimal(ticket_cost_amount) > Decimal("0.00") and not (project_id or project_name):
-                raise ValueError("project_id or project_name is required when ticket_cost_amount is greater than 0.")
-            special_metadata = {
-                "special_type": CASH_TICKET_PURCHASE_MODE,
-                "cash_amount": cash_amount,
-                "ticket_cost_amount": ticket_cost_amount,
-                "project_id": project_id,
-                "project_name": project_name,
-                "cost_policy": "include_ticket_cost_only",
-                "note": note,
-                "created_by": "system",
-                "updated_by": "system",
-            }
-            updated_relation, _history = self._workbench_pair_relation_service.update_special_metadata_for_row_ids(
-                row_ids,
-                special_metadata=special_metadata,
-                updated_by="system",
-                note=note,
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cash_ticket_purchase_request", "message": str(exc)},
-            )
-        self._after_cash_special_relation_update(
-            month=month,
-            relation=updated_relation,
-            request_id=request_id,
-            action_name="confirm_cash_ticket_purchase",
-        )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "confirm_cash_ticket_purchase",
-                "month": month,
-                "case_id": str(updated_relation.get("case_id") or ""),
-                "affected_row_ids": list(updated_relation.get("row_ids") or []),
-                "special_metadata": dict(updated_relation.get("special_metadata") or {}),
-                "message": "已确认现金往来买票情况。",
-            },
-        )
+        result = self._workbench_write_facade().confirm_cash_ticket_purchase(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_cancel_cash_special(
         self,
@@ -9970,38 +9885,8 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        try:
-            month = str(payload["month"])
-            row_ids = self._cash_special_row_ids(payload)
-            note = str(payload.get("note") or payload.get("comment") or "").strip()
-            updated_relation, _history = self._workbench_pair_relation_service.clear_special_metadata_for_row_ids(
-                row_ids,
-                updated_by="system",
-                note=note,
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cancel_cash_special_request", "message": str(exc)},
-            )
-        self._after_cash_special_relation_update(
-            month=month,
-            relation=updated_relation,
-            request_id=request_id,
-            action_name="cancel_cash_special",
-        )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "cancel_cash_special",
-                "month": month,
-                "case_id": str(updated_relation.get("case_id") or ""),
-                "affected_row_ids": list(updated_relation.get("row_ids") or []),
-                "special_metadata": dict(updated_relation.get("special_metadata") or {}),
-                "message": "已取消现金往来特殊处理。",
-            },
-        )
+        result = self._workbench_write_facade().cancel_cash_special(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_update_bank_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -10010,7 +9895,8 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        return self._handle_live_workbench_update_bank_exception(payload)
+        result = self._workbench_write_facade().update_bank_exception(payload)
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_oa_bank_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -10019,10 +9905,8 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        month = str(payload.get("month", ""))
-        if self._live_workbench_service.has_rows_for_month(month):
-            return self._handle_live_workbench_oa_bank_exception(payload)
-        return self._handle_live_workbench_oa_bank_exception(payload)
+        result = self._workbench_write_facade().oa_bank_exception(payload)
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_confirm_personal_advance_repayment(
         self,
@@ -10036,7 +9920,8 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        return self._handle_live_workbench_confirm_personal_advance_repayment(payload, request_id=request_id)
+        result = self._workbench_write_facade().confirm_personal_advance_repayment(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_cancel_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -13195,265 +13080,16 @@ class Application:
         *,
         request_id: str | None = None,
     ) -> Response:
-        action_name = "withdraw_link"
-        try:
-            month = str(payload["month"])
-            raw_row_ids = payload.get("row_ids")
-            if raw_row_ids is None and payload.get("row_id") is not None:
-                raw_row_ids = [payload.get("row_id")]
-            row_ids = self._normalize_row_ids(list(raw_row_ids or []))
-            note = str(payload.get("note") or payload.get("comment") or "").strip()
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_withdraw_link_request", "message": str(exc)},
-            )
-
-        try:
-            preview = self._workbench_pair_relation_service.preview_withdraw_for_row_ids(row_ids)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": str(exc).strip("'") or "workbench_pair_relation_no_withdraw_history", "message": str(exc)},
-            )
-
-        active_relation = preview["active_relation"]
-        _rows, after_relations, affected_row_ids = self._withdraw_rows_and_after_relations(
-            active_relation=active_relation,
-            after_relations=list(preview.get("after_relations") or []),
-            month=month,
-        )
-        restored_relations, _history = self._workbench_pair_relation_service.withdraw_latest_for_row_ids(
-            row_ids,
-            created_by="system",
-            note=note,
-            fallback_after_relations=after_relations,
-        )
-        changed_scope_keys = list(
-            self._scope_keys_for_row_ids(
-                month=month,
-                row_ids=affected_row_ids,
-                month_scope=str(active_relation.get("month_scope") or ""),
-            )
-        )
-        changed_case_ids = [
-            str(active_relation.get("case_id") or ""),
-            *[str(relation.get("case_id") or "") for relation in restored_relations],
-        ]
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
-        )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "operation": "withdraw_link",
-                "action": "withdraw_link",
-                "month": month,
-                "changed_scopes": changed_scope_keys,
-                "affected_months": changed_scope_keys,
-                "affected_row_ids": affected_row_ids,
-                "restored_relations": restored_relations,
-            },
-        )
-
-    def _preview_withdraw_link(self, payload: dict[str, object]) -> dict[str, object]:
-        month = str(payload["month"])
-        raw_row_ids = payload.get("row_ids")
-        if raw_row_ids is None and payload.get("row_id") is not None:
-            raw_row_ids = [payload.get("row_id")]
-        row_ids = self._normalize_row_ids(list(raw_row_ids or []))
-        preview = self._workbench_pair_relation_service.preview_withdraw_for_row_ids(row_ids)
-        active_relation = preview["active_relation"]
-        rows, after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
-            active_relation=active_relation,
-            after_relations=list(preview.get("after_relations") or []),
-            month=month,
-        )
-        before_groups = self._relation_groups([active_relation], selected_rows=rows)
-        after_groups = self._relation_groups(after_relations, selected_rows=rows, ungrouped_selected_rows="separate")
-        amount_check = self._amount_check_for_withdraw_preview(active_relation=active_relation, rows=rows)
-        return {
-            "operation": "withdraw_link",
-            "can_submit": True,
-            "requires_note": False,
-            "message": "",
-            "before": {"groups": before_groups},
-            "after": {"groups": after_groups},
-            "amount_summary": {
-                "before": amount_check,
-                "after": amount_check,
-                **amount_check,
-            },
-            "restored_relations": after_relations,
-        }
-
-    def _amount_check_for_withdraw_preview(
-        self,
-        *,
-        active_relation: dict[str, object],
-        rows: list[dict[str, object]],
-    ) -> dict[str, object]:
-        relation_amount_check = active_relation.get("amount_check")
-        if isinstance(relation_amount_check, dict) and any(
-            relation_amount_check.get(key) is not None
-            for key in ("oa_total", "bank_total", "invoice_total")
-        ):
-            return dict(relation_amount_check)
-        return self._amount_check_for_rows_by_type(self._rows_by_type(rows))
+        result = self._workbench_write_facade().withdraw_link(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _handle_live_workbench_update_bank_exception(self, payload: dict[str, object]) -> Response:
-        try:
-            month = str(payload["month"])
-            row_id = str(payload["row_id"])
-            relation_code = str(payload["relation_code"])
-            relation_label = str(payload["relation_label"])
-            comment = str(payload["comment"]) if payload.get("comment") is not None else None
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_update_bank_exception_request", "message": str(exc)},
-            )
-
-        try:
-            rows = self._resolve_live_rows_direct([row_id], month_hint=month)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": str(exc)},
-            )
-        row = rows[0]
-        if row.get("type") != "bank":
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_update_bank_exception_request", "message": "update_bank_exception only supports bank rows."},
-            )
-        return self._handle_legacy_workbench_exception_via_application(
-            month=month,
-            row_ids=[row_id],
-            action_name="update_bank_exception",
-            invalid_error_code="invalid_update_bank_exception_request",
-            legacy_payload={
-                "note": comment or relation_label,
-                "legacy_relation_code": relation_code,
-                "legacy_relation_label": relation_label,
-            },
-            response_message="已更新银行异常分类。",
-        )
+        result = self._workbench_write_facade().update_bank_exception(payload)
+        return self._workbench_write_response(result)
 
     def _handle_live_workbench_oa_bank_exception(self, payload: dict[str, object]) -> Response:
-        try:
-            month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
-            exception_code = str(payload["exception_code"])
-            exception_label = str(payload["exception_label"])
-            comment = str(payload["comment"]) if payload.get("comment") is not None else None
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_bank_exception_request", "message": str(exc)},
-            )
-
-        try:
-            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": str(exc)},
-            )
-
-        if not rows:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_bank_exception_request", "message": "row_ids is required."},
-            )
-        if any(str(row.get("type")) == "invoice" for row in rows):
-            return self._handle_live_workbench_oa_bank_exception_with_invoice(
-                month=month,
-                row_ids=row_ids,
-                exception_code=exception_code,
-                exception_label=exception_label,
-                comment=comment,
-            )
-
-        return self._handle_legacy_workbench_exception_via_application(
-            month=month,
-            row_ids=row_ids,
-            action_name="oa_bank_exception",
-            invalid_error_code="invalid_oa_bank_exception_request",
-            legacy_payload={
-                "note": comment or exception_label,
-                "legacy_exception_code": exception_code,
-                "legacy_exception_label": exception_label,
-            },
-            response_message=f"已对 {len(rows)} 条记录执行 OA/流水异常处理。",
-        )
-
-    def _handle_live_workbench_oa_bank_exception_with_invoice(
-        self,
-        *,
-        month: str,
-        row_ids: list[str],
-        exception_code: str,
-        exception_label: str,
-        comment: str | None,
-    ) -> Response:
-        try:
-            preview = self._workbench_exception_application_service.preview({"month": month, "row_ids": row_ids})
-            result = self._apply_workbench_exception_application(
-                {
-                    "month": month,
-                    "row_ids": row_ids,
-                    "scenario_code": str(preview["scenario"]["scenario_code"]),
-                    "action_code": "manual_review",
-                    "payload": {
-                        "note": comment or exception_label,
-                        "legacy_exception_code": exception_code,
-                        "legacy_exception_label": exception_label,
-                    },
-                },
-                actor="system",
-                action_name="oa_bank_exception",
-            )
-        except WorkbenchExceptionApplicationConflict as exc:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": exc.code, "message": str(exc), **({"payload": exc.payload} if exc.payload else {})},
-            )
-        except StatePersistenceError as exc:
-            return self._workbench_persistence_unavailable_response(exc)
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_bank_exception_request", "message": str(exc)},
-            )
-
-        case_payload = result["case"]
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "oa_bank_exception",
-                "month": month,
-                "affected_row_ids": list(result.get("affected_row_ids") or row_ids),
-                "updated_rows": list(result.get("updated_rows") or []),
-                "exception_case_id": str(case_payload.get("id") or ""),
-                "exception_case_ids": [str(case_payload.get("id") or "")],
-                "message": f"已对 {len(row_ids)} 条记录执行 OA/流水异常处理。",
-            },
-        )
+        result = self._workbench_write_facade().oa_bank_exception(payload)
+        return self._workbench_write_response(result)
 
     def _handle_live_workbench_confirm_personal_advance_repayment(
         self,
@@ -13461,122 +13097,8 @@ class Application:
         *,
         request_id: str | None = None,
     ) -> Response:
-        action_name = "confirm_personal_advance_repayment"
-        try:
-            month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
-            note = str(payload.get("note") or payload.get("comment") or "").strip()
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_personal_advance_repayment_request", "message": str(exc)},
-            )
-
-        try:
-            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": str(exc)},
-            )
-
-        amount_summary = self._personal_advance_repayment_amount_summary(rows)
-        validation_message = self._personal_advance_repayment_validation_message(rows, amount_summary)
-        if validation_message:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_personal_advance_repayment_request",
-                    "message": validation_message,
-                    "amount_summary": amount_summary,
-                },
-            )
-
-        changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
-        before_relations = self._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
-        history_before_relations = self._merge_relation_snapshots(
-            before_relations,
-            self._synthetic_existing_case_relations(
-                rows,
-                existing_relations=before_relations,
-                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-            ),
-        )
-        previous_exception_snapshot = self._workbench_exception_case_service.snapshot()
-        previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
-        try:
-            exception_case = self._workbench_exception_case_service.create_settlement_case(
-                rows=rows,
-                exception_code=PERSONAL_ADVANCE_REPAYMENT_MODE,
-                exception_label="还清个人暂借款",
-                category="oa_bank_settlement",
-                comment=note or None,
-                scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
-            )
-            case_id = f"CASE-{str(exception_case['id'])}"
-            amount_check = {
-                "status": "matched",
-                "direction": PERSONAL_ADVANCE_REPAYMENT_MODE,
-                **amount_summary,
-            }
-            relation, _history = self._workbench_pair_relation_service.replace_with_confirmed_relation(
-                case_id=case_id,
-                row_ids=row_ids,
-                row_types=[str(row.get("type") or "") for row in rows],
-                relation_mode=PERSONAL_ADVANCE_REPAYMENT_MODE,
-                created_by="system",
-                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-                note=note,
-                amount_check=amount_check,
-                special_metadata={
-                    "special_type": PERSONAL_ADVANCE_REPAYMENT_MODE,
-                    "cost_policy": "exclude_all",
-                    "note": note,
-                },
-                before_relations=history_before_relations,
-            )
-            self._save_workbench_exception_cases_snapshot()
-        except Exception as exc:
-            self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
-            self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
-            if isinstance(exc, StatePersistenceError):
-                return self._workbench_persistence_unavailable_response(exc)
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_personal_advance_repayment_request", "message": str(exc)},
-            )
-
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=[
-                *[str(before_relation.get("case_id") or "") for before_relation in before_relations],
-                str(relation.get("case_id") or ""),
-            ],
-            request_id=request_id,
-            action_name=action_name,
-        )
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name},
-        )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": action_name,
-                "month": month,
-                "case_id": str(relation.get("case_id") or ""),
-                "exception_case_id": str(exception_case["id"]),
-                "affected_row_ids": row_ids,
-                "amount_summary": amount_summary,
-                "message": "已确认还清个人暂借款。",
-            },
-        )
+        result = self._workbench_write_facade().confirm_personal_advance_repayment(payload, request_id=request_id)
+        return self._workbench_write_response(result)
 
     def _handle_live_workbench_cancel_exception(self, payload: dict[str, object]) -> Response:
         result = self._workbench_write_facade().cancel_exception(payload)
@@ -19385,94 +18907,6 @@ class Application:
         rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=allow_direct)
         return self._amount_check_for_rows_by_type(self._rows_by_type(rows))
 
-    def _cash_special_row_ids(self, payload: dict[str, object]) -> list[str]:
-        raw_row_ids = payload.get("row_ids")
-        if raw_row_ids is None and payload.get("row_id") is not None:
-            raw_row_ids = [payload.get("row_id")]
-        return self._normalize_row_ids(list(raw_row_ids or []))
-
-    def _active_relation_for_cash_special(self, row_ids: list[str]) -> dict[str, object]:
-        if not row_ids:
-            raise ValueError("row_ids is required.")
-        relation = self._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
-        if not relation:
-            raise KeyError("workbench_pair_relation_not_found")
-        return relation[0]
-
-    @staticmethod
-    def _validate_cash_pass_through_relation(relation: dict[str, object]) -> None:
-        row_types = {str(row_type).strip() for row_type in list(relation.get("row_types") or []) if str(row_type).strip()}
-        if not {"oa", "bank"}.issubset(row_types):
-            raise ValueError("cash_pass_through requires a relation containing OA and bank rows.")
-        if "invoice" in row_types:
-            raise ValueError("cash_pass_through requires an OA and bank relation without invoice rows.")
-
-    @staticmethod
-    def _validate_cash_ticket_purchase_relation(relation: dict[str, object]) -> None:
-        row_types = {str(row_type).strip() for row_type in list(relation.get("row_types") or []) if str(row_type).strip()}
-        if not {"oa", "bank", "invoice"}.issubset(row_types):
-            raise ValueError("cash_ticket_purchase requires a relation containing OA, bank, and invoice rows.")
-
-    def _cash_special_cash_amount(self, payload: dict[str, object], relation: dict[str, object]) -> str:
-        if payload.get("cash_amount") is not None:
-            return self._required_non_negative_amount(payload.get("cash_amount"), "cash_amount")
-        bank_amounts: list[Decimal] = []
-        for row_id, row_type in zip(list(relation.get("row_ids") or []), list(relation.get("row_types") or [])):
-            if str(row_type) != "bank":
-                continue
-            try:
-                transaction = self._import_service.get_transaction(str(row_id))
-            except KeyError:
-                continue
-            bank_amounts.append(transaction.amount)
-        if len(bank_amounts) == 1:
-            return f"{bank_amounts[0].quantize(Decimal('0.01')):.2f}"
-        return "0.00"
-
-    @staticmethod
-    def _required_non_negative_amount(value: object, field_name: str) -> str:
-        if value is None:
-            raise ValueError(f"{field_name} is required.")
-        try:
-            amount = Decimal(str(value).replace(",", "")).quantize(Decimal("0.01"))
-        except Exception as exc:
-            raise ValueError(f"{field_name} must be a valid amount.") from exc
-        if amount < Decimal("0.00"):
-            raise ValueError(f"{field_name} must be greater than or equal to 0.")
-        return f"{amount:.2f}"
-
-    def _after_cash_special_relation_update(
-        self,
-        *,
-        month: str,
-        relation: dict[str, object],
-        request_id: str | None,
-        action_name: str,
-    ) -> None:
-        row_ids = self._normalize_row_ids(list(relation.get("row_ids") or []))
-        changed_scope_keys = list(
-            self._scope_keys_for_row_ids(
-                month=month,
-                row_ids=row_ids,
-                month_scope=str(relation.get("month_scope") or ""),
-            )
-        )
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=[str(relation.get("case_id") or "")],
-            request_id=request_id,
-            action_name=action_name,
-        )
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": str(relation.get("case_id") or "")},
-        )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
-
     def _amount_check_for_rows_by_type(self, rows_by_type: dict[str, list[dict[str, object]]]) -> dict[str, object]:
         amount_check = self._workbench_amount_check_service.check(rows_by_type)
         if (
@@ -19485,74 +18919,6 @@ class Application:
             amount_check["direction"] = "unknown"
             amount_check["requires_note"] = False
         return amount_check
-
-    def _personal_advance_repayment_amount_summary(self, rows: list[dict[str, object]]) -> dict[str, str]:
-        oa_total = Decimal("0.00")
-        bank_debit_total = Decimal("0.00")
-        bank_credit_total = Decimal("0.00")
-        for row in rows:
-            row_type = str(row.get("type") or "")
-            if row_type == "oa":
-                amount = (
-                    self._decimal_from_value(row.get("amount"))
-                    or self._decimal_from_value(row.get("reimbursement_amount"))
-                    or self._decimal_from_value(row.get("payment_amount"))
-                    or self._decimal_from_value(row.get("apply_amount"))
-                    or Decimal("0.00")
-                )
-                oa_total += amount
-            elif row_type == "bank":
-                debit_amount = self._decimal_from_value(row.get("debit_amount"))
-                credit_amount = self._decimal_from_value(row.get("credit_amount"))
-                if debit_amount is not None and debit_amount > 0:
-                    bank_debit_total += debit_amount
-                if credit_amount is not None and credit_amount > 0:
-                    bank_credit_total += credit_amount
-        return {
-            "oa_total": self._plain_money(oa_total),
-            "bank_debit_total": self._plain_money(bank_debit_total),
-            "bank_credit_total": self._plain_money(bank_credit_total),
-            "bank_net_total": self._plain_money(bank_credit_total - bank_debit_total),
-        }
-
-    def _personal_advance_repayment_validation_message(
-        self,
-        rows: list[dict[str, object]],
-        amount_summary: dict[str, str],
-    ) -> str | None:
-        rows_by_type = self._rows_by_type(rows)
-        unsupported_row_types = sorted(
-            {
-                str(row.get("type") or "")
-                for row in rows
-                if str(row.get("type") or "") not in {"oa", "bank", "invoice"}
-            }
-        )
-        if unsupported_row_types:
-            return f"personal advance repayment only supports OA and bank rows: {unsupported_row_types[0]}."
-        if rows_by_type["invoice"]:
-            return "personal advance repayment does not support invoice rows."
-        if not rows_by_type["oa"]:
-            return "personal advance repayment requires at least one OA row."
-
-        has_bank_debit = False
-        has_bank_credit = False
-        for row in rows_by_type["bank"]:
-            debit_amount = self._decimal_from_value(row.get("debit_amount"))
-            credit_amount = self._decimal_from_value(row.get("credit_amount"))
-            has_bank_debit = has_bank_debit or bool(debit_amount is not None and debit_amount > 0)
-            has_bank_credit = has_bank_credit or bool(credit_amount is not None and credit_amount > 0)
-        if not has_bank_debit:
-            return "personal advance repayment requires at least one bank debit row."
-        if not has_bank_credit:
-            return "personal advance repayment requires at least one bank credit row."
-
-        oa_total = Decimal(amount_summary["oa_total"])
-        bank_debit_total = Decimal(amount_summary["bank_debit_total"])
-        bank_credit_total = Decimal(amount_summary["bank_credit_total"])
-        if oa_total != bank_debit_total or bank_credit_total != bank_debit_total:
-            return "personal advance repayment amounts do not close."
-        return None
 
     @staticmethod
     def _plain_money(value: Decimal) -> str:

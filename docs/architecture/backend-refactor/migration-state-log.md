@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P017 - Workbench Remaining Write Facade Extraction` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P017 - Workbench Remaining Write Facade Extraction` (`planned`) |
+| 当前阶段 | `PF-P017 - Workbench Remaining Write Facade Extraction` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P017 - Workbench Remaining Write Facade Extraction` (`implemented`) |
 | 最近 verified prompt | `PF-P016 - Workbench Remaining Write Characterization Tests` |
 | 当前分支 | `codex/workbench-remaining-write-facade-planning` |
-| 最近验证 | PF-P016 已运行 Workbench write characterization、dirty queue wiring、OA-bank invoice compatibility 精确测试，均通过；未执行 Merge Gate / Traffic Gate / push |
-| 下一条允许任务 | 执行 `PF-P017 - Workbench Remaining Write Facade Extraction`；不得引入 UoW、修复 stale write 或修改事务模型 |
+| 最近验证 | PF-P017 已运行 Workbench write characterization、dirty queue wiring、4 个精确 v2 API 回归、platform runtime guard，均通过；未执行 Merge Gate / Traffic Gate / push |
+| 下一条允许任务 | 等待用户确认 PF-P017 是否可标记 `verified`；确认前不得生成 PF-P017-MG、UoW prompt 或继续其它写路径语义修复 |
 
 ## Prompt 执行日志
 
@@ -1932,7 +1932,7 @@ UoW readiness：
 
 ### PF-P017 - Workbench Remaining Write Facade Extraction
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -1966,7 +1966,52 @@ UoW readiness：
 
 #### 下一条 Prompt 上下文
 
-PF-P017 已生成并审查。下一步允许在用户确认后执行 PF-P017。PF-P017 执行后若测试全绿并确认行为保持，再决定是否继续生成 PF-P017-MG 覆盖 PF-P015/PF-P016/PF-P017 的完整 diff，或先补极小范围修正 prompt。
+PF-P017 已执行但未由用户确认 `verified`。下一步应先由用户确认 PF-P017 是否可标记 `verified`。确认后，建议生成并审查 `PF-P017-MG - Workbench Remaining Write Facade Merge Gate`，统一覆盖 PF-P015/PF-P016/PF-P017 的完整 diff；不得在 PF-P017-MG 前进入 UoW、stale write 修复或其它语义改造。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+- `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+
+#### 执行结果
+
+- `server.py` 的目标 HTTP handlers 已薄化为 body parsing、freshness guard、request_id 透传、facade 调用和 response wrapping。
+- `WorkbenchWriteFacade` 新增并承接：
+  - `preview_withdraw_link`
+  - `withdraw_link`
+  - `confirm_cash_pass_through`
+  - `confirm_cash_ticket_purchase`
+  - `cancel_cash_special`
+  - `update_bank_exception`
+  - `oa_bank_exception`
+  - `confirm_personal_advance_repayment`
+- 保留 legacy private wrapper 兼容已有 tests 对 `_handle_live_workbench_oa_bank_exception` 等方法的直接调用，但 wrapper 只委托 facade。
+- 未修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 未引入 UoW，未修复 stale write、duplicate submit、rollback 或 scheduling failure 当前语义。
+
+#### 验证
+
+- 抽离前基线：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，29 tests。
+- 抽离后：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：通过，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：通过，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`：通过，1 test。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation -v`：通过，1 test。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v`：通过，1 test。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background -v`：通过，1 test。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，12 tests。
+- `python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_write_facade.py`：通过。
+- `git diff --check`：通过。
+- `git ls-files --others --exclude-standard`：无输出。
+
+#### 残余风险
+
+- PF-P017 只完成行为保持型 facade extraction，不代表 Workbench 写路径已经获得目标一致性语义。
+- duplicate submit、stale write、facts 与 dirty/outbox 非同事务、scheduling failure after mutation 等风险仍按 PF-P016 characterization 保持原样。
+- `/matching/run`、matching dirty worker 和 worker topology 未进入本轮 facade 边界。
 
 ## 维护规则
 
