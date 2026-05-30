@@ -50,15 +50,17 @@
 4. `operations/backup-and-recovery.md`
 5. `operations/monitoring.md`
 
-### Axum/PostgreSQL 后端重构
+### Python-first 后端架构重构
 
 1. `architecture/backend-refactor/README.md`
 2. `architecture/backend-refactor/target-architecture.md`
-3. `architecture/backend-refactor/migration-roadmap.md`
-4. `architecture/backend-refactor/data-model-and-read-models.md`
-5. `operations/backend-refactor/mongo-backup.md`
-6. `operations/backend-refactor/postgresql-provisioning.md`
-7. `operations/backend-refactor/mongo-to-postgresql-migration.md`
+3. `architecture/backend-refactor/module-refactor-plan.md`
+4. `architecture/backend-refactor/runtime-call-chain.md`
+5. `architecture/backend-refactor/read-model-and-external-services.md`
+6. `architecture/backend-refactor/migration-roadmap.md`
+7. `architecture/backend-refactor/ai-execution-rules.md`
+8. `architecture/backend-refactor/migration-state-log.md`
+9. `architecture/backend-refactor/refactor-prompts.md`
 
 ### App Mongo 到 PostgreSQL 迁移
 

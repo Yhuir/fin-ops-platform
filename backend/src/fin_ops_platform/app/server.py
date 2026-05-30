@@ -242,6 +242,8 @@ CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
 WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-25-oa-attachment-source-groups"
+PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
+POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
 }
@@ -1578,12 +1580,14 @@ class Application:
                 storage_summary.update({"postgres_status": "error", "postgres_error": str(exc)})
 
         runtime_release = self._runtime_release_summary()
-        status = "ready" if runtime_release["consistent"] else "not_ready"
+        production_runtime_guard = self._production_runtime_guard_summary(storage_summary, runtime_release)
+        status = "ready" if runtime_release["consistent"] and production_runtime_guard["consistent"] else "not_ready"
         return {
             "service": "fin-ops-platform-api",
             "version": __version__,
             "status": status,
             "runtime_release": runtime_release,
+            "production_runtime_guard": production_runtime_guard,
             "bootstrap": {
                 "mode": self._bootstrap_mode,
                 "legacy_snapshot_disabled": self._bootstrap_mode != "legacy",
@@ -1741,6 +1745,41 @@ class Application:
             "storage": storage_summary,
             "future_modules": [],
         }
+
+    def _production_runtime_guard_summary(
+        self,
+        storage_summary: dict[str, object],
+        runtime_release: dict[str, object],
+    ) -> dict[str, object]:
+        enabled = bool(runtime_release.get("is_release_runtime")) or self._env_flag_enabled(
+            PRODUCTION_RUNTIME_GUARD_ENV,
+            default=False,
+        )
+        storage_backend = str(storage_summary.get("backend") or "").strip()
+        full_snapshot_enabled = self._env_flag_enabled(POSTGRES_FULL_STATE_SNAPSHOT_ENV, default=False)
+        problems: list[str] = []
+        if enabled:
+            if storage_backend != "postgres":
+                problems.append("storage_backend_not_postgres")
+            if self._bootstrap_mode == "legacy":
+                problems.append("legacy_bootstrap_in_production")
+            if full_snapshot_enabled:
+                problems.append("postgres_full_state_snapshot_enabled")
+        return {
+            "enabled": enabled,
+            "storage_backend": storage_backend,
+            "bootstrap_mode": self._bootstrap_mode,
+            "postgres_full_state_snapshot_enabled": full_snapshot_enabled,
+            "consistent": not problems,
+            "problems": problems,
+        }
+
+    @staticmethod
+    def _env_flag_enabled(env_name: str, *, default: bool) -> bool:
+        raw_value = (os.getenv(env_name) or "").strip()
+        if not raw_value:
+            return default
+        return raw_value.lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _path_is_relative_to(path: Path, parent: Path) -> bool:

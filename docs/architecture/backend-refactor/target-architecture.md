@@ -1,166 +1,154 @@
-# Axum + PostgreSQL 目标架构
+# Python-first 后端目标架构
+
+## 当前完成度
+
+本文档已经整理出目标优化后的高层架构：Python-first、模块化、外部服务边界、Read Model consistency、Worker 异步化和可观测性。
+
+但该目标架构仍需要下一步用代码事实校准：
+
+- 真实 API path ownership。
+- 真实 handler/service/repository 调用关系。
+- 真实 Redis/RabbitMQ/read model 使用点。
+- 当前同步全量构建、snapshot fallback 和跨模块耦合点。
+- 首批性能热点和优化优先级。
+
+这些事实由 `PF-P001 - Architecture Inventory / Dynamic Call Chain Discovery` 的 Macro-Inventory 产出后，再反向修订本文档。后续每个模块的详细目标设计必须走 Micro-JIT-Planning，不得在全局阶段一次性写完。
 
 ## 目标
 
-后端重构的目标是把当前 Python HTTP 服务和 Mongo app 状态库，演进为可扩展、可审计、可恢复的生产级财务后端：
+后端重构目标不是替换语言，而是把现有 Python 后端重构成边界清晰、低耦合、可测试、可观测、可按热点优化的生产架构。
 
-- API 层具备高并发、明确超时、结构化日志和统一鉴权。
-- 财务核心事实进入 PostgreSQL，支持事务、约束、索引、分区和审计。
-- 工作台、搜索、成本统计、税金抵扣等重查询页面使用物化读模型。
-- 导入、OA 同步、文件解析、OCR、read model 重建等重任务异步化。
-- MongoDB 只作为 OA 原始数据只读源和迁移期数据源。
-- 文件从 GridFS 迁入 MinIO/S3，数据库只保存文件元数据。
+目标状态：
+
+- Python 继续承载默认业务 API。
+- 业务模块按领域拆分，每个模块有明确输入、输出、依赖和测试。
+- PostgreSQL facts、audit、dirty scope、outbox 和 read model 形成一致的写读闭环。
+- Redis、RabbitMQ、OA Mongo、MinIO/S3、PostgreSQL driver 都被平台边界封装。
+- Worker、Read Model、SSE、App Health、监控和一致性巡检共同暴露异步系统状态。
+- 性能优化在 Python、PostgreSQL、Read Model、Redis、RabbitMQ 和 worker 边界内完成。
+
+## 非目标
+
+- 不做全量 Python 到其他语言的重写。
+- 不新建 `backend-go` 作为默认目标系统。
+- 不为单个业务模块创建新语言后端。
+- 不让前端感知两套业务 API。
+- 不把 Redis 或 RabbitMQ 当业务事实源。
+- 不在 API 请求热路径读取 app Mongo snapshot、local pickle、full state 或 OA Mongo fallback。
+- 不把 Sidecar、服务网格或 Dapr 作为第一阶段默认方案。
 
 ## 目标拓扑
 
 ```text
-React 前端
+React / Vite 前端
   |
-Nginx / TLS / 上传限制 / 静态文件
+  v
+Nginx / OA 同域路径 / Trace Header
   |
-Axum API
+  v
+Python API
   |
-  +-- PostgreSQL 主业务库
-  |     +-- 核心事实表
-  |     +-- 审计表
-  |     +-- outbox_events
-  |     +-- read model 表
-  |     +-- 搜索表
+  +-- platform/auth：OA token、cookie、权限上下文
+  +-- platform/db：PostgreSQL connection、transaction、repository boundary
+  +-- platform/cache：Redis cache、wakeup、lock
+  +-- platform/queue：PostgreSQL outbox、durable queue、RabbitMQ envelope
+  +-- platform/storage：MinIO/S3 object pointer
+  +-- platform/observability：trace id、structured log、metrics
   |
-  +-- Redis
-  |     +-- 缓存
-  |     +-- 限流
-  |     +-- 短期任务进度
-  |
-  +-- NATS JetStream
-  |     +-- 文件解析任务
-  |     +-- OA 同步任务
-  |     +-- read model 重建任务
-  |
-  +-- MinIO / S3
-  |     +-- 原始导入文件
-  |     +-- 附件
-  |     +-- 导出文件
-  |
-  +-- OA Mongo 只读源
-        +-- 由同步任务读取，不在页面请求中实时扫描
+  +-- workbench
+  +-- turnover-ledger
+  +-- batch-accounting
+  +-- bankdetail
+  +-- invoices
+  +-- imports
+  +-- tax-cost
+  +-- search
+  +-- ops
 
 Python Worker
   |
-  +-- 订阅 NATS 任务
-  +-- 读取 MinIO/S3 文件
-  +-- 处理 Excel/PDF/OCR/OA 附件
-  +-- 写回 PostgreSQL
+  +-- claim durable queue / consume RabbitMQ envelope
+  +-- refresh read model
+  +-- sync OA Mongo read-only source into PostgreSQL projection
+  +-- parse Excel / PDF / OCR / attachment
+  +-- emit App Health and consistency status
 ```
 
-## 技术定版
+## 分层边界
 
-| 层 | 选择 | 说明 |
+当前代码不需要一次性搬成新目录。重构时按模块逐步收敛到以下边界：
+
+```text
+backend/src/fin_ops_platform/
+  app/
+    routes_*        # HTTP request/response mapping
+    server.py       # routing assembly only
+  domain/
+    models.py       # stable domain value objects and enums
+  services/
+    platform_*      # shared platform ports/adapters where appropriate
+    workbench_*     # workbench module
+    turnover_*      # turnover ledger module
+    batch_accounting* # batch accounting module
+    bank_*          # bank detail module
+    invoice_*       # invoice module
+    imports*        # import module
+    tax_* / cost_*  # tax and cost module
+    search_*        # search and pending invoice read module
+    runtime_*       # queue/cache/runtime boundary
+```
+
+规则：
+
+- `app/` 不承载业务计算。
+- 模块 service/usecase 可以依赖 domain model 和 platform port。
+- 模块之间不得直接 import 对方 usecase 来做写入。
+- 跨模块影响通过 facts、outbox、dirty scope、read model 或明确 query service 协作。
+- 生产路径不得依赖 legacy full snapshot。
+
+## 外部服务边界
+
+外部服务必须模块化，但模块化首先在 Python 中落地：
+
+| 外部服务 | 当前角色 | 目标边界 |
 | --- | --- | --- |
-| API | Axum + Tokio | Axum 负责路由、extractor、响应，Tokio 负责异步运行时。 |
-| Middleware | Tower | 统一超时、trace id、限流、鉴权、CORS、body limit、压缩。 |
-| 数据访问 | SQLx | 手写 SQL 优先，保留编译期或 CI 期查询校验能力。 |
-| 迁移 | `sqlx migrate` | 一期用 SQL migration；动态 SQL 生成不是主路径。 |
-| 动态查询 | sea-query，可选 | 只用于复杂搜索筛选构造，不作为主 ORM。 |
-| 主库 | PostgreSQL 16/17 | 财务事实源、事务、一致性、索引、分区、PITR。 |
-| 缓存 | Redis | 只存可再生成数据，不存最终业务事实。 |
-| 队列 | NATS JetStream | 跨 Rust/Python Worker，支持持久化、ack、重放。 |
-| 可靠投递 | PostgreSQL outbox | 业务事务和事件发布解耦，避免写库成功但任务丢失。 |
-| 文件 | MinIO/S3 | 替代 GridFS，支持版本化、生命周期和独立备份。 |
-| 日志 | tracing + JSON | 所有请求、任务、DB 慢查询和外部调用带 trace id。 |
-| 指标 | OpenTelemetry + Prometheus | API latency、DB pool、任务队列、read model、业务指标。 |
+| PostgreSQL | app facts、audit、queue、read model、settings | repository + transaction manager |
+| Redis | 短 TTL cache、wakeup、辅助锁 | cache port，Redis 不影响正确性 |
+| RabbitMQ | outbox envelope transport | queue transport adapter，业务 payload 以 PostgreSQL outbox 为准 |
+| OA Mongo | OA 原始只读源 | worker/tool adapter，只写 PostgreSQL projection |
+| MinIO/S3 | 文件对象 | storage port，PostgreSQL 保存 verified pointer |
+| OA Auth | token/cookie/userinfo/权限 | auth context service |
 
-## Axum API 边界
+单元测试默认 mock 这些边界。集成测试才连接真实 PostgreSQL、Redis、RabbitMQ 或对象存储。
 
-Axum 服务按模块拆分，但先保持一个部署单元：
+## 性能优化规则
 
-```text
-crates/fin-ops-api/
-  src/
-    main.rs
-    app_state.rs
-    config.rs
-    error.rs
-    middleware/
-    routes/
-      health.rs
-      auth.rs
-      imports.rs
-      workbench.rs
-      reconciliation.rs
-      exceptions.rs
-      settings.rs
-      files.rs
-    services/
-    repositories/
-    jobs/
-    observability/
-```
+本轮重构只在 Python 系统内优化，不引入新语言后端。
 
-核心规则：
+优化顺序：
 
-- `routes/` 只做 HTTP 入参、鉴权上下文、响应映射。
-- `services/` 承载业务用例和事务边界。
-- `repositories/` 只封装 SQLx 查询和事务内读写。
-- `jobs/` 只负责发布任务和消费内部事件，不直接放业务规则。
-- 所有写操作必须携带操作者、trace id、幂等键和审计上下文。
+1. SQL/index/read model 优化。
+2. Python 模块边界和算法复杂度优化。
+3. Worker 异步化和 cache key 版本化。
+4. 批处理、并发控制、后台预热和 worker lag 限流。
+5. 如果仍不达标，先回到架构评审重新评估业务口径、数据模型和缓存策略；不得直接创建新语言后端。
 
-## PostgreSQL 事实源
+## Sidecar 取舍
 
-PostgreSQL 负责以下最终状态：
+第一阶段不引入 Sidecar。只有出现以下证据时才重新评估：
 
-- 银行流水、发票、OA 单据归一化结果。
-- 导入批次、导入文件、解析结果、撤回状态。
-- 核销关系、免 OA 批次、异常处理、备注和忽略状态。
-- 成本统计、税金抵扣、ETC、往来款等业务事实。
-- 文件元数据、对象存储 key、checksum、大小、内容类型。
-- 审计日志、任务状态、outbox 事件、read model 版本。
+- 多语言服务数量明显增加，Nginx/path routing 难以治理。
+- 需要统一 mTLS、服务发现、熔断、限流或灰度策略。
+- 多服务东西向流量复杂到影响排障和可靠性。
 
-Mongo 迁移后只保留两类用途：
-
-- OA Mongo：只读原始数据源。
-- 迁移期 app Mongo：回滚和对账参考，迁移完成后冻结为归档。
-
-## Read Model 与查询路径
-
-页面查询不能实时从所有来源拼全量数据。目标路径：
-
-```text
-用户写操作
-  -> PostgreSQL 事实表事务提交
-  -> outbox_events 写入同一事务
-  -> outbox publisher 发布 NATS 消息
-  -> worker 重建受影响月份 read model
-  -> API 读取 read model
-```
-
-关键 read model：
-
-- `workbench_read_models`：工作台月份视图和全局汇总。
-- `workbench_rows`：可筛选、可分页、可定位的行级投影。
-- `workbench_candidate_matches`：自动匹配候选。
-- `search_index_rows`：跨银行流水、发票、OA、项目的统一搜索表。
-- `cost_statistics_read_models`：成本统计口径。
-- `tax_offset_read_models`：税金抵扣口径。
-
-## Python Worker 边界
-
-Python Worker 保留现有解析能力，但不再承载 HTTP 主入口：
-
-- 读取 MinIO/S3 原始文件。
-- 解析 Excel、PDF、OCR、ETC 附件和 OA 附件。
-- 输出结构化结果到 PostgreSQL staging 表或结果表。
-- 失败时写任务状态、错误码、可重试标记和错误摘要。
-
-Python Worker 不直接修改核销关系等核心业务状态，除非通过明确的服务命令或数据库存储过程边界。
+否则，Sidecar 会增加运维复杂度和网络跳数，不应作为性能优化默认方案。
 
 ## 生产安全底线
 
-- 所有外部输入都必须验证：文件大小、MIME、扩展名、行数、金额精度、日期范围。
-- 金额使用 PostgreSQL `numeric` 和 Rust decimal 类型，不使用 float。
-- 数据库账号最小权限：API、migrator、worker、read-only 分开。
-- MinIO/S3 bucket 开启版本化和生命周期策略。
-- 所有删除采用软删除或可审计删除，除非是明确的临时文件清理。
-- 后台任务必须支持 retry、dead-letter、人工重放。
-- 生产必须具备 PostgreSQL PITR、MinIO 版本恢复、Mongo 迁移前冷备份。
-
+- 金额使用 PostgreSQL `numeric` 和 Python decimal，不使用 float。
+- 所有写操作携带 actor、trace id、幂等键和审计上下文。
+- 所有外部输入校验文件大小、MIME、扩展名、行数、金额精度、日期范围。
+- Redis 清空不影响业务正确性。
+- RabbitMQ 停止时可以回退到 PostgreSQL polling worker。
+- Read Model miss/stale 不允许同步全量重算阻塞用户请求。
+- Consistency checker 和 App Health 必须暴露 stale scope、failed generation、worker lag 和 outbox backlog。
