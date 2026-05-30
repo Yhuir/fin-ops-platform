@@ -5385,7 +5385,7 @@ Post-Flight:
 
 ## PF-P017-MG - Workbench Remaining Write Facade Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -9003,3 +9003,59 @@ Post-Flight:
 - PF-P030-MG 不执行 Traffic Gate，因为本分支没有网关/部署/auth/session/worker routing 变更。
 - PF-P030-MG 不得进入真实 API migration，不得生成 PF-P031。
 - 未经用户确认，不得执行 PF-P030-MG，也不得将 PF-P030-MG 标记为 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+已完成：
+
+- 已合入本地 `main`。
+- Merge commit：`3f4c3927 feat(workbench): establish stale write foundation`。
+- 合入范围统一覆盖 PF-P027、PF-P028、PF-P029、PF-P030 的完整 stale write foundation diff。
+- 已在合入前和合入后的 `main` 上执行要求的 scope 检查、diff 检查和测试门禁。
+
+明确未执行：
+
+- 未 push。
+- 未执行 Traffic Gate。
+- 未部署、未访问生产。
+- 未生成或执行 PF-P031。
+- 未迁移真实 Workbench API。
+- 未修改 `backend/src/fin_ops_platform/app/server.py`。
+- 未新增 SQL migration。
+- 未修改前端、部署、网关、auth/session 或 worker routing。
+- 未创建或恢复 `backend-go`。
+
+合入前验证：
+
+- `git status --short --branch`：分支干净。
+- `git rev-list --left-right --count main...origin/main`：`0 0`。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --name-only`：无输出。
+- `git log --oneline main..HEAD`：确认包含 PF-P027 到 PF-P030 stale write foundation commit stack。
+- `git diff --name-only main...HEAD`：只包含允许的 stale write foundation 文件。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+Main 上复验：
+
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+下一步：
+
+- 等待用户确认 PF-P030-MG 可标记为 `verified`。
+- 用户确认后再执行 `git push origin main`。
+- push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。
+- 真实 Workbench API migration 仍未开始。

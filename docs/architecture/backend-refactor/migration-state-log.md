@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` 已执行并合入本地 `main`，等待用户确认 verified |
+| 当前 active prompt | `PF-P030-MG - Workbench Stale Write Foundation Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P030 - Workbench UoW Stale Precondition Port Skeleton` |
-| 当前分支 | `codex/workbench-stale-write-planning` |
-| 最近验证 | 用户确认 PF-P030 可标记 `verified`；PF-P030-MG 已生成并审查但未执行 |
-| 下一条允许任务 | 只允许执行 PF-P030-MG。PF-P030-MG 统一覆盖 PF-P027 到 PF-P030 的完整 diff；不得进入真实 API migration |
+| 当前分支 | `main` |
+| 最近验证 | PF-P030-MG 合入前与合入后 `main` 复验全部通过；未 push；未迁移真实 Workbench API |
+| 下一条允许任务 | 等待用户确认 PF-P030-MG 可标记 `verified`；确认后再执行 `git push origin main`，push 后必须从最新 `main` 新建分支生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -3169,7 +3169,7 @@ PF-P030 已由用户确认 `verified`。PF-P030-MG 已生成并审查，下一�
 
 ### PF-P030-MG - Workbench Stale Write Foundation Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3202,6 +3202,48 @@ PF-P030 已由用户确认 `verified`。PF-P030-MG 已生成并审查，下一�
 - PF-P030-MG 是当前分支进入下一个真实 API migration 前的必要门禁。
 - 该分支已经包含 production code 变更，因此 commit message 应使用 `feat(workbench): ...` 或等价语义，不能使用纯 docs 前缀描述整个合入。
 - 没有 staging 环境不阻塞本 Merge Gate，因为本分支没有切换流量、没有部署拓扑变更、没有网关或 auth/session 变更。
+
+#### 执行结果
+
+- 已合入本地 `main`。
+- Merge commit：`3f4c3927 feat(workbench): establish stale write foundation`。
+- 合入覆盖 PF-P027、PF-P028、PF-P029、PF-P030 的完整 stale write foundation diff。
+- 未 push。
+- 未执行 Traffic Gate、部署、生产访问或服务器操作。
+- 未迁移真实 Workbench 写 API。
+- 未修改 `backend/src/fin_ops_platform/app/server.py`。
+- 未新增 SQL migration。
+- 未修改前端、部署、网关、auth/session 或 worker routing。
+- 没有 `backend-go`。
+
+#### 合入前验证
+
+- `git status --short --branch`：当前分支干净。
+- `git rev-list --left-right --count main...origin/main`：`0 0`。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --name-only`：无输出。
+- `git diff --name-only main...HEAD`：只包含 PF-P027 到 PF-P030 允许的 stale write foundation 文件。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### Main 上复验
+
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### 下一条 Prompt 上下文
+
+PF-P030-MG 已合入本地 `main` 并完成 main 上复验，但尚未由用户确认 `verified`，也尚未 push 到 `origin/main`。下一步应先由用户确认 PF-P030-MG `verified`；随后执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。真实 Workbench API migration 仍未开始。
 
 ## 维护规则
 
