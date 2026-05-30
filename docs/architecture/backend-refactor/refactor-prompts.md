@@ -6604,7 +6604,7 @@ Blocker:
 
 ## PF-P021-CI - Workbench UoW Contract Test CI Isolation
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -6734,7 +6734,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`，等待用户确认后才能标记 `verified`。
+状态：`verified`。用户已确认 PF-P021-CI verified。
 
 本轮只修改 `tests/test_workbench_uow_contract.py` 与 backend-refactor 文档；未修改生产代码、默认测试入口、README、部署或 CI/CD 配置；未执行 merge、Traffic Gate、push 或生产访问。
 
@@ -6766,4 +6766,4 @@ Post-Flight:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 
-下一步：用户确认 PF-P021-CI `verified` 后，重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。
+下一步：重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。

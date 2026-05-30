@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P021-CI - Workbench UoW Contract Test CI Isolation` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P021-CI - Workbench UoW Contract Test CI Isolation` (`implemented`) |
-| 最近 verified prompt | `PF-P021 - Workbench Minimal Unit of Work Skeleton` |
+| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 准备重新执行 |
+| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P021-CI - Workbench UoW Contract Test CI Isolation` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | PF-P021-CI 已将 7 个尚未实现的 stale write / durable idempotency target contract tests 标记为 `unittest.expectedFailure`；`test_workbench_uow_contract.py` 默认 discover 与 direct module suite 均退出码 0，并显示 `expected failures=7`；runtime queue、Workbench write characterization、dirty queue wiring、platform guard 安全网均通过 |
-| 下一条允许任务 | 等待用户确认 PF-P021-CI 是否标记为 `verified`；确认后重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，不得继续迁移 Workbench 写路径 |
+| 最近验证 | 用户已确认 PF-P021-CI `verified`：7 个尚未实现的 stale write / durable idempotency target contract tests 已标记为 `unittest.expectedFailure`；`test_workbench_uow_contract.py` 默认 discover 与 direct module suite 均退出码 0，并显示 `expected failures=7`；runtime queue、Workbench write characterization、dirty queue wiring、platform guard 安全网均通过 |
+| 下一条允许任务 | 重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，确认默认 CI blocker 已解除后再考虑 merge 到 `main`；不得继续迁移 Workbench 写路径 |
 
 ## Prompt 执行日志
 
@@ -2271,7 +2271,7 @@ PF-P021 已由用户确认 `verified`。PF-P021-MG 已生成并审查，下一�
 
 ### PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
 
-状态：`blocked`
+状态：`planned`
 
 #### 范围
 
@@ -2321,7 +2321,7 @@ PF-P021-MG 已执行并被阻断。Blocker：仓库 README、`backend/README.md`
 
 ### PF-P021-CI - Workbench UoW Contract Test CI Isolation
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2382,7 +2382,7 @@ PF-P021-MG 已执行并被阻断。Blocker：仓库 README、`backend/README.md`
 
 #### 下一条 Prompt 上下文
 
-PF-P021-CI 已执行并记录为 `implemented`，等待用户确认后才能标记 `verified`。用户确认后，应重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，确认默认 CI blocker 已解除后再考虑 merge 到 `main`。在 PF-P021-MG 通过前，不得继续迁移 Workbench 写路径。
+PF-P021-CI 已由用户确认 `verified`。下一步重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，确认默认 CI blocker 已解除后再考虑 merge 到 `main`。在 PF-P021-MG 通过前，不得继续迁移 Workbench 写路径。
 
 ## 维护规则
 
