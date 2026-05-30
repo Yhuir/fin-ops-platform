@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 已执行，等待用户确认 `verified`；本轮只做 Workbench exception/ignore facade extraction。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`；当前已从最新 `main` 新建分支，生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`。
 
 ## 1. Scope Boundary
 
@@ -438,7 +438,7 @@ PF-P014 已完成第二轮行为保持型 facade 抽取：
 | API retry idempotency is inconsistent | High | PF-P012 locked current behavior: explicit same-case confirm replays success but repeats side effects; no-case confirm allocates a new case; cancel/unignore repeat returns 404; exception/apply is idempotent | PF-P013 must preserve current behavior during extraction; later semantic changes need separate prompt and tests. |
 | stale write / blind overwrite behavior exists | High | PF-P012 locked current behavior: confirm-after-ignore and ignore-after-confirm both succeed and leave conflicting facts; exception-after-relation returns 409 | Do not fix during facade extraction. Plan a later optimistic state assertion / conflict semantics prompt. |
 | read model scheduling failure happens after fact mutation | High | PF-P012 shows `_schedule_workbench_read_model_persist` failure propagates after pair relation fact is already mutated | UoW/outbox refactor must explicitly handle facts + dirty scope + outbox atomicity. |
-| App Shell is still orchestration god object | High | PF-P013 已将 confirm/cancel 的非 HTTP 编排抽入 `WorkbenchWriteFacade`，但 `server.py` 仍拥有其它 Workbench 写路径、persistence callbacks、derived lifecycle、background threads、read model scheduling | 先通过 PF-P013-MG 合并最小 facade 边界；后续再按 exception/ignore/UoW 独立 prompt 推进。 |
+| App Shell is still orchestration god object | High | PF-P013/PF-P014 已将 confirm/cancel、exception/apply、mark-exception、cancel-exception、ignore/unignore 的非 HTTP 编排抽入 `WorkbenchWriteFacade`，但 `server.py` 仍拥有 withdraw-link、cash special、bank exception、personal advance repayment、matching run / dirty worker、persistence callbacks、derived lifecycle、background threads、read model scheduling | 先执行 PF-P015 完成剩余写入口 discovery / planning；不得直接跳到 UoW 或继续盲抽 facade。 |
 | In-process daemon threads can overlap writes | Medium-High | HTTP server can start matching dirty worker; app/worker can run matching loop beside RuntimeWorker; async persist thread env flags exist | Document deployment mode and add concurrency characterization tests. |
 | Matching engine cannot yet be standalone | Medium | orchestrator writes candidate state, reads pair relations/exceptions, invalidates read models | Keep as Workbench internal subdomain; extract ports first. |
 | Direct Mongo adapter remains in App Shell and projection builder | Medium | `server.py`, `worker.py`, `workbench_sql_projection.py` import `MongoOAAdapter` | Keep in Platform/App Shell for now; later move parser version helper and direct adapter checks behind ports. |
@@ -475,16 +475,15 @@ Required properties:
 
 ## 12. Next Slice Recommendation
 
-PF-P013 已由用户确认 `verified`。下一条已生成并审查的 prompt：
+PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。下一条已生成并审查的 prompt：
 
-`PF-P013-MG - Workbench Write Facade Merge Gate`
+`PF-P015 - Workbench Remaining Write Facade Discovery and Planning`
 
 理由：
 
-- PF-P012 锁定了 Workbench 写路径当前行为。
-- PF-P013 在同一切片中完成了 confirm/cancel thin facade 抽取。
-- 这两个 prompt 共同构成一个可合并的最小 Workbench write facade slice，符合“多个 prompt 完成一个模块任务后再进入 MG”的工作流。
-- PF-P013-MG 必须覆盖 PF-P012 + PF-P013 尚未合入 `main` 的完整 diff。
-- PF-P013-MG 不执行 Traffic Gate，不部署，不修改生产配置。
+- PF-P013/PF-P014 已经把 `confirm-link`、`cancel-link`、`mark-exception`、`exception/apply`、`cancel-exception`、`ignore-row`、`unignore-row` 迁入 `WorkbenchWriteFacade`。
+- 剩余写入口的业务差异更大，包括 `withdraw-link`、cash special、`update-bank-exception`、`oa-bank-exception`、`confirm-personal-advance-repayment`、matching run / dirty worker，不应直接盲抽 facade。
+- Unit of Work 是必要方向，但当前还缺少每个剩余入口的 facts、audit/history、dirty scope、outbox/read model scheduling、失败传播和测试缺口清单。
+- PF-P015 只做 discovery / planning 和文档回写，不修改业务代码，不新增测试，不设计或实现 UoW API。
 
-PF-P013-MG 执行时仍不得把 stale write / optimistic locking 或 Unit of Work 语义修复混入 merge gate；这些属于合入后新的独立实现 prompt。PF-P013-MG 通过并合入 `main` 后，下一条建议 prompt 是 `PF-P014 - Workbench Exception Facade Extraction`，但必须从最新 `main` 新建分支后生成。
+PF-P015 必须包含 `UoW Readiness Assessment`：评估未来 UoW 需要包住哪些 facts、audit/history、dirty scope、outbox、read model scheduling，以及当前 blocker。PF-P015 执行后，下一条 prompt 才能根据真实发现结果决定是先补 characterization tests、继续 remaining facade extraction，还是进入 `Workbench Unit of Work Boundary Design`。

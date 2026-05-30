@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P014-MG - Workbench Exception Facade Merge Gate` 已由用户确认 `verified`，并已同步到 `origin/main` |
-| 当前 active prompt | 无，下一条 prompt 必须从最新 `main` 新建分支后生成 |
+| 当前阶段 | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` (`planned`) |
 | 最近 verified prompt | `PF-P014-MG - Workbench Exception Facade Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/workbench-remaining-write-facade-planning` |
 | 最近验证 | PF-P014-MG 已在功能分支和本地 `main` 复验：`compileall`、Workbench write characterization、Workbench v2 API、exception application/case、pair relation、derived lifecycle + platform guards 均通过；`main` 已 push 到 `origin/main`；未执行 Traffic Gate |
-| 下一条允许任务 | 从最新 `main` 新建分支，再生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` |
+| 下一条允许任务 | 执行 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`；不得直接进入 UoW 设计或业务代码实现 |
 
 ## Prompt 执行日志
 
@@ -1813,6 +1813,45 @@ main 复验结果：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：25 tests OK。
 
 用户已确认 PF-P014-MG `verified`，且已执行 `git push origin main`。`main` 与 `origin/main` 已同步。下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`；不得直接在当前 `main` 上进入 PF-P015 / Unit of Work。
+
+### PF-P015 - Workbench Remaining Write Facade Discovery and Planning
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Workbench 剩余写入口的 discovery / planning 和文档回写。
+- 必须盘点 PF-P014 后仍未迁移的写入口：
+  - `withdraw-link` / `withdraw-link-preview`
+  - cash special：`confirm-cash-pass-through`、`confirm-cash-ticket-purchase`、`cancel-cash-special`
+  - `update-bank-exception`
+  - `oa-bank-exception`
+  - `confirm-personal-advance-repayment`
+  - matching run / matching dirty worker / standalone worker dirty loop
+- 必须输出每个入口的 handler、service、facts、audit/history、dirty scope、outbox/read model scheduling、当前测试覆盖和风险。
+- 必须包含 `UoW Readiness Assessment`：评估未来 Unit of Work 需要包住哪些 facts、audit、dirty scope、outbox、read model scheduling，以及当前 blocker。
+
+#### 禁止范围
+
+- 不修改 Python 业务代码。
+- 不抽 facade。
+- 不新增或修改 tests。
+- 不设计具体 UoW API。
+- 不实现 UoW、repository、transaction manager、outbox 或 dirty scope 变更。
+- 不修复 stale write / optimistic locking / blind write。
+- 不修改 SQL migration、前端、网关、部署或生产配置。
+- 不执行 Merge Gate、Traffic Gate、deploy、push 或生产访问。
+
+#### 验收标准
+
+- PF-P015 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P015 prompt 明确要求使用 CodeGraph 或等价结构分析覆盖剩余写入口。
+- PF-P015 prompt 明确产物为 `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`，并允许同步更新 `workbench-writes-and-matching-plan.md`。
+- PF-P015 prompt 明确执行后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P015 已生成并审查。下一步允许在用户确认后执行 PF-P015。PF-P015 只能发现和规划，不得写业务代码；执行后应根据发现结果决定下一步是 characterization tests、remaining facade extraction，还是进入 Workbench Unit of Work Boundary Design。
 
 ## 维护规则
 
