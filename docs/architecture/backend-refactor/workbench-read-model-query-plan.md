@@ -484,6 +484,30 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
   - PF-P009-MG 边界：未执行 Traffic Gate、未部署服务器、未 push `origin/main`；已由用户确认 `verified`。
   - 下一步：push `origin/main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
 
+### Slice E：Repository active generation 与查询一致性边界
+
+- 目标：收口 `PostgresReadModelRepository` 的 Workbench query/read-model 读路径，确保 summary、groups page、group detail、refresh status、source_versions 和 cache version 都围绕 active generation/source_version 一致读取。
+- 当前 prompt：`PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已生成并审查，状态 `planned`，等待用户确认是否执行。
+- 输入事实：
+  - PF-P009-MG 已由用户确认 `verified`，`main` 已 push 到 `origin/main`，本轮分支从最新 `main` 创建。
+  - CodeGraph 确认 Slice E 的主要入口是 `PostgresReadModelRepository.get_workbench_summary(...)`、`get_workbench_groups_page(...)`、`get_workbench_group_detail(...)`、`get_workbench_refresh_status(...)`、`workbench_groups_cache_version(...)`。
+  - `get_workbench_groups_page(...)` 当前会读取 active generation id / source_versions，并在 page/count/row-count 查询中使用多段 SQL；PF-P010 必须确认这些查询没有跨 generation 混读。
+  - 现有测试集中已有 Workbench SQL runtime、row detail targeted tests、query facade tests 和 platform runtime boundary guards；PF-P010 必须先补 targeted tests 再做最小实现。
+- 允许：
+  - 修改 Workbench read model repository 读路径。
+  - 新增/调整 repository active generation、group detail、groups count/filter/search、summary/source_versions 的 targeted tests。
+  - 记录 groups page/count/filter/search 慢查询观测性 gap。
+- 禁止：
+  - 不修改 SQL migration。
+  - 不修改 Workbench 写路径、matching/candidates、candidate grouping、free matching engine、worker rebuild、builder、Outbox、Dirty Scope、RabbitMQ、Redis cache key 语义、前端、网关、部署配置。
+  - 不改变 API response contract、status code、field names 或 fresh/stale/refreshing/unavailable 语义。
+  - 不执行 Merge Gate、Traffic Gate、部署或 push。
+- 验证：
+  - `tests.test_workbench_sql_runtime -v`
+  - `tests.test_workbench_query_facade tests.test_platform_runtime_boundary_guards -v`
+  - row detail targeted tests
+  - `compileall` 针对 `read_models.py`、`server.py`、`workbench_query_facade.py`
+
 ## Guard Compatibility
 
 PF-P003 的 8 类平台 guard 对 Workbench query/read-model 的约束如下：

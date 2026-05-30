@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已由用户确认 `verified`，等待 push `origin/main` |
-| 当前 active prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` (`verified`) |
+| 当前阶段 | `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` 已生成并审查，等待用户确认是否执行 |
+| 当前 active prompt | `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` (`planned`) |
 | 最近 verified prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P009-MG 已由用户确认 `verified`：feature branch 与 `main` 双重复验通过；本地 `main` 已 fast-forward 到 `b58bd5a0`；未执行 Traffic Gate、部署或 push |
-| 下一条允许任务 | push `origin/main`；push 完成后从最新 `main` 新建分支，生成并审查 `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)` |
+| 当前分支 | `codex/workbench-query-slice-e-prompt` |
+| 最近验证 | PF-P009-MG 已由用户确认 `verified`，`main` 已 push 到 `origin/main`，本地与远端均为 `dfd42c16`；未执行 Traffic Gate 或部署 |
+| 下一条允许任务 | 用户审查并确认后执行 PF-P010；PF-P010 只允许处理 Workbench query repository / active generation / source_version 读边界，不得进入 Workbench 写路径、matching/candidates、worker rebuild 或 Traffic Gate |
 
 ## Prompt 执行日志
 
@@ -1261,7 +1261,35 @@ PF-P009 已由用户确认 `verified`。下一步应执行已生成并审查的 
 
 #### 下一条 Prompt 上下文
 
-PF-P009-MG 已由用户确认 `verified`。下一步 push `origin/main`；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成，建议生成并审查 `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)`。
+PF-P009-MG 已由用户确认 `verified`。`git push origin main` 已通过，`origin/main` 从 `f01ba926` 更新到 `dfd42c16`。本次 push 只推送 Git 远端主干；未推送或重启服务器，未修改部署配置，未执行 Traffic Gate。已从最新 `main` 创建新分支 `codex/workbench-query-slice-e-prompt`，下一条 prompt 为 `PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)`。
+
+### PF-P010 - Workbench Query Repository and Active Generation Boundary (Slice E)
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 Workbench query/read-model 的 repository 与 active generation/source_version 读边界。
+- 深挖 `PostgresReadModelRepository.get_workbench_summary(...)`、`get_workbench_groups_page(...)`、`get_workbench_group_detail(...)`、`get_workbench_refresh_status(...)`、`workbench_groups_cache_version(...)` 及其测试。
+- 先补 characterization / guard tests，再做最小实现修正。
+- 检查 groups page/count/filter/search 的 repository 慢查询与观测性粒度，但不得把 HTTP request context 的 `request_database_timing` 下沉到 facade/repository。
+
+#### 禁止范围
+
+- 不开始 Workbench 写路径、matching/candidates、candidate grouping、free matching engine 或 action handler 重构。
+- 不修改 worker rebuild、builder、Outbox、Dirty Scope、RabbitMQ、Redis cache key 语义、前端、SQL migration、部署或网关配置。
+- 不执行 Merge Gate、Traffic Gate、部署或 push。
+
+#### 验收标准
+
+- PF-P010 prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P010 必须要求执行前使用 CodeGraph 或等价结构分析确认 repository 方法、caller 和测试覆盖。
+- PF-P010 必须包含 TDD：先新增或调整 targeted failing tests，再做实现。
+- PF-P010 执行完成后只能标记 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+下一步允许用户审查并执行 PF-P010。PF-P010 是 Slice E 的执行型 prompt，不是 Merge Gate；完成后如需合入 `main`，必须另行生成 Slice E 的 MG，且 MG 覆盖 PF-P010 的完整 diff。
 
 ## 维护规则
 
