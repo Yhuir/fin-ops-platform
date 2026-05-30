@@ -51,12 +51,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已生成，等待执行 |
-| 当前 active prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P007-MG - Workbench Query Cache and Freshness Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P007 - Workbench Query Cache and Freshness Boundary (Slice C)` |
-| 当前分支 | `codex/workbench-query-cache-freshness` |
-| 最近验证 | 用户已确认 PF-P007 verified；PF-P007 已在 feature branch 通过 mandatory checks；未 commit、未 merge、未 push、未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `PF-P007-MG`；不得直接开始 Slice D、Traffic Gate、部署或生产变更 |
+| 当前分支 | `main` |
+| 最近验证 | PF-P007-MG 已在 feature branch 和 `main` 上通过 mandatory checks；本地 `main` 尚未 push 到 `origin/main`；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 用户确认后可将 PF-P007-MG 标记为 `verified`；push `origin/main` 需要用户明确确认；随后必须从最新 `main` 新建分支生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -929,7 +929,7 @@ PF-P007 已由用户确认 `verified`。PF-P007-MG 已生成并审查，下一�
 
 ### PF-P007-MG - Workbench Query Cache and Freshness Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -982,7 +982,44 @@ PF-P007-MG 允许合入的文件仅限：
 
 #### 下一条 Prompt 上下文
 
-PF-P007-MG 是 Merge Gate，不是 Traffic Gate。执行完成后只能进入 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。PF-P007-MG verified 且 `main` 推送完成后，下一步必须从最新 `main` 创建新分支，再生成下一条 prompt；不得在旧功能分支继续开始 Slice D。
+PF-P007-MG 是 Merge Gate，不是 Traffic Gate。当前已执行并停在 `implemented`，必须等待用户确认后才能标记 `verified`。PF-P007-MG verified 且 `main` 推送完成后，下一步必须从最新 `main` 创建新分支，再生成下一条 prompt；不得在旧功能分支继续开始 Slice D。
+
+#### 执行结果
+
+- Feature branch：`codex/workbench-query-cache-freshness`。
+- Commit：`08ccad92 refactor(workbench): enforce query cache freshness gate`。
+- Merge 方式：`main` 与 `origin/main` 执行前均为 `be04b10c`，`main` 通过 fast-forward 合入 `08ccad92`。
+- 合入范围只包含 Expected Changed Files：`workbench_query_facade.py`、`test_workbench_query_facade.py`、`test_workbench_sql_runtime.py`、`ai-execution-rules.md`、`migration-state-log.md`、`refactor-prompts.md`、`workbench-read-model-query-plan.md`。
+- 未修改 SQL migration、前端、网关、部署配置、生产配置、SSE、worker、builder、repository SQL 或 Workbench 写路径。
+- 未执行 Traffic Gate，未部署服务器，未 push 到 `origin/main`。
+
+#### Feature branch 验证结果
+
+- `git status --short --branch` / `git ls-files --others --exclude-standard` / `git diff --name-only` / `git diff --stat` / `git diff --check`：通过，范围只包含 Expected Changed Files，无 untracked 混入。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`：通过，3 tests passed。
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，102 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，9 tests passed。
+- Row detail targeted tests：通过，4 tests passed。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过，status `ready`。
+- Facade 上帝对象注入静态检查：无输出，通过。
+- Facade mock 静态检查：无输出，通过。
+- `request_database_timing` 边界静态检查：通过。
+
+#### main 上验证结果
+
+- `git status --short --branch`：`main...origin/main [ahead 1]`。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --check`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade -v`：通过，3 tests passed。
+- `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，102 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，9 tests passed。
+- Row detail targeted tests：通过，4 tests passed。
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：通过，status `ready`。
+- Facade 上帝对象注入静态检查：无输出，通过。
+- Facade mock 静态检查：无输出，通过。
+- `request_database_timing` 边界静态检查：通过。
 
 ## 维护规则
 
