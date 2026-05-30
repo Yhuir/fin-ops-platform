@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已 verified 并同步到 `origin/main` |
-| 当前 active prompt | 无；`PF-P034-MG - Workbench Stale Guard Group Merge Gate` (`verified`) |
+| 当前阶段 | 已从最新 `main` 新建分支并生成 `PF-P035 - Workbench Confirm Link UoW Integration Slice`，等待执行 |
+| 当前 active prompt | `PF-P035 - Workbench Confirm Link UoW Integration Slice` (`planned`) |
 | 最近 verified prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/workbench-confirm-link-uow` |
 | 最近验证 | PF-P034-MG 在功能分支和本地 `main` 上均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试；用户确认 verified；`main` 已 push 到 `origin/main`；未部署、未 Traffic Gate |
-| 下一条允许任务 | 从最新 `main` 新建分支，再生成并审查下一条 Workbench prompt；不得直接在 `main` 上实现 |
+| 下一条允许任务 | 等待用户确认后执行 PF-P035；PF-P035 只迁移 `confirm-link` 真实写 API 到 UoW，不得迁移其它 Workbench 写路径 |
 
 ## Prompt 执行日志
 
@@ -3680,6 +3680,45 @@ PF-P034 已完成实现和验证，并已由用户确认 `verified`。下一步�
 #### 下一条 Prompt 上下文
 
 PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认 `verified`，并已同步到 `origin/main`。后续 prompt 必须从最新 `main` 新建分支生成，不得直接在 `main` 上实现。
+
+### PF-P035 - Workbench Confirm Link UoW Integration Slice
+
+状态：`planned`
+
+#### 范围
+
+- 从最新 `main` 新建分支：`codex/workbench-confirm-link-uow`。
+- 只迁移 `POST /api/workbench/actions/confirm-link` / `WorkbenchWriteFacade.confirm_link` 到 `WorkbenchWriteUnitOfWork`。
+- 必须保持旧前端未携带 `idempotency_key` / `expected_versions` 时的 response shape 与 characterization 行为。
+- 必须先补/调整测试，再实现。
+- 如果真实 PostgreSQL repository 或 transaction-bound facts writer 不足以安全完成 `confirm-link` UoW 集成，必须停止并记录 blocker，不得扩大到其它 API 或伪造事务保证。
+
+#### 预期读取文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+- `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`
+- `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+- `backend/src/fin_ops_platform/services/runtime_queue.py`
+- `tests/test_workbench_write_characterization.py`
+- `tests/test_workbench_uow_contract.py`
+- `tests/test_workbench_idempotency_contract.py`
+- `tests/test_workbench_stale_write_contract.py`
+- `tests/test_platform_runtime_boundary_guards.py`
+
+#### 审查结论
+
+- PF-P035 是 PF-P034-MG 后的合理下一步，因为 `confirm-link` 是 Workbench 写路径的核心入口，也是 UoW 目标矩阵中的第一批迁移对象。
+- 本 prompt 必须小切片推进，不得顺手迁移 `cancel-link`、exception、ignore/unignore、cash special、withdraw、personal advance repayment 或 matching/candidates。
+- 该 prompt 是实现 prompt，不是 Merge Gate；完成后只能标记 `implemented`，等待用户确认后再决定是否生成对应 MG。
 
 ## 维护规则
 

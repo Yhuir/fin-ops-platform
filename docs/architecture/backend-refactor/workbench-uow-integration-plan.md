@@ -553,6 +553,16 @@ Test state after PF-P026:
 - `tests.test_workbench_uow_contract`: Pass, 16 tests, 4 expected failures.
 - Remaining expected failures are stale write / optimistic locking target contracts and are outside PF-P026.
 
-Next safe step after user confirmation is a Merge Gate prompt, not another implementation prompt:
+## 16. PF-P035 Confirm Link UoW Integration Planning
 
-`PF-P026-MG - Workbench UoW Idempotency Integration Merge Gate`
+PF-P034-MG 已确认 `verified` 并推送到 `origin/main`。当前已从最新 `main` 创建新分支：
+
+`codex/workbench-confirm-link-uow`
+
+下一条 planned prompt：
+
+`PF-P035 - Workbench Confirm Link UoW Integration Slice`
+
+PF-P035 是 stale guard foundation 之后第一条真实 Workbench 写 API 的 UoW 集成切片。它只能迁移 `confirm-link`，不得迁移 `cancel-link`、exception 路径、ignore/unignore、cash special、withdraw、personal advance repayment、matching/candidates、query/read-model 或 deployment/runtime routing。
+
+PF-P035 必须把 repository capability 当作硬门禁。如果不扩大 repository/schema 范围就无法让 `confirm-link` 具备 transaction-bound facts/history + dirty/outbox 能力，本轮必须停止并记录为 `blocked`，不能伪装成生产级 UoW 已完成。
