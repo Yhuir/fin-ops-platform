@@ -7219,7 +7219,7 @@ Post-Flight:
 
 ## PF-P024 - Workbench Durable Idempotency Store Contract
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -9931,3 +9931,24 @@ Post-Flight:
 - PF-P029 已建立 preview `submit_expected_versions` 契约；PF-P034 应复用该契约并在 submit mutation 前校验当前 relation identity/version。
 - 当前 relation 缺少明确 durable version 字段时，本轮先完成 relation identity guard 是合理的；如果代码中可读取 version，再补 version 校验。不得伪造 schema 或新增 SQL migration。
 - PF-P034 完成后应生成 cumulative MG，统一覆盖 PF-P032 到 PF-P034 的完整 diff。
+
+### 执行结果
+
+- RED：新增 `test_withdraw_submit_with_stale_preview_expected_versions_rejects_replacement_relation` 后，旧 preview 的 submit 返回 200，并撤销 replacement relation 后恢复旧 relation。
+- GREEN：`WorkbenchWriteFacade.withdraw_link` 在携带 `expected_versions` 时复用 `_withdraw_link_stale_conflict` helper；当前 active relation identity 不匹配时返回 `409 workbench_write_conflict`，并在 `withdraw_latest_for_row_ids` 前退出。
+- 保持未携带 `expected_versions` 的 legacy withdraw 行为不变。
+- 保持 preview `submit_expected_versions` 契约不变。
+- 未修改 `cancel link`、`ignore row` 或 `cash special` 已完成 guard 的语义。
+- 未修改 `server.py`、前端、SQL migration、部署、网关、auth/session 或 worker routing。
+
+### 验证结果
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，33 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+### 下一步
+
+等待用户确认 PF-P034 后，生成并审查 cumulative Merge Gate，统一覆盖 PF-P032 到 PF-P034 的完整 diff；不得直接 merge 或 push。

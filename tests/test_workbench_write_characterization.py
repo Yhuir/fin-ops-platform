@@ -576,6 +576,47 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         restored_case_ids = [relation["case_id"] for relation in _json_response(stale_submit)["restored_relations"]]
         self.assertIn("CASE-WITHDRAW-OLD", restored_case_ids)
 
+    def test_withdraw_submit_with_stale_preview_expected_versions_rejects_replacement_relation(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+
+        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+            first_confirm = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-WITHDRAW-EXPECTED-OLD"},
+            )
+            preview = self._post(app, "/api/workbench/actions/withdraw-link/preview", {"month": "2026-03", "row_ids": row_ids})
+            replacement = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-WITHDRAW-EXPECTED-NEW"},
+            )
+            history_count = len(app._workbench_pair_relation_service.list_history())
+            stale_submit = self._post(
+                app,
+                "/api/workbench/actions/withdraw-link",
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "expected_versions": _json_response(preview)["submit_expected_versions"],
+                },
+            )
+
+        self.assertEqual(first_confirm.status_code, 200, first_confirm.body)
+        self.assertEqual(preview.status_code, 200, preview.body)
+        self.assertEqual(replacement.status_code, 200, replacement.body)
+        self.assertEqual(stale_submit.status_code, 409, stale_submit.body)
+        payload = _json_response(stale_submit)
+        self.assertEqual(payload["error"], "workbench_write_conflict")
+        self.assertEqual(payload["conflict"]["action"], "withdraw_link")
+        self.assertIn(payload["conflict"]["reason"], {"stale_relation_identity", "stale_relation_version"})
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-EXPECTED-OLD"))
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-EXPECTED-NEW"))
+        self.assertEqual(len(app._workbench_pair_relation_service.list_history()), history_count)
+        self.assertEqual(pair_relation_persist.call_count, 2)
+        self.assertEqual(read_model_persist.call_count, 2)
+
     def test_withdraw_link_read_model_scheduling_failure_propagates_after_relation_is_withdrawn(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)

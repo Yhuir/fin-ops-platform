@@ -384,6 +384,29 @@ class WorkbenchWriteFacade:
             return exc
         return None
 
+    def _withdraw_link_stale_conflict(
+        self,
+        payload: dict[str, object],
+        active_relation: dict[str, object],
+    ) -> WorkbenchWriteConflict | None:
+        expected_versions = payload.get("expected_versions")
+        if not isinstance(expected_versions, dict) or not expected_versions:
+            return None
+        try:
+            assert_workbench_stale_preconditions(
+                _WorkbenchWritePreconditionCommand(
+                    action_name="withdraw_link",
+                    expected_versions=dict(expected_versions),
+                    payload={
+                        "current_relation_case_id": str(active_relation.get("case_id") or ""),
+                        "current_relation_version": active_relation.get("version"),
+                    },
+                )
+            )
+        except WorkbenchWriteConflict as exc:
+            return exc
+        return None
+
     def preview_withdraw_link(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
@@ -477,6 +500,10 @@ class WorkbenchWriteFacade:
             )
 
         active_relation = preview["active_relation"]
+        conflict = self._withdraw_link_stale_conflict(payload, active_relation)
+        if conflict is not None:
+            conflict_payload = conflict.to_response_payload()
+            return WorkbenchWriteResult(HTTPStatus(conflict.status_code), dict(conflict_payload["payload"]))
         _rows, after_relations, affected_row_ids = self._withdraw_rows_and_after_relations(
             active_relation=active_relation,
             after_relations=list(preview.get("after_relations") or []),

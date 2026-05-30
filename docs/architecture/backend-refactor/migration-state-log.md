@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` (`planned`) |
+| 当前阶段 | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` 已实现，等待用户确认后生成累计 Merge Gate |
+| 当前 active prompt | `PF-P034 - Workbench Withdraw Submit Stale Guard Migration` (`implemented`) |
 | 最近 verified prompt | `PF-P033 - Workbench Cash Special Stale Guard Migration` (`MG deferred`) |
 | 当前分支 | `codex/workbench-ignore-row-stale-guard` |
-| 最近验证 | PF-P033 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试全部通过；用户确认 PF-P033 verified |
-| 下一条允许任务 | 执行 PF-P034；PF-P034 只迁移 withdraw submit stale guard，不迁移其它 Workbench 写路径；PF-P032/PF-P033 MG 均已延后，累计 MG 将覆盖 PF-P032 到 PF-P034 |
+| 最近验证 | PF-P034 指定 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试全部通过 |
+| 下一条允许任务 | 等待用户确认 PF-P034；确认后生成并审查 cumulative MG，覆盖 PF-P032 到 PF-P034 的完整 diff |
 
 ## Prompt 执行日志
 
@@ -3526,7 +3526,7 @@ PF-P033 已完成实现和验证，并已由用户确认 `verified`。PF-P032-MG
 
 ### PF-P034 - Workbench Withdraw Submit Stale Guard Migration
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3561,6 +3561,35 @@ PF-P033 已完成实现和验证，并已由用户确认 `verified`。PF-P032-MG
 - PF-P034 必须保持小切片，只处理 withdraw submit；不得顺手修改其它 Workbench 写路径。
 - 当前 preview 使用兼容性 `version=1` 暴露 submit contract；PF-P034 应优先完成 relation identity guard。如当前 relation 可读取真实 version，则同时校验 version；不得伪造 PostgreSQL 版本字段或新增 SQL migration。
 - PF-P034 完成后应生成累计 Merge Gate，统一覆盖 PF-P032 到 PF-P034 的完整 diff。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+
+#### 执行结果
+
+- RED：新增 `test_withdraw_submit_with_stale_preview_expected_versions_rejects_replacement_relation` 后，旧 preview 的 submit 返回 200，并撤销 replacement relation 后恢复旧 relation。
+- GREEN：`WorkbenchWriteFacade.withdraw_link` 在携带 `expected_versions` 时复用 `_withdraw_link_stale_conflict` helper；当前 active relation identity 不匹配时返回 `409 workbench_write_conflict`，并在 `withdraw_latest_for_row_ids` 前退出。
+- Legacy no-expected-versions withdraw characterization 保持不变。
+- Preview `submit_expected_versions` 契约保持不变。
+- 未修改 `cancel link`、`ignore row` 或 `cash special` 已完成 guard 的语义。
+- 未修改 `server.py`、前端、SQL migration、部署、网关、auth/session 或 worker routing。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，33 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### 下一条 Prompt 上下文
+
+PF-P034 已完成实现和验证，等待用户确认。下一步应生成并审查 cumulative Merge Gate，统一覆盖 PF-P032 ignore row、PF-P033 cash special、PF-P034 withdraw submit 的完整 diff；不得直接 merge 或 push。
 
 ## 维护规则
 
