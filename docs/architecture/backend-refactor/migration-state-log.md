@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` 已由用户确认 verified，准备 push 到 `origin/main` |
+| 当前阶段 | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` 已 verified 并 push 到 `origin/main` |
 | 当前 active prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` (`verified`) |
 | 最近 verified prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P031-MG 合入前与合入后 `main` 复验全部通过；用户已确认 verified；仍未迁移 ignore row、cash special 或 withdraw submit |
-| 下一条允许任务 | 执行 `git push origin main`；push 后从最新 `main` 新建分支生成下一条 prompt |
+| 最近验证 | PF-P031-MG 合入前与合入后 `main` 复验全部通过；已 push；仍未迁移 ignore row、cash special 或 withdraw submit |
+| 下一条允许任务 | 从最新 `main` 新建分支，生成并审查 `PF-P032 - Workbench Ignore Row Stale Guard Migration`；不得直接执行 |
 
 ## Prompt 执行日志
 
@@ -3394,7 +3394,7 @@ PF-P031 已完成实现和验证，并已由用户确认 `verified`。PF-P031-MG
 
 #### 下一条 Prompt 上下文
 
-PF-P031-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确认 `verified`。下一步执行 `git push origin main`。push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。建议下一条 prompt 为 `PF-P032 - Workbench Ignore Row Stale Guard Migration`，但生成前必须先新建分支并审查 prompt；不得直接执行。
+PF-P031-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确认 `verified`。`git push origin main` 已完成，`main` 与 `origin/main` 对齐。下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P032 - Workbench Ignore Row Stale Guard Migration`。PF-P032 应只迁移 ignore row stale guard，不得顺手迁移 cash special 或 withdraw submit；生成后仍需单独审查，不得直接执行。
 
 ## 维护规则
 

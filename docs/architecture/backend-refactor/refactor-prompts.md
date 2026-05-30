@@ -9440,6 +9440,6 @@ Main 上复验：
 下一步：
 
 - 用户已确认 PF-P031-MG `verified`。
-- 下一步执行 `git push origin main`。
-- push 完成后，必须从最新 `main` 新建分支，再生成下一条 prompt。
-- 建议下一条 prompt 为 `PF-P032 - Workbench Ignore Row Stale Guard Migration`，但不得直接执行。
+- `git push origin main` 已完成。
+- 下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P032 - Workbench Ignore Row Stale Guard Migration`。
+- PF-P032 只迁移 ignore row stale guard，不得顺手迁移 cash special 或 withdraw submit。
