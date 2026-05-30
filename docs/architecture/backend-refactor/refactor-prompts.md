@@ -1665,7 +1665,7 @@ Post-Flight:
 
 ## PF-P005-MG - Workbench Query Characterization Tests Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### 目标
 
@@ -1819,3 +1819,23 @@ Post-Flight:
 - Prompt 明确 commit message 语义应使用 `test(workbench): ...`，因为本轮包含测试代码而不是纯 docs。
 - Prompt 明确不执行 Traffic Gate、不 push 生产服务器、不访问生产外部服务。
 - PF-P005-MG 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。
+
+### 执行结果
+
+- 已执行，当前状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- PF-P005 tests/docs 变更已精准 stage 并提交，提交为 `2bb3ac17`：
+  - `test(workbench): lock query read model characterization baseline`
+- 已切回 `main` 并 fast-forward merge `codex/workbench-read-model-query-plan`。
+- `main` 未 push 到 `origin/main`。
+- 未执行 Traffic Gate，未部署服务器，未访问生产外部服务。
+- 合入范围只包含 tests/docs；未修改生产代码、SQL migration、前端、网关、部署或生产配置。
+- `tests/test_workbench_v2_api.py` 未被修改，只作为 row detail targeted tests 复用。
+- `git ls-files --others --exclude-standard` 合入 main 后无输出。
+- main 上验证已通过：
+  - `git diff --check`
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`，102 tests passed
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`，9 tests passed
+  - Row detail targeted tests，4 tests passed
+  - PF-P005 / PF-P005-MG 文档门禁 `rg`
+  - 新增 characterization test 锚点 `rg`
+- 下一步建议：用户确认后将 PF-P005-MG 标记为 `verified`；随后生成并审查 PF-P006，不要在 PF-P005-MG verified 前开始生产代码重构。

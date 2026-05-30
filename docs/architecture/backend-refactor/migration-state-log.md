@@ -49,12 +49,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Workbench Query Characterization Tests 已 verified；PF-P005-MG 已生成，等待执行 |
-| 当前 active prompt | `PF-P005-MG - Workbench Query Characterization Tests Merge Gate` (`planned`) |
+| 当前阶段 | Workbench Query Characterization Tests Merge Gate 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P005-MG - Workbench Query Characterization Tests Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P005 - Workbench Query Characterization Tests` |
 | 当前分支 | `codex/workbench-read-model-query-plan` |
-| 最近验证 | PF-P005 targeted tests、`tests.test_workbench_sql_runtime` 全文件、row detail targeted tests、PF-P003 platform guards 均已通过；用户已确认 PF-P005 verified；未部署服务器；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `PF-P005-MG`；只处理 Workbench Query Characterization Tests 的 Merge Gate，不开始 PF-P006 生产代码重构 |
+| 最近验证 | PF-P005-MG 已在 `main` 上 fast-forward merge；`tests.test_workbench_sql_runtime`、row detail targeted tests、PF-P003 platform guards 均已通过；未 push；未部署服务器；未执行 Traffic Gate |
+| 下一条允许任务 | 用户确认后将 `PF-P005-MG` 标记为 verified；随后生成并审查 `PF-P006`，不得在 PF-P005-MG verified 前开始生产代码重构 |
 
 ## Prompt 执行日志
 
@@ -619,7 +619,7 @@ PF-P005 已 verified。PF-P005-MG 已生成并审查，下一步允许执行 PF-
 
 ### PF-P005-MG - Workbench Query Characterization Tests Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -657,9 +657,38 @@ PF-P005 已 verified。PF-P005-MG 已生成并审查，下一步允许执行 PF-
 - Row detail targeted tests。
 - `rg` 检查 PF-P005 / PF-P005-MG 状态和文档门禁。
 
+#### 执行结果
+
+- 已执行，等待用户确认后才能标记 `verified`。
+- PF-P005 变更已精准 stage 并提交，提交为 `2bb3ac17`（`test(workbench): lock query read model characterization baseline`）。
+- 当前分支已切回 `main`，并通过 fast-forward merge 将 `codex/workbench-read-model-query-plan` 合入 `main`。
+- `main` 未 push 到 `origin/main`。
+- 未执行 Traffic Gate，未部署服务器，未访问生产外部服务。
+- 合入范围只包含 tests/docs：
+  - `tests/test_workbench_sql_runtime.py`
+  - `docs/architecture/backend-refactor/workbench-read-model-query-plan.md`
+  - `docs/architecture/backend-refactor/runtime-call-chain.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 未修改生产代码、SQL migration、前端、网关、部署或生产配置。
+- `git ls-files --others --exclude-standard`：合入前仅出现允许的新文档；合入 main 后无 untracked files。
+- `tests/test_workbench_v2_api.py` 未修改，只作为 row detail targeted tests 复用。
+
+#### main 上验证结果
+
+- `git status --short --branch`：`main...origin/main [ahead 1]`。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --name-only`：无输出。
+- `git diff --check`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`：通过，102 tests passed。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：通过，9 tests passed。
+- Row detail targeted tests：通过，4 tests passed。
+- PF-P005 / PF-P005-MG 文档门禁 `rg`：通过。
+- 新增 characterization test 锚点 `rg`：通过。
+
 #### 下一条 Prompt 上下文
 
-执行 PF-P005-MG 后，必须先等待用户确认才能标记 `verified`。PF-P005-MG verified 后，下一步建议生成并审查 PF-P006 的实现型 prompt；PF-P006 才能开始 Workbench Query handler/facade/repository 的最小生产代码切片。
+PF-P005-MG 已执行到 `implemented`，必须先等待用户确认才能标记 `verified`。PF-P005-MG verified 后，下一步建议生成并审查 PF-P006 的实现型 prompt；PF-P006 才能开始 Workbench Query handler/facade/repository 的最小生产代码切片。当前 `main` 只在本地 ahead，尚未 push 到 `origin/main`。
 
 ## 维护规则
 
