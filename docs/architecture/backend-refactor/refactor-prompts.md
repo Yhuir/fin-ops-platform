@@ -4245,7 +4245,7 @@ TDD 记录：
 
 ## PF-P013-MG - Workbench Write Facade Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -4417,7 +4417,7 @@ Post-Flight:
 
 ## PF-P014 - Workbench Exception Facade Extraction
 
-状态：`planned`
+状态：`implemented`
 
 ```text
 请执行 PF-P014 - Workbench Exception Facade Extraction。
@@ -5578,7 +5578,7 @@ Post-Flight:
 - Untracked gate：Pass。`git ls-files --others --exclude-standard` 无输出。
 - Feature branch verification：Pass。
 - Main verification：Pass。
-- Push：已推送 `origin/main`，远端 `main` 更新到 `232615b7`。
+- Push：已推送 `origin/main`，远端 `main` 最终更新到 `06c6fd43`。
 - Traffic Gate：未执行；未部署、未切流、未修改生产配置、未访问生产服务器。
 - User confirmation：2026-05-30 用户确认 PF-P017-MG `verified`。
 
@@ -5597,3 +5597,1173 @@ Main 复验命令：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`
 
 下一步：从最新 `main` 新建分支，再生成并审查 `PF-P018 - Workbench Write Unit of Work Boundary Design`。PF-P018 只做 UoW 边界设计与测试策略，不直接改事务语义或修复 stale write。
+
+## PF-P018 - Workbench Write Unit of Work Boundary Design
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P018 - Workbench Write Unit of Work Boundary Design。
+
+Role: 你是一位精通 Python 遗留系统重构、PostgreSQL 事务一致性、Transactional Outbox、Read Model freshness 和 Clean Architecture 的后端架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P013/PF-P014/PF-P017 已将 Workbench 写入口的主要非 HTTP 编排抽入 `WorkbenchWriteFacade`。
+- PF-P012/PF-P016 已用 characterization tests 锁定当前 duplicate-submit、stale write、persistence failure、scheduling failure 行为。
+- 当前仍未解决的核心风险是：facts、audit/history、dirty scope、outbox/read model scheduling 不在同一个 PostgreSQL transaction 中提交。
+- PF-P018 是设计/文档 prompt，不是代码实现 prompt。
+
+Pre-Flight:
+1. 必须先确认当前工作流：
+   - 当前分支不是 `main`。
+   - 当前分支必须从最新 `origin/main` 新建。
+   - 最近 verified prompt 是 `PF-P017-MG - Workbench Remaining Write Facade Merge Gate`。
+   - 当前 active prompt 是 `PF-P018 - Workbench Write Unit of Work Boundary Design` planned。
+2. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/target-architecture.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+3. 必须读取或通过 CodeGraph 覆盖当前实现和测试：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/runtime_worker.py`
+   - `backend/src/fin_ops_platform/app/worker.py`
+   - `backend/src/fin_ops_platform/services/postgres_connection.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/core.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+   - `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_exception_case_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_override_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_exception_application_service.py`
+   - `backend/src/fin_ops_platform/services/workbench_candidate_match_service.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_dirty_queue_wiring.py`
+   - `tests/test_workbench_v2_api.py`
+   - `tests/test_workbench_exception_application_service.py`
+   - `tests/test_workbench_exception_case_service.py`
+   - `tests/test_workbench_pair_relation_service.py`
+   - `tests/test_derived_data_lifecycle_service.py`
+   - `tests/test_platform_runtime_boundary_guards.py`
+4. 必须先记录工作区状态：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - 若存在非本轮文件变更，必须停止并说明。
+
+Goal:
+产出 Workbench 写路径 Unit of Work 目标边界设计，明确未来实现时每个写 API 必须如何在同一 PostgreSQL transaction 中提交 facts、audit/history、dirty scope、outbox/read model scheduling 和 source_version，并明确实现前还必须补哪些测试门禁。PF-P018 只做设计和文档，不修改生产逻辑。
+
+Required Design Work:
+1. Current State Inventory
+   - 列出 `WorkbenchWriteFacade` 当前所有写入口：
+     - `confirm_link`
+     - `cancel_link`
+     - `preview_withdraw_link`（read-only，不进入 UoW，但要说明 submit parity）
+     - `withdraw_link`
+     - `confirm_cash_pass_through`
+     - `confirm_cash_ticket_purchase`
+     - `cancel_cash_special`
+     - `mark_exception`
+     - `cancel_exception`
+     - `ignore_row`
+     - `unignore_row`
+     - `apply_exception`
+     - `update_bank_exception`
+     - `oa_bank_exception`
+     - `confirm_personal_advance_repayment`
+   - 对每个入口记录当前调用的 service、persistence callback、derived lifecycle callback、read model scheduling callback 和 known failure mode。
+2. UoW Boundary Matrix
+   - 对每个 write API 输出矩阵：
+     - facts tables / facts service state；
+     - audit/history；
+     - dirty scope；
+     - outbox event / read model scheduling；
+     - source_version 或 expected version；
+     - idempotency key / duplicate submit contract；
+     - stale write precondition / optimistic locking candidate；
+     - rollback expectations；
+     - 是否需要更新 characterization tests。
+3. Transaction Sequence Design
+   - 用 Mermaid sequence diagram 输出目标写路径时序：
+     - HTTP handler parse/freshness guard；
+     - facade 调用；
+     - UoW begin；
+     - facts + audit/history；
+     - dirty scope + outbox/read model scheduling；
+     - source_version bump；
+     - commit；
+     - post-commit side effects only for safe async notification；
+     - response。
+   - 必须明确哪些操作必须在 transaction 内，哪些只能在 post-commit 后执行。
+4. Postgres / Repository Boundary Design
+   - 审计当前 `postgres_connection.py` 和 `postgres_repositories/core.py` 是否已有可复用 transaction helper。
+   - 设计未来最小可行接口，例如 `WorkbenchWriteUnitOfWork` / transaction callback / repository bundle，但不得写代码。
+   - 明确禁止把 `Application`、`RuntimeRepositories`、`state_store` 或外部 client 作为 UoW 上帝对象。
+5. Read Model / Dirty Scope / Outbox Contract
+   - 基于 `read-model-and-external-services.md` 和 PF-P003/PF-P004 既有规则，明确 Workbench 写路径的最低一致性规则：
+     - facts、audit/history、dirty scope、outbox 必须同事务；
+     - dirty scope 的 source_version 必须单调递增；
+     - worker 必须按 `(scope_type, scope_key, source_version)` 幂等刷新；
+     - API 读路径必须能识别 stale/refreshing；
+     - Redis key 必须包含 generation/source_version。
+   - 如果当前 Python 代码尚未有完整 outbox writer，必须记录 blocker，不得虚构已有实现。
+6. Failure Mode Matrix
+   - 基于 PF-P012/PF-P016 当前测试，列出未来 UoW 必须改变或保持的失败语义：
+     - persistence failure；
+     - scheduling failure after mutation；
+     - duplicate submit；
+     - stale write / blind overwrite；
+     - partial pair relation + exception case mutation；
+     - worker/read model lag；
+     - outbox enqueue failure。
+   - 必须区分：
+     - 当前行为已锁定但不理想；
+     - 未来 UoW 应修复；
+     - 修复前必须先补测试。
+7. Test Strategy / Next Prompt Recommendation
+   - 输出下一步测试 prompt 的建议，不直接进入实现：
+     - 推荐优先生成 `PF-P019 - Workbench UoW Contract Tests` 或等价名称。
+   - 明确哪些测试必须先写：
+     - facts + audit + dirty scope + outbox 同事务成功；
+     - scheduling failure 不得留下 partial mutation；
+     - duplicate submit idempotency；
+     - stale write conflict；
+     - source_version monotonicity；
+     - worker idempotent refresh compatibility。
+
+Required Documentation Output:
+- 新增：
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- 更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`（只补充 UoW next-slice 摘要；如无必要可说明未改）
+
+Forbidden Scope:
+- 不实现 UoW、transaction manager、repository rewrite、outbox writer、dirty scope writer 或 source_version 更新逻辑。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改任何 Workbench service 生产代码。
+- 不新增或修改 tests。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不修复 stale write、duplicate submit、blind write、rollback 或 scheduling failure 当前语义。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+- 不使用 `git add .` 或 `git add -A`。
+
+Expected Changed Files:
+- 允许修改：
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 如需修改其它文件，必须停止并说明原因。
+
+Required Verification:
+- `git status --short --branch`：Pass，只显示允许文档变更。
+- `git ls-files --others --exclude-standard`：Pass，只显示新增允许文档。
+- `git diff --name-only`：Pass，只显示允许文档。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$)'`：Pass，无输出。
+  - 该命令必须无输出；否则 blocked。
+- 本轮不需要运行 Python tests，因为 PF-P018 不改生产代码或测试代码；如实际修改了任何 `.py` 文件，必须停止并说明违规范围。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P018 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 写明变更文件、验证命令、风险和下一条 prompt 建议。
+- 更新 `refactor-prompts.md` 的 PF-P018 执行结果。
+- 不 merge 到 main。
+- 不 push。
+- 不执行 Merge Gate。
+- 未经用户确认，不得将 PF-P018 标记为 `verified`。
+- 最终回复必须说明：
+  - 产出了哪些 UoW 设计内容；
+  - 哪些 blocker 仍存在；
+  - 下一条建议 prompt 是什么。
+```
+
+### 审查结论
+
+- PF-P018 的边界正确：它只做 UoW 边界设计、测试策略和风险清单，不改生产逻辑。
+- PF-P018 明确读取当前 Workbench facade、server handlers、derived lifecycle、runtime queue、Postgres transaction 基础设施和 characterization tests，能基于真实代码制定设计。
+- PF-P018 明确禁止实现 UoW、修改事务语义、修复 stale write 或新增测试，避免越过设计阶段直接动生产逻辑。
+- PF-P018 要求输出逐 API UoW matrix、目标事务时序、failure mode matrix 和下一步测试 prompt，为后续实现前的机械门禁做准备。
+- PF-P018 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`verified`
+
+变更：
+
+- 新增 `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`。
+- 更新 `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`，补充 PF-P017/PF-P018 结果和下一条测试 prompt 建议。
+- 更新 `docs/architecture/backend-refactor/migration-state-log.md`，记录 PF-P018 implemented 状态。
+- 未修改任何生产代码、测试代码、SQL migration、前端、部署或生产配置。
+
+设计结论：
+
+- Workbench 写路径下一步需要 UoW，但实现前必须先写目标 contract tests。
+- 当前最大 blocker 是 `RuntimeQueueRepository.enqueue_read_model_refresh()` 内部开启独立事务，无法直接加入 Workbench facts transaction。
+- 未来 UoW 必须把 facts、audit/history、dirty scope、outbox、source_version 和 durable idempotency 放到同一 PostgreSQL transaction。
+- 下一条建议 prompt：`PF-P019 - Workbench UoW Contract Tests`。PF-P019 只新增目标契约测试，不实现 UoW。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only | rg -v '^(docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$)'`
+
+本轮不运行 Python tests，因为 PF-P018 只改文档，不改 `.py` 文件或测试文件。
+
+用户已确认 PF-P018 `verified`。
+
+## PF-P019 - Workbench UoW Contract Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P019 - Workbench UoW Contract Tests。
+
+Role: 你是一位精通 Python unittest、TDD red phase、PostgreSQL 事务一致性、Transactional Outbox 和遗留系统安全重构的后端测试架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P018 已 verified，产物是 `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`。
+- PF-P018 结论：Workbench 写路径需要 UoW，但实现前必须先写目标 contract tests。
+- PF-P019 是 TDD red phase：只新增目标契约测试，不实现 UoW。
+- 新增目标测试在当前实现上允许失败，但失败必须清晰指向缺失的目标能力，而不是测试夹具错误、语法错误或错误导入。
+
+Pre-Flight:
+1. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-boundary-design` 或同一 UoW 分支。
+   - 最近 verified prompt 是 `PF-P018 - Workbench Write Unit of Work Boundary Design`。
+   - 当前 active prompt 是 `PF-P019 - Workbench UoW Contract Tests` planned。
+2. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+3. 必须读取或通过 CodeGraph 覆盖：
+   - `backend/src/fin_ops_platform/services/postgres_connection.py`
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `tests/test_runtime_queue.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_dirty_queue_wiring.py`
+   - `tests/test_platform_runtime_boundary_guards.py`
+4. 必须先记录工作区状态：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - 若存在非本轮文件变更，必须停止并说明。
+
+Goal:
+新增 Workbench UoW 目标契约测试，明确未来实现必须满足的事务一致性、source_version、outbox/dirty scope、durable idempotency 和 stale-write conflict 行为。PF-P019 不实现生产逻辑，不修改现有生产代码。
+
+Required Test Work:
+1. 新增 `tests/test_workbench_uow_contract.py`。
+2. 测试文件必须在文件头说明：
+   - 这是 PF-P019 目标契约测试；
+   - 当前实现可能失败；
+   - 失败是 red phase signal；
+   - 在 PF-P020 或后续实现前，不得合入 `main`。
+3. 新增测试必须覆盖以下 contract groups：
+
+Platform transaction-bound dirty/outbox writer contract:
+- `test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction`
+- `test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload`
+- `test_read_model_refresh_writer_failure_rolls_back_transaction`
+
+Workbench UoW atomicity contract:
+- `test_confirm_link_commits_pair_relation_history_dirty_scope_and_outbox_in_one_transaction`
+- `test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history`
+- `test_exception_apply_commits_case_override_candidate_dirty_scope_and_outbox_in_one_transaction`
+- `test_personal_advance_repayment_rolls_back_case_and_relation_when_dirty_scope_fails`
+
+Stale write target contract:
+- `test_withdraw_submit_rejects_stale_preview_relation_version`
+- `test_cancel_link_rejects_stale_replaced_relation`
+- `test_ignore_row_rejects_when_row_already_confirmed`
+- `test_cash_special_rejects_changed_relation_version`
+
+Durable idempotency target contract:
+- `test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history`
+- `test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox`
+- `test_cash_special_idempotency_key_does_not_append_duplicate_history`
+
+Worker / source_version compatibility contract:
+- `test_outbox_payload_contains_source_version_for_each_dirty_scope`
+- `test_worker_completion_cannot_mark_newer_dirty_scope_done_from_older_event`
+
+Test Design Rules:
+- Tests must be explicit and readable; do not hide target behavior behind broad helper magic.
+- If a future class/function does not yet exist, tests may fail with a clear assertion message such as `WorkbenchWriteUnitOfWork is not implemented yet` or `transaction-bound read model refresh writer is missing`.
+- Do not create tests that pass vacuously by only checking documentation or comments.
+- Do not mark new target tests with `@unittest.skip` or `@unittest.expectedFailure`; PF-P019 is allowed to leave the branch red until implementation prompt.
+- Existing characterization tests must not be weakened, deleted, skipped, or rewritten to target behavior.
+- Target tests should not depend on real PostgreSQL, Redis, RabbitMQ, OA Mongo, MySQL, or filesystem state.
+- Prefer fake transaction / fake repository / fake writer objects inside the test file.
+- New fakes must record call order, transaction outcome, source_version, outbox payload and rollback/commit state.
+
+Expected Red Verification:
+- Run the new target tests:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+- Expected result for PF-P019:
+  - FAIL is acceptable only if failures clearly indicate missing UoW/transaction-bound writer/stale guard/idempotency implementation.
+  - ERROR due to syntax error, import error unrelated to planned target API, broken fixture, or missing package is not acceptable.
+  - If tests unexpectedly pass without production implementation, inspect for vacuous assertions and strengthen them.
+
+Required Existing Green Verification:
+These must still pass:
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Forbidden Scope:
+- 不实现 UoW、transaction manager、repository rewrite、outbox writer、dirty scope writer、source_version writer、durable idempotency store 或 stale-write guard。
+- 不修改任何生产 `.py` 文件。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改 `backend/src/fin_ops_platform/services/runtime_queue.py`。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不修改现有 characterization tests 的期望。
+- 不使用 `@unittest.skip` 或 `@unittest.expectedFailure` 隐藏新目标测试失败。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+- 不使用 `git add .` 或 `git add -A`。
+
+Expected Changed Files:
+- 允许新增/修改：
+  - `tests/test_workbench_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 如需修改其它文件，必须停止并说明原因。
+
+Required Scope Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only | rg -v '^(tests/test_workbench_uow_contract\\.py$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$)'`
+  - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P019 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录新目标测试数量、Expected Red 结果、Existing Green 结果和残余风险。
+- 更新 `refactor-prompts.md` 的 PF-P019 执行结果。
+- 更新 `workbench-write-uow-boundary-design.md` 或 `workbench-writes-and-matching-plan.md`，记录 PF-P019 target test coverage。
+- 不 merge 到 main。
+- 不 push。
+- 不执行 Merge Gate。
+- 未经用户确认，不得将 PF-P019 标记为 `verified`。
+- 最终回复必须说明：
+  - 新增了哪些目标契约测试；
+  - 新测试是 expected red 还是 blocked；
+  - 现有绿色验证是否通过；
+  - 下一条建议 prompt 是什么。
+```
+
+### 审查结论
+
+- PF-P019 的边界正确：它只新增目标 contract tests，不实现 UoW。
+- PF-P019 明确允许 red phase，但要求失败必须是目标能力缺失，而不是测试自身错误。
+- PF-P019 明确现有 characterization、dirty queue 和 platform guard tests 必须保持绿色，防止红灯契约测试污染现有安全网。
+- PF-P019 禁止修改生产代码、SQL migration、前端、部署和现有 characterization 期望。
+- PF-P019 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+- 已新增 `tests/test_workbench_uow_contract.py`，共 16 个 Workbench UoW 目标契约测试。
+- Contract coverage:
+  - transaction-bound dirty/outbox writer：3 tests。
+  - Workbench UoW atomicity：4 tests。
+  - stale write target behavior：4 tests。
+  - durable idempotency target behavior：3 tests。
+  - worker/source_version compatibility：2 tests。
+- Expected Red:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+  - 结果：FAIL，16 tests，14 failures，2 ok。
+  - 失败原因符合预期：缺失 `fin_ops_platform.services.workbench_uow.WorkbenchWriteUnitOfWork`，以及缺失 transaction-bound read model refresh writer / `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=...)`。
+- Existing Green:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- Scope:
+  - 未修改生产 `.py` 文件。
+  - 未修改 `server.py`、`workbench_write_facade.py`、`runtime_queue.py`。
+  - 未修改 SQL migration、前端、部署、CI/CD 或现有 characterization 期望。
+- 下一步建议：用户确认 PF-P019 `verified` 后，生成并审查 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`，先补齐可加入外层 PostgreSQL transaction 的 dirty scope/outbox writer，再进入完整 UoW 实现。
+
+用户已确认 PF-P019 `verified`。
+
+## PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer。
+
+Role: 你是一位精通 Python unittest、PostgreSQL transaction、Transactional Outbox、source_version 并发控制和遗留系统最小风险改造的后端架构工程师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P019 已 verified，新增了 `tests/test_workbench_uow_contract.py`。
+- PF-P019 当前 Expected Red：16 tests，14 failures，2 ok。红灯中最小可先解决的 blocker 是 transaction-bound dirty/outbox writer 缺失。
+- 当前 `RuntimeQueueRepository.enqueue_read_model_refresh()` 会自己打开 `self._connection.transaction()`，因此不能加入 Workbench facts transaction。
+- PF-P020 的目标是先解决 runtime queue 平台底座能力，不进入完整 Workbench UoW。
+
+Pre-Flight:
+1. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-boundary-design` 或同一 UoW 分支。
+   - 最近 verified prompt 是 `PF-P019 - Workbench UoW Contract Tests`。
+   - 当前 active prompt 是 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` planned。
+2. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+3. 必须读取或通过 CodeGraph 覆盖：
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/postgres_connection.py`
+   - `tests/test_runtime_queue.py`
+   - `tests/test_workbench_uow_contract.py`
+4. 必须先记录工作区状态：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - 若存在非本轮文件变更，必须停止并说明。
+
+Goal:
+实现一个可复用外层 PostgreSQL transaction 的 read model refresh dirty/outbox writer，让后续 Workbench UoW 能在同一 transaction 中提交 facts、audit/history、dirty scope 和 outbox。PF-P020 只解决 runtime queue 平台写入边界，不实现 Workbench UoW。
+
+Required Red Step:
+1. 先运行 PF-P019 中的 3 个 platform writer tests，确认它们当前仍红：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+2. 允许这 3 个测试失败，但失败必须是缺少 transaction-bound writer，而不是测试自身错误。
+
+Required Test Work:
+1. 在 `tests/test_runtime_queue.py` 中新增 focused tests，先写测试再实现：
+   - `test_enqueue_read_model_refresh_in_transaction_uses_supplied_transaction_without_opening_connection_context`
+   - `test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract`
+   - `test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer`
+2. 新测试必须复用或扩展现有 `FakeTransaction` / `FakeConnection` 模式。
+3. 测试必须明确断言：
+   - transaction-bound 方法接收外层 `transaction` 对象；
+   - transaction-bound 方法不调用 `connection.transaction()`；
+   - dirty scope SQL 和 outbox SQL 的 source_version、payload、priority、trace_id、dedupe_key 语义与现有 `enqueue_read_model_refresh()` 一致；
+   - 现有 `enqueue_read_model_refresh()` 仍然打开自己的 transaction，并委托 transaction-bound 方法，保持 public API 兼容。
+
+Required Implementation Work:
+1. 在 `backend/src/fin_ops_platform/services/runtime_queue.py` 中新增最小接口，首选：
+   - `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=..., scope_type, scope_key, reason, tenant_id="default", priority="normal", trace_id=None) -> RuntimeQueueEvent`
+2. 把现有 `enqueue_read_model_refresh()` 中的 dirty scope + outbox SQL 逻辑移动/委托到该 transaction-bound 方法。
+3. 保持现有 SQL 语义不变：
+   - `job.read_model_dirty_scopes` source_version 递增规则不变；
+   - `job.outbox_events` event_type、aggregate_type、aggregate_id、scope_type、scope_key、dedupe_key、schema_version、source_version、priority、trace_id、payload、raw_payload 语义不变；
+   - outbox `on conflict` 更新语义不变；
+   - `_json_param()` 和 `_event_from_row()` 继续作为唯一 JSON / event conversion 路径。
+4. transaction-bound 方法不得调用 `self._connection.transaction()`、`self._connection.fetch_one()` 或任何会自行开连接的方法；只能使用传入的 `transaction.fetch_one()`。
+5. 输入校验必须与现有 `enqueue_read_model_refresh()` 一致：空 `scope_type` / `scope_key` 仍抛 `RuntimeQueueDataError`。
+
+Expected Verification:
+1. PF-P020 targeted writer tests must pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_in_transaction_uses_supplied_transaction_without_opening_connection_context -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer -v`
+2. Existing runtime queue tests must pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+3. PF-P019 writer group must now pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+4. PF-P019 full contract file may remain Expected Red:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - Acceptable only if the remaining failures are missing `WorkbenchWriteUnitOfWork` / UoW semantics. The 3 transaction-bound writer tests must pass.
+5. Existing safety net must remain green:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Forbidden Scope:
+- 不实现 `WorkbenchWriteUnitOfWork`。
+- 不新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改 Workbench facts repositories。
+- 不修 stale write / optimistic locking。
+- 不实现 durable idempotency store。
+- 不改变现有 `enqueue_read_model_refresh()` public behavior。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不修改 PF-P019 target tests 来让红灯消失；目标是实现 runtime queue writer，而不是改测试。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+- 不使用 `git add .` 或 `git add -A`。
+
+Expected Changed Files:
+- 允许修改：
+  - `backend/src/fin_ops_platform/services/runtime_queue.py`
+  - `tests/test_runtime_queue.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 如需修改其它文件，必须停止并说明原因。
+
+Required Scope Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only | rg -v '^(backend/src/fin_ops_platform/services/runtime_queue\\.py$|tests/test_runtime_queue\\.py$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$)'`
+  - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P020 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录新 runtime queue tests、PF-P019 writer group、PF-P019 full expected red 和现有安全网验证结果。
+- 更新 `refactor-prompts.md` 的 PF-P020 执行结果。
+- 更新 `workbench-write-uow-boundary-design.md` 或 `workbench-writes-and-matching-plan.md`，记录 transaction-bound writer capability。
+- 不 merge 到 main。
+- 不 push。
+- 不执行 Merge Gate。
+- 未经用户确认，不得将 PF-P020 标记为 `verified`。
+- 最终回复必须说明：
+  - 是否新增 transaction-bound writer；
+  - PF-P019 哪些红灯已变绿、哪些仍保持 expected red；
+  - 现有绿色验证是否通过；
+  - 下一条建议 prompt 是什么。
+```
+
+### 审查结论
+
+- PF-P020 的边界正确：它只补 runtime queue 层 transaction-bound dirty/outbox writer，不进入 Workbench UoW。
+- PF-P020 直接对应 PF-P019 当前红灯中最小、最底层的 blocker，避免在 UoW 还没有 writer port 时先改 Workbench facade。
+- PF-P020 要求保留现有 `enqueue_read_model_refresh()` public API，并通过委托新方法复用同一套 SQL 语义，降低对现有 worker / read model 行为的影响。
+- PF-P020 明确 PF-P019 全量 contract file 仍可保持 Expected Red，但 3 个 writer tests 必须转绿，避免把完整 UoW 工作偷渡进本轮。
+- PF-P020 禁止修改 PF-P019 target tests、Workbench handler/facade、SQL migration、前端和部署配置；执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+- 已在 `backend/src/fin_ops_platform/services/runtime_queue.py` 中新增 `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=...)`。
+- 现有 `enqueue_read_model_refresh()` 保持 public API 不变，打开 `self._connection.transaction()` 后委托 transaction-bound 方法。
+- 已在 `tests/test_runtime_queue.py` 中新增 3 个 focused tests：
+  - `test_enqueue_read_model_refresh_in_transaction_uses_supplied_transaction_without_opening_connection_context`
+  - `test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract`
+  - `test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer`
+- Red step:
+  - PF-P019 3 个 writer tests 在实现前均按预期失败，失败原因是缺少 transaction-bound writer。
+  - PF-P020 3 个 runtime queue focused tests 在实现前均清晰失败，失败原因是 `enqueue_read_model_refresh_in_transaction` 未实现。
+- Verification:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+  - PF-P019 writer group：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Expected Red，16 tests，11 failures，5 ok；剩余 failures 均为缺失 `WorkbenchWriteUnitOfWork`。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- Scope:
+  - 未新增 `workbench_uow.py`。
+  - 未修改 `server.py`、`workbench_write_facade.py`、Workbench facts repositories、SQL migration、前端、网关、部署或 CI/CD。
+- 下一步建议：用户确认 PF-P020 `verified` 后，生成并审查 `PF-P021 - Workbench Minimal Unit of Work Skeleton`，只接入 transaction-bound writer 与最小 UoW skeleton，不一次性迁移全部 Workbench 写路径。
+
+用户已确认 PF-P020 `verified`。
+
+## PF-P021 - Workbench Minimal Unit of Work Skeleton
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P021 - Workbench Minimal Unit of Work Skeleton。
+
+Role: 你是一位精通 Python unittest、PostgreSQL transaction、Transactional Outbox、Clean Architecture 和遗留系统最小风险重构的后端架构工程师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P019 已 verified，新增了 `tests/test_workbench_uow_contract.py`。
+- PF-P020 已 verified，`RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=...)` 已落地。
+- PF-P019 writer group 已转绿；PF-P019 全量 contract 仍是 Expected Red，剩余失败集中在缺失 `WorkbenchWriteUnitOfWork` / UoW skeleton、stale write 和 durable idempotency。
+- PF-P021 的目标是只建立最小 `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton，并接入 PF-P020 的 transaction-bound writer。
+- PF-P021 不迁移任何 Workbench facade/server 写路径，不修 stale write，不实现 durable idempotency。
+
+Pre-Flight:
+1. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-boundary-design` 或同一 UoW 分支。
+   - 最近 verified prompt 是 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`。
+   - 当前 active prompt 是 `PF-P021 - Workbench Minimal Unit of Work Skeleton` planned。
+2. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+3. 必须读取或通过 CodeGraph 覆盖：
+   - `tests/test_workbench_uow_contract.py`
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/postgres_connection.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+4. 必须先记录工作区状态：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - 若存在非本轮文件变更，必须停止并说明。
+
+Goal:
+新增最小 Workbench UoW skeleton，让 PF-P019 中 UoW atomicity contract 子集从红转绿：`run(command, handler)` 必须在同一个 transaction 中创建 repository context、执行 handler、写 read model dirty/outbox，并在 writer failure 时让 transaction 回滚。PF-P021 只提供 skeleton，不接入真实 Workbench 写路径。
+
+Required Red Step:
+1. 先运行以下 PF-P019 UoW skeleton / atomicity tests，确认当前仍红：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_commits_pair_relation_history_dirty_scope_and_outbox_in_one_transaction -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_exception_apply_commits_case_override_candidate_dirty_scope_and_outbox_in_one_transaction -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_personal_advance_repayment_rolls_back_case_and_relation_when_dirty_scope_fails -v`
+2. 允许这 4 个测试失败，但失败必须是缺少 `WorkbenchWriteUnitOfWork` / skeleton，而不是测试自身错误。
+
+Required Implementation Work:
+1. 新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+2. 实现最小公开类型：
+   - `WorkbenchWriteUnitOfWork`
+   - 可选的 `WorkbenchWriteUnitOfWorkContext` 或等价轻量 context。
+3. `WorkbenchWriteUnitOfWork.__init__` 必须接受且只要求以下细粒度依赖：
+   - `connection`
+   - `repository_factory`
+   - `read_model_refresh_writer`
+   - `idempotency_store`
+4. `WorkbenchWriteUnitOfWork.run(command, handler)` 必须：
+   - 使用 `with self._connection.transaction() as transaction:` 打开一个 transaction；
+   - 调用 `repository_factory(transaction)` 创建 transaction-bound repositories；
+   - 构造 handler context，至少包含：
+     - `transaction`
+     - `pair_relations`
+     - `exception_cases`
+     - `row_overrides`
+     - `candidate_matches`
+   - 调用 `handler(context)`；
+   - 从 `command.scope_keys` 或 handler result 的 `affected_scope_keys` 推导 scope keys；
+   - 对每个 scope key 调用 `read_model_refresh_writer.enqueue_refresh(transaction=transaction, scope_type="workbench", scope_key=scope_key, reason=command.action_name)`；
+   - 返回 handler result 的副本，并补充：
+     - `source_versions`：`{scope_key: source_version}`
+     - `outbox_event_ids`：按 scope key 写入顺序收集的 event id 列表。
+5. `run()` 不得吞掉异常。handler 或 writer 抛错时必须让 connection transaction context 自然 rollback。
+6. 兼容 fake writer 返回 dict 或 RuntimeQueueEvent-like object：
+   - dict: `event["source_version"]`, `event["event_id"]`
+   - object: `event.source_version`, `event.event_id`
+7. 如果 handler 返回非 dict，必须明确 fail fast，抛出 `TypeError` 或 `ValueError`；不要生成含糊 payload。
+
+Explicit Non-Goals:
+- 不把 `WorkbenchWriteFacade` 接入 UoW。
+- 不修改 `server.py`。
+- 不迁移 confirm/cancel/exception/cash/personal advance 等任何真实写 API。
+- 不实现 stale write / optimistic locking。
+- 不实现 durable idempotency replay；`idempotency_store` 本轮只作为构造依赖保留，供后续 prompt 使用。
+- 不新增数据库表，不修改 SQL migration。
+- 不引入 Redis/RabbitMQ/OA Mongo/MySQL 或任何外部客户端。
+- 不使用 `Application`、`RuntimeRepositories`、`ApplicationStateStore`、`state_store` 作为 UoW 依赖。
+
+Expected Verification:
+1. PF-P021 targeted UoW tests must pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_commits_pair_relation_history_dirty_scope_and_outbox_in_one_transaction -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_exception_apply_commits_case_override_candidate_dirty_scope_and_outbox_in_one_transaction -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_personal_advance_repayment_rolls_back_case_and_relation_when_dirty_scope_fails -v`
+2. PF-P020 writer group must remain green:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+3. PF-P019 full contract file may remain Expected Red:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - Acceptable only if remaining failures are stale write / durable idempotency target semantics. It must no longer fail because `WorkbenchWriteUnitOfWork` is missing or because the atomicity skeleton is missing.
+4. Existing safety net must remain green:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Forbidden Scope:
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改 `backend/src/fin_ops_platform/services/runtime_queue.py`，除非发现 PF-P020 writer 有测试证明的 bug；如需修改必须先说明。
+- 不修改 Workbench facts repositories。
+- 不修改 `tests/test_workbench_uow_contract.py` 来绕过红灯。
+- 不修改现有 characterization tests 的期望。
+- 不修 stale write / optimistic locking。
+- 不实现 durable idempotency store 或 replay。
+- 不修改 SQL migration、前端、网关、部署、CI/CD 或生产配置。
+- 不执行 Merge Gate、Traffic Gate、push、deploy 或生产访问。
+- 不使用 `git add .` 或 `git add -A`。
+
+Expected Changed Files:
+- 允许新增/修改：
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 不应修改测试文件；PF-P019 的 target tests 已足够作为 PF-P021 red/green gate。
+- 如需修改其它文件，必须停止并说明原因。
+
+Required Scope Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only | rg -v '^(backend/src/fin_ops_platform/services/workbench_uow\\.py$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$)'`
+  - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P021 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录 PF-P021 targeted tests、PF-P020 writer group、PF-P019 full expected red 和现有安全网验证结果。
+- 更新 `refactor-prompts.md` 的 PF-P021 执行结果。
+- 更新 `workbench-write-uow-boundary-design.md` 或 `workbench-writes-and-matching-plan.md`，记录 minimal UoW skeleton capability。
+- 不 merge 到 main。
+- 不 push。
+- 不执行 Merge Gate。
+- 未经用户确认，不得将 PF-P021 标记为 `verified`。
+- 最终回复必须说明：
+  - 是否新增 `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton；
+  - PF-P019 哪些红灯已变绿、哪些仍保持 expected red；
+  - 现有绿色验证是否通过；
+  - 下一条建议 prompt 是什么。
+```
+
+### 审查结论
+
+- PF-P021 的边界正确：它只新增最小 `WorkbenchWriteUnitOfWork` skeleton，不迁移任何真实 Workbench 写路径。
+- PF-P021 直接承接 PF-P020 的 transaction-bound writer，目标是让 PF-P019 中 UoW atomicity 子集转绿，而不是一次性消灭所有红灯。
+- PF-P021 明确禁止 stale write、durable idempotency、facade/server 接入和 SQL migration，避免把多个语义变更混在同一 prompt。
+- PF-P021 不要求修改 PF-P019 target tests；执行时应使用现有红灯测试完成 TDD red/green。
+- PF-P021 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+变更：
+- 新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 实现最小 `WorkbenchWriteUnitOfWork` 与 `WorkbenchWriteUnitOfWorkContext`。
+- `run(command, handler)` 现在会打开 `connection.transaction()`，创建 transaction-bound repository context，调用 handler，并在同一 transaction 中调用 PF-P020 writer 写 read model dirty/outbox。
+- 返回结果会补充 `source_versions` 和 `outbox_event_ids`。
+- 未接入真实 Workbench write facade/server 写路径。
+- 未实现 stale write / optimistic locking。
+- 未实现 durable idempotency replay。
+- 未修改 PF-P019 tests。
+
+验证：
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `tests.test_workbench_uow_contract`：Expected Red，16 tests，7 failures，9 ok；剩余 failures 均为 stale write / durable idempotency 目标语义。
+- `tests.test_runtime_queue`：Pass，31 tests。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+
+范围：
+- 未修改 `backend/src/fin_ops_platform/app/server.py`。
+- 未修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 未修改 `backend/src/fin_ops_platform/services/runtime_queue.py`。
+- 未修改 Workbench facts repositories、SQL migration、前端、网关、部署或 CI/CD。
+
+下一步建议：
+- 用户确认后，将 PF-P021 标记为 `verified`。
+- 然后生成并审查 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`，统一覆盖本 UoW 基础切片尚未合入 `main` 的完整 diff。
+
+用户已确认 PF-P021 `verified`。
+
+## PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate。
+
+Role: 你是一位严格的生产级 Merge Gate reviewer，精通 Python unittest、Git 主干合并、CI 门禁、PostgreSQL transaction/outbox 架构和遗留系统渐进式重构。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P019 已 verified，新增 Workbench UoW target contract tests。
+- PF-P020 已 verified，新增 transaction-bound read model dirty/outbox writer。
+- PF-P021 已 verified，新增最小 `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton。
+- 本 MG 只处理 UoW 基础切片合入 `main` 的门禁，不开始下一轮业务迁移。
+- 当前分支相对 `main` 的完整 diff 必须覆盖且只覆盖：
+  - `backend/src/fin_ops_platform/services/runtime_queue.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_runtime_queue.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-boundary-design` 或同一 UoW 分支。
+   - PF-P019、PF-P020、PF-P021 均已 `verified`。
+   - 当前 active prompt 是 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` planned。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --cached --name-only`
+   - `git log --oneline main..HEAD`
+   - `git diff --name-only main...HEAD`
+4. 如果存在 unstaged/staged/untracked 文件，必须先判断是否属于本 MG 文档回写；否则 blocked。
+
+Gate Scope:
+- 这是 Merge Gate，不是 Traffic Gate。
+- 允许执行范围检查、测试验证、upstream sync、merge 到 `main`、main 上复验和状态机回写。
+- 不允许执行 staging/prod Traffic Gate。
+- 不允许部署、push、生产访问、Nginx/网关切流。
+- 不允许开始 stale write guard、durable idempotency 或更多 Workbench 写路径迁移。
+
+Branch and Diff Scope:
+1. `git diff --name-only main...HEAD` 必须只包含 Expected Changed Files。
+2. Expected Changed Files:
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `tests/test_runtime_queue.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+3. 如果出现以下文件，必须 blocked：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - Workbench facts repositories
+   - SQL migrations
+   - frontend files
+   - gateway / deploy / CI/CD files
+   - Redis/RabbitMQ/OA Mongo/MySQL adapter files，除非已在本切片明示
+4. 严禁使用 `git add .` 或 `git add -A`。
+
+Critical CI Gate for Expected-Red Contract Tests:
+- 本分支包含 `tests/test_workbench_uow_contract.py`，且 PF-P021 后该文件全量仍是 Expected Red：16 tests，7 failures，9 ok。
+- PF-P021-MG 必须确认这些 expected-red failures 不会破坏默认 CI。
+- 必须运行或审计默认测试入口：
+  - 查看项目 README、CI 配置或现有验证脚本，确认默认 CI 是否运行 `python -m unittest discover` 或等价全量测试。
+  - 如果默认 CI 会发现并执行 `tests/test_workbench_uow_contract.py` 且导致失败，PF-P021-MG 必须 `blocked`，不得 merge。
+  - 不允许为了通过 MG 临时删除测试、修改测试期望、隐藏失败或跳过测试，除非另起 prompt 专门设计 target contract tests 的默认 CI 策略并通过用户审查。
+- 允许的合入前提：
+  - 默认 CI 不运行该 expected-red target file；或
+  - 该文件被明确归类为手动 target contract suite，且默认发现不会失败；或
+  - 后续修正 prompt 先将 expected-red 目标测试用显式、可审查的方式从默认 CI 中隔离，同时保留手动执行入口。
+
+Required Verification:
+1. Scope and hygiene:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only main...HEAD`
+   - `git diff --check main...HEAD`
+   - `test ! -e backend-go`
+2. UoW targeted green checks:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_commits_pair_relation_history_dirty_scope_and_outbox_in_one_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_exception_apply_commits_case_override_candidate_dirty_scope_and_outbox_in_one_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_personal_advance_repayment_rolls_back_case_and_relation_when_dirty_scope_fails -v`
+3. PF-P020 writer group:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+4. Expected-red characterization:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - 允许失败，但必须严格记录：16 tests，7 failures，9 ok；剩余 failures 只能是 stale write / durable idempotency 目标语义。
+   - 该命令失败本身不能被叫做 pass；它只证明目标契约剩余红灯符合预期。
+5. Existing safety net:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+6. Default CI safety check:
+   - 必须运行或审计默认 CI 等价命令。
+   - 如果默认 CI 会因 `tests.test_workbench_uow_contract` 失败而红，MG blocked。
+
+Upstream Sync:
+- 如果用户要求合入 `main`，必须先同步最新 `main`。
+- 若远端可用，应先 `git fetch origin`，确认 `main` 与 `origin/main` 关系。
+- 当前分支必须包含最新 `main`，可以通过 rebase main 或 merge main 到当前分支解决。
+- 一旦同步 main 产生新提交或冲突解决，必须重新执行 Required Verification。
+
+Merge Execution:
+1. 只有所有 Required Verification 满足，且 expected-red contract tests 不会破坏默认 CI，才允许 merge。
+2. 合入前建议 commit message：
+   - `feat(workbench): establish transaction-bound uow skeleton`
+3. 如果当前已经在 `main`，不得做无意义 merge，只做范围检查、验证、必要 commit 和状态机更新。
+4. 合入后必须在 `main` 上重新执行 Required Verification 中的绿色测试和默认 CI safety check。
+5. 合入后不要 push，除非用户另行明确要求 `git push origin main`。
+
+Forbidden Scope:
+- 不修改生产业务逻辑来通过 MG。
+- 不修改 `server.py`。
+- 不修改 `workbench_write_facade.py`。
+- 不继续迁移 Workbench 写路径。
+- 不修 stale write / optimistic locking。
+- 不实现 durable idempotency。
+- 不修改 SQL migration、前端、网关、部署、CI/CD。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不把 expected-red 测试静默隐藏或改期望。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 如果 merge gate 通过并 main 复验通过，记录 PF-P021-MG `implemented`，等待用户确认后才可标记 `verified`。
+  - 如果因 expected-red contract tests 会破坏默认 CI、范围污染或测试失败而无法合入，记录 PF-P021-MG `blocked`，并写清 blocker。
+- 更新 `refactor-prompts.md` 的 PF-P021-MG 执行结果。
+- 不生成下一条业务实现 prompt，直到用户确认 PF-P021-MG verified。
+- 最终回复必须说明：
+  - 是否 merge 到 main；
+  - 是否发现 expected-red contract tests 会破坏默认 CI；
+  - 哪些测试通过，哪些 expected-red 保留；
+  - 是否需要用户确认 verified；
+  - 下一步建议。
+```
+
+### 审查结论
+
+- PF-P021-MG 的边界正确：它只覆盖 PF-P019/PF-P020/PF-P021 形成的 UoW 基础切片，不进入 stale write、durable idempotency 或真实写路径迁移。
+- 该 MG 必须显式处理 `tests/test_workbench_uow_contract.py` 仍有 expected-red failures 的 CI 风险；如果默认 CI 会执行并失败，合入应 blocked，而不是强行 merge。
+- Expected Changed Files 与当前分支相对 `main` 的真实 diff 对齐。
+- PF-P021-MG 不触发 Traffic Gate、不部署、不 push；push 需要用户另行确认。
+- 未经用户确认，不得将 PF-P021-MG 标记为 `verified`。
+
+### 执行结果
+
+状态：`blocked`
+
+Blocker:
+- 默认后端测试入口会发现并执行 `tests/test_workbench_uow_contract.py`。
+- 该文件当前仍包含 expected-red target contract failures：16 tests，7 failures，9 ok。
+- 因此如果合入 `main`，默认 CI/默认本地验证会失败。根据 PF-P021-MG 硬门禁，本轮不得 merge。
+
+已执行验证：
+- Scope/diff 检查通过：当前分支相对 `main` 只包含 PF-P019/PF-P020/PF-P021 UoW 基础切片预期文件。
+- `git diff --check main...HEAD`：通过。
+- `test ! -e backend-go`：通过。
+- 默认测试入口审计：
+  - `README.md`：默认后端验证为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`。
+  - `backend/README.md`：同上。
+  - `docs/dev/testing.md`：同上。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Fail，16 tests，7 failures，9 ok。
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `tests.test_runtime_queue`：Pass，31 tests。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+
+未执行：
+- 未 merge 到 `main`。
+- 未执行 upstream sync 后 merge。
+- 未执行 main 上复验。
+- 未执行 Traffic Gate、部署、生产访问或 push。
+
+下一步建议：
+- 生成并审查一个修正 prompt，处理 `tests/test_workbench_uow_contract.py` 的默认 CI 策略。
+- 建议方向：对尚未实现的 target contract cases 使用显式 `unittest.expectedFailure` 或等价机制，确保默认 CI 不失败，同时保留手动 target contract suite 和 unexpected success 信号。
+- 在该 blocker 解决前，不得 merge，不得继续迁移 Workbench 写路径。
+
+用户同意生成默认 CI 策略修正 prompt。
+
+## PF-P021-CI - Workbench UoW Contract Test CI Isolation
+
+状态：`verified`
+
+### Prompt
+
+```text
+请执行 PF-P021-CI - Workbench UoW Contract Test CI Isolation。
+
+Role: 你是一位精通 Python unittest、CI 门禁和渐进式目标契约测试管理的后端测试架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P019 已 verified，新增 `tests/test_workbench_uow_contract.py`，用于描述 Workbench UoW 目标契约。
+- PF-P020 已 verified，transaction-bound dirty/outbox writer 已落地。
+- PF-P021 已 verified，minimal `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton 已落地。
+- PF-P021-MG 已执行但 blocked：默认后端测试入口 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v` 会发现 `tests/test_workbench_uow_contract.py`，而该文件当前 16 tests，7 failures，9 ok，会导致默认 CI 失败。
+- PF-P021-CI 的目标是让 expected-red target contract tests 与默认 CI 共存，同时保留这些目标契约作为后续实现的机械门禁。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `tests/test_workbench_uow_contract.py`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支是 `codex/workbench-uow-boundary-design` 或同一 UoW 分支。
+   - 最近 verified prompt 是 `PF-P021 - Workbench Minimal Unit of Work Skeleton`。
+   - 当前 active prompt 是 `PF-P021-CI - Workbench UoW Contract Test CI Isolation` planned。
+3. 必须记录：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --cached --name-only`
+
+Goal:
+在不删除目标契约、不修改生产代码、不改变测试断言语义的前提下，将 `tests/test_workbench_uow_contract.py` 中 7 个尚未实现的 target contract cases 标记为显式 expected failures，使默认 `unittest discover` 退出码为 0；后续如果实现使这些测试意外通过，unittest 必须报告 unexpected success，从而提醒我们移除 expected-failure 标记。
+
+Required Test Classification:
+必须只把以下 7 个当前 expected-red tests 标记为 `unittest.expectedFailure` 或等价 unittest 机制：
+- `test_withdraw_submit_rejects_stale_preview_relation_version`
+- `test_cancel_link_rejects_stale_replaced_relation`
+- `test_ignore_row_rejects_when_row_already_confirmed`
+- `test_cash_special_rejects_changed_relation_version`
+- `test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history`
+- `test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox`
+- `test_cash_special_idempotency_key_does_not_append_duplicate_history`
+
+必须保持以下 9 个 tests 为普通 pass，不得标记 expectedFailure：
+- 3 个 transaction-bound writer tests。
+- 4 个 PF-P021 UoW atomicity skeleton tests。
+- `test_outbox_payload_contains_source_version_for_each_dirty_scope`
+- `test_worker_completion_cannot_mark_newer_dirty_scope_done_from_older_event`
+
+Allowed Scope:
+- 允许修改：
+  - `tests/test_workbench_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 可以增加少量测试文件注释，说明 expectedFailure 是临时 target-contract marker，后续实现对应语义后必须移除。
+
+Forbidden Scope:
+- 不修改生产代码。
+- 不修改 `backend/src/fin_ops_platform/services/runtime_queue.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改 Workbench facts repositories。
+- 不删除 target contract tests。
+- 不使用 `unittest.skip`、条件 skip、环境变量 skip、文件重命名或 discovery 规避来隐藏债务。
+- 不改变 expected-red tests 的断言内容来伪造通过。
+- 不修改 README、backend README、docs/dev/testing 默认测试入口。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Baseline / targeted contract suite:
+   - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`
+   - 必须退出码为 0。
+   - 输出必须显示 16 tests，其中 7 个 expected failures，0 failures，0 errors。
+2. Direct module suite:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - 必须退出码为 0。
+   - 输出必须显示 16 tests，其中 7 个 expected failures，0 failures，0 errors。
+3. PF-P021 targeted UoW tests must remain ordinary pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_commits_pair_relation_history_dirty_scope_and_outbox_in_one_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_exception_apply_commits_case_override_candidate_dirty_scope_and_outbox_in_one_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_personal_advance_repayment_rolls_back_case_and_relation_when_dirty_scope_fails -v`
+4. PF-P020 writer group must remain ordinary pass:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload tests.test_workbench_uow_contract.WorkbenchUoWContractTests.test_read_model_refresh_writer_failure_rolls_back_transaction -v`
+5. Existing safety net must remain green:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+6. Scope verification:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - `git diff --name-only | rg -v '^(tests/test_workbench_uow_contract\\.py$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$)'`
+     - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P021-CI 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录 default discover 现在是否退出码为 0，以及 expected failures 数量。
+- 更新 `refactor-prompts.md` 的 PF-P021-CI 执行结果。
+- 更新 `workbench-write-uow-boundary-design.md` 或 `workbench-writes-and-matching-plan.md`，记录 expectedFailure 是默认 CI 隔离机制，不是删除目标契约。
+- 不 merge 到 `main`。
+- 不 push。
+- 不执行 PF-P021-MG。
+- 未经用户确认，不得将 PF-P021-CI 标记为 `verified`。
+- 最终回复必须说明：
+  - 哪 7 个 tests 被标记为 expectedFailure；
+  - 默认 discover 是否通过；
+  - 绿色安全网是否通过；
+  - 下一步建议是否重新执行 PF-P021-MG。
+```
+
+### 审查结论
+
+- PF-P021-CI 的边界正确：它只处理默认 CI 与 target contract tests 的共存问题，不修改生产代码。
+- 使用 `unittest.expectedFailure` 比 skip 更合适：expected failure 不会让默认 CI 失败，但对应语义实现后会产生 unexpected success，提醒后续移除标记。
+- 该 prompt 明确禁止删除测试、改断言、改默认测试入口或继续迁移 Workbench 写路径。
+- PF-P021-CI 执行完成后只能到 `implemented` 或 `blocked`；必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+状态：`verified`。用户已确认 PF-P021-CI verified。
+
+本轮只修改 `tests/test_workbench_uow_contract.py` 与 backend-refactor 文档；未修改生产代码、默认测试入口、README、部署或 CI/CD 配置；未执行 merge、Traffic Gate、push 或生产访问。
+
+已将以下 7 个尚未实现的 target contract tests 标记为 `unittest.expectedFailure`：
+
+- `test_withdraw_submit_rejects_stale_preview_relation_version`
+- `test_cancel_link_rejects_stale_replaced_relation`
+- `test_ignore_row_rejects_when_row_already_confirmed`
+- `test_cash_special_rejects_changed_relation_version`
+- `test_confirm_link_idempotency_key_replays_first_result_without_duplicate_history`
+- `test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox`
+- `test_cash_special_idempotency_key_does_not_append_duplicate_history`
+
+以下测试保持普通绿色测试，未被标记为 expectedFailure：
+
+- PF-P021 targeted UoW 4 tests。
+- PF-P020 writer group 3 tests。
+- `test_outbox_payload_contains_source_version_for_each_dirty_scope`。
+- `test_worker_completion_cannot_mark_newer_dirty_scope_done_from_older_event`。
+
+验证结果：
+
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- PF-P021 targeted UoW 4 tests：Pass。
+- PF-P020 writer group 3 tests：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+下一步：重新执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。

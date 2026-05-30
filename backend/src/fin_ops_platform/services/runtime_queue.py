@@ -249,6 +249,28 @@ class RuntimeQueueRepository:
         priority: str = "normal",
         trace_id: str | None = None,
     ) -> RuntimeQueueEvent:
+        with self._connection.transaction() as transaction:
+            return self.enqueue_read_model_refresh_in_transaction(
+                transaction=transaction,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                reason=reason,
+                tenant_id=tenant_id,
+                priority=priority,
+                trace_id=trace_id,
+            )
+
+    def enqueue_read_model_refresh_in_transaction(
+        self,
+        *,
+        transaction: Any,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+    ) -> RuntimeQueueEvent:
         normalized_scope_type = str(scope_type or "").strip()
         normalized_scope_key = str(scope_key or "").strip()
         normalized_reason = str(reason or "").strip() or "read_model_refresh"
@@ -262,115 +284,114 @@ class RuntimeQueueRepository:
             "reason": normalized_reason,
         }
         event_type = f"{normalized_scope_type}.read_model.refresh"
-        with self._connection.transaction() as transaction:
-            dirty_row = transaction.fetch_one(
-                """
-                insert into job.read_model_dirty_scopes(
-                    tenant_id, scope_type, scope_key, reason, payload, raw_payload,
-                    source_version, status, next_run_at, priority, trace_id
-                )
-                values (
-                    %s, %s, %s, %s, %s, %s,
-                    coalesce((
-                        select max(existing.source_version) + 1
-                        from job.read_model_dirty_scopes existing
-                        where existing.tenant_id = %s
-                          and existing.scope_type = %s
-                          and existing.scope_key = %s
-                    ), 0),
-                    'pending',
-                    now(),
-                    %s,
-                    %s
-                )
-                on conflict (tenant_id, scope_type, scope_key)
-                where status in ('pending', 'processing')
-                do update set
-                    reason = excluded.reason,
-                    payload = job.read_model_dirty_scopes.payload || excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    source_version = job.read_model_dirty_scopes.source_version + 1,
-                    status = 'pending',
-                    next_run_at = now(),
-                    priority = excluded.priority,
-                    trace_id = coalesce(excluded.trace_id, job.read_model_dirty_scopes.trace_id),
-                    updated_at = now()
-                returning source_version
-                """,
-                (
-                    tenant_id,
-                    normalized_scope_type,
-                    normalized_scope_key,
-                    normalized_reason,
-                    self._json_param(payload),
-                    self._json_param(payload),
-                    tenant_id,
-                    normalized_scope_type,
-                    normalized_scope_key,
-                    normalized_priority,
-                    normalized_trace_id,
-                ),
+        dirty_row = transaction.fetch_one(
+            """
+            insert into job.read_model_dirty_scopes(
+                tenant_id, scope_type, scope_key, reason, payload, raw_payload,
+                source_version, status, next_run_at, priority, trace_id
             )
-            source_version = int((dirty_row or {}).get("source_version") or 0)
-            payload = {**payload, "source_version": source_version}
-            row = transaction.fetch_one(
-                """
-                insert into job.outbox_events (
-                    tenant_id, event_type, aggregate_type, aggregate_id,
-                    scope_type, scope_key, dedupe_key, schema_version,
-                    source_version, priority, trace_id, payload, raw_payload
-                )
-                values (%s, %s, 'read_model', %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
-                on conflict (tenant_id, dedupe_key)
-                where dedupe_key is not null and status = 'pending'
-                do update set
-                    payload = job.outbox_events.payload || excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    source_version = excluded.source_version,
-                    priority = excluded.priority,
-                    trace_id = coalesce(excluded.trace_id, job.outbox_events.trace_id),
-                    publish_status = 'unpublished',
-                    published_at = null,
-                    publish_last_error = null,
-                    next_publish_at = now(),
-                    publish_locked_by = null,
-                    publish_locked_at = null,
-                    publish_confirmed_at = null,
-                    updated_at = now()
-                returning
-                    id::text as event_id,
-                    tenant_id,
-                    event_type,
-                    aggregate_type,
-                    aggregate_id,
-                    scope_type,
-                    scope_key,
-                    dedupe_key,
-                    payload,
-                    attempts,
-                    status,
-                    schema_version,
-                    source_version,
-                    priority,
-                    trace_id
-                """,
-                (
-                    tenant_id,
-                    event_type,
-                    normalized_scope_key,
-                    normalized_scope_type,
-                    normalized_scope_key,
-                    f"{event_type}:{normalized_scope_type}:{normalized_scope_key}",
-                    source_version,
-                    normalized_priority,
-                    normalized_trace_id,
-                    self._json_param(payload),
-                    self._json_param(payload),
-                ),
+            values (
+                %s, %s, %s, %s, %s, %s,
+                coalesce((
+                    select max(existing.source_version) + 1
+                    from job.read_model_dirty_scopes existing
+                    where existing.tenant_id = %s
+                      and existing.scope_type = %s
+                      and existing.scope_key = %s
+                ), 0),
+                'pending',
+                now(),
+                %s,
+                %s
             )
-            if row is None:
-                raise RuntimeError("Runtime queue enqueue did not return a read model refresh event.")
-            return _event_from_row(row)
+            on conflict (tenant_id, scope_type, scope_key)
+            where status in ('pending', 'processing')
+            do update set
+                reason = excluded.reason,
+                payload = job.read_model_dirty_scopes.payload || excluded.payload,
+                raw_payload = excluded.raw_payload,
+                source_version = job.read_model_dirty_scopes.source_version + 1,
+                status = 'pending',
+                next_run_at = now(),
+                priority = excluded.priority,
+                trace_id = coalesce(excluded.trace_id, job.read_model_dirty_scopes.trace_id),
+                updated_at = now()
+            returning source_version
+            """,
+            (
+                tenant_id,
+                normalized_scope_type,
+                normalized_scope_key,
+                normalized_reason,
+                self._json_param(payload),
+                self._json_param(payload),
+                tenant_id,
+                normalized_scope_type,
+                normalized_scope_key,
+                normalized_priority,
+                normalized_trace_id,
+            ),
+        )
+        source_version = int((dirty_row or {}).get("source_version") or 0)
+        payload = {**payload, "source_version": source_version}
+        row = transaction.fetch_one(
+            """
+            insert into job.outbox_events (
+                tenant_id, event_type, aggregate_type, aggregate_id,
+                scope_type, scope_key, dedupe_key, schema_version,
+                source_version, priority, trace_id, payload, raw_payload
+            )
+            values (%s, %s, 'read_model', %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
+            on conflict (tenant_id, dedupe_key)
+            where dedupe_key is not null and status = 'pending'
+            do update set
+                payload = job.outbox_events.payload || excluded.payload,
+                raw_payload = excluded.raw_payload,
+                source_version = excluded.source_version,
+                priority = excluded.priority,
+                trace_id = coalesce(excluded.trace_id, job.outbox_events.trace_id),
+                publish_status = 'unpublished',
+                published_at = null,
+                publish_last_error = null,
+                next_publish_at = now(),
+                publish_locked_by = null,
+                publish_locked_at = null,
+                publish_confirmed_at = null,
+                updated_at = now()
+            returning
+                id::text as event_id,
+                tenant_id,
+                event_type,
+                aggregate_type,
+                aggregate_id,
+                scope_type,
+                scope_key,
+                dedupe_key,
+                payload,
+                attempts,
+                status,
+                schema_version,
+                source_version,
+                priority,
+                trace_id
+            """,
+            (
+                tenant_id,
+                event_type,
+                normalized_scope_key,
+                normalized_scope_type,
+                normalized_scope_key,
+                f"{event_type}:{normalized_scope_type}:{normalized_scope_key}",
+                source_version,
+                normalized_priority,
+                normalized_trace_id,
+                self._json_param(payload),
+                self._json_param(payload),
+            ),
+        )
+        if row is None:
+            raise RuntimeError("Runtime queue enqueue did not return a read model refresh event.")
+        return _event_from_row(row)
 
     def claim_next(
         self,

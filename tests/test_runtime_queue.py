@@ -36,8 +36,10 @@ class FakeTransaction:
 class FakeConnection:
     def __init__(self, transaction: FakeTransaction) -> None:
         self.transaction_obj = transaction
+        self.transaction_open_count = 0
 
     def transaction(self):
+        self.transaction_open_count += 1
         transaction_obj = self.transaction_obj
 
         class TransactionContext:
@@ -49,6 +51,11 @@ class FakeConnection:
                 return False
 
         return TransactionContext()
+
+
+class FailingTransactionConnection:
+    def transaction(self):
+        raise AssertionError("transaction-bound writer must use the supplied transaction")
 
 
 def event_row(**overrides: object) -> dict[str, object]:
@@ -74,6 +81,12 @@ def event_row(**overrides: object) -> dict[str, object]:
 
 
 class RuntimeQueueRepositoryTests(unittest.TestCase):
+    def _enqueue_read_model_refresh_in_transaction(self, repository: RuntimeQueueRepository):
+        method = getattr(repository, "enqueue_read_model_refresh_in_transaction", None)
+        if not callable(method):
+            self.fail("RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction is not implemented.")
+        return method
+
     def test_settings_default_to_postgres_and_parse_reserved_rabbitmq_boundary(self) -> None:
         self.assertEqual(RuntimeQueueSettings.from_env({}).backend, "postgres")
         self.assertEqual(RuntimeQueueSettings.from_env({}).rabbitmq_dispatch_event_types, DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES)
@@ -491,6 +504,144 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             outbox_params[6:10],
             (3, "high", "trace-read-model", {"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 3}),
         )
+
+    def test_enqueue_read_model_refresh_in_transaction_uses_supplied_transaction_without_opening_connection_context(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                {"source_version": 5},
+                event_row(
+                    event_type="workbench.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="2026-05",
+                    scope_type="workbench",
+                    scope_key="2026-05",
+                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "confirm_link", "source_version": 5},
+                    source_version=5,
+                ),
+            ]
+        )
+        repository = RuntimeQueueRepository(FailingTransactionConnection())  # type: ignore[arg-type]
+        enqueue_in_transaction = self._enqueue_read_model_refresh_in_transaction(repository)
+
+        event = enqueue_in_transaction(
+            transaction=transaction,
+            scope_type="workbench",
+            scope_key="2026-05",
+            reason="confirm_link",
+        )
+
+        self.assertEqual(event.source_version, 5)
+        self.assertEqual(len(transaction.calls), 2)
+
+    def test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                {"source_version": 8},
+                event_row(
+                    event_type="workbench.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="2026-05",
+                    scope_type="workbench",
+                    scope_key="2026-05",
+                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+                    source_version=8,
+                    priority="high",
+                    trace_id="trace-read-model",
+                ),
+            ]
+        )
+        repository = RuntimeQueueRepository(FailingTransactionConnection())  # type: ignore[arg-type]
+        enqueue_in_transaction = self._enqueue_read_model_refresh_in_transaction(repository)
+
+        event = enqueue_in_transaction(
+            transaction=transaction,
+            scope_type="workbench",
+            scope_key="2026-05",
+            reason="exception_apply",
+            priority="high",
+            trace_id="trace-read-model",
+        )
+
+        self.assertEqual(event.payload["source_version"], 8)
+        self.assertEqual(event.source_version, 8)
+        self.assertEqual(event.priority, "high")
+        self.assertEqual(event.trace_id, "trace-read-model")
+        _, dirty_sql, dirty_params = transaction.calls[0]
+        _, outbox_sql, outbox_params = transaction.calls[1]
+        normalized_dirty_sql = " ".join(dirty_sql.lower().split())
+        normalized_outbox_sql = " ".join(outbox_sql.lower().split())
+        self.assertIn("insert into job.read_model_dirty_scopes", normalized_dirty_sql)
+        self.assertIn("source_version = job.read_model_dirty_scopes.source_version + 1", normalized_dirty_sql)
+        self.assertIn("insert into job.outbox_events", normalized_outbox_sql)
+        self.assertIn("payload = job.outbox_events.payload || excluded.payload", normalized_outbox_sql)
+        self.assertEqual(
+            dirty_params,
+            (
+                "default",
+                "workbench",
+                "2026-05",
+                "exception_apply",
+                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply"},
+                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply"},
+                "default",
+                "workbench",
+                "2026-05",
+                "high",
+                "trace-read-model",
+            ),
+        )
+        self.assertEqual(
+            outbox_params,
+            (
+                "default",
+                "workbench.read_model.refresh",
+                "2026-05",
+                "workbench",
+                "2026-05",
+                "workbench.read_model.refresh:workbench:2026-05",
+                8,
+                "high",
+                "trace-read-model",
+                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+            ),
+        )
+
+    def test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                {"source_version": 6},
+                event_row(
+                    event_type="workbench.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="2026-05",
+                    scope_type="workbench",
+                    scope_key="2026-05",
+                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 6},
+                    source_version=6,
+                ),
+            ]
+        )
+        connection = FakeConnection(transaction)
+        repository = RuntimeQueueRepository(connection)
+        delegated_transactions: list[FakeTransaction] = []
+        original = self._enqueue_read_model_refresh_in_transaction(repository)
+
+        def recording_delegate(**kwargs):
+            delegated_transactions.append(kwargs["transaction"])
+            return original(**kwargs)
+
+        repository.enqueue_read_model_refresh_in_transaction = recording_delegate  # type: ignore[method-assign]
+
+        event = repository.enqueue_read_model_refresh(scope_type="workbench", scope_key="2026-05", reason="test")
+
+        self.assertEqual(event.source_version, 6)
+        self.assertEqual(connection.transaction_open_count, 1)
+        self.assertEqual(delegated_transactions, [transaction])
+        self.assertEqual(transaction.outcomes, ["commit"])
 
     def test_enqueue_read_model_refresh_initializes_new_scope_from_historical_source_version(self) -> None:
         transaction = FakeTransaction(

@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已生成并审查，等待执行。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已由用户确认 `verified`，新增 transaction-bound dirty/outbox writer。PF-P021 已由用户确认 `verified`，新增 minimal UoW skeleton。PF-P021-MG 已执行但 blocked，未合入 `main`。PF-P021-CI 已执行并记录为 `implemented`，等待用户确认。
 
 ## 1. Scope Boundary
 
@@ -430,6 +430,24 @@ PF-P014 已完成第二轮行为保持型 facade 抽取：
 - 本轮未引入 Workbench Unit of Work，未修复 stale write / optimistic locking，未改变事务模型、dirty scope / outbox、derived lifecycle 或 read model scheduling 顺序。
 - `update-bank-exception`、`oa-bank-exception`、cash special、personal advance repayment、withdraw-link、matching run / dirty worker 仍在 `server.py` 后续切片中处理。
 
+### PF-P017 Remaining Write Facade Extraction Results
+
+PF-P017 已完成第三轮行为保持型 facade 抽取：
+
+- `WorkbenchWriteFacade` 已承接 `withdraw-link/preview`、`withdraw-link`、cash special、`update-bank-exception`、`oa-bank-exception` 和 `confirm-personal-advance-repayment`。
+- `server.py` 对目标 Workbench 写入口只保留 parse、freshness guard、request id、facade call 和 response wrapping。
+- 本轮继续保持 PF-P012/PF-P016 锁定的 duplicate submit、stale write、blind write、read model scheduling failure 和 persistence failure 当前语义。
+- 本轮未引入 Workbench Unit of Work，未修复 stale write / optimistic locking，未改变 dirty scope / outbox 或 read model scheduling 顺序。
+
+### PF-P018 UoW Boundary Design Results
+
+PF-P018 已完成 Workbench 写路径 UoW 边界设计：
+
+- 新增 `workbench-write-uow-boundary-design.md`，明确逐 API UoW matrix、目标事务时序、PostgreSQL/repository 边界、read model/dirty scope/outbox contract、failure mode matrix 和测试策略。
+- 已确认核心 blocker：`RuntimeQueueRepository.enqueue_read_model_refresh()` 当前内部开启独立事务，不能直接加入 Workbench facts transaction；实现前需要 transaction-bound dirty/outbox writer 或拆出可复用 SQL writer。
+- 已确认未来 UoW 必须把 facts、audit/history、dirty scope、outbox、source_version 和 durable idempotency 置于同一 PostgreSQL transaction。
+- 已确认下一步应优先生成 `PF-P019 - Workbench UoW Contract Tests`，先写目标契约测试，不直接实现 UoW。
+
 ## 10. Risk / Optimization Findings
 
 | Risk | Severity | Evidence | Required Next Step |
@@ -475,7 +493,7 @@ Required properties:
 
 ## 12. Next Slice Recommendation
 
-PF-P015、PF-P016、PF-P017 已由用户确认 `verified`。PF-P017-MG 已生成并审查，等待执行。
+PF-P015、PF-P016、PF-P017、PF-P017-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。
 
 PF-P016 新增测试已锁定剩余写入口当前行为：
 
@@ -495,8 +513,68 @@ PF-P017 已完成行为保持型 facade extraction：
 - `confirm-personal-advance-repayment` 已迁入 `WorkbenchWriteFacade`。
 - `server.py` 目标 HTTP handlers 只保留 parse、freshness guard、request_id、facade call、response wrapping。
 
-下一条允许执行：
+PF-P018 已完成 UoW 边界设计并由用户确认 `verified`。PF-P019 已生成并审查，下一条允许执行：
 
-`PF-P017-MG - Workbench Remaining Write Facade Merge Gate`
+`PF-P019 - Workbench UoW Contract Tests`
 
-PF-P017-MG 必须统一覆盖 PF-P015/PF-P016/PF-P017 的完整 diff；不得执行 Traffic Gate、部署、push 或 UoW/stale write 语义修复。UoW 是必要方向，但应在 PF-P017-MG verified 并 push 到 `origin/main` 后，从最新 main 新建分支再生成专门 prompt。
+PF-P019 应只新增目标 contract tests，不实现 UoW，不修改生产逻辑。测试应覆盖 facts/audit/dirty scope/outbox 同事务、source_version monotonicity、outbox failure rollback、duplicate submit durable idempotency、stale write conflict 和 worker idempotent refresh compatibility。
+
+PF-P019 已新增 `tests/test_workbench_uow_contract.py` 并完成红相验证：
+
+- 16 个目标契约测试覆盖 transaction-bound dirty/outbox writer、Workbench UoW atomicity、stale write、durable idempotency 和 worker/source_version compatibility。
+- `tests.test_workbench_uow_contract` 当前为 Expected Red：16 tests，14 failures，2 ok。红灯原因是缺失 transaction-bound writer / `WorkbenchWriteUnitOfWork`，不是测试自身错误。
+- 既有 `tests.test_workbench_write_characterization`、`tests.test_workbench_dirty_queue_wiring`、`tests.test_platform_runtime_boundary_guards` 全部通过。
+
+PF-P019 已由用户确认 `verified`。下一条建议 prompt 已生成并审查：
+
+`PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`
+
+PF-P020 应先让 read model refresh dirty scope/outbox 写入能复用外层 PostgreSQL transaction。不要在 PF-P020 直接实现完整 Workbench UoW、stale write guard 或 durable idempotency store。
+
+PF-P020 已执行：
+
+- `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=...)` 已作为 transaction-bound dirty/outbox writer 落地。
+- `enqueue_read_model_refresh()` 保持 public API，内部委托 transaction-bound writer。
+- PF-P019 writer group 已转绿：3 tests pass。
+- PF-P019 全量 contract file 仍是 Expected Red：16 tests，11 failures，5 ok；剩余红灯为缺失 `WorkbenchWriteUnitOfWork` / UoW 语义。
+- 现有 runtime queue、Workbench characterization、dirty queue wiring 和 platform guard tests 全部通过。
+
+PF-P020 已由用户确认 `verified`。下一条 prompt 已生成并审查：
+
+`PF-P021 - Workbench Minimal Unit of Work Skeleton`
+
+PF-P021 应只建立最小 `WorkbenchWriteUnitOfWork.run(command, handler)` skeleton，并接入 PF-P020 的 transaction-bound writer。不要在同一 prompt 中迁移全部 Workbench 写路径、修 stale write 或实现 durable idempotency store。
+
+PF-P021 的边界：
+
+- 只允许新增 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- `run(command, handler)` 负责打开 PostgreSQL transaction、创建 repository context、执行 handler，并通过 PF-P020 的 transaction-bound writer 在同一 transaction 内写入 dirty scope/outbox。
+- 只让 PF-P019 中 4 个 UoW atomicity skeleton tests 转绿。
+- 不迁移 `server.py` 或 `WorkbenchWriteFacade` 的真实写路径。
+- 不实现 stale write guard、durable idempotency replay 或新的数据库 schema。
+
+PF-P021 已执行：
+
+- 已新增 `WorkbenchWriteUnitOfWork.run(command, handler)` minimal skeleton。
+- 4 个 UoW atomicity tests 已从红转绿。
+- PF-P020 writer group 保持绿色。
+- PF-P019 全量 contract file 仍为 Expected Red：16 tests，7 failures，9 ok；剩余 failures 均为 stale write / durable idempotency 目标语义。
+- 现有 runtime queue、Workbench characterization、dirty queue wiring 和 platform guard tests 全部通过。
+- 未迁移任何真实 Workbench write API，未修改 `server.py` 或 `workbench_write_facade.py`。
+
+PF-P021 已由用户确认 `verified`。PF-P021-MG 已执行，但被默认 CI 风险阻断。
+
+PF-P021-MG 发现 `README.md`、`backend/README.md` 和 `docs/dev/testing.md` 的默认后端测试入口均为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`；`tests/test_workbench_uow_contract.py` 会被默认 discover，且当前 16 tests，7 failures，9 ok。因此本轮不能 merge。PF-P021-CI 已生成并审查，用于先处理 target contract tests 的默认 CI 策略；不得继续迁移更多 Workbench 写路径。
+
+PF-P021-CI 的目标是只把 7 个尚未实现的 stale write / durable idempotency target tests 标记为 `unittest.expectedFailure`，让默认 discover 不失败，同时保留目标契约和 unexpected success 信号。已通过的 writer、UoW atomicity 和 worker/source_version tests 必须保持普通绿色测试。
+
+PF-P021-CI 已按该边界执行：
+
+- 7 个尚未实现的 stale write / durable idempotency target contract tests 已标记为 `unittest.expectedFailure`。
+- 该机制是默认 CI 隔离，不是删除目标契约；后续实现对应语义后，应根据 unexpected success 信号移除 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Pass，16 tests，`expected failures=7`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests，`expected failures=7`。
+- PF-P021 targeted UoW tests、PF-P020 writer group、runtime queue、Workbench write characterization、dirty queue wiring 和 platform guard safety net 均保持通过。
+- 未修改生产代码，未执行 merge、Traffic Gate、部署或 push。
+
+PF-P021-CI 需要用户确认后才能标记 `verified`。确认后应重新执行 PF-P021-MG；在 PF-P021-MG 通过前，不继续迁移 Workbench 写路径。
