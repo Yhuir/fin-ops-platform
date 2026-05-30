@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` (`planned`) |
+| 当前阶段 | `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer` (`implemented`) |
 | 最近 verified prompt | `PF-P019 - Workbench UoW Contract Tests` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | PF-P019 已由用户确认 verified；新增 16 个目标 contract tests，其中 14 个为预期红灯、2 个通过；既有 Workbench characterization、dirty queue wiring、platform guard tests 全部通过 |
-| 下一条允许任务 | 执行 `PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer`；只允许实现 runtime queue 的 transaction-bound dirty/outbox writer，不得实现完整 Workbench UoW、stale write guard 或 durable idempotency store |
+| 最近验证 | PF-P020 已新增 transaction-bound read model refresh writer；PF-P019 3 个 writer 红灯已转绿；PF-P019 全量仍为 Expected Red，剩余 11 个失败均指向缺失 `WorkbenchWriteUnitOfWork`；runtime queue、Workbench characterization、dirty queue wiring、platform guard tests 全部通过 |
+| 下一条允许任务 | 用户确认后将 PF-P020 标记为 `verified`；随后生成并审查 `PF-P021 - Workbench Minimal Unit of Work Skeleton`，不得直接迁移全部 Workbench 写路径 |
 
 ## Prompt 执行日志
 
@@ -2166,7 +2166,7 @@ PF-P019 已由用户确认 `verified`。新增测试显示当前最先阻塞点�
 
 ### PF-P020 - Workbench Transaction-bound Dirty/Outbox Writer
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -2190,15 +2190,21 @@ PF-P019 已由用户确认 `verified`。新增测试显示当前最先阻塞点�
 
 #### 验收标准
 
-- PF-P020 prompt 已写入 `refactor-prompts.md` 并完成审查。
-- PF-P020 必须要求先跑 PF-P019 的 3 个 writer tests 作为红灯，再实现最小 runtime queue writer。
-- PF-P020 必须保持 `tests.test_runtime_queue` 全绿。
-- PF-P020 必须明确 `tests.test_workbench_uow_contract` 全量仍可保持 Expected Red，但剩余失败只能是缺失 `WorkbenchWriteUnitOfWork` / UoW 语义。
+- 已在 `RuntimeQueueRepository` 上新增 `enqueue_read_model_refresh_in_transaction(transaction=...)`，并让现有 `enqueue_read_model_refresh()` 打开 transaction 后委托该方法。
+- 已新增 `tests.test_runtime_queue` 的 3 个 focused tests，覆盖 supplied transaction、source_version/outbox payload contract、旧 public API 委托。
+- Red step：PF-P019 的 3 个 writer tests 执行前均按预期失败，失败原因是缺少 transaction-bound writer。
+- `tests.test_runtime_queue`：Pass，31 tests。
+- PF-P019 writer group：Pass，3 tests。
+- `tests.test_workbench_uow_contract`：Expected Red，16 tests，11 failures，5 ok；剩余失败均指向缺失 `WorkbenchWriteUnitOfWork` / UoW 语义。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+- 本轮未新增 `workbench_uow.py`，未修改 `server.py`、`workbench_write_facade.py`、Workbench facts repositories、SQL migration、前端、部署或 CI/CD。
 - PF-P020 执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
 
 #### 下一条 Prompt 上下文
 
-PF-P020 已生成并审查。下一步允许执行 PF-P020。PF-P020 verified 后，才允许生成 `PF-P021 - Workbench Minimal Unit of Work Skeleton` 或等价 prompt，把 transaction-bound writer 接入最小 UoW skeleton；仍不得一次性迁移全部 Workbench 写路径。
+PF-P020 已执行，等待用户确认。PF-P020 verified 后，才允许生成 `PF-P021 - Workbench Minimal Unit of Work Skeleton` 或等价 prompt，把 transaction-bound writer 接入最小 UoW skeleton；仍不得一次性迁移全部 Workbench 写路径，不得在同一 prompt 中修 stale write 或 durable idempotency。
 
 ## 维护规则
 

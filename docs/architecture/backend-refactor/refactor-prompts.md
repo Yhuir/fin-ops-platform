@@ -4417,7 +4417,7 @@ Post-Flight:
 
 ## PF-P014 - Workbench Exception Facade Extraction
 
-状态：`planned`
+状态：`implemented`
 
 ```text
 请执行 PF-P014 - Workbench Exception Facade Extraction。
@@ -6173,3 +6173,26 @@ Post-Flight:
 - PF-P020 要求保留现有 `enqueue_read_model_refresh()` public API，并通过委托新方法复用同一套 SQL 语义，降低对现有 worker / read model 行为的影响。
 - PF-P020 明确 PF-P019 全量 contract file 仍可保持 Expected Red，但 3 个 writer tests 必须转绿，避免把完整 UoW 工作偷渡进本轮。
 - PF-P020 禁止修改 PF-P019 target tests、Workbench handler/facade、SQL migration、前端和部署配置；执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能标记 `verified`。
+
+### 执行结果
+
+- 已在 `backend/src/fin_ops_platform/services/runtime_queue.py` 中新增 `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=...)`。
+- 现有 `enqueue_read_model_refresh()` 保持 public API 不变，打开 `self._connection.transaction()` 后委托 transaction-bound 方法。
+- 已在 `tests/test_runtime_queue.py` 中新增 3 个 focused tests：
+  - `test_enqueue_read_model_refresh_in_transaction_uses_supplied_transaction_without_opening_connection_context`
+  - `test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract`
+  - `test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer`
+- Red step:
+  - PF-P019 3 个 writer tests 在实现前均按预期失败，失败原因是缺少 transaction-bound writer。
+  - PF-P020 3 个 runtime queue focused tests 在实现前均清晰失败，失败原因是 `enqueue_read_model_refresh_in_transaction` 未实现。
+- Verification:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`：Pass，31 tests。
+  - PF-P019 writer group：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Expected Red，16 tests，11 failures，5 ok；剩余 failures 均为缺失 `WorkbenchWriteUnitOfWork`。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，29 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`：Pass，17 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- Scope:
+  - 未新增 `workbench_uow.py`。
+  - 未修改 `server.py`、`workbench_write_facade.py`、Workbench facts repositories、SQL migration、前端、网关、部署或 CI/CD。
+- 下一步建议：用户确认 PF-P020 `verified` 后，生成并审查 `PF-P021 - Workbench Minimal Unit of Work Skeleton`，只接入 transaction-bound writer 与最小 UoW skeleton，不一次性迁移全部 Workbench 写路径。

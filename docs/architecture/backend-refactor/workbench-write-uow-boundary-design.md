@@ -305,7 +305,7 @@ PF-P019 已新增 `tests/test_workbench_uow_contract.py`，用于锁定 UoW 目�
 2. 再实现最小 `WorkbenchWriteUnitOfWork.run(command, handler)`。
 3. 再逐步把已抽出的 Workbench write facade 写路径迁入 UoW。
 
-## 12. PF-P020 Prompt Review
+## 12. PF-P020 Transaction-bound Writer Result
 
 PF-P019 已由用户确认 `verified`。PF-P020 已生成并审查，推荐下一条执行 prompt：
 
@@ -322,4 +322,12 @@ PF-P019 已由用户确认 `verified`。PF-P020 已生成并审查，推荐下�
 
 PF-P020 应首选在 `RuntimeQueueRepository` 上新增 `enqueue_read_model_refresh_in_transaction(transaction=...)`，然后让现有 `enqueue_read_model_refresh()` 打开事务后委托该方法。这样可以保持现有 public API 不变，同时为后续 Workbench UoW 提供可复用的 transaction-bound writer port。
 
-PF-P020 verified 后，下一步才适合进入 `PF-P021 - Workbench Minimal Unit of Work Skeleton` 或等价 prompt。
+PF-P020 已按上述边界执行：
+
+- `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(transaction=...)` 已提供可复用外层 transaction 的 dirty scope / outbox writer。
+- 现有 `enqueue_read_model_refresh()` 继续作为 public API，内部打开 transaction 后委托新方法，保持调用方兼容。
+- dirty scope source_version、outbox event payload、dedupe key、priority、trace_id 和 `_event_from_row()` 事件转换语义保持不变。
+- PF-P019 中 3 个 writer target tests 已转绿。
+- PF-P019 全量 contract file 仍为 Expected Red，剩余失败集中在缺失 `WorkbenchWriteUnitOfWork`，符合本轮边界。
+
+PF-P020 verified 后，下一步才适合进入 `PF-P021 - Workbench Minimal Unit of Work Skeleton` 或等价 prompt。PF-P021 应只接入最小 UoW skeleton 与 transaction-bound writer，不应一次性迁移全部 Workbench 写路径，也不应同时修 stale write 或 durable idempotency。
