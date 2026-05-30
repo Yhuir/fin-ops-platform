@@ -6,7 +6,7 @@
 
 本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
-PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已由用户确认 `verified`，新增 transaction-bound dirty/outbox writer。PF-P021 已由用户确认 `verified`，新增 minimal UoW skeleton。PF-P021-MG 已生成并审查，等待执行。
+PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已由用户确认 `verified`，新增 transaction-bound dirty/outbox writer。PF-P021 已由用户确认 `verified`，新增 minimal UoW skeleton。PF-P021-MG 已执行但 blocked，未合入 `main`。
 
 ## 1. Scope Boundary
 
@@ -562,6 +562,6 @@ PF-P021 已执行：
 - 现有 runtime queue、Workbench characterization、dirty queue wiring 和 platform guard tests 全部通过。
 - 未迁移任何真实 Workbench write API，未修改 `server.py` 或 `workbench_write_facade.py`。
 
-PF-P021 已由用户确认 `verified`。PF-P021-MG 已生成并审查，下一步应执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`。
+PF-P021 已由用户确认 `verified`。PF-P021-MG 已执行，但被默认 CI 风险阻断。
 
-PF-P021-MG 必须统一覆盖 PF-P019/PF-P020/PF-P021 这条 UoW 基础切片尚未合入 `main` 的完整 diff，并额外检查 `tests/test_workbench_uow_contract.py` 的 expected-red failures 是否会破坏默认 CI；如果会破坏默认 CI，MG 必须 blocked。不得在 PF-P021-MG 前继续迁移更多 Workbench 写路径。
+PF-P021-MG 发现 `README.md`、`backend/README.md` 和 `docs/dev/testing.md` 的默认后端测试入口均为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`；`tests/test_workbench_uow_contract.py` 会被默认 discover，且当前 16 tests，7 failures，9 ok。因此本轮不能 merge。下一步必须先处理 target contract tests 的默认 CI 策略，不得继续迁移更多 Workbench 写路径。

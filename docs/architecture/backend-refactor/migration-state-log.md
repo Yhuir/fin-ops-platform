@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` 已执行但被阻断 |
+| 当前 active prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` (`blocked`) |
 | 最近 verified prompt | `PF-P021 - Workbench Minimal Unit of Work Skeleton` |
 | 当前分支 | `codex/workbench-uow-boundary-design` |
-| 最近验证 | PF-P021 已由用户确认 `verified`；4 个 UoW atomicity tests 通过；PF-P020 writer group 通过；PF-P019 全量仍为 Expected Red，剩余 7 个失败均为 stale write / durable idempotency 目标语义；runtime queue、Workbench characterization、dirty queue wiring、platform guard tests 全部通过 |
-| 下一条允许任务 | 执行 `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate`；必须先处理/阻断 expected-red contract tests 是否会破坏默认 CI 的风险，不得在 MG 前继续迁移 Workbench 写路径 |
+| 最近验证 | PF-P021-MG 发现默认测试入口 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v` 会发现 `tests/test_workbench_uow_contract.py`；该文件当前 16 tests，7 failures，9 ok，会破坏默认 CI；绿色子集仍通过 |
+| 下一条允许任务 | 生成并审查 UoW target contract tests 默认 CI 隔离/expected-failure 策略 prompt；在解决默认 CI 阻断前不得 merge，不得继续迁移 Workbench 写路径 |
 
 ## Prompt 执行日志
 
@@ -2271,7 +2271,7 @@ PF-P021 已由用户确认 `verified`。PF-P021-MG 已生成并审查，下一�
 
 ### PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate
 
-状态：`planned`
+状态：`blocked`
 
 #### 范围
 
@@ -2297,7 +2297,27 @@ PF-P021 已由用户确认 `verified`。PF-P021-MG 已生成并审查，下一�
 
 #### 下一条 Prompt 上下文
 
-PF-P021-MG 尚未执行。执行后若通过并合入 `main`，应等待用户确认 verified，再根据剩余 UoW contract failures 选择下一条：stale write guard 或 durable idempotency。若 MG 因 expected-red tests 会破坏默认 CI 而 blocked，应先生成修正 prompt，处理 target contract tests 的默认 CI 策略。
+PF-P021-MG 已执行并被阻断。Blocker：仓库 README、`backend/README.md` 和 `docs/dev/testing.md` 的默认测试入口都是 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`；`tests/test_workbench_uow_contract.py` 符合默认 discover 规则，且当前 16 tests，7 failures，9 ok，会导致默认 CI 失败。根据 MG 硬门禁，本轮未 merge 到 `main`。
+
+#### 执行结果
+
+- 未 merge 到 `main`。
+- 未执行 Traffic Gate、部署、生产访问或 push。
+- Branch/diff scope：通过，当前分支相对 `main` 只包含 PF-P019/PF-P020/PF-P021 UoW 基础切片预期文件。
+- `git diff --check main...HEAD`：通过。
+- `test ! -e backend-go`：通过。
+- 默认 CI 风险审计：blocked。`README.md`、`backend/README.md`、`docs/dev/testing.md` 均记录默认后端测试为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Fail，16 tests，7 failures，9 ok。
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `tests.test_runtime_queue`：Pass，31 tests。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+
+#### 下一条 Prompt 上下文
+
+下一步必须先生成并审查一个修正 prompt，处理 `tests/test_workbench_uow_contract.py` 的默认 CI 策略。建议方向：将尚未实现的 target contract cases 用显式、可审查的 `unittest.expectedFailure` 或等价机制隔离，使默认 CI 不失败，同时保留手动 target contract suite 和 unexpected success 信号。修正前不得 merge，不得继续迁移 Workbench 写路径。
 
 ## 维护规则
 

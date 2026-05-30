@@ -6563,3 +6563,39 @@ Post-Flight:
 - Expected Changed Files 与当前分支相对 `main` 的真实 diff 对齐。
 - PF-P021-MG 不触发 Traffic Gate、不部署、不 push；push 需要用户另行确认。
 - 未经用户确认，不得将 PF-P021-MG 标记为 `verified`。
+
+### 执行结果
+
+状态：`blocked`
+
+Blocker:
+- 默认后端测试入口会发现并执行 `tests/test_workbench_uow_contract.py`。
+- 该文件当前仍包含 expected-red target contract failures：16 tests，7 failures，9 ok。
+- 因此如果合入 `main`，默认 CI/默认本地验证会失败。根据 PF-P021-MG 硬门禁，本轮不得 merge。
+
+已执行验证：
+- Scope/diff 检查通过：当前分支相对 `main` 只包含 PF-P019/PF-P020/PF-P021 UoW 基础切片预期文件。
+- `git diff --check main...HEAD`：通过。
+- `test ! -e backend-go`：通过。
+- 默认测试入口审计：
+  - `README.md`：默认后端验证为 `PYTHONPATH=backend/src python3 -m unittest discover -s tests -v`。
+  - `backend/README.md`：同上。
+  - `docs/dev/testing.md`：同上。
+- `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`：Fail，16 tests，7 failures，9 ok。
+- PF-P021 targeted UoW tests：Pass，4 tests。
+- PF-P020 writer group：Pass，3 tests。
+- `tests.test_runtime_queue`：Pass，31 tests。
+- `tests.test_workbench_write_characterization`：Pass，29 tests。
+- `tests.test_workbench_dirty_queue_wiring`：Pass，17 tests。
+- `tests.test_platform_runtime_boundary_guards`：Pass，12 tests。
+
+未执行：
+- 未 merge 到 `main`。
+- 未执行 upstream sync 后 merge。
+- 未执行 main 上复验。
+- 未执行 Traffic Gate、部署、生产访问或 push。
+
+下一步建议：
+- 生成并审查一个修正 prompt，处理 `tests/test_workbench_uow_contract.py` 的默认 CI 策略。
+- 建议方向：对尚未实现的 target contract cases 使用显式 `unittest.expectedFailure` 或等价机制，确保默认 CI 不失败，同时保留手动 target contract suite 和 unexpected success 信号。
+- 在该 blocker 解决前，不得 merge，不得继续迁移 Workbench 写路径。
