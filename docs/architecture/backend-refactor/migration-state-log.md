@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` 已 verified 并 push 到 `origin/main` |
-| 当前 active prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` (`verified`) |
+| 当前阶段 | `PF-P032 - Workbench Ignore Row Stale Guard Migration` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P032 - Workbench Ignore Row Stale Guard Migration` (`planned`) |
 | 最近 verified prompt | `PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P031-MG 合入前与合入后 `main` 复验全部通过；已 push；仍未迁移 ignore row、cash special 或 withdraw submit |
-| 下一条允许任务 | 从最新 `main` 新建分支，生成并审查 `PF-P032 - Workbench Ignore Row Stale Guard Migration`；不得直接执行 |
+| 当前分支 | `codex/workbench-ignore-row-stale-guard` |
+| 最近验证 | PF-P031-MG 合入前与合入后 `main` 复验全部通过；已 push；PF-P032 已生成但未执行 |
+| 下一条允许任务 | 等待用户确认后执行 PF-P032；PF-P032 只迁移 ignore row stale guard，不迁移 cash special 或 withdraw submit |
 
 ## Prompt 执行日志
 
@@ -3395,6 +3395,38 @@ PF-P031 已完成实现和验证，并已由用户确认 `verified`。PF-P031-MG
 #### 下一条 Prompt 上下文
 
 PF-P031-MG 已合入本地 `main` 并完成 main 上复验，且已由用户确认 `verified`。`git push origin main` 已完成，`main` 与 `origin/main` 对齐。下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P032 - Workbench Ignore Row Stale Guard Migration`。PF-P032 应只迁移 ignore row stale guard，不得顺手迁移 cash special 或 withdraw submit；生成后仍需单独审查，不得直接执行。
+
+### PF-P032 - Workbench Ignore Row Stale Guard Migration
+
+状态：`planned`
+
+#### 范围
+
+- 只迁移 Workbench `ignore row` 的 stale guard。
+- 目标：当请求携带 `expected_versions` 且 invoice row 已不再处于可忽略的 open/unpaired 状态时，返回 `409 workbench_write_conflict`，并且不得创建 ignored case 或 override。
+- 保持未携带 `expected_versions` 的 legacy ignore row 行为不变。
+- 复用 PF-P028/PF-P030/PF-P031 已建立的 `WorkbenchWriteConflict`、stale precondition primitive 和 Workbench write facade 约束。
+
+#### 禁止范围
+
+- 不迁移 `cash special`。
+- 不迁移 `withdraw submit`。
+- 不修改前端、SQL migration、部署、网关、auth/session 或 worker routing。
+- 不执行 Traffic Gate、部署、生产访问或 push。
+- 不生成或执行 PF-P033。
+
+#### 验收标准
+
+- 先写或补充针对真实 HTTP/facade ignore row 行为的测试，再实现。
+- 新增测试必须覆盖 stale expected row open 返回 409 且不创建 ignored case / override。
+- 现有 legacy no-expected-versions ignore behavior characterization 仍通过，除非 prompt 内明确拆分 guarded 与 legacy 行为。
+- 指定 Workbench write characterization、UoW contract、stale write contract、idempotency contract 和 platform runtime guard 测试通过。
+
+#### 审查结论
+
+- PF-P032 是 PF-P031-MG 后的正确下一步，因为 stale write 计划把 ignore row 列为 cancel link 后的下一条真实写 API 迁移候选。
+- PF-P032 必须保持小切片，只处理 ignore row；cash special 和 withdraw submit 留给后续 prompt。
+- 当前分支已从最新 `main` 创建：`codex/workbench-ignore-row-stale-guard`。
 
 ## 维护规则
 
