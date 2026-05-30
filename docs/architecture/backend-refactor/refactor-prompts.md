@@ -6810,7 +6810,7 @@ Post-Flight:
 
 ## PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -6962,7 +6962,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`。等待用户确认后才能标记 `verified`。
+状态：`verified`。用户已确认 PF-P022 verified。
 
 本轮只修改 backend-refactor 文档；未修改生产代码、测试代码、SQL migration、前端、部署、CI/CD、Nginx 或 worker 运行配置；未执行 merge、Traffic Gate、部署、生产访问或 push。
 
@@ -7021,4 +7021,163 @@ CodeGraph 覆盖：
 
 下一步建议：
 
-用户确认 PF-P022 `verified` 后，生成并审查 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`。PF-P023 仍不应直接迁移生产写路径。
+PF-P022 已由用户确认 `verified`。PF-P023 已生成并审查，下一步允许执行 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`。PF-P023 仍不应直接迁移生产写路径。
+
+## PF-P023 - Workbench Stale Write Contract and Compatibility Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P023 - Workbench Stale Write Contract and Compatibility Tests。
+
+Role: 你是一位精通 Python unittest、遗留系统 characterization tests、并发写冲突和 API compatibility testing 的后端测试架构师。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P022 已 verified，并产出 `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`。
+- PF-P022 的结论是：真实 Workbench 写 API 仍未接入 `WorkbenchWriteUnitOfWork`；下一步必须先补 stale write / optimistic locking 的测试契约和兼容性测试，不直接迁移生产写路径。
+- PF-P019/PF-P021-CI 中已有 7 个 `unittest.expectedFailure` 目标测试，其中 4 个属于 stale write：withdraw stale preview、cancel stale relation、ignore already-confirmed row、cash special changed relation version。
+- PF-P023 只补测试与文档，不实现 stale guard、不迁移真实写 API。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_v2_api.py` 中 Workbench write/preview 相关片段
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/app/server.py` 中 Workbench write/preview handler 片段。
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前 active prompt 是 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests` planned。
+   - 最近 verified prompt 是 `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy`。
+3. 必须优先使用 CodeGraph 做结构性分析：
+   - 追踪 withdraw preview/submit、cancel link、ignore row、cash special 的 handler -> facade -> service 调用链。
+   - 只有查找固定字符串、测试名、path 或 JSON field 时才使用 `rg`。
+4. 必须记录：
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+
+Goal:
+新增或调整 Workbench stale write / optimistic locking 的测试契约，让后续实现有明确机械门禁。PF-P023 必须保持默认 CI 绿色。尚未实现的目标语义必须显式标记为 `unittest.expectedFailure`，不得使用 skip、条件 skip、环境变量规避或删除测试。
+
+Required Test Work:
+1. UoW stale precondition contract tests
+   - 在 `tests/test_workbench_uow_contract.py` 中补强或新增 target contract tests，覆盖统一 `expected_versions` 语义。
+   - 必须覆盖：
+     - withdraw submit 基于 preview relation version 的 stale rejection；
+     - cancel link 发现当前 active relation 已从 CASE-OLD 变为 CASE-NEW 时返回 conflict；
+     - ignore row 发现 row 已 confirmed/paired 时返回 conflict；
+     - cash special 发现 relation version 变化时返回 conflict。
+   - 若当前 UoW 未实现这些语义，测试必须保持 `unittest.expectedFailure`，并添加注释说明它们是 target contract，不是 skip。
+2. API / compatibility tests
+   - 为 withdraw preview response 定义目标兼容契约：未来必须暴露足够稳定的 relation identity/version，使 submit 可以携带 expected relation version。
+   - 为 write request payload 定义兼容契约：新增 expected version 字段时不得破坏现有字段。
+   - 如果当前 API 尚未返回目标字段，目标测试必须使用 `unittest.expectedFailure`；不得把缺失字段伪装成通过。
+3. Conflict response shape tests
+   - 定义 409 conflict 的目标 JSON shape，至少包含：
+     - `error: "workbench_write_conflict"` 或等价稳定错误码；
+     - `message`；
+     - `conflict.action`；
+     - `conflict.reason`；
+     - `conflict.expected`；
+     - `conflict.actual`。
+   - 这些可以是 UoW/facade 层 target tests，不要求本轮生产代码实现。
+4. Characterization safety
+   - 不得删除或弱化 PF-P012/PF-P016 已锁定的当前行为测试。
+   - 如果新增普通 passing characterization tests，它们只能锁定当前真实行为，不能与未来目标契约冲突。
+   - 不得让 expectedFailure 的目标测试变成 `skip`。
+5. Test isolation
+   - 严禁产生 Redis/PostgreSQL 状态污染。
+   - 新增测试优先使用现有 fake / in-memory fixture。
+   - 如必须复用大型 API fixture，必须保证 tearDown/事务隔离，不能破坏 `test_workbench_sql_runtime.py`、`test_workbench_v2_api.py` 或默认 discover 稳定性。
+
+Allowed Scope:
+- 允许修改：
+  - `tests/test_workbench_uow_contract.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `tests/test_workbench_v2_api.py`
+  - `tests/test_workbench_stale_write_contract.py`（如决定新增独立测试文件）
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+
+Forbidden Scope:
+- 不修改生产代码。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_uow.py`。
+- 不修改 `backend/src/fin_ops_platform/services/workbench_write_facade.py`。
+- 不修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不修改 repository 或 SQL。
+- 不新增或修改 SQL migration。
+- 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
+- 不实现 stale write guard。
+- 不实现 durable idempotency store 或 replay。
+- 不迁移 `confirm_link`、`cancel_link`、`ignore_row`、cash special、withdraw 或任何真实写 API 到 UoW。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Verification:
+1. Targeted test verification:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - 如果新增 `tests/test_workbench_stale_write_contract.py`：
+     - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+   - 如果修改 `tests/test_workbench_write_characterization.py`：
+     - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - 如果修改 `tests/test_workbench_v2_api.py`：
+     - 只运行新增/相关 targeted tests；不要默认跑整个 300KB+ 文件，除非本地时间允许。
+2. Safety net:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+3. Default CI compatibility:
+   - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_uow_contract.py' -v`
+   - 如果新增独立测试文件，也执行：
+     - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_workbench_stale_write_contract.py' -v`
+   - 退出码必须为 0；expected failures 允许，但 failures/errors 不允许。
+4. Scope verification:
+   - `git status --short --branch`
+   - `git rev-list --left-right --count main...origin/main`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - `git diff --name-only | rg -v '^(tests/test_workbench_uow_contract\\.py$|tests/test_workbench_write_characterization\\.py$|tests/test_workbench_v2_api\\.py$|tests/test_workbench_stale_write_contract\\.py$|docs/architecture/backend-refactor/migration-state-log\\.md$|docs/architecture/backend-refactor/refactor-prompts\\.md$|docs/architecture/backend-refactor/workbench-uow-integration-plan\\.md$|docs/architecture/backend-refactor/workbench-write-uow-boundary-design\\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\\.md$)'`
+     - 该命令必须无输出；否则 blocked。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - 将 PF-P023 记录为 `implemented` 或 `blocked`，不得标记 `verified`。
+  - 记录新增/调整的测试、expectedFailure 数量、验证结果和下一条 prompt 上下文。
+- 更新 `refactor-prompts.md` 的 PF-P023 执行结果。
+- 按需要小范围回写 `workbench-uow-integration-plan.md`、`workbench-write-uow-boundary-design.md` 或 `workbench-writes-and-matching-plan.md`。
+- 不生成 PF-P024。
+- 不执行 PF-P024。
+- 不 merge。
+- 不 push。
+- 未经用户确认，不得将 PF-P023 标记为 `verified`。
+- 最终回复必须说明：
+  - 新增/调整了哪些 stale write tests；
+  - 哪些 tests 是普通 pass，哪些是 expectedFailure；
+  - 默认 CI compatibility 是否保持绿色；
+  - 是否发现 API/preview 字段缺口；
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P023 的边界正确：它只补 stale write / optimistic locking 的测试契约和兼容性测试，不实现生产语义。
+- PF-P023 必须保持默认 CI 绿色；目标语义未实现时使用 `unittest.expectedFailure` 是正确机制，不能使用 skip 或删除测试。
+- PF-P023 不应处理 durable idempotency store；该工作应留给 PF-P024。
+- PF-P023 不应迁移 `confirm_link` / `cancel_link` 真实写路径；真实迁移应等 stale write contract 和 idempotency contract 都稳定后再进入后续 prompt。

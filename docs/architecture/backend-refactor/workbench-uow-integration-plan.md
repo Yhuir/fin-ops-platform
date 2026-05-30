@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy`
 
-状态：`implemented`，等待用户确认 `verified`
+状态：`verified`
 
 本文档只规划 Workbench 真实写 API 如何接入 `WorkbenchWriteUnitOfWork`，并定义 stale write、durable idempotency、schema readiness 和后续测试转绿顺序。本文档不修改生产代码、不修改测试、不新增 SQL migration。
 
@@ -408,5 +408,7 @@ PF-P023 should:
 - verify conflict response shape is 409-compatible;
 - keep `unittest.expectedFailure` where target implementation is still absent;
 - not migrate production write paths yet.
+
+PF-P022 has been confirmed `verified` by the user. PF-P023 has been generated and reviewed in `refactor-prompts.md`; it must be executed before any real Workbench write path migration.
 
 Then use PF-P024 for durable idempotency store contract and schema readiness before the first real write path UoW integration.

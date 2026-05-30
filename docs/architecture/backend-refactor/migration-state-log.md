@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` (`implemented`) |
-| 最近 verified prompt | `PF-P021-MG - Workbench Minimal Unit of Work Skeleton Merge Gate` |
+| 当前阶段 | `PF-P023 - Workbench Stale Write Contract and Compatibility Tests` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P023 - Workbench Stale Write Contract and Compatibility Tests` (`planned`) |
+| 最近 verified prompt | `PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy` |
 | 当前分支 | `codex/workbench-uow-integration-planning` |
-| 最近验证 | PF-P022 为 docs-only planning；已创建 `workbench-uow-integration-plan.md` 并回写 UoW 边界与 Workbench 写路径计划；未修改生产代码、测试、SQL migration、前端、部署或 CI/CD |
-| 下一条允许任务 | 等待用户确认 PF-P022 是否可标记为 `verified`。确认前不得生成 PF-P023、不得执行真实写路径迁移、不得 merge/push |
+| 最近验证 | PF-P022 已由用户确认 `verified`；UoW integration plan 已建立，明确下一步先做 stale write contract/compatibility tests，不直接迁移真实写路径 |
+| 下一条允许任务 | 只允许执行 `PF-P023`。PF-P023 只能新增/调整 stale write contract 与 compatibility tests，并回写文档；不得修改生产代码、SQL migration、前端、部署配置或执行真实写路径迁移 |
 
 ## Prompt 执行日志
 
@@ -2422,7 +2422,7 @@ PF-P021-CI 已由用户确认 `verified`。下一步重新执行 `PF-P021-MG - W
 
 ### PF-P022 - Workbench Write UoW Integration Planning / Stale Write and Idempotency Strategy
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -2458,7 +2458,7 @@ PF-P021-CI 已由用户确认 `verified`。下一步重新执行 `PF-P021-MG - W
 
 #### 下一条 Prompt 上下文
 
-PF-P022 已执行但未经用户确认，不得标记 `verified`。PF-P022 的主要产物是 `workbench-uow-integration-plan.md`，结论是下一步不应直接迁移真实写路径，而应先生成并审查 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`。
+PF-P022 已由用户确认 `verified`。PF-P022 的主要产物是 `workbench-uow-integration-plan.md`，结论是下一步不应直接迁移真实写路径，而应先执行已生成并审查的 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`。
 
 #### 执行结果
 
@@ -2490,7 +2490,46 @@ PF-P022 已执行但未经用户确认，不得标记 `verified`。PF-P022 的�
 
 #### 下一条 Prompt 上下文
 
-用户确认 PF-P022 `verified` 后，建议生成并审查 `PF-P023 - Workbench Stale Write Contract and Compatibility Tests`。PF-P023 应先补 expected relation/case/row versions、withdraw preview/submit 版本契约和 409 conflict response tests；仍不得直接迁移生产写路径。
+用户已确认 PF-P022 `verified`。PF-P023 已生成并审查，下一步允许执行 PF-P023。PF-P023 应先补 expected relation/case/row versions、withdraw preview/submit 版本契约和 409 conflict response tests；仍不得直接迁移生产写路径。
+
+### PF-P023 - Workbench Stale Write Contract and Compatibility Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Workbench stale write / optimistic locking 的测试契约和兼容性测试。
+- 覆盖 expected relation/case/row/source version 的 command/payload contract。
+- 覆盖 withdraw preview -> submit 的 relation identity/version 传递契约。
+- 覆盖 409 conflict response shape。
+- 必须保持默认 CI 绿色；尚未实现的目标语义必须用 `unittest.expectedFailure` 或等价显式机制保留，不能用 skip 隐藏。
+
+#### 禁止范围
+
+- 不修改生产代码。
+- 不迁移任何真实 Workbench 写 API 到 UoW。
+- 不实现 stale write guard。
+- 不实现 durable idempotency store。
+- 不新增或修改 SQL migration。
+- 不修改前端、部署、CI/CD、Nginx、worker 运行配置。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已写入完整 PF-P023 prompt。
+- PF-P023 prompt 明确读取 PF-P022 产物 `workbench-uow-integration-plan.md`。
+- PF-P023 prompt 明确测试文件 allowlist、expectedFailure 策略和默认 CI 不破坏规则。
+- PF-P023 prompt 明确不得执行实现或生产写路径迁移。
+
+#### 审查结论
+
+- PF-P023 是 PF-P022 后的正确下一步：先把 stale write 的目标契约、兼容字段和冲突响应形态写成可执行测试，再进入 UoW 真实实现。
+- PF-P023 不应处理 durable idempotency；idempotency store 应留给 PF-P024。
+- PF-P023 不应开始 `confirm_link` / `cancel_link` 真实迁移；这些应等 stale contract 与 idempotency contract 都稳定后再进入 PF-P026 或后续 prompt。
+
+#### 下一条 Prompt 上下文
+
+下一步只允许执行 PF-P023。执行完成后，必须回写本文档和相关架构文档，将 PF-P023 记录为 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
 
 ## 维护规则
 
