@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已生成，等待审查/执行 |
-| 当前 active prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` 已执行，本地 `main` 已完成 fast-forward merge，等待用户确认 `verified` |
+| 当前 active prompt | `PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P009 - Workbench Query Fallback and SSE Mitigation (Slice D-B)` |
-| 当前分支 | `codex/workbench-query-slice-d-prompt` |
-| 最近验证 | PF-P009 已由用户确认 `verified`；mandatory checks 全部通过；未执行 Merge Gate、Traffic Gate、部署或 push |
-| 下一条允许任务 | 审查并执行 PF-P009-MG；PF-P009-MG 必须统一覆盖 PF-P008 + PF-P009 的完整 diff |
+| 当前分支 | `main` |
+| 最近验证 | PF-P009-MG 已执行到 `implemented`：feature branch 与 `main` 双重复验通过；本地 `main` 已 fast-forward 到 `b58bd5a0`；未执行 Traffic Gate、部署或 push |
+| 下一条允许任务 | 用户确认后将 PF-P009-MG 标记为 `verified`；push `origin/main` 需要用户明确确认；下一条 prompt 必须从最新 `main` 新建分支生成 |
 
 ## Prompt 执行日志
 
@@ -1201,7 +1201,7 @@ PF-P009 已由用户确认 `verified`。下一步应执行已生成并审查的 
 
 ### PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -1226,9 +1226,42 @@ PF-P009 已由用户确认 `verified`。下一步应执行已生成并审查的 
 - PF-P009-MG 必须包含禁止 `git add .` / `git add -A`、untracked 文件检查、上游同步、feature branch 和 main 双重复验、Post-Flight 状态回写。
 - 未经用户确认，不得把 PF-P009-MG 标记为 `verified`。
 
+#### 执行结果
+
+- Feature branch：`codex/workbench-query-slice-d-prompt`。
+- 功能提交：`b58bd5a0 refactor(workbench): mitigate query fallback and sse stream cleanup`。
+- Merge：`main` 已通过 fast-forward merge 合入 `codex/workbench-query-slice-d-prompt`，当前本地 `main` 到达 `b58bd5a0`。
+- 变更范围：仅包含 Expected Changed Files：`backend/src/fin_ops_platform/app/server.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_api_performance_metrics.py`、`docs/architecture/backend-refactor/ai-execution-rules.md`、`docs/architecture/backend-refactor/migration-state-log.md`、`docs/architecture/backend-refactor/refactor-prompts.md`、`docs/architecture/backend-refactor/workbench-read-model-query-plan.md`。
+- Feature branch 验证通过：
+  - `git status --short --branch`
+  - `git ls-files --others --exclude-standard`
+  - `git diff --name-only`
+  - `git diff --stat`
+  - `git diff --check`
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+  - Row detail targeted tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_api_performance_metrics tests.test_platform_runtime_boundary_guards -v`
+  - `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`
+  - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+  - production diff、forbidden surface diff、Facade god object、Facade mock、observability boundary、SSE PubSub 静态检查。
+- `main` 复验通过：
+  - `git status --short --branch`
+  - `git ls-files --others --exclude-standard`
+  - `git diff --check`
+  - `git diff --name-only origin/main..HEAD`
+  - `git diff --stat origin/main..HEAD`
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -v`
+  - Row detail targeted tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_api_performance_metrics tests.test_platform_runtime_boundary_guards -v`
+  - `PYTHONPATH=backend/src python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services`
+  - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`
+  - production diff、forbidden surface diff、Facade god object、Facade mock、observability boundary、SSE PubSub 静态检查。
+- 未执行 Traffic Gate、未部署服务器、未修改网关或生产配置、未 push `origin/main`。
+- 剩余限制：`ThreadingHTTPServer` streaming loop 仍不能在 `sleep(5)` 期间主动感知客户端断开；本轮只保证 generator close/finalization cleanup 可测试。App Health SSE 不在 PF-P009 范围内，保持原行为。
+
 #### 下一条 Prompt 上下文
 
-下一步允许执行 PF-P009-MG。执行完成后状态只能为 `implemented` 或 `blocked`，必须等待用户确认后才能 `verified`。PF-P009-MG verified 并按用户确认 push `origin/main` 后，下一条 prompt 必须从最新 `main` 新建分支生成。
+下一步等待用户确认 PF-P009-MG 是否可标记为 `verified`。push `origin/main` 需要用户明确确认；push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
 
 ## 维护规则
 

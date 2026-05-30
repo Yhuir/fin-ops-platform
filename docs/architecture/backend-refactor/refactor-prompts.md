@@ -3059,7 +3059,7 @@ Post-Flight:
 
 ## PF-P009-MG - Workbench Query Fallback and SSE Mitigation Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### 目标
 
@@ -3215,3 +3215,14 @@ Post-Flight:
 - Prompt 明确禁止 Traffic Gate、部署、默认 push、Slice E 和任何新业务重构。
 - Prompt 保留本轮关键门禁：untracked 检查、精准 staging、禁止 `git add .` / `git add -A`、上游同步、feature branch 与 main 双重复验。
 - Prompt 明确执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认才能 `verified`。
+
+### 执行结果
+
+- Feature branch：`codex/workbench-query-slice-d-prompt`。
+- 功能提交：`b58bd5a0 refactor(workbench): mitigate query fallback and sse stream cleanup`。
+- Merge：本地 `main` 已通过 fast-forward merge 合入 feature branch，当前到达 `b58bd5a0`。
+- 变更范围：只包含 Expected Changed Files；未修改 SQL migration、前端、网关、部署配置、生产配置、Worker refresh、builder、read model repository SQL、RabbitMQ、Outbox、Dirty Scope、Workbench 写路径或 `WorkbenchQueryFacade`。
+- Feature branch 验证通过：`git status --short --branch`、`git ls-files --others --exclude-standard`、`git diff --name-only`、`git diff --stat`、`git diff --check`、`tests.test_workbench_sql_runtime -v`、row detail targeted tests、`tests.test_workbench_query_facade tests.test_api_performance_metrics tests.test_platform_runtime_boundary_guards -v`、`compileall`、`app.main --check`、production diff / forbidden surface / Facade god object / Facade mock / observability boundary / SSE PubSub 静态检查。
+- `main` 复验通过：`git status --short --branch`、`git ls-files --others --exclude-standard`、`git diff --check`、`git diff --name-only origin/main..HEAD`、`git diff --stat origin/main..HEAD`、`tests.test_workbench_sql_runtime -v`、row detail targeted tests、`tests.test_workbench_query_facade tests.test_api_performance_metrics tests.test_platform_runtime_boundary_guards -v`、`compileall`、`app.main --check`、production diff / forbidden surface / Facade god object / Facade mock / observability boundary / SSE PubSub 静态检查。
+- 未执行 Traffic Gate、未部署服务器、未修改网关或生产配置、未 push `origin/main`。
+- 状态：`implemented`，等待用户确认后才能标记为 `verified`。
