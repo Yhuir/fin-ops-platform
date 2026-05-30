@@ -5171,7 +5171,7 @@ Post-Flight:
 
 ## PF-P017 - Workbench Remaining Write Facade Extraction
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -5344,7 +5344,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`
+状态：`verified`
 
 变更：
 
@@ -5380,4 +5380,187 @@ Post-Flight:
 - PF-P017 不修复 stale write、duplicate submit、facts 与 dirty/outbox 非同事务、scheduling failure after mutation。
 - PF-P017 未迁移 `/matching/run`、matching dirty worker 或 RuntimeWorker topology。
 - PF-P017 未执行 Merge Gate、Traffic Gate、push 或部署。
-- PF-P017 仍需用户确认后才能标记 `verified`。
+- 用户已确认 PF-P017 `verified`；该确认只代表 behavior-preserving facade extraction、测试和文档回写通过，不代表 Workbench 写路径目标一致性语义已完成。
+
+## PF-P017-MG - Workbench Remaining Write Facade Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+请执行 PF-P017-MG - Workbench Remaining Write Facade Merge Gate。
+
+Role: 你是一位严格执行生产级合入门禁的后端架构师，熟悉 Python 遗留系统重构、Git 主干合入、特征测试保护、范围门禁和最小变更原则。
+
+Context:
+- 当前重构方向是 Python-first 架构重构，不引入 Go，不替换运行时。
+- PF-P015 已 verified，完成 Workbench remaining write facade discovery / planning。
+- PF-P016 已 verified，新增剩余写入口 characterization tests，锁定 duplicate/stale/failure 当前行为。
+- PF-P017 已 verified，完成剩余 Workbench write facade extraction。
+- PF-P017-MG 只处理 PF-P015/PF-P016/PF-P017 的 Merge Gate：范围检查、完整验证、精准 commit/merge、main 上复验和状态机回写。
+- PF-P017-MG 不等于 Traffic Gate；不得部署、不得改生产配置、不得访问生产服务器、不得切流。
+
+Pre-Flight:
+1. 必须先读取并遵守：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+   - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+   - `docs/architecture/backend-refactor/platform-runtime-boundary-audit.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+2. 必须确认：
+   - `PF-P015 - Workbench Remaining Write Facade Discovery and Planning` 已是 `verified`。
+   - `PF-P016 - Workbench Remaining Write Characterization Tests` 已是 `verified`。
+   - `PF-P017 - Workbench Remaining Write Facade Extraction` 已是 `verified`。
+   - 当前 active prompt 是 `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` planned。
+   - 当前分支不是 `main`，除非用户明确已经在 main 上要求只做范围检查和状态更新。
+   - 当前分支包含最新 `main`。如果不确定，必须先同步 upstream。
+3. 必须先运行并记录：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only main...HEAD`
+   - `git diff --stat main...HEAD`
+   - `git diff --check main...HEAD`
+
+Gate Scope:
+- Merge Gate：涉及。PF-P017-MG 是 PF-P015/PF-P016/PF-P017 的合入门禁。
+- Traffic Gate：不涉及。不得切流、不得部署、不得修改 Nginx / Vite / CD / 生产配置。
+- Business Scope：只允许 remaining Workbench write facade slice，不允许新增业务行为。
+
+Allowed Diff Scope:
+允许且只允许以下文件出现在本轮 `main...HEAD` diff：
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+- `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+
+Expected Behavior Scope:
+- PF-P015 只产生 discovery / planning 文档事实源。
+- PF-P016 只新增 Workbench remaining write characterization tests，不修改生产业务代码。
+- PF-P017 只做 behavior-preserving facade extraction：
+  - `withdraw-link/preview`
+  - `withdraw-link`
+  - `confirm-cash-pass-through`
+  - `confirm-cash-ticket-purchase`
+  - `cancel-cash-special`
+  - `update-bank-exception`
+  - `oa-bank-exception`，包含 invoice compatibility path
+  - `confirm-personal-advance-repayment`
+- `server.py` 目标 HTTP handlers 只保留 parse、freshness guard、request_id、facade call、response wrapping。
+- 当前语义保持不变：
+  - duplicate submit 当前行为不变。
+  - stale write / blind write 当前行为不变。
+  - read model scheduling failure 当前传播行为不变。
+  - persistence rollback / partial mutation behavior 当前行为不变。
+  - conflict / 404 / endpoint-specific 400 映射不变。
+
+Forbidden Scope:
+- 不开始 UoW、transaction manager、repository rewrite、outbox/dirty scope 语义改造。
+- 不修复 stale write / optimistic locking / blind write。
+- 不改变事务模型、dirty scope、outbox、derived lifecycle 或 read model scheduling 顺序。
+- 不迁移 `/matching/run`、matching dirty worker、RuntimeWorker loop 或 worker topology。
+- 不修改 SQL migration、前端、网关、部署、生产配置或 CI/CD。
+- 不执行 Traffic Gate、deploy、push 到生产服务器或生产访问。
+- 不使用 `git add .` 或 `git add -A`。
+- 不提交未跟踪临时文件、`.pkl`、`.sqlite`、缓存目录、测试输出或导出物。
+
+Mandatory Checks:
+1. Untracked / dirty file gate:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - 如果存在未跟踪文件，必须逐一说明并确认不纳入 commit。
+2. Diff scope gate:
+   - `git diff --name-only main...HEAD`
+   - `git diff --name-only main...HEAD | rg -v '^(backend/src/fin_ops_platform/app/server\.py$|backend/src/fin_ops_platform/services/workbench_write_facade\.py$|tests/test_workbench_write_characterization\.py$|docs/architecture/backend-refactor/migration-state-log\.md$|docs/architecture/backend-refactor/refactor-prompts\.md$|docs/architecture/backend-refactor/workbench-remaining-write-facade-plan\.md$|docs/architecture/backend-refactor/workbench-writes-and-matching-plan\.md$)'`
+   - 上述 `rg -v` 检查必须无输出；否则 blocked。
+3. Static forbidden surface checks:
+   - `git diff --name-only main...HEAD | rg '^(web/|postgres/|deploy/|backend-go/|backend/src/fin_ops_platform/services/runtime_redis.py|backend/src/fin_ops_platform/services/rabbitmq_runtime.py)'`
+   - 必须无输出。
+4. Whitespace / patch integrity:
+   - `git diff --check main...HEAD`
+
+Required Verification:
+必须运行：
+- `python3 -m compileall -q backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_case_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`
+
+Upstream Sync Rule:
+- 合入 main 前必须确认当前分支已经包含最新 main。
+- 如果 `main` 有新提交，必须先把最新 `main` 合入当前功能分支或 rebase 当前功能分支，并解决冲突。
+- 只要发生 upstream sync，就必须重新执行 Required Verification 全套检查。
+
+Commit / Merge Preparation:
+- 如果当前分支已有未合并提交，先确认是否还需要新增 MG 执行结果 commit。
+- 只能精准 stage Allowed Diff Scope 中的具体文件。
+- 严禁 `git add .` 或 `git add -A`。
+- Commit message 建议：
+  - `refactor(workbench): extract remaining write facade`
+- Commit body 必须说明：
+  - 包含 PF-P015 planning、PF-P016 characterization tests、PF-P017 remaining write facade extraction。
+  - 未改变 API 语义。
+  - 未引入 Unit of Work。
+  - 未修复 stale write / optimistic locking。
+  - 未执行 Traffic Gate。
+
+Main Merge:
+- 如果用户确认执行合入 main：
+  1. 切到 `main`。
+  2. 拉取或确认 `origin/main` 最新。
+  3. 合并当前功能分支。
+  4. 在 `main` 上重新执行 Main Verification。
+- 如果当前已经在 `main`，不得做无意义 merge；只做范围检查、必要验证、commit 和状态机更新。
+
+Main Verification:
+merge 后必须在 `main` 上重新运行：
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `python3 -m compileall -q backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_application_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_exception_case_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`
+
+Post-Flight:
+- 更新 `docs/architecture/backend-refactor/migration-state-log.md`：
+  - 记录 PF-P017-MG 执行结果。
+  - 记录 commit hash、merge hash 和 main 复验结果。
+  - 记录是否 push；如果未 push，明确下一步是用户确认后 `git push origin main`。
+  - 将 PF-P017-MG 状态设为 `implemented` 或 `blocked`；未经用户确认不得设为 `verified`。
+  - 写明下一条 prompt 建议，但必须在 PF-P017-MG verified 并 push 后从最新 main 新建分支再生成。
+- 更新 `docs/architecture/backend-refactor/refactor-prompts.md` 的 PF-P017-MG 执行结果。
+- 最终回复必须说明：
+  - 合并了哪些 prompt 的 diff。
+  - 哪些测试通过。
+  - 是否 commit / merge / push。
+  - 是否执行 Traffic Gate。
+  - 下一步建议是什么。
+```
+
+### 审查结论
+
+- PF-P017-MG 的边界正确：它只处理 PF-P015/PF-P016/PF-P017 的合入门禁，不进入 UoW 或 stale write 语义修复。
+- PF-P017-MG 明确区分 Merge Gate 和 Traffic Gate；本轮不部署、不切流、不改生产配置。
+- PF-P017-MG 的 allowed diff scope 覆盖当前分支相对 `main` 的完整实际 diff：2 个生产代码文件、1 个测试文件、4 个 backend-refactor 文档。
+- PF-P017-MG 明确要求 upstream sync，避免在过期 main 上合并。
+- PF-P017-MG 明确禁止 `git add .` / `git add -A`，并要求检查 untracked files，防止测试产物混入。
+- PF-P017-MG 执行完成后只能到 `implemented` 或 `blocked`，必须等待用户确认后才能 `verified`。

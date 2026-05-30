@@ -55,12 +55,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P017 - Workbench Remaining Write Facade Extraction` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P017 - Workbench Remaining Write Facade Extraction` (`implemented`) |
-| 最近 verified prompt | `PF-P016 - Workbench Remaining Write Characterization Tests` |
+| 当前阶段 | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P017-MG - Workbench Remaining Write Facade Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P017 - Workbench Remaining Write Facade Extraction` |
 | 当前分支 | `codex/workbench-remaining-write-facade-planning` |
 | 最近验证 | PF-P017 已运行 Workbench write characterization、dirty queue wiring、4 个精确 v2 API 回归、platform runtime guard，均通过；未执行 Merge Gate / Traffic Gate / push |
-| 下一条允许任务 | 等待用户确认 PF-P017 是否可标记 `verified`；确认前不得生成 PF-P017-MG、UoW prompt 或继续其它写路径语义修复 |
+| 下一条允许任务 | 执行 `PF-P017-MG - Workbench Remaining Write Facade Merge Gate`；不得开始 UoW、stale write 修复、Traffic Gate、部署或生产访问 |
 
 ## Prompt 执行日志
 
@@ -1932,7 +1932,7 @@ UoW readiness：
 
 ### PF-P017 - Workbench Remaining Write Facade Extraction
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -1966,7 +1966,7 @@ UoW readiness：
 
 #### 下一条 Prompt 上下文
 
-PF-P017 已执行但未由用户确认 `verified`。下一步应先由用户确认 PF-P017 是否可标记 `verified`。确认后，建议生成并审查 `PF-P017-MG - Workbench Remaining Write Facade Merge Gate`，统一覆盖 PF-P015/PF-P016/PF-P017 的完整 diff；不得在 PF-P017-MG 前进入 UoW、stale write 修复或其它语义改造。
+用户已确认 PF-P017 `verified`。PF-P017-MG 已生成并审查，下一步允许执行 PF-P017-MG。PF-P017-MG 必须统一覆盖 PF-P015/PF-P016/PF-P017 的完整 diff；不得在 PF-P017-MG 前进入 UoW、stale write 修复或其它语义改造。
 
 #### 变更文件
 
@@ -2012,6 +2012,42 @@ PF-P017 已执行但未由用户确认 `verified`。下一步应先由用户确�
 - PF-P017 只完成行为保持型 facade extraction，不代表 Workbench 写路径已经获得目标一致性语义。
 - duplicate submit、stale write、facts 与 dirty/outbox 非同事务、scheduling failure after mutation 等风险仍按 PF-P016 characterization 保持原样。
 - `/matching/run`、matching dirty worker 和 worker topology 未进入本轮 facade 边界。
+
+### PF-P017-MG - Workbench Remaining Write Facade Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 PF-P015/PF-P016/PF-P017 的 Merge Gate。
+- 统一覆盖当前分支相对 `main` 的完整 diff：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+  - `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- 负责范围检查、untracked 检查、完整验证、精准提交/合并准备、合并到 main、main 上复验和状态机回写。
+
+#### 禁止范围
+
+- 不开始 UoW、transaction manager、outbox/dirty scope 语义改造。
+- 不修复 stale write、duplicate submit、optimistic locking、rollback 或 scheduling failure 当前语义。
+- 不执行 Traffic Gate、部署、生产访问、生产配置修改或服务器推送。
+- 不修改 SQL migration、前端、网关、CI/CD 或 worker topology。
+- 不使用 `git add .` 或 `git add -A`。
+
+#### 验收标准
+
+- PF-P017-MG prompt 已写入 `refactor-prompts.md` 并完成审查。
+- PF-P017-MG prompt 明确 PF-P015/PF-P016/PF-P017 均已 verified。
+- PF-P017-MG prompt 明确 allowed diff scope 覆盖当前实际完整 diff。
+- PF-P017-MG prompt 明确执行完成后只能到 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一条 Prompt 上下文
+
+PF-P017-MG 已生成并审查。下一步允许执行 PF-P017-MG。PF-P017-MG 通过并由用户确认 `verified` 后，才能 push `origin/main`；push 后必须从最新 main 新建分支，再生成 UoW 或 stale write 相关 prompt。
 
 ## 维护规则
 

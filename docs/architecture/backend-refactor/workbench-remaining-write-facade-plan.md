@@ -325,7 +325,7 @@ Current blocker：`_execute_derived_data_lifecycle_event` and `_schedule_workben
   - OA-bank exception duplicate/failure。
   - personal advance repayment duplicate/stale/persistence failure。
 
-用户已确认 PF-P015 `verified`。用户已确认 PF-P016 `verified`。PF-P017 已执行并进入 `implemented`，等待用户确认。
+用户已确认 PF-P015 `verified`。用户已确认 PF-P016 `verified`。用户已确认 PF-P017 `verified`。PF-P017-MG 已生成并审查，等待执行。
 
 PF-P016 未修复 stale write 或实现 UoW。它的产物是黑盒 characterization tests 和必要的文档回写。PF-P017 应执行 remaining facade extraction；UoW 仍应等剩余写入口完成行为保持型 facade 边界后再进入。
 
@@ -406,7 +406,7 @@ PF-P017 已生成并审查，目标是把 PF-P016 锁定过的剩余 HTTP 写入
 - UoW、transaction manager、outbox、dirty scope 结构调整。
 - stale write、duplicate submit、rollback、scheduling failure 语义修复。
 
-PF-P017 执行后，PF-P016/PF-P012 行为锁定测试和平台边界 guard 均已通过。下一步应先等待用户确认 PF-P017 是否可标记 `verified`，确认后再生成 `PF-P017-MG`；不得在 MG 前进入 UoW 或 stale write 修复。
+PF-P017 执行后，PF-P016/PF-P012 行为锁定测试和平台边界 guard 均已通过。用户已确认 PF-P017 `verified`。下一步是执行 `PF-P017-MG`；不得在 MG 前进入 UoW 或 stale write 修复。
 
 ## 10. PF-P017 Extraction Results
 
@@ -449,3 +449,31 @@ PF-P017 将剩余 HTTP 写入口的非 HTTP 编排迁入 `WorkbenchWriteFacade`�
 - PF-P017 指定的 4 个 `tests.test_workbench_v2_api.WorkbenchV2ApiTests` 精确回归均通过。
 - `tests.test_platform_runtime_boundary_guards` 通过，12 tests。
 - `python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_write_facade.py` 通过。
+
+## 11. PF-P017-MG Planned Merge Gate Boundary
+
+PF-P017-MG 已生成并审查，目标是把 PF-P015/PF-P016/PF-P017 组成的 remaining write facade slice 经过生产级合入门禁进入 `main`。
+
+### Merge Gate 覆盖范围
+
+- PF-P015：remaining write facade discovery / planning 文档。
+- PF-P016：remaining write characterization tests。
+- PF-P017：remaining write facade extraction 生产代码与文档回写。
+
+当前分支相对 `main` 的 allowed diff scope：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-remaining-write-facade-plan.md`
+- `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+
+### Merge Gate 不等于 Traffic Gate
+
+PF-P017-MG 不允许部署、不允许修改生产配置、不允许访问生产服务器、不允许执行 Traffic Gate。它只处理合入 `main` 的范围、验证、commit/merge 和状态机门禁。
+
+### MG 后下一步
+
+PF-P017-MG 执行完成后只能进入 `implemented` 或 `blocked`，仍需用户确认后才能标记 `verified`。PF-P017-MG verified 并 push `origin/main` 后，下一条 prompt 必须从最新 main 新建分支再生成；UoW / stale write 修复不得在当前 MG 中开始。
