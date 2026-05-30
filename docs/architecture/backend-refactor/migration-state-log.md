@@ -49,12 +49,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Platform Runtime Boundary Guard Merge Gate 已本地合入 main，等待用户验收 |
-| 当前 active prompt | `PF-P003-MG - Platform Runtime Boundary Guard Merge Gate` implemented |
-| 最近 verified prompt | `PF-P003 - Platform Runtime Boundary Enforcement / Guard Tests` |
+| 当前阶段 | Platform Runtime Boundary Guard Merge Gate 已 verified |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P003-MG - Platform Runtime Boundary Guard Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | `PF-P003-MG` 已本地 merge 到 main；main 上指定测试均已通过；未 push，未执行 Traffic Gate |
-| 下一条允许任务 | 用户审查 `PF-P003-MG` 本地 main 合入和验证结果；确认后可标记 PF-P003-MG verified，然后决定是否 push main，或生成第一个业务模块 Micro-JIT prompt |
+| 最近验证 | 用户已确认 `PF-P003-MG` verified；已本地 merge 到 main；main 上指定测试均已通过；未 push，未执行 Traffic Gate |
+| 下一条允许任务 | 决定是否 push `main` 到 origin；或生成第一个业务模块 Micro-JIT prompt |
 
 ## Prompt 执行日志
 
@@ -338,7 +338,7 @@ PF-P003 已由用户确认 verified。下一步只能执行 `PF-P003-MG - Platfo
 
 ### PF-P003-MG - Platform Runtime Boundary Guard Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -425,7 +425,7 @@ PF-P003 已由用户确认 verified。下一步只能执行 `PF-P003-MG - Platfo
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_auth_guard tests.test_session_api -v`：在 main 上通过，12 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_runtime_redis tests.test_rabbitmq_runtime -v`：在 main 上通过，49 tests。
 - `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`：在 main 上通过，本地 readiness `status=ready`，`production_runtime_guard.enabled=false`。
-- `git status --short --branch`：main 工作区干净，领先 `origin/main` 3 个本地提交。
+- `git status --short --branch`：main 工作区干净，领先 `origin/main` 4 个本地提交。
 
 #### Commit / Merge
 
@@ -438,7 +438,7 @@ PF-P003 已由用户确认 verified。下一步只能执行 `PF-P003-MG - Platfo
 
 #### 下一条 Prompt 上下文
 
-PF-P003-MG 已执行、本地合入 `main`，并在 `main` 上通过指定验证，等待用户确认 verified。确认后可以决定是否 push `main` 到 origin；也可以生成第一个业务模块 Micro-JIT prompt。下一条业务模块 prompt 必须读取 `architecture-inventory.md` 和 `platform-runtime-boundary-audit.md`，并继续遵守 PF-P003 固化的 8 类平台 guard。
+PF-P003-MG 已由用户确认 verified，已本地合入 `main`，并在 `main` 上通过指定验证。下一步可以决定是否 push `main` 到 origin；也可以生成第一个业务模块 Micro-JIT prompt。下一条业务模块 prompt 必须读取 `architecture-inventory.md` 和 `platform-runtime-boundary-audit.md`，并继续遵守 PF-P003 固化的 8 类平台 guard。
 
 ## 维护规则
 

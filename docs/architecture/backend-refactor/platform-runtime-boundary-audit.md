@@ -466,7 +466,7 @@ PF-P003 验证：
 
 ## 14. PF-P003-MG Merge Gate Findings
 
-状态：`implemented`，等待用户确认 verified。
+状态：`verified`，已由用户确认。
 
 PF-P003-MG 已执行平台 guard 分支的 Merge Gate 前置检查：
 
@@ -506,4 +506,4 @@ Platform / Ops / Runtime Boundary 已具备第一批机械 guard，但还不能�
 
 ### 下一步建议
 
-PF-P003-MG 已 implemented，等待用户确认 verified。确认后才允许生成第一个业务模块 Micro-JIT prompt。
+PF-P003-MG 已 verified。后续才允许生成第一个业务模块 Micro-JIT prompt。

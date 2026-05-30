@@ -969,7 +969,7 @@ Post-Flight:
 
 ## PF-P003-MG - Platform Runtime Boundary Guard Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 ### 目标
 
@@ -1128,7 +1128,7 @@ Post-Flight:
 
 ### 执行结果
 
-- 已执行，当前状态为 `implemented`，等待用户确认后才能改为 `verified`。
+- 已执行，用户已确认，当前状态为 `verified`。
 - 范围检查通过：变更只包含已 verified 的 backend-refactor 文档、平台 App Shell guard 和平台 guard tests。
 - untracked 检查通过：新增文件均属于本次允许范围，没有 `.pkl`、`.sqlite`、cache、测试输出或 IDE 临时文件混入。
 - 指定测试已通过：`git diff --check`、`git ls-files --others --exclude-standard`、PF-P003 guard tests、runtime bootstrap/state store/app postgres mode tests、auth/session tests、runtime queue/Redis/RabbitMQ tests、`python3 -m fin_ops_platform.app.main --check`。
