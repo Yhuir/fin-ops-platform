@@ -2077,6 +2077,10 @@ class Application:
     def _workbench_write_facade(self) -> WorkbenchWriteFacade:
         return WorkbenchWriteFacade(
             pair_relation_service=self._workbench_pair_relation_service,
+            exception_service=self._workbench_exception_application_service,
+            exception_case_service=self._workbench_exception_case_service,
+            override_service=self._workbench_override_service,
+            candidate_match_service=self._workbench_candidate_match_service,
             next_case_id=self._workbench_override_service._next_case_id,
             normalize_row_ids=self._normalize_row_ids,
             resolved_row_types_for_row_ids=self._resolved_row_types_for_row_ids,
@@ -2088,6 +2092,17 @@ class Application:
             synthetic_existing_case_relations=self._synthetic_existing_case_relations,
             month_scope_for_selected_row_ids=self._month_scope_for_selected_row_ids,
             scope_keys_for_row_ids=self._scope_keys_for_row_ids,
+            scope_keys_for_rows=self._scope_keys_for_rows,
+            resolve_live_rows_direct=self._resolve_live_rows_direct,
+            resolve_live_row=self._resolve_live_row,
+            build_workbench_payload=self._build_api_workbench_payload,
+            build_ignored_rows_payload=self._build_api_workbench_ignored_rows_payload,
+            save_exception_cases_snapshot=self._save_workbench_exception_cases_snapshot,
+            persist_pair_relations=self._persist_workbench_pair_relations,
+            save_overrides_snapshot=self._save_workbench_overrides_snapshot,
+            persist_candidate_matches_best_effort=self._persist_workbench_candidate_matches_best_effort,
+            restore_exception_write_snapshots=self._restore_workbench_exception_write_snapshots,
+            restore_exception_override_snapshots=self._restore_workbench_exception_override_snapshots,
             schedule_pair_relation_persist=self._schedule_workbench_pair_relation_persist,
             consume_reconciliation_decisions=self._consume_workbench_reconciliation_decisions,
             restore_pair_relation_snapshot=self._restore_workbench_pair_relation_snapshot,
@@ -2098,6 +2113,34 @@ class Application:
 
     def _workbench_write_response(self, result: WorkbenchWriteResult) -> Response:
         return self._json_response(result.status_code, result.payload)
+
+    def _restore_workbench_exception_write_snapshots(
+        self,
+        *,
+        previous_exception_snapshot: dict[str, object],
+        previous_pair_snapshot: dict[str, object],
+        previous_candidate_snapshot: dict[str, object],
+        previous_override_snapshot: dict[str, object],
+    ) -> None:
+        self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
+        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+        self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)
+        self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
+        self._configure_workbench_exception_application_service()
+
+    def _restore_workbench_exception_override_snapshots(
+        self,
+        *,
+        previous_exception_snapshot: dict[str, object],
+        previous_override_snapshot: dict[str, object],
+    ) -> None:
+        if self._state_store is not None:
+            try:
+                self._state_store.save_workbench_exception_cases(previous_exception_snapshot)
+            except Exception:
+                pass
+        self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
+        self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
 
     def _restore_workbench_pair_relation_snapshot(
         self,
@@ -9739,31 +9782,13 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        try:
-            result = self._apply_workbench_exception_application(
-                payload,
-                actor=str(payload.get("actor") or payload.get("confirmed_by") or "system"),
-                request_id=request_id,
-                action_name="exception_apply",
-            )
-        except WorkbenchExceptionApplicationConflict as exc:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": exc.code, "message": str(exc), **({"payload": exc.payload} if exc.payload else {})},
-            )
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": str(exc)},
-            )
-        except StatePersistenceError as exc:
-            return self._workbench_persistence_unavailable_response(exc)
-        except (TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_exception_apply_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, result)
+        result = self._workbench_write_facade().apply_exception(
+            payload,
+            actor=str(payload.get("actor") or payload.get("confirmed_by") or "system"),
+            request_id=request_id,
+            action_name="exception_apply",
+        )
+        return self._workbench_write_response(result)
 
     def _handle_api_workbench_mark_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -13152,29 +13177,8 @@ class Application:
         }
 
     def _handle_live_workbench_mark_exception(self, payload: dict[str, object]) -> Response:
-        try:
-            month = str(payload["month"])
-            row_id = str(payload["row_id"])
-            exception_code = str(payload["exception_code"])
-            comment = str(payload["comment"]) if payload.get("comment") is not None else None
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_mark_exception_request", "message": str(exc)},
-            )
-
-        return self._handle_legacy_workbench_exception_via_application(
-            month=month,
-            row_ids=[row_id],
-            action_name="mark_exception",
-            invalid_error_code="invalid_mark_exception_request",
-            legacy_payload={
-                "note": comment or "",
-                "legacy_exception_code": exception_code,
-                "legacy_exception_label": comment or exception_code,
-            },
-            response_message="已标记异常。",
-        )
+        result = self._workbench_write_facade().mark_exception(payload)
+        return self._workbench_write_response(result)
 
     def _handle_live_workbench_cancel_link(
         self,
@@ -13575,165 +13579,16 @@ class Application:
         )
 
     def _handle_live_workbench_cancel_exception(self, payload: dict[str, object]) -> Response:
-        try:
-            month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
-            comment = str(payload["comment"]) if payload.get("comment") is not None else None
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cancel_exception_request", "message": str(exc)},
-            )
-
-        if not row_ids:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cancel_exception_request", "message": "row_ids is required."},
-            )
-
-        try:
-            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": str(exc)},
-            )
-
-        try:
-            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
-            def mutation() -> tuple[list[str], list[dict[str, object]]]:
-                cancelled_cases = self._workbench_exception_case_service.cancel_exception_cases(
-                    rows=rows,
-                    comment=comment,
-                )
-                updated = self._workbench_override_service.cancel_exception(rows=rows, comment=comment)
-                return [str(case["id"]) for case in cancelled_cases], updated
-
-            exception_case_ids, updated_rows = self._persist_workbench_exception_and_override_change(
-                changed_row_ids=row_ids,
-                mutation=mutation,
-                changed_scope_keys=changed_scope_keys,
-                action_name="cancel_exception",
-            )
-        except StatePersistenceError as exc:
-            return self._workbench_persistence_unavailable_response(exc)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "cancel_exception",
-                "month": month,
-                "affected_row_ids": [row["id"] for row in updated_rows],
-                "updated_rows": updated_rows,
-                "exception_case_ids": exception_case_ids,
-                "message": f"已取消 {len(updated_rows)} 条记录的异常处理。",
-            },
-        )
+        result = self._workbench_write_facade().cancel_exception(payload)
+        return self._workbench_write_response(result)
 
     def _handle_workbench_ignore_row_payload(self, payload: dict[str, object]) -> Response:
-        try:
-            month = str(payload["month"])
-            row_id = str(payload["row_id"])
-            comment = str(payload["comment"]) if payload.get("comment") is not None else None
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_ignore_row_request", "message": str(exc)},
-            )
-
-        grouped_payload = self._build_api_workbench_payload(month)
-        try:
-            row = self._resolve_live_row(grouped_payload, row_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": row_id},
-            )
-        if row.get("type") != "invoice":
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_ignore_row_request", "message": "ignore_row only supports invoice rows."},
-            )
-        try:
-            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
-            def mutation() -> tuple[str, dict[str, object]]:
-                exception_case = self._workbench_exception_case_service.ignore_row(row, comment=comment)
-                updated = self._workbench_override_service.ignore_row(
-                    row=row,
-                    comment=comment,
-                    exception_case_id=str(exception_case["id"]),
-                )
-                return str(exception_case["id"]), updated
-
-            exception_case_id, updated_row = self._persist_workbench_exception_and_override_change(
-                changed_row_ids=[row_id],
-                mutation=mutation,
-                changed_scope_keys=changed_scope_keys,
-                action_name="ignore_row",
-            )
-        except StatePersistenceError as exc:
-            return self._workbench_persistence_unavailable_response(exc)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "ignore_row",
-                "month": month,
-                "affected_row_ids": [updated_row["id"]],
-                "updated_rows": [updated_row],
-                "exception_case_id": exception_case_id,
-                "exception_case_ids": [exception_case_id],
-                "message": "已忽略 1 条记录。",
-            },
-        )
+        result = self._workbench_write_facade().ignore_row(payload)
+        return self._workbench_write_response(result)
 
     def _handle_workbench_unignore_row_payload(self, payload: dict[str, object]) -> Response:
-        try:
-            month = str(payload["month"])
-            row_id = str(payload["row_id"])
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_unignore_row_request", "message": str(exc)},
-            )
-
-        ignored_rows = {
-            str(row["id"]): row
-            for row in self._build_api_workbench_ignored_rows_payload(month)
-        }
-        row = ignored_rows.get(row_id)
-        if row is None:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": row_id},
-            )
-        try:
-            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
-            def mutation() -> tuple[list[str], dict[str, object]]:
-                unignored_case = self._workbench_exception_case_service.unignore_row(row)
-                updated = self._workbench_override_service.unignore_row(row=row)
-                return ([str(unignored_case["id"])] if isinstance(unignored_case, dict) else []), updated
-
-            exception_case_ids, updated_row = self._persist_workbench_exception_and_override_change(
-                changed_row_ids=[row_id],
-                mutation=mutation,
-                changed_scope_keys=changed_scope_keys,
-                action_name="unignore_row",
-            )
-        except StatePersistenceError as exc:
-            return self._workbench_persistence_unavailable_response(exc)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "unignore_row",
-                "month": month,
-                "affected_row_ids": [updated_row["id"]],
-                "updated_rows": [updated_row],
-                "exception_case_ids": exception_case_ids,
-                "message": "已撤回忽略 1 条记录。",
-            },
-        )
+        result = self._workbench_write_facade().unignore_row(payload)
+        return self._workbench_write_response(result)
 
     def _handle_workbench_confirm(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
