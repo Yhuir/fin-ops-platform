@@ -1782,7 +1782,7 @@ PF-P014-MG 已执行并合入本地 `main`。本轮覆盖 PF-P014 的完整 diff
 - 功能提交：`4031a1d5` (`refactor(workbench): extract exception write facade`)。
 - 本地 main merge commit：`6fb77dc3` (`Merge branch 'codex/workbench-exception-facade-prompt': workbench exception facade`)。
 - upstream sync：`origin/main` 与本地 `main` 均为 `f37c32ca`，且 `origin/main` 是功能分支祖先；合并前 `git pull --ff-only origin main` 显示 `Already up to date`。
-- push：已执行，`origin/main` 已同步到 `1227d779`。
+- push：已执行，`main` 与 `origin/main` 已同步；不在状态机中硬编码最终 push 记录提交 hash，避免状态记录追逐自身更新提交。
 - Traffic Gate / deploy / 生产配置：未执行、未修改。
 
 功能分支验证结果：
@@ -1812,7 +1812,7 @@ main 复验结果：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service -v`：4 tests OK。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_platform_runtime_boundary_guards -v`：25 tests OK。
 
-用户已确认 PF-P014-MG `verified`，且已执行 `git push origin main`。`main` 与 `origin/main` 已同步到 `1227d779`。下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`；不得直接在当前 `main` 上进入 PF-P015 / Unit of Work。
+用户已确认 PF-P014-MG `verified`，且已执行 `git push origin main`。`main` 与 `origin/main` 已同步。下一步必须从最新 `main` 新建分支，再生成并审查 `PF-P015 - Workbench Remaining Write Facade Discovery and Planning`；不得直接在当前 `main` 上进入 PF-P015 / Unit of Work。
 
 ## 维护规则
 
