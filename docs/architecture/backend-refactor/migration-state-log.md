@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已由用户确认 `verified`，本轮执行 `git push origin main` |
-| 当前 active prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` (`verified`) |
+| 当前阶段 | 已从最新 `main` 创建 `codex/workbench-durable-idempotency-planning`，`PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` (`planned`) |
 | 最近 verified prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P036-MG 已在功能分支和本地 `main` 双重复验通过；merge commit `7e311921`；post-flight commit `ba157bc3`；未部署、未 Traffic Gate |
-| 下一条允许任务 | `git push origin main` 完成后，从最新 `main` 新建分支，生成并审查 `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` |
+| 当前分支 | `codex/workbench-durable-idempotency-planning` |
+| 最近验证 | `main` 与 `origin/main` 均在 `1169765f`；已从最新 main 新建分支；PF-P037 只生成和审查，未执行 |
+| 下一条允许任务 | 执行 `PF-P037`；它只做 durable idempotency PostgreSQL store 规划和文档回写，不直接实现 SQL migration、repository 或迁移更多 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -3911,6 +3911,32 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
   - `git push origin main` 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
   - 建议下一条 prompt 是 `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning`。
   - PF-P037 应只做 durable idempotency schema/repository 规划和风险拆解，不直接迁移更多 Workbench 写 API。
+
+### PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning
+
+状态：`planned`
+
+#### 范围
+
+- 从最新 `main` 新建分支：`codex/workbench-durable-idempotency-planning`。
+- 只规划 Workbench durable idempotency PostgreSQL store。
+- 产出或更新 `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`。
+- 必须基于当前事实：`WorkbenchWriteUnitOfWork` 已接入 idempotency get/reserve/commit/replay，但当前生产组装仍使用 `InMemoryWorkbenchIdempotencyRepository`。
+- 必须覆盖 schema、unique identity、row lock/concurrency、reserve/commit/replay/failed semantics、repository API、transaction integration、migration/testing strategy、rollout order 和 cleanup/retention。
+
+#### 禁止范围
+
+- 不写 SQL migration。
+- 不实现 PostgreSQL repository。
+- 不修改 `server.py`、`workbench_uow.py`、`workbench_idempotency.py` 或业务代码。
+- 不迁移更多 Workbench 写 API。
+- 不执行 Merge Gate、Traffic Gate、部署或生产访问。
+
+#### 审查结论
+
+- PF-P037 是 PF-P036-MG 后合理的下一步：真实 `confirm-link` / `cancel-link` 已进入 UoW，但 idempotency 仍是进程内存实现，不具备跨进程、重启后的生产级 replay/conflict 能力。
+- 在继续迁移 exception、ignore、cash special、withdraw 等更多写路径前，应先把 durable idempotency 的表结构、并发语义和事务边界设计清楚。
+- PF-P037 应是 planning prompt，不应直接实现；实现应拆到后续 PF-P038/PF-P039 等小切片。
 
 ## 维护规则
 
