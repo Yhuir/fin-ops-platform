@@ -570,6 +570,71 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(suggestion["category_code"], custom_rule["code"])
         self.assertEqual(suggestion["auto_category_evidence"]["condition_type"], "contains_all")
 
+    def test_put_primary_label_only_change_persists_reconfigures_engine_and_enqueues_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            app = build_application(data_dir=data_dir)
+            app._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
+                app._default_bank_auto_tag_rules_file_source(),
+                actor_id="settings-owner",
+            )
+            queue = _ReadModelQueue()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+            current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+            target = next(
+                rule
+                for rule in current["active_rules"]
+                if rule["output_primary_label"] == "往来款付款" and rule["output_sub_label"] == "借出款"
+            )
+            active = []
+            for rule in current["active_rules"]:
+                next_rule = dict(rule)
+                if next_rule.get("output_primary_label") == "往来款付款":
+                    next_rule["output_primary_label"] = "外部往来款付款"
+                active.append(next_rule)
+
+            with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+                response = app.handle_request(
+                    "PUT",
+                    "/api/bank-details/auto-tag-rules",
+                    json.dumps(
+                        {
+                            "expected_version": current["version"],
+                            "active_rules": active,
+                            "archived_rules": current["archived_rules"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+
+            payload = json.loads(response.body)
+            reloaded = build_application(data_dir=data_dir)._app_settings_service.get_bank_auto_tag_rules_payload()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["version"], current["version"] + 1)
+        saved_target = next(rule for rule in payload["active_rules"] if rule["code"] == target["code"])
+        self.assertEqual(saved_target["label"], "借出款")
+        self.assertEqual(saved_target["output_primary_label"], "外部往来款付款")
+        self.assertEqual(saved_target["output_sub_label"], "借出款")
+        reloaded_target = next(rule for rule in reloaded["active_rules"] if rule["code"] == target["code"])
+        self.assertEqual(reloaded_target["output_primary_label"], "外部往来款付款")
+        suggestions = app._bank_transaction_auto_category_service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-external-turnover-borrow-out",
+                    "direction": "expense",
+                    "purpose": "借据号 贷款本息",
+                    "summary": "贷款扣款",
+                }
+            ]
+        )
+        suggestion = suggestions["txn-external-turnover-borrow-out"]
+        self.assertEqual(suggestion["category_code"], target["code"])
+        self.assertEqual(suggestion["category_label"], "借出款")
+        self.assertEqual(suggestion["category_primary_label"], "外部往来款付款")
+        self.assertEqual(suggestion["category_sub_label"], "借出款")
+        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+
     def test_put_rejects_false_success_when_settings_store_does_not_persist_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

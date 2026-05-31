@@ -1557,9 +1557,26 @@ class BankTransactionCategoryService:
                 "code": code,
                 "old_label": previous_by_code[code]["label"],
                 "new_label": next_by_code[code]["label"],
+                "old_output_primary_label": previous_by_code[code].get("output_primary_label"),
+                "new_output_primary_label": next_by_code[code].get("output_primary_label"),
+                "old_output_sub_label": previous_by_code[code].get("output_sub_label"),
+                "new_output_sub_label": next_by_code[code].get("output_sub_label"),
             }
             for code in sorted(set(previous_by_code).intersection(next_by_code))
-            if previous_by_code[code]["label"] != next_by_code[code]["label"]
+            if (
+                previous_by_code[code]["status"] == next_by_code[code]["status"]
+                and (
+                    previous_by_code[code]["label"] != next_by_code[code]["label"]
+                    or (
+                        previous_by_code[code].get("output_primary_label")
+                        != next_by_code[code].get("output_primary_label")
+                    )
+                    or (
+                        previous_by_code[code].get("output_sub_label")
+                        != next_by_code[code].get("output_sub_label")
+                    )
+                )
+            )
         ]
         archived = [
             code
