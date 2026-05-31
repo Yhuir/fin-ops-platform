@@ -989,3 +989,28 @@ PF-P044 已实现 deterministic failed reservation policy，但没有打开 dura
 下一步建议：
 
 如果用户认为 PF-P040 到 PF-P044 已达到可合并切片，应生成 cumulative Merge Gate，覆盖 PF-P040 起的完整 diff。若继续拆 rollout blocker，下一条应优先处理 cleanup/retention、真实 PostgreSQL concurrency 或 observability 中的一个，不应顺手迁移更多 Workbench 写 API。
+
+## 24. PF-P044-MG Planned Boundary
+
+用户已确认 PF-P044 `verified`。下一条 planned prompt：
+
+`PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate`
+
+PF-P044-MG 覆盖 PF-P040 到 PF-P044 的完整 diff：
+
+- rollout readiness 文档与测试。
+- request-local OA actor / tenant context 注入 confirm-link / cancel-link UoW command。
+- reserved/in-progress duplicate policy。
+- expired reserved takeover policy。
+- failed reservation policy。
+
+PF-P044-MG 只执行 Merge Gate，不执行 Traffic Gate，不部署，不访问生产，不修改网关 / worker routing / 环境变量，不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+
+合入 main 后仍不代表 durable idempotency 可生产启用。以下 gate 仍需后续单独处理：
+
+- cleanup/retention。
+- real PostgreSQL row-lock concurrency。
+- observability/metrics/logging。
+- migration apply / rollback runbook。
+
+PF-P044-MG 必须执行 upstream sync、范围检查、完整分支验证、合入 main 后 main 复验，并更新状态机。未经用户确认，不得将 PF-P044-MG 标记为 `verified`。

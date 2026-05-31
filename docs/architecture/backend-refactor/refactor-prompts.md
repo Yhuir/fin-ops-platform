@@ -12585,9 +12585,9 @@ Stop Conditions:
 
 ### 执行结果
 
-状态：`implemented`
+状态：`verified`
 
-PF-P044 已完成 Workbench durable idempotency 的 failed reservation policy，但未执行 Merge Gate、Traffic Gate、部署、merge 或 push。
+PF-P044 已完成 Workbench durable idempotency 的 failed reservation policy，并已由用户确认 `verified`；但未执行 Merge Gate、Traffic Gate、部署、merge 或 push。
 
 已完成：
 
@@ -12621,6 +12621,177 @@ PF-P044 已完成 Workbench durable idempotency 的 failed reservation policy，
 
 下一步：
 
-- 等待用户确认 PF-P044 `verified`。
 - 若用户认为 PF-P040 到 PF-P044 已达到可合并切片，生成 cumulative Merge Gate 覆盖 PF-P040 起完整 diff。
 - 若继续拆 rollout blocker，下一条 prompt 应聚焦 cleanup/retention、真实 PostgreSQL concurrency 或 observability 中的一个。
+
+## PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate。
+
+Role: 你是一位严格的 Git Merge Gate 审核工程师，熟悉 Python unittest、平台 guard tests、金融写路径一致性、durable idempotency rollout 风险和主干合入流程。你的任务是只处理 PF-P040 到 PF-P044 的 cumulative Merge Gate，确保本分支可以安全合入 main。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-durable-idempotency-rollout-readiness`。
+- 用户已确认以下 prompt 均为 `verified`：
+  - PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests
+  - PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract
+  - PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy
+  - PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy
+  - PF-P044 - Workbench Durable Idempotency Failed Reservation Policy
+- PF-P040-MG 此前 deferred；本 prompt 是覆盖 PF-P040 到 PF-P044 的 cumulative MG。
+- 本 MG 只允许完成 Merge Gate，不允许执行 Traffic Gate、部署、生产访问、feature flag 打开或更多业务迁移。
+- 即使本 MG 成功合入 main，也不得宣称 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 可以生产打开；cleanup/retention、真实 PostgreSQL row-lock concurrency、observability/metrics/logging 和 migration apply/runbook 仍是后续 gate。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+   - 本轮涉及的代码和测试文件。
+2. 必须确认：
+   - 当前分支是 `codex/workbench-durable-idempotency-rollout-readiness`。
+   - PF-P040、PF-P041、PF-P042、PF-P043、PF-P044 均已 `verified`。
+   - 当前 active prompt 是 PF-P044-MG planned。
+   - 工作区没有未提交变更；如果有，只能是 PF-P044-MG 文档状态更新，且必须先提交或纳入本 MG 明确范围。
+   - `git ls-files --others --exclude-standard` 为空；严禁临时文件、`.pkl`、`.sqlite`、`__pycache__` 或测试输出混入。
+3. 必须列出并确认分支相对 main 的 commit 范围：
+   - `git log --oneline main..HEAD`
+   - 当前预期提交：
+     - `908ba91c docs(backend-refactor): plan durable idempotency rollout readiness`
+     - `a72adac4 test(workbench): add durable idempotency rollout readiness`
+     - `377fcbc0 docs(workbench): plan idempotency actor context contract`
+     - `cd3753d5 feat(workbench): propagate auth context to idempotency commands`
+     - `3a9c01e5 docs(workbench): plan idempotency in-progress policy`
+     - `fd574862 feat(workbench): handle idempotency in-progress reservations`
+     - `ec86d127 docs(workbench): plan expired reserved takeover prompt`
+     - `7aeb4138 feat(workbench): handle expired idempotency reservations`
+     - `db905884 docs(workbench): plan failed idempotency policy prompt`
+     - `01e29dce feat(workbench): handle failed idempotency records`
+
+Gate Scope:
+- 这是 Merge Gate，只决定是否把当前分支合入 main。
+- 不触发 Traffic Gate。
+- 不部署。
+- 不访问生产或 staging。
+- 不修改 Nginx、网关、worker routing、部署配置、环境变量或 feature flag。
+- 不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不迁移更多 Workbench 写 API。
+- 不实现 cleanup/retention、真实 PostgreSQL concurrency test 或 observability。
+
+Expected Changed Files:
+必须确认 `git diff --name-only main...HEAD` 只包含以下文件；如有额外文件，必须停止并解释，未经用户确认不得继续：
+
+- `backend/src/fin_ops_platform/app/auth.py`
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+- `tests/test_workbench_auth_context_idempotency.py`
+- `tests/test_workbench_durable_idempotency_rollout.py`
+- `tests/test_workbench_idempotency_contract.py`
+- `tests/test_workbench_postgres_idempotency_repository.py`
+- `tests/test_workbench_uow_contract.py`
+- `tests/test_workbench_write_characterization.py`
+
+Required Scope Review:
+1. 审查代码 diff，确认只包含：
+   - durable idempotency rollout readiness 文档与测试。
+   - request-local OA actor/tenant context 传入 confirm/cancel UoW command。
+   - reserved/in-progress duplicate policy。
+   - expired reserved takeover policy。
+   - failed reservation policy。
+2. 必须确认未发生：
+   - feature flag 默认打开。
+   - migration schema 变更。
+   - 部署、网关或 worker routing 变更。
+   - 更多 Workbench API 迁移。
+   - Go/backend-go 相关恢复。
+3. 必须确认 rollout readiness 文档仍明确：
+   - feature flag 默认关闭。
+   - cleanup/retention 仍未完成。
+   - real PostgreSQL row-lock concurrency 仍未完成。
+   - observability/metrics/logging 仍未完成。
+   - 合入 main 不等于生产可打开 durable idempotency。
+
+Required Verification Before Merge:
+必须在当前分支执行并通过：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only main...HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- `rg -n "FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY|PostgresWorkbenchIdempotencyRepository|WorkbenchIdempotencyFailed|WorkbenchIdempotencyInProgress|taken_over_expired|actor_id_for_session|tenant_id_for_session|cleanup/retention|row-lock concurrency|observability" backend/src/fin_ops_platform tests docs/architecture/backend-refactor`
+
+Upstream Sync / Merge Rules:
+1. 执行 merge 前必须同步 main：
+   - `git checkout main`
+   - `git pull origin main`
+2. 如果 main 有新提交，必须回到功能分支执行 rebase 或 merge main：
+   - 推荐：`git checkout codex/workbench-durable-idempotency-rollout-readiness`
+   - `git rebase main` 或 `git merge main`
+   - 如有冲突，解决后必须重新执行 Required Verification Before Merge 全套检查。
+3. 只有当前分支包含最新 main 且验证全绿，才允许合入 main。
+4. 合入 main 后必须在 main 上重新执行完整验证：
+   - `git status --short --branch`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - 上述所有 unittest 命令
+   - 上述 `rg` 检索
+5. 如果当前已经在 main 且 commit 已存在于 main，不做无意义 merge；只做范围检查、main 复验和状态机更新。
+
+Commit / Merge Rules:
+- 严禁使用 `git add .` 或 `git add -A`。
+- 如果需要更新 MG 状态文档，必须精准 stage 具体文件。
+- 如果需要创建 MG 文档提交，commit message 建议：
+  - `docs(backend-refactor): plan workbench idempotency rollout merge gate`
+- 合入 main 的 merge commit message 建议：
+  - `Merge branch 'codex/workbench-durable-idempotency-rollout-readiness': workbench durable idempotency rollout guards`
+- 不 push，除非用户明确要求。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P044-MG 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录 merge 前分支验证结果。
+  - 记录 main 复验结果。
+  - 记录是否已合入 main。
+  - 记录未执行 Traffic Gate、部署、生产访问、feature flag 打开或 push。
+  - 记录下一步建议：push origin main，或继续生成 cleanup/retention / real PostgreSQL concurrency / observability prompt。
+- 更新 `refactor-prompts.md` 的 PF-P044-MG 执行结果。
+- 若执行了 merge，确保最终工作区干净。
+
+Stop Conditions:
+- 如果存在未跟踪临时文件，停止。
+- 如果 changed files 超出 Expected Changed Files，停止并请求用户确认。
+- 如果任何 unittest 或 guard test 失败，停止。
+- 如果需要打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 才能通过测试，停止。
+- 如果需要修改 migration、部署、网关、worker routing 或 feature flag，停止。
+- 如果 main 同步后出现冲突且无法在本轮安全解决，停止并记录 blocker。
+- 如果用户未确认，不得将 PF-P044-MG 标记为 verified。
+```
+
+### 审查结论
+
+- PF-P044-MG 范围合理：它覆盖 PF-P040 到 PF-P044 的 durable idempotency rollout blocker 切片，正好是此前 deferred 的 cumulative MG。
+- 该 MG 明确区分 Merge Gate 和 Traffic Gate；合入 main 后仍不允许打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 该 MG 仍保留 cleanup/retention、真实 PostgreSQL row-lock concurrency、observability/metrics/logging 和 migration apply/runbook 为后续 gate，避免把 main merge 误判成生产启用许可。
