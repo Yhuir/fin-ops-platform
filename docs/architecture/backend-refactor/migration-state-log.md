@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P036 - Workbench Cancel Link UoW Integration Slice` 已实现，等待用户确认是否可标记 `verified` |
-| 当前 active prompt | `PF-P036 - Workbench Cancel Link UoW Integration Slice` (`implemented`) |
-| 最近 verified prompt | `PF-P035 - Workbench Confirm Link UoW Integration Slice` |
+| 当前阶段 | `PF-P036 - Workbench Cancel Link UoW Integration Slice` 已由用户确认 `verified`；`PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P036 - Workbench Cancel Link UoW Integration Slice` |
 | 当前分支 | `codex/workbench-confirm-link-uow` |
 | 最近验证 | PF-P036 在功能分支通过 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试；未执行 MG、未部署、未 Traffic Gate、未 push |
-| 下一条允许任务 | 等待用户确认 PF-P036 是否可标记 `verified`；确认后默认生成累计 MG，覆盖 PF-P035 到 PF-P036 的完整 diff |
+| 下一条允许任务 | 执行 `PF-P036-MG`；它必须统一覆盖 PF-P035 到 PF-P036 的完整 diff，不得进入下一条业务迁移 |
 
 ## Prompt 执行日志
 
@@ -3758,7 +3758,7 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 
 ### PF-P036 - Workbench Cancel Link UoW Integration Slice
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3796,7 +3796,7 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 
 #### 执行结果
 
-- 状态：`implemented`，等待用户确认后才可标记 `verified`。
+- 状态：`verified`，用户已确认 PF-P036 可落锁。
 - 完成范围：
   - `WorkbenchWriteFacade.cancel_link` 在解析请求、读取 active relation、执行 stale expected relation guard 后接入 `WorkbenchWriteUnitOfWork`。
   - cancel-link 使用 transaction-bound pair relation persistence 和 UoW dirty/outbox/source_version writer。
@@ -3826,9 +3826,44 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
   - actor/tenant 仍使用默认值，后续仍需接入真实 auth context。
   - 本轮没有迁移 exception、ignore/unignore、cash special、withdraw、personal advance repayment 或其它 Workbench 写路径。
 - 下一条 Prompt 上下文：
-  - 等待用户确认 PF-P036 verified。
   - PF-P035-MG 仍 deferred；累计 MG 当前计划覆盖 PF-P035 到 PF-P036。
-  - 用户确认 PF-P036 verified 后，默认下一步应生成并审查 `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`，而不是直接迁移下一条 API。
+  - `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已生成并审查。
+  - 下一步只允许执行 PF-P036-MG；不得直接迁移下一条 Workbench 写 API。
+
+### PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 这是累计 Merge Gate，只覆盖 PF-P035 `confirm-link` UoW 和 PF-P036 `cancel-link` UoW 的完整 diff。
+- 必须确认 PF-P035 和 PF-P036 均为 `verified`。
+- 必须确认 PF-P035-MG 是 deferred，且本 MG 是该 deferred gate 的替代累计门禁。
+- 允许合入的生产代码范围仅限 Workbench pair relation UoW integration：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_workbench_write_characterization.py`
+- 允许合入的文档范围仅限本轮 prompt、状态机和 Workbench UoW 设计/执行结果文档。
+
+#### 明确禁止
+
+- 不迁移 exception、ignore/unignore、cash special、withdraw、personal advance repayment、matching/candidates、query/read-model 或其它 Workbench 写路径。
+- 不新增 SQL migration，不新增 PostgreSQL durable idempotency repository。
+- 不修改前端、网关、部署、auth/session、worker routing。
+- 不执行 Traffic Gate、部署、生产访问或 `git push origin main`。
+- 严禁把 untracked 临时文件、`.pkl`、`.sqlite`、`__pycache__`、测试输出或 `backend-go` 带入提交。
+- 严禁使用 `git add .` 或 `git add -A`。
+
+#### 验证门禁
+
+PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 changed files 白名单，再在功能分支和本地 `main` 合入后分别执行 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试。
+
+#### 审查结论
+
+- PF-P035 与 PF-P036 同属 Workbench pair relation facts/history 写路径，使用累计 MG 合并是合理的。
+- 当前仍存在生产级 idempotency 缺口：真实 PostgreSQL durable idempotency store 尚未实现。因此 MG 只能证明 pair relation UoW transaction boundary 进入 main，不代表 Workbench 写路径全部生产完成。
+- PF-P036-MG 不应继续扩大业务范围。通过后用户确认 `verified`，再由用户决定是否 `git push origin main`。
 
 ## 维护规则
 

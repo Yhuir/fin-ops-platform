@@ -494,7 +494,7 @@ PF-P026 should be followed by a Merge Gate after user confirmation, because PF-P
 
 ## 18. PF-P035 Confirm Link UoW Boundary Update
 
-PF-P035 has been executed as the first real Workbench write API UoW integration slice. It is currently `implemented` and waiting for user confirmation before `verified`.
+PF-P035 has been executed as the first real Workbench write API UoW integration slice. The user has confirmed PF-P035 as `verified`.
 
 Boundary now enforced for `confirm-link`:
 
@@ -514,7 +514,7 @@ Still outside this boundary:
 
 Next boundary gate:
 
-After user confirmation, run `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`. Do not expand UoW integration to another write API until PF-P035 has passed its MG.
+PF-P035-MG has been deferred and folded into the cumulative PF-P036-MG, covering PF-P035 through PF-P036 in one pair-relation UoW merge gate.
 
 ## 19. PF-P036 Cancel Link UoW Boundary Planning
 
@@ -548,7 +548,7 @@ PF-P036 should be followed by a cumulative MG after user confirmation unless the
 
 ## 20. PF-P036 Cancel Link UoW Boundary Update
 
-PF-P036 has been executed as the second real Workbench pair-relation write API UoW integration slice. It is currently `implemented` and waiting for user confirmation before `verified`.
+PF-P036 has been executed as the second real Workbench pair-relation write API UoW integration slice. The user has confirmed PF-P036 as `verified`.
 
 Boundary now enforced for `cancel-link`:
 
@@ -573,4 +573,8 @@ Still outside this boundary:
 
 Next boundary gate:
 
-After user confirmation, generate cumulative MG: `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`, covering PF-P035 through PF-P036.
+PF-P036-MG has been generated and reviewed:
+
+`PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`
+
+The cumulative MG must cover the full PF-P035 through PF-P036 diff. It should merge only the pair relation UoW boundary for `confirm-link` and `cancel-link`; it must not claim durable PostgreSQL idempotency, real auth actor/tenant propagation, or broader Workbench write-path completion.

@@ -569,7 +569,7 @@ PF-P035 必须把 repository capability 当作硬门禁。如果不扩大 reposi
 
 ## 17. PF-P035 Confirm Link UoW Integration Result
 
-PF-P035 已执行，当前状态为 `implemented`，等待用户确认后才可标记 `verified`。
+PF-P035 已执行，用户已确认状态为 `verified`。
 
 实际完成：
 
@@ -597,7 +597,7 @@ PF-P035 已执行，当前状态为 `implemented`，等待用户确认后才可�
 
 下一步建议：
 
-用户确认 PF-P035 `verified` 后，应生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`，统一检查 PF-P035 完整 diff 并合入本地 `main`。不要直接迁移下一条 API。
+用户已确认 PF-P035 `verified`。PF-P035-MG 已延后并纳入 PF-P036-MG 累计门禁，统一覆盖 PF-P035 到 PF-P036 的完整 diff。
 
 ## 18. PF-P036 Cancel Link UoW Integration Planning
 
@@ -624,7 +624,7 @@ PF-P036 完成并由用户确认 verified 后，默认下一步应生成累计 M
 
 ## 19. PF-P036 Cancel Link UoW Integration Result
 
-PF-P036 已执行，当前状态为 `implemented`，等待用户确认后才可标记 `verified`。
+PF-P036 已执行，用户已确认状态为 `verified`。
 
 实际完成：
 
@@ -653,4 +653,10 @@ PF-P036 已执行，当前状态为 `implemented`，等待用户确认后才可�
 
 下一步建议：
 
-用户确认 PF-P036 `verified` 后，默认生成累计 MG：`PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`，覆盖 PF-P035 到 PF-P036 的完整 diff。
+用户已确认 PF-P036 `verified`。累计 MG 已生成并审查：
+
+`PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`
+
+该 MG 必须统一覆盖 PF-P035 到 PF-P036 的完整 diff。它只验证并合入 Workbench pair relation 写路径中的 `confirm-link` 和 `cancel-link` UoW integration，不得扩大到 exception、ignore/unignore、cash special、withdraw、personal advance repayment、matching/candidates 或 query/read-model。
+
+PF-P036-MG 通过并由用户确认后，才允许用户决定是否 `git push origin main`。push 后，下一条 prompt 必须从最新 `main` 新建分支生成。

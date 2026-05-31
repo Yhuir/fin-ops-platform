@@ -10547,3 +10547,186 @@ PF-P036 已按 TDD 执行：
 - 未执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
 
 下一步：用户确认 PF-P036 `verified` 后，默认生成并审查 `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`，统一覆盖 PF-P035 到 PF-P036 的完整 diff。
+
+用户已确认 PF-P036 `verified`。PF-P036-MG 已生成并审查，下一步只允许执行该累计 Merge Gate；不得直接进入下一条 Workbench 写 API 迁移。
+
+## PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate。
+
+Role: 你是一位严格的 Python 遗留系统重构 Merge Gate 审查工程师，负责在合入 main 前拦截范围漂移、未跟踪文件、测试缺口、上游不同步和隐式生产风险。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-confirm-link-uow`。
+- PF-P035 已由用户确认 `verified`。
+- PF-P036 已由用户确认 `verified`。
+- PF-P035-MG 已 deferred；本 prompt 是累计 MG，统一覆盖 PF-P035 到 PF-P036 的完整 diff。
+- PF-P035 将真实 `confirm-link` 接入 `WorkbenchWriteUnitOfWork`。
+- PF-P036 将真实 `cancel-link` 接入 `WorkbenchWriteUnitOfWork`。
+- 本 MG 只证明 pair relation 写路径的 confirm/cancel UoW 切片可合入 main，不代表 Workbench 写路径整体重构完成。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_platform_runtime_boundary_guards.py`
+2. 必须确认状态机：
+   - 当前 active prompt 是 `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` planned。
+   - PF-P035 状态为 `verified`。
+   - PF-P036 状态为 `verified`。
+   - PF-P035-MG 已明确 deferred，本 MG 是其累计替代门禁。
+3. 必须确认当前分支：
+   - 执行时必须从 `codex/workbench-confirm-link-uow` 开始。
+   - 不得在 `main` 上直接执行 feature diff 检查或修改。
+4. 必须先记录并检查：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-status main...HEAD`
+   - `git diff --check main...HEAD`
+   - `test ! -e backend-go`
+5. 如果 `git ls-files --others --exclude-standard` 非空，必须逐项判断是否为临时文件；严禁把 `.pkl`、`.sqlite`、`__pycache__`、测试输出、导出物、截图或任何无关文件带入提交。
+
+Gate Scope:
+- 这是 Merge Gate，不是 Traffic Gate。
+- 允许把 PF-P035 + PF-P036 的 pair relation UoW 切片合入本地 `main`。
+- 不允许执行 staging/prod Traffic Gate。
+- 不允许部署、访问生产、修改生产配置或 `git push origin main`。
+- 不允许开始下一条业务迁移 prompt。
+
+Expected Changed Files:
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `tests/test_workbench_write_characterization.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+- `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+
+Allowed Scope:
+- 允许确认并合入 PF-P035 的 confirm-link UoW integration。
+- 允许确认并合入 PF-P036 的 cancel-link UoW integration。
+- 允许合入相关 characterization / UoW / idempotency / stale contract 测试调整。
+- 允许合入对应文档和状态机更新。
+- 允许在 MG 执行过程中更新 `migration-state-log.md` 和 `refactor-prompts.md` 的 PF-P036-MG 执行结果。
+
+Forbidden Scope:
+- 不迁移 exception、mark-exception、exception/apply、cancel-exception。
+- 不迁移 ignore/unignore。
+- 不迁移 cash special、withdraw、personal advance repayment。
+- 不迁移 matching/candidates、Workbench query/read-model、worker、SSE 或 search。
+- 不新增 SQL migration。
+- 不新增 PostgreSQL durable idempotency repository。
+- 不修改前端、部署、网关、auth/session、worker routing。
+- 不修改生产配置。
+- 不执行 `git push origin main`。
+- 不使用 `git add .` 或 `git add -A`；必须精确 `git add <file>`。
+
+Required Diff Review:
+1. Branch and file scope：
+   - 确认 diff 只包含 Expected Changed Files 或明确属于本 MG 文档回写。
+   - 如果出现额外文件，必须停止并解释；不得自行扩大白名单。
+2. Behavior scope：
+   - 确认 `confirm-link` 和 `cancel-link` 仍保持原有 HTTP response shape。
+   - 确认内部 `source_versions` / `outbox_event_ids` 没有泄漏到前端 payload。
+   - 确认 legacy 无 idempotency key 的 duplicate cancel 仍保持当前 not found 行为。
+3. UoW scope：
+   - 确认 `confirm-link` 的 pair relation facts/history、reconciliation decision consumption、dirty scope、outbox、source_version 在 UoW transaction 内。
+   - 确认 `cancel-link` 的 relation cancellation、pair relation facts/history、dirty scope、outbox、source_version 在 UoW transaction 内。
+   - 确认 cancel-link stale expected relation conflict 不打开 UoW transaction。
+4. Idempotency scope：
+   - 确认当前 idempotency 仍是 `InMemoryWorkbenchIdempotencyRepository` primitive。
+   - 必须在状态机记录 durable PostgreSQL idempotency store 仍是后续生产级缺口。
+5. Platform scope：
+   - 确认没有绕过 platform runtime guard。
+   - 确认没有新增业务层 Redis/RabbitMQ/OA Mongo/pymysql direct import。
+   - 确认没有 handler/usecase raw SQL 越界。
+
+Required Verification On Feature Branch:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-status main...HEAD`
+- `git diff --check main...HEAD`
+- `test ! -e backend-go`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Upstream Sync Lock:
+1. 在合入 `main` 前必须执行：
+   - `git fetch origin`
+   - `git checkout main`
+   - `git pull --ff-only origin main`
+2. 如果 `main` 更新了，必须切回 `codex/workbench-confirm-link-uow`，将最新 `main` 同步到当前分支。
+3. 同步后如发生冲突，必须停止并报告，不得强行解决。
+4. 同步后如无冲突，必须重新执行 Required Verification On Feature Branch。
+
+Merge Procedure:
+1. 只有在 feature branch verification 全部通过后，才允许合入本地 `main`。
+2. 合入方式：
+   - `git checkout main`
+   - `git merge --no-ff codex/workbench-confirm-link-uow -m "Merge branch 'codex/workbench-confirm-link-uow': workbench pair relation uow"`
+3. 合入后不得 push。
+4. 合入后必须在本地 `main` 重新执行完整验证：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --check HEAD~1..HEAD`
+   - `test ! -e backend-go`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+5. 如果 main 上验证失败，必须停止并报告；不得 push。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P036-MG 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录 feature branch verification 结果。
+  - 记录 upstream sync 结果。
+  - 记录是否已 merge 到本地 `main`、merge commit hash、main 上复验结果。
+  - 明确记录未执行 `git push origin main`、未执行 Traffic Gate、未部署。
+  - 明确记录 durable PostgreSQL idempotency store、真实 auth actor/tenant 仍是后续缺口。
+- 更新 `refactor-prompts.md` 的 PF-P036-MG 执行结果。
+- 如果 MG 已在本地 main 合入并复验通过，最终回复必须告诉用户：
+  - PF-P036-MG 还需要用户确认后才能标记 `verified`。
+  - 用户确认后才执行 `git push origin main`。
+  - push 后下一条 prompt 必须从最新 main 新建分支生成。
+
+Stop Conditions:
+- PF-P035 或 PF-P036 不是 `verified`。
+- 当前分支不是 `codex/workbench-confirm-link-uow`。
+- 出现 Expected Changed Files 之外的无关 diff。
+- 存在未解释的 untracked files。
+- 任一验证命令失败。
+- upstream sync 出现冲突。
+- main merge 后任一验证失败。
+```
+
+### 审查结论
+
+- PF-P036-MG 的边界正确：它统一覆盖 PF-P035 和 PF-P036，避免每条小 API 都单独 MG，同时保持同一功能分支生命周期受控。
+- 该 MG 不应执行 Traffic Gate，因为本轮没有网关、部署、worker routing 或生产配置变更。
+- 该 MG 必须在 feature branch 和本地 `main` 双重复验；通过后仍需用户确认，才能标记 `verified` 并决定是否 push。
+- 当前最大残留风险是 idempotency 仍非 durable PostgreSQL store；MG 文案已要求在状态机中保留这个生产级缺口，不允许宣称 Workbench 写路径已整体完成。
