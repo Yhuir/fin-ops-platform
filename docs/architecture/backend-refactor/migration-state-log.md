@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已执行 `PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests`，等待用户确认 |
-| 当前 active prompt | `PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests` (`implemented`) |
-| 最近 verified prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` |
+| 当前阶段 | 已确认 `PF-P040` verified，并生成/审查 `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` |
+| 当前 active prompt | `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` (`planned`) |
+| 最近 verified prompt | `PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests` |
 | 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
-| 最近验证 | PF-P040 已完成默认绿色测试和文档门禁；未执行 Merge Gate、Traffic Gate、部署或 push；未经用户确认不得标记 `verified` |
-| 下一条允许任务 | 等待用户确认 PF-P040 `verified`；之后建议生成并审查 `PF-P040-MG - Workbench Durable Idempotency Rollout Readiness Merge Gate` |
+| 最近验证 | PF-P040 已完成默认绿色测试和文档门禁；用户已确认 `verified`；PF-P040-MG deferred，将由后续 cumulative MG 覆盖；未执行 Traffic Gate、部署或 push |
+| 下一条允许任务 | 执行 `PF-P041`；PF-P041 只允许处理 Workbench durable idempotency 的 actor/tenant auth context contract，不得启用 feature flag、不得迁移更多 API、不得执行 MG/Traffic/deploy/push |
 
 ## Prompt 执行日志
 
@@ -4236,7 +4236,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4308,8 +4308,35 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认 PF-P040 `verified`。
-- 之后建议生成并审查 `PF-P040-MG - Workbench Durable Idempotency Rollout Readiness Merge Gate`。
+- 用户已确认 PF-P040 `verified`。
+- PF-P040-MG deferred：后续 cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
+- 已生成并审查 `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract`；下一步允许执行 PF-P041。
+
+### PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 Workbench durable idempotency identity 的 actor/tenant auth context contract。
+- 目标是让 Workbench UoW command / idempotency identity 不再默认落到 `actor_id="system"`、`tenant_id="default"`，而是从 OA session / auth context 显式传入。
+- 必须先写 failing tests，再做最小实现。
+- 不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不迁移更多 Workbench 写 API。
+- 不处理 reserved/in-progress、expired takeover、failed policy、cleanup/retention 或真实 PostgreSQL concurrency。
+- 不执行 Merge Gate、Traffic Gate、部署或 push。
+
+#### 审查结论
+
+- PF-P041 是 PF-P040 后合理的下一步：PF-P040 readiness matrix 已将 `actor/tenant auth context` 标为 feature flag 打开前 blocker。
+- CodeGraph / 源码确认当前 `_WorkbenchConfirmLinkCommand` 和 `_WorkbenchCancelLinkCommand` 默认 `tenant_id="default"`、`actor_id="system"`。
+- 源码确认 `server.py` 的 `_enforce_route_access()` 会解析 OA session 并校验权限，但当前只返回 auth error / None，成功 session 未传到 Workbench 写 handler / facade。
+- PF-P041 必须禁止把 session 存到 `Application` 全局可变字段；该系统存在 threaded request 风险，auth context 应作为请求局部参数显式传递。
+- PF-P041 不应顺手改变历史 audit / `created_by` 语义，除非测试证明这是 actor context contract 必需且范围可控。
+
+#### 下一步
+
+- 等待用户确认后执行 PF-P041。
 
 ## 维护规则
 

@@ -721,3 +721,15 @@ PF-P040 已建立 durable idempotency 启用前 rollout readiness 门禁，但�
 `PF-P040-MG - Workbench Durable Idempotency Rollout Readiness Merge Gate`
 
 PF-P040-MG 应覆盖本轮 rollout readiness 文档、测试和状态机/prompt 更新的完整 diff，执行范围检查、验证和合入前门禁。PF-P040-MG 不应打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不应执行 Traffic Gate 或部署。
+
+用户已确认 PF-P040 `verified`。按用户要求，PF-P040-MG deferred；后续 cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
+
+下一条 planned prompt：
+
+`PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract`
+
+PF-P041 应优先处理 PF-P040 readiness matrix 中的 `actor/tenant auth context` blocker。当前源码事实是：
+
+- `_WorkbenchConfirmLinkCommand` 和 `_WorkbenchCancelLinkCommand` 仍默认 `tenant_id="default"`、`actor_id="system"`。
+- `server.py` 已通过 `_enforce_route_access()` 解析 OA session 并校验权限，但成功 session 未传入 Workbench 写 handler / facade / UoW command。
+- PF-P041 应用 TDD 建立 actor/tenant contract，并做最小实现；不得打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不得迁移更多 Workbench 写 API，不能把 session 存在 `Application` 全局可变字段。

@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests`
 
-状态：`implemented`
+状态：`verified`
 
 本文档记录 Workbench durable idempotency 在打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 前必须满足的上线就绪门禁。PF-P040 不启用 feature flag，不部署，不执行 Traffic Gate，不迁移更多 Workbench 写 API。
 
@@ -91,3 +91,9 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 `PF-P041 - Workbench Durable Idempotency Reserved/In-Progress Policy`
 
 该方向只处理 reserved/in-progress duplicate、expired reserved takeover 和 failed reservation policy，不打开 feature flag。
+
+## 8. PF-P040 Verification
+
+用户已确认 PF-P040 `verified`。
+
+PF-P040-MG deferred：后续 cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。PF-P041 先处理 `actor/tenant auth context`，仍不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。

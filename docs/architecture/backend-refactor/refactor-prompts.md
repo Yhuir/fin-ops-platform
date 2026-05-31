@@ -11776,3 +11776,163 @@ Stop Conditions:
 `PF-P040-MG - Workbench Durable Idempotency Rollout Readiness Merge Gate`
 
 PF-P040-MG 应覆盖 PF-P040 的完整 diff，并继续禁止打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`、Traffic Gate、部署和 push。
+
+## PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract。
+
+Role: 你是一位严格的 Python 后端架构师，熟悉 auth context propagation、financial audit boundary、durable idempotency 和 TDD。你的任务是在不打开 durable idempotency feature flag 的前提下，把 Workbench UoW idempotency identity 的 actor/tenant 来源从默认值改为真实请求上下文。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-durable-idempotency-rollout-readiness`。
+- PF-P040 已由用户确认 `verified`。
+- PF-P040-MG deferred；后续 cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
+- PF-P040 readiness matrix 将 `actor/tenant auth context` 标记为打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 前必须解决的 blocker。
+- CodeGraph / 源码确认：
+  - `_WorkbenchConfirmLinkCommand` 和 `_WorkbenchCancelLinkCommand` 当前默认 `tenant_id="default"`、`actor_id="system"`。
+  - `server.py` 的 `_enforce_route_access()` 会解析 OA session 并校验权限，但成功 session 当前没有传入 Workbench 写 handler / facade / UoW command。
+  - 当前 durable unique identity 是 `(tenant_id, actor_id, idempotency_key)`；如果 actor/tenant 继续默认，durable idempotency 会出现跨用户 key collision 和审计失真风险。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+   - `backend/src/fin_ops_platform/app/auth.py`
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_durable_idempotency_rollout.py`
+2. 必须用 CodeGraph 或源码确认：
+   - `OARequestSession` / `OAUserIdentity` 中可作为 stable actor id 的字段。
+   - `_enforce_route_access()` 的成功 session 当前是否被丢弃。
+   - Workbench confirm/cancel handler 到 `WorkbenchWriteFacade` 再到 UoW command 的调用链。
+   - `_WorkbenchConfirmLinkCommand` / `_WorkbenchCancelLinkCommand` 的 actor/tenant 默认值。
+3. 必须确认：
+   - 当前 active prompt 是 PF-P041 planned。
+   - PF-P040 状态为 `verified`。
+   - PF-P040-MG 已记录为 deferred / cumulative MG 覆盖范围。
+   - 当前分支是 `codex/workbench-durable-idempotency-rollout-readiness`。
+   - 工作区没有未提交变更或未跟踪临时文件。
+
+Goal:
+建立并实现 Workbench durable idempotency 的 actor/tenant context contract：真实 OA session 应以请求局部参数传入 Workbench 写路径，并进入 UoW command / request fingerprint / idempotency identity。完成后，confirm-link 和 cancel-link 的 UoW command 不应在已认证请求中继续使用 `actor_id="system"`。
+
+Allowed Scope:
+- 允许新增或修改默认绿色 tests：
+  - `tests/test_workbench_auth_context_idempotency.py`，或等价测试文件。
+  - `tests/test_workbench_idempotency_contract.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `tests/test_workbench_durable_idempotency_rollout.py`
+- 允许最小修改：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`，仅当 command contract 或 helper 需要。
+  - `backend/src/fin_ops_platform/app/auth.py`，仅当需要新增无副作用的 actor/tenant normalization helper。
+- 允许更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+
+Forbidden Scope:
+- 不启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不修改部署、环境变量、网关、worker routing、前端或数据库 migration。
+- 不迁移更多 Workbench 写 API。
+- 不处理 reserved/in-progress duplicate、expired takeover、failed policy、cleanup/retention 或真实 PostgreSQL concurrency。
+- 不改变 `app.workbench_idempotency_records` schema。
+- 不访问生产数据库，不依赖真实 PostgreSQL 作为默认 CI。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问、merge 或 push。
+- 不把 auth session 存到 `Application` 实例的全局可变字段；该服务可能是 threaded request 模型，跨请求共享状态会污染身份。
+- 不为了测试方便绕过 `resolve_oa_request_session()` 或把 handler/UoW 全局 mock 掉。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Test Work:
+1. RED 先行：新增测试必须先失败，失败原因应指向 actor/tenant context 未传入 command，而不是 import error 或外部服务缺失。
+2. Facade-level contract：
+   - 使用 fake UoW 捕获 `_WorkbenchConfirmLinkCommand`，断言 confirm-link command 的 `actor_id` 来自传入的 OA session actor，而不是 `system`。
+   - 使用 fake UoW 捕获 `_WorkbenchCancelLinkCommand`，断言 cancel-link command 的 `actor_id` 来自传入的 OA session actor，而不是 `system`。
+   - 断言 `tenant_id` 有稳定来源；如果当前系统没有真实多租户来源，可以继续为 `default`，但必须通过显式 normalization helper / explicit parameter 传入，不能依赖 dataclass 默认值。
+3. Server/auth integration contract：
+   - 用 fake `resolve_oa_request_session()` 或 fake identity service/access control，在 request 局部构造 `OARequestSession`。
+   - 通过 Workbench confirm/cancel handler 或最小路由层测试证明 session 被传入 write facade / UoW command。
+   - 测试不得依赖真实 OA 服务。
+4. Idempotency fingerprint contract：
+   - 同一 payload、同一 idempotency key、不同 actor 应生成不同 fingerprint 或至少形成不同 durable identity。
+   - 同一 actor 同一 payload fingerprint 必须稳定。
+5. Backward compatibility：
+   - 未提供 session/actor 的 legacy direct facade 调用可以继续使用 explicit fallback，但测试必须标注这是 legacy/test fallback，不得成为 authenticated request 的路径。
+
+Required Implementation Work:
+1. 设计请求局部 auth context 传递方式：
+   - 推荐让 route access 返回或传递 `OARequestSession`，再由 handler 显式传给 Workbench write facade。
+   - 如果需要新增 helper，优先选择纯函数，例如从 `OARequestSession` 派生 `actor_id` / `tenant_id`。
+   - 不允许把 session 存到 `self._current_session`、thread global 或其他跨请求共享状态。
+2. Workbench write facade：
+   - 为 confirm-link / cancel-link 添加细粒度 `actor_id` / `tenant_id` 参数或 context 参数。
+   - 创建 `_WorkbenchConfirmLinkCommand` / `_WorkbenchCancelLinkCommand` 时显式填入 actor/tenant。
+   - 保持现有 response shape 不变。
+3. UoW / idempotency：
+   - 保持 `WorkbenchWriteUnitOfWork.run()` 默认行为兼容。
+   - 确保 `_idempotency_request_for(command)` 使用 command 上的 actor/tenant。
+   - 不改变 reserved/expired/failed policy。
+4. Audit boundary：
+   - 本轮重点是 durable idempotency identity。不要顺手重写所有 `created_by="system"` 或 exception actor 语义。
+   - 如果必须修改 `created_by` 才能通过 actor contract，必须把范围限制在 confirm/cancel 并补 characterization。
+
+Required Documentation:
+- 更新 rollout readiness 文档：
+  - 将 `actor/tenant auth context` 从 `blocked` 调整为 `ready` 或 `documented-risk`，取决于本轮实际完成度。
+  - 明确是否仍保留 `tenant_id="default"`，以及它是显式单租户默认还是未解决风险。
+- 更新 durable idempotency plan，记录 PF-P041 execution result / planned boundary。
+- 更新状态机和 prompt 库。
+- 如果 PF-P041 后仍不允许打开 feature flag，必须明确剩余 blocker。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- 新增测试文件对应 unittest 命令。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- `rg -n "actor_id=\\\"system\\\"|created_by=\\\"system\\\"|tenant_id=\\\"default\\\"|OARequestSession|resolve_oa_request_session|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY" backend/src/fin_ops_platform/app backend/src/fin_ops_platform/services tests docs/architecture/backend-refactor`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P041 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录变更文件、验证结果、新增 tests、actor/tenant contract 状态和剩余 blocker。
+  - 记录 PF-P040-MG 仍 deferred，后续 cumulative MG 覆盖 PF-P040 起的完整 diff。
+- 更新 `refactor-prompts.md` 的 PF-P041 执行结果。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+Stop Conditions:
+- 如果需要打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 才能让测试通过，停止。
+- 如果必须大改 auth 中间件或全局 route dispatcher，停止并记录 blocker，改为先生成 auth boundary design prompt。
+- 如果实现会把 session 存到全局 mutable Application state，停止。
+- 如果默认 CI 需要真实 OA 或真实 PostgreSQL，改用 fake/contract tests 或停止。
+- 如果发现 actor/tenant 无法从当前 OA session 中稳定派生，停止并记录 contract blocker。
+```
+
+### 审查结论
+
+- PF-P041 的方向正确：PF-P040 已把 `actor/tenant auth context` 标为打开 durable idempotency 前的 blocker，下一步应先解决身份隔离，而不是先处理 reserved/expired policy。
+- 关键实现约束是“请求局部显式传递”，不能把 OA session 放进 `Application` 实例字段，否则 threaded request 下会产生跨请求身份污染。
+- PF-P041 只应让 confirm/cancel 的 UoW command / idempotency identity 获取真实 actor/tenant；不应顺手打开 feature flag、迁移更多 API、修改 migration 或重写所有 audit actor 语义。
+- PF-P041 完成后仍可能不能打开 feature flag，因为 reserved/in-progress、expired takeover、failed policy、cleanup/retention 和真实 PostgreSQL concurrency 仍是独立 blocker。
