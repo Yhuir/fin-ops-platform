@@ -5525,7 +5525,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         auto_category_source: "",
         auto_category_reason: null,
         auto_category_confidence: null,
-        auto_candidate_category_codes: ["fee", "salary"],
+        auto_candidate_category_codes: ["fee", "salary", "business_warranty_pending_collection"],
         auto_candidate_categories: [
           {
             category_code: "fee",
@@ -5546,6 +5546,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             category_path: ["自动识别", "工资"],
             rule_code: "salary",
             reason: "摘要命中工资",
+          },
+          {
+            category_code: "business_warranty_pending_collection",
+            category_label: "待收款",
+            category_primary_label: "质保金",
+            category_sub_label: "待收款",
+            category_label_path: ["质保金", "待收款"],
+            category_path: ["业务往来", "质保金", "待收款"],
+            rule_code: "business_warranty_pending_collection",
+            reason: "旧候选不在当前自动规则中",
           },
         ],
         effective_category_code: null,

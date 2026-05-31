@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -41,6 +41,7 @@ import {
   clearBankDetailCategoryAssignment,
   confirmBankDetailCategory,
   downloadBankDetailTransactionsExport,
+  fetchBankAutoTagRules,
   fetchBankDetailAccounts,
   fetchBankDetailTransactions,
   revokeBankDetailCategoryConfirmation,
@@ -52,6 +53,7 @@ import {
 } from "../features/domainEvents";
 import type {
   BankAutoTagRulesResponse,
+  BankAutoTagEditableRule,
   BankDateFilter,
   BankDetailAccount,
   BankDetailExportMode,
@@ -378,6 +380,14 @@ function eventTagVersion(event: Event) {
   }
   const version = Number((event.detail as { version?: unknown }).version);
   return Number.isFinite(version) ? version : null;
+}
+
+function eventActiveAutoTagRules(event: Event): BankAutoTagEditableRule[] | null {
+  if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") {
+    return null;
+  }
+  const activeRules = (event.detail as { activeRules?: unknown }).activeRules;
+  return Array.isArray(activeRules) ? activeRules as BankAutoTagEditableRule[] : null;
 }
 
 function readPersistedTagVersion() {
@@ -747,19 +757,38 @@ function confirmationChoiceFromCandidate(
   };
 }
 
-function confirmationChoiceFromTagDefinition(tag: BankTransactionTagDefinition): ConfirmationChoice | null {
-  const categoryCode = candidateLabelPart(tag.code);
+function confirmationChoiceFromAutoTagRule(rule: BankAutoTagEditableRule): ConfirmationChoice | null {
+  if (rule.status !== "active") {
+    return null;
+  }
+  const categoryCode = candidateLabelPart(rule.code);
   if (!categoryCode) {
     return null;
   }
-  const parts = tagDefinitionDisplayParts(tag);
-  const primaryLabel = candidateLabelPart(parts.primaryLabel) || tagDefinitionDisplayLabel(tag) || categoryCode;
-  const subLabel = candidateLabelPart(parts.subLabel) || primaryLabel;
+  const primaryLabel = candidateLabelPart(rule.outputPrimaryLabel)
+    || candidateLabelPart(rule.label)
+    || categoryCode;
+  const subLabel = candidateLabelPart(rule.outputSubLabel)
+    || candidateLabelPart(rule.label)
+    || primaryLabel;
   return {
     categoryCode,
     primaryLabel,
     subLabel,
   };
+}
+
+function buildActiveAutoRuleChoiceMap(
+  rules: BankAutoTagEditableRule[],
+): Map<BankTransactionCategoryCode, ConfirmationChoice> {
+  const choicesByCode = new Map<BankTransactionCategoryCode, ConfirmationChoice>();
+  rules.forEach((rule) => {
+    const choice = confirmationChoiceFromAutoTagRule(rule);
+    if (choice && !choicesByCode.has(choice.categoryCode)) {
+      choicesByCode.set(choice.categoryCode, choice);
+    }
+  });
+  return choicesByCode;
 }
 
 function buildConfirmationChoiceGroupsFromChoices(
@@ -787,19 +816,27 @@ function buildConfirmationChoiceGroupsFromChoices(
 
 function buildConfirmationChoiceGroups(
   candidates: BankDetailTransaction["autoCandidateCategories"],
+  activeRules: BankAutoTagEditableRule[],
 ): ConfirmationChoiceGroup[] {
-  return buildConfirmationChoiceGroupsFromChoices(candidates.map(confirmationChoiceFromCandidate));
+  const activeChoiceByCode = buildActiveAutoRuleChoiceMap(activeRules);
+  return buildConfirmationChoiceGroupsFromChoices(candidates.map((candidate) => {
+    const candidateChoice = confirmationChoiceFromCandidate(candidate);
+    if (!candidateChoice) {
+      return null;
+    }
+    return activeChoiceByCode.get(candidateChoice.categoryCode) ?? null;
+  }));
 }
 
 function buildAssignmentChoiceGroups(
-  tags: BankTransactionTagDefinition[],
+  activeRules: BankAutoTagEditableRule[],
 ): ConfirmationChoiceGroup[] {
-  return buildConfirmationChoiceGroupsFromChoices(tags.map(confirmationChoiceFromTagDefinition));
+  return buildConfirmationChoiceGroupsFromChoices(activeRules.map(confirmationChoiceFromAutoTagRule));
 }
 
 function TypeCell({
   row,
-  categoryOptions,
+  autoTagRules,
   confirming,
   onConfirm,
   onAssign,
@@ -807,7 +844,7 @@ function TypeCell({
   onClearAssignment,
 }: {
   row: BankDetailTransaction;
-  categoryOptions: BankTransactionTagDefinition[];
+  autoTagRules: BankAutoTagEditableRule[];
   confirming: boolean;
   onConfirm: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
   onAssign: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
@@ -817,15 +854,15 @@ function TypeCell({
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const confirmationGroups = useMemo(
     () => (row.categoryResolutionStatus === "needs_confirmation"
-      ? buildConfirmationChoiceGroups(row.autoCandidateCategories)
+      ? buildConfirmationChoiceGroups(row.autoCandidateCategories, autoTagRules)
       : []),
-    [row.autoCandidateCategories, row.categoryResolutionStatus],
+    [autoTagRules, row.autoCandidateCategories, row.categoryResolutionStatus],
   );
   const assignmentGroups = useMemo(
     () => (row.categoryResolutionStatus === "unmatched" && !row.effectiveCategoryCode
-      ? buildAssignmentChoiceGroups(categoryOptions)
+      ? buildAssignmentChoiceGroups(autoTagRules)
       : []),
-    [categoryOptions, row.categoryResolutionStatus, row.effectiveCategoryCode],
+    [autoTagRules, row.categoryResolutionStatus, row.effectiveCategoryCode],
   );
   const isManualAssignment = assignmentGroups.length > 0;
   const selectionGroups = confirmationGroups.length > 0 ? confirmationGroups : assignmentGroups;
@@ -1100,6 +1137,7 @@ export default function BankDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [categoryCounts, setCategoryCounts] = useState<BankTransactionCategoryCounts>(EMPTY_CATEGORY_COUNTS);
   const [categoryOptions, setCategoryOptions] = useState<BankTransactionTagDefinition[]>([]);
+  const [activeAutoTagRules, setActiveAutoTagRules] = useState<BankAutoTagEditableRule[]>([]);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<BankCategoryFilter>(ALL_CATEGORY_FILTER);
   const selectedCategoryRequestParams = useMemo(
     () => categoryFilterRequestParams(selectedCategoryFilter),
@@ -1124,6 +1162,18 @@ export default function BankDetailsPage() {
   const [refreshToken, setRefreshToken] = useState(0);
   const readModelStatus = combinedReadModelStatus(accountsReadModelStatus, transactionsReadModelStatus);
   const readModelNeedsRefresh = readModelStatus !== "fresh";
+
+  const refreshAutoTagRules = useCallback(() => {
+    fetchBankAutoTagRules()
+      .then((payload) => {
+        setActiveAutoTagRules(payload.activeRules);
+      })
+      .catch((caught) => {
+        if (!isAbortLikeError(caught)) {
+          setError(caught instanceof Error ? caught.message : "自动标签规则加载失败。");
+        }
+      });
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1169,6 +1219,20 @@ export default function BankDetailsPage() {
       });
     return () => controller.abort();
   }, [dateFilter.dateFrom, dateFilter.dateTo, setSelectedAccountKey]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchBankAutoTagRules({ signal: controller.signal })
+      .then((payload) => {
+        setActiveAutoTagRules(payload.activeRules);
+      })
+      .catch((caught) => {
+        if (!isAbortLikeError(caught)) {
+          setError(caught instanceof Error ? caught.message : "自动标签规则加载失败。");
+        }
+      });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1301,6 +1365,12 @@ export default function BankDetailsPage() {
         tagVersionRef.current = version;
         persistTagVersion(version);
       }
+      const activeRules = eventActiveAutoTagRules(event);
+      if (activeRules) {
+        setActiveAutoTagRules(activeRules);
+      } else {
+        refreshAutoTagRules();
+      }
       setRefreshToken((current) => current + 1);
     };
     window.addEventListener(TAG_SYNC_EVENT, handleTagUpdate);
@@ -1310,7 +1380,13 @@ export default function BankDetailsPage() {
       channel = new BroadcastChannel(TAG_SYNC_EVENT);
       channel.onmessage = (message) => {
         const version = Number((message.data as { version?: unknown } | undefined)?.version);
-        window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, { detail: { version: Number.isFinite(version) ? version : undefined } }));
+        const activeRules = (message.data as { activeRules?: unknown } | undefined)?.activeRules;
+        window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, {
+          detail: {
+            version: Number.isFinite(version) ? version : undefined,
+            activeRules: Array.isArray(activeRules) ? activeRules : undefined,
+          },
+        }));
       };
     }
 
@@ -1319,6 +1395,7 @@ export default function BankDetailsPage() {
       if (persistedVersion !== null && persistedVersion !== tagVersionRef.current) {
         tagVersionRef.current = persistedVersion;
       }
+      refreshAutoTagRules();
       setRefreshToken((current) => current + 1);
     };
     window.addEventListener("focus", handleFocus);
@@ -1327,7 +1404,7 @@ export default function BankDetailsPage() {
       window.removeEventListener("focus", handleFocus);
       channel?.close();
     };
-  }, []);
+  }, [refreshAutoTagRules]);
 
   const effectiveCategoryCounts = categoryCounts;
   const visibleCategorySummary = useMemo<CategorySummaryItem[]>(() => {
@@ -1503,10 +1580,13 @@ export default function BankDetailsPage() {
   const handleAutoTagRulesSaved = (payload: BankAutoTagRulesResponse) => {
     persistTagVersion(payload.version);
     tagVersionRef.current = payload.version;
-    window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, { detail: { version: payload.version } }));
+    setActiveAutoTagRules(payload.activeRules);
+    window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, {
+      detail: { version: payload.version, activeRules: payload.activeRules },
+    }));
     if (typeof BroadcastChannel !== "undefined") {
       const channel = new BroadcastChannel(TAG_SYNC_EVENT);
-      channel.postMessage({ version: payload.version });
+      channel.postMessage({ version: payload.version, activeRules: payload.activeRules });
       channel.close();
     }
     rulesRefreshPendingRef.current = true;
@@ -1783,7 +1863,7 @@ export default function BankDetailsPage() {
                         <TableCell align="center" className="bank-col-type">
                           <TypeCell
                             row={row}
-                            categoryOptions={categoryOptions}
+                            autoTagRules={activeAutoTagRules}
                             confirming={categoryMutationId === row.id}
                             onConfirm={handleConfirmCategory}
                             onAssign={handleAssignCategory}

@@ -507,7 +507,7 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
-  test("uncategorized unmatched rows display manual classification choices from active tags", async () => {
+  test("uncategorized unmatched rows display manual classification choices from active auto tag rules", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
@@ -528,7 +528,8 @@ describe("Bank details page", () => {
 
     const primaryMenu = await screen.findByRole("menu", { name: "待分类主标签" });
     expect(within(primaryMenu).getByRole("menuitem", { name: "费用" })).toBeInTheDocument();
-    expect(within(primaryMenu).getByRole("menuitem", { name: "质保金" })).toBeInTheDocument();
+    expect(within(primaryMenu).queryByRole("menuitem", { name: "质保金" })).not.toBeInTheDocument();
+    expect(within(primaryMenu).queryByRole("menuitem", { name: "银行往来款" })).not.toBeInTheDocument();
 
     await user.click(within(primaryMenu).getByRole("menuitem", { name: "费用" }));
     const childMenu = await screen.findByRole("menu", { name: "费用可选子标签" });
@@ -546,6 +547,41 @@ describe("Bank details page", () => {
     expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 1" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
+  });
+
+  test("manual classification choices update after automatic tag rules are saved", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("费用 / 工资");
+
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "薪资社保福利", "人员薪酬");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-details/auto-tag-rules",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+    await user.click(within(drawer).getByRole("button", { name: "关闭自动标签规则抽屉" }));
+
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const supplierName = await within(table).findByText("普通供应商");
+    const supplierRow = supplierName.closest("tr");
+    expect(supplierRow).toBeInstanceOf(HTMLElement);
+
+    await user.click(within(supplierRow as HTMLElement).getByRole("button", { name: "待分类" }));
+    const primaryMenu = await screen.findByRole("menu", { name: "待分类主标签" });
+    expect(within(primaryMenu).getByRole("menuitem", { name: "薪资社保福利" })).toBeInTheDocument();
+
+    await user.click(within(primaryMenu).getByRole("menuitem", { name: "薪资社保福利" }));
+    const childMenu = await screen.findByRole("menu", { name: "薪资社保福利可选子标签" });
+    expect(within(childMenu).getByRole("menuitem", { name: "人员薪酬" })).toBeInTheDocument();
   });
 
   test("needs-confirmation rows group only matched candidates by primary tag", async () => {

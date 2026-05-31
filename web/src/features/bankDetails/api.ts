@@ -215,6 +215,7 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   bank_detail_export_row_limit_exceeded: "当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。",
   invalid_category_confirmation_candidate: "只能选择当前自动规则命中的候选标签。",
   invalid_manual_category_assignment_target: "当前流水已有自动标签或候选确认状态，不能走人工待分类入口。",
+  invalid_manual_category_assignment_candidate: "只能选择当前自动标签规则中的可用标签。",
 };
 
 function normalizeBankDetailReadModelStatus(value: unknown): BankDetailReadModelStatus {

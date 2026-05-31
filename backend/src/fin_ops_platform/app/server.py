@@ -10802,6 +10802,7 @@ class Application:
             else "bank_category_confirmation"
         )
         try:
+            active_rule_codes = set(self._active_bank_auto_tag_rule_codes())
             suggestion = self._latest_bank_detail_auto_category_suggestion(transaction_id)
             if (
                 isinstance(suggestion, dict)
@@ -10811,7 +10812,7 @@ class Application:
                 seen_candidate_codes: set[str] = set()
                 for raw_code in list((suggestion or {}).get("auto_candidate_category_codes") or []):
                     code = str(raw_code or "").strip()
-                    if not code or code in seen_candidate_codes:
+                    if not code or code in seen_candidate_codes or code not in active_rule_codes:
                         continue
                     seen_candidate_codes.add(code)
                     candidate_codes.append(code)
@@ -10819,6 +10820,12 @@ class Application:
                     raise BankTransactionCategoryValidationError(
                         "invalid_category_confirmation_candidate",
                         "当前流水没有多个可确认的自动标签候选。",
+                        transaction_id=transaction_id,
+                    )
+                if selected_code not in seen_candidate_codes:
+                    raise BankTransactionCategoryValidationError(
+                        "invalid_category_confirmation_candidate",
+                        "只能选择当前自动规则命中的候选标签。",
                         transaction_id=transaction_id,
                     )
             else:
@@ -10931,6 +10938,13 @@ class Application:
                 raise BankTransactionCategoryValidationError(
                     "invalid_manual_category_assignment_target",
                     "当前流水已有自动标签或候选确认状态，不能走人工待分类入口。",
+                    transaction_id=transaction_id,
+                )
+            active_rule_codes = set(self._active_bank_auto_tag_rule_codes())
+            if selected_code not in active_rule_codes:
+                raise BankTransactionCategoryValidationError(
+                    "invalid_manual_category_assignment_candidate",
+                    "只能选择当前自动标签规则中的可用标签。",
                     transaction_id=transaction_id,
                 )
             result = self._bank_transaction_category_service.assign_manual_category(
@@ -11487,6 +11501,22 @@ class Application:
         except Exception:
             return 1
         return self._int_or_none(payload.get("version")) or 1
+
+    def _active_bank_auto_tag_rule_codes(self) -> list[str]:
+        payload = self._app_settings_service.get_bank_auto_tag_rules_payload(can_save=False)
+        active_rules = payload.get("active_rules") if isinstance(payload, dict) else []
+        codes: list[str] = []
+        seen: set[str] = set()
+        if not isinstance(active_rules, list):
+            return codes
+        for rule in active_rules:
+            if not isinstance(rule, dict):
+                continue
+            code = str(rule.get("code") or "").strip()
+            if code and code not in seen:
+                seen.add(code)
+                codes.append(code)
+        return codes
 
     @staticmethod
     def _int_or_none(value: object) -> int | None:
