@@ -298,14 +298,16 @@ GET /api/pending-invoices/rules
 PUT /api/pending-invoices/rules
 ```
 
-规则保存仍复用同一份 `pending_invoice_tag_groups`，不新增规则表。当前规则专用接口只持久化两组可编辑规则：`bank_statement_as_invoice`、`no_invoice_required`；`requires_invoice` 由后端按 active 银行明细自动标签补集派生。
+规则保存仍复用同一份 `pending_invoice_tag_groups`，不新增规则表。当前规则专用接口只持久化两组可编辑规则：`bank_statement_as_invoice`、`no_invoice_required`；`requires_invoice` 由后端按银行明细 `自动标签规则` 的 active 补集派生。
 
 `GET /api/pending-invoices/rules` 返回：
 
+- `available_tags`：待找发票规则抽屉唯一可用标签全集，来源等同于 `/api/bank-details/auto-tag-rules` 的 `system_rule + active_rules`，每项至少包含 `code`、`label`、`status`、`output_primary_label`、`output_sub_label`。
 - `groups.requires_invoice`、`groups.bank_statement_as_invoice`、`groups.no_invoice_required` 三组，供前端展示。
 - 每组 `tags[*]` 至少包含 `code`、`label`、`status`、`output_primary_label`、`output_sub_label`。
-- `groups.requires_invoice.tag_codes` 等于当前 `bank_transaction_tags` 中所有 `status=active` 标签 code 减去两个可编辑组 code 后的有序补集。
+- `groups.requires_invoice.tag_codes` 等于 `available_tags` 中所有 `status=active` 标签 code 减去两个可编辑组 code 后的有序补集。
 - 兼容字段 `pending_invoice_tag_groups.groups.requires_invoice.tag_codes` 在响应中也镜像派生结果，但不作为可编辑持久化事实。
+- 兼容字段 `bank_transaction_tags` 可能包含历史流水分类字典或非规则 taxonomy，客户端不得用它替代 `available_tags` 渲染规则抽屉。
 
 `PUT /api/pending-invoices/rules` 接受：
 
@@ -323,9 +325,9 @@ PUT /api/pending-invoices/rules
 - unknown tag、archived tag、重复分组校验只适用于两个可编辑持久化组。
 - 成功后沿用设置服务版本、审计和持久化路径，并标记 pending invoice read model dirty。
 
-规则组持久化银行明细标签 `code`，响应展示时实时从 `bank_transaction_tags` 解析当前标签名称。银行标签改名后，本接口返回的新规则名称应同步变化；被两个可编辑规则组引用的银行标签不得在 `/api/bank-details/auto-tag-rules` 中停用。
+规则组持久化银行明细标签 `code`，响应展示时实时从 `available_tags` 解析当前标签名称。银行标签改名后，本接口返回的新规则名称应同步变化；被两个可编辑规则组引用的银行标签不得在 `/api/bank-details/auto-tag-rules` 中停用。
 
-`GET /api/pending-invoices/rows?direction=expense&filter=requires_invoice`、导出和 SQL pending invoice read model 也使用同一 active 补集语义：只有有效标签 code 位于 active 补集中的支出流水才属于 `requires_invoice`。无有效标签、未知标签或已停用标签不得被强制归入 `requires_invoice`。
+`GET /api/pending-invoices/rows?direction=expense&filter=requires_invoice`、导出和 SQL pending invoice read model 也使用同一 active 补集语义：只有有效标签 code 位于 `available_tags` 补集中的支出流水才属于 `requires_invoice`。无有效标签、未知标签、已停用标签或仅存在于历史分类字典中的标签不得被强制归入 `requires_invoice`。
 
 ## 导出
 

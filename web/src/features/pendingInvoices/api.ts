@@ -171,6 +171,7 @@ type ApiPendingInvoiceRowsResponse = {
 type ApiPendingInvoiceRulesPayload = {
   version?: number | string | null;
   permissions?: { can_save?: boolean | null } | null;
+  available_tags?: ApiTagDefinition[] | null;
   bank_transaction_tags?: ApiTagDictionary | null;
   groups?: Partial<Record<"requires_invoice" | "bank_statement_as_invoice" | "no_invoice_required", {
     tag_codes?: unknown[] | null;
@@ -648,7 +649,8 @@ function mapRuleGroup(payload: ApiPendingInvoiceRulesPayload, code: keyof typeof
 }
 
 function mapRulesPayload(payload: ApiPendingInvoiceRulesPayload): PendingInvoiceRulesPayload {
-  const availableTags = (payload.bank_transaction_tags?.tags ?? payload.bank_transaction_tags?.definitions ?? [])
+  const rawAvailableTags = payload.available_tags ?? payload.bank_transaction_tags?.tags ?? payload.bank_transaction_tags?.definitions ?? [];
+  const availableTags = rawAvailableTags
     .map((tag) => ({
       code: stringValue(tag.code),
       label: stringValue(tag.label, stringValue(tag.code)),

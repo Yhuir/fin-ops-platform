@@ -308,6 +308,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
                         "path": ["餐饮"],
                         "source": "custom",
                         "status": "active",
+                        "rules": {"match_fields": ["all_text"], "contains": ["餐饮"]},
                     },
                     {
                         "code": "custom_archived",

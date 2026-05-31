@@ -143,7 +143,12 @@ class PendingComplementProjectionConnection:
                         "definitions": [
                             {"code": "fee", "label": "手续费", "status": "active"},
                             {"code": "salary", "label": "工资", "status": "active"},
-                            {"code": "custom_meal", "label": "餐饮", "status": "active"},
+                            {
+                                "code": "custom_meal",
+                                "label": "餐饮",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["餐饮"]},
+                            },
                             {"code": "custom_archived", "label": "归档", "status": "archived"},
                         ],
                     },

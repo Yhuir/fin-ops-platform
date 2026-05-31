@@ -11,6 +11,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     default_bank_transaction_tag_dictionary_payload,
 )
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
+from fin_ops_platform.services.pending_invoice_rules import active_pending_invoice_rule_tags
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
@@ -164,6 +165,13 @@ class AppSettingsService:
                 version=int(self._snapshot["bank_transaction_tags"]["version"]),
             ),
         }
+
+    def get_pending_invoice_settings_payload(self) -> dict[str, Any]:
+        payload = self.get_settings_payload()
+        payload["pending_invoice_available_tags"] = active_pending_invoice_rule_tags(
+            self._snapshot["bank_transaction_tags"]
+        )
+        return payload
 
     def update_settings(
         self,

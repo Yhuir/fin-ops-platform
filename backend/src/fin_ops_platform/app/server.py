@@ -171,8 +171,8 @@ from fin_ops_platform.services.pending_invoice_service import (
     VALID_FILTERS as PENDING_INVOICE_VALID_FILTERS,
 )
 from fin_ops_platform.services.pending_invoice_rules import (
-    active_pending_invoice_rule_tags,
     editable_pending_invoice_tag_groups_payload,
+    pending_invoice_available_rule_tags,
     pending_invoice_group_codes,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
@@ -699,7 +699,7 @@ class Application:
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
             category_service=self._bank_transaction_category_service,
-            app_settings_provider=self._app_settings_service.get_settings_payload,
+            app_settings_provider=self._app_settings_service.get_pending_invoice_settings_payload,
             effective_category_provider=self._bank_transaction_effective_category_provider,
             oa_projection=oa_adapter,
         )
@@ -7674,7 +7674,7 @@ class Application:
         session, auth_error = self._resolve_pending_invoice_read_session(headers)
         if auth_error is not None:
             return auth_error
-        settings = self._app_settings_service.get_settings_payload()
+        settings = self._app_settings_service.get_pending_invoice_settings_payload()
         rules_payload = self._pending_invoice_rules_payload(settings)
         rules_payload["permissions"] = {"can_save": bool(session.can_mutate_data) if session is not None else True}
         return self._json_response(
@@ -7708,12 +7708,12 @@ class Application:
                 {"error": "invalid_pending_invoice_rules_request", "message": "pending_invoice_tag_groups must be an object."},
             )
         pending_invoice_tag_groups = editable_pending_invoice_tag_groups_payload(pending_invoice_tag_groups)
-        current = self._app_settings_service.get_settings_payload()
+        current = self._app_settings_service.get_pending_invoice_settings_payload()
         access_control = current.get("access_control") if isinstance(current.get("access_control"), dict) else {}
         projects = current.get("projects") if isinstance(current.get("projects"), dict) else {}
         actor_id = str(session.identity.username or "pending_invoice_rules").strip()
         try:
-            updated = self._app_settings_service.update_settings(
+            self._app_settings_service.update_settings(
                 completed_project_ids=list(projects.get("completed_project_ids") or projects.get("completed") or []),
                 bank_account_mappings=list(current.get("bank_account_mappings") or []),
                 allowed_usernames=list(access_control.get("allowed_usernames") or []),
@@ -7723,7 +7723,7 @@ class Application:
                 oa_retention=current.get("oa_retention") if isinstance(current.get("oa_retention"), dict) else {},
                 oa_import=current.get("oa_import") if isinstance(current.get("oa_import"), dict) else {},
                 oa_invoice_offset=current.get("oa_invoice_offset") if isinstance(current.get("oa_invoice_offset"), dict) else {},
-                bank_transaction_tags=current.get("bank_transaction_tags") if isinstance(current.get("bank_transaction_tags"), dict) else None,
+                bank_transaction_tags=None,
                 pending_invoice_tag_groups=pending_invoice_tag_groups,
                 actor_id=actor_id or "pending_invoice_rules",
                 after_bank_transaction_tag_settings_saved=self._finalize_bank_transaction_tag_settings_update,
@@ -7733,7 +7733,9 @@ class Application:
         if self._state_store is not None:
             self._persist_state()
         self._invalidate_pending_invoice_read_model_scopes(reason="pending_invoice_rules_update")
-        rules_payload = self._pending_invoice_rules_payload(updated)
+        rules_payload = self._pending_invoice_rules_payload(
+            self._app_settings_service.get_pending_invoice_settings_payload()
+        )
         rules_payload["permissions"] = {"can_save": True}
         return self._json_response(HTTPStatus.OK, rules_payload)
 
@@ -7771,7 +7773,7 @@ class Application:
             else {}
         )
         groups = pending_groups.get("groups") if isinstance(pending_groups.get("groups"), dict) else {}
-        active_tags = active_pending_invoice_rule_tags(tag_dictionary) if isinstance(tag_dictionary, dict) else []
+        active_tags = pending_invoice_available_rule_tags(settings)
         tags_by_code = {str(tag["code"]): tag for tag in active_tags}
         active_codes = set(tags_by_code)
         bank_statement_codes = [
@@ -7816,6 +7818,7 @@ class Application:
         return {
             "version": int(pending_groups.get("version") or 1) if isinstance(pending_groups, dict) else 1,
             "groups": enriched_groups,
+            "available_tags": active_tags,
             "bank_transaction_tags": tag_dictionary,
             "pending_invoice_tag_groups": compatible_pending_groups,
         }

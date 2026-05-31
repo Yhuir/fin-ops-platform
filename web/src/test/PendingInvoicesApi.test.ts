@@ -273,12 +273,18 @@ describe("pending invoices and tag settings API mapping", () => {
         return new Response(JSON.stringify({
           version: 3,
           permissions: { can_save: true },
+          available_tags: [
+            { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
+            { code: "internal_transfer", label: "内部往来款", status: "active", output_primary_label: "内部往来款", output_sub_label: "" },
+            { code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" },
+          ],
           bank_transaction_tags: {
             version: 3,
             tags: [
               { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
               { code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" },
               { code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" },
+              { code: "borrow_in_company_repaid", label: "公司暂借款：已还款", status: "active", output_primary_label: "公司暂借款：已还款", output_sub_label: "" },
               { code: "inactive_tag", label: "停用", status: "inactive", output_primary_label: "停用", output_sub_label: "" },
               { code: "archived_tag", label: "归档", status: "archived", output_primary_label: "归档", output_sub_label: "" },
             ],
@@ -423,6 +429,7 @@ describe("pending invoices and tag settings API mapping", () => {
       outputSubLabel: "手续费",
     });
     expect(rules.availableTags.map((tag) => tag.code)).toEqual(["fee", "internal_transfer", "salary"]);
+    expect(rules.availableTags.some((tag) => tag.code === "borrow_in_company_repaid")).toBe(false);
     await api().savePendingInvoiceRules(rules);
 
     const relation = await api().fetchPendingInvoiceRelationDetail("txn_001");

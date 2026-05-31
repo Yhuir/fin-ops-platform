@@ -333,7 +333,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
             response = app.handle_request("GET", "/api/pending-invoices/rules")
 
         payload = json.loads(response.body)
-        expected_requires = self._active_rule_codes(payload["bank_transaction_tags"], excluding={"fee", "salary"})
+        expected_requires = self._active_rule_codes(payload["available_tags"], excluding={"fee", "salary"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["groups"]["requires_invoice"]["tag_codes"], expected_requires)
         custom_meal_tag = next(tag for tag in payload["groups"]["requires_invoice"]["tags"] if tag["code"] == "custom_meal")
@@ -344,6 +344,22 @@ class PendingInvoiceApiTests(unittest.TestCase):
             payload["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"],
             expected_requires,
         )
+
+    def test_pending_invoice_rules_available_tags_match_bank_auto_rules_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            payload = app._pending_invoice_rules_payload(app._app_settings_service.get_settings_payload())
+
+        available_codes = {tag["code"] for tag in payload["available_tags"]}
+        requires_codes = set(payload["groups"]["requires_invoice"]["tag_codes"])
+        self.assertIn("internal_transfer", available_codes)
+        self.assertIn("fee", available_codes)
+        self.assertIn("external_turnover", available_codes)
+        self.assertNotIn("borrow_in_company_repaid", available_codes)
+        self.assertNotIn("borrow_out_bank_lent", available_codes)
+        self.assertNotIn("borrow_in_company_repaid", requires_codes)
+        self.assertFalse(any(tag["output_primary_label"].startswith("公司暂借款") for tag in payload["available_tags"]))
 
     def test_pending_invoice_rules_put_ignores_legacy_requires_invoice_input(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -361,10 +377,13 @@ class PendingInvoiceApiTests(unittest.TestCase):
                     }
                 }),
             )
+            auto_rules_after_save = app._app_settings_service.get_bank_auto_tag_rules_payload()
 
         payload = json.loads(response.body)
-        expected_requires = self._active_rule_codes(payload["bank_transaction_tags"], excluding={"fee", "salary"})
+        active_auto_rule_codes = {rule["code"] for rule in auto_rules_after_save["active_rules"]}
+        expected_requires = self._active_rule_codes(payload["available_tags"], excluding={"fee", "salary"})
         self.assertEqual(response.status_code, 200)
+        self.assertIn("custom_meal", active_auto_rule_codes)
         self.assertEqual(payload["groups"]["requires_invoice"]["tag_codes"], expected_requires)
         self.assertIn("custom_meal", payload["groups"]["requires_invoice"]["tag_codes"])
         self.assertNotIn("unknown_legacy_code", payload["groups"]["requires_invoice"]["tag_codes"])
@@ -508,6 +527,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
                     "status": "active",
                     "output_primary_label": "餐饮",
                     "output_sub_label": "",
+                    "rules": {"match_fields": ["all_text"], "contains": ["餐饮"]},
                 },
                 {
                     "code": "old_tag",
@@ -538,8 +558,11 @@ class PendingInvoiceApiTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _active_rule_codes(tag_dictionary: dict[str, object], *, excluding: set[str]) -> list[str]:
-        definitions = tag_dictionary.get("definitions") or tag_dictionary.get("tags") or []
+    def _active_rule_codes(tag_source: object, *, excluding: set[str]) -> list[str]:
+        if isinstance(tag_source, dict):
+            definitions = tag_source.get("definitions") or tag_source.get("tags") or []
+        else:
+            definitions = tag_source
         return [
             str(definition.get("code"))
             for definition in list(definitions)
