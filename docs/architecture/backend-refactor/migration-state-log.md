@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P039 - Workbench Durable Idempotency Repository Integration` 已实现并完成本轮验证，等待用户确认 `verified` |
-| 当前 active prompt | `PF-P039 - Workbench Durable Idempotency Repository Integration` (`implemented`) |
-| 最近 verified prompt | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` |
+| 当前阶段 | `PF-P039 - Workbench Durable Idempotency Repository Integration` 已由用户确认 `verified`；`PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P039 - Workbench Durable Idempotency Repository Integration` |
 | 当前分支 | `codex/workbench-durable-idempotency-planning` |
-| 最近验证 | PF-P039 已新增 PostgreSQL durable idempotency repository、UoW transaction-bound idempotency seam 和 disabled-by-default wiring；默认仍使用 `InMemoryWorkbenchIdempotencyRepository`；未迁移更多 Workbench 写 API |
-| 下一条允许任务 | 等待用户确认 PF-P039 `verified`；之后生成并审查 `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate`，统一覆盖 PF-P038 + PF-P039 diff |
+| 最近验证 | PF-P039 已新增 PostgreSQL durable idempotency repository、UoW transaction-bound idempotency seam 和 disabled-by-default wiring；验证集通过；commit `6e0c6ee5`；用户已确认 `verified` |
+| 下一条允许任务 | 执行 `PF-P039-MG`；它必须统一覆盖当前功能分支中尚未合入 `main` 的 durable idempotency 累计 diff，至少包含 PF-P038 + PF-P039，不得执行 Traffic Gate、部署或默认启用 durable idempotency |
 
 ## Prompt 执行日志
 
@@ -4034,7 +4034,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P039 - Workbench Durable Idempotency Repository Integration
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4111,12 +4111,55 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `reserved` 记录的 expired takeover、失败重试策略、清理任务和观测指标仍未实现。
 - 真实 PostgreSQL 并发行为尚未在外部数据库上跑 integration test，本轮使用 fake/contract-style 测试锁定 repository 与 UoW seam。
 
+#### 用户确认
+
+- 用户已确认 PF-P039 `verified`。
+
 #### 下一条 Prompt 上下文
 
-- 等待用户确认 PF-P039 `verified`。
-- 下一条建议 prompt：`PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate`。
-- PF-P039-MG 必须统一覆盖 PF-P038 + PF-P039 的完整 diff，执行 upstream sync、范围检查、main 合入和 main 复验。
+- `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` 已生成并审查。
+- PF-P039-MG 必须统一覆盖当前功能分支中尚未合入 `main` 的 durable idempotency 累计 diff，至少包含 PF-P038 + PF-P039。
+- 执行前必须用 `git diff --name-status main...HEAD` 以真实 diff 为准，不能只凭记忆列文件。
 - PF-P039-MG 不应执行 Traffic Gate，不应部署，不应默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+
+### PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只处理当前功能分支的 durable idempotency 累计 Merge Gate。
+- 必须确认 PF-P038 和 PF-P039 均已 `verified`。
+- 必须覆盖当前分支相对 `main` 的完整 diff；当前已知 diff 至少包含：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`
+  - `backend/src/fin_ops_platform/services/postgres_repositories/__init__.py`
+  - `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_postgres_migrations.py`
+  - `tests/test_workbench_postgres_idempotency_repository.py`
+  - `tests/test_workbench_uow_contract.py`
+  - durable idempotency 相关架构文档和状态机 / prompt 库。
+- 必须执行 upstream sync、范围检查、测试验证、本地合入 `main` 和 `main` 复验。
+
+#### 禁止范围
+
+- 不执行 Traffic Gate。
+- 不部署，不访问生产，不 push 生产服务器。
+- 不默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不迁移更多 Workbench 写 API。
+- 不修改业务逻辑，除非 Merge Gate 验证发现必须修复的阻断；如需修复，必须记录并重新跑完整验证。
+- 不使用 `git add .` 或 `git add -A`。
+
+#### 审查结论
+
+- PF-P039-MG 是 PF-P038/PF-P039 后合理的下一步：schema、repository 和 UoW seam 已完成，需要通过累计 Merge Gate 把 durable idempotency 基础切片合入 `main`。
+- 当前分支还包含 durable idempotency 规划文档，因此执行 MG 时必须以 `main...HEAD` 的真实 diff 为准，不得只检查 PF-P038/PF-P039 名义上的文件。
+- 本 MG 不代表上线；它只是把默认关闭的基础能力和测试门禁合入主干。
+
+#### 下一步
+
+- 等待用户执行 PF-P039-MG。
 
 ## 维护规则
 
