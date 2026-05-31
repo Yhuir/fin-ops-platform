@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import unittest
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -251,6 +252,54 @@ class _ExistingReservedIdempotencyStore:
     def for_transaction(self, transaction: object) -> _ExistingReservedTransactionBoundIdempotencyStore:
         self.bound_transactions.append(transaction)
         return _ExistingReservedTransactionBoundIdempotencyStore(self, transaction)
+
+
+class _ExpiredReservedTransactionBoundIdempotencyStore:
+    def __init__(self, root: "_ExpiredReservedIdempotencyStore", transaction: object) -> None:
+        self._root = root
+        self._transaction = transaction
+
+    def reserve(self, **kwargs: object) -> object:
+        self._root.reserve_calls.append({"transaction": self._transaction, **kwargs})
+        return SimpleNamespace(record=self._root.taken_over_record, created=False, taken_over_expired=True)
+
+    def commit(self, **kwargs: object) -> None:
+        self._root.commit_calls.append({"transaction": self._transaction, **kwargs})
+
+
+class _ExpiredReservedIdempotencyStore:
+    def __init__(self, *, request_fingerprint: str = "fp:confirm:expired") -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        record_class = getattr(module, "WorkbenchIdempotencyRecord")
+        self.record = record_class(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:expired",
+            request_fingerprint=request_fingerprint,
+            status="reserved",
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        )
+        self.taken_over_record = record_class(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:expired",
+            request_fingerprint=request_fingerprint,
+            status="reserved",
+            request_payload={"case_id": "CASE-RETRY"},
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+        self.bound_transactions: list[object] = []
+        self.reserve_calls: list[dict[str, object]] = []
+        self.commit_calls: list[dict[str, object]] = []
+
+    def get_committed_or_reserved(self, *args: object, **kwargs: object) -> object | None:
+        return self.record
+
+    def for_transaction(self, transaction: object) -> _ExpiredReservedTransactionBoundIdempotencyStore:
+        self.bound_transactions.append(transaction)
+        return _ExpiredReservedTransactionBoundIdempotencyStore(self, transaction)
 
 
 class WorkbenchUoWContractTests(unittest.TestCase):
@@ -689,6 +738,73 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(idempotency.commit_calls, [])
         self.assertEqual(connection.commits, 0)
         self.assertEqual(connection.rollbacks, 1)
+
+    def test_expired_reserved_same_fingerprint_is_taken_over_inside_transaction(self) -> None:
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        idempotency = _ExpiredReservedIdempotencyStore()
+        uow = self._new_uow(connection=connection, read_model_writer=writer, idempotency_store=idempotency)  # type: ignore[arg-type]
+        handler_calls = 0
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal handler_calls
+            handler_calls += 1
+            ctx.pair_relations.record("save_relation", case_id="CASE-RETRY")
+            return {"case_id": "CASE-RETRY", "affected_scope_keys": ["2026-05"]}
+
+        result = self._run_uow(
+            uow,
+            _Command(
+                action_name="confirm_link",
+                scope_keys=["2026-05"],
+                idempotency_key="confirm:expired",
+                request_fingerprint="fp:confirm:expired",
+                actor_id="finance-1",
+                payload={"case_id": "CASE-RETRY", "row_ids": ["oa-1", "bank-1"]},
+            ),
+            handler,
+        )
+
+        self.assertEqual(handler_calls, 1)
+        self.assertEqual(result["case_id"], "CASE-RETRY")
+        self.assertEqual(idempotency.reserve_calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(idempotency.commit_calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(writer.calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.rollbacks, 0)
+
+    def test_expired_reserved_different_fingerprint_still_conflicts_without_takeover(self) -> None:
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        idempotency = _ExpiredReservedIdempotencyStore(request_fingerprint="fp:confirm:old")
+        uow = self._new_uow(connection=connection, read_model_writer=writer, idempotency_store=idempotency)  # type: ignore[arg-type]
+        handler_calls = 0
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal handler_calls
+            handler_calls += 1
+            return {"case_id": "SHOULD-NOT-RUN", "affected_scope_keys": ["2026-05"]}
+
+        with self.assertRaisesRegex(Exception, "idempotency|fingerprint|conflict"):
+            self._run_uow(
+                uow,
+                _Command(
+                    action_name="confirm_link",
+                    scope_keys=["2026-05"],
+                    idempotency_key="confirm:expired",
+                    request_fingerprint="fp:confirm:new",
+                    actor_id="finance-1",
+                    payload={"case_id": "CASE-NEW", "row_ids": ["oa-1", "bank-1"]},
+                ),
+                handler,
+            )
+
+        self.assertEqual(handler_calls, 0)
+        self.assertEqual(idempotency.reserve_calls, [])
+        self.assertEqual(idempotency.commit_calls, [])
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 0)
 
     def test_outbox_payload_contains_source_version_for_each_dirty_scope(self) -> None:
         connection = _RecordingConnection(_RecordingTransaction(dirty_source_version=9))

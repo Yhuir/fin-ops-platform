@@ -25,7 +25,7 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 | same-key different-fingerprint conflict | ready | `WorkbenchIdempotencyKeyConflict` 稳定返回 409 风格 payload；测试锁定 same-key different-fingerprint conflict。 | 前端/调用方需要把 409 视为幂等 key 复用错误，不应静默重试。 |
 | payload sanitization | ready | repository 与 record tests 已覆盖 authorization、cookie、token、password、secret 类字段过滤。 | 新增 payload 字段时必须继续走 sanitizer。 |
 | reserved/in-progress duplicate policy | ready | PF-P042 新增 `WorkbenchIdempotencyInProgress` / `WorkbenchIdempotencyReservation`，UoW 对 same-key same-fingerprint `reserved` record 返回稳定 `idempotency_key_in_progress` 409 payload，不执行 handler、dirty scope、outbox 或 idempotency commit；repository contract 可区分 new/existing reservation。 | 继续保持 deterministic in-progress response；真实 PostgreSQL 并发锁验证仍由 `real PostgreSQL row-lock concurrency` gate 跟踪。 |
-| expired reserved takeover | blocked | 当前 schema 有 `expires_at`，但 repository 尚未实现 expired reserved takeover 或 mark-failed-then-retry 策略。 | 需要明确过期判断、锁行、接管或失败策略，并用 fake 和真实 PostgreSQL concurrency test 覆盖。 |
+| expired reserved takeover | ready | PF-P043 新增 deterministic expiration helper、takeover outcome 和 repository/UoW contract：active same-fingerprint `reserved` 继续返回 in-progress；expired same-fingerprint `reserved` 可在 transaction-bound reserve path 中被接管并继续执行 handler；different-fingerprint 即使过期也继续 conflict。 | 继续保持 same-fingerprint-only takeover；真实 PostgreSQL 并发锁验证仍由 `real PostgreSQL row-lock concurrency` gate 跟踪。 |
 | failed reservation policy | blocked | `failed` 状态存在，但 failed 是否允许同 fingerprint retry、如何返回历史失败、如何避免盲重放未定。 | 需要单独 contract 和 repository tests。 |
 | cleanup/retention | blocked | 有 `expires_at` 字段，但没有 cleanup job、retention policy 实现和运维门禁。 | 需要 ops cleanup 策略、监控和测试；request path 不得隐式清理大量历史记录。 |
 | actor/tenant auth context | documented-risk | PF-P041 已让 confirm-link / cancel-link 的 UoW command 从请求局部 `OARequestSession` 显式接入 `actor_id`，并通过 helper 显式注入单租户 `tenant_id="default"`。当前系统仍未提供真实多租户来源，且只覆盖已迁移到 UoW 的 Workbench pair relation 写路径。 | 打开前仍需确认所有启用 durable idempotency 的 Workbench 写路径都显式传入 actor/tenant；如果未来引入多租户，必须替换默认 tenant helper。 |
@@ -66,7 +66,6 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 
 打开 feature flag 前必须解决：
 
-- `expired reserved takeover`
 - `failed reservation policy`
 - `real PostgreSQL row-lock concurrency`
 
@@ -155,3 +154,18 @@ PF-P043 不会打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。即使 PF-P043 �
 - cleanup/retention
 - real PostgreSQL row-lock concurrency
 - observability/metrics/logging
+
+## 13. PF-P043 Execution Result
+
+PF-P043 已完成 expired `reserved` takeover 的默认绿色 contract。
+
+已完成：
+
+- 新增 deterministic expiration helper；`expires_at is None` 和 future expiry 视为 active，`expires_at <= now` 且 status 为 `reserved` 视为 expired。
+- 扩展 `WorkbenchIdempotencyReservation`，增加 `taken_over_expired` outcome。
+- `InMemoryWorkbenchIdempotencyRepository.reserve()` 支持 same-fingerprint expired `reserved` takeover，并保持 active reservation 不覆盖。
+- `PostgresWorkbenchIdempotencyRepository.reserve()` 使用 insert-if-absent + locked existing row + conditional takeover SQL contract 表达 expired takeover。
+- `WorkbenchWriteUnitOfWork.run()` 对 expired same-fingerprint `reserved` 不再返回 in-progress，而是进入 transaction-bound reserve/takeover path；active `reserved` 仍返回 in-progress。
+- same-key different-fingerprint 即使 expired 仍继续返回 `idempotency_key_conflict`。
+
+本轮仍不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。feature flag 打开前，仍需处理 failed policy、cleanup/retention、真实 PostgreSQL concurrency 和 observability。

@@ -879,3 +879,44 @@ PF-P043 不应：
 - 执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
 
 PF-P043 完成后仍应留在 PF-P040 起的 cumulative MG 范围内。只有用户确认相关 prompt verified 后，才允许生成覆盖 PF-P040 起完整 diff 的 cumulative Merge Gate。
+
+## 21. PF-P043 Execution Result
+
+PF-P043 已实现 deterministic expired `reserved` takeover policy，但没有打开 durable idempotency feature flag，也没有迁移更多 Workbench 写 API。
+
+已完成：
+
+- 新增 deterministic expiration helper：
+  - `expires_at is None`：active / not expired。
+  - `expires_at > now`：active / not expired。
+  - `expires_at <= now` 且 status 为 `reserved`：expired。
+  - 非 `reserved` 状态即使 `expires_at` 已过期也不按 reserved takeover 处理。
+- 扩展 `WorkbenchIdempotencyReservation(record, created, taken_over_expired)`。
+- `InMemoryWorkbenchIdempotencyRepository.reserve()`：
+  - active existing reservation 不覆盖。
+  - expired same-fingerprint `reserved` 可被 takeover，并刷新 request payload / created_at / expires_at。
+  - expired different-fingerprint `reserved` 不 takeover，继续交由 UoW 触发 fingerprint conflict。
+- `PostgresWorkbenchIdempotencyRepository.reserve()`：
+  - 使用 insert-if-absent + locked existing row + conditional takeover SQL contract。
+  - 只有 `status='reserved'`、same fingerprint、`expires_at is not null` 且 `expires_at <= now` 的 row 才会被 takeover。
+  - 继续使用 sanitized storage payload。
+- `WorkbenchWriteUnitOfWork.run()`：
+  - active `reserved` same-fingerprint 继续返回 in-progress。
+  - expired `reserved` same-fingerprint 允许进入 transaction-bound takeover path 并执行 handler。
+  - different-fingerprint 继续 `idempotency_key_conflict`。
+  - committed replay 不变。
+
+仍未完成：
+
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未处理 failed reservation policy。
+- 未处理 cleanup/retention。
+- 未执行真实 PostgreSQL row-lock concurrency test。
+- 未新增 durable idempotency observability 指标。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+下一步建议：
+
+`PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`
+
+PF-P044 应只处理 `failed` 状态的 retry/replay/error semantics，并继续保持 feature flag 默认关闭。若用户认为 PF-P040 到 PF-P043 已达到可合并切片，也可以先生成 cumulative MG 覆盖 PF-P040 起完整 diff。

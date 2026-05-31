@@ -9,6 +9,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyKeyConflict,
     WorkbenchIdempotencyRecord,
     WorkbenchIdempotencyReservation,
+    is_workbench_idempotency_reserved_expired,
     workbench_request_fingerprint,
 )
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
@@ -67,7 +68,7 @@ class WorkbenchWriteUnitOfWork:
                     replayed = _replay_committed_idempotency_response(reserved_record)
                     if replayed is not None:
                         return replayed
-                    if _is_existing_reservation(reserved):
+                    if _is_existing_reservation(reserved) and not _is_taken_over_expired_reservation(reserved):
                         _raise_if_idempotency_in_progress(reserved_record, idempotency)
 
             repositories = self._repository_factory(transaction)
@@ -325,6 +326,8 @@ def _raise_if_idempotency_in_progress(existing: Any, request: _IdempotencyReques
     status = _record_value(existing, "status")
     if status != "reserved":
         return
+    if is_workbench_idempotency_reserved_expired(existing):
+        return
     raise WorkbenchIdempotencyInProgress(
         idempotency_key=request.idempotency_key,
         action_name=request.action_name,
@@ -367,6 +370,12 @@ def _is_existing_reservation(value: Any) -> bool:
     if hasattr(value, "record") and hasattr(value, "created"):
         return not bool(getattr(value, "created"))
     return False
+
+
+def _is_taken_over_expired_reservation(value: Any) -> bool:
+    if isinstance(value, WorkbenchIdempotencyReservation):
+        return value.taken_over_expired
+    return bool(getattr(value, "taken_over_expired", False))
 
 
 def _record_value(record: Any, name: str) -> Any:

@@ -90,18 +90,51 @@ class PostgresWorkbenchIdempotencyRepository:
                     %s, %s, %s
                 )
                 on conflict (tenant_id, actor_id, idempotency_key) do nothing
-                returning true as inserted, {_COLUMNS}
+                returning 'inserted' as reservation_outcome, true as inserted, {_COLUMNS}
             ),
-            existing as (
-                select false as inserted, {_COLUMNS}
+            locked as (
+                select {_COLUMNS}
                 from app.workbench_idempotency_records
                 where tenant_id = %s
                   and actor_id = %s
                   and idempotency_key = %s
                   and not exists (select 1 from inserted)
                 for update
+            ),
+            taken_over as (
+                update app.workbench_idempotency_records target
+                set action_name = %s,
+                    request_fingerprint = %s,
+                    status = 'reserved',
+                    request_payload = %s,
+                    response_payload = %s,
+                    source_versions = %s,
+                    outbox_event_ids = %s,
+                    created_at = %s,
+                    completed_at = null,
+                    expires_at = %s,
+                    updated_at = now()
+                where target.tenant_id = %s
+                  and target.actor_id = %s
+                  and target.idempotency_key = %s
+                  and exists (
+                      select 1
+                      from locked
+                      where locked.status = 'reserved'
+                        and locked.request_fingerprint = %s
+                        and locked.expires_at is not null
+                        and locked.expires_at <= %s
+                  )
+                returning 'taken_over_expired' as reservation_outcome, false as inserted, {_COLUMNS}
+            ),
+            existing as (
+                select 'existing' as reservation_outcome, false as inserted, {_COLUMNS}
+                from locked
+                where not exists (select 1 from taken_over)
             )
             select * from inserted
+            union all
+            select * from taken_over
             union all
             select * from existing
             limit 1
@@ -123,12 +156,30 @@ class PostgresWorkbenchIdempotencyRepository:
                 storage["tenant_id"],
                 storage["actor_id"],
                 storage["idempotency_key"],
+                storage["action_name"],
+                storage["request_fingerprint"],
+                jsonb(storage["request_payload"]),
+                jsonb(storage["response_payload"]),
+                jsonb(storage["source_versions"]),
+                jsonb(storage["outbox_event_ids"]),
+                storage["created_at"],
+                storage["expires_at"],
+                storage["tenant_id"],
+                storage["actor_id"],
+                storage["idempotency_key"],
+                storage["request_fingerprint"],
+                storage["created_at"],
             ),
         )
         record = _record_from_row(row)
         if record is None:
             raise RuntimeError("failed to reserve Workbench idempotency record")
-        return WorkbenchIdempotencyReservation(record=record, created=bool((row or {}).get("inserted", True)))
+        outcome = str((row or {}).get("reservation_outcome") or "")
+        return WorkbenchIdempotencyReservation(
+            record=record,
+            created=bool((row or {}).get("inserted", outcome == "inserted")),
+            taken_over_expired=outcome == "taken_over_expired" or bool((row or {}).get("taken_over_expired")),
+        )
 
     def commit(
         self,

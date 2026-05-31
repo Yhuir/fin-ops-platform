@@ -4,6 +4,7 @@ import importlib
 import json
 import unittest
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from unittest.mock import patch
 
@@ -168,6 +169,69 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertEqual(payload["action_name"], "confirm_link")
         self.assertTrue(payload["retryable"])
 
+    def test_reserved_expiration_helper_is_deterministic_for_fixed_now(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_idempotency")
+        record_class = getattr(module, "WorkbenchIdempotencyRecord")
+        is_expired = getattr(module, "is_workbench_idempotency_reserved_expired")
+        now = datetime(2026, 5, 31, 9, 0, tzinfo=timezone.utc)
+
+        self.assertFalse(
+            is_expired(
+                record_class(
+                    tenant_id="default",
+                    actor_id="finance-1",
+                    action_name="confirm_link",
+                    idempotency_key="confirm:no-expiry",
+                    request_fingerprint="fp",
+                    status="reserved",
+                    expires_at=None,
+                ),
+                now=now,
+            )
+        )
+        self.assertFalse(
+            is_expired(
+                record_class(
+                    tenant_id="default",
+                    actor_id="finance-1",
+                    action_name="confirm_link",
+                    idempotency_key="confirm:future",
+                    request_fingerprint="fp",
+                    status="reserved",
+                    expires_at=now + timedelta(seconds=1),
+                ),
+                now=now,
+            )
+        )
+        self.assertTrue(
+            is_expired(
+                record_class(
+                    tenant_id="default",
+                    actor_id="finance-1",
+                    action_name="confirm_link",
+                    idempotency_key="confirm:past",
+                    request_fingerprint="fp",
+                    status="reserved",
+                    expires_at=now,
+                ),
+                now=now,
+            )
+        )
+        self.assertFalse(
+            is_expired(
+                record_class(
+                    tenant_id="default",
+                    actor_id="finance-1",
+                    action_name="confirm_link",
+                    idempotency_key="confirm:committed",
+                    request_fingerprint="fp",
+                    status="committed",
+                    expires_at=now - timedelta(seconds=1),
+                ),
+                now=now,
+            )
+        )
+
     def test_in_memory_idempotency_repository_reserves_commits_and_detects_fingerprint_conflict(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_uow")
         record_class = getattr(module, "WorkbenchIdempotencyRecord")
@@ -234,6 +298,67 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             repository.get_committed_or_reserved("default", "finance-1", "confirm:idem-reserved").request_payload,
             {"case_id": "CASE-1"},
         )
+
+    def test_in_memory_idempotency_repository_takes_over_expired_same_fingerprint_reserved_record(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        repository_class = getattr(module, "InMemoryWorkbenchIdempotencyRepository")
+        now = datetime.now(timezone.utc)
+        repository = repository_class()
+
+        first = repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:expired",
+            request_fingerprint="fp-expired",
+            request_payload={"case_id": "CASE-OLD"},
+            expires_at=now - timedelta(seconds=1),
+        )
+        second = repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:expired",
+            request_fingerprint="fp-expired",
+            request_payload={"case_id": "CASE-RETRY"},
+            expires_at=now + timedelta(minutes=5),
+        )
+
+        self.assertTrue(first.created)
+        self.assertFalse(second.created)
+        self.assertTrue(second.taken_over_expired)
+        self.assertEqual(second.record.request_payload, {"case_id": "CASE-RETRY"})
+        self.assertEqual(second.record.expires_at, now + timedelta(minutes=5))
+
+    def test_in_memory_idempotency_repository_does_not_take_over_expired_different_fingerprint_record(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        repository_class = getattr(module, "InMemoryWorkbenchIdempotencyRepository")
+        now = datetime.now(timezone.utc)
+        repository = repository_class()
+        repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:expired-conflict",
+            request_fingerprint="fp-old",
+            request_payload={"case_id": "CASE-OLD"},
+            expires_at=now - timedelta(seconds=1),
+        )
+
+        second = repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:expired-conflict",
+            request_fingerprint="fp-new",
+            request_payload={"case_id": "CASE-NEW"},
+            expires_at=now + timedelta(minutes=5),
+        )
+
+        self.assertFalse(second.created)
+        self.assertFalse(second.taken_over_expired)
+        self.assertEqual(second.record.request_fingerprint, "fp-old")
+        self.assertEqual(second.record.request_payload, {"case_id": "CASE-OLD"})
 
     def test_uow_replays_committed_same_fingerprint_without_handler_or_outbox(self) -> None:
         stored_response = {

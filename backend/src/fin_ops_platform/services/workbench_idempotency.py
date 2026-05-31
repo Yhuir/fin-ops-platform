@@ -134,6 +134,7 @@ class WorkbenchIdempotencyInProgress(RuntimeError):
 class WorkbenchIdempotencyReservation:
     record: WorkbenchIdempotencyRecord
     created: bool
+    taken_over_expired: bool = False
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.record, name)
@@ -163,8 +164,27 @@ class InMemoryWorkbenchIdempotencyRepository:
         expires_at: datetime | None = None,
     ) -> WorkbenchIdempotencyReservation:
         identity = (tenant_id, actor_id, idempotency_key)
+        now = _utcnow()
         existing = self._records.get(identity)
         if existing is not None:
+            if (
+                existing.status == "reserved"
+                and existing.request_fingerprint == request_fingerprint
+                and is_workbench_idempotency_reserved_expired(existing, now=now)
+            ):
+                record = WorkbenchIdempotencyRecord(
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action_name=action_name,
+                    idempotency_key=idempotency_key,
+                    request_fingerprint=request_fingerprint,
+                    status="reserved",
+                    request_payload=request_payload or {},
+                    created_at=now,
+                    expires_at=expires_at,
+                )
+                self._records[identity] = record
+                return WorkbenchIdempotencyReservation(record=record, created=False, taken_over_expired=True)
             return WorkbenchIdempotencyReservation(record=existing, created=False)
 
         record = WorkbenchIdempotencyRecord(
@@ -175,7 +195,7 @@ class InMemoryWorkbenchIdempotencyRepository:
             request_fingerprint=request_fingerprint,
             status="reserved",
             request_payload=request_payload or {},
-            created_at=_utcnow(),
+            created_at=now,
             expires_at=expires_at,
         )
         self._records[record.unique_identity] = record
@@ -263,6 +283,23 @@ def workbench_request_fingerprint(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def is_workbench_idempotency_reserved_expired(record: Any, *, now: datetime | None = None) -> bool:
+    status = _value(record, "status")
+    if status != "reserved":
+        return False
+
+    expires_at = _datetime_value(_value(record, "expires_at"))
+    if expires_at is None:
+        return False
+
+    current = now or _utcnow()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= current
+
+
 def _fingerprint_payload(value: Any) -> Any:
     if isinstance(value, dict):
         cleaned: dict[str, Any] = {}
@@ -298,6 +335,25 @@ def _sanitize_payload(value: Any) -> Any:
 def _is_sensitive_key(key: str) -> bool:
     normalized = key.lower()
     return normalized in _SENSITIVE_KEYS or any(token in normalized for token in ("secret", "token", "password", "cookie"))
+
+
+def _value(record: Any, name: str) -> Any:
+    if isinstance(record, WorkbenchIdempotencyRecord):
+        return getattr(record, name)
+    if isinstance(record, dict):
+        return record.get(name)
+    return getattr(record, name, None)
+
+
+def _datetime_value(value: Any) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _datetime_to_storage(value: datetime | None) -> str | None:

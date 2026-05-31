@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -146,6 +146,46 @@ class WorkbenchPostgresIdempotencyRepositoryTests(unittest.TestCase):
         self.assertIn("on conflict", sql)
         self.assertIn("do nothing", sql)
         self.assertIn("for update", sql)
+
+    def test_transaction_bound_reserve_reports_expired_reserved_takeover_without_nested_transaction(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+            PostgresWorkbenchIdempotencyRepository,
+        )
+
+        now = datetime(2026, 5, 31, 9, 0, tzinfo=timezone.utc)
+        connection = _RecordingSqlExecutor()
+        transaction = _RecordingSqlExecutor(
+            rows=[
+                _record_row(
+                    status="reserved",
+                    inserted=False,
+                    reservation_outcome="taken_over_expired",
+                    expires_at=now + timedelta(minutes=5),
+                )
+            ]
+        )
+        repository = PostgresWorkbenchIdempotencyRepository(connection).for_transaction(transaction)
+
+        reservation = repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:idem-1",
+            request_fingerprint="fp:confirm:idem-1",
+            request_payload={"case_id": "CASE-RETRY", "authorization": "Bearer SECRET"},
+            expires_at=now + timedelta(minutes=5),
+        )
+
+        self.assertIsInstance(reservation, WorkbenchIdempotencyReservation)
+        self.assertFalse(reservation.created)
+        self.assertTrue(reservation.taken_over_expired)
+        self.assertFalse(connection.transaction_opened)
+        sql, params = transaction.fetch_one_calls[0]
+        self.assertIn("for update", sql)
+        self.assertIn("expires_at <=", sql)
+        self.assertIn("request_fingerprint", sql)
+        stored_request_payload = _json_obj(params[6])
+        self.assertNotIn("SECRET", repr(stored_request_payload))
 
     def test_transaction_bound_commit_updates_committed_record_with_sanitized_response(self) -> None:
         from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
