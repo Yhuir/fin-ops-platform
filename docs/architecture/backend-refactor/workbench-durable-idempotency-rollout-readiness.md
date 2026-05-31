@@ -28,7 +28,7 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 | expired reserved takeover | blocked | 当前 schema 有 `expires_at`，但 repository 尚未实现 expired reserved takeover 或 mark-failed-then-retry 策略。 | 需要明确过期判断、锁行、接管或失败策略，并用 fake 和真实 PostgreSQL concurrency test 覆盖。 |
 | failed reservation policy | blocked | `failed` 状态存在，但 failed 是否允许同 fingerprint retry、如何返回历史失败、如何避免盲重放未定。 | 需要单独 contract 和 repository tests。 |
 | cleanup/retention | blocked | 有 `expires_at` 字段，但没有 cleanup job、retention policy 实现和运维门禁。 | 需要 ops cleanup 策略、监控和测试；request path 不得隐式清理大量历史记录。 |
-| actor/tenant auth context | blocked | 当前 UoW command 仍可能落到默认 `tenant_id="default"`、`actor_id="system"`；durable unique key 依赖 `(tenant_id, actor_id, idempotency_key)`，默认身份会降低隔离性和审计价值。 | 打开前必须从 auth context 注入真实 actor/tenant，并补测试证明不会默认落到 `system/default`。 |
+| actor/tenant auth context | documented-risk | PF-P041 已让 confirm-link / cancel-link 的 UoW command 从请求局部 `OARequestSession` 显式接入 `actor_id`，并通过 helper 显式注入单租户 `tenant_id="default"`。当前系统仍未提供真实多租户来源，且只覆盖已迁移到 UoW 的 Workbench pair relation 写路径。 | 打开前仍需确认所有启用 durable idempotency 的 Workbench 写路径都显式传入 actor/tenant；如果未来引入多租户，必须替换默认 tenant helper。 |
 | real PostgreSQL row-lock concurrency | future-test-needed | 当前默认 CI 使用 fake/contract tests；没有真实 PostgreSQL 并发 reserve test。 | 打开前至少在可控环境跑真实 PostgreSQL concurrent reserve / committed replay test。 |
 | observability/metrics/logging | future-test-needed | 当前没有 durable idempotency 专用 metrics，例如 replay count、conflict count、reserved age、expired count。 | 打开前需要最少的日志/指标清单和告警阈值。 |
 | rollback | ready | 回滚主开关是关闭 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，默认路径回到 in-memory repository。 | 关闭 flag 只能停止新请求写 durable records；已存在 records 保留用于审计，不应在回滚时删除。 |
@@ -38,7 +38,7 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 - `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 仍默认关闭。
 - 目标数据库已应用 `0043_workbench_idempotency_records.sql`。
 - API 数据库用户具备 `select/insert/update` 相关权限。
-- `actor/tenant auth context` 已接入真实身份，且不再默认落到 `system/default`。
+- `actor/tenant auth context` 已在 confirm-link / cancel-link UoW 写路径接入真实 actor，且不再默认落到 `system/default`；当前 tenant 仍是显式单租户 `default`。
 - `reserved/in-progress duplicate policy` 已定义并测试。
 - `expired reserved takeover` 已定义并测试。
 - `failed reservation policy` 已定义并测试。
@@ -66,7 +66,6 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 
 打开 feature flag 前必须解决：
 
-- `actor/tenant auth context`
 - `reserved/in-progress duplicate policy`
 - `expired reserved takeover`
 - `failed reservation policy`
@@ -74,6 +73,7 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 
 可以 disabled-by-default 合入但必须继续跟踪：
 
+- `actor/tenant auth context` 的多租户来源；当前为显式单租户 default
 - `cleanup/retention`
 - `observability/metrics/logging`
 - migration apply runbook
@@ -97,3 +97,9 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 用户已确认 PF-P040 `verified`。
 
 PF-P040-MG deferred：后续 cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。PF-P041 先处理 `actor/tenant auth context`，仍不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+
+## 9. PF-P041 Execution Result
+
+PF-P041 已让 confirm-link / cancel-link 的 UoW command / idempotency identity 使用请求局部 OA session actor，并通过显式 helper 传入单租户 `tenant_id="default"`。
+
+本轮仍不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。feature flag 打开前，仍需处理 reserved/in-progress、expired takeover、failed policy、cleanup/retention、真实 PostgreSQL concurrency 和 observability。

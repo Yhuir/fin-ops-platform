@@ -11936,3 +11936,23 @@ Stop Conditions:
 - 关键实现约束是“请求局部显式传递”，不能把 OA session 放进 `Application` 实例字段，否则 threaded request 下会产生跨请求身份污染。
 - PF-P041 只应让 confirm/cancel 的 UoW command / idempotency identity 获取真实 actor/tenant；不应顺手打开 feature flag、迁移更多 API、修改 migration 或重写所有 audit actor 语义。
 - PF-P041 完成后仍可能不能打开 feature flag，因为 reserved/in-progress、expired takeover、failed policy、cleanup/retention 和真实 PostgreSQL concurrency 仍是独立 blocker。
+
+### 执行结果
+
+- 状态：`implemented`，等待用户确认，未经确认不得标记 `verified`。
+- 新增 `tests/test_workbench_auth_context_idempotency.py`。
+- RED：新增测试先因 Workbench facade 不接受 `actor_id` / `tenant_id`，以及 handler 不接受 `headers` 而失败。
+- GREEN：最小实现后新增测试通过。
+- `app/auth.py` 新增 `actor_id_for_session()` / `tenant_id_for_session()` 纯 helper。
+- `server.py` 中 confirm/cancel 写 handler 显式解析请求局部 `OARequestSession`，并把 actor/tenant 传到 live write path。
+- `workbench_write_facade.py` 中 confirm/cancel UoW command 显式填入 actor/tenant。
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未迁移更多 Workbench 写 API。
+- 未修改 SQL migration、部署、网关、worker、前端。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+下一步建议：
+
+`PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`
+
+PF-P042 应继续留在 PF-P040 起的 cumulative MG 范围内，且只处理 reserved/in-progress duplicate policy，不打开 feature flag。

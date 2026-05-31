@@ -17,6 +17,16 @@ class _WorkbenchWritePersistenceError(RuntimeError):
     pass
 
 
+def _normalize_actor_id(actor_id: object, *, fallback: str = "system") -> str:
+    normalized = str(actor_id or fallback).strip()
+    return normalized or fallback
+
+
+def _normalize_tenant_id(tenant_id: object, *, fallback: str = "default") -> str:
+    normalized = str(tenant_id or fallback).strip()
+    return normalized or fallback
+
+
 @dataclass(frozen=True)
 class WorkbenchWriteResult:
     status_code: HTTPStatus
@@ -156,7 +166,14 @@ class WorkbenchWriteFacade:
         self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
         self._consume_reconciliation_decisions_in_transaction = consume_reconciliation_decisions_in_transaction
 
-    def confirm_link(self, payload: dict[str, object], *, request_id: str | None = None) -> WorkbenchWriteResult:
+    def confirm_link(
+        self,
+        payload: dict[str, object],
+        *,
+        request_id: str | None = None,
+        actor_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> WorkbenchWriteResult:
         action_name = "confirm_link"
         try:
             month = str(payload["month"])
@@ -221,6 +238,8 @@ class WorkbenchWriteFacade:
             return self._confirm_link_with_uow(
                 payload=payload,
                 request_id=request_id,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
                 month=month,
                 row_ids=row_ids,
                 row_types=row_types,
@@ -295,6 +314,8 @@ class WorkbenchWriteFacade:
         *,
         payload: dict[str, object],
         request_id: str | None,
+        actor_id: str | None,
+        tenant_id: str | None,
         month: str,
         row_ids: list[str],
         row_types: list[str],
@@ -320,6 +341,8 @@ class WorkbenchWriteFacade:
             payload=dict(payload),
             idempotency_key=idempotency_key,
             expected_versions=dict(expected_versions),
+            tenant_id=_normalize_tenant_id(tenant_id),
+            actor_id=_normalize_actor_id(actor_id),
         )
 
         def handler(ctx: object) -> dict[str, object]:
@@ -402,7 +425,14 @@ class WorkbenchWriteFacade:
             "message": str(result.get("message") or ""),
         }
 
-    def cancel_link(self, payload: dict[str, object], *, request_id: str | None = None) -> WorkbenchWriteResult:
+    def cancel_link(
+        self,
+        payload: dict[str, object],
+        *,
+        request_id: str | None = None,
+        actor_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> WorkbenchWriteResult:
         action_name = "cancel_link"
         try:
             month = str(payload["month"])
@@ -414,7 +444,13 @@ class WorkbenchWriteFacade:
                 {"error": "invalid_cancel_link_request", "message": str(exc)},
             )
 
-        replayed = self._cancel_link_replay_if_committed(payload=payload, month=month, row_id=row_id)
+        replayed = self._cancel_link_replay_if_committed(
+            payload=payload,
+            month=month,
+            row_id=row_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
         if replayed is not None:
             return replayed
 
@@ -452,6 +488,8 @@ class WorkbenchWriteFacade:
             return self._cancel_link_with_uow(
                 payload=payload,
                 request_id=request_id,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
                 month=month,
                 row_id=row_id,
                 active_relation=active_relation,
@@ -504,6 +542,8 @@ class WorkbenchWriteFacade:
         payload: dict[str, object],
         month: str,
         row_id: str,
+        actor_id: str | None,
+        tenant_id: str | None,
     ) -> WorkbenchWriteResult | None:
         if self._cancel_link_uow is None:
             return None
@@ -519,6 +559,8 @@ class WorkbenchWriteFacade:
             expected_versions=dict(payload.get("expected_versions") or {})
             if isinstance(payload.get("expected_versions"), dict)
             else {},
+            tenant_id=_normalize_tenant_id(tenant_id),
+            actor_id=_normalize_actor_id(actor_id),
         )
         replay_committed = getattr(self._cancel_link_uow, "replay_committed", None)
         if not callable(replay_committed):
@@ -536,6 +578,8 @@ class WorkbenchWriteFacade:
         *,
         payload: dict[str, object],
         request_id: str | None,
+        actor_id: str | None,
+        tenant_id: str | None,
         month: str,
         row_id: str,
         active_relation: dict[str, object],
@@ -557,6 +601,8 @@ class WorkbenchWriteFacade:
             expected_versions=dict(payload.get("expected_versions") or {})
             if isinstance(payload.get("expected_versions"), dict)
             else {},
+            tenant_id=_normalize_tenant_id(tenant_id),
+            actor_id=_normalize_actor_id(actor_id),
         )
 
         def handler(ctx: object) -> dict[str, object]:

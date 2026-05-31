@@ -733,3 +733,35 @@ PF-P041 应优先处理 PF-P040 readiness matrix 中的 `actor/tenant auth conte
 - `_WorkbenchConfirmLinkCommand` 和 `_WorkbenchCancelLinkCommand` 仍默认 `tenant_id="default"`、`actor_id="system"`。
 - `server.py` 已通过 `_enforce_route_access()` 解析 OA session 并校验权限，但成功 session 未传入 Workbench 写 handler / facade / UoW command。
 - PF-P041 应用 TDD 建立 actor/tenant contract，并做最小实现；不得打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不得迁移更多 Workbench 写 API，不能把 session 存在 `Application` 全局可变字段。
+
+## 17. PF-P041 Execution Result
+
+PF-P041 已完成 actor/tenant context contract 的最小实现，但没有打开 durable idempotency feature flag，也没有迁移更多 Workbench 写 API。
+
+已完成：
+
+- 新增 `tests/test_workbench_auth_context_idempotency.py`。
+- RED：新增测试先因 `WorkbenchWriteFacade.confirm_link()` / `cancel_link()` 不接受 `actor_id` / `tenant_id`，以及 Workbench handler 不接受 `headers` 而失败。
+- GREEN：实现请求局部 auth context 传递后测试通过。
+- 在 `app/auth.py` 中新增纯 helper：
+  - `actor_id_for_session(session)`：优先使用 `OAUserIdentity.user_id`，回退 `username` / `system`。
+  - `tenant_id_for_session(session)`：当前返回显式单租户 `default`。
+- 在 `server.py` 中为 Workbench confirm/cancel 写路径新增请求局部 auth context 解析，不把 session 存到 `Application` 全局可变字段。
+- 在 `WorkbenchWriteFacade.confirm_link()` / `cancel_link()` 中新增细粒度 `actor_id` / `tenant_id` 参数。
+- `_WorkbenchConfirmLinkCommand` 和 `_WorkbenchCancelLinkCommand` 在 UoW 路径中显式接收 actor/tenant，供 `_idempotency_request_for(command)` 生成 durable identity 和 request fingerprint。
+
+仍未完成：
+
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未处理 reserved/in-progress duplicate policy。
+- 未处理 expired reserved takeover。
+- 未处理 failed reservation policy。
+- 未处理 cleanup/retention。
+- 未执行真实 PostgreSQL row-lock concurrency test。
+- 未新增 durable idempotency observability 指标。
+
+下一步建议：
+
+`PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`
+
+PF-P042 应只处理 same-key same-fingerprint 的 reserved/in-progress duplicate policy，并保持 feature flag 默认关闭。

@@ -39,6 +39,17 @@ class OARequestSession:
     can_admin_access: bool
 
 
+def actor_id_for_session(session: OARequestSession, *, fallback: str = "system") -> str:
+    identity = session.identity
+    actor_id = str(identity.user_id or identity.username or fallback).strip()
+    return actor_id or fallback
+
+
+def tenant_id_for_session(_: OARequestSession, *, fallback: str = "default") -> str:
+    tenant_id = str(fallback or "default").strip()
+    return tenant_id or "default"
+
+
 def _should_enable_default_test_auth() -> bool:
     override = os.getenv("FIN_OPS_TEST_DEFAULT_AUTH")
     if override is not None:

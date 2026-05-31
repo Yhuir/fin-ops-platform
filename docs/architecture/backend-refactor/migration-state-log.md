@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已确认 `PF-P040` verified，并生成/审查 `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` |
-| 当前 active prompt | `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` (`planned`) |
+| 当前阶段 | 已执行 `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract`，等待用户确认 |
+| 当前 active prompt | `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` (`implemented`) |
 | 最近 verified prompt | `PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests` |
 | 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
-| 最近验证 | PF-P040 已完成默认绿色测试和文档门禁；用户已确认 `verified`；PF-P040-MG deferred，将由后续 cumulative MG 覆盖；未执行 Traffic Gate、部署或 push |
-| 下一条允许任务 | 执行 `PF-P041`；PF-P041 只允许处理 Workbench durable idempotency 的 actor/tenant auth context contract，不得启用 feature flag、不得迁移更多 API、不得执行 MG/Traffic/deploy/push |
+| 最近验证 | PF-P041 新增 actor/tenant context tests 并完成红绿循环；未执行 Merge Gate、Traffic Gate、部署或 push；未经用户确认不得标记 `verified` |
+| 下一条允许任务 | 等待用户确认 PF-P041 `verified`；之后建议生成并审查 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy` |
 
 ## Prompt 执行日志
 
@@ -4314,7 +4314,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -4334,9 +4334,63 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - PF-P041 必须禁止把 session 存到 `Application` 全局可变字段；该系统存在 threaded request 风险，auth context 应作为请求局部参数显式传递。
 - PF-P041 不应顺手改变历史 audit / `created_by` 语义，除非测试证明这是 actor context contract 必需且范围可控。
 
+#### 执行结果
+
+- 新增 `tests/test_workbench_auth_context_idempotency.py`。
+- RED：新增测试先因 `WorkbenchWriteFacade.confirm_link()` / `cancel_link()` 不接受 `actor_id` / `tenant_id`，以及 Workbench handler 不接受 `headers` 而失败。
+- GREEN：实现请求局部 auth context 传递后测试通过。
+- `app/auth.py` 新增纯 helper：
+  - `actor_id_for_session(session)`：优先使用 `OAUserIdentity.user_id`，回退 `username` / `system`。
+  - `tenant_id_for_session(session)`：当前返回显式单租户 `default`。
+- `server.py` 中 Workbench confirm/cancel handler 显式接收 headers，解析请求局部 OA session 后把 actor/tenant 传给 live write path。
+- `WorkbenchWriteFacade.confirm_link()` / `cancel_link()` 新增细粒度 `actor_id` / `tenant_id` 参数。
+- `_WorkbenchConfirmLinkCommand` / `_WorkbenchCancelLinkCommand` 在 UoW 路径显式填充 actor/tenant，供 durable idempotency identity 和 request fingerprint 使用。
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未迁移更多 Workbench 写 API。
+- 未修改 deployment/env/gateway/frontend/worker 或 PostgreSQL migration。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/auth.py`
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_auth_context_idempotency.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`：先失败，失败原因是 actor/tenant/header 参数不存在；实现后通过，3 tests。
+- `git status --short --branch`：Pass，位于 `codex/workbench-durable-idempotency-rollout-readiness`，仅包含 PF-P041 预期代码、测试和文档变更。
+- `git ls-files --others --exclude-standard`：Pass，仅包含本轮新增 `tests/test_workbench_auth_context_idempotency.py`。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `rg -n "actor_id=\"system\"|created_by=\"system\"|tenant_id=\"default\"|OARequestSession|resolve_oa_request_session|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY" backend/src/fin_ops_platform/app backend/src/fin_ops_platform/services tests docs/architecture/backend-refactor`：Pass，剩余 `created_by="system"` / `tenant_id="default"` 均为本轮明确不迁移的 audit 语义、单租户默认、测试或历史文档语境。
+- 未经用户确认不得标记 `verified`。
+
+#### 未关闭风险
+
+- 当前 `tenant_id` 仍是显式单租户 `default`，系统尚无真实多租户来源。
+- `reserved/in-progress duplicate policy` 尚未实现。
+- `expired reserved takeover` 尚未实现。
+- `failed reservation policy` 尚未实现。
+- `cleanup/retention` 尚未实现。
+- `real PostgreSQL row-lock concurrency` 尚未验证。
+- `observability/metrics/logging` 尚未补齐。
+
 #### 下一步
 
-- 等待用户确认后执行 PF-P041。
+- 等待用户确认 PF-P041 `verified`。
+- 之后建议生成并审查 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`，继续留在同一 cumulative MG 范围内。
 
 ## 维护规则
 
