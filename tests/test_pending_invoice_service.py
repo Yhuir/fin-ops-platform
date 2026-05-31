@@ -279,6 +279,62 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(income_payload["rows"][0]["id"], "txn_income")
         self.assertTrue(income_payload["rows"][0]["can_create_invoice"])
 
+    def test_requires_invoice_filter_uses_active_tag_complement(self) -> None:
+        fee_txn = self._bank_transaction("txn_fee", TransactionDirection.OUTFLOW, "Fee Vendor", "10.00")
+        salary_txn = self._bank_transaction("txn_salary", TransactionDirection.OUTFLOW, "Salary Vendor", "20.00")
+        custom_txn = self._bank_transaction("txn_custom_meal", TransactionDirection.OUTFLOW, "Meal Vendor", "30.00")
+        no_category_txn = self._bank_transaction("txn_no_category", TransactionDirection.OUTFLOW, "No Category", "40.00")
+        archived_txn = self._bank_transaction("txn_archived", TransactionDirection.OUTFLOW, "Archived Vendor", "50.00")
+        unknown_txn = self._bank_transaction("txn_unknown", TransactionDirection.OUTFLOW, "Unknown Vendor", "60.00")
+
+        class EffectiveProvider:
+            def bulk_get_for_rows(self, rows: list[BankTransaction]) -> dict[str, dict[str, object]]:
+                categories = {
+                    "txn_fee": {"category_code": "fee", "category_label": "手续费"},
+                    "txn_salary": {"category_code": "salary", "category_label": "工资"},
+                    "txn_custom_meal": {"category_code": "custom_meal", "category_label": "餐饮"},
+                    "txn_archived": {"category_code": "custom_archived", "category_label": "归档"},
+                    "txn_unknown": {"category_code": "unknown_external_code", "category_label": "未知"},
+                }
+                return {row.id: categories.get(row.id, {}) for row in rows}
+
+        category_service = BankTransactionCategoryService(
+            tag_dictionary={
+                "version": 7,
+                "definitions": [
+                    {
+                        "code": "custom_meal",
+                        "label": "餐饮",
+                        "path": ["餐饮"],
+                        "source": "custom",
+                        "status": "active",
+                    },
+                    {
+                        "code": "custom_archived",
+                        "label": "归档",
+                        "path": ["历史"],
+                        "source": "custom",
+                        "status": "archived",
+                    },
+                ],
+            }
+        )
+        service = self._query_service(
+            transactions=[fee_txn, salary_txn, custom_txn, no_category_txn, archived_txn, unknown_txn],
+            category_service=category_service,
+            effective_category_provider=EffectiveProvider(),
+            tag_groups={
+                "requires_invoice": ["legacy_requires_should_be_ignored"],
+                "bank_statement_as_invoice": ["fee"],
+                "no_invoice_required": ["salary"],
+            },
+        )
+
+        payload = service.list_rows(direction="expense", filter="requires_invoice")
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["txn_custom_meal"])
+        self.assertEqual(payload["rows"][0]["invoice_acquisition_status"]["matched_rule"]["group"], "requires_invoice")
+
     def test_expense_status_priority_uses_rules_and_invoice_payment_facts(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
         partial_txn = self._bank_transaction("txn_partial", TransactionDirection.OUTFLOW, "Vendor A", "100.00")

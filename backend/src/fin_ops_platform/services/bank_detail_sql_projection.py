@@ -201,6 +201,7 @@ class BankDetailSqlProjectionBuilder:
                 "source": text(row.get("source")) or "manual",
                 "category_version": int(row.get("version") or 0),
                 "category_rule_version": text(normalized_payload.get("category_rule_version")),
+                "manual_assignment": bool(normalized_payload.get("manual_assignment")),
             }
         for row in confirmation_rows:
             transaction_id = identity_to_row_id.get(text(row.get("transaction_id")) or "")
@@ -392,7 +393,12 @@ class BankDetailSqlProjectionBuilder:
         manual_source = text(manual.get("source")) or ""
         manual_confirmed_code = manual.get("category_code") if manual_source == "auto_confirmation" else None
         auto_status = text(auto.get("category_resolution_status")) if isinstance(auto, dict) else None
-        category_resolution_status = "manual_confirmed" if manual_confirmed_code else (auto_status or "unmatched")
+        effective_source = text(effective.get("effective_category_source")) or ""
+        category_resolution_status = (
+            "manual_confirmed"
+            if manual_confirmed_code or effective_source in {"manual", "manual_confirmation"}
+            else (auto_status or "unmatched")
+        )
         relation_payload = relation or {"oa_relation_tag": "无oa", "invoice_relation_tag": "无发票", "relation_case_id": None}
         relation_tags = [
             str(relation_payload.get("oa_relation_tag") or "无oa"),

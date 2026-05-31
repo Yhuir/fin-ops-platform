@@ -214,6 +214,7 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   bank_detail_export_account_not_found: "当前银行账户不存在或不在当前筛选范围内。",
   bank_detail_export_row_limit_exceeded: "当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。",
   invalid_category_confirmation_candidate: "只能选择当前自动规则命中的候选标签。",
+  invalid_manual_category_assignment_target: "当前流水已有自动标签或候选确认状态，不能走人工待分类入口。",
 };
 
 function normalizeBankDetailReadModelStatus(value: unknown): BankDetailReadModelStatus {
@@ -749,6 +750,23 @@ export async function confirmBankDetailCategory(
 
 export async function revokeBankDetailCategoryConfirmation(transactionId: string): Promise<unknown> {
   return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-confirmation`, {
+    method: "DELETE",
+  });
+}
+
+export async function assignBankDetailCategory(
+  transactionId: string,
+  categoryCode: BankTransactionCategoryCode,
+): Promise<unknown> {
+  return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-assignment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category_code: categoryCode }),
+  });
+}
+
+export async function clearBankDetailCategoryAssignment(transactionId: string): Promise<unknown> {
+  return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-assignment`, {
     method: "DELETE",
   });
 }

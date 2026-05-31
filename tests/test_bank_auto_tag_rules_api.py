@@ -281,6 +281,103 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(confirm_calls[0]["category_code"], "salary")
         self.assertEqual(confirm_calls[0]["candidate_category_codes"], ["fee", "salary"])
 
+    def test_manual_assignment_endpoint_allows_unmatched_row_to_choose_active_tag(self) -> None:
+        app = build_application()
+        assign_calls: list[dict[str, object]] = []
+        mutations: list[dict[str, object]] = []
+        saved_snapshots: list[dict[str, object]] = []
+
+        def assign_stub(**kwargs: object) -> dict[str, object]:
+            assign_calls.append(dict(kwargs))
+            return {"ok": True}
+
+        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+            "category_resolution_status": "unmatched",
+        }
+        app._bank_transaction_category_service.assign_manual_category = assign_stub
+        app._bank_transaction_category_affected_months = lambda _transaction_ids: ["2026-02"]
+        app._after_bank_category_confirmation_mutation = lambda **kwargs: mutations.append(dict(kwargs))
+        app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda snapshot: saved_snapshots.append(snapshot))
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_request_untracked(
+                "POST",
+                "/api/bank-details/transactions/txn-unmatched/category-assignment",
+                json.dumps({"category_code": "salary"}),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["affected_months"], ["2026-02"])
+        self.assertEqual(assign_calls[0]["transaction_id"], "txn-unmatched")
+        self.assertEqual(assign_calls[0]["category_code"], "salary")
+        self.assertEqual(assign_calls[0]["actor"], "TESTFULL001")
+        self.assertTrue(saved_snapshots)
+        self.assertEqual(mutations[0]["action"], "bank_detail_category_manually_assigned")
+        self.assertEqual(mutations[0]["metadata"]["selected_category_code"], "salary")
+        self.assertEqual(mutations[0]["metadata"]["previous_resolution_status"], "unmatched")
+        self.assertEqual(mutations[0]["metadata"]["assignment_source"], "manual")
+        self.assertNotIn("candidate_category_codes", mutations[0]["metadata"])
+
+    def test_manual_assignment_endpoint_rejects_auto_candidate_confirmation_targets(self) -> None:
+        app = build_application()
+        assign_calls: list[dict[str, object]] = []
+
+        def assign_stub(**kwargs: object) -> dict[str, object]:
+            assign_calls.append(dict(kwargs))
+            return {"ok": True}
+
+        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+            "category_resolution_status": "needs_confirmation",
+            "auto_candidate_category_codes": ["fee", "salary"],
+        }
+        app._bank_transaction_category_service.assign_manual_category = assign_stub
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_request_untracked(
+                "POST",
+                "/api/bank-details/transactions/txn-candidate/category-assignment",
+                json.dumps({"category_code": "salary"}),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_manual_category_assignment_target")
+        self.assertEqual(assign_calls, [])
+
+    def test_manual_assignment_delete_endpoint_clears_manual_category(self) -> None:
+        app = build_application()
+        clear_calls: list[dict[str, object]] = []
+        mutations: list[dict[str, object]] = []
+
+        def clear_stub(**kwargs: object) -> dict[str, object]:
+            clear_calls.append(dict(kwargs))
+            return {"ok": True}
+
+        app._bank_transaction_category_service.clear_manual_category = clear_stub
+        app._bank_transaction_category_affected_months = lambda _transaction_ids: ["2026-02"]
+        app._after_bank_category_confirmation_mutation = lambda **kwargs: mutations.append(dict(kwargs))
+        app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_request_untracked(
+                "DELETE",
+                "/api/bank-details/transactions/txn-manual/category-assignment",
+                None,
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(clear_calls[0]["transaction_id"], "txn-manual")
+        self.assertEqual(clear_calls[0]["actor"], "TESTFULL001")
+        self.assertEqual(mutations[0]["action"], "bank_detail_category_manual_assignment_cleared")
+        self.assertEqual(mutations[0]["metadata"]["assignment_source"], "manual")
+
     def test_put_renames_reorders_adds_archives_audits_and_triggers_lifecycle(self) -> None:
         app = build_application()
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()

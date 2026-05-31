@@ -276,15 +276,26 @@ describe("pending invoices and tag settings API mapping", () => {
           bank_transaction_tags: {
             version: 3,
             tags: [
-              { code: "fee", label: "手续费", status: "active" },
-              { code: "internal_transfer", label: "内部转账", status: "active" },
-              { code: "salary", label: "工资", status: "active" },
+              { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
+              { code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" },
+              { code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" },
+              { code: "inactive_tag", label: "停用", status: "inactive", output_primary_label: "停用", output_sub_label: "" },
+              { code: "archived_tag", label: "归档", status: "archived", output_primary_label: "归档", output_sub_label: "" },
             ],
           },
           groups: {
-            requires_invoice: { tag_codes: ["fee"], tags: [{ code: "fee", label: "手续费", status: "active" }] },
-            bank_statement_as_invoice: { tag_codes: ["internal_transfer"], tags: [{ code: "internal_transfer", label: "内部转账", status: "active" }] },
-            no_invoice_required: { tag_codes: ["salary"], tags: [{ code: "salary", label: "工资", status: "active" }] },
+            requires_invoice: {
+              tag_codes: ["fee"],
+              tags: [{ code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" }],
+            },
+            bank_statement_as_invoice: {
+              tag_codes: ["internal_transfer"],
+              tags: [{ code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" }],
+            },
+            no_invoice_required: {
+              tag_codes: ["salary"],
+              tags: [{ code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" }],
+            },
           },
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
@@ -292,7 +303,6 @@ describe("pending invoices and tag settings API mapping", () => {
         const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
         expect(body).toEqual({
           groups: {
-            requires_invoice: { tag_codes: ["fee"] },
             bank_statement_as_invoice: { tag_codes: ["internal_transfer"] },
             no_invoice_required: { tag_codes: ["salary"] },
           },
@@ -406,7 +416,12 @@ describe("pending invoices and tag settings API mapping", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const rules = await api().fetchPendingInvoiceRules();
-    expect(rules.groups.requiresInvoice.tags[0]).toMatchObject({ code: "fee", label: "手续费" });
+    expect(rules.groups.requiresInvoice.tags[0]).toMatchObject({
+      code: "fee",
+      label: "手续费",
+      outputPrimaryLabel: "费用",
+      outputSubLabel: "手续费",
+    });
     expect(rules.availableTags.map((tag) => tag.code)).toEqual(["fee", "internal_transfer", "salary"]);
     await api().savePendingInvoiceRules(rules);
 

@@ -755,6 +755,26 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(effective["effective_category_label_path"], ["费用", "手续费"])
         self.assertEqual(effective["effective_category_source"], "auto")
 
+    def test_effective_category_uses_manual_category_when_auto_is_missing(self) -> None:
+        category_service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-manual",
+        )
+        category_service.assign_manual_category(
+            transaction_id="txn-manual",
+            category_code="salary",
+            actor="YNSYLP005",
+        )
+
+        effective = resolve_effective_category(category_service.get("txn-manual"), None)
+
+        self.assertEqual(effective["effective_category_code"], "salary")
+        self.assertEqual(effective["effective_category_label"], "工资")
+        self.assertEqual(effective["effective_category_primary_label"], "工资")
+        self.assertEqual(effective["effective_category_sub_label"], None)
+        self.assertEqual(effective["effective_category_label_path"], ["工资"])
+        self.assertEqual(effective["effective_category_source"], "manual")
+
     def test_effective_category_ignores_manual_clear_when_auto_exists(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(
             None,

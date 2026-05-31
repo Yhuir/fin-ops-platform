@@ -619,6 +619,16 @@ def resolve_effective_category(
             "effective_category_path": list(manual.get("category_path") or []),
             "effective_category_source": "manual_confirmation",
         }
+    if manual_code and manual_source == "manual" and bool(manual.get("manual_assignment")) and not auto_code:
+        return {
+            "effective_category_code": manual_code,
+            "effective_category_label": manual.get("category_label"),
+            "effective_category_primary_label": manual.get("category_primary_label"),
+            "effective_category_sub_label": manual.get("category_sub_label"),
+            "effective_category_label_path": list(manual.get("category_label_path") or []),
+            "effective_category_path": list(manual.get("category_path") or []),
+            "effective_category_source": "manual",
+        }
     if manual_code in BANK_TRANSACTION_CATEGORY_DEFINITIONS and (
         manual_source == "turnover_ledger" or auto_code == "external_turnover"
     ):

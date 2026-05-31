@@ -170,6 +170,11 @@ from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceQueryService,
     VALID_FILTERS as PENDING_INVOICE_VALID_FILTERS,
 )
+from fin_ops_platform.services.pending_invoice_rules import (
+    active_pending_invoice_rule_tags,
+    editable_pending_invoice_tag_groups_payload,
+    pending_invoice_group_codes,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
@@ -1071,6 +1076,15 @@ class Application:
             )
         bank_detail_confirmation_prefix = "/api/bank-details/transactions/"
         bank_detail_confirmation_suffix = "/category-confirmation"
+        bank_detail_assignment_suffix = "/category-assignment"
+        if route_path.startswith(bank_detail_confirmation_prefix) and route_path.endswith(bank_detail_assignment_suffix):
+            transaction_id = unquote(
+                route_path[len(bank_detail_confirmation_prefix):-len(bank_detail_assignment_suffix)]
+            )
+            if method == "POST":
+                return self._handle_api_bank_detail_category_assignment(transaction_id, body, headers)
+            if method == "DELETE":
+                return self._handle_api_bank_detail_category_assignment_delete(transaction_id, headers)
         if route_path.startswith(bank_detail_confirmation_prefix) and route_path.endswith(bank_detail_confirmation_suffix):
             transaction_id = unquote(
                 route_path[len(bank_detail_confirmation_prefix):-len(bank_detail_confirmation_suffix)]
@@ -1629,6 +1643,7 @@ class Application:
                 "/api/bank-details/accounts",
                 "/api/bank-details/transactions",
                 "/api/bank-details/transactions/export",
+                "/api/bank-details/transactions/{transaction_id}/category-assignment",
                 "/api/pending-invoices/rows",
                 "/api/pending-invoices/filter-options",
                 "/api/pending-invoices/rows/{transaction_id}/relation-detail",
@@ -7692,6 +7707,7 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_pending_invoice_rules_request", "message": "pending_invoice_tag_groups must be an object."},
             )
+        pending_invoice_tag_groups = editable_pending_invoice_tag_groups_payload(pending_invoice_tag_groups)
         current = self._app_settings_service.get_settings_payload()
         access_control = current.get("access_control") if isinstance(current.get("access_control"), dict) else {}
         projects = current.get("projects") if isinstance(current.get("projects"), dict) else {}
@@ -7722,6 +7738,31 @@ class Application:
         return self._json_response(HTTPStatus.OK, rules_payload)
 
     @staticmethod
+    def _pending_invoice_enriched_group(
+        tag_codes: list[str],
+        *,
+        tags_by_code: dict[str, dict[str, object]],
+    ) -> dict[str, object]:
+        return {
+            "tag_codes": tag_codes,
+            "tags": [
+                {
+                    "code": code,
+                    "label": str(tags_by_code.get(code, {}).get("label") or code),
+                    "status": str(tags_by_code.get(code, {}).get("status") or "active"),
+                    "output_primary_label": str(
+                        tags_by_code.get(code, {}).get("output_primary_label")
+                        or tags_by_code.get(code, {}).get("label")
+                        or code
+                    ),
+                    "output_sub_label": str(tags_by_code.get(code, {}).get("output_sub_label") or ""),
+                }
+                for code in tag_codes
+                if code in tags_by_code
+            ],
+        }
+
+    @staticmethod
     def _pending_invoice_rules_payload(settings: dict[str, object]) -> dict[str, object]:
         tag_dictionary = settings.get("bank_transaction_tags") if isinstance(settings.get("bank_transaction_tags"), dict) else {}
         pending_groups = (
@@ -7730,32 +7771,53 @@ class Application:
             else {}
         )
         groups = pending_groups.get("groups") if isinstance(pending_groups.get("groups"), dict) else {}
-        tags = list(tag_dictionary.get("tags") or tag_dictionary.get("definitions") or []) if isinstance(tag_dictionary, dict) else []
-        tags_by_code = {
-            str(tag.get("code") or ""): tag
-            for tag in tags
-            if isinstance(tag, dict) and str(tag.get("code") or "").strip()
+        active_tags = active_pending_invoice_rule_tags(tag_dictionary) if isinstance(tag_dictionary, dict) else []
+        tags_by_code = {str(tag["code"]): tag for tag in active_tags}
+        active_codes = set(tags_by_code)
+        bank_statement_codes = [
+            code
+            for code in pending_invoice_group_codes(groups, "bank_statement_as_invoice")
+            if code in active_codes
+        ]
+        no_invoice_codes = [
+            code
+            for code in pending_invoice_group_codes(groups, "no_invoice_required")
+            if code in active_codes
+        ]
+        selected_no_invoice_codes = set(bank_statement_codes).union(no_invoice_codes)
+        requires_invoice_codes = [
+            str(tag["code"])
+            for tag in active_tags
+            if str(tag["code"]) not in selected_no_invoice_codes
+        ]
+        enriched_groups: dict[str, object] = {
+            "requires_invoice": Application._pending_invoice_enriched_group(
+                requires_invoice_codes,
+                tags_by_code=tags_by_code,
+            ),
+            "bank_statement_as_invoice": Application._pending_invoice_enriched_group(
+                bank_statement_codes,
+                tags_by_code=tags_by_code,
+            ),
+            "no_invoice_required": Application._pending_invoice_enriched_group(
+                no_invoice_codes,
+                tags_by_code=tags_by_code,
+            ),
         }
-        enriched_groups: dict[str, object] = {}
-        for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required"):
-            group = groups.get(group_name) if isinstance(groups, dict) and isinstance(groups.get(group_name), dict) else {}
-            tag_codes = [str(code).strip() for code in list(group.get("tag_codes") or []) if str(code).strip()]
-            enriched_groups[group_name] = {
-                "tag_codes": tag_codes,
-                "tags": [
-                    {
-                        "code": code,
-                        "label": str((tags_by_code.get(code) or {}).get("label") or code),
-                        "status": str((tags_by_code.get(code) or {}).get("status") or "active"),
-                    }
-                    for code in tag_codes
-                ],
-            }
+        compatible_pending_groups = {
+            **pending_groups,
+            "groups": {
+                **(groups if isinstance(groups, dict) else {}),
+                "requires_invoice": {"tag_codes": requires_invoice_codes},
+                "bank_statement_as_invoice": {"tag_codes": bank_statement_codes},
+                "no_invoice_required": {"tag_codes": no_invoice_codes},
+            },
+        }
         return {
             "version": int(pending_groups.get("version") or 1) if isinstance(pending_groups, dict) else 1,
             "groups": enriched_groups,
             "bank_transaction_tags": tag_dictionary,
-            "pending_invoice_tag_groups": pending_groups,
+            "pending_invoice_tag_groups": compatible_pending_groups,
         }
 
     def _handle_api_pending_invoice_export_preview(
@@ -10829,6 +10891,111 @@ class Application:
             action="bank_detail_category_confirmation_revoked",
             affected_months=affected_months,
             metadata={},
+        )
+        return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
+
+    def _handle_api_bank_detail_category_assignment(
+        self,
+        transaction_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有设置银行明细标签权限。"},
+            )
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        selected_code = str(
+            payload.get("category_code")
+            or payload.get("selected_category_code")
+            or payload.get("selectedCategoryCode")
+            or ""
+        ).strip()
+        actor_id = (
+            session.identity.username or session.identity.user_id
+            if session is not None
+            else "bank_category_assignment"
+        )
+        try:
+            suggestion = self._latest_bank_detail_auto_category_suggestion(transaction_id)
+            previous_resolution_status = "unmatched"
+            if isinstance(suggestion, dict):
+                previous_resolution_status = str(suggestion.get("category_resolution_status") or "unmatched") or "unmatched"
+            if previous_resolution_status != "unmatched":
+                raise BankTransactionCategoryValidationError(
+                    "invalid_manual_category_assignment_target",
+                    "当前流水已有自动标签或候选确认状态，不能走人工待分类入口。",
+                    transaction_id=transaction_id,
+                )
+            result = self._bank_transaction_category_service.assign_manual_category(
+                transaction_id=transaction_id,
+                category_code=selected_code,
+                actor=str(actor_id or "bank_category_assignment"),
+            )
+        except BankTransactionCategoryValidationError as exc:
+            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
+            return self._json_response(
+                status,
+                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
+            )
+        affected_months = self._bank_transaction_category_affected_months([transaction_id])
+        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
+        self._after_bank_category_confirmation_mutation(
+            transaction_id=transaction_id,
+            actor_id=str(actor_id or "bank_category_assignment"),
+            action="bank_detail_category_manually_assigned",
+            affected_months=affected_months,
+            metadata={
+                "selected_category_code": selected_code,
+                "previous_resolution_status": previous_resolution_status,
+                "assignment_source": "manual",
+            },
+        )
+        return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
+
+    def _handle_api_bank_detail_category_assignment_delete(
+        self,
+        transaction_id: str,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        if session is not None and not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有撤销银行明细人工标签权限。"},
+            )
+        actor_id = (
+            session.identity.username or session.identity.user_id
+            if session is not None
+            else "bank_category_assignment"
+        )
+        try:
+            result = self._bank_transaction_category_service.clear_manual_category(
+                transaction_id=transaction_id,
+                actor=str(actor_id or "bank_category_assignment"),
+            )
+        except BankTransactionCategoryValidationError as exc:
+            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
+            return self._json_response(
+                status,
+                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
+            )
+        affected_months = self._bank_transaction_category_affected_months([transaction_id])
+        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
+        self._after_bank_category_confirmation_mutation(
+            transaction_id=transaction_id,
+            actor_id=str(actor_id or "bank_category_assignment"),
+            action="bank_detail_category_manual_assignment_cleared",
+            affected_months=affected_months,
+            metadata={"assignment_source": "manual"},
         )
         return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
 

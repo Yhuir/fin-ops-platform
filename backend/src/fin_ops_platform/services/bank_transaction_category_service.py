@@ -1064,6 +1064,25 @@ class BankTransactionCategoryService:
             invalid_category_message="Only turnover leaf category codes can be selected from turnover ledger.",
         )
 
+    def assign_manual_category(
+        self,
+        *,
+        transaction_id: str,
+        category_code: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        return self._apply_updates(
+            [
+                {
+                    "transaction_id": transaction_id,
+                    "category_code": category_code,
+                    "manual_assignment": True,
+                }
+            ],
+            actor=actor,
+            source="manual",
+        )
+
     def confirm_auto_category(
         self,
         *,
@@ -1112,6 +1131,22 @@ class BankTransactionCategoryService:
             ],
             actor=actor,
             source="auto_confirmation",
+        )
+
+    def clear_manual_category(self, *, transaction_id: str, actor: str) -> dict[str, Any]:
+        normalized_transaction_id = self._normalize_transaction_id(transaction_id)
+        if not normalized_transaction_id:
+            raise BankTransactionCategoryValidationError("unknown_transaction_id", "transaction_id is required.")
+        if self._transaction_exists is not None and not self._transaction_exists(normalized_transaction_id):
+            raise BankTransactionCategoryValidationError(
+                "unknown_transaction_id",
+                f"Unknown bank transaction id: {normalized_transaction_id}",
+                transaction_id=normalized_transaction_id,
+            )
+        return self._apply_updates(
+            [{"transaction_id": normalized_transaction_id, "category_code": None, "manual_assignment": True}],
+            actor=actor,
+            source="manual",
         )
 
     def revoke_auto_category_confirmation(self, *, transaction_id: str, actor: str) -> dict[str, Any]:
@@ -1213,6 +1248,8 @@ class BankTransactionCategoryService:
                     "updated_at": timestamp,
                     "version": next_version,
                 }
+                if update.get("manual_assignment"):
+                    record["manual_assignment"] = True
                 if update.get("candidate_category_codes"):
                     record["candidate_category_codes"] = list(update.get("candidate_category_codes") or [])
                 if update.get("rule_version"):
@@ -1227,6 +1264,7 @@ class BankTransactionCategoryService:
                         "source": source,
                         "candidate_category_codes": list(update.get("candidate_category_codes") or []),
                         "rule_version": str(update.get("rule_version") or ""),
+                        "manual_assignment": bool(update.get("manual_assignment")),
                         "updated_by": normalized_actor,
                         "updated_at": timestamp,
                         "version": next_version,
@@ -1979,6 +2017,7 @@ class BankTransactionCategoryService:
                 if str(code or "").strip()
             ],
             "rule_version": str(update.get("rule_version") or "").strip(),
+            "manual_assignment": bool(update.get("manual_assignment")),
         }
 
     @staticmethod
@@ -2095,4 +2134,5 @@ class BankTransactionCategoryService:
             "updated_at": str(record.get("updated_at") or "") if isinstance(record, dict) else "",
             "confirmed_candidate_category_codes": list(record.get("candidate_category_codes") or []) if isinstance(record, dict) else [],
             "category_rule_version": str(record.get("rule_version") or "") if isinstance(record, dict) else "",
+            "manual_assignment": bool(record.get("manual_assignment")) if isinstance(record, dict) else False,
         }

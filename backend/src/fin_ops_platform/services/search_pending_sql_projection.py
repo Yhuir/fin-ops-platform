@@ -7,6 +7,10 @@ import re
 from typing import Any
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.pending_invoice_rules import (
+    pending_invoice_group_for_category,
+    pending_invoice_tag_group_sets,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -375,15 +379,7 @@ class SearchPendingSqlProjectionBuilder:
             ("app_settings",),
         )
         payload = row.get("settings_payload") if isinstance(row, dict) else {}
-        groups = (((payload or {}).get("pending_invoice_tag_groups") or {}).get("groups") or {}) if isinstance(payload, dict) else {}
-        return {
-            group_name: {
-                str(code).strip()
-                for code in list((groups.get(group_name) or {}).get("tag_codes") or [])
-                if str(code).strip()
-            }
-            for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required")
-        }
+        return pending_invoice_tag_group_sets(payload if isinstance(payload, dict) else {})
 
     def _search_source_versions(self) -> dict[str, object]:
         return {
@@ -476,10 +472,7 @@ def _status_label(status: str) -> str:
 
 
 def _filter_group_for_category(category_code: str, tag_groups: dict[str, set[str]]) -> str | None:
-    for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required"):
-        if category_code in tag_groups.get(group_name, set()):
-            return group_name
-    return None
+    return pending_invoice_group_for_category(category_code, tag_groups)
 
 
 def _matched_rule_payload(*, group: str | None, category_code: str, category_label: object) -> dict[str, object] | None:

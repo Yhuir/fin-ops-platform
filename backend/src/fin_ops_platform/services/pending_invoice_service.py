@@ -13,6 +13,10 @@ from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.pending_invoice_rules import (
+    pending_invoice_group_for_category,
+    pending_invoice_tag_group_sets,
+)
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
@@ -281,25 +285,11 @@ class PendingInvoiceQueryService:
         return True
 
     def _pending_invoice_tag_groups(self) -> dict[str, set[str]]:
-        payload = self._app_settings_provider()
-        groups = ((payload.get("pending_invoice_tag_groups") or {}).get("groups") or {})
-        return {
-            group_name: {
-                str(code).strip()
-                for code in list((groups.get(group_name) or {}).get("tag_codes") or [])
-                if str(code).strip()
-            }
-            for group_name in EXPENSE_FILTERS
-        }
+        return pending_invoice_tag_group_sets(self._app_settings_provider())
 
     @staticmethod
     def _group_for_category(category_code: str | None, tag_groups: dict[str, set[str]]) -> str | None:
-        if not category_code:
-            return None
-        for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required"):
-            if category_code in tag_groups.get(group_name, set()):
-                return group_name
-        return None
+        return pending_invoice_group_for_category(category_code, tag_groups)
 
     def _transaction_matches_filter(
         self,

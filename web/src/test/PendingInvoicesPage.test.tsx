@@ -176,10 +176,31 @@ function installPendingInvoiceFetch() {
       return new Response(JSON.stringify({
         version: 7,
         permissions: { can_save: true },
+        bank_transaction_tags: {
+          version: 7,
+          tags: [
+            { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
+            { code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" },
+            { code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" },
+            { code: "custom_meal", label: "餐饮", status: "active", output_primary_label: "餐饮", output_sub_label: "" },
+          ],
+        },
         groups: {
-          requires_invoice: { tag_codes: ["fee"], tags: [{ code: "fee", label: "手续费", status: "active" }] },
-          bank_statement_as_invoice: { tag_codes: ["internal_transfer"], tags: [{ code: "internal_transfer", label: "内部转账", status: "active" }] },
-          no_invoice_required: { tag_codes: ["salary"], tags: [{ code: "salary", label: "工资", status: "active" }] },
+          requires_invoice: {
+            tag_codes: ["fee", "custom_meal"],
+            tags: [
+              { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
+              { code: "custom_meal", label: "餐饮", status: "active", output_primary_label: "餐饮", output_sub_label: "" },
+            ],
+          },
+          bank_statement_as_invoice: {
+            tag_codes: ["internal_transfer"],
+            tags: [{ code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" }],
+          },
+          no_invoice_required: {
+            tag_codes: ["salary"],
+            tags: [{ code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" }],
+          },
         },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -187,10 +208,31 @@ function installPendingInvoiceFetch() {
       return new Response(JSON.stringify({
         version: 8,
         permissions: { can_save: true },
+        bank_transaction_tags: {
+          version: 8,
+          tags: [
+            { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
+            { code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" },
+            { code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" },
+            { code: "custom_meal", label: "餐饮", status: "active", output_primary_label: "餐饮", output_sub_label: "" },
+          ],
+        },
         groups: {
-          requires_invoice: { tag_codes: ["fee"], tags: [{ code: "fee", label: "手续费", status: "active" }] },
-          bank_statement_as_invoice: { tag_codes: ["internal_transfer"], tags: [{ code: "internal_transfer", label: "内部转账", status: "active" }] },
-          no_invoice_required: { tag_codes: ["salary"], tags: [{ code: "salary", label: "工资", status: "active" }] },
+          requires_invoice: {
+            tag_codes: ["fee", "custom_meal"],
+            tags: [
+              { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
+              { code: "custom_meal", label: "餐饮", status: "active", output_primary_label: "餐饮", output_sub_label: "" },
+            ],
+          },
+          bank_statement_as_invoice: {
+            tag_codes: ["internal_transfer"],
+            tags: [{ code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" }],
+          },
+          no_invoice_required: {
+            tag_codes: ["salary"],
+            tags: [{ code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" }],
+          },
         },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -429,7 +471,7 @@ describe("Pending invoices page", () => {
     await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
     expect(await screen.findByRole("heading", { name: "待找发票规则设置" })).toBeInTheDocument();
     expect(screen.getByText("需要开票")).toBeInTheDocument();
-    expect(screen.getByText("手续费")).toBeInTheDocument();
+    expect(screen.getAllByText("手续费").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "保存规则" }));
     await waitFor(() => {
       const rulesPut = fetchMock.mock.calls.some(([input, init]) => {
@@ -445,6 +487,39 @@ describe("Pending invoices page", () => {
     expect(screen.getByText("预计导出 128 行")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "下载导出" }));
     expect(await screen.findByText("已生成 pending-invoices.xlsx")).toBeInTheDocument();
+  });
+
+  test("renders hierarchical pending invoice rule blocks with mutual exclusion", async () => {
+    const user = userEvent.setup();
+    installPendingInvoiceFetch();
+    renderAppAt("/pending-invoices");
+
+    const page = await screen.findByTestId("pending-invoices-page");
+    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+
+    const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
+    const noInvoiceBlock = screen.getByRole("group", { name: "无需开票" });
+    const requiresInvoiceBlock = screen.getByRole("group", { name: "需要开票" });
+    expect(within(bankStatementBlock).getByText("费用")).toBeInTheDocument();
+    expect(within(bankStatementBlock).queryByRole("checkbox", { name: "费用" })).not.toBeInTheDocument();
+    const bankStatementFee = within(bankStatementBlock).getByRole("checkbox", { name: "手续费" });
+    expect(bankStatementFee).not.toBeChecked();
+    expect(within(noInvoiceBlock).getByRole("checkbox", { name: "手续费" })).not.toBeDisabled();
+    expect(within(requiresInvoiceBlock).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(requiresInvoiceBlock).getByText("手续费")).toBeInTheDocument();
+    expect(within(requiresInvoiceBlock).getAllByText("餐饮")).toHaveLength(2);
+
+    await user.click(bankStatementFee);
+
+    expect(bankStatementFee).toBeChecked();
+    expect(within(noInvoiceBlock).getByRole("checkbox", { name: "手续费" })).toBeDisabled();
+    expect(within(requiresInvoiceBlock).queryByText("手续费")).not.toBeInTheDocument();
+
+    await user.click(bankStatementFee);
+
+    expect(bankStatementFee).not.toBeChecked();
+    expect(within(noInvoiceBlock).getByRole("checkbox", { name: "手续费" })).not.toBeDisabled();
+    expect(within(requiresInvoiceBlock).getByText("手续费")).toBeInTheDocument();
   });
 
   test("opens invoice picker from status column, previews attach-existing, confirms, and refetches rows", async () => {

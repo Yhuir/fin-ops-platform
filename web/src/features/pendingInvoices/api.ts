@@ -656,7 +656,7 @@ function mapRulesPayload(payload: ApiPendingInvoiceRulesPayload): PendingInvoice
       outputSubLabel: stringValue(tag.output_sub_label),
       status: stringValue(tag.status, "active") as PendingInvoiceRuleGroup["tags"][number]["status"],
     }))
-    .filter((tag) => tag.code && tag.status !== "archived");
+    .filter((tag) => tag.code && tag.status === "active");
   return {
     version: numberValue(payload.version),
     availableTags,
@@ -674,7 +674,6 @@ function mapRulesPayload(payload: ApiPendingInvoiceRulesPayload): PendingInvoice
 function rulesRequestBody(payload: PendingInvoiceRulesPayload) {
   return {
     groups: {
-      requires_invoice: { tag_codes: payload.groups.requiresInvoice.tagCodes },
       bank_statement_as_invoice: { tag_codes: payload.groups.bankStatementAsInvoice.tagCodes },
       no_invoice_required: { tag_codes: payload.groups.noInvoiceRequired.tagCodes },
     },

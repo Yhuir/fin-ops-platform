@@ -507,9 +507,9 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
-  test("uncategorized unmatched rows display an empty type instead of confirmation actions", async () => {
+  test("uncategorized unmatched rows display manual classification choices from active tags", async () => {
     const user = userEvent.setup();
-    installMockApiFetch();
+    const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
@@ -524,9 +524,24 @@ describe("Bank details page", () => {
     const supplierRow = supplierName.closest("tr");
     expect(supplierRow).toBeInstanceOf(HTMLElement);
     expect(within(supplierRow as HTMLElement).queryByRole("button", { name: "待确认" })).not.toBeInTheDocument();
-    const typeCell = (supplierRow as HTMLElement).querySelector(".bank-col-type");
-    expect(typeCell).toBeInstanceOf(HTMLElement);
-    expect(within(typeCell as HTMLElement).getByText("-")).toBeInTheDocument();
+    await user.click(within(supplierRow as HTMLElement).getByRole("button", { name: "待分类" }));
+
+    const primaryMenu = await screen.findByRole("menu", { name: "待分类主标签" });
+    expect(within(primaryMenu).getByRole("menuitem", { name: "费用" })).toBeInTheDocument();
+    expect(within(primaryMenu).getByRole("menuitem", { name: "质保金" })).toBeInTheDocument();
+
+    await user.click(within(primaryMenu).getByRole("menuitem", { name: "费用" }));
+    const childMenu = await screen.findByRole("menu", { name: "费用可选子标签" });
+    expect(within(childMenu).getByRole("menuitem", { name: "手续费" })).toBeInTheDocument();
+    expect(within(childMenu).getByRole("menuitem", { name: "工资" })).toBeInTheDocument();
+
+    await user.click(within(childMenu).getByRole("menuitem", { name: "工资" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-details/transactions/bank-detail-search-filler/category-assignment",
+        expect.objectContaining({ body: JSON.stringify({ category_code: "salary" }) }),
+      );
+    });
     categoryPanel = await openCategoryFilterPanel(user, page);
     expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 1" })).toBeInTheDocument();
     await user.keyboard("{Escape}");

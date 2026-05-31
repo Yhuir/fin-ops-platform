@@ -270,7 +270,11 @@ class BankDetailsService:
         manual_source = str(manual_category.get("source") or "")
         manual_confirmed_code = manual_category["category_code"] if manual_source == "auto_confirmation" else None
         auto_status = str(auto_category.get("category_resolution_status") or "") if isinstance(auto_category, dict) else ""
-        category_resolution_status = "manual_confirmed" if manual_confirmed_code else (auto_status or "unmatched")
+        category_resolution_status = (
+            "manual_confirmed"
+            if manual_confirmed_code or effective_source in {"manual", "manual_confirmation"}
+            else (auto_status or "unmatched")
+        )
         relation_tags = self._relation_tag_payload(relation)
         text_fields = self._bank_text_display_fields(row)
         return {

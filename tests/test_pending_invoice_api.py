@@ -313,6 +313,87 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(payload["error"], "permission_denied")
 
+    def test_pending_invoice_rules_get_derives_requires_invoice_from_active_tag_complement(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._state_store.save_app_settings(
+                {
+                    "bank_transaction_tags": self._tag_dictionary_payload(),
+                    "pending_invoice_tag_groups": {
+                        "version": 7,
+                        "groups": {
+                            "requires_invoice": {"tag_codes": ["old_tag"]},
+                            "bank_statement_as_invoice": {"tag_codes": ["fee"]},
+                            "no_invoice_required": {"tag_codes": ["salary"]},
+                        },
+                    },
+                }
+            )
+
+            response = app.handle_request("GET", "/api/pending-invoices/rules")
+
+        payload = json.loads(response.body)
+        expected_requires = self._active_rule_codes(payload["bank_transaction_tags"], excluding={"fee", "salary"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["groups"]["requires_invoice"]["tag_codes"], expected_requires)
+        custom_meal_tag = next(tag for tag in payload["groups"]["requires_invoice"]["tags"] if tag["code"] == "custom_meal")
+        self.assertEqual(custom_meal_tag["output_primary_label"], "餐饮")
+        self.assertEqual(custom_meal_tag["output_sub_label"], "")
+        self.assertNotIn("old_tag", payload["groups"]["requires_invoice"]["tag_codes"])
+        self.assertEqual(
+            payload["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"],
+            expected_requires,
+        )
+
+    def test_pending_invoice_rules_put_ignores_legacy_requires_invoice_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_rule_tags(app)
+
+            response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/rules",
+                body=json.dumps({
+                    "groups": {
+                        "requires_invoice": {"tag_codes": ["unknown_legacy_code"]},
+                        "bank_statement_as_invoice": {"tag_codes": ["fee"]},
+                        "no_invoice_required": {"tag_codes": ["salary"]},
+                    }
+                }),
+            )
+
+        payload = json.loads(response.body)
+        expected_requires = self._active_rule_codes(payload["bank_transaction_tags"], excluding={"fee", "salary"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["groups"]["requires_invoice"]["tag_codes"], expected_requires)
+        self.assertIn("custom_meal", payload["groups"]["requires_invoice"]["tag_codes"])
+        self.assertNotIn("unknown_legacy_code", payload["groups"]["requires_invoice"]["tag_codes"])
+        self.assertEqual(
+            payload["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"],
+            expected_requires,
+        )
+
+    def test_pending_invoice_rules_put_rejects_duplicate_editable_group_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_rule_tags(app)
+
+            response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/rules",
+                body=json.dumps({
+                    "groups": {
+                        "requires_invoice": {"tag_codes": ["custom_meal"]},
+                        "bank_statement_as_invoice": {"tag_codes": ["fee"]},
+                        "no_invoice_required": {"tag_codes": ["fee"]},
+                    }
+                }),
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "duplicate_pending_invoice_tag_mapping")
+
     def test_recoverable_manual_invoice_failure_persists_command_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -395,6 +476,78 @@ class PendingInvoiceApiTests(unittest.TestCase):
         )
         app._import_service.confirm_import(preview.id)
         return str(preview.row_results[0].linked_object_id)
+
+    @staticmethod
+    def _tag_dictionary_payload() -> dict[str, object]:
+        return {
+            "version": 7,
+            "definitions": [
+                {
+                    "code": "fee",
+                    "label": "手续费",
+                    "path": ["费用", "手续费"],
+                    "source": "system",
+                    "status": "active",
+                    "output_primary_label": "费用",
+                    "output_sub_label": "手续费",
+                },
+                {
+                    "code": "salary",
+                    "label": "工资",
+                    "path": ["薪酬", "工资"],
+                    "source": "system",
+                    "status": "active",
+                    "output_primary_label": "薪酬",
+                    "output_sub_label": "工资",
+                },
+                {
+                    "code": "custom_meal",
+                    "label": "餐饮",
+                    "path": ["餐饮"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "餐饮",
+                    "output_sub_label": "",
+                },
+                {
+                    "code": "old_tag",
+                    "label": "旧标签",
+                    "path": ["历史"],
+                    "source": "custom",
+                    "status": "archived",
+                    "output_primary_label": "历史",
+                    "output_sub_label": "旧标签",
+                },
+            ],
+        }
+
+    @classmethod
+    def _configure_rule_tags(cls, app: object) -> None:
+        app._state_store.save_app_settings(
+            {
+                "bank_transaction_tags": cls._tag_dictionary_payload(),
+                "pending_invoice_tag_groups": {
+                    "version": 7,
+                    "groups": {
+                        "requires_invoice": {"tag_codes": []},
+                        "bank_statement_as_invoice": {"tag_codes": []},
+                        "no_invoice_required": {"tag_codes": []},
+                    },
+                },
+            }
+        )
+
+    @staticmethod
+    def _active_rule_codes(tag_dictionary: dict[str, object], *, excluding: set[str]) -> list[str]:
+        definitions = tag_dictionary.get("definitions") or tag_dictionary.get("tags") or []
+        return [
+            str(definition.get("code"))
+            for definition in list(definitions)
+            if isinstance(definition, dict)
+            and str(definition.get("code") or "")
+            and str(definition.get("status") or "active") == "active"
+            and str(definition.get("code")) not in excluding
+        ]
 
 
 if __name__ == "__main__":

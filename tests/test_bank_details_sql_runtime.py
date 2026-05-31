@@ -17,10 +17,14 @@ class FakeConnection:
         rows: list[object] | None = None,
         app_settings_payload: dict[str, object] | None = None,
         dirty_scope_rows: list[dict[str, object]] | None = None,
+        category_rows: list[dict[str, object]] | None = None,
+        confirmation_rows: list[dict[str, object]] | None = None,
     ) -> None:
         self.rows = list(rows or [])
         self.app_settings_payload = app_settings_payload
         self.dirty_scope_rows = list(dirty_scope_rows or [])
+        self.category_rows = list(category_rows or [])
+        self.confirmation_rows = list(confirmation_rows or [])
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
@@ -40,8 +44,10 @@ class FakeConnection:
         normalized_sql = " ".join(sql.lower().split())
         if "from job.read_model_dirty_scopes" in normalized_sql:
             return list(self.dirty_scope_rows)
+        if "from app.bank_transaction_categories" in normalized_sql:
+            return list(self.category_rows)
         if "from app.bank_transaction_category_confirmations" in normalized_sql:
-            return []
+            return list(self.confirmation_rows)
         value = self.rows.pop(0) if self.rows else []
         return list(value) if isinstance(value, list) else []
 
@@ -627,6 +633,75 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(repository.saved_rows[0]["category_sub_label"], "手续费")
         self.assertEqual(repository.saved_rows[0]["category_label_path"], ["费用", "手续费"])
         self.assertEqual(repository.saved_rows[0]["source_versions"]["bank_auto_tag_rules_version"], 2)
+
+    def test_rebuild_uses_manual_category_for_unmatched_transaction(self) -> None:
+        repository = CaptureBankDetailReadModelRepository()
+        connection = FakeConnection(
+            category_rows=[
+                {
+                    "transaction_id": "txn-manual",
+                    "category": "salary",
+                    "source": "manual",
+                    "version": 1,
+                    "raw_payload": {
+                        "normalized_payload": {
+                            "category_label": "工资",
+                            "category_path": ["自动识别", "工资"],
+                            "category_primary_label": "费用",
+                            "category_sub_label": "工资",
+                            "category_label_path": ["费用", "工资"],
+                            "manual_assignment": True,
+                        }
+                    },
+                }
+            ],
+            rows=[
+                [
+                    {
+                        "id": "txn-manual",
+                        "transaction_id": "uuid-manual",
+                        "account_no": "6222000011118106",
+                        "account_name": "云南溯源科技有限公司",
+                        "txn_direction": "income",
+                        "counterparty_name_raw": "房克丽",
+                        "amount": "160000.00",
+                        "signed_amount": "160000.00",
+                        "balance": "884077.96",
+                        "currency": "CNY",
+                        "txn_date": "2026-02-03",
+                        "trade_time": "2026-02-03 08:27:06",
+                        "summary": "电子汇入",
+                        "remark": "电子汇入",
+                        "bank_text_fields": [{"label": "摘要", "value": "电子汇入"}],
+                        "raw_payload": {
+                            "normalized_payload": {
+                                "imported_bank_name": "建设银行",
+                                "imported_bank_last4": "8106",
+                            }
+                        },
+                    }
+                ],
+                [],
+                [],
+            ],
+        )
+        builder = BankDetailSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+
+        result = builder.rebuild_bank_detail_read_model_scope("2026-02", source_version=9)
+
+        self.assertEqual(result["row_count"], 1)
+        row = repository.saved_rows[0]
+        self.assertEqual(row["manual_category_code"], "salary")
+        self.assertEqual(row["manual_category_source"], "manual")
+        self.assertEqual(row["auto_category_code"], None)
+        self.assertEqual(row["effective_category_code"], "salary")
+        self.assertEqual(row["effective_category_label"], "工资")
+        self.assertEqual(row["effective_category_primary_label"], "费用")
+        self.assertEqual(row["effective_category_sub_label"], "工资")
+        self.assertEqual(row["effective_category_source"], "manual")
+        self.assertEqual(row["category_resolution_status"], "manual_confirmed")
+        self.assertEqual(row["category_code"], "salary")
+        self.assertEqual(row["category_label"], "工资")
 
     def test_relation_tags_use_pair_relation_row_types_for_oa_attachment_invoices(self) -> None:
         connection = FakeConnection(

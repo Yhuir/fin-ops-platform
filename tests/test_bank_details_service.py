@@ -924,6 +924,45 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["category_code"], "fee")
         self.assertEqual(row["category_version"], 1)
 
+    def test_manual_category_classifies_unmatched_transaction(self) -> None:
+        transactions = [
+            self._transaction(
+                transaction_id="txn-manual",
+                trade_time="2026-04-03 09:00:00",
+                counterparty_name="房克丽",
+                summary="电子汇入",
+                remark="电子汇入",
+            )
+        ]
+        category_service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-manual",
+        )
+        category_service.assign_manual_category(
+            transaction_id="txn-manual",
+            category_code="salary",
+            actor="YNSYLP005",
+        )
+        service = BankDetailsService(
+            _ImportServiceStub(transactions),
+            category_service=category_service,
+            auto_category_service=BankTransactionAutoCategoryService(),
+        )
+
+        row = service.list_transactions(account_key="工商银行:6386")["rows"][0]
+
+        self.assertEqual(row["manual_category_code"], "salary")
+        self.assertEqual(row["manual_category_source"], "manual")
+        self.assertEqual(row["auto_category_code"], None)
+        self.assertEqual(row["effective_category_code"], "salary")
+        self.assertEqual(row["effective_category_label"], "工资")
+        self.assertEqual(row["effective_category_primary_label"], "工资")
+        self.assertEqual(row["effective_category_sub_label"], None)
+        self.assertEqual(row["effective_category_source"], "manual")
+        self.assertEqual(row["category_resolution_status"], "manual_confirmed")
+        self.assertEqual(row["category_code"], "salary")
+        self.assertEqual(row["category_label"], "工资")
+
     def test_manual_clear_does_not_suppress_auto_category(self) -> None:
         transactions = [
             self._transaction(

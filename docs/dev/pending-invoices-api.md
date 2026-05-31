@@ -298,9 +298,34 @@ GET /api/pending-invoices/rules
 PUT /api/pending-invoices/rules
 ```
 
-规则保存同一份 `pending_invoice_tag_groups`，不新增规则表。`PUT` 校验 unknown tag、archived tag 和重复分组，成功后写设置审计并标记 pending invoice read model dirty。
+规则保存仍复用同一份 `pending_invoice_tag_groups`，不新增规则表。当前规则专用接口只持久化两组可编辑规则：`bank_statement_as_invoice`、`no_invoice_required`；`requires_invoice` 由后端按 active 银行明细自动标签补集派生。
 
-规则组持久化银行明细标签 `code`，响应展示时实时从 `bank_transaction_tags` 解析当前标签名称。银行标签改名后，本接口返回的新规则名称应同步变化；被任一规则组引用的银行标签不得在 `/api/bank-details/auto-tag-rules` 中停用。
+`GET /api/pending-invoices/rules` 返回：
+
+- `groups.requires_invoice`、`groups.bank_statement_as_invoice`、`groups.no_invoice_required` 三组，供前端展示。
+- 每组 `tags[*]` 至少包含 `code`、`label`、`status`、`output_primary_label`、`output_sub_label`。
+- `groups.requires_invoice.tag_codes` 等于当前 `bank_transaction_tags` 中所有 `status=active` 标签 code 减去两个可编辑组 code 后的有序补集。
+- 兼容字段 `pending_invoice_tag_groups.groups.requires_invoice.tag_codes` 在响应中也镜像派生结果，但不作为可编辑持久化事实。
+
+`PUT /api/pending-invoices/rules` 接受：
+
+```json
+{
+  "groups": {
+    "bank_statement_as_invoice": { "tag_codes": ["internal_transfer"] },
+    "no_invoice_required": { "tag_codes": ["salary"] }
+  }
+}
+```
+
+- 后端只保存 `bank_statement_as_invoice` 和 `no_invoice_required`。
+- 旧客户端如果提交 `requires_invoice`，后端接受但忽略，并在响应中按 active 补集重算。
+- unknown tag、archived tag、重复分组校验只适用于两个可编辑持久化组。
+- 成功后沿用设置服务版本、审计和持久化路径，并标记 pending invoice read model dirty。
+
+规则组持久化银行明细标签 `code`，响应展示时实时从 `bank_transaction_tags` 解析当前标签名称。银行标签改名后，本接口返回的新规则名称应同步变化；被两个可编辑规则组引用的银行标签不得在 `/api/bank-details/auto-tag-rules` 中停用。
+
+`GET /api/pending-invoices/rows?direction=expense&filter=requires_invoice`、导出和 SQL pending invoice read model 也使用同一 active 补集语义：只有有效标签 code 位于 active 补集中的支出流水才属于 `requires_invoice`。无有效标签、未知标签或已停用标签不得被强制归入 `requires_invoice`。
 
 ## 导出
 

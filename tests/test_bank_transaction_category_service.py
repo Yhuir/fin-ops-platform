@@ -541,6 +541,73 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(result["updated_categories"][0]["category_path"], ["自定义", "餐费"])
         self.assertEqual(service.get("txn-custom")["category_code"], "custom_meal_without_invoice")
 
+    def test_assign_manual_category_uses_existing_manual_update_contract(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-manual",
+        )
+
+        result = service.assign_manual_category(
+            transaction_id="txn-manual",
+            category_code="salary",
+            actor="YNSYLP005",
+        )
+
+        self.assertEqual(result["updated_transaction_ids"], ["txn-manual"])
+        self.assertEqual(result["updated_categories"][0]["category_code"], "salary")
+        stored = service.get("txn-manual")
+        self.assertEqual(stored["category_code"], "salary")
+        self.assertEqual(stored["source"], "manual")
+        self.assertEqual(stored["category_version"], 1)
+
+    def test_clear_manual_category_reuses_manual_clear_contract(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-manual",
+        )
+        service.assign_manual_category(
+            transaction_id="txn-manual",
+            category_code="salary",
+            actor="YNSYLP005",
+        )
+
+        result = service.clear_manual_category(transaction_id="txn-manual", actor="YNSYLP005")
+
+        self.assertEqual(result["updated_categories"][0]["category_code"], None)
+        stored = service.get("txn-manual")
+        self.assertEqual(stored["category_code"], None)
+        self.assertEqual(stored["source"], "manual")
+        self.assertEqual(stored["category_version"], 2)
+
+    def test_assign_manual_category_rejects_archived_tag(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-new",
+        )
+        service.configure_tag_dictionary(
+            {
+                "version": 4,
+                "definitions": [
+                    {
+                        "code": "custom_archived_tag",
+                        "label": "历史停用标签",
+                        "path": ["历史"],
+                        "source": "custom",
+                        "status": "archived",
+                    }
+                ],
+            }
+        )
+
+        with self.assertRaises(BankTransactionCategoryValidationError) as context:
+            service.assign_manual_category(
+                transaction_id="txn-new",
+                category_code="custom_archived_tag",
+                actor="YNSYLP005",
+            )
+
+        self.assertEqual(context.exception.error_code, "archived_category_code")
+
     def test_archived_tag_remains_resolvable_but_cannot_be_new_manual_choice(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(
             {

@@ -6980,6 +6980,20 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       });
     }
+    if (
+      url.pathname.startsWith("/api/bank-details/transactions/")
+      && (
+        url.pathname.endsWith("/category-confirmation")
+        || url.pathname.endsWith("/category-assignment")
+      )
+    ) {
+      return jsonResponse({
+        body: {
+          ok: true,
+          affected_months: ["2026-04"],
+        },
+      });
+    }
 
     const handler = handlers[url.pathname];
     if (!handler) {

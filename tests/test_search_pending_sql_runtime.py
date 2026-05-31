@@ -119,6 +119,73 @@ class PendingProjectionConnection:
         return None
 
 
+class PendingComplementProjectionConnection:
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized:
+            return [
+                self._row("txn-fee", "fee", "手续费"),
+                self._row("txn-salary", "salary", "工资"),
+                self._row("txn-custom-meal", "custom_meal", "餐饮"),
+                self._row("txn-no-category", "", ""),
+                self._row("txn-archived", "custom_archived", "归档"),
+                self._row("txn-unknown", "unknown_external_code", "未知"),
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "bank_transaction_tags": {
+                        "version": 7,
+                        "definitions": [
+                            {"code": "fee", "label": "手续费", "status": "active"},
+                            {"code": "salary", "label": "工资", "status": "active"},
+                            {"code": "custom_meal", "label": "餐饮", "status": "active"},
+                            {"code": "custom_archived", "label": "归档", "status": "archived"},
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "groups": {
+                            "requires_invoice": {"tag_codes": ["legacy_requires_should_be_ignored"]},
+                            "bank_statement_as_invoice": {"tag_codes": ["fee"]},
+                            "no_invoice_required": {"tag_codes": ["salary"]},
+                        }
+                    },
+                }
+            }
+        return None
+
+    @staticmethod
+    def _row(transaction_id: str, category_code: str, category_label: str) -> dict:
+        return {
+            "transaction_id": transaction_id,
+            "counterparty_name_raw": transaction_id,
+            "trade_time": "2026-05-20 10:00:00",
+            "txn_date": "2026-05-20",
+            "amount": "118.00",
+            "balance": "1000.00",
+            "currency": "CNY",
+            "summary": "转账",
+            "remark": "",
+            "bank_serial_no": transaction_id,
+            "account_name": "工商银行",
+            "account_no": "622200001234",
+            "category_payload": (
+                {"category_code": category_code, "category_label": category_label}
+                if category_code
+                else {}
+            ),
+            "invoices": [],
+            "paid_total": "0.00",
+            "oa_applicant": "",
+            "oa_project_name": "",
+            "relation_case_ids": [],
+        }
+
+
 class SearchPendingSqlRuntimeTests(unittest.TestCase):
     def test_search_repository_reads_index_rows_without_state_fallback(self) -> None:
         connection = SearchPendingConnection(
@@ -549,6 +616,18 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("input_invoices", payload)
         self.assertIn("oa", payload)
         self.assertEqual(payload["bank_transaction"]["account_last4"], "1234")
+
+    def test_pending_invoice_sql_projection_uses_active_complement_for_requires_invoice_filter(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingComplementProjectionConnection())
+
+        rows = builder._pending_invoice_rows(direction="expense", filter_name="requires_invoice", month="2026-05")
+
+        self.assertEqual([row["payload"]["id"] for row in rows], ["txn-custom-meal"])
+        self.assertEqual(rows[0]["payload"]["filter_group"], "requires_invoice")
+        self.assertEqual(
+            rows[0]["payload"]["invoice_acquisition_status"]["matched_rule"]["group"],
+            "requires_invoice",
+        )
 
     def test_refresh_handler_rebuilds_search_and_pending_scopes(self) -> None:
         class FakeBuilder:

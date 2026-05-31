@@ -37,6 +37,8 @@ import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
 import {
+  assignBankDetailCategory,
+  clearBankDetailCategoryAssignment,
   confirmBankDetailCategory,
   downloadBankDetailTransactionsExport,
   fetchBankDetailAccounts,
@@ -745,14 +747,28 @@ function confirmationChoiceFromCandidate(
   };
 }
 
-function buildConfirmationChoiceGroups(
-  candidates: BankDetailTransaction["autoCandidateCategories"],
+function confirmationChoiceFromTagDefinition(tag: BankTransactionTagDefinition): ConfirmationChoice | null {
+  const categoryCode = candidateLabelPart(tag.code);
+  if (!categoryCode) {
+    return null;
+  }
+  const parts = tagDefinitionDisplayParts(tag);
+  const primaryLabel = candidateLabelPart(parts.primaryLabel) || tagDefinitionDisplayLabel(tag) || categoryCode;
+  const subLabel = candidateLabelPart(parts.subLabel) || primaryLabel;
+  return {
+    categoryCode,
+    primaryLabel,
+    subLabel,
+  };
+}
+
+function buildConfirmationChoiceGroupsFromChoices(
+  choices: Array<ConfirmationChoice | null>,
 ): ConfirmationChoiceGroup[] {
   const groups: ConfirmationChoiceGroup[] = [];
   const groupsByKey = new Map<string, ConfirmationChoiceGroup>();
   const seenCodes = new Set<string>();
-  candidates.forEach((candidate) => {
-    const choice = confirmationChoiceFromCandidate(candidate);
+  choices.forEach((choice) => {
     if (!choice || seenCodes.has(choice.categoryCode)) {
       return;
     }
@@ -769,16 +785,34 @@ function buildConfirmationChoiceGroups(
   return groups;
 }
 
+function buildConfirmationChoiceGroups(
+  candidates: BankDetailTransaction["autoCandidateCategories"],
+): ConfirmationChoiceGroup[] {
+  return buildConfirmationChoiceGroupsFromChoices(candidates.map(confirmationChoiceFromCandidate));
+}
+
+function buildAssignmentChoiceGroups(
+  tags: BankTransactionTagDefinition[],
+): ConfirmationChoiceGroup[] {
+  return buildConfirmationChoiceGroupsFromChoices(tags.map(confirmationChoiceFromTagDefinition));
+}
+
 function TypeCell({
   row,
+  categoryOptions,
   confirming,
   onConfirm,
+  onAssign,
   onRevoke,
+  onClearAssignment,
 }: {
   row: BankDetailTransaction;
+  categoryOptions: BankTransactionTagDefinition[];
   confirming: boolean;
   onConfirm: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
+  onAssign: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
   onRevoke: (row: BankDetailTransaction) => void;
+  onClearAssignment: (row: BankDetailTransaction) => void;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const confirmationGroups = useMemo(
@@ -787,24 +821,34 @@ function TypeCell({
       : []),
     [row.autoCandidateCategories, row.categoryResolutionStatus],
   );
+  const assignmentGroups = useMemo(
+    () => (row.categoryResolutionStatus === "unmatched" && !row.effectiveCategoryCode
+      ? buildAssignmentChoiceGroups(categoryOptions)
+      : []),
+    [categoryOptions, row.categoryResolutionStatus, row.effectiveCategoryCode],
+  );
+  const isManualAssignment = assignmentGroups.length > 0;
+  const selectionGroups = confirmationGroups.length > 0 ? confirmationGroups : assignmentGroups;
+  const selectionLabel = confirmationGroups.length > 0 ? "待确认" : "待分类";
+  const childLabelSuffix = confirmationGroups.length > 0 ? "候选子标签" : "可选子标签";
   const [selectedPrimaryKey, setSelectedPrimaryKey] = useState("");
-  const selectedGroup = confirmationGroups.find((group) => group.key === selectedPrimaryKey) ?? confirmationGroups[0] ?? null;
+  const selectedGroup = selectionGroups.find((group) => group.key === selectedPrimaryKey) ?? selectionGroups[0] ?? null;
 
   useEffect(() => {
-    if (!confirmationGroups.length) {
+    if (!selectionGroups.length) {
       if (selectedPrimaryKey) {
         setSelectedPrimaryKey("");
       }
       return;
     }
-    if (!confirmationGroups.some((group) => group.key === selectedPrimaryKey)) {
-      setSelectedPrimaryKey(confirmationGroups[0].key);
+    if (!selectionGroups.some((group) => group.key === selectedPrimaryKey)) {
+      setSelectedPrimaryKey(selectionGroups[0].key);
     }
-  }, [confirmationGroups, selectedPrimaryKey]);
+  }, [selectionGroups, selectedPrimaryKey]);
 
   const closeConfirmationPanel = () => setAnchorEl(null);
 
-  if (confirmationGroups.length > 0) {
+  if (selectionGroups.length > 0) {
     return (
       <>
         <Button
@@ -813,11 +857,11 @@ function TypeCell({
           aria-haspopup="menu"
           size="small"
           variant="outlined"
-          color="warning"
+          color={isManualAssignment ? "info" : "warning"}
           onClick={(event) => setAnchorEl(event.currentTarget)}
           disabled={confirming}
         >
-          待确认
+          {selectionLabel}
         </Button>
         <Popper
           anchorEl={anchorEl}
@@ -850,13 +894,13 @@ function TypeCell({
             >
               <Box className="bank-category-confirmation-columns">
                 <MenuList
-                  aria-label="待确认主标签"
+                  aria-label={`${selectionLabel}主标签`}
                   autoFocus
                   className="bank-category-confirmation-primary-list"
                   dense
                   variant="menu"
                 >
-                  {confirmationGroups.map((group) => (
+                  {selectionGroups.map((group) => (
                     <ListItemButton
                       className="bank-category-confirmation-primary-item"
                       component="button"
@@ -871,7 +915,7 @@ function TypeCell({
                 </MenuList>
                 <Divider flexItem orientation="vertical" />
                 <MenuList
-                  aria-label={`${selectedGroup?.primaryLabel ?? "已选主标签"}候选子标签`}
+                  aria-label={`${selectedGroup?.primaryLabel ?? "已选主标签"}${childLabelSuffix}`}
                   className="bank-category-confirmation-child-list"
                   dense
                   variant="menu"
@@ -883,7 +927,11 @@ function TypeCell({
                       key={choice.categoryCode}
                       onClick={() => {
                         closeConfirmationPanel();
-                        onConfirm(row, choice.categoryCode);
+                        if (isManualAssignment) {
+                          onAssign(row, choice.categoryCode);
+                        } else {
+                          onConfirm(row, choice.categoryCode);
+                        }
                       }}
                       role="menuitem"
                     >
@@ -913,7 +961,18 @@ function TypeCell({
           hierarchyTooltip
           label={displayLabel}
         />
-        <Button size="small" variant="text" onClick={() => onRevoke(row)} disabled={confirming}>
+        <Button
+          size="small"
+          variant="text"
+          onClick={() => {
+            if (row.effectiveCategorySource === "manual") {
+              onClearAssignment(row);
+            } else {
+              onRevoke(row);
+            }
+          }}
+          disabled={confirming}
+        >
           撤销
         </Button>
       </Stack>
@@ -1342,10 +1401,28 @@ export default function BankDetailsPage() {
       .finally(() => setCategoryMutationId(null));
   };
 
+  const handleAssignCategory = (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => {
+    setCategoryMutationId(row.id);
+    setError(null);
+    assignBankDetailCategory(row.id, categoryCode)
+      .then(() => setRefreshToken((current) => current + 1))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签设置失败。"))
+      .finally(() => setCategoryMutationId(null));
+  };
+
   const handleRevokeCategoryConfirmation = (row: BankDetailTransaction) => {
     setCategoryMutationId(row.id);
     setError(null);
     revokeBankDetailCategoryConfirmation(row.id)
+      .then(() => setRefreshToken((current) => current + 1))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签撤销失败。"))
+      .finally(() => setCategoryMutationId(null));
+  };
+
+  const handleClearCategoryAssignment = (row: BankDetailTransaction) => {
+    setCategoryMutationId(row.id);
+    setError(null);
+    clearBankDetailCategoryAssignment(row.id)
       .then(() => setRefreshToken((current) => current + 1))
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签撤销失败。"))
       .finally(() => setCategoryMutationId(null));
@@ -1706,9 +1783,12 @@ export default function BankDetailsPage() {
                         <TableCell align="center" className="bank-col-type">
                           <TypeCell
                             row={row}
+                            categoryOptions={categoryOptions}
                             confirming={categoryMutationId === row.id}
                             onConfirm={handleConfirmCategory}
+                            onAssign={handleAssignCategory}
                             onRevoke={handleRevokeCategoryConfirmation}
+                            onClearAssignment={handleClearCategoryAssignment}
                           />
                         </TableCell>
                         <TableCell align="right" className="bank-col-amount">

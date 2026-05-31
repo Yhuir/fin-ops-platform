@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  assignBankDetailCategory,
+  clearBankDetailCategoryAssignment,
   confirmBankDetailCategory,
   downloadBankDetailTransactionsExport,
   fetchBankDetailTransactions,
@@ -267,6 +269,25 @@ describe("bank details API", () => {
       body: JSON.stringify({ category_code: "fee" }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/bank-details/transactions/bank-detail-001/category-confirmation", expect.objectContaining({
+      method: "DELETE",
+    }));
+  });
+
+  test("assigns and clears unmatched bank detail manual categories through scoped endpoints", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await assignBankDetailCategory("bank-detail-unmatched", "salary");
+    await clearBankDetailCategoryAssignment("bank-detail-unmatched");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/bank-details/transactions/bank-detail-unmatched/category-assignment", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ category_code: "salary" }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/bank-details/transactions/bank-detail-unmatched/category-assignment", expect.objectContaining({
       method: "DELETE",
     }));
   });
