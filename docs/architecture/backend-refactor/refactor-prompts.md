@@ -10980,3 +10980,167 @@ PF-P037 已执行：
 - `test ! -e backend-go`：Pass。
 - `test -f docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`：Pass。
 - `rg -n "PostgreSQL|idempotency|unique|reserved|committed|failed|source_versions|outbox_event_ids|TOCTOU|PF-P038" docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`：Pass。
+
+用户已确认 PF-P037 `verified`。PF-P038 已生成并审查，下一步只允许执行 PF-P038；不得直接实现 repository、切 production wiring 或迁移更多 Workbench 写 API。
+
+## PF-P038 - Workbench Durable Idempotency Migration and Contract Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P038 - Workbench Durable Idempotency Migration and Contract Tests。
+
+Role: 你是一位严格的 Python/PostgreSQL 迁移与测试工程师，负责把 PF-P037 的 durable Workbench idempotency schema 规划落成可验证的 migration 和默认绿色测试门禁。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-durable-idempotency-planning`。
+- PF-P037 已由用户确认 `verified`。
+- PF-P037 产物是 `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`。
+- 当前 migrations 目录最新版本是 `0042_bank_detail_candidate_projection.sql`。
+- PF-P038 只允许新增 PostgreSQL migration 和测试门禁；不得实现 repository、不得修改生产 wiring、不得迁移更多 Workbench 写 API。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `backend/src/fin_ops_platform/postgres/migrate.py`
+   - `backend/src/fin_ops_platform/postgres/migrations/0042_bank_detail_candidate_projection.sql`
+   - `tests/test_postgres_migrations.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_platform_runtime_boundary_guards.py`
+2. 必须确认：
+   - 当前 active prompt 是 `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` planned。
+   - 当前分支是 `codex/workbench-durable-idempotency-planning`。
+   - PF-P037 状态为 `verified`。
+   - 工作区没有未提交变更和未跟踪临时文件。
+3. 必须用 CodeGraph 或源码确认当前 migration discovery test 的维护方式，尤其是 `EXPECTED_MIGRATIONS`、`EXPECTED_TABLES`、`migration_sql()` 和 schema assertion 风格。
+
+Goal:
+新增 Workbench durable idempotency PostgreSQL schema migration 和默认绿色测试门禁，为后续 PF-P039 实现 `PostgresWorkbenchIdempotencyRepository` 提供稳定 schema contract。
+
+Allowed Scope:
+- 允许新增：
+  - `backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`
+  - 必要时新增 `tests/test_workbench_idempotency_migration_contract.py`
+- 允许修改：
+  - `tests/test_postgres_migrations.py`
+  - `tests/test_workbench_idempotency_contract.py`，仅限默认绿色的 record/schema contract 或明确 future/expectedFailure，不得破坏默认 CI。
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- 允许小幅更新 UoW 设计文档中的 PF-P038 执行状态。
+
+Forbidden Scope:
+- 不实现 `PostgresWorkbenchIdempotencyRepository`。
+- 不新增 `services/postgres_repositories/workbench_idempotency.py`，除非只是空文件也不允许；repository 实现留给 PF-P039。
+- 不修改 `server.py`、`workbench_uow.py`、`workbench_idempotency.py` 或其它生产代码。
+- 不切换 `InMemoryWorkbenchIdempotencyRepository`。
+- 不新增 feature flag wiring。
+- 不迁移更多 Workbench 写 API。
+- 不修改前端、部署、网关、auth/session、worker routing。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Migration Work:
+1. 新增 `0043_workbench_idempotency_records.sql`。
+2. Migration 必须创建或修正 `app.workbench_idempotency_records`，字段至少包含：
+   - `id uuid primary key default gen_random_uuid()`
+   - `tenant_id text not null default 'default'`
+   - `actor_id text not null`
+   - `action_name text not null`
+   - `idempotency_key text not null`
+   - `request_fingerprint text not null`
+   - `status text not null default 'reserved'`
+   - `request_payload jsonb not null default '{}'::jsonb`
+   - `response_payload jsonb not null default '{}'::jsonb`
+   - `source_versions jsonb not null default '{}'::jsonb`
+   - `outbox_event_ids jsonb not null default '[]'::jsonb`
+   - `trace_id text`
+   - `reserved_at timestamptz not null default now()`
+   - `completed_at timestamptz`
+   - `expires_at timestamptz`
+   - `last_error text`
+   - `created_at timestamptz not null default now()`
+   - `updated_at timestamptz not null default now()`
+3. Migration 必须包含：
+   - status check：`reserved` / `committed` / `failed`
+   - request fingerprint check：64 位 lowercase hex
+   - unique index on `(tenant_id, actor_id, idempotency_key)`
+   - action/status diagnostic index
+   - expires_at cleanup index
+   - committed replay lookup index
+4. Migration 必须按现有风格处理 grants：
+   - `fin_ops_api`：select/insert/update
+   - `fin_ops_worker`：select
+   - `fin_ops_readonly`：select
+   - `fin_ops_migrator`：select/insert/update
+5. Migration 不得创建 trigger、function 或 cleanup job，除非已有仓库模式明确需要；默认只做 schema。
+
+Required Test Work:
+1. 更新 `tests/test_postgres_migrations.py`：
+   - `EXPECTED_MIGRATIONS` 追加 `0043_workbench_idempotency_records.sql`。
+   - version range 从 1..43 调整到 1..44。
+   - `EXPECTED_TABLES` 追加 `app.workbench_idempotency_records`。
+2. 增加默认绿色测试，验证 aggregated migration SQL 包含：
+   - `app.workbench_idempotency_records`
+   - `workbench_idempotency_identity_uidx`
+   - `(tenant_id, actor_id, idempotency_key)`
+   - 不存在以 `(tenant_id, action_name, idempotency_key)` 作为 unique identity 的设计
+   - `workbench_idempotency_status_chk`
+   - `reserved` / `committed` / `failed`
+   - `workbench_idempotency_fingerprint_chk`
+   - `request_payload jsonb`
+   - `response_payload jsonb`
+   - `source_versions jsonb`
+   - `outbox_event_ids jsonb`
+   - runtime grants
+3. 可新增 `tests/test_workbench_idempotency_migration_contract.py`，但不得引入真实数据库依赖。
+4. 如添加未来 PostgreSQL repository 行为测试，在没有 repository 实现前必须使用 `unittest.expectedFailure` 或明确跳过机制，且默认 CI 必须绿色。
+5. 不得写会因为 `PostgresWorkbenchIdempotencyRepository` 尚不存在而默认失败的测试。
+
+Required Documentation Updates:
+- 更新 `workbench-durable-idempotency-plan.md`：
+  - 记录 PF-P038 是否已创建 `0043_workbench_idempotency_records.sql`。
+  - 记录仍未实现 repository 和 production wiring。
+- 更新状态机和 prompt 执行结果。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+- 如果新增 migration contract test：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_migration_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- `rg -n "0043_workbench_idempotency_records|app.workbench_idempotency_records|workbench_idempotency_identity_uidx|tenant_id, actor_id, idempotency_key|reserved|committed|failed" backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql tests/test_postgres_migrations.py`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P038 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录变更文件、验证结果、是否新增 migration、是否新增 tests、是否保持 repository/wiring 未实现。
+  - 记录下一步建议：`PF-P039 - Workbench Durable Idempotency Repository Integration`。
+- 更新 `refactor-prompts.md` 的 PF-P038 执行结果。
+- 不执行 Merge Gate、Traffic Gate、部署或 push。
+
+Stop Conditions:
+- 如果需要改生产代码才能让测试通过，停止并记录 blocker。
+- 如果 migration 需要改变 PF-P024/PF-P025 的 unique identity 契约，停止并记录冲突。
+- 如果 migration discovery 需要重写迁移系统，停止并记录 blocker。
+- 如果默认 CI 会因 future repository contract 失败，停止并改成 future/expectedFailure 或推迟到 PF-P039。
+```
+
+### 审查结论
+
+- PF-P038 的边界正确：它只把 PF-P037 的 durable idempotency schema 规划落成 migration 和测试门禁，不实现 repository，不切 production wiring。
+- PF-P038 必须保持默认 CI 绿色；repository 行为测试不能在 repository 尚未实现时直接失败。
+- PF-P038 应坚持 `(tenant_id, actor_id, idempotency_key)` 作为 durable unique identity，并用测试防止误把 `action_name` 放入 unique key。
+- PF-P038 完成后，下一条合理 prompt 是 `PF-P039 - Workbench Durable Idempotency Repository Integration`。

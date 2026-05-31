@@ -540,3 +540,17 @@ PF-P039 should:
 - still avoid migrating additional Workbench write APIs.
 
 Only after PF-P039 is verified should we continue migrating more Workbench write APIs.
+
+## 11. PF-P038 Planned Boundary
+
+用户已确认 PF-P037 `verified`。下一条 planned prompt：
+
+`PF-P038 - Workbench Durable Idempotency Migration and Contract Tests`
+
+PF-P038 的目标是把本文档的 schema 规划落成迁移文件和默认绿色测试门禁：
+
+- 新增 `backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`。
+- 更新 `tests/test_postgres_migrations.py` 的 migration discovery 和 table inventory。
+- 增加 migration/schema contract tests，验证 `app.workbench_idempotency_records`、status/fingerprint constraints、JSONB 字段、grants、indexes 和 durable unique identity。
+
+PF-P038 不应实现 `PostgresWorkbenchIdempotencyRepository`，不应修改 UoW 或 production wiring，也不应迁移更多 Workbench 写 API。Repository integration 应拆到 PF-P039。

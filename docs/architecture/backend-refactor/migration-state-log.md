@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` 已执行，等待用户确认是否可标记 `verified` |
-| 当前 active prompt | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` (`implemented`) |
-| 最近 verified prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` 已由用户确认 `verified`；`PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` (`planned`) |
+| 最近 verified prompt | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` |
 | 当前分支 | `codex/workbench-durable-idempotency-planning` |
-| 最近验证 | PF-P037 已产出 `workbench-durable-idempotency-plan.md`；仅修改文档；未写 SQL migration、repository 或生产代码 |
-| 下一条允许任务 | 等待用户确认 PF-P037 是否可标记 `verified`；确认后生成并审查 `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` |
+| 最近验证 | PF-P037 已产出 `workbench-durable-idempotency-plan.md`；仅修改文档；未写 SQL migration、repository 或生产代码；用户已确认 `verified` |
+| 下一条允许任务 | 执行 `PF-P038`；它只允许新增 durable idempotency migration 和默认绿测试门禁，不得实现 repository、切 production wiring 或迁移更多 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -3914,7 +3914,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3940,7 +3940,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 执行结果
 
-- 状态：`implemented`，等待用户确认后才可标记 `verified`。
+- 状态：`verified`，用户已确认 PF-P037 可落锁。
 - 产物：
   - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
 - 读取/覆盖范围：
@@ -3969,8 +3969,28 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
   - `test -f docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`：Pass。
   - `rg -n "PostgreSQL|idempotency|unique|reserved|committed|failed|source_versions|outbox_event_ids|TOCTOU|PF-P038" docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`：Pass，关键术语均覆盖。
 - 下一条 Prompt 上下文：
-  - 用户确认 PF-P037 verified 后，建议生成并审查 `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests`。
+  - 用户已确认 PF-P037 verified。
+  - `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` 已生成并审查。
   - PF-P038 应新增 migration 和测试门禁，但仍不应切 production wiring 或迁移更多 Workbench 写 API。
+
+### PF-P038 - Workbench Durable Idempotency Migration and Contract Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只允许新增 durable idempotency PostgreSQL migration 和默认绿测试门禁。
+- 目标 migration：`backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`。
+- 必须更新 migration discovery / schema contract tests。
+- 可新增默认绿的 migration contract test，验证 table、constraints、unique index、JSONB 字段、grants 和 action_name 不进入 unique key。
+- 不实现 `PostgresWorkbenchIdempotencyRepository`。
+- 不切生产 wiring，不启用 PostgreSQL store，不迁移更多 Workbench 写 API。
+
+#### 审查结论
+
+- PF-P038 是 PF-P037 后合理的小切片：先把 durable idempotency 的 schema 和测试门禁落地，避免 repository implementation 在没有 schema contract 的情况下先行。
+- PF-P038 必须保持默认 CI 绿色；任何未来 repository 行为测试如果尚未实现，必须使用明确的 future/expectedFailure 机制或推迟到 PF-P039。
+- PF-P038 完成后不应直接进入更多 API 迁移；下一步应生成 `PF-P039 - Workbench Durable Idempotency Repository Integration`。
 
 ## 维护规则
 
