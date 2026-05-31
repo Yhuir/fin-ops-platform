@@ -56,7 +56,7 @@ type AutoTagRulesDrawerProps = {
   refreshScope?: BankAutoTagRefreshScope;
 };
 
-type DraftRule = BankAutoTagEditableRule & { localId: string };
+type DraftRule = Omit<BankAutoTagEditableRule, "priority"> & { localId: string; priority: number | "" };
 type RuleConditionKey = "containsAny" | "containsAll" | "exactAny" | "noneOf";
 type RuleGroup = {
   key: string;
@@ -94,7 +94,7 @@ function cloneRule(rule: BankAutoTagEditableRule, index: number): DraftRule {
   const sortOrder = typeof rule.sortOrder === "number" ? rule.sortOrder : index + 1;
   return {
     ...rule,
-    priority: 2,
+    priority: normalizeRulePriority(rule.priority),
     sortOrder,
     localId: rule.code || `new-${index}`,
     accountScope: { type: "any", values: [] },
@@ -134,7 +134,7 @@ function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
   return {
     ...(rule.code ? { code: rule.code } : {}),
     label,
-    priority: 2,
+    priority: normalizeRulePriority(rule.priority),
     ...(typeof rule.sortOrder === "number" ? { sortOrder: rule.sortOrder } : {}),
     outputPrimaryLabel,
     outputSubLabel,
@@ -718,9 +718,23 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                         onEdit={() => setConditionEditor({ localId: rule.localId, key: "noneOf", label: "不包含字样", values: rule.rules.noneOf })}
                       />
                       <TableCell className="bank-auto-tag-priority-cell">
-                        <Typography component="span" className="bank-auto-tag-priority-value" aria-label={`${ruleDisplayLabel(rule)} 优先级`}>
-                          2
-                        </Typography>
+                        <TextField
+                          className="bank-auto-tag-priority-value"
+                          variant="standard"
+                          size="small"
+                          type="number"
+                          value={rule.priority}
+                          disabled={readonly}
+                          inputProps={{
+                            "aria-label": `${ruleDisplayLabel(rule)} 优先级`,
+                            min: 2,
+                            step: 1,
+                          }}
+                          onChange={(event) => updateActiveRule(rule.localId, (current) => ({
+                            ...current,
+                            priority: event.target.value === "" ? "" : Number(event.target.value),
+                          }))}
+                        />
                       </TableCell>
                       <TableCell align="right">
                         <Stack direction="row" justifyContent="flex-end" spacing={0.5}>

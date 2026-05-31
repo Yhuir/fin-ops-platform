@@ -297,7 +297,7 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertNotIn("route_to", external_turnover)
         self.assertNotIn("audit", external_turnover)
 
-    def test_legacy_sequential_order_priorities_are_normalized_to_priority_two(self) -> None:
+    def test_auto_tag_rules_payload_preserves_user_configured_priorities(self) -> None:
         payload = BankTransactionCategoryService.auto_tag_rules_payload(
             {
                 "version": 3,
@@ -327,8 +327,8 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         )
 
         rules_by_code = {rule["code"]: rule for rule in payload["active_rules"]}
-        self.assertEqual(rules_by_code["custom_fee"]["priority"], 2)
-        self.assertEqual(rules_by_code["custom_salary"]["priority"], 2)
+        self.assertEqual(rules_by_code["custom_fee"]["priority"], 10)
+        self.assertEqual(rules_by_code["custom_salary"]["priority"], 20)
         self.assertEqual(rules_by_code["custom_fee"]["sort_order"], 1)
         self.assertEqual(rules_by_code["custom_salary"]["sort_order"], 2)
 

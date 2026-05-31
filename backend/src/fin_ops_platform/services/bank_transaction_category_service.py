@@ -1644,7 +1644,6 @@ class BankTransactionCategoryService:
             if code in definitions_by_code and definitions_by_code[code]["source"] == "system":
                 continue
             definitions_by_code[code] = definition
-        cls._normalize_legacy_auto_tag_priority_sequence(definitions_by_code)
         return {
             "version": version,
             "definitions": sorted(definitions_by_code.values(), key=lambda item: (item["source"] != "system", item["code"])),

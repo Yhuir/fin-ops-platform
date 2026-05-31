@@ -72,8 +72,9 @@ function matchFieldCombobox(row: HTMLElement) {
 }
 
 function lastEditableRow(drawer: HTMLElement) {
-  const rows = Array.from(drawer.querySelectorAll(".bank-auto-tag-rule-row"));
-  const row = rows.at(-1);
+  const emptyPrimaryInput = Array.from(drawer.querySelectorAll('input[placeholder="主标签名称"]'))
+    .find((input) => input instanceof HTMLInputElement && input.value === "");
+  const row = emptyPrimaryInput?.closest("tr");
   if (!(row instanceof HTMLElement)) {
     throw new Error("rule row not found");
   }
@@ -150,7 +151,8 @@ describe("AutoTagRulesDrawer", () => {
     expect(systemRow).not.toHaveTextContent("只读");
     expect(within(drawer).getAllByDisplayValue("费用")).toHaveLength(1);
     expect(within(drawer).getByDisplayValue("手续费")).toBeInTheDocument();
-    expect(Array.from(drawer.querySelectorAll(".bank-auto-tag-priority-value")).map((item) => item.textContent)).toEqual(["2", "2"]);
+    expect(within(drawer).getByRole("spinbutton", { name: "费用 / 手续费 优先级" })).toHaveValue(10);
+    expect(within(drawer).getByRole("spinbutton", { name: "费用 / 工资 优先级" })).toHaveValue(20);
     expect(within(drawer).queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
     expect(within(drawer).queryByRole("button", { name: /上移/ })).not.toBeInTheDocument();
     expect(within(drawer).queryByRole("button", { name: /下移/ })).not.toBeInTheDocument();
@@ -202,21 +204,28 @@ describe("AutoTagRulesDrawer", () => {
     const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
     const activeRules = payload?.active_rules as Array<Record<string, unknown>>;
     expect(activeRules.filter((rule) => rule.code === "fee" || rule.code === "salary")).toEqual([
-      expect.objectContaining({ code: "fee", output_primary_label: "支出费用", priority: 2 }),
-      expect.objectContaining({ code: "salary", output_primary_label: "支出费用", priority: 2 }),
+      expect.objectContaining({ code: "fee", output_primary_label: "支出费用", priority: 10 }),
+      expect.objectContaining({ code: "salary", output_primary_label: "支出费用", priority: 20 }),
     ]);
   });
 
-  test("normalizes every ordinary rule priority to two instead of carrying legacy row order priorities", async () => {
-    installMockApiFetch();
+  test("edits ordinary rule priority and submits it with the saved rules", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
     renderDrawer();
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
     await waitForLoadedRule(drawer, "手续费");
+    const feePriority = within(drawer).getByRole("spinbutton", { name: "费用 / 手续费 优先级" });
+    await user.clear(feePriority);
+    await user.type(feePriority, "3");
+    await user.click(buttonByName(drawer, "保存"));
 
-    expect(Array.from(drawer.querySelectorAll(".bank-auto-tag-priority-value")).map((item) => item.textContent)).toEqual(["2", "2"]);
-    expect(within(drawer).queryByText("10")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("20")).not.toBeInTheDocument();
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    expect(payload?.active_rules).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "fee", priority: 3 }),
+      expect.objectContaining({ code: "salary", priority: 20 }),
+    ]));
   });
 
   test("manages match fields with select all and clear actions without showing all text as an option", async () => {
