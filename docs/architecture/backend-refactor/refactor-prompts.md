@@ -8837,7 +8837,7 @@ Post-Flight:
 
 ## PF-P030-MG - Workbench Stale Write Foundation Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -11144,3 +11144,31 @@ Stop Conditions:
 - PF-P038 必须保持默认 CI 绿色；repository 行为测试不能在 repository 尚未实现时直接失败。
 - PF-P038 应坚持 `(tenant_id, actor_id, idempotency_key)` 作为 durable unique identity，并用测试防止误把 `action_name` 放入 unique key。
 - PF-P038 完成后，下一条合理 prompt 是 `PF-P039 - Workbench Durable Idempotency Repository Integration`。
+
+### 执行结果
+
+PF-P038 已执行：
+
+- 新增 `backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`。
+- 更新 `tests/test_postgres_migrations.py`：
+  - `EXPECTED_MIGRATIONS` 追加 `0043_workbench_idempotency_records.sql`。
+  - version range 调整为 `range(1, 44)`。
+  - `EXPECTED_TABLES` 追加 `app.workbench_idempotency_records`。
+  - 新增 default-green schema contract，覆盖 table、status/fingerprint check、JSONB 字段、unique identity、diagnostic/cleanup/replay indexes 和 grants。
+  - 明确防止 `(tenant_id, action_name, idempotency_key)` 成为 durable unique identity。
+- 未新增 `tests/test_workbench_idempotency_migration_contract.py`，避免制造重复测试文件。
+- 未实现 `PostgresWorkbenchIdempotencyRepository`。
+- 未新增 `services/postgres_repositories/workbench_idempotency.py`。
+- 未修改 `server.py`、`workbench_uow.py`、`workbench_idempotency.py` 或 production wiring。
+- 未迁移更多 Workbench 写 API。
+
+验证摘要：
+
+- RED：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v` 在 migration 缺失时失败，失败原因为 `0043_workbench_idempotency_records.sql` 不存在。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`：Pass。
+- 完整 PF-P038 验证命令已在执行收尾阶段运行并记录到状态机。
+
+下一步：
+
+- 用户确认后，将 PF-P038 标记为 `verified`。
+- 下一条 prompt 应生成并审查 `PF-P039 - Workbench Durable Idempotency Repository Integration`。

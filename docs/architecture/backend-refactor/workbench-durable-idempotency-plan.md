@@ -554,3 +554,38 @@ PF-P038 的目标是把本文档的 schema 规划落成迁移文件和默认绿�
 - 增加 migration/schema contract tests，验证 `app.workbench_idempotency_records`、status/fingerprint constraints、JSONB 字段、grants、indexes 和 durable unique identity。
 
 PF-P038 不应实现 `PostgresWorkbenchIdempotencyRepository`，不应修改 UoW 或 production wiring，也不应迁移更多 Workbench 写 API。Repository integration 应拆到 PF-P039。
+
+## 12. PF-P038 Execution Result
+
+PF-P038 已落地 durable idempotency 的 schema contract，但仍未切换任何生产路径。
+
+已完成：
+
+- 新增 `backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`。
+- 创建 `app.workbench_idempotency_records`，字段覆盖 tenant、actor、action、idempotency key、request fingerprint、status、request/response payload、source versions、outbox event ids、trace id、reserve/complete/expiry timestamps 和诊断错误。
+- 固化 durable unique identity：`(tenant_id, actor_id, idempotency_key)`。
+- 保留 `action_name` 作为诊断字段和 action/status index 维度，但不进入 durable unique key。
+- 新增 status check：`reserved` / `committed` / `failed`。
+- 新增 request fingerprint check：64 位 lowercase hex。
+- 新增 expires cleanup index 和 committed replay lookup index。
+- 增加 role grants：
+  - `fin_ops_api`: `select, insert, update`
+  - `fin_ops_worker`: `select`
+  - `fin_ops_readonly`: `select`
+  - `fin_ops_migrator`: `select, insert, update`
+- 更新 `tests/test_postgres_migrations.py`，用默认绿色 migration/schema contract 测试锁定上面的 schema、索引、约束和 grants。
+
+仍未完成：
+
+- 未实现 `PostgresWorkbenchIdempotencyRepository`。
+- 未新增 `services/postgres_repositories/workbench_idempotency.py`。
+- 未切换 `InMemoryWorkbenchIdempotencyRepository`。
+- 未引入 feature flag wiring。
+- 未修改 `server.py`、`workbench_uow.py` 或真实 Workbench 写 API。
+- 未实现 PostgreSQL row locking、expired reserved takeover、committed replay repository API 或 transaction-bound reserve/commit。
+
+下一步建议：
+
+`PF-P039 - Workbench Durable Idempotency Repository Integration`
+
+PF-P039 应基于 `0043_workbench_idempotency_records.sql` 实现 PostgreSQL repository，并用 fake/contract/integration-style 测试验证 reserve、commit、same-fingerprint replay、different-fingerprint conflict 和 transaction-bound rollback 语义。PF-P039 仍不应顺手迁移更多 Workbench 写 API。

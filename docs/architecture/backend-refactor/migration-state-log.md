@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` 已由用户确认 `verified`；`PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` (`planned`) |
+| 当前阶段 | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` 已执行完成，等待用户确认 `verified` |
+| 当前 active prompt | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` (`implemented`) |
 | 最近 verified prompt | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` |
 | 当前分支 | `codex/workbench-durable-idempotency-planning` |
-| 最近验证 | PF-P037 已产出 `workbench-durable-idempotency-plan.md`；仅修改文档；未写 SQL migration、repository 或生产代码；用户已确认 `verified` |
-| 下一条允许任务 | 执行 `PF-P038`；它只允许新增 durable idempotency migration 和默认绿测试门禁，不得实现 repository、切 production wiring 或迁移更多 Workbench 写 API |
+| 最近验证 | PF-P038 已新增 `0043_workbench_idempotency_records.sql` 和默认绿 migration/schema contract tests；未实现 repository；未切 production wiring；未迁移更多 Workbench 写 API |
+| 下一条允许任务 | 用户确认 PF-P038 后标记 `verified`；然后生成并审查 `PF-P039 - Workbench Durable Idempotency Repository Integration` |
 
 ## Prompt 执行日志
 
@@ -3975,7 +3975,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P038 - Workbench Durable Idempotency Migration and Contract Tests
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3991,6 +3991,45 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - PF-P038 是 PF-P037 后合理的小切片：先把 durable idempotency 的 schema 和测试门禁落地，避免 repository implementation 在没有 schema contract 的情况下先行。
 - PF-P038 必须保持默认 CI 绿色；任何未来 repository 行为测试如果尚未实现，必须使用明确的 future/expectedFailure 机制或推迟到 PF-P039。
 - PF-P038 完成后不应直接进入更多 API 迁移；下一步应生成 `PF-P039 - Workbench Durable Idempotency Repository Integration`。
+
+#### 执行结果
+
+- 新增 migration：`backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`。
+- 更新 migration discovery 和 schema contract tests：`tests/test_postgres_migrations.py`。
+- 未新增 repository 文件；未实现 `PostgresWorkbenchIdempotencyRepository`。
+- 未修改 `server.py`、`workbench_uow.py`、`workbench_idempotency.py` 或 production wiring。
+- 未迁移更多 Workbench 写 API。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`
+- `tests/test_postgres_migrations.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+
+#### 验证
+
+- RED：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v` 在 migration 缺失时失败，失败点为缺少 `0043_workbench_idempotency_records.sql`。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`：Pass。
+- `git status --short --branch`：Pass，仅包含本轮预期变更和新增 migration。
+- `git ls-files --others --exclude-standard`：Pass，仅列出本轮新增 `0043_workbench_idempotency_records.sql`。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass。
+- `rg -n "0043_workbench_idempotency_records|app.workbench_idempotency_records|workbench_idempotency_identity_uidx|tenant_id, actor_id, idempotency_key|reserved|committed|failed" backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql tests/test_postgres_migrations.py`：Pass。
+
+#### 未关闭风险
+
+- PostgreSQL repository 仍未实现。
+- Durable idempotency 尚未接入 UoW production wiring。
+- 真实 PostgreSQL 并发锁语义、expired reserved policy 和 replay integration 留给 PF-P039 之后的小切片。
+
+#### 下一条 Prompt 上下文
+
+- 下一条建议 prompt：`PF-P039 - Workbench Durable Idempotency Repository Integration`。
+- PF-P039 应实现 PostgreSQL repository integration，但仍必须避免顺手迁移更多 Workbench 写 API，除非 prompt 明确授权。
 
 ## 维护规则
 
