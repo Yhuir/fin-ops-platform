@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` 已执行并完成本地 `main` 复验，等待用户确认 `verified` |
-| 当前 active prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P039 - Workbench Durable Idempotency Repository Integration` |
+| 当前阶段 | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` 已由用户确认 `verified`，并已 push 到 `origin/main` |
+| 当前 active prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P039-MG 已在功能分支和本地 `main` 上完成验证；merge commit `8c9aa130`；未执行 Traffic Gate、未部署、未 push |
-| 下一条允许任务 | 等待用户确认 PF-P039-MG `verified`；确认后再决定是否执行 `git push origin main`；push 后下一条 prompt 必须从最新 `main` 新建分支生成 |
+| 最近验证 | PF-P039-MG 已在功能分支和本地 `main` 上完成验证；merge commit `8c9aa130`；用户已确认 `verified`；已 push `origin/main`；未执行 Traffic Gate、未部署 |
+| 下一条允许任务 | 从最新 `main` 新建分支，并生成/审查下一条 prompt；不得直接在 `main` 继续开发 |
 
 ## Prompt 执行日志
 
@@ -4124,7 +4124,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4159,7 +4159,8 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认 PF-P039-MG `verified`。
+- 用户已确认 PF-P039-MG `verified`，且已执行 `git push origin main`。
+- 下一条 prompt 必须从最新 `main` 新建分支生成。
 
 #### 执行结果
 
@@ -4174,8 +4175,8 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
   - `git merge-base --is-ancestor main HEAD`：Pass，功能分支包含最新 `main`。
   - `git checkout main`：Pass。
   - `git merge --no-ff codex/workbench-durable-idempotency-planning -m "Merge branch 'codex/workbench-durable-idempotency-planning': workbench durable idempotency foundation"`：Pass，无冲突。
-- 当前 `main` 状态：
-  - `main...origin/main [ahead 8]`，尚未 push。
+- 合入后 `main` 状态：
+  - 合入完成时 `main...origin/main [ahead 8]`。
 
 #### Feature Branch 验证
 
@@ -4206,13 +4207,19 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 
-#### 未执行
+#### 未执行（MG 阶段）
 
 - 未执行 Traffic Gate。
 - 未部署。
 - 未访问生产。
 - 未默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
-- 未执行 `git push origin main`。
+- MG 执行阶段未自动 push；用户确认 verified 后已执行 `git push origin main`。
+
+#### 用户确认
+
+- 用户已确认 PF-P039-MG `verified`。
+- 已执行 `git push origin main`，远端已包含 PF-P039-MG 合入内容。
+- 本次 push 只推送 Git 远端主干；未部署、未访问生产、未执行 Traffic Gate，且未默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
 
 #### 剩余风险
 
@@ -4223,9 +4230,9 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一条 Prompt 上下文
 
-- 用户确认 PF-P039-MG `verified` 后，可以执行 `git push origin main`。
-- push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
-- 下一条建议 prompt 应继续围绕 durable idempotency 的 rollout readiness 或 Workbench 剩余写 API UoW 接入，但不得在当前 `main` 或旧功能分支上直接继续开发。
+- 下一条 prompt 必须从最新 `main` 新建分支生成。
+- 下一条建议 prompt 应继续围绕 durable idempotency 的 rollout readiness 或 Workbench 剩余写 API UoW 接入。
+- 不得在当前 `main` 或旧功能分支上直接继续开发。
 
 ## 维护规则
 

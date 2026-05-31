@@ -11535,7 +11535,7 @@ Stop Conditions:
 
 ### 执行结果
 
-PF-P039-MG 已执行，当前状态为 `implemented`，等待用户确认后才能标记 `verified`。
+PF-P039-MG 已执行，并已由用户确认 `verified`。
 
 合入结果：
 
@@ -11584,6 +11584,6 @@ Main 复验：
 
 下一步：
 
-- 用户确认 PF-P039-MG `verified`。
-- 确认后再决定是否执行 `git push origin main`。
-- push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
+- 已执行 `git push origin main`，远端已包含 PF-P039-MG 合入内容。
+- 本次 push 只推送 Git 远端主干；未部署、未访问生产、未执行 Traffic Gate，且未默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 下一条 prompt 必须从最新 `main` 新建分支生成。
