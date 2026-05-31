@@ -11532,3 +11532,58 @@ Stop Conditions:
 - 它必须以 `main...HEAD` 的真实 diff 为准，因为当前功能分支包含 PF-P037/PF-P038/PF-P039 的 durable idempotency 累计文档、migration、repository 和测试变更。
 - 它必须验证 feature branch 和 merge 后的 `main`，并且不得自动 push。
 - 执行完成后只能标记 `implemented`；必须等用户确认后才能标记 `verified`。
+
+### 执行结果
+
+PF-P039-MG 已执行，当前状态为 `implemented`，等待用户确认后才能标记 `verified`。
+
+合入结果：
+
+- 功能分支：`codex/workbench-durable-idempotency-planning`。
+- 合入目标：本地 `main`。
+- Merge commit：`8c9aa130`。
+- 合入命令：
+  - `git merge --no-ff codex/workbench-durable-idempotency-planning -m "Merge branch 'codex/workbench-durable-idempotency-planning': workbench durable idempotency foundation"`
+- 合入无冲突。
+- 当前 `main` 状态：`main...origin/main [ahead 8]`，尚未 push。
+
+Feature branch 验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --name-status main...HEAD`：Pass，仅包含 durable idempotency 范围。
+- `git diff --check main...HEAD`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`：Pass，20 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`：Pass，5 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `rg -n "PostgresWorkbenchIdempotencyRepository|workbench_idempotency_records|for_transaction|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY|InMemoryWorkbenchIdempotencyRepository" backend/src/fin_ops_platform tests docs/architecture/backend-refactor`：Pass，228 matches。
+
+Main 复验：
+
+- `git status --short --branch`：Pass，`main...origin/main [ahead 8]`。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check HEAD~1..HEAD`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`：Pass，20 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`：Pass，5 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+未执行：
+
+- 未执行 Traffic Gate。
+- 未部署，未访问生产。
+- 未默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未 push `origin/main`。
+
+下一步：
+
+- 用户确认 PF-P039-MG `verified`。
+- 确认后再决定是否执行 `git push origin main`。
+- push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。

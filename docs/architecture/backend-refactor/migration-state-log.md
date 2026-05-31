@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P039 - Workbench Durable Idempotency Repository Integration` 已由用户确认 `verified`；`PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` 已执行并完成本地 `main` 复验，等待用户确认 `verified` |
+| 当前 active prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P039 - Workbench Durable Idempotency Repository Integration` |
-| 当前分支 | `codex/workbench-durable-idempotency-planning` |
-| 最近验证 | PF-P039 已新增 PostgreSQL durable idempotency repository、UoW transaction-bound idempotency seam 和 disabled-by-default wiring；验证集通过；commit `6e0c6ee5`；用户已确认 `verified` |
-| 下一条允许任务 | 执行 `PF-P039-MG`；它必须统一覆盖当前功能分支中尚未合入 `main` 的 durable idempotency 累计 diff，至少包含 PF-P038 + PF-P039，不得执行 Traffic Gate、部署或默认启用 durable idempotency |
+| 当前分支 | `main` |
+| 最近验证 | PF-P039-MG 已在功能分支和本地 `main` 上完成验证；merge commit `8c9aa130`；未执行 Traffic Gate、未部署、未 push |
+| 下一条允许任务 | 等待用户确认 PF-P039-MG `verified`；确认后再决定是否执行 `git push origin main`；push 后下一条 prompt 必须从最新 `main` 新建分支生成 |
 
 ## Prompt 执行日志
 
@@ -4124,7 +4124,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -4159,7 +4159,73 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户执行 PF-P039-MG。
+- 等待用户确认 PF-P039-MG `verified`。
+
+#### 执行结果
+
+- 功能分支：`codex/workbench-durable-idempotency-planning`。
+- 本地合入目标：`main`。
+- Merge commit：`8c9aa130`。
+- 合入方式：
+  - `git fetch origin`：Pass。
+  - `git checkout main`：Pass。
+  - `git pull --ff-only origin main`：Pass，`Already up to date`。
+  - `git checkout codex/workbench-durable-idempotency-planning`：Pass。
+  - `git merge-base --is-ancestor main HEAD`：Pass，功能分支包含最新 `main`。
+  - `git checkout main`：Pass。
+  - `git merge --no-ff codex/workbench-durable-idempotency-planning -m "Merge branch 'codex/workbench-durable-idempotency-planning': workbench durable idempotency foundation"`：Pass，无冲突。
+- 当前 `main` 状态：
+  - `main...origin/main [ahead 8]`，尚未 push。
+
+#### Feature Branch 验证
+
+- `git status --short --branch`：Pass，位于 `codex/workbench-durable-idempotency-planning`。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --name-status main...HEAD`：Pass，仅包含 durable idempotency 范围。
+- `git diff --check main...HEAD`：Pass。
+- `git log --oneline main..HEAD`：Pass，覆盖 durable idempotency planning、migration、repository integration 和 MG planning commits。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`：Pass，20 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`：Pass，5 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `rg -n "PostgresWorkbenchIdempotencyRepository|workbench_idempotency_records|for_transaction|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY|InMemoryWorkbenchIdempotencyRepository" backend/src/fin_ops_platform tests docs/architecture/backend-refactor`：Pass，228 matches。
+
+#### Main 复验
+
+- `git status --short --branch`：Pass，`main...origin/main [ahead 8]`。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check HEAD~1..HEAD`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`：Pass，20 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`：Pass，5 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+#### 未执行
+
+- 未执行 Traffic Gate。
+- 未部署。
+- 未访问生产。
+- 未默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未执行 `git push origin main`。
+
+#### 剩余风险
+
+- Durable idempotency 仍为显式 feature flag 控制，默认生产行为未切换。
+- 真实 actor/tenant 仍未接 auth context。
+- `reserved` 记录 expired takeover、清理任务、失败重试策略和生产观测指标仍未实现。
+- 未执行真实 PostgreSQL 并发 integration test。
+
+#### 下一条 Prompt 上下文
+
+- 用户确认 PF-P039-MG `verified` 后，可以执行 `git push origin main`。
+- push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
+- 下一条建议 prompt 应继续围绕 durable idempotency 的 rollout readiness 或 Workbench 剩余写 API UoW 接入，但不得在当前 `main` 或旧功能分支上直接继续开发。
 
 ## 维护规则
 
