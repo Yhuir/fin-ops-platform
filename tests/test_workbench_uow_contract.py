@@ -169,6 +169,52 @@ class _RecordingIdempotencyStore:
         self.records[key] = result
 
 
+class _TransactionBoundIdempotencyStore:
+    def __init__(self, root: "_TransactionAwareIdempotencyStore", transaction: object) -> None:
+        self._root = root
+        self._transaction = transaction
+
+    def reserve(self, **kwargs: object) -> None:
+        self._root.reserve_calls.append({"transaction": self._transaction, **kwargs})
+
+    def commit(self, **kwargs: object) -> None:
+        self._root.commit_calls.append({"transaction": self._transaction, **kwargs})
+
+
+class _TransactionAwareIdempotencyStore:
+    def __init__(self) -> None:
+        self.get_calls: list[dict[str, object]] = []
+        self.bound_transactions: list[object] = []
+        self.reserve_calls: list[dict[str, object]] = []
+        self.commit_calls: list[dict[str, object]] = []
+
+    def get_committed_or_reserved(self, *args: object, **kwargs: object) -> object | None:
+        if args:
+            tenant_id, actor_id, idempotency_key = args
+        else:
+            tenant_id = kwargs["tenant_id"]
+            actor_id = kwargs["actor_id"]
+            idempotency_key = kwargs["idempotency_key"]
+        self.get_calls.append(
+            {
+                "tenant_id": tenant_id,
+                "actor_id": actor_id,
+                "idempotency_key": idempotency_key,
+            }
+        )
+        return None
+
+    def for_transaction(self, transaction: object) -> _TransactionBoundIdempotencyStore:
+        self.bound_transactions.append(transaction)
+        return _TransactionBoundIdempotencyStore(self, transaction)
+
+    def reserve(self, **_: object) -> None:
+        raise AssertionError("durable idempotency reserve must use the transaction-bound store")
+
+    def commit(self, **_: object) -> None:
+        raise AssertionError("durable idempotency commit must use the transaction-bound store")
+
+
 class WorkbenchUoWContractTests(unittest.TestCase):
     def _transaction_bound_writer(self) -> Callable[..., object]:
         method = getattr(RuntimeQueueRepository, "enqueue_read_model_refresh_in_transaction", None)
@@ -545,6 +591,33 @@ class WorkbenchUoWContractTests(unittest.TestCase):
 
         self.assertEqual(history_appends, 1)
         self.assertIn("cash:idem-1", idempotency.records)
+
+    def test_idempotency_reserve_and_commit_use_transaction_bound_store(self) -> None:
+        connection = _RecordingConnection()
+        idempotency = _TransactionAwareIdempotencyStore()
+        uow = self._new_uow(connection=connection, idempotency_store=idempotency)  # type: ignore[arg-type]
+
+        def handler(ctx: object) -> dict[str, object]:
+            self.assertIs(ctx.idempotency_store._transaction, connection.transaction_obj)
+            return {"case_id": "CASE-TX-IDEMPOTENCY", "affected_scope_keys": ["2026-05"]}
+
+        result = self._run_uow(
+            uow,
+            _Command(
+                action_name="confirm_link",
+                scope_keys=["2026-05"],
+                idempotency_key="confirm:tx-bound",
+                request_fingerprint="fp:confirm:tx-bound",
+                actor_id="finance-1",
+                payload={"case_id": "CASE-TX-IDEMPOTENCY"},
+            ),
+            handler,
+        )
+
+        self.assertEqual(result["case_id"], "CASE-TX-IDEMPOTENCY")
+        self.assertEqual(idempotency.bound_transactions, [connection.transaction_obj])
+        self.assertEqual(idempotency.reserve_calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(idempotency.commit_calls[0]["transaction"], connection.transaction_obj)
 
     def test_outbox_payload_contains_source_version_for_each_dirty_scope(self) -> None:
         connection = _RecordingConnection(_RecordingTransaction(dirty_source_version=9))

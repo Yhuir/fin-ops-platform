@@ -660,3 +660,23 @@ PF-P036 已执行，用户已确认状态为 `verified`。
 该 MG 必须统一覆盖 PF-P035 到 PF-P036 的完整 diff。它只验证并合入 Workbench pair relation 写路径中的 `confirm-link` 和 `cancel-link` UoW integration，不得扩大到 exception、ignore/unignore、cash special、withdraw、personal advance repayment、matching/candidates 或 query/read-model。
 
 PF-P036-MG 通过并由用户确认后，才允许用户决定是否 `git push origin main`。push 后，下一条 prompt 必须从最新 `main` 新建分支生成。
+
+## 20. PF-P037 Durable Idempotency Planning
+
+PF-P036-MG 已确认 `verified` 并推送到 `origin/main`。当前已从最新 `main` 创建新分支：
+
+`codex/workbench-durable-idempotency-planning`
+
+下一条 planned prompt：
+
+`PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning`
+
+PF-P037 只做 durable idempotency PostgreSQL store 的规划和文档回写，不写 SQL migration，不实现 repository，不切换生产 wiring，也不迁移更多 Workbench 写 API。
+
+PF-P037 必须重点处理当前剩余的生产级缺口：
+
+- `WorkbenchWriteUnitOfWork` 已经具备 idempotency get/reserve/commit/replay skeleton，但当前 store 仍是 `InMemoryWorkbenchIdempotencyRepository`。
+- 真实 `confirm-link` / `cancel-link` 现在依赖进程内 replay/conflict primitive，跨进程和重启后不可 durable。
+- PostgreSQL store 必须明确 unique identity、row locking/concurrency、reserve/commit/replay/failed semantics、retention、migration、repository API、UoW TOCTOU 消除方式和测试门禁。
+
+PF-P037 完成并 verified 后，下一条实现切片才应进入 `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` 或等价的小步实现 prompt。

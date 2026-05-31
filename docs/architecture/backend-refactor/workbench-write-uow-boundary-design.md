@@ -578,3 +578,23 @@ PF-P036-MG has been generated and reviewed:
 `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`
 
 The cumulative MG must cover the full PF-P035 through PF-P036 diff. It should merge only the pair relation UoW boundary for `confirm-link` and `cancel-link`; it must not claim durable PostgreSQL idempotency, real auth actor/tenant propagation, or broader Workbench write-path completion.
+
+## 21. PF-P037 Durable Idempotency Boundary Planning
+
+PF-P036-MG has been confirmed `verified` and pushed to `origin/main`. The next branch is:
+
+`codex/workbench-durable-idempotency-planning`
+
+Planned prompt:
+
+`PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning`
+
+This is a planning-only boundary step. It must not add SQL migrations, implement a PostgreSQL repository, switch production wiring, or migrate more Workbench write APIs.
+
+The design problem is now narrower and more concrete:
+
+- `WorkbenchWriteUnitOfWork` already performs idempotency lookup, reserve, commit and replay through a store-like dependency.
+- `confirm-link` and `cancel-link` are the first real Workbench write APIs using that UoW boundary.
+- The remaining blocker is durability: current production wiring still uses `InMemoryWorkbenchIdempotencyRepository`.
+
+PF-P037 must define the PostgreSQL table/repository/concurrency/rollout/test strategy that allows later slices to replace the in-memory store without widening Workbench write-path scope.
