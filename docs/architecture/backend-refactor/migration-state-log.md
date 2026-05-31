@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` 已 verified 并同步到 `origin/main` |
-| 当前 active prompt | 无；`PF-P034-MG - Workbench Stale Guard Group Merge Gate` (`verified`) |
-| 最近 verified prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P034-MG 在功能分支和本地 `main` 上均通过 Workbench write characterization、stale write contract、UoW contract、idempotency contract 和 platform runtime guard 测试；用户确认 verified；`main` 已 push 到 `origin/main`；未部署、未 Traffic Gate |
-| 下一条允许任务 | 从最新 `main` 新建分支，再生成并审查下一条 Workbench prompt；不得直接在 `main` 上实现 |
+| 当前阶段 | `PF-P036 - Workbench Cancel Link UoW Integration Slice` 已由用户确认 `verified`；`PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P036 - Workbench Cancel Link UoW Integration Slice` |
+| 当前分支 | `codex/workbench-confirm-link-uow` |
+| 最近验证 | PF-P036 在功能分支通过 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试；未执行 MG、未部署、未 Traffic Gate、未 push |
+| 下一条允许任务 | 执行 `PF-P036-MG`；它必须统一覆盖 PF-P035 到 PF-P036 的完整 diff，不得进入下一条业务迁移 |
 
 ## Prompt 执行日志
 
@@ -3680,6 +3680,190 @@ PF-P034 已完成实现和验证，并已由用户确认 `verified`。下一步�
 #### 下一条 Prompt 上下文
 
 PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认 `verified`，并已同步到 `origin/main`。后续 prompt 必须从最新 `main` 新建分支生成，不得直接在 `main` 上实现。
+
+### PF-P035 - Workbench Confirm Link UoW Integration Slice
+
+状态：`verified`
+
+#### 范围
+
+- 从最新 `main` 新建分支：`codex/workbench-confirm-link-uow`。
+- 只迁移 `POST /api/workbench/actions/confirm-link` / `WorkbenchWriteFacade.confirm_link` 到 `WorkbenchWriteUnitOfWork`。
+- 必须保持旧前端未携带 `idempotency_key` / `expected_versions` 时的 response shape 与 characterization 行为。
+- 必须先补/调整测试，再实现。
+- 如果真实 PostgreSQL repository 或 transaction-bound facts writer 不足以安全完成 `confirm-link` UoW 集成，必须停止并记录 blocker，不得扩大到其它 API 或伪造事务保证。
+
+#### 预期读取文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+- `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- `docs/architecture/backend-refactor/workbench-writes-and-matching-plan.md`
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`
+- `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+- `backend/src/fin_ops_platform/services/runtime_queue.py`
+- `tests/test_workbench_write_characterization.py`
+- `tests/test_workbench_uow_contract.py`
+- `tests/test_workbench_idempotency_contract.py`
+- `tests/test_workbench_stale_write_contract.py`
+- `tests/test_platform_runtime_boundary_guards.py`
+
+#### 审查结论
+
+- PF-P035 是 PF-P034-MG 后的合理下一步，因为 `confirm-link` 是 Workbench 写路径的核心入口，也是 UoW 目标矩阵中的第一批迁移对象。
+- 本 prompt 必须小切片推进，不得顺手迁移 `cancel-link`、exception、ignore/unignore、cash special、withdraw、personal advance repayment 或 matching/candidates。
+- 该 prompt 是实现 prompt，不是 Merge Gate；完成后只能标记 `implemented`，等待用户确认后再决定是否生成对应 MG。
+
+#### 执行结果
+
+- 状态：`implemented`，等待用户确认后才可标记 `verified`。
+- 完成范围：
+  - `WorkbenchWriteFacade.confirm_link` 在通过现有 validation、row expansion 和 amount check 后接入 `WorkbenchWriteUnitOfWork`。
+  - `Application._workbench_write_facade()` 只负责组装细粒度依赖，新增 confirm-link UoW factory、transaction-bound pair relation persistence、transaction-bound reconciliation decision consumption。
+  - `RuntimeQueueReadModelRefreshWriter` 将 UoW dirty/outbox/source_version 写入代理到 `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction()`。
+  - legacy 非 PostgreSQL / 无 UoW 环境仍保留原 confirm-link response shape 与 legacy 调度行为。
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- 验证结果：
+  - `git status --short --branch`：Pass，当前分支 `codex/workbench-confirm-link-uow`，仅本轮文件变更。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，36 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 剩余风险：
+  - confirm-link 的 idempotency 仍依赖当前 `InMemoryWorkbenchIdempotencyRepository` primitive；真实 PostgreSQL durable idempotency store / SQL migration 仍未实现。
+  - actor/tenant 仍使用现有默认值；后续需要接入真实 auth context 后再提升到生产级审计身份。
+  - 本轮没有迁移 cancel-link、exception、ignore/unignore、cash special、withdraw 或其它 Workbench 写路径。
+- 下一条 Prompt 上下文：
+  - 用户已确认 PF-P035 verified。
+  - PF-P035-MG 已延后：`PF-P035-MG deferred; cumulative MG will cover PF-P035 through PF-P036`。
+  - 当前允许生成并执行 PF-P036；PF-P036 只迁移 `cancel-link` 到 UoW，不得迁移其它 Workbench 写路径。
+
+### PF-P036 - Workbench Cancel Link UoW Integration Slice
+
+状态：`verified`
+
+#### 范围
+
+- 继续使用当前分支：`codex/workbench-confirm-link-uow`。
+- PF-P035-MG 已延后，累计 MG 当前计划覆盖 PF-P035 到 PF-P036 的完整 diff。
+- 只迁移 `POST /api/workbench/actions/cancel-link` / `WorkbenchWriteFacade.cancel_link` 到 `WorkbenchWriteUnitOfWork`。
+- 必须保留 PF-P031/PF-P032/PF-P033/PF-P034 已完成的 stale guard 行为，尤其是 cancel-link expected relation conflict。
+- 不得迁移 exception、ignore/unignore、cash special、withdraw、personal advance repayment、query/read-model 或 matching/candidates。
+
+#### 预期读取文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+- `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`
+- `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+- `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
+- `tests/test_workbench_write_characterization.py`
+- `tests/test_workbench_uow_contract.py`
+- `tests/test_workbench_idempotency_contract.py`
+- `tests/test_workbench_stale_write_contract.py`
+- `tests/test_platform_runtime_boundary_guards.py`
+
+#### 审查结论
+
+- PF-P036 是 PF-P035 后合理的小批次延续，因为 `confirm-link` 与 `cancel-link` 都属于 pair relation facts/history 写路径，适合由同一个累计 MG 覆盖。
+- PF-P036 必须复用 PF-P035 建立的 UoW 组装模式和 transaction-bound persistence，不得引入新的上帝对象依赖。
+- PF-P036 完成后仍不得直接合入 main；应等待用户确认后生成累计 MG，除非用户明确要求再追加一个紧密相关的小切片。
+
+#### 执行结果
+
+- 状态：`verified`，用户已确认 PF-P036 可落锁。
+- 完成范围：
+  - `WorkbenchWriteFacade.cancel_link` 在解析请求、读取 active relation、执行 stale expected relation guard 后接入 `WorkbenchWriteUnitOfWork`。
+  - cancel-link 使用 transaction-bound pair relation persistence 和 UoW dirty/outbox/source_version writer。
+  - `WorkbenchWriteUnitOfWork.replay_committed(command)` 支持在 relation lookup 前进行 idempotency replay/conflict probe，避免第二次 cancel 因 active relation 已不存在而退化为 404。
+  - legacy 无 idempotency key 的 duplicate cancel 行为保持不变：第二次 cancel 仍返回 not found。
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- 验证结果：
+  - `git status --short --branch`：Pass，当前分支 `codex/workbench-confirm-link-uow`，仅本轮文件变更。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 剩余风险：
+  - cancel-link 的 idempotency 仍依赖当前 `InMemoryWorkbenchIdempotencyRepository` primitive；真实 PostgreSQL durable idempotency store / SQL migration 仍未实现。
+  - actor/tenant 仍使用默认值，后续仍需接入真实 auth context。
+  - 本轮没有迁移 exception、ignore/unignore、cash special、withdraw、personal advance repayment 或其它 Workbench 写路径。
+- 下一条 Prompt 上下文：
+  - PF-P035-MG 仍 deferred；累计 MG 当前计划覆盖 PF-P035 到 PF-P036。
+  - `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已生成并审查。
+  - 下一步只允许执行 PF-P036-MG；不得直接迁移下一条 Workbench 写 API。
+
+### PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 这是累计 Merge Gate，只覆盖 PF-P035 `confirm-link` UoW 和 PF-P036 `cancel-link` UoW 的完整 diff。
+- 必须确认 PF-P035 和 PF-P036 均为 `verified`。
+- 必须确认 PF-P035-MG 是 deferred，且本 MG 是该 deferred gate 的替代累计门禁。
+- 允许合入的生产代码范围仅限 Workbench pair relation UoW integration：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_workbench_write_characterization.py`
+- 允许合入的文档范围仅限本轮 prompt、状态机和 Workbench UoW 设计/执行结果文档。
+
+#### 明确禁止
+
+- 不迁移 exception、ignore/unignore、cash special、withdraw、personal advance repayment、matching/candidates、query/read-model 或其它 Workbench 写路径。
+- 不新增 SQL migration，不新增 PostgreSQL durable idempotency repository。
+- 不修改前端、网关、部署、auth/session、worker routing。
+- 不执行 Traffic Gate、部署、生产访问或 `git push origin main`。
+- 严禁把 untracked 临时文件、`.pkl`、`.sqlite`、`__pycache__`、测试输出或 `backend-go` 带入提交。
+- 严禁使用 `git add .` 或 `git add -A`。
+
+#### 验证门禁
+
+PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 changed files 白名单，再在功能分支和本地 `main` 合入后分别执行 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试。
+
+#### 审查结论
+
+- PF-P035 与 PF-P036 同属 Workbench pair relation facts/history 写路径，使用累计 MG 合并是合理的。
+- 当前仍存在生产级 idempotency 缺口：真实 PostgreSQL durable idempotency store 尚未实现。因此 MG 只能证明 pair relation UoW transaction boundary 进入 main，不代表 Workbench 写路径全部生产完成。
+- PF-P036-MG 不应继续扩大业务范围。通过后用户确认 `verified`，再由用户决定是否 `git push origin main`。
 
 ## 维护规则
 

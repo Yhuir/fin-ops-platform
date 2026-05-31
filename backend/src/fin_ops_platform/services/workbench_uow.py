@@ -95,6 +95,52 @@ class WorkbenchWriteUnitOfWork:
                 )
             return result
 
+    def replay_committed(self, command: Any) -> dict[str, Any] | None:
+        idempotency = _idempotency_request_for(command)
+        if idempotency is None:
+            return None
+        existing = _idempotency_get(self._idempotency_store, idempotency)
+        if existing is None:
+            return None
+        _raise_on_fingerprint_conflict(existing, idempotency)
+        return _replay_committed_idempotency_response(existing)
+
+
+class RuntimeQueueReadModelRefreshWriter:
+    def __init__(
+        self,
+        queue_repository: Any,
+        *,
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+    ) -> None:
+        self._queue_repository = queue_repository
+        self._tenant_id = str(tenant_id or "default")
+        self._priority = str(priority or "normal")
+        self._trace_id = str(trace_id).strip() if trace_id else None
+
+    def enqueue_refresh(
+        self,
+        *,
+        transaction: Any,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+    ) -> Any:
+        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+        if not callable(enqueue):
+            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction.")
+        return enqueue(
+            transaction=transaction,
+            scope_type=scope_type,
+            scope_key=scope_key,
+            reason=reason,
+            tenant_id=self._tenant_id,
+            priority=self._priority,
+            trace_id=self._trace_id,
+        )
+
 
 def _scope_keys_for(command: Any, handler_result: dict[str, Any]) -> list[str]:
     raw_scope_keys = getattr(command, "scope_keys", None) or handler_result.get("affected_scope_keys") or []
