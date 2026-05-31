@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已生成并审查 `PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate`，等待执行 |
-| 当前 active prompt | `PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate` (`planned`) |
+| 当前阶段 | 已执行 `PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate`，已本地合入 `main` 并完成 main 复验，等待用户确认 verified |
+| 当前 active prompt | `PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy` |
-| 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
-| 最近验证 | 用户已确认 PF-P044 `verified`；已生成 cumulative MG，未执行 merge、Traffic Gate、部署或 push |
-| 下一条允许任务 | 执行 PF-P044-MG；未经用户确认不得将 PF-P044-MG 标记为 `verified` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P044-MG 已在本地 `main` 完成 no-ff merge；main 复验通过；未执行 Traffic Gate、部署、生产访问、feature flag 打开或 push |
+| 下一条允许任务 | 用户确认 PF-P044-MG `verified`；之后可执行 `git push origin main`，或生成 cleanup/retention、real PostgreSQL concurrency、observability 中的下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -4669,7 +4669,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -4732,10 +4732,45 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `test ! -e backend-go`：Pass。
 - 文档检索：Pass，`refactor-prompts.md` 已包含 PF-P044-MG，正文以 `/goal` 开头；状态机已标记 PF-P044 `verified` 且 PF-P044-MG `planned`。
 
+#### 执行结果
+
+- Feature branch pre-flight：Pass。
+  - 当前分支曾为 `codex/workbench-durable-idempotency-rollout-readiness`。
+  - `git status --short --branch`：Pass，工作区干净。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `git diff --name-only main...HEAD`：Pass，只包含 PF-P044-MG expected changed files。
+- Upstream sync / merge：Pass。
+  - `git checkout main`：Pass。
+  - `git pull origin main`：Pass，`main` 已是最新 `origin/main`。
+  - `git merge --no-ff codex/workbench-durable-idempotency-rollout-readiness -m "Merge branch 'codex/workbench-durable-idempotency-rollout-readiness': workbench durable idempotency rollout guards"`：Pass。
+  - Merge commit：`5fb40888`。
+- Main post-merge verification：Pass。
+  - `git status --short --branch`：Pass，`main...origin/main [ahead 12]`。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，22 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，18 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，43 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`：Pass，4 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+  - `rg -n "FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY|PostgresWorkbenchIdempotencyRepository|WorkbenchIdempotencyFailed|WorkbenchIdempotencyInProgress|taken_over_expired|actor_id_for_session|tenant_id_for_session|cleanup/retention|row-lock concurrency|observability" backend/src/fin_ops_platform tests docs/architecture/backend-refactor`：Pass。
+- 未执行：Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改、`FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 打开、push。
+- 仍保留为后续 gate / blocker：
+  - `cleanup/retention`。
+  - `real PostgreSQL row-lock concurrency`。
+  - `observability/metrics/logging`。
+  - migration apply/runbook。
+
 #### 下一步
 
-- 执行 PF-P044-MG。
-- PF-P044-MG 执行后如成功，应完成合入 main、main 复验和状态机更新；未经用户确认不得标记 `verified`。
+- 用户确认 PF-P044-MG `verified`。
+- 确认后可执行 `git push origin main`。
+- 若继续拆 durable idempotency rollout blocker，下一条 prompt 应聚焦 cleanup/retention、real PostgreSQL concurrency 或 observability 中的一个。
 
 ## 维护规则
 
