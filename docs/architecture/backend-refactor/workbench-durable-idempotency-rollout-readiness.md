@@ -137,3 +137,21 @@ PF-P042 已完成 same-key same-fingerprint `reserved` / in-progress duplicate p
 - confirm-link / cancel-link facade 将 in-progress primitive 映射为稳定 409 payload，不落入 persistence unavailable。
 
 本轮仍不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。feature flag 打开前，仍需处理 expired takeover、failed policy、cleanup/retention、真实 PostgreSQL concurrency 和 observability。
+
+## 12. PF-P043 Planned Boundary
+
+用户已确认 PF-P042 `verified`。PF-P043 将继续留在 PF-P040 起的 cumulative MG 范围内。
+
+PF-P043 只处理 `expired reserved takeover`：
+
+- active same-key same-fingerprint `reserved` 必须继续返回稳定 `idempotency_key_in_progress`。
+- expired same-key same-fingerprint `reserved` 可以被相同请求接管并继续执行 handler。
+- same-key different-fingerprint 即使已过期，也必须继续返回 `idempotency_key_conflict`。
+- 接管成功后，handler、dirty scope、outbox 和 idempotency commit 仍必须在同一个 UoW transaction 内完成。
+
+PF-P043 不会打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。即使 PF-P043 完成，以下 gate 仍不得视为 ready：
+
+- failed reservation policy
+- cleanup/retention
+- real PostgreSQL row-lock concurrency
+- observability/metrics/logging

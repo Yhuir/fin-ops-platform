@@ -841,4 +841,41 @@ PF-P042 已实现 deterministic same-key same-fingerprint in-progress duplicate 
 
 `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`
 
-PF-P043 应只处理 expired `reserved` 判断、锁行接管或 mark-failed-then-retry 策略，并继续保持 feature flag 默认关闭。也可以先生成 cumulative MG，如果用户决定本轮 PF-P040 到 PF-P042 的 rollout blocker 切片已经达到可合并粒度。
+PF-P043 应只处理 expired `reserved` 判断与锁行接管策略，并继续保持 feature flag 默认关闭；failed retry policy 留给后续独立 prompt。也可以先生成 cumulative MG，如果用户决定本轮 PF-P040 到 PF-P042 的 rollout blocker 切片已经达到可合并粒度。
+
+## 20. PF-P043 Planned Boundary
+
+用户已确认 PF-P042 `verified`。下一条 planned prompt：
+
+`PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`
+
+PF-P043 的目标是建立 deterministic expired reserved takeover policy：
+
+- active same-key same-fingerprint `reserved` 继续返回 `idempotency_key_in_progress`。
+- expired same-key same-fingerprint `reserved` 可以被相同请求接管并继续执行 handler。
+- same-key different-fingerprint 即使已过期，也必须继续返回 `idempotency_key_conflict`，不得被 takeover 覆盖。
+- committed same-fingerprint 继续 replay response。
+- 接管后的 handler、dirty scope、outbox 和 idempotency commit 必须继续在同一个 Workbench UoW transaction 内完成。
+
+PF-P043 的关键设计点是 expiration/takeover outcome seam。实现时必须能区分：
+
+- `created=True`：本请求新建 reservation。
+- `existing active reserved`：已有 active reservation，被判定为 in-progress。
+- `taken_over_expired=True` 或等价语义：已有 expired reservation 被当前请求安全接管。
+
+建议实现边界：
+
+- 在 `workbench_idempotency.py` 中新增可测试的 expiration helper，并扩展 reserve outcome 语义。
+- 在 `workbench_uow.py` 中集中处理 active reserved、expired takeover、different-fingerprint conflict 和 committed replay。
+- 在 in-memory repository 中支持 deterministic takeover，不覆盖 active reservation。
+- 在 PostgreSQL repository 中使用 fake-testable SQL contract 表达 row lock / conditional takeover；默认 CI 仍不连接真实 PostgreSQL。
+
+PF-P043 不应：
+
+- 启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 修改 `0043_workbench_idempotency_records.sql`。
+- 处理 failed reservation retry policy、cleanup/retention、observability 或真实 PostgreSQL concurrency integration test。
+- 迁移更多 Workbench 写 API。
+- 执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+PF-P043 完成后仍应留在 PF-P040 起的 cumulative MG 范围内。只有用户确认相关 prompt verified 后，才允许生成覆盖 PF-P040 起完整 diff 的 cumulative Merge Gate。

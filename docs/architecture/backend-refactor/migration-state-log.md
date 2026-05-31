@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已执行 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`，等待用户确认 |
-| 当前 active prompt | `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy` (`implemented`) |
-| 最近 verified prompt | `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` |
+| 当前阶段 | 已生成并审查 `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`，等待执行 |
+| 当前 active prompt | `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy` (`planned`) |
+| 最近 verified prompt | `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy` |
 | 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
-| 最近验证 | PF-P042 新增 in-progress primitive / reserve outcome tests 并完成红绿循环；未执行 Merge Gate、Traffic Gate、部署或 push；未经用户确认不得标记 `verified` |
-| 下一条允许任务 | 等待用户确认 PF-P042 `verified`；之后可继续生成 PF-P043 expired reserved takeover，或按用户要求生成 PF-P042-MG/cumulative MG |
+| 最近验证 | 用户已确认 PF-P042 `verified`；PF-P043 只生成/审查，未执行代码实现、Merge Gate、Traffic Gate、部署或 push |
+| 下一条允许任务 | 执行 PF-P043；PF-P043 完成后仍留在 PF-P040 起 cumulative MG 范围，未经用户确认不得标记 `verified` |
 
 ## Prompt 执行日志
 
@@ -4394,7 +4394,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4486,9 +4486,62 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认 PF-P042 `verified`。
-- 之后可继续生成 `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`，或按用户要求生成 PF-P042-MG/cumulative MG。
+- 用户已确认 PF-P042 `verified`。
+- 已生成并审查 `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`；下一步允许执行 PF-P043。
 - PF-P042 仍不触发 MG；cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
+
+### PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 Workbench durable idempotency 的 expired `reserved` takeover policy。
+- 明确过期 `reserved` 与 active `reserved` 的分流：
+  - active `reserved` same-fingerprint 继续返回 `idempotency_key_in_progress`。
+  - expired `reserved` same-fingerprint 可以被同一请求安全接管并继续执行 handler。
+  - expired `reserved` different-fingerprint 仍不得绕过 `idempotency_key_conflict`。
+- 允许最小扩展 reserve outcome / repository contract，使 UoW 能区分 existing-active、existing-expired-taken-over、created。
+- 不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不处理 failed reservation retry policy、cleanup/retention、observability 或真实 PostgreSQL concurrency integration test。
+- 不迁移更多 Workbench 写 API。
+- 不执行 Merge Gate、Traffic Gate、部署或 push。
+
+#### 审查结论
+
+- PF-P043 是 PF-P042 verified 后合理的下一步：rollout readiness matrix 中 `expired reserved takeover` 仍是打开 durable idempotency feature flag 前的 blocker。
+- PF-P042 已解决 active `reserved` 重复请求不应再次执行 handler 的问题；如果不补 expired takeover，崩溃后残留的 `reserved` 会永久阻塞同一 key 的安全重试。
+- PF-P043 不应把“过期接管”和“失败重试策略”混在一起：`failed` 状态的重试语义仍应留给后续 prompt。
+- PF-P043 不应伪装完成真实 PostgreSQL 并发验证；默认 CI 仍以 fake/contract tests 为主，真实 row-lock concurrency 单独跟踪。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已包含完整 PF-P043 prompt，且 prompt 正文以 `/goal` 开头。
+- PF-P043 prompt 包含 Pre-Flight、Allowed Scope、Forbidden Scope、Required Test Work、Required Implementation Work、Required Documentation、Required Verification、Post-Flight 和 Stop Conditions。
+- PF-P043 prompt 明确禁止启用 durable idempotency feature flag、部署、Traffic Gate、push 和迁移更多 Workbench 写 API。
+- PF-P043 prompt 明确 PF-P040-MG 仍 deferred，后续 cumulative MG 覆盖 PF-P040 起的完整 diff。
+- PF-P043 prompt 明确 active `reserved` 语义不得回退，same-key different-fingerprint conflict 不得被 expired takeover 绕过。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+
+#### 验证
+
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `rg -n "PF-P043|expired reserved takeover|taken_over|takeover|当前 active prompt|最近 verified prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`：Pass。
+- `git status --short --branch`：Pass，仅包含 PF-P043 prompt generation 相关文档变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+
+#### 下一步
+
+- 执行 PF-P043。
+- PF-P043 执行后状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+- PF-P043 完成后仍不触发 Traffic Gate；如用户认为 PF-P040 到 PF-P043 已达到可合并切片，可生成 cumulative MG 覆盖完整 diff。
 
 ## 维护规则
 
