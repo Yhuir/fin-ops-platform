@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P035 - Workbench Confirm Link UoW Integration Slice` 已实现，等待用户确认是否可标记 `verified` |
-| 当前 active prompt | `PF-P035 - Workbench Confirm Link UoW Integration Slice` (`implemented`) |
-| 最近 verified prompt | `PF-P034-MG - Workbench Stale Guard Group Merge Gate` |
+| 当前阶段 | PF-P035 已由用户确认 `verified`；PF-P035-MG 已延后，当前已生成并审查 `PF-P036 - Workbench Cancel Link UoW Integration Slice` |
+| 当前 active prompt | `PF-P036 - Workbench Cancel Link UoW Integration Slice` (`planned`) |
+| 最近 verified prompt | `PF-P035 - Workbench Confirm Link UoW Integration Slice` |
 | 当前分支 | `codex/workbench-confirm-link-uow` |
-| 最近验证 | PF-P035 在功能分支通过 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试；未执行 MG、未部署、未 Traffic Gate、未 push |
-| 下一条允许任务 | 等待用户确认 PF-P035 是否可标记 `verified`；确认后生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`，不得直接迁移下一条 API |
+| 最近验证 | PF-P035 在功能分支通过 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试；用户确认 verified；未执行 MG、未部署、未 Traffic Gate、未 push |
+| 下一条允许任务 | 等待用户确认后执行 PF-P036；PF-P036 只迁移 cancel-link 到 UoW，不得迁移其它 Workbench 写路径；PF-P035-MG deferred，累计 MG 当前计划覆盖 PF-P035 到 PF-P036 |
 
 ## Prompt 执行日志
 
@@ -3683,7 +3683,7 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 
 ### PF-P035 - Workbench Confirm Link UoW Integration Slice
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3752,8 +3752,47 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
   - actor/tenant 仍使用现有默认值；后续需要接入真实 auth context 后再提升到生产级审计身份。
   - 本轮没有迁移 cancel-link、exception、ignore/unignore、cash special、withdraw 或其它 Workbench 写路径。
 - 下一条 Prompt 上下文：
-  - 用户确认 PF-P035 verified 后，应生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`。
-  - PF-P035-MG 必须覆盖本轮完整 diff、重新执行验证、合入本地 `main`；不得执行 Traffic Gate、部署或 push，除非用户另行确认。
+  - 用户已确认 PF-P035 verified。
+  - PF-P035-MG 已延后：`PF-P035-MG deferred; cumulative MG will cover PF-P035 through PF-P036`。
+  - 当前允许生成并执行 PF-P036；PF-P036 只迁移 `cancel-link` 到 UoW，不得迁移其它 Workbench 写路径。
+
+### PF-P036 - Workbench Cancel Link UoW Integration Slice
+
+状态：`planned`
+
+#### 范围
+
+- 继续使用当前分支：`codex/workbench-confirm-link-uow`。
+- PF-P035-MG 已延后，累计 MG 当前计划覆盖 PF-P035 到 PF-P036 的完整 diff。
+- 只迁移 `POST /api/workbench/actions/cancel-link` / `WorkbenchWriteFacade.cancel_link` 到 `WorkbenchWriteUnitOfWork`。
+- 必须保留 PF-P031/PF-P032/PF-P033/PF-P034 已完成的 stale guard 行为，尤其是 cancel-link expected relation conflict。
+- 不得迁移 exception、ignore/unignore、cash special、withdraw、personal advance repayment、query/read-model 或 matching/candidates。
+
+#### 预期读取文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+- `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`
+- `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+- `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
+- `tests/test_workbench_write_characterization.py`
+- `tests/test_workbench_uow_contract.py`
+- `tests/test_workbench_idempotency_contract.py`
+- `tests/test_workbench_stale_write_contract.py`
+- `tests/test_platform_runtime_boundary_guards.py`
+
+#### 审查结论
+
+- PF-P036 是 PF-P035 后合理的小批次延续，因为 `confirm-link` 与 `cancel-link` 都属于 pair relation facts/history 写路径，适合由同一个累计 MG 覆盖。
+- PF-P036 必须复用 PF-P035 建立的 UoW 组装模式和 transaction-bound persistence，不得引入新的上帝对象依赖。
+- PF-P036 完成后仍不得直接合入 main；应等待用户确认后生成累计 MG，除非用户明确要求再追加一个紧密相关的小切片。
 
 ## 维护规则
 

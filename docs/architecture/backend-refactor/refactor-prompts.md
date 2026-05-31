@@ -10329,3 +10329,175 @@ PF-P035 已按 TDD 执行：
 - 未执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
 
 下一步：用户确认 PF-P035 可标记 `verified` 后，生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`。
+
+用户已确认 PF-P035 `verified`。PF-P035-MG 已延后：`PF-P035-MG deferred; cumulative MG will cover PF-P035 through PF-P036`。PF-P036 已生成并审查，下一步只允许在当前分支执行 PF-P036；不得执行 MG、Traffic Gate、部署或 push。
+
+## PF-P036 - Workbench Cancel Link UoW Integration Slice
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P036 - Workbench Cancel Link UoW Integration Slice。
+
+Role: 你是一位严格的 Python 遗留系统重构工程师，专注 Workbench pair relation 写路径的 Unit of Work 集成、事务一致性、stale guard 保真和小批次合入安全。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-confirm-link-uow`。
+- PF-P035 已由用户确认 `verified`。
+- PF-P035-MG 已延后：`PF-P035-MG deferred; cumulative MG will cover PF-P035 through PF-P036`。
+- PF-P035 已将真实 `confirm-link` 接入 `WorkbenchWriteUnitOfWork`，并建立了 transaction-bound pair relation persistence、reconciliation decision consumption、dirty scope/outbox/source_version writer。
+- Workbench stale guard group 已完成：cancel-link、ignore-row、cash special、withdraw submit 都已有目标 conflict primitive/compatibility tests。
+- 本轮只迁移 `cancel-link` 到 UoW，不得顺手迁移其它 Workbench 写 API。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `docs/architecture/backend-refactor/workbench-stale-write-boundary-plan.md`
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/workbench_stale_precondition.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_conflict.py`
+   - `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `tests/test_workbench_write_characterization.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_stale_write_contract.py`
+   - `tests/test_platform_runtime_boundary_guards.py`
+2. 必须用 CodeGraph 或源码确认当前真实调用链，并在执行结果中记录：
+   - `_handle_live_workbench_cancel_link`
+   - `WorkbenchWriteFacade.cancel_link`
+   - `WorkbenchWriteFacade._cancel_link_stale_conflict`
+   - `WorkbenchPairRelationService.get_active_relation_by_row_id`
+   - `WorkbenchPairRelationService.cancel_relation_for_row_id`
+   - `schedule_pair_relation_persist`
+   - derived lifecycle / read model scheduling
+3. 必须确认：
+   - 当前分支是 `codex/workbench-confirm-link-uow`。
+   - 当前 active prompt 是 `PF-P036 - Workbench Cancel Link UoW Integration Slice` planned。
+   - 最近 verified prompt 是 `PF-P035 - Workbench Confirm Link UoW Integration Slice`。
+   - PF-P035-MG 已明确 deferred，累计 MG 当前计划覆盖 PF-P035 到 PF-P036。
+   - 工作区没有未提交变更和未跟踪临时文件。
+
+Goal:
+把真实 `cancel-link` 写路径接入 `WorkbenchWriteUnitOfWork` 的最小可验证切片，使 `cancel-link` 具备：
+- handler 仍只做 HTTP 边界；
+- `WorkbenchWriteFacade.cancel_link` 负责构造 command 并调用 UoW；
+- stale expected relation conflict 仍在 mutation 前阻断；
+- UoW 在一个 transaction 内执行 cancel-link handler；
+- pair relation facts/history 写入、dirty scope/outbox/source_version 写入由同一个 UoW transaction 包裹；
+- legacy 未携带 idempotency/expected_versions 的请求保持现有 response shape 与行为。
+
+Allowed Scope:
+- 只允许修改 `cancel-link` 相关代码和测试。
+- 允许新增极小的 cancel-link command dataclass/helper，但必须放在合适的 Workbench service 模块内。
+- 允许复用或小幅泛化 PF-P035 的 UoW dependency / UoW factory；禁止注入 Application、RuntimeRepositories、StateStore 等上帝对象。
+- 允许调整 `server.py` 只为组装细粒度依赖和保持 HTTP response mapping；不得把业务计算写回 handler。
+- 允许新增/调整 tests：
+  - `tests/test_workbench_write_characterization.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `tests/test_workbench_idempotency_contract.py`
+  - 必要时 `tests/test_platform_runtime_boundary_guards.py`
+- 允许更新本轮执行结果相关文档：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+
+Forbidden Scope:
+- 不迁移 `confirm-link` 以外的新逻辑；PF-P035 已完成，PF-P036 只能在必要时复用或轻微泛化其 UoW 组装。
+- 不迁移 `mark-exception`、`exception/apply`、`cancel-exception`。
+- 不迁移 `ignore-row` / `unignore-row`。
+- 不迁移 cash special、withdraw、personal advance repayment。
+- 不迁移 update-bank-exception / oa-bank-exception。
+- 不修改 Workbench Query / Read Model 读路径。
+- 不修改 matching/candidates/reconciliation engine。
+- 不新增 SQL migration，除非先停止并把缺失 schema 明确记录为 blocker；本 prompt 默认不做 schema migration。
+- 不修改前端、部署、网关、auth/session、worker routing。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Test Work (TDD):
+1. 先写或调整测试，再实现。
+2. 必须保持现有 characterization 行为：
+   - legacy `cancel-link` 无 `idempotency_key` / 无 `expected_versions` 请求仍返回当前成功 payload shape。
+   - `test_duplicate_cancel_link_returns_not_found_after_first_cancel` 当前 legacy 行为不得被无意改变。
+   - `test_cancel_link_with_expected_relation_rejects_replaced_active_relation` stale guard 行为必须保持。
+3. 必须新增或调整 targeted tests 覆盖：
+   - `cancel-link` 通过 UoW 运行，而不是直接在 facade 中独立调度 pair relation/read model。
+   - UoW handler 取消 pair relation 后，dirty scope/outbox/source_version 在同一 transaction 中写入。
+   - dirty/outbox writer failure 时，cancel-link facts/history 不应 commit。
+   - stale expected relation conflict 必须发生在 handler/outbox 之前，不能打开 UoW transaction。
+   - 如携带 `idempotency_key`，同 key 同 fingerprint 应 replay 第一次结果，不重复写 pair relation history 或 outbox；同 key 不同 payload/fingerprint 应 409 且不执行 handler/outbox。
+4. 禁止通过 mock 掉整个 `WorkbenchWriteUnitOfWork.run()` 来制造通过；测试必须覆盖 HTTP/facade 到 UoW 的真实集成边界。
+
+Required Implementation Work:
+1. 为 `cancel-link` 建立最小 command shape，至少包含：
+   - `action_name="cancel_link"`
+   - `month`
+   - `row_id`
+   - `affected_row_ids`
+   - `case_id`
+   - `scope_keys`
+   - `payload`
+   - optional `idempotency_key`
+   - optional `request_fingerprint`
+   - optional `expected_versions`
+   - actor/tenant/trace context 如当前代码能安全取得则接入，否则保持默认并记录后续缺口。
+2. `WorkbenchWriteFacade.cancel_link` 应在解析请求、读取 active relation、执行 `_cancel_link_stale_conflict` 后进入 UoW。
+3. UoW handler 内只做 cancel-link 事实写入需要的最小操作：
+   - 调用 `WorkbenchPairRelationService.cancel_relation_for_row_id`。
+   - 通过 transaction-bound pair relation persistence 写入 changed case。
+   - 返回现有 response 所需字段和 `affected_scope_keys`。
+4. `cancel-link` 不得再在 UoW transaction 外执行本次 read model dirty/outbox 写入。
+5. 保持 `WorkbenchWriteResult` / HTTP response shape 兼容；新增 `source_versions` / `outbox_event_ids` 只能内部使用，不应破坏现有前端/测试 payload。
+6. 错误映射必须保持现有语义：
+   - invalid request 仍是当前 `invalid_cancel_link_request`。
+   - 未找到 relation 仍是 `workbench_pair_relation_not_found`。
+   - stale conflict 使用现有 `WorkbenchWriteConflict` primitive。
+   - idempotency conflict 使用现有 409 primitive。
+
+Blocker Rules:
+- 如果当前 transaction-bound pair relation persistence 不能安全保存 cancelled relation facts/history，本 prompt 应停止并记录 blocker，不得扩大范围改完整 repository 层。
+- 如果 UoW 集成需要 SQL schema 变化，本 prompt 应停止并记录 `SQL migration required`，不得顺手写 migration。
+- 如果为了让测试通过需要改动其它 Workbench 写 API，应停止并记录 scope blocker。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P036 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录变更文件、测试结果、是否完成真实 cancel-link UoW 集成、是否发现 repository/schema blocker。
+  - 记录 PF-P035-MG 仍 deferred；累计 MG 当前计划覆盖 PF-P035 到 PF-P036，除非用户明确继续追加紧密相关小切片。
+  - 记录下一步建议；若 PF-P036 implemented 且用户确认 verified，下一步通常应生成 cumulative MG，而不是直接迁移下一条 API。
+- 更新 `refactor-prompts.md` 的 PF-P036 执行结果。
+- 更新 `workbench-uow-integration-plan.md` / `workbench-write-uow-boundary-design.md` 中 cancel-link 的实际状态和剩余风险。
+- 不执行 Merge Gate、Traffic Gate、部署或 push。
+```
+
+### 审查结论
+
+- PF-P036 的方向合理：`cancel-link` 与 PF-P035 的 `confirm-link` 同属 pair relation facts/history 写路径，适合放在同一个累计 MG 小批次里。
+- PF-P036 的边界足够窄，只迁移 `cancel-link`，并要求保留已完成的 stale expected relation guard。
+- 最大风险是误把 legacy duplicate cancel 行为改成默认 idempotency replay；prompt 已要求 legacy 无 idempotency 请求继续保持 “第二次 cancel 返回 not found” 的 characterization。
+- PF-P036 不应执行 MG；完成后应等待用户确认，再决定执行累计 MG 或追加一个紧密相关的小切片。

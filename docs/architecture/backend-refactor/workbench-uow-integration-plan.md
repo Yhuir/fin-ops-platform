@@ -598,3 +598,26 @@ PF-P035 已执行，当前状态为 `implemented`，等待用户确认后才可�
 下一步建议：
 
 用户确认 PF-P035 `verified` 后，应生成并审查 `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`，统一检查 PF-P035 完整 diff 并合入本地 `main`。不要直接迁移下一条 API。
+
+## 18. PF-P036 Cancel Link UoW Integration Planning
+
+用户已确认 PF-P035 `verified`。为了避免每个小 prompt 都执行 MG，但仍保持分支生命周期受控，PF-P035-MG 已延后：
+
+`PF-P035-MG deferred; cumulative MG will cover PF-P035 through PF-P036`
+
+下一条 planned prompt：
+
+`PF-P036 - Workbench Cancel Link UoW Integration Slice`
+
+PF-P036 是 PF-P035 后的同子域小批次延续。`confirm-link` 与 `cancel-link` 都属于 pair relation facts/history 写路径，因此可以由同一个累计 MG 覆盖。
+
+PF-P036 必须保持以下边界：
+
+- 只迁移 `cancel-link` 到 `WorkbenchWriteUnitOfWork`。
+- 复用 PF-P035 的 transaction-bound pair relation persistence 和 dirty/outbox writer 模式。
+- 保留 PF-P031 已建立的 cancel-link stale expected relation guard。
+- 保留 legacy duplicate cancel behavior：未携带 idempotency key 的第二次 cancel 仍按当前行为返回 not found。
+- 不迁移 exception、ignore/unignore、cash special、withdraw、personal advance repayment 或 matching/candidates。
+- 不新增 SQL migration。
+
+PF-P036 完成并由用户确认 verified 后，默认下一步应生成累计 MG，覆盖 PF-P035 到 PF-P036 的完整 diff；如用户明确要求继续追加紧密相关小切片，必须先更新状态机里的累计 MG 覆盖范围。

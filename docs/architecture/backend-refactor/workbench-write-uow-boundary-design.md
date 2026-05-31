@@ -515,3 +515,33 @@ Still outside this boundary:
 Next boundary gate:
 
 After user confirmation, run `PF-P035-MG - Workbench Confirm Link UoW Merge Gate`. Do not expand UoW integration to another write API until PF-P035 has passed its MG.
+
+## 19. PF-P036 Cancel Link UoW Boundary Planning
+
+PF-P035 has been confirmed `verified` by the user. PF-P035-MG is deferred so the current small pair-relation UoW batch can include `cancel-link`:
+
+`PF-P035-MG deferred; cumulative MG will cover PF-P035 through PF-P036`
+
+PF-P036 should migrate only `cancel-link` into the UoW boundary.
+
+Target boundary for `cancel-link`:
+
+- HTTP handler remains thin and delegates to `WorkbenchWriteFacade.cancel_link`.
+- The facade parses the request, resolves active relation and runs stale expected relation conflict checks before mutation.
+- If stale expected relation conflict is detected, no UoW transaction should be opened.
+- When a UoW is available, relation cancellation and pair relation facts/history persistence must occur inside the UoW transaction.
+- Dirty scope, outbox and source_version writes must be emitted by the same UoW transaction.
+- Legacy no-idempotency duplicate cancel behavior must remain unchanged.
+- Optional idempotency key behavior may use the existing in-memory UoW primitive, but this is not durable until a future PostgreSQL idempotency repository exists.
+
+Still out of scope for PF-P036:
+
+- exception/apply and cancel-exception;
+- ignore/unignore;
+- cash special;
+- withdraw;
+- personal advance repayment;
+- matching/candidates;
+- PostgreSQL durable idempotency schema.
+
+PF-P036 should be followed by a cumulative MG after user confirmation unless the user explicitly extends the batch with another tightly related pair-relation UoW slice.
