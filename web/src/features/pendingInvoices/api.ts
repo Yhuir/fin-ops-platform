@@ -38,6 +38,10 @@ type ApiTagDefinition = {
   path?: unknown[] | null;
   output_primary_label?: string | null;
   output_sub_label?: string | null;
+  output_third_label?: string | null;
+  turnover_role?: string | null;
+  turnover_action_type?: string | null;
+  turnover_family?: string | null;
   status?: string | null;
   source?: string | null;
 };
