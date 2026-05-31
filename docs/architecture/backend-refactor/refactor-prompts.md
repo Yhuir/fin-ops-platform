@@ -10501,3 +10501,49 @@ Post-Flight:
 - PF-P036 的边界足够窄，只迁移 `cancel-link`，并要求保留已完成的 stale expected relation guard。
 - 最大风险是误把 legacy duplicate cancel 行为改成默认 idempotency replay；prompt 已要求 legacy 无 idempotency 请求继续保持 “第二次 cancel 返回 not found” 的 characterization。
 - PF-P036 不应执行 MG；完成后应等待用户确认，再决定执行累计 MG 或追加一个紧密相关的小切片。
+
+### 执行结果
+
+状态：`implemented`，等待用户确认后才可标记 `verified`。
+
+PF-P036 已按 TDD 执行：
+
+- RED：新增 cancel-link UoW targeted tests，先证明当前 cancel-link 仍调用 legacy pair/read-model scheduler、idempotency replay 在 active relation 不存在时退化为 404、outbox failure 不回滚。
+- GREEN：`WorkbenchWriteFacade.cancel_link` 接入 `WorkbenchWriteUnitOfWork`，并在 stale expected relation guard 之后进入 UoW。
+- 补强 idempotency replay 边界：
+  - `WorkbenchWriteUnitOfWork.replay_committed(command)` 支持 transaction-free replay/conflict probe。
+  - cancel-link 在 active relation lookup 前执行 replay probe，使第二次同 key 请求能 replay 首次成功结果。
+
+实际变更：
+
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - 新增 cancel-link command shape。
+  - 新增 cancel-link UoW 分支和 response filtering。
+  - stale expected relation conflict 仍在 mutation/UoW transaction 前阻断。
+  - idempotency conflict 映射到 409 primitive。
+- `backend/src/fin_ops_platform/app/server.py`
+  - 组装 cancel-link UoW 细粒度依赖。
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - 新增 `replay_committed(command)`，只读取 idempotency store，不打开 transaction。
+- `tests/test_workbench_write_characterization.py`
+  - 新增 cancel-link UoW transaction、replay、conflict、outbox rollback、stale no-transaction 五个 targeted tests。
+
+验证结果：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+剩余风险：
+
+- cancel-link idempotency 仍基于 in-memory primitive，不是 PostgreSQL durable store。
+- actor/tenant 仍为默认值，尚未接真实 auth context。
+- 未执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+下一步：用户确认 PF-P036 `verified` 后，默认生成并审查 `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`，统一覆盖 PF-P035 到 PF-P036 的完整 diff。

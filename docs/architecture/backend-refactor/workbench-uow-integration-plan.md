@@ -621,3 +621,36 @@ PF-P036 必须保持以下边界：
 - 不新增 SQL migration。
 
 PF-P036 完成并由用户确认 verified 后，默认下一步应生成累计 MG，覆盖 PF-P035 到 PF-P036 的完整 diff；如用户明确要求继续追加紧密相关小切片，必须先更新状态机里的累计 MG 覆盖范围。
+
+## 19. PF-P036 Cancel Link UoW Integration Result
+
+PF-P036 已执行，当前状态为 `implemented`，等待用户确认后才可标记 `verified`。
+
+实际完成：
+
+- `cancel-link` 是继 `confirm-link` 后第二条接入 `WorkbenchWriteUnitOfWork` 的真实 Workbench pair relation 写 API。
+- `WorkbenchWriteFacade.cancel_link` 保持原有 request parse、active relation lookup、stale expected relation conflict 和 response shape，然后进入 UoW。
+- UoW handler 在同一个 transaction 内完成：
+  - relation cancellation；
+  - pair relation facts/history 持久化；
+  - dirty scope / outbox / source_version 写入。
+- `WorkbenchWriteUnitOfWork.replay_committed(command)` 允许 cancel-link 在 active relation lookup 前做 idempotency replay/conflict probe，解决第二次 cancel 因 relation 已取消而无法 replay 的问题。
+- 非 UoW legacy 请求仍保留当前 duplicate cancel behavior：第二次 cancel 返回 relation not found。
+
+本轮验证覆盖：
+
+- cancel-link 使用 UoW 时不再调用 legacy pair relation/read model scheduler。
+- stale expected relation conflict 不打开 UoW transaction，也不写 outbox。
+- dirty/outbox failure 会回滚 UoW transaction，并恢复 in-memory pair relation snapshot。
+- 同一 `idempotency_key` + 同 fingerprint 在 active relation 已不存在时 replay 首次结果。
+- 同一 `idempotency_key` + 不同 payload/fingerprint 在 relation lookup 前返回 409 conflict。
+
+明确未完成：
+
+- PostgreSQL durable idempotency repository / SQL migration 仍未实现。
+- actor/tenant 仍使用默认值。
+- exception、ignore/unignore、cash special、withdraw、personal advance repayment 尚未接入 UoW。
+
+下一步建议：
+
+用户确认 PF-P036 `verified` 后，默认生成累计 MG：`PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`，覆盖 PF-P035 到 PF-P036 的完整 diff。

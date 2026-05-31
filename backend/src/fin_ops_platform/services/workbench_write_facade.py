@@ -45,6 +45,22 @@ class _WorkbenchConfirmLinkCommand:
     actor_id: str = "system"
 
 
+@dataclass(frozen=True)
+class _WorkbenchCancelLinkCommand:
+    action_name: str
+    month: str
+    row_id: str
+    affected_row_ids: list[str]
+    case_id: str
+    scope_keys: list[str]
+    payload: dict[str, object]
+    idempotency_key: str | None = None
+    request_fingerprint: str | None = None
+    expected_versions: dict[str, object] | None = None
+    tenant_id: str = "default"
+    actor_id: str = "system"
+
+
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
@@ -93,6 +109,7 @@ class WorkbenchWriteFacade:
         schedule_read_model_persist: Callable[..., None],
         emit_action_timing: Callable[..., None],
         confirm_link_uow: Any | None = None,
+        cancel_link_uow: Any | None = None,
         persist_pair_relations_in_transaction: Callable[..., None] | None = None,
         consume_reconciliation_decisions_in_transaction: Callable[..., int] | None = None,
     ) -> None:
@@ -135,6 +152,7 @@ class WorkbenchWriteFacade:
         self._schedule_read_model_persist = schedule_read_model_persist
         self._emit_action_timing = emit_action_timing
         self._confirm_link_uow = confirm_link_uow
+        self._cancel_link_uow = cancel_link_uow
         self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
         self._consume_reconciliation_decisions_in_transaction = consume_reconciliation_decisions_in_transaction
 
@@ -396,6 +414,10 @@ class WorkbenchWriteFacade:
                 {"error": "invalid_cancel_link_request", "message": str(exc)},
             )
 
+        replayed = self._cancel_link_replay_if_committed(payload=payload, month=month, row_id=row_id)
+        if replayed is not None:
+            return replayed
+
         resolve_rows_started_at = monotonic()
         active_relation = self._pair_relation_service.get_active_relation_by_row_id(row_id)
         if not isinstance(active_relation, dict):
@@ -418,6 +440,26 @@ class WorkbenchWriteFacade:
             started_at=resolve_rows_started_at,
             detail=f"rows={len(affected_row_ids)}",
         )
+        changed_scope_keys = list(
+            self._scope_keys_for_row_ids(
+                month=month,
+                row_ids=affected_row_ids,
+                month_scope=str(active_relation.get("month_scope") or ""),
+            )
+        )
+        changed_case_ids = [str(active_relation.get("case_id") or "")]
+        if self._cancel_link_uow is not None:
+            return self._cancel_link_with_uow(
+                payload=payload,
+                request_id=request_id,
+                month=month,
+                row_id=row_id,
+                active_relation=active_relation,
+                affected_row_ids=affected_row_ids,
+                changed_scope_keys=changed_scope_keys,
+                changed_case_ids=changed_case_ids,
+            )
+
         pair_relation_started_at = monotonic()
         cancelled_relation = self._pair_relation_service.cancel_relation_for_row_id(row_id)
         self._emit_timing_if_requested(
@@ -426,13 +468,6 @@ class WorkbenchWriteFacade:
             phase="pair_relation_update",
             started_at=pair_relation_started_at,
             detail=f"row_id={row_id}",
-        )
-        changed_scope_keys = list(
-            self._scope_keys_for_row_ids(
-                month=month,
-                row_ids=affected_row_ids,
-                month_scope=str(active_relation.get("month_scope") or ""),
-            )
         )
         changed_case_ids = []
         if isinstance(cancelled_relation, dict):
@@ -462,6 +497,130 @@ class WorkbenchWriteFacade:
                 "message": "已取消关联并回退为待处理。",
             },
         )
+
+    def _cancel_link_replay_if_committed(
+        self,
+        *,
+        payload: dict[str, object],
+        month: str,
+        row_id: str,
+    ) -> WorkbenchWriteResult | None:
+        if self._cancel_link_uow is None:
+            return None
+        command = _WorkbenchCancelLinkCommand(
+            action_name="cancel_link",
+            month=month,
+            row_id=row_id,
+            affected_row_ids=[],
+            case_id="",
+            scope_keys=[],
+            payload=dict(payload),
+            idempotency_key=self._idempotency_key_from_payload(payload),
+            expected_versions=dict(payload.get("expected_versions") or {})
+            if isinstance(payload.get("expected_versions"), dict)
+            else {},
+        )
+        replay_committed = getattr(self._cancel_link_uow, "replay_committed", None)
+        if not callable(replay_committed):
+            return None
+        try:
+            result = replay_committed(command)
+        except WorkbenchIdempotencyKeyConflict as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        if result is None:
+            return None
+        return WorkbenchWriteResult(HTTPStatus.OK, self._cancel_link_response_payload(result))
+
+    def _cancel_link_with_uow(
+        self,
+        *,
+        payload: dict[str, object],
+        request_id: str | None,
+        month: str,
+        row_id: str,
+        active_relation: dict[str, object],
+        affected_row_ids: list[str],
+        changed_scope_keys: list[str],
+        changed_case_ids: list[str],
+    ) -> WorkbenchWriteResult:
+        action_name = "cancel_link"
+        previous_pair_snapshot = self._pair_relation_service.snapshot()
+        command = _WorkbenchCancelLinkCommand(
+            action_name=action_name,
+            month=month,
+            row_id=row_id,
+            affected_row_ids=list(affected_row_ids),
+            case_id=str(active_relation.get("case_id") or ""),
+            scope_keys=list(changed_scope_keys),
+            payload=dict(payload),
+            idempotency_key=self._idempotency_key_from_payload(payload),
+            expected_versions=dict(payload.get("expected_versions") or {})
+            if isinstance(payload.get("expected_versions"), dict)
+            else {},
+        )
+
+        def handler(ctx: object) -> dict[str, object]:
+            transaction = getattr(ctx, "transaction", None)
+            if transaction is None:
+                raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
+            if self._persist_pair_relations_in_transaction is None:
+                raise _WorkbenchWritePersistenceError("cancel-link UoW requires transaction-bound pair relation persistence.")
+            pair_relation_started_at = monotonic()
+            cancelled_relation = self._pair_relation_service.cancel_relation_for_row_id(row_id)
+            self._emit_timing_if_requested(
+                request_id=request_id,
+                action_name=action_name,
+                phase="pair_relation_update",
+                started_at=pair_relation_started_at,
+                detail=f"row_id={row_id}",
+            )
+            if not isinstance(cancelled_relation, dict):
+                raise _WorkbenchWritePersistenceError("cancel-link relation disappeared during UoW handler.")
+            self._persist_pair_relations_in_transaction(
+                transaction=transaction,
+                changed_case_ids=changed_case_ids,
+            )
+            return {
+                "success": True,
+                "action": action_name,
+                "month": month,
+                "case_id": str(active_relation.get("case_id") or ""),
+                "affected_row_ids": list(affected_row_ids),
+                "affected_months": list(changed_scope_keys),
+                "affected_scope_keys": list(changed_scope_keys),
+                "message": "已取消关联并回退为待处理。",
+            }
+
+        try:
+            result = self._cancel_link_uow.run(command, handler)
+        except WorkbenchIdempotencyKeyConflict as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchWriteConflict as exc:
+            conflict_payload = exc.to_response_payload()
+            return WorkbenchWriteResult(HTTPStatus(exc.status_code), dict(conflict_payload["payload"]))
+        except Exception:
+            self._restore_pair_relation_snapshot(
+                previous_pair_snapshot,
+                changed_case_ids=changed_case_ids,
+            )
+            return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
+        return WorkbenchWriteResult(HTTPStatus.OK, self._cancel_link_response_payload(result))
+
+    @staticmethod
+    def _cancel_link_response_payload(result: dict[str, object]) -> dict[str, object]:
+        return {
+            "success": bool(result.get("success")),
+            "action": "cancel_link",
+            "month": str(result.get("month") or ""),
+            "case_id": str(result.get("case_id") or ""),
+            "affected_row_ids": list(result.get("affected_row_ids") or []),
+            "affected_months": list(result.get("affected_months") or []),
+            "message": str(result.get("message") or ""),
+        }
+
+    @staticmethod
+    def _idempotency_key_from_payload(payload: dict[str, object]) -> str | None:
+        return str(payload.get("idempotency_key") or payload.get("request_idempotency_key") or "").strip() or None
 
     def _cancel_link_stale_conflict(
         self,

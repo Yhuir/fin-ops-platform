@@ -93,6 +93,28 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app._persist_workbench_pair_relations_in_transaction = persist_in_transaction  # type: ignore[method-assign]
         return connection, writer, persisted
 
+    def _install_cancel_link_uow(
+        self,
+        app: Application,
+        *,
+        fail_outbox: bool = False,
+    ) -> tuple[_RecordingConnection, _RecordingDirtyOutboxWriter, list[dict[str, object]]]:
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter(fail=fail_outbox)
+        app._workbench_cancel_link_uow_override = WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=_RecordingRepositoryFactory(),
+            read_model_refresh_writer=writer,
+            idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
+        )
+        persisted: list[dict[str, object]] = []
+
+        def persist_in_transaction(*, transaction: object, changed_case_ids: list[str] | None = None) -> None:
+            persisted.append({"transaction": transaction, "changed_case_ids": list(changed_case_ids or [])})
+
+        app._persist_workbench_pair_relations_in_transaction = persist_in_transaction  # type: ignore[method-assign]
+        return connection, writer, persisted
+
     def _create_cash_special_relation(
         self,
         app: Application,
@@ -370,6 +392,182 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(second_cancel.status_code, 404, second_cancel.body)
         self.assertEqual(_json_response(second_cancel)["error"], "workbench_pair_relation_not_found")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-DUP"))
+
+    def test_cancel_link_uses_uow_transaction_when_available(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        with self._suppress_background_persistence(app):
+            confirm_response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CANCEL-UOW"},
+            )
+        connection, writer, persisted = self._install_cancel_link_uow(app)
+
+        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+            cancel_response = self._post(
+                app,
+                "/api/workbench/actions/cancel-link",
+                {
+                    "month": "2026-03",
+                    "row_id": row_ids[1],
+                    "idempotency_key": "cancel:uow-cancel-1",
+                },
+            )
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        self.assertEqual(cancel_response.status_code, 200, cancel_response.body)
+        payload = _json_response(cancel_response)
+        self.assertEqual(payload["case_id"], "CASE-CANCEL-UOW")
+        self.assertCountEqual(payload["affected_row_ids"], row_ids)
+        self.assertEqual(pair_relation_persist.call_count, 0)
+        self.assertEqual(read_model_persist.call_count, 0)
+        self.assertEqual(connection.opened, 1)
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.rollbacks, 0)
+        self.assertEqual(len(persisted), 1)
+        self.assertIs(persisted[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(persisted[0]["changed_case_ids"], ["CASE-CANCEL-UOW"])
+        self.assertTrue(writer.calls)
+        self.assertIs(writer.calls[0]["transaction"], connection.transaction_obj)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-UOW"))
+
+    def test_cancel_link_uow_replays_same_idempotency_key_without_active_relation(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        with self._suppress_background_persistence(app):
+            self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CANCEL-IDEMPOTENT"},
+            )
+        connection, writer, persisted = self._install_cancel_link_uow(app)
+        request_payload = {
+            "month": "2026-03",
+            "row_id": row_ids[1],
+            "idempotency_key": "cancel:uow-idem-replay",
+        }
+
+        first = self._post(app, "/api/workbench/actions/cancel-link", request_payload)
+        first_outbox_count = len(writer.calls)
+        second = self._post(app, "/api/workbench/actions/cancel-link", request_payload)
+
+        self.assertEqual(first.status_code, 200, first.body)
+        self.assertEqual(second.status_code, 200, second.body)
+        self.assertEqual(_json_response(first), _json_response(second))
+        self.assertEqual(connection.opened, 1)
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(len(persisted), 1)
+        self.assertGreater(first_outbox_count, 0)
+        self.assertEqual(len(writer.calls), first_outbox_count)
+
+    def test_cancel_link_uow_rejects_same_idempotency_key_with_different_payload_before_lookup(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        with self._suppress_background_persistence(app):
+            self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CANCEL-IDEMPOTENT-CONFLICT"},
+            )
+        connection, writer, persisted = self._install_cancel_link_uow(app)
+
+        first = self._post(
+            app,
+            "/api/workbench/actions/cancel-link",
+            {
+                "month": "2026-03",
+                "row_id": row_ids[1],
+                "idempotency_key": "cancel:uow-idem-conflict",
+                "comment": "first",
+            },
+        )
+        first_outbox_count = len(writer.calls)
+        second = self._post(
+            app,
+            "/api/workbench/actions/cancel-link",
+            {
+                "month": "2026-03",
+                "row_id": row_ids[1],
+                "idempotency_key": "cancel:uow-idem-conflict",
+                "comment": "changed",
+            },
+        )
+
+        self.assertEqual(first.status_code, 200, first.body)
+        self.assertEqual(second.status_code, 409, second.body)
+        self.assertEqual(_json_response(second)["error"], "idempotency_key_conflict")
+        self.assertEqual(connection.opened, 1)
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(len(persisted), 1)
+        self.assertGreater(first_outbox_count, 0)
+        self.assertEqual(len(writer.calls), first_outbox_count)
+
+    def test_cancel_link_uow_outbox_failure_restores_relation(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        with self._suppress_background_persistence(app):
+            self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CANCEL-ROLLBACK"},
+            )
+        connection, writer, persisted = self._install_cancel_link_uow(app, fail_outbox=True)
+
+        cancel_response = self._post(
+            app,
+            "/api/workbench/actions/cancel-link",
+            {
+                "month": "2026-03",
+                "row_id": row_ids[1],
+                "idempotency_key": "cancel:uow-rollback",
+            },
+        )
+
+        self.assertEqual(cancel_response.status_code, 503, cancel_response.body)
+        self.assertEqual(_json_response(cancel_response)["error"], "workbench_state_persistence_unavailable")
+        self.assertEqual(connection.opened, 1)
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 1)
+        self.assertEqual(len(persisted), 1)
+        self.assertEqual(writer.calls, [])
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-ROLLBACK"))
+
+    def test_cancel_link_uow_stale_expected_relation_does_not_open_transaction(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        with self._suppress_background_persistence(app):
+            self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CANCEL-STALE-OLD"},
+            )
+            self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CANCEL-STALE-NEW"},
+            )
+        connection, writer, persisted = self._install_cancel_link_uow(app)
+
+        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+            cancel_response = self._post(
+                app,
+                "/api/workbench/actions/cancel-link",
+                {
+                    "month": "2026-03",
+                    "row_id": row_ids[1],
+                    "expected_versions": {"relation:CASE-CANCEL-STALE-OLD": 1},
+                    "idempotency_key": "cancel:uow-stale",
+                },
+            )
+
+        self.assertEqual(cancel_response.status_code, 409, cancel_response.body)
+        self.assertEqual(connection.opened, 0)
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(persisted, [])
+        self.assertEqual(pair_relation_persist.call_count, 0)
+        self.assertEqual(read_model_persist.call_count, 0)
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-STALE-NEW"))
 
     def test_duplicate_ignore_and_unignore_current_behavior(self) -> None:
         app = self._build_app()

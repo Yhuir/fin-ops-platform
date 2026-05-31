@@ -2122,6 +2122,7 @@ class Application:
             schedule_read_model_persist=self._schedule_workbench_read_model_persist,
             emit_action_timing=self._emit_workbench_action_timing,
             confirm_link_uow=self._workbench_confirm_link_unit_of_work(),
+            cancel_link_uow=self._workbench_cancel_link_unit_of_work(),
             persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
             consume_reconciliation_decisions_in_transaction=self._consume_workbench_reconciliation_decisions_in_transaction,
         )
@@ -2141,6 +2142,31 @@ class Application:
         if idempotency_store is None:
             idempotency_store = InMemoryWorkbenchIdempotencyRepository()
             self._workbench_confirm_link_idempotency_store = idempotency_store
+        return WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=self._workbench_uow_repository_factory,
+            read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
+                queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            ),
+            idempotency_store=idempotency_store,
+        )
+
+    def _workbench_cancel_link_unit_of_work(self) -> WorkbenchWriteUnitOfWork | None:
+        override = getattr(self, "_workbench_cancel_link_uow_override", None)
+        if override is not None:
+            return override
+        state_store = getattr(self, "_state_store", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
+            return None
+        connection = getattr(state_store, "_connection", None)
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if connection is None or queue_repository is None:
+            return None
+        idempotency_store = getattr(self, "_workbench_cancel_link_idempotency_store", None)
+        if idempotency_store is None:
+            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+            self._workbench_cancel_link_idempotency_store = idempotency_store
         return WorkbenchWriteUnitOfWork(
             connection=connection,
             repository_factory=self._workbench_uow_repository_factory,

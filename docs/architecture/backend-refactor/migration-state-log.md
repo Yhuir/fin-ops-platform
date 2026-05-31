@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | PF-P035 已由用户确认 `verified`；PF-P035-MG 已延后，当前已生成并审查 `PF-P036 - Workbench Cancel Link UoW Integration Slice` |
-| 当前 active prompt | `PF-P036 - Workbench Cancel Link UoW Integration Slice` (`planned`) |
+| 当前阶段 | `PF-P036 - Workbench Cancel Link UoW Integration Slice` 已实现，等待用户确认是否可标记 `verified` |
+| 当前 active prompt | `PF-P036 - Workbench Cancel Link UoW Integration Slice` (`implemented`) |
 | 最近 verified prompt | `PF-P035 - Workbench Confirm Link UoW Integration Slice` |
 | 当前分支 | `codex/workbench-confirm-link-uow` |
-| 最近验证 | PF-P035 在功能分支通过 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试；用户确认 verified；未执行 MG、未部署、未 Traffic Gate、未 push |
-| 下一条允许任务 | 等待用户确认后执行 PF-P036；PF-P036 只迁移 cancel-link 到 UoW，不得迁移其它 Workbench 写路径；PF-P035-MG deferred，累计 MG 当前计划覆盖 PF-P035 到 PF-P036 |
+| 最近验证 | PF-P036 在功能分支通过 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试；未执行 MG、未部署、未 Traffic Gate、未 push |
+| 下一条允许任务 | 等待用户确认 PF-P036 是否可标记 `verified`；确认后默认生成累计 MG，覆盖 PF-P035 到 PF-P036 的完整 diff |
 
 ## Prompt 执行日志
 
@@ -3758,7 +3758,7 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 
 ### PF-P036 - Workbench Cancel Link UoW Integration Slice
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3793,6 +3793,42 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 - PF-P036 是 PF-P035 后合理的小批次延续，因为 `confirm-link` 与 `cancel-link` 都属于 pair relation facts/history 写路径，适合由同一个累计 MG 覆盖。
 - PF-P036 必须复用 PF-P035 建立的 UoW 组装模式和 transaction-bound persistence，不得引入新的上帝对象依赖。
 - PF-P036 完成后仍不得直接合入 main；应等待用户确认后生成累计 MG，除非用户明确要求再追加一个紧密相关的小切片。
+
+#### 执行结果
+
+- 状态：`implemented`，等待用户确认后才可标记 `verified`。
+- 完成范围：
+  - `WorkbenchWriteFacade.cancel_link` 在解析请求、读取 active relation、执行 stale expected relation guard 后接入 `WorkbenchWriteUnitOfWork`。
+  - cancel-link 使用 transaction-bound pair relation persistence 和 UoW dirty/outbox/source_version writer。
+  - `WorkbenchWriteUnitOfWork.replay_committed(command)` 支持在 relation lookup 前进行 idempotency replay/conflict probe，避免第二次 cancel 因 active relation 已不存在而退化为 404。
+  - legacy 无 idempotency key 的 duplicate cancel 行为保持不变：第二次 cancel 仍返回 not found。
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `tests/test_workbench_write_characterization.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+  - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+- 验证结果：
+  - `git status --short --branch`：Pass，当前分支 `codex/workbench-confirm-link-uow`，仅本轮文件变更。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 剩余风险：
+  - cancel-link 的 idempotency 仍依赖当前 `InMemoryWorkbenchIdempotencyRepository` primitive；真实 PostgreSQL durable idempotency store / SQL migration 仍未实现。
+  - actor/tenant 仍使用默认值，后续仍需接入真实 auth context。
+  - 本轮没有迁移 exception、ignore/unignore、cash special、withdraw、personal advance repayment 或其它 Workbench 写路径。
+- 下一条 Prompt 上下文：
+  - 等待用户确认 PF-P036 verified。
+  - PF-P035-MG 仍 deferred；累计 MG 当前计划覆盖 PF-P035 到 PF-P036。
+  - 用户确认 PF-P036 verified 后，默认下一步应生成并审查 `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate`，而不是直接迁移下一条 API。
 
 ## 维护规则
 
