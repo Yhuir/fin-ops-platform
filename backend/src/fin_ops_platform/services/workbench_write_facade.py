@@ -7,7 +7,10 @@ from time import monotonic
 from typing import Any, Callable
 
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE
-from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotencyKeyConflict
+from fin_ops_platform.services.workbench_idempotency import (
+    WorkbenchIdempotencyInProgress,
+    WorkbenchIdempotencyKeyConflict,
+)
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
@@ -401,6 +404,8 @@ class WorkbenchWriteFacade:
             result = self._confirm_link_uow.run(command, handler)
         except WorkbenchIdempotencyKeyConflict as exc:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyInProgress as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         except WorkbenchWriteConflict as exc:
             conflict_payload = exc.to_response_payload()
             return WorkbenchWriteResult(HTTPStatus(exc.status_code), dict(conflict_payload["payload"]))
@@ -569,6 +574,8 @@ class WorkbenchWriteFacade:
             result = replay_committed(command)
         except WorkbenchIdempotencyKeyConflict as exc:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyInProgress as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         if result is None:
             return None
         return WorkbenchWriteResult(HTTPStatus.OK, self._cancel_link_response_payload(result))
@@ -640,6 +647,8 @@ class WorkbenchWriteFacade:
         try:
             result = self._cancel_link_uow.run(command, handler)
         except WorkbenchIdempotencyKeyConflict as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyInProgress as exc:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         except WorkbenchWriteConflict as exc:
             conflict_payload = exc.to_response_payload()

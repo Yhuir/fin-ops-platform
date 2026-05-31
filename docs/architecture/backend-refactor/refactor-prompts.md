@@ -12151,3 +12151,26 @@ Stop Conditions:
 - 关键设计点不是简单看到 `status="reserved"` 就拦截，因为首次新建 reservation 的请求也会拿到 reserved record；因此 prompt 必须要求 reserve outcome seam 来区分 created 与 existing。
 - PF-P042 仍不应宣称 durable idempotency 可打开：expired takeover、failed policy、cleanup/retention、真实 PostgreSQL concurrency 和 observability 仍是独立 blocker。
 - PF-P042 完成后仍应留在 PF-P040 起的 cumulative MG 范围内，不单独 push，不执行 Traffic Gate。
+
+### 执行结果
+
+- 状态：`implemented`，等待用户确认，未经确认不得标记 `verified`。
+- RED：新增 tests 先因缺少 `WorkbenchIdempotencyInProgress` / `WorkbenchIdempotencyReservation`，以及 existing reserved 仍会执行 handler 而失败。
+- GREEN：最小实现后 PF-P042 相关 tests 通过。
+- 新增 `WorkbenchIdempotencyInProgress`，稳定返回 `idempotency_key_in_progress`、`retryable: true`、HTTP 409 语义。
+- 新增 `WorkbenchIdempotencyReservation(record, created)` reserve outcome。
+- `InMemoryWorkbenchIdempotencyRepository.reserve()` 不再覆盖已有同 identity reservation。
+- `PostgresWorkbenchIdempotencyRepository.reserve()` 使用 insert-if-absent + existing row `for update` 的 SQL contract 表达 new/existing outcome。
+- `WorkbenchWriteUnitOfWork.run()` 对 transaction 外已有 `reserved` 和 transaction 内 existing reservation 都返回 in-progress，不执行 handler、dirty scope、outbox 或 commit。
+- confirm-link / cancel-link facade 将 in-progress primitive 映射为稳定 409 payload，不落入 generic persistence unavailable。
+- rollout readiness 中 `reserved/in-progress duplicate policy` 已从 `blocked` 调整为 `ready`。
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未迁移更多 Workbench 写 API。
+- 未修改 SQL migration、部署、网关、worker、前端。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+下一步建议：
+
+`PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`
+
+PF-P043 应只处理 expired reserved takeover 或 mark-failed-then-retry 策略，继续保持 feature flag 默认关闭。若用户认为 PF-P040 到 PF-P042 已达到一个可合并切片，也可以先生成 cumulative MG。

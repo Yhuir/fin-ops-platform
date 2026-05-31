@@ -84,13 +84,13 @@ class WorkbenchDurableIdempotencyRolloutTests(unittest.TestCase):
         text = DOC_PATH.read_text(encoding="utf-8")
         for blocker in (
             "expired reserved takeover",
-            "in-progress duplicate policy",
             "failed reservation policy",
             "real PostgreSQL row-lock concurrency",
             "actor/tenant auth context",
         ):
             with self.subTest(blocker=blocker):
                 self.assertIn(blocker, text)
+        self.assertIn("| reserved/in-progress duplicate policy | ready |", text)
         self.assertIn("Feature flag must remain off", text)
 
 

@@ -181,6 +181,20 @@ class _TransactionBoundIdempotencyStore:
         self._root.commit_calls.append({"transaction": self._transaction, **kwargs})
 
 
+class _ExistingReservedTransactionBoundIdempotencyStore:
+    def __init__(self, root: "_ExistingReservedIdempotencyStore", transaction: object) -> None:
+        self._root = root
+        self._transaction = transaction
+
+    def reserve(self, **kwargs: object) -> object:
+        self._root.reserve_calls.append({"transaction": self._transaction, **kwargs})
+        record = self._root.record
+        return SimpleNamespace(record=record, created=False)
+
+    def commit(self, **kwargs: object) -> None:
+        self._root.commit_calls.append({"transaction": self._transaction, **kwargs})
+
+
 class _TransactionAwareIdempotencyStore:
     def __init__(self) -> None:
         self.get_calls: list[dict[str, object]] = []
@@ -213,6 +227,30 @@ class _TransactionAwareIdempotencyStore:
 
     def commit(self, **_: object) -> None:
         raise AssertionError("durable idempotency commit must use the transaction-bound store")
+
+
+class _ExistingReservedIdempotencyStore:
+    def __init__(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        record_class = getattr(module, "WorkbenchIdempotencyRecord")
+        self.record = record_class(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:existing-reserved",
+            request_fingerprint="fp:confirm:existing-reserved",
+            status="reserved",
+        )
+        self.bound_transactions: list[object] = []
+        self.reserve_calls: list[dict[str, object]] = []
+        self.commit_calls: list[dict[str, object]] = []
+
+    def get_committed_or_reserved(self, *args: object, **kwargs: object) -> object | None:
+        return None
+
+    def for_transaction(self, transaction: object) -> _ExistingReservedTransactionBoundIdempotencyStore:
+        self.bound_transactions.append(transaction)
+        return _ExistingReservedTransactionBoundIdempotencyStore(self, transaction)
 
 
 class WorkbenchUoWContractTests(unittest.TestCase):
@@ -618,6 +656,39 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(idempotency.bound_transactions, [connection.transaction_obj])
         self.assertEqual(idempotency.reserve_calls[0]["transaction"], connection.transaction_obj)
         self.assertEqual(idempotency.commit_calls[0]["transaction"], connection.transaction_obj)
+
+    def test_existing_reserved_transaction_outcome_does_not_execute_handler_dirty_scope_or_commit(self) -> None:
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        idempotency = _ExistingReservedIdempotencyStore()
+        uow = self._new_uow(connection=connection, read_model_writer=writer, idempotency_store=idempotency)  # type: ignore[arg-type]
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"case_id": "SHOULD-NOT-RUN", "affected_scope_keys": ["2026-05"]}
+
+        with self.assertRaisesRegex(Exception, "in.progress|idempotency"):
+            self._run_uow(
+                uow,
+                _Command(
+                    action_name="confirm_link",
+                    scope_keys=["2026-05"],
+                    idempotency_key="confirm:existing-reserved",
+                    request_fingerprint="fp:confirm:existing-reserved",
+                    actor_id="finance-1",
+                    payload={"case_id": "CASE-IDEM"},
+                ),
+                handler,
+            )
+
+        self.assertFalse(called)
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(idempotency.reserve_calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(idempotency.commit_calls, [])
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 1)
 
     def test_outbox_payload_contains_source_version_for_each_dirty_scope(self) -> None:
         connection = _RecordingConnection(_RecordingTransaction(dirty_source_version=9))

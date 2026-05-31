@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotencyInProgress
 from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
 
 
@@ -44,6 +45,20 @@ class _RecordingUoW:
             "amount_check": {},
             "message": "已确认 2 条记录关联。",
         }
+
+
+class _InProgressUoW:
+    def replay_committed(self, command: object) -> None:
+        raise WorkbenchIdempotencyInProgress(
+            idempotency_key=str(getattr(command, "idempotency_key")),
+            action_name=str(getattr(command, "action_name")),
+        )
+
+    def run(self, command: object, handler: object) -> dict[str, object]:
+        raise WorkbenchIdempotencyInProgress(
+            idempotency_key=str(getattr(command, "idempotency_key")),
+            action_name=str(getattr(command, "action_name")),
+        )
 
 
 class _PairRelationService:
@@ -171,6 +186,35 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         for command in [*uow.replay_commands, *uow.run_commands]:
             self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
             self.assertEqual(getattr(command, "tenant_id"), "default")
+
+    def test_confirm_and_cancel_link_map_in_progress_idempotency_to_stable_conflict_payload(self) -> None:
+        facade = _new_facade(confirm_uow=_InProgressUoW(), cancel_uow=_InProgressUoW())
+
+        confirm = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "confirm:progress",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+        cancel = facade.cancel_link(
+            {
+                "month": "2026-05",
+                "row_id": "oa-1",
+                "idempotency_key": "cancel:progress",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(confirm.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(confirm.payload["error"], "idempotency_key_in_progress")
+        self.assertTrue(confirm.payload["retryable"])
+        self.assertEqual(cancel.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(cancel.payload["error"], "idempotency_key_in_progress")
+        self.assertTrue(cancel.payload["retryable"])
 
     def test_workbench_handlers_pass_request_local_oa_session_actor_to_live_write_path(self) -> None:
         session = _session()

@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.common import jsonb
-from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotencyRecord
+from fin_ops_platform.services.workbench_idempotency import (
+    WorkbenchIdempotencyRecord,
+    WorkbenchIdempotencyReservation,
+)
 
 
 _COLUMNS = """
@@ -62,7 +65,7 @@ class PostgresWorkbenchIdempotencyRepository:
         request_fingerprint: str,
         request_payload: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
-    ) -> WorkbenchIdempotencyRecord:
+    ) -> WorkbenchIdempotencyReservation:
         created_at = _utcnow()
         storage = WorkbenchIdempotencyRecord(
             tenant_id=tenant_id,
@@ -77,17 +80,31 @@ class PostgresWorkbenchIdempotencyRepository:
         ).to_storage_payload()
         row = self._executor.fetch_one(
             f"""
-            insert into app.workbench_idempotency_records (
-                {_COLUMNS}
+            with inserted as (
+                insert into app.workbench_idempotency_records (
+                    {_COLUMNS}
+                )
+                values (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s
+                )
+                on conflict (tenant_id, actor_id, idempotency_key) do nothing
+                returning true as inserted, {_COLUMNS}
+            ),
+            existing as (
+                select false as inserted, {_COLUMNS}
+                from app.workbench_idempotency_records
+                where tenant_id = %s
+                  and actor_id = %s
+                  and idempotency_key = %s
+                  and not exists (select 1 from inserted)
+                for update
             )
-            values (
-                %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s
-            )
-            on conflict (tenant_id, actor_id, idempotency_key) do update
-            set updated_at = app.workbench_idempotency_records.updated_at
-            returning {_COLUMNS}
+            select * from inserted
+            union all
+            select * from existing
+            limit 1
             """,
             (
                 storage["tenant_id"],
@@ -103,12 +120,15 @@ class PostgresWorkbenchIdempotencyRepository:
                 storage["created_at"],
                 storage["completed_at"],
                 storage["expires_at"],
+                storage["tenant_id"],
+                storage["actor_id"],
+                storage["idempotency_key"],
             ),
         )
         record = _record_from_row(row)
         if record is None:
             raise RuntimeError("failed to reserve Workbench idempotency record")
-        return record
+        return WorkbenchIdempotencyReservation(record=record, created=bool((row or {}).get("inserted", True)))
 
     def commit(
         self,

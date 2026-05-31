@@ -802,3 +802,43 @@ PF-P042 不应：
 - 执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
 
 PF-P042 完成后仍应留在 PF-P040 起的 cumulative MG 范围内。只有用户确认相关 prompt verified 后，才允许生成覆盖 PF-P040 起完整 diff 的 cumulative Merge Gate。
+
+## 19. PF-P042 Execution Result
+
+PF-P042 已实现 deterministic same-key same-fingerprint in-progress duplicate policy，但没有打开 durable idempotency feature flag，也没有迁移更多 Workbench 写 API。
+
+已完成：
+
+- 新增 `WorkbenchIdempotencyInProgress` primitive：
+  - `status_code = 409`
+  - `error = "idempotency_key_in_progress"`
+  - `retryable = True`
+- 新增 `WorkbenchIdempotencyReservation(record, created)` reserve outcome，用于区分：
+  - `created=True`：本请求新建 reservation，允许继续执行 handler。
+  - `created=False`：已有 reservation 被命中，返回 in-progress 或 conflict。
+- `InMemoryWorkbenchIdempotencyRepository.reserve()` 不再无条件覆盖同 identity record。
+- `PostgresWorkbenchIdempotencyRepository.reserve()` 改为 insert-if-absent + existing row `for update` 的 SQL contract，继续使用 sanitized storage payload。
+- `WorkbenchWriteUnitOfWork.run()` 在以下场景不再执行 handler、dirty scope、outbox 或 commit：
+  - transaction 外 `get_committed_or_reserved()` 返回 same-fingerprint `reserved` record。
+  - transaction 内 reserve outcome 返回 `created=False` 且 record status 为 `reserved`。
+- `WorkbenchWriteUnitOfWork.run()` 仍保持：
+  - committed same-fingerprint replay。
+  - same-key different-fingerprint `idempotency_key_conflict`。
+  - created reservation 的正常 handler / dirty / outbox / commit。
+- `WorkbenchWriteFacade` 将 confirm-link / cancel-link 的 in-progress primitive 映射为稳定 409 payload，不落入 generic persistence unavailable。
+
+仍未完成：
+
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未处理 expired reserved takeover。
+- 未处理 failed reservation policy。
+- 未处理 cleanup/retention。
+- 未执行真实 PostgreSQL row-lock concurrency test。
+- 未新增 durable idempotency observability 指标。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+下一步建议：
+
+`PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`
+
+PF-P043 应只处理 expired `reserved` 判断、锁行接管或 mark-failed-then-retry 策略，并继续保持 feature flag 默认关闭。也可以先生成 cumulative MG，如果用户决定本轮 PF-P040 到 PF-P042 的 rollout blocker 切片已经达到可合并粒度。

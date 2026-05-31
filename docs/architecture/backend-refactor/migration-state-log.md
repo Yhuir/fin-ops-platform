@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已确认 `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` verified；已生成并审查 PF-P042 |
-| 当前 active prompt | `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy` (`planned`) |
+| 当前阶段 | 已执行 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`，等待用户确认 |
+| 当前 active prompt | `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy` (`implemented`) |
 | 最近 verified prompt | `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` |
 | 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
-| 最近验证 | 用户已确认 PF-P041 verified；PF-P042 仅生成和审查，未执行实现、Merge Gate、Traffic Gate、部署或 push |
-| 下一条允许任务 | 执行 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`；继续留在 PF-P040 起的 cumulative MG 范围内 |
+| 最近验证 | PF-P042 新增 in-progress primitive / reserve outcome tests 并完成红绿循环；未执行 Merge Gate、Traffic Gate、部署或 push；未经用户确认不得标记 `verified` |
+| 下一条允许任务 | 等待用户确认 PF-P042 `verified`；之后可继续生成 PF-P043 expired reserved takeover，或按用户要求生成 PF-P042-MG/cumulative MG |
 
 ## Prompt 执行日志
 
@@ -4394,7 +4394,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -4430,17 +4430,64 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 验证
 
+- RED：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract tests.test_workbench_uow_contract tests.test_workbench_postgres_idempotency_repository -v` 先失败，失败原因是缺少 `WorkbenchIdempotencyInProgress` / `WorkbenchIdempotencyReservation`，且 existing reserved 仍会执行 handler。
+- GREEN：PF-P042 最小实现后，新增和相关测试通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，11 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，18 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`：Pass，6 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`：Pass，4 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 - `git diff --check`：Pass。
 - `test ! -e backend-go`：Pass。
-- `rg` 检查 PF-P042、in-progress primitive、reserve outcome、`planned` 状态和相关文档引用：Pass。
-- `rg` 检查 PF-P041 verified、PF-P042 active prompt、PF-P040-MG deferred、禁止 MG/Traffic Gate/feature flag 的约束：Pass。
-- `git status --short --branch`：Pass，仅包含 PF-P042 prompt / 状态机 / 相关架构文档变更。
+- `rg -n "idempotency_key_in_progress|WorkbenchIdempotencyInProgress|WorkbenchIdempotencyReservation|reserved/in-progress|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY" backend/src/fin_ops_platform/services tests docs/architecture/backend-refactor`：Pass。
+- `git status --short --branch`：Pass，仅包含 PF-P042 预期代码、测试和文档变更。
 - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+
+#### 执行结果
+
+- 新增 `WorkbenchIdempotencyInProgress`，稳定返回 `idempotency_key_in_progress` 409 payload。
+- 新增 `WorkbenchIdempotencyReservation(record, created)` reserve outcome。
+- `InMemoryWorkbenchIdempotencyRepository.reserve()` 不再覆盖已有 same identity reservation。
+- `PostgresWorkbenchIdempotencyRepository.reserve()` 使用 insert-if-absent + existing row `for update` SQL contract 区分 new/existing reservation。
+- `WorkbenchWriteUnitOfWork.run()` 对 transaction 外已有 `reserved` 和 transaction 内 existing reservation 都返回 in-progress，不执行 handler、dirty scope、outbox 或 commit。
+- confirm-link / cancel-link facade 将 in-progress primitive 映射为稳定 409 payload。
+- rollout readiness 中 `reserved/in-progress duplicate policy` 已从 `blocked` 调整为 `ready`。
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未迁移更多 Workbench 写 API。
+- 未修改 SQL migration、部署、网关、worker、前端。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+- `tests/test_workbench_idempotency_contract.py`
+- `tests/test_workbench_uow_contract.py`
+- `tests/test_workbench_postgres_idempotency_repository.py`
+- `tests/test_workbench_auth_context_idempotency.py`
+- `tests/test_workbench_durable_idempotency_rollout.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+
+#### 未关闭风险
+
+- `expired reserved takeover` 尚未实现。
+- `failed reservation policy` 尚未实现。
+- `cleanup/retention` 尚未实现。
+- `real PostgreSQL row-lock concurrency` 尚未验证。
+- `observability/metrics/logging` 尚未补齐。
+- 当前 `tenant_id` 仍是显式单租户 `default`，系统尚无真实多租户来源。
 
 #### 下一步
 
-- 执行 PF-P042。
-- PF-P042 完成后只能标记为 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
+- 等待用户确认 PF-P042 `verified`。
+- 之后可继续生成 `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`，或按用户要求生成 PF-P042-MG/cumulative MG。
 - PF-P042 仍不触发 MG；cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
 
 ## 维护规则

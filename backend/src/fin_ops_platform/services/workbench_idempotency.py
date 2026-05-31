@@ -111,6 +111,34 @@ class WorkbenchIdempotencyKeyConflict(ValueError):
         }
 
 
+class WorkbenchIdempotencyInProgress(RuntimeError):
+    status_code = 409
+
+    def __init__(self, *, idempotency_key: str, action_name: str) -> None:
+        super().__init__("same idempotency key is already processing an identical Workbench request")
+        self.idempotency_key = idempotency_key
+        self.action_name = action_name
+
+    def to_response_payload(self) -> dict[str, Any]:
+        return {
+            "success": False,
+            "error": "idempotency_key_in_progress",
+            "idempotency_key": self.idempotency_key,
+            "action_name": self.action_name,
+            "retryable": True,
+            "message": "The same idempotency key is already processing an identical Workbench request.",
+        }
+
+
+@dataclass(frozen=True)
+class WorkbenchIdempotencyReservation:
+    record: WorkbenchIdempotencyRecord
+    created: bool
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.record, name)
+
+
 class InMemoryWorkbenchIdempotencyRepository:
     def __init__(self) -> None:
         self._records: dict[tuple[str, str, str], WorkbenchIdempotencyRecord] = {}
@@ -133,7 +161,12 @@ class InMemoryWorkbenchIdempotencyRepository:
         request_fingerprint: str,
         request_payload: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
-    ) -> WorkbenchIdempotencyRecord:
+    ) -> WorkbenchIdempotencyReservation:
+        identity = (tenant_id, actor_id, idempotency_key)
+        existing = self._records.get(identity)
+        if existing is not None:
+            return WorkbenchIdempotencyReservation(record=existing, created=False)
+
         record = WorkbenchIdempotencyRecord(
             tenant_id=tenant_id,
             actor_id=actor_id,
@@ -146,7 +179,7 @@ class InMemoryWorkbenchIdempotencyRepository:
             expires_at=expires_at,
         )
         self._records[record.unique_identity] = record
-        return record
+        return WorkbenchIdempotencyReservation(record=record, created=True)
 
     def commit(
         self,
