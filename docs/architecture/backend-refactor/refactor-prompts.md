@@ -11956,3 +11956,198 @@ Stop Conditions:
 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`
 
 PF-P042 应继续留在 PF-P040 起的 cumulative MG 范围内，且只处理 reserved/in-progress duplicate policy，不打开 feature flag。
+
+## PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy。
+
+Role: 你是一位严格的 Python 后端架构师，熟悉 financial write path、durable idempotency、transactional outbox、PostgreSQL row locking 和 TDD。你的任务是在不打开 durable idempotency feature flag 的前提下，补齐 Workbench durable idempotency 的 reserved/in-progress duplicate policy。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-durable-idempotency-rollout-readiness`。
+- PF-P040-MG deferred；后续 cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
+- PF-P041 已由用户确认 `verified`，confirm-link / cancel-link 的 UoW command 已接入请求局部 actor/tenant context。
+- `workbench-durable-idempotency-rollout-readiness.md` 中 `reserved/in-progress duplicate policy` 仍是打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 前的 blocker。
+- 当前源码事实：
+  - `WorkbenchWriteUnitOfWork.run()` 对已有 `reserved` 记录只检查 fingerprint conflict 和 committed replay；same-key same-fingerprint reserved 会继续执行 handler。
+  - `InMemoryWorkbenchIdempotencyRepository.reserve()` 当前会覆盖同 identity 的 reserved record。
+  - `PostgresWorkbenchIdempotencyRepository.reserve()` 当前使用 `insert ... on conflict do update ... returning` 返回 record，但没有显式 reserve outcome，UoW 无法区分“本请求新建 reservation”和“已有 in-progress reservation”。
+  - `WorkbenchIdempotencyKeyConflict` 只表达 same-key different-fingerprint conflict，不表达 same-key same-fingerprint in-progress duplicate。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_postgres_idempotency_repository.py`
+   - `tests/test_workbench_durable_idempotency_rollout.py`
+   - `tests/test_workbench_auth_context_idempotency.py`
+2. 必须用 CodeGraph 或源码确认：
+   - `WorkbenchWriteUnitOfWork.run()` 的 idempotency get/reserve/commit 顺序。
+   - `confirm_link` / `cancel_link` 当前如何 catch `WorkbenchIdempotencyKeyConflict` 并映射 HTTP 409。
+   - `PostgresWorkbenchIdempotencyRepository.reserve()` 当前 SQL 是否能表达 existing-row hit。
+   - `InMemoryWorkbenchIdempotencyRepository.reserve()` 当前是否覆盖同 identity record。
+3. 必须确认：
+   - 当前 active prompt 是 PF-P042 planned。
+   - PF-P041 状态为 `verified`。
+   - PF-P040-MG 仍为 deferred / cumulative MG 范围。
+   - 当前分支是 `codex/workbench-durable-idempotency-rollout-readiness`。
+   - 工作区没有未提交变更或未跟踪临时文件。
+
+Goal:
+建立 deterministic same-key same-fingerprint in-progress duplicate contract：当已有 `reserved` idempotency record 表示另一个相同请求正在处理时，后续请求必须返回稳定的 in-progress response，不得再次执行 Workbench 写 handler，不得写 facts、dirty scope、outbox 或 idempotency commit。首次成功 reserve 的请求仍必须正常执行 handler 并最终 commit。
+
+Allowed Scope:
+- 允许新增或修改默认绿色 tests：
+  - `tests/test_workbench_idempotency_contract.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `tests/test_workbench_postgres_idempotency_repository.py`
+  - `tests/test_workbench_write_characterization.py`，仅当需要锁定 HTTP/facade response shape。
+  - `tests/test_workbench_durable_idempotency_rollout.py`，仅更新 readiness blocker 状态测试。
+- 允许最小修改：
+  - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`，仅用于把 in-progress primitive 映射为稳定 `WorkbenchWriteResult`。
+- 允许更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+
+Forbidden Scope:
+- 不启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不修改部署、环境变量、网关、worker routing、前端或数据库 migration。
+- 不迁移更多 Workbench 写 API；只允许影响已接入 UoW 的 confirm-link / cancel-link idempotency path。
+- 不处理 expired reserved takeover；expired reserved 可继续记录为 blocker 或 documented-risk。
+- 不处理 failed reservation retry policy。
+- 不实现 cleanup/retention job。
+- 不新增 observability metrics，除非只是文档列出后续需求。
+- 不依赖真实 PostgreSQL 作为默认 CI。
+- 不执行真实生产或 staging 访问。
+- 不执行 Merge Gate、Traffic Gate、部署、merge 或 push。
+- 不用 broad `except Exception` 吞掉 idempotency primitive。
+- 不用 sleep/polling/wait-loop 阻塞 HTTP request 等待另一个请求完成。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Test Work:
+1. RED 先行：
+   - 新增 tests 必须先失败，失败原因应指向 reserved/in-progress duplicate 仍会执行 handler 或缺少 in-progress primitive，而不是 import error 或外部服务缺失。
+2. In-progress primitive contract：
+   - 新增 `WorkbenchIdempotencyInProgress` 或等价稳定 primitive。
+   - response payload 必须稳定，建议：
+     - `success: False`
+     - `error: "idempotency_key_in_progress"`
+     - `idempotency_key`
+     - `action_name`
+     - `retryable: True`
+     - 明确 message。
+   - HTTP status 必须稳定。优先使用 `409 Conflict`，除非现有接口测试强制其他状态。
+3. UoW existing-reserved contract：
+   - 当 transaction 外 `get_committed_or_reserved()` 返回 same-key same-fingerprint 且 `status="reserved"` 的 record 时，UoW 必须抛出/返回 in-progress primitive。
+   - 必须断言 handler 未执行。
+   - 必须断言 dirty scope / outbox writer 未调用。
+   - 必须断言 commit 未调用。
+4. Reserve outcome contract：
+   - 建立最小 reserve outcome seam，用于表达 `created=True/False` 或等价语义。
+   - 当 reserve outcome 表示本请求新建 reservation 时，handler 必须继续执行并 commit。
+   - 当 reserve outcome 表示已存在 same-fingerprint reserved record 时，handler 必须不执行，并返回 in-progress primitive。
+   - same-key different-fingerprint 仍必须返回现有 `idempotency_key_conflict`，不得变成 in-progress。
+   - committed same-fingerprint 仍必须 replay response。
+5. Repository contract：
+   - `InMemoryWorkbenchIdempotencyRepository.reserve()` 不得无条件覆盖已有同 identity record；它必须能表达 existing reserved 命中。
+   - `PostgresWorkbenchIdempotencyRepository.reserve()` 或新增等价方法必须能表达 inserted/new reservation 与 existing reservation 的区别。
+   - 对 PostgreSQL repository 的默认测试使用 fake executor / SQL contract，不连接真实 PostgreSQL。
+   - 如果 SQL 使用 CTE + `on conflict do nothing` + existing row `for update`，测试应锁定关键 SQL 结构；不要依赖不稳定的 PostgreSQL system column hack，除非已有项目模式支持。
+6. Facade / HTTP response contract：
+   - confirm-link 和 cancel-link UoW path 必须把 in-progress primitive 映射为稳定 conflict response。
+   - 不改变成功响应 shape。
+   - 不改变 stale write conflict response shape。
+7. Rollout readiness test：
+   - 如果本轮完整解决 same-key same-fingerprint reserved duplicate policy，将 readiness row 从 `blocked` 调整为 `ready` 或 `documented-risk`。
+   - 如果仍无法覆盖 transaction-inside existing reserve case，必须保持 `blocked` 或 `documented-risk`，不得伪装 ready。
+
+Required Implementation Work:
+1. 在 `workbench_idempotency.py` 中新增最小 primitive / dataclass：
+   - in-progress exception 或 result object。
+   - reserve outcome object，例如 `WorkbenchIdempotencyReservation(record, created)`。
+   - 保持 `WorkbenchIdempotencyRecord` schema 不变。
+2. 在 `workbench_uow.py` 中集中处理 idempotency state：
+   - 对 existing `reserved` same-fingerprint 返回 in-progress。
+   - 对 reserve outcome 的 existing `reserved` same-fingerprint 返回 in-progress。
+   - 对 `committed` replay 保持现有逻辑。
+   - 对 different fingerprint 继续抛 `WorkbenchIdempotencyKeyConflict`。
+   - 不引入 wait-loop。
+3. 在 repository 中实现可区分 outcome：
+   - In-memory store：同 identity 已存在时返回 `created=False` outcome，不覆盖已有 record。
+   - PostgreSQL store：建议通过 transaction 内 insert-if-absent + select existing `for update` 的方式表达 outcome；必须继续使用 `to_storage_payload()` 做 sanitization。
+4. 在 `workbench_write_facade.py` 中只做必要 catch：
+   - confirm-link / cancel-link 捕获 in-progress primitive 并返回 `HTTPStatus.CONFLICT` 或 prompt 中选定状态。
+   - 不把 in-progress primitive 落入 generic persistence unavailable 分支。
+5. 保持 feature flag default-off：
+   - 未设置 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 时不应改变生产默认 repository wiring。
+   - 即使 in-memory path behavior 更安全，也不得宣称 durable idempotency 已可生产打开。
+
+Required Documentation:
+- 更新 rollout readiness 文档：
+  - 记录 `reserved/in-progress duplicate policy` 本轮状态。
+  - 明确 expired reserved takeover、failed policy、cleanup/retention、real PostgreSQL concurrency 和 observability 是否仍是 blocker。
+  - 明确 feature flag 仍默认关闭。
+- 更新 durable idempotency plan：
+  - 记录 PF-P042 execution result / planned boundary。
+  - 记录 reserve outcome seam 的目标语义。
+- 更新状态机和 prompt 库。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- 新增或修改测试文件对应 unittest 命令。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- `rg -n "idempotency_key_in_progress|WorkbenchIdempotencyInProgress|WorkbenchIdempotencyReservation|reserved/in-progress|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY" backend/src/fin_ops_platform/services tests docs/architecture/backend-refactor`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P042 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录变更文件、验证结果、新增 tests、reserved/in-progress policy 状态和剩余 blocker。
+  - 记录 PF-P040-MG 仍 deferred，后续 cumulative MG 覆盖 PF-P040 起的完整 diff。
+- 更新 `refactor-prompts.md` 的 PF-P042 执行结果。
+- 更新 `workbench-durable-idempotency-plan.md` 和 rollout readiness 文档。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+Stop Conditions:
+- 如果需要打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 才能让测试通过，停止。
+- 如果必须修改 PostgreSQL migration schema，停止并生成单独 migration prompt。
+- 如果要处理 expired takeover、failed retry 或 cleanup 才能完成本轮，停止并记录为后续 blocker。
+- 如果默认 CI 需要真实 PostgreSQL 并发测试，改用 fake/contract tests 或停止。
+- 如果实现会让首次 reserve 的请求也被误判为 in-progress，停止。
+- 如果实现会让 same-key different-fingerprint conflict 变成 in-progress，停止。
+```
+
+### 审查结论
+
+- PF-P042 的边界正确：它聚焦 `reserved` / in-progress duplicate，解决“同 key 同 fingerprint 正在处理时重复执行 handler”的核心风险。
+- 关键设计点不是简单看到 `status="reserved"` 就拦截，因为首次新建 reservation 的请求也会拿到 reserved record；因此 prompt 必须要求 reserve outcome seam 来区分 created 与 existing。
+- PF-P042 仍不应宣称 durable idempotency 可打开：expired takeover、failed policy、cleanup/retention、真实 PostgreSQL concurrency 和 observability 仍是独立 blocker。
+- PF-P042 完成后仍应留在 PF-P040 起的 cumulative MG 范围内，不单独 push，不执行 Traffic Gate。

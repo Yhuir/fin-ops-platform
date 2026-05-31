@@ -78,19 +78,19 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 - `observability/metrics/logging`
 - migration apply runbook
 
-## 7. 下一步建议 Prompt
+## 7. 已执行 / 下一步建议 Prompt
 
-建议下一条实现类 prompt 优先处理身份隔离：
+PF-P040 后已优先处理身份隔离：
 
 `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract`
 
-边界建议：只把真实 auth context 注入 Workbench UoW command / idempotency identity，并补 contract tests；不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不迁移更多 Workbench 写 API。
+边界：只把真实 auth context 注入 Workbench UoW command / idempotency identity，并补 contract tests；不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不迁移更多 Workbench 写 API。
 
-如果用户更关注并发策略，也可以先生成：
+PF-P041 已完成后，下一条 planned prompt 是：
 
-`PF-P041 - Workbench Durable Idempotency Reserved/In-Progress Policy`
+`PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`
 
-该方向只处理 reserved/in-progress duplicate、expired reserved takeover 和 failed reservation policy，不打开 feature flag。
+该方向只处理 same-key same-fingerprint 的 reserved/in-progress duplicate policy，不处理 expired takeover、failed policy 或 cleanup/retention，不打开 feature flag。
 
 ## 8. PF-P040 Verification
 
@@ -103,3 +103,23 @@ PF-P040-MG deferred：后续 cumulative MG 将覆盖 PF-P040 起同一 durable i
 PF-P041 已让 confirm-link / cancel-link 的 UoW command / idempotency identity 使用请求局部 OA session actor，并通过显式 helper 传入单租户 `tenant_id="default"`。
 
 本轮仍不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。feature flag 打开前，仍需处理 reserved/in-progress、expired takeover、failed policy、cleanup/retention、真实 PostgreSQL concurrency 和 observability。
+
+## 10. PF-P042 Planned Boundary
+
+用户已确认 PF-P041 `verified`。PF-P042 将继续留在 PF-P040 起的 cumulative MG 范围内。
+
+PF-P042 只处理 `reserved/in-progress duplicate policy`：
+
+- same-key same-fingerprint 且已有 `reserved` record 的重复请求必须返回稳定 in-progress response。
+- 重复请求不得执行 Workbench 写 handler。
+- 重复请求不得写 facts、dirty scope、outbox 或 idempotency commit。
+- 首次成功 reserve 的请求仍必须正常执行 handler 并最终 commit。
+- same-key different-fingerprint conflict 和 committed replay 必须保持现有语义。
+
+PF-P042 不会打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。即使 PF-P042 完成，以下 gate 仍不得视为 ready：
+
+- expired reserved takeover
+- failed reservation policy
+- cleanup/retention
+- real PostgreSQL row-lock concurrency
+- observability/metrics/logging

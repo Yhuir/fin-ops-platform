@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已执行 `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract`，等待用户确认 |
-| 当前 active prompt | `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` (`implemented`) |
-| 最近 verified prompt | `PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests` |
+| 当前阶段 | 已确认 `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` verified；已生成并审查 PF-P042 |
+| 当前 active prompt | `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy` (`planned`) |
+| 最近 verified prompt | `PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract` |
 | 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
-| 最近验证 | PF-P041 新增 actor/tenant context tests 并完成红绿循环；未执行 Merge Gate、Traffic Gate、部署或 push；未经用户确认不得标记 `verified` |
-| 下一条允许任务 | 等待用户确认 PF-P041 `verified`；之后建议生成并审查 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy` |
+| 最近验证 | 用户已确认 PF-P041 verified；PF-P042 仅生成和审查，未执行实现、Merge Gate、Traffic Gate、部署或 push |
+| 下一条允许任务 | 执行 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`；继续留在 PF-P040 起的 cumulative MG 范围内 |
 
 ## Prompt 执行日志
 
@@ -4314,7 +4314,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4375,7 +4375,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`：Pass，3 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
 - `rg -n "actor_id=\"system\"|created_by=\"system\"|tenant_id=\"default\"|OARequestSession|resolve_oa_request_session|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY" backend/src/fin_ops_platform/app backend/src/fin_ops_platform/services tests docs/architecture/backend-refactor`：Pass，剩余 `created_by="system"` / `tenant_id="default"` 均为本轮明确不迁移的 audit 语义、单租户默认、测试或历史文档语境。
-- 未经用户确认不得标记 `verified`。
+- 用户已确认 PF-P041 `verified`。
 
 #### 未关闭风险
 
@@ -4389,8 +4389,59 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认 PF-P041 `verified`。
-- 之后建议生成并审查 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`，继续留在同一 cumulative MG 范围内。
+- 用户已确认 PF-P041 `verified`。
+- 已生成并审查 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`；下一步允许执行 PF-P042。
+
+### PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 Workbench durable idempotency 的 same-key same-fingerprint `reserved` / in-progress duplicate policy。
+- 建立 deterministic in-progress primitive，使已有 `reserved` 记录不会让重复请求再次执行 handler、dirty scope 或 outbox。
+- 允许引入最小 reserve outcome contract，用于区分“本请求新建 reservation”和“已有 reservation 被命中”。
+- 保持 committed replay、different-fingerprint conflict 和 actor/tenant identity 语义不退化。
+- 不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不处理 expired reserved takeover、failed retry policy、cleanup/retention、observability 或真实 PostgreSQL concurrency integration test。
+- 不迁移更多 Workbench 写 API。
+- 不执行 Merge Gate、Traffic Gate、部署或 push。
+
+#### 审查结论
+
+- PF-P042 是 PF-P041 verified 后合理的下一步：rollout readiness matrix 中 `reserved/in-progress duplicate policy` 仍是打开 durable idempotency feature flag 前的 blocker。
+- 当前 `WorkbenchWriteUnitOfWork.run()` 对同 key 同 fingerprint 的 `reserved` 记录只会跳过 committed replay，然后继续进入 handler，存在重复写风险。
+- 当前 `PostgresWorkbenchIdempotencyRepository.reserve()` 可返回冲突行，但没有显式告诉 UoW 这条 row 是新建 reservation 还是已有 in-progress reservation，因此 PF-P042 应优先建立可测试的 reserve outcome seam。
+- PF-P042 不应伪装解决所有并发问题：expired takeover、failed retry 和真实 PostgreSQL row-lock concurrency 仍应留给后续 prompt。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已包含完整 PF-P042 prompt，且 prompt 正文以 `/goal` 开头。
+- PF-P042 prompt 包含 Pre-Flight、Allowed Scope、Forbidden Scope、Required Test Work、Required Implementation Work、Required Documentation、Required Verification、Post-Flight 和 Stop Conditions。
+- PF-P042 prompt 明确禁止启用 durable idempotency feature flag、部署、Traffic Gate、push 和迁移更多 Workbench 写 API。
+- PF-P042 prompt 明确 PF-P040-MG 仍 deferred，后续 cumulative MG 覆盖 PF-P040 起的完整 diff。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+
+#### 验证
+
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `rg` 检查 PF-P042、in-progress primitive、reserve outcome、`planned` 状态和相关文档引用：Pass。
+- `rg` 检查 PF-P041 verified、PF-P042 active prompt、PF-P040-MG deferred、禁止 MG/Traffic Gate/feature flag 的约束：Pass。
+- `git status --short --branch`：Pass，仅包含 PF-P042 prompt / 状态机 / 相关架构文档变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+
+#### 下一步
+
+- 执行 PF-P042。
+- PF-P042 完成后只能标记为 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
+- PF-P042 仍不触发 MG；cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
 
 ## 维护规则
 

@@ -765,3 +765,40 @@ PF-P041 已完成 actor/tenant context contract 的最小实现，但没有打�
 `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`
 
 PF-P042 应只处理 same-key same-fingerprint 的 reserved/in-progress duplicate policy，并保持 feature flag 默认关闭。
+
+## 18. PF-P042 Planned Boundary
+
+用户已确认 PF-P041 `verified`。下一条 planned prompt：
+
+`PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy`
+
+PF-P042 的目标是建立 deterministic in-progress duplicate policy：
+
+- 同一 `(tenant_id, actor_id, idempotency_key)` 下已有 `reserved` 且 request fingerprint 相同的请求，不得再次执行 Workbench 写 handler。
+- 重复 in-progress 请求必须返回稳定 response，例如 `idempotency_key_in_progress`。
+- same-key different-fingerprint 仍必须返回现有 `idempotency_key_conflict`。
+- committed same-fingerprint 仍必须 replay response。
+- 首次成功 reserve 的请求必须继续执行 handler 并 commit。
+
+PF-P042 的关键设计点是 reserve outcome seam。仅凭 `WorkbenchIdempotencyRecord.status == "reserved"` 不足以判断是否应该拦截，因为首次 reserve 的当前请求也会拿到 `reserved` record。实现时必须能区分：
+
+- `created=True`：本请求新建 reservation，允许继续执行 handler。
+- `created=False`：已有 reservation 被命中，返回 in-progress 或 conflict，不执行 handler。
+
+建议实现边界：
+
+- 在 `workbench_idempotency.py` 中新增 in-progress primitive 和 reserve outcome value object。
+- 在 `workbench_uow.py` 中集中处理 existing reserved / reservation outcome。
+- 在 in-memory repository 中避免无条件覆盖已有 reservation。
+- 在 PostgreSQL repository 中使用 insert-if-absent + existing row lookup 的方式表达 created/existing outcome；默认 CI 仍使用 fake executor / SQL contract，不连接真实 PostgreSQL。
+- 在 `workbench_write_facade.py` 中把 in-progress primitive 映射为稳定 conflict response。
+
+PF-P042 不应：
+
+- 启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 修改 `0043_workbench_idempotency_records.sql`。
+- 处理 expired reserved takeover、failed retry policy、cleanup/retention 或 observability。
+- 迁移更多 Workbench 写 API。
+- 执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+PF-P042 完成后仍应留在 PF-P040 起的 cumulative MG 范围内。只有用户确认相关 prompt verified 后，才允许生成覆盖 PF-P040 起完整 diff 的 cumulative Merge Gate。
