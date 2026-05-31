@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已从最新 `main` 创建 `codex/workbench-durable-idempotency-planning`，`PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` (`planned`) |
+| 当前阶段 | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` 已执行，等待用户确认是否可标记 `verified` |
+| 当前 active prompt | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` (`implemented`) |
 | 最近 verified prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` |
 | 当前分支 | `codex/workbench-durable-idempotency-planning` |
-| 最近验证 | `main` 与 `origin/main` 均在 `1169765f`；已从最新 main 新建分支；PF-P037 只生成和审查，未执行 |
-| 下一条允许任务 | 执行 `PF-P037`；它只做 durable idempotency PostgreSQL store 规划和文档回写，不直接实现 SQL migration、repository 或迁移更多 Workbench 写 API |
+| 最近验证 | PF-P037 已产出 `workbench-durable-idempotency-plan.md`；仅修改文档；未写 SQL migration、repository 或生产代码 |
+| 下一条允许任务 | 等待用户确认 PF-P037 是否可标记 `verified`；确认后生成并审查 `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -3914,7 +3914,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3937,6 +3937,40 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - PF-P037 是 PF-P036-MG 后合理的下一步：真实 `confirm-link` / `cancel-link` 已进入 UoW，但 idempotency 仍是进程内存实现，不具备跨进程、重启后的生产级 replay/conflict 能力。
 - 在继续迁移 exception、ignore、cash special、withdraw 等更多写路径前，应先把 durable idempotency 的表结构、并发语义和事务边界设计清楚。
 - PF-P037 应是 planning prompt，不应直接实现；实现应拆到后续 PF-P038/PF-P039 等小切片。
+
+#### 执行结果
+
+- 状态：`implemented`，等待用户确认后才可标记 `verified`。
+- 产物：
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- 读取/覆盖范围：
+  - 状态机、prompt 库、UoW integration plan、UoW boundary design、platform runtime audit。
+  - `workbench_idempotency.py`、`workbench_uow.py`、`server.py` 中 UoW factory。
+  - PostgreSQL migration 目录、`0009_runtime_infrastructure.sql`、`0016_runtime_outbox_envelope_fields.sql`、当前最新 `0042_bank_detail_candidate_projection.sql`。
+  - `tests/test_workbench_idempotency_contract.py`、`tests/test_workbench_uow_contract.py`、`tests/test_postgres_migrations.py`。
+  - CodeGraph 覆盖 `WorkbenchWriteUnitOfWork.run`、`replay_committed`、`WorkbenchIdempotencyRecord`、`InMemoryWorkbenchIdempotencyRepository`、`workbench_request_fingerprint` 相关依赖。
+- 设计结论：
+  - 推荐表名 `app.workbench_idempotency_records`。
+  - durable unique identity 继续使用 `(tenant_id, actor_id, idempotency_key)`；`action_name` 保留为诊断字段，不进入唯一键。
+  - 当前 UoW 的 transaction-outside get 与 transaction-inside reserve 存在 durable store TOCTOU 风险，后续实现应通过 transaction-bound `reserve_or_get_locked(...)` 消除。
+  - 建议拆分 replay reader 与 transaction-bound writer，以支持 cancel-link 在 active relation lookup 前 replay committed result。
+  - 后续 SQL migration 建议为 `0043_workbench_idempotency_records.sql`，但 PF-P037 未创建该 migration。
+- 未执行：
+  - 未写 SQL migration。
+  - 未实现 `PostgresWorkbenchIdempotencyRepository`。
+  - 未修改生产代码或 tests。
+  - 未迁移更多 Workbench 写 API。
+  - 未执行 Merge Gate、Traffic Gate、部署或 push。
+- 验证结果：
+  - `git status --short --branch`：Pass，当前分支 `codex/workbench-durable-idempotency-planning`，仅文档变更。
+  - `git ls-files --others --exclude-standard`：Pass，仅新增预期产物 `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `test -f docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`：Pass。
+  - `rg -n "PostgreSQL|idempotency|unique|reserved|committed|failed|source_versions|outbox_event_ids|TOCTOU|PF-P038" docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`：Pass，关键术语均覆盖。
+- 下一条 Prompt 上下文：
+  - 用户确认 PF-P037 verified 后，建议生成并审查 `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests`。
+  - PF-P038 应新增 migration 和测试门禁，但仍不应切 production wiring 或迁移更多 Workbench 写 API。
 
 ## 维护规则
 

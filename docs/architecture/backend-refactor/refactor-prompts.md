@@ -10949,3 +10949,34 @@ Stop Conditions:
 - PF-P037 必须是 planning-only。直接写 SQL migration 或 repository 会把 schema、并发语义、UoW TOCTOU 和 rollout 策略混在一个 prompt 里，风险过高。
 - PF-P037 的核心审查点是并发语义：当前 UoW 存在 transaction 外 replay probe 与 transaction 内 reserve 的边界，PostgreSQL 实现必须明确如何消除同 key 并发竞态。
 - PF-P037 不需要 Merge Gate；它完成并 verified 后，再生成下一条实现切片，例如 `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests`。
+
+### 执行结果
+
+状态：`implemented`，等待用户确认后才可标记 `verified`。
+
+PF-P037 已执行：
+
+- 创建 `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`。
+- 明确推荐 `app.workbench_idempotency_records` 作为 durable store 表。
+- 保持 PF-P024/PF-P025 的 durable unique identity：`(tenant_id, actor_id, idempotency_key)`。
+- 明确 `action_name` 是 diagnostics 字段，不进入 durable uniqueness。
+- 明确 PostgreSQL implementation 必须通过 transaction-bound `reserve_or_get_locked(...)` 消除当前 UoW pre-transaction get 与 transaction-bound reserve 的 TOCTOU 风险。
+- 明确 cancel-link 需要 pre-active-relation replay，因此后续实现应拆分 committed replay reader 与 transaction-bound writer。
+- 明确下一条实现切片建议：`PF-P038 - Workbench Durable Idempotency Migration and Contract Tests`。
+
+未执行：
+
+- 未写 SQL migration。
+- 未实现 PostgreSQL repository。
+- 未修改生产代码。
+- 未修改 tests。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+验证结果：
+
+- `git status --short --branch`：Pass，当前分支 `codex/workbench-durable-idempotency-planning`，仅文档变更。
+- `git ls-files --others --exclude-standard`：Pass，仅新增预期产物 `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `test -f docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`：Pass。
+- `rg -n "PostgreSQL|idempotency|unique|reserved|committed|failed|source_versions|outbox_event_ids|TOCTOU|PF-P038" docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`：Pass。
