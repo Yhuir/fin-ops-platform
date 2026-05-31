@@ -10745,23 +10745,18 @@ class Application:
                 isinstance(suggestion, dict)
                 and str(suggestion.get("category_resolution_status") or "") == "needs_confirmation"
             ):
-                candidate_codes = [
-                    str(code).strip()
-                    for code in list((suggestion or {}).get("auto_candidate_category_codes") or [])
-                    if str(code or "").strip()
-                ]
-                if len(set(candidate_codes)) < 2:
+                candidate_codes: list[str] = []
+                seen_candidate_codes: set[str] = set()
+                for raw_code in list((suggestion or {}).get("auto_candidate_category_codes") or []):
+                    code = str(raw_code or "").strip()
+                    if not code or code in seen_candidate_codes:
+                        continue
+                    seen_candidate_codes.add(code)
+                    candidate_codes.append(code)
+                if len(candidate_codes) < 2:
                     raise BankTransactionCategoryValidationError(
                         "invalid_category_confirmation_candidate",
                         "当前流水没有多个可确认的自动标签候选。",
-                        transaction_id=transaction_id,
-                    )
-            elif not isinstance(suggestion, dict) or str(suggestion.get("category_resolution_status") or "") == "unmatched":
-                candidate_codes = self._active_bank_transaction_tag_codes()
-                if not candidate_codes:
-                    raise BankTransactionCategoryValidationError(
-                        "invalid_category_confirmation_candidate",
-                        "当前没有可选择的银行明细标签。",
                         transaction_id=transaction_id,
                     )
             else:
@@ -10796,23 +10791,6 @@ class Application:
             },
         )
         return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
-
-    def _active_bank_transaction_tag_codes(self) -> list[str]:
-        payload = self._bank_transaction_category_service.tag_dictionary_payload()
-        definitions = list(payload.get("definitions") or payload.get("tags") or [])
-        codes: list[str] = []
-        seen: set[str] = set()
-        for definition in definitions:
-            if not isinstance(definition, dict):
-                continue
-            code = str(definition.get("code") or "").strip()
-            if not code or code in seen:
-                continue
-            if str(definition.get("status") or "active").strip() == "archived":
-                continue
-            seen.add(code)
-            codes.append(code)
-        return codes
 
     def _handle_api_bank_detail_category_confirmation_delete(
         self,

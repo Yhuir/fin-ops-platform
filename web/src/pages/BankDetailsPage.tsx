@@ -6,6 +6,7 @@ import ClickAwayListener from "@mui/material/ClickAwayListener";
 import Divider from "@mui/material/Divider";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
+import MenuList from "@mui/material/MenuList";
 import Popover from "@mui/material/Popover";
 import Popper from "@mui/material/Popper";
 import Paper from "@mui/material/Paper";
@@ -140,15 +141,6 @@ function tagDefinitionDisplayParts(tag: BankTransactionTagDefinition) {
     primaryLabel: primaryLabel || displayLabel,
     subLabel: subLabel,
   };
-}
-
-function tagDefinitionSelectionLabel(tag: BankTransactionTagDefinition) {
-  const parts = tagDefinitionDisplayParts(tag);
-  const path = [parts.primaryLabel, parts.subLabel].map((value) => value.trim()).filter(Boolean);
-  if (path.length > 0) {
-    return path.join(" / ");
-  }
-  return tagDefinitionDisplayLabel(tag) || tag.code;
 }
 
 function buildCategoryTree(items: CategorySummaryItem[]): CategoryTreeGroup[] {
@@ -715,49 +707,110 @@ function counterpartyNameDensity(name: string) {
   return "regular";
 }
 
+type ConfirmationChoice = {
+  categoryCode: BankTransactionCategoryCode;
+  primaryLabel: string;
+  subLabel: string | null;
+};
+
+type ConfirmationChoiceGroup = {
+  key: string;
+  primaryLabel: string;
+  choices: ConfirmationChoice[];
+};
+
+function candidateLabelPart(value: string | null | undefined) {
+  return String(value ?? "").trim();
+}
+
+function confirmationChoiceFromCandidate(
+  candidate: BankDetailTransaction["autoCandidateCategories"][number],
+): ConfirmationChoice | null {
+  const categoryCode = candidateLabelPart(candidate.categoryCode);
+  if (!categoryCode) {
+    return null;
+  }
+  const labelPath = candidate.categoryLabelPath.map(candidateLabelPart).filter(Boolean);
+  const primaryLabel = candidateLabelPart(candidate.categoryPrimaryLabel)
+    || labelPath[0]
+    || candidateLabelPart(candidate.categoryLabel)
+    || categoryCode;
+  const subLabel = candidateLabelPart(candidate.categorySubLabel)
+    || labelPath.slice(1).find(Boolean)
+    || null;
+  return {
+    categoryCode,
+    primaryLabel,
+    subLabel,
+  };
+}
+
+function buildConfirmationChoiceGroups(
+  candidates: BankDetailTransaction["autoCandidateCategories"],
+): ConfirmationChoiceGroup[] {
+  const groups: ConfirmationChoiceGroup[] = [];
+  const groupsByKey = new Map<string, ConfirmationChoiceGroup>();
+  const seenCodes = new Set<string>();
+  candidates.forEach((candidate) => {
+    const choice = confirmationChoiceFromCandidate(candidate);
+    if (!choice || seenCodes.has(choice.categoryCode)) {
+      return;
+    }
+    seenCodes.add(choice.categoryCode);
+    const key = choice.primaryLabel;
+    let group = groupsByKey.get(key);
+    if (!group) {
+      group = { key, primaryLabel: choice.primaryLabel, choices: [] };
+      groupsByKey.set(key, group);
+      groups.push(group);
+    }
+    group.choices.push(choice);
+  });
+  return groups;
+}
+
 function TypeCell({
   row,
   confirming,
-  categoryOptions,
   onConfirm,
   onRevoke,
 }: {
   row: BankDetailTransaction;
   confirming: boolean;
-  categoryOptions: BankTransactionTagDefinition[];
   onConfirm: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
   onRevoke: (row: BankDetailTransaction) => void;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const isUnmatchedWithoutCategory = row.categoryResolutionStatus === "unmatched"
-    && !row.autoCategoryCode
-    && !row.effectiveCategoryCode
-    && !row.categoryCode;
+  const confirmationGroups = useMemo(
+    () => (row.categoryResolutionStatus === "needs_confirmation"
+      ? buildConfirmationChoiceGroups(row.autoCandidateCategories)
+      : []),
+    [row.autoCandidateCategories, row.categoryResolutionStatus],
+  );
+  const [selectedPrimaryKey, setSelectedPrimaryKey] = useState("");
+  const selectedGroup = confirmationGroups.find((group) => group.key === selectedPrimaryKey) ?? confirmationGroups[0] ?? null;
 
-  const confirmationChoices = row.categoryResolutionStatus === "needs_confirmation"
-    ? row.autoCandidateCategories.map((candidate) => ({
-      categoryCode: candidate.categoryCode,
-      label: candidate.categoryLabelPath.length
-        ? candidate.categoryLabelPath.join(" / ")
-        : [candidate.categoryPrimaryLabel, candidate.categorySubLabel].filter(Boolean).join(" / ") || candidate.categoryLabel || candidate.categoryCode,
-    }))
-    : isUnmatchedWithoutCategory
-    ? categoryOptions.reduce<Array<{ categoryCode: BankTransactionCategoryCode; label: string }>>((choices, tag) => {
-      if (tag.status === "archived" || choices.some((choice) => choice.categoryCode === tag.code)) {
-        return choices;
+  useEffect(() => {
+    if (!confirmationGroups.length) {
+      if (selectedPrimaryKey) {
+        setSelectedPrimaryKey("");
       }
-      choices.push({
-        categoryCode: tag.code,
-        label: tagDefinitionSelectionLabel(tag),
-      });
-      return choices;
-    }, [])
-    : [];
+      return;
+    }
+    if (!confirmationGroups.some((group) => group.key === selectedPrimaryKey)) {
+      setSelectedPrimaryKey(confirmationGroups[0].key);
+    }
+  }, [confirmationGroups, selectedPrimaryKey]);
 
-  if (confirmationChoices.length > 0) {
+  const closeConfirmationPanel = () => setAnchorEl(null);
+
+  if (confirmationGroups.length > 0) {
     return (
       <>
         <Button
+          aria-controls={anchorEl ? `bank-category-confirmation-${row.id}` : undefined}
+          aria-expanded={anchorEl ? "true" : undefined}
+          aria-haspopup="menu"
           size="small"
           variant="outlined"
           color="warning"
@@ -766,23 +819,85 @@ function TypeCell({
         >
           待确认
         </Button>
-        <Menu
+        <Popper
           anchorEl={anchorEl}
+          className="bank-category-confirmation-popper"
           open={Boolean(anchorEl)}
-          onClose={() => setAnchorEl(null)}
+          placement="bottom-start"
+          modifiers={[
+            {
+              name: "preventOverflow",
+              enabled: true,
+              options: { padding: 8, altAxis: true },
+            },
+            {
+              name: "flip",
+              enabled: true,
+              options: { padding: 8 },
+            },
+          ]}
         >
-          {confirmationChoices.map((choice) => (
-            <MenuItem
-              key={choice.categoryCode}
-              onClick={() => {
-                setAnchorEl(null);
-                onConfirm(row, choice.categoryCode);
+          <ClickAwayListener onClickAway={closeConfirmationPanel}>
+            <Paper
+              className="bank-category-confirmation-panel"
+              elevation={8}
+              id={`bank-category-confirmation-${row.id}`}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  closeConfirmationPanel();
+                }
               }}
             >
-              {choice.label}
-            </MenuItem>
-          ))}
-        </Menu>
+              <Box className="bank-category-confirmation-columns">
+                <MenuList
+                  aria-label="待确认主标签"
+                  autoFocus
+                  className="bank-category-confirmation-primary-list"
+                  dense
+                  variant="menu"
+                >
+                  {confirmationGroups.map((group) => (
+                    <ListItemButton
+                      className="bank-category-confirmation-primary-item"
+                      component="button"
+                      key={group.key}
+                      onClick={() => setSelectedPrimaryKey(group.key)}
+                      role="menuitem"
+                      selected={group.key === selectedGroup?.key}
+                    >
+                      <ListItemText disableTypography primary={<Typography component="span">{group.primaryLabel}</Typography>} />
+                    </ListItemButton>
+                  ))}
+                </MenuList>
+                <Divider flexItem orientation="vertical" />
+                <MenuList
+                  aria-label={`${selectedGroup?.primaryLabel ?? "已选主标签"}候选子标签`}
+                  className="bank-category-confirmation-child-list"
+                  dense
+                  variant="menu"
+                >
+                  {(selectedGroup?.choices ?? []).map((choice) => (
+                    <ListItemButton
+                      className="bank-category-confirmation-child-item"
+                      component="button"
+                      key={choice.categoryCode}
+                      onClick={() => {
+                        closeConfirmationPanel();
+                        onConfirm(row, choice.categoryCode);
+                      }}
+                      role="menuitem"
+                    >
+                      <ListItemText
+                        disableTypography
+                        primary={<Typography component="span">{choice.subLabel || choice.primaryLabel}</Typography>}
+                      />
+                    </ListItemButton>
+                  ))}
+                </MenuList>
+              </Box>
+            </Paper>
+          </ClickAwayListener>
+        </Popper>
       </>
     );
   }
@@ -1592,7 +1707,6 @@ export default function BankDetailsPage() {
                           <TypeCell
                             row={row}
                             confirming={categoryMutationId === row.id}
-                            categoryOptions={categoryOptions}
                             onConfirm={handleConfirmCategory}
                             onRevoke={handleRevokeCategoryConfirmation}
                           />

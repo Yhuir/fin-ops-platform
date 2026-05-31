@@ -507,7 +507,7 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
-  test("uncategorized unmatched rows display a confirmation entry in the narrow type column", async () => {
+  test("uncategorized unmatched rows display an empty type instead of confirmation actions", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderBankDetailsPage();
@@ -520,30 +520,48 @@ describe("Bank details page", () => {
 
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
     const table = await within(page).findByRole("table", { name: "交易流水" });
-    expect(await within(table).findByText("普通供应商")).toBeInTheDocument();
-    expect(within(table).getByRole("button", { name: "待确认" })).toBeInTheDocument();
+    const supplierName = await within(table).findByText("普通供应商");
+    const supplierRow = supplierName.closest("tr");
+    expect(supplierRow).toBeInstanceOf(HTMLElement);
+    expect(within(supplierRow as HTMLElement).queryByRole("button", { name: "待确认" })).not.toBeInTheDocument();
+    const typeCell = (supplierRow as HTMLElement).querySelector(".bank-col-type");
+    expect(typeCell).toBeInstanceOf(HTMLElement);
+    expect(within(typeCell as HTMLElement).getByText("-")).toBeInTheDocument();
     categoryPanel = await openCategoryFilterPanel(user, page);
     expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 1" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
   });
 
-  test("unmatched rows open all active bank tag options for manual selection", async () => {
+  test("needs-confirmation rows group only matched candidates by primary tag", async () => {
     const user = userEvent.setup();
-    installMockApiFetch();
+    const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
-    await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "候选供应商");
     const table = await within(page).findByRole("table", { name: "交易流水" });
-    expect(await within(table).findByText("普通供应商")).toBeInTheDocument();
+    expect(await within(table).findByText("候选供应商")).toBeInTheDocument();
 
     await user.click(within(table).getByRole("button", { name: "待确认" }));
 
-    const menu = await screen.findByRole("menu");
-    expect(within(menu).getByRole("menuitem", { name: "费用 / 工资" })).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitem", { name: "费用 / 手续费" })).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitem", { name: "质保金 / 待收款" })).toBeInTheDocument();
+    const primaryMenu = await screen.findByRole("menu", { name: "待确认主标签" });
+    expect(within(primaryMenu).getByRole("menuitem", { name: "费用" })).toBeInTheDocument();
+    expect(within(primaryMenu).queryByRole("menuitem", { name: "质保金" })).not.toBeInTheDocument();
+
+    await user.click(within(primaryMenu).getByRole("menuitem", { name: "费用" }));
+    const childMenu = await screen.findByRole("menu", { name: "费用候选子标签" });
+    expect(within(childMenu).getByRole("menuitem", { name: "手续费" })).toBeInTheDocument();
+    expect(within(childMenu).getByRole("menuitem", { name: "工资" })).toBeInTheDocument();
+    expect(within(childMenu).queryByRole("menuitem", { name: "待收款" })).not.toBeInTheDocument();
+
+    await user.click(within(childMenu).getByRole("menuitem", { name: "工资" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-details/transactions/bank-detail-needs-confirmation/category-confirmation",
+        expect.objectContaining({ body: JSON.stringify({ category_code: "salary" }) }),
+      );
+    });
   });
 
   test("shows primary and sub tag labels in bank transaction rows", async () => {

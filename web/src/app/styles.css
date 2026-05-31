@@ -7880,6 +7880,64 @@ body.column-layout-dragging {
   border-color: var(--bank-border-subtle);
 }
 
+.bank-category-confirmation-popper {
+  z-index: 40;
+  padding-top: 4px;
+}
+
+.bank-category-confirmation-panel {
+  width: min(420px, calc(100vw - 40px));
+  max-height: min(320px, calc(100vh - 160px));
+  overflow: hidden;
+  border: 1px solid var(--bank-border);
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+}
+
+.bank-category-confirmation-columns {
+  display: grid;
+  grid-template-columns: minmax(118px, 0.9fr) auto minmax(150px, 1.1fr);
+  max-height: inherit;
+  min-width: 0;
+}
+
+.bank-category-confirmation-primary-list,
+.bank-category-confirmation-child-list {
+  max-height: inherit;
+  overflow: auto;
+  padding: 5px;
+}
+
+.bank-category-confirmation-primary-item.MuiListItemButton-root,
+.bank-category-confirmation-child-item.MuiListItemButton-root {
+  justify-content: flex-start;
+  min-height: 30px;
+  border-radius: 5px;
+  color: var(--bank-text);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.2;
+  padding: 5px 9px;
+  text-align: left;
+}
+
+.bank-category-confirmation-primary-item.Mui-selected {
+  background: var(--bank-selected);
+  color: var(--bank-blue);
+}
+
+.bank-category-confirmation-primary-item .MuiTypography-root,
+.bank-category-confirmation-child-item .MuiTypography-root {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bank-grid-toolbar-actions {
   flex: 1 1 auto;
   align-items: center;
