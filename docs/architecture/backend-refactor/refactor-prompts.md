@@ -10730,3 +10730,53 @@ Stop Conditions:
 - 该 MG 不应执行 Traffic Gate，因为本轮没有网关、部署、worker routing 或生产配置变更。
 - 该 MG 必须在 feature branch 和本地 `main` 双重复验；通过后仍需用户确认，才能标记 `verified` 并决定是否 push。
 - 当前最大残留风险是 idempotency 仍非 durable PostgreSQL store；MG 文案已要求在状态机中保留这个生产级缺口，不允许宣称 Workbench 写路径已整体完成。
+
+### 执行结果
+
+状态：`implemented`，等待用户确认后才可标记 `verified`。
+
+PF-P036-MG 已执行：
+
+- 在功能分支 `codex/workbench-confirm-link-uow` 完成 branch/diff scope 检查，diff 只包含 PF-P035 到 PF-P036 预期文件。
+- 无 untracked files。
+- `backend-go` 不存在。
+- `origin/main` 已 fetch，`main` 已 `git pull --ff-only origin main`，结果为 `Already up to date`。
+- 功能分支包含最新 `main`。
+- 已通过 `--no-ff` merge 合入本地 `main`。
+- merge commit：`7e311921`。
+
+功能分支验证结果：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --name-status main...HEAD`：Pass。
+- `git diff --check main...HEAD`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+本地 `main` 复验结果：
+
+- `git status --short --branch`：Pass，`main...origin/main [ahead 6]`。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check HEAD~1..HEAD`：Pass。
+- `test ! -e backend-go`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+
+未执行：
+
+- 未执行 `git push origin main`。
+- 未执行 Traffic Gate。
+- 未部署或访问生产。
+
+后续：
+
+- 用户确认 PF-P036-MG `verified` 后，才允许执行 `git push origin main`。
+- push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。

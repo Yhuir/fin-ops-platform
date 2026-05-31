@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P036 - Workbench Cancel Link UoW Integration Slice` 已由用户确认 `verified`；`PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已执行并合入本地 `main`，等待用户确认是否可标记 `verified` |
+| 当前 active prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P036 - Workbench Cancel Link UoW Integration Slice` |
-| 当前分支 | `codex/workbench-confirm-link-uow` |
-| 最近验证 | PF-P036 在功能分支通过 Workbench write characterization、UoW contract、idempotency contract、stale write contract 和 platform runtime guard 测试；未执行 MG、未部署、未 Traffic Gate、未 push |
-| 下一条允许任务 | 执行 `PF-P036-MG`；它必须统一覆盖 PF-P035 到 PF-P036 的完整 diff，不得进入下一条业务迁移 |
+| 当前分支 | `main` |
+| 最近验证 | PF-P036-MG 已在功能分支和本地 `main` 双重复验通过；merge commit `7e311921`；未部署、未 Traffic Gate、未 push |
+| 下一条允许任务 | 等待用户确认 PF-P036-MG 是否可标记 `verified`；确认后才允许执行 `git push origin main` |
 
 ## Prompt 执行日志
 
@@ -3832,7 +3832,7 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 
 ### PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -3864,6 +3864,51 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - PF-P035 与 PF-P036 同属 Workbench pair relation facts/history 写路径，使用累计 MG 合并是合理的。
 - 当前仍存在生产级 idempotency 缺口：真实 PostgreSQL durable idempotency store 尚未实现。因此 MG 只能证明 pair relation UoW transaction boundary 进入 main，不代表 Workbench 写路径全部生产完成。
 - PF-P036-MG 不应继续扩大业务范围。通过后用户确认 `verified`，再由用户决定是否 `git push origin main`。
+
+#### 执行结果
+
+- 状态：`implemented`，等待用户确认后才可标记 `verified`。
+- 功能分支验证：
+  - `git status --short --branch`：Pass，位于 `codex/workbench-confirm-link-uow`。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --name-status main...HEAD`：Pass，只包含 PF-P035 到 PF-P036 预期的 8 个文件。
+  - `git diff --check main...HEAD`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- Upstream sync：
+  - `git fetch origin`：Pass。
+  - `git checkout main`：Pass。
+  - `git pull --ff-only origin main`：Pass，`Already up to date`。
+  - `git merge-base --is-ancestor main codex/workbench-confirm-link-uow`：Pass，功能分支包含最新 main。
+- 本地 main 合入：
+  - `git merge --no-ff codex/workbench-confirm-link-uow -m "Merge branch 'codex/workbench-confirm-link-uow': workbench pair relation uow"`：Pass。
+  - merge commit：`7e311921`。
+- main 复验：
+  - `git status --short --branch`：Pass，`main...origin/main [ahead 6]`。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check HEAD~1..HEAD`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 未执行：
+  - 未执行 `git push origin main`。
+  - 未执行 Traffic Gate。
+  - 未部署，未访问生产。
+- 剩余风险：
+  - Workbench idempotency 仍不是 PostgreSQL durable store。
+  - actor/tenant 仍未接真实 auth context。
+  - PF-P036-MG 只覆盖 pair relation `confirm-link` / `cancel-link` UoW，不代表 Workbench 写路径全部完成。
+- 下一条 Prompt 上下文：
+  - 等待用户确认 PF-P036-MG verified。
+  - 用户确认后才允许执行 `git push origin main`。
+  - push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
 
 ## 维护规则
 
