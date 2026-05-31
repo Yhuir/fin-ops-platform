@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已执行 `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy`，等待用户确认 |
-| 当前 active prompt | `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy` (`implemented`) |
-| 最近 verified prompt | `PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy` |
+| 当前阶段 | 已生成并审查 `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`，等待执行 |
+| 当前 active prompt | `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy` (`planned`) |
+| 最近 verified prompt | `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy` |
 | 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
-| 最近验证 | PF-P043 新增 expired reserved takeover helper / outcome / UoW / repository tests 并完成红绿循环；未执行 Merge Gate、Traffic Gate、部署或 push；未经用户确认不得标记 `verified` |
-| 下一条允许任务 | 等待用户确认 PF-P043 `verified`；之后可继续生成 PF-P044 failed reservation policy，或按用户要求生成 PF-P043-MG/cumulative MG |
+| 最近验证 | 用户已确认 PF-P043 `verified`；PF-P044 只生成/审查，未执行代码实现、Merge Gate、Traffic Gate、部署或 push |
+| 下一条允许任务 | 执行 PF-P044；PF-P044 完成后仍留在 PF-P040 起 cumulative MG 范围，未经用户确认不得标记 `verified` |
 
 ## Prompt 执行日志
 
@@ -4492,7 +4492,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4584,9 +4584,59 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认 PF-P043 `verified`。
-- 之后可继续生成 `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`，或按用户要求生成 PF-P043-MG/cumulative MG。
+- 用户已确认 PF-P043 `verified`。
+- 已生成并审查 `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`；下一步允许执行 PF-P044。
 - PF-P043 仍不触发 MG；cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
+
+### PF-P044 - Workbench Durable Idempotency Failed Reservation Policy
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 Workbench durable idempotency 的 `failed` record policy。
+- 建立 deterministic failed same-fingerprint response，避免同一 idempotency key 在失败后盲目重跑 handler。
+- 继续保持 same-key different-fingerprint conflict。
+- 允许最小新增 failed primitive / helper / repository contract test。
+- 不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不处理 cleanup/retention、observability 或真实 PostgreSQL concurrency integration test。
+- 不迁移更多 Workbench 写 API。
+- 不执行 Merge Gate、Traffic Gate、部署或 push。
+
+#### 审查结论
+
+- PF-P044 是 PF-P043 verified 后合理的下一步：rollout readiness matrix 中 `failed reservation policy` 仍是打开 durable idempotency feature flag 前的 blocker。
+- 当前源码已有 `status="failed"` 和 `mark_failed()`，但 UoW 对 failed record 没有稳定 replay/reject 语义；如果不锁定策略，后续 request path 可能对失败记录产生盲重放或不一致 retry。
+- PF-P044 的保守策略应是：same-fingerprint failed record 返回稳定 failed idempotency response，默认不自动重试；如果未来需要 retry，必须用新 idempotency key 或后续显式 retry policy。
+- PF-P044 不应混入 cleanup/retention、observability 或真实 PostgreSQL 并发 integration test；这些仍是独立 gate。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已包含完整 PF-P044 prompt，且 prompt 正文以 `/goal` 开头。
+- PF-P044 prompt 包含 Pre-Flight、Allowed Scope、Forbidden Scope、Required Test Work、Required Implementation Work、Required Documentation、Required Verification、Post-Flight 和 Stop Conditions。
+- PF-P044 prompt 明确禁止启用 durable idempotency feature flag、部署、Traffic Gate、push 和迁移更多 Workbench 写 API。
+- PF-P044 prompt 明确 PF-P040-MG 仍 deferred，后续 cumulative MG 覆盖 PF-P040 起的完整 diff。
+- PF-P044 prompt 明确 failed same-fingerprint 不自动重试，different-fingerprint 继续 conflict。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+
+#### 验证
+
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪临时文件。
+- 文档检索：Pass，PF-P044 prompt 已写入 `refactor-prompts.md`，正文以 `/goal` 开头；状态机、计划文档和 rollout readiness 均已记录 PF-P044 planned boundary。
+
+#### 下一步
+
+- 执行 PF-P044。
+- PF-P044 执行后状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+- PF-P044 完成后仍不触发 Traffic Gate；如用户认为 PF-P040 到 PF-P044 已达到可合并切片，可生成 cumulative MG 覆盖完整 diff。
 
 ## 维护规则
 

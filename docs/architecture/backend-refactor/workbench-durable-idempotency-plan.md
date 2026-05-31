@@ -920,3 +920,39 @@ PF-P043 已实现 deterministic expired `reserved` takeover policy，但没有�
 `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`
 
 PF-P044 应只处理 `failed` 状态的 retry/replay/error semantics，并继续保持 feature flag 默认关闭。若用户认为 PF-P040 到 PF-P043 已达到可合并切片，也可以先生成 cumulative MG 覆盖 PF-P040 起完整 diff。
+
+## 22. PF-P044 Planned Boundary
+
+用户已确认 PF-P043 `verified`。下一条 planned prompt：
+
+`PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`
+
+PF-P044 的目标是建立 deterministic failed reservation policy：
+
+- same-key same-fingerprint `failed` record 返回稳定 `idempotency_key_failed` response。
+- failed same-fingerprint 默认不自动 retry，不执行 handler，不写 facts、dirty scope、outbox 或 idempotency commit。
+- same-key different-fingerprint 即使 record status 为 `failed`，也必须继续返回 `idempotency_key_conflict`。
+- committed replay、active reserved in-progress、expired reserved takeover 语义不得回退。
+
+PF-P044 的关键设计点是 failed primitive。实现时必须明确：
+
+- `failed` 是 request path 的稳定终态，不是自动重试入口。
+- 如果业务要重新执行失败请求，调用方必须使用新的 idempotency key，或等待未来单独 retry policy prompt 定义显式机制。
+- 当前 schema 没有 `last_error` 字段，本轮不得修改 migration；失败详情只能通过现有 `response_payload` 表达。
+
+建议实现边界：
+
+- 在 `workbench_idempotency.py` 中新增 `WorkbenchIdempotencyFailed` 或等价 primitive。
+- 在 `workbench_uow.py` 中集中处理 failed same-fingerprint / different-fingerprint 分流。
+- 在 in-memory 和 PostgreSQL repository tests 中锁定 `mark_failed()` 的 sanitization 和 transaction-bound 行为。
+- 在 `workbench_write_facade.py` 中把 failed primitive 映射为稳定 response。
+
+PF-P044 不应：
+
+- 启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 修改 `0043_workbench_idempotency_records.sql`。
+- 处理 cleanup/retention、observability 或真实 PostgreSQL concurrency integration test。
+- 迁移更多 Workbench 写 API。
+- 执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+PF-P044 完成后仍应留在 PF-P040 起的 cumulative MG 范围内。只有用户确认相关 prompt verified 后，才允许生成覆盖 PF-P040 起完整 diff 的 cumulative Merge Gate。

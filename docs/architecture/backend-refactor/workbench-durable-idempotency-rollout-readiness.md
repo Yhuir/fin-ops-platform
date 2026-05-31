@@ -169,3 +169,29 @@ PF-P043 已完成 expired `reserved` takeover 的默认绿色 contract。
 - same-key different-fingerprint 即使 expired 仍继续返回 `idempotency_key_conflict`。
 
 本轮仍不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。feature flag 打开前，仍需处理 failed policy、cleanup/retention、真实 PostgreSQL concurrency 和 observability。
+
+## 14. PF-P044 Planned Boundary
+
+用户已确认 PF-P043 `verified`。下一条 planned prompt：
+
+`PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`
+
+PF-P044 只处理 failed reservation policy，不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不迁移更多 Workbench 写 API，也不执行 Traffic Gate、部署或 push。
+
+PF-P044 的目标是把现有 `failed` record 从未定义 blocker 收敛为 deterministic contract：
+
+- same-key same-fingerprint `failed` record 返回稳定 `idempotency_key_failed` response。
+- failed same-fingerprint 默认不自动 retry，不执行 handler，不写 facts、dirty scope、outbox 或 idempotency commit。
+- same-key different-fingerprint 即使 record status 为 `failed`，也必须继续返回 `idempotency_key_conflict`。
+- committed replay、active reserved in-progress、expired reserved takeover 语义不得回退。
+
+PF-P044 的保守策略是：失败记录是 request path 的稳定终态，不是自动重试入口。如果业务需要重新执行失败请求，调用方必须使用新的 idempotency key，或等待未来单独 retry policy prompt 定义显式机制。
+
+即使 PF-P044 完成，以下 gate 仍不得视为 ready：
+
+- cleanup/retention
+- real PostgreSQL row-lock concurrency
+- observability/metrics/logging
+- migration apply / rollback runbook
+
+PF-P044 完成后仍留在 PF-P040 起的 cumulative MG 范围内。只有用户确认相关 prompt verified 后，才允许生成覆盖 PF-P040 起完整 diff 的 cumulative Merge Gate。

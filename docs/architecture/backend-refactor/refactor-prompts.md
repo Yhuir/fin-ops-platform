@@ -12390,3 +12390,195 @@ Stop Conditions:
 `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`
 
 PF-P044 应只处理 `failed` 状态的 retry/replay/error semantics，继续保持 feature flag 默认关闭。若用户认为 PF-P040 到 PF-P043 已达到一个可合并切片，也可以先生成 cumulative MG。
+
+## PF-P044 - Workbench Durable Idempotency Failed Reservation Policy
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P044 - Workbench Durable Idempotency Failed Reservation Policy。
+
+Role: 你是一位严格的 Python 后端架构师，熟悉 financial write path、durable idempotency、failure replay semantics、PostgreSQL row locking 和 TDD。你的任务是在不打开 durable idempotency feature flag 的前提下，补齐 Workbench durable idempotency 的 failed reservation policy。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-durable-idempotency-rollout-readiness`。
+- PF-P040-MG deferred；后续 cumulative MG 将覆盖 PF-P040 起同一 durable idempotency rollout blocker 主题的完整 diff。
+- PF-P043 已由用户确认 `verified`：
+  - active same-fingerprint `reserved` 返回 `idempotency_key_in_progress`。
+  - expired same-fingerprint `reserved` 可被 transaction-bound takeover。
+  - different-fingerprint 即使 expired 仍 conflict。
+  - feature flag 仍默认关闭。
+- `workbench-durable-idempotency-rollout-readiness.md` 中 `failed reservation policy` 仍是打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 前的 blocker。
+- 当前源码事实：
+  - `WorkbenchIdempotencyRecord` 已支持 `status="failed"`。
+  - `InMemoryWorkbenchIdempotencyRepository.mark_failed()` 和 `PostgresWorkbenchIdempotencyRepository.mark_failed()` 已存在。
+  - `WorkbenchWriteUnitOfWork.run()` 对 existing failed record 没有稳定语义；它既不是 committed replay，也不是 in-progress。
+  - 当前没有 `WorkbenchIdempotencyFailed` 或等价 failed primitive。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/workbench_write_facade.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_postgres_idempotency_repository.py`
+   - `tests/test_workbench_durable_idempotency_rollout.py`
+   - `tests/test_workbench_auth_context_idempotency.py`
+2. 必须用 CodeGraph 或源码确认：
+   - `WorkbenchWriteUnitOfWork.run()` 对 committed / reserved / failed record 的当前分流。
+   - `mark_failed()` 在 in-memory 和 PostgreSQL repository 中的当前 payload sanitization 和 update 行为。
+   - facade 当前如何 catch `WorkbenchIdempotencyKeyConflict` / `WorkbenchIdempotencyInProgress`。
+3. 必须确认：
+   - 当前 active prompt 是 PF-P044 planned。
+   - PF-P043 状态为 `verified`。
+   - PF-P040-MG 仍为 deferred / cumulative MG 范围。
+   - 当前分支是 `codex/workbench-durable-idempotency-rollout-readiness`。
+   - 工作区没有未提交变更或未跟踪临时文件。
+
+Goal:
+建立 deterministic failed idempotency contract：当已有 same-key same-fingerprint `failed` record 时，后续相同请求必须返回稳定 failed response，不得自动重试 handler、不得写 facts/dirty scope/outbox；same-key different-fingerprint 继续返回 conflict。默认策略是保守不自动 retry；如果业务需要重新执行，调用方必须使用新的 idempotency key 或未来显式 retry prompt 定义的机制。
+
+Allowed Scope:
+- 允许新增或修改默认绿色 tests：
+  - `tests/test_workbench_idempotency_contract.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `tests/test_workbench_postgres_idempotency_repository.py`
+  - `tests/test_workbench_write_characterization.py`，仅当需要锁定 facade response 不退化。
+  - `tests/test_workbench_durable_idempotency_rollout.py`，仅更新 readiness blocker 状态测试。
+- 允许最小修改：
+  - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+  - `backend/src/fin_ops_platform/services/workbench_uow.py`
+  - `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+  - `backend/src/fin_ops_platform/services/workbench_write_facade.py`，仅用于把 failed primitive 映射为稳定 conflict/failed response。
+- 允许更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+
+Forbidden Scope:
+- 不启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不修改部署、环境变量、网关、worker routing、前端或数据库 migration。
+- 不迁移更多 Workbench 写 API；只允许影响已接入 UoW 的 confirm-link / cancel-link idempotency path。
+- 不实现 cleanup/retention job。
+- 不新增 observability metrics，除非只是文档列出后续需求。
+- 不依赖真实 PostgreSQL 作为默认 CI。
+- 不执行真实生产或 staging 访问。
+- 不执行 Merge Gate、Traffic Gate、部署、merge 或 push。
+- 不把 failed same-fingerprint 写成自动 retry handler。
+- 不把 failed different-fingerprint 写成可覆盖或可重用。
+- 不用 broad `except Exception` 吞掉 idempotency primitive。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Test Work:
+1. RED 先行：
+   - 新增 tests 必须先失败，失败原因应指向 failed record 无稳定 response 或仍可能执行 handler，而不是 import error 或外部服务缺失。
+2. Failed primitive contract：
+   - 新增 `WorkbenchIdempotencyFailed` 或等价稳定 primitive。
+   - response payload 必须稳定，建议：
+     - `success: False`
+     - `error: "idempotency_key_failed"`
+     - `idempotency_key`
+     - `action_name`
+     - `retryable: False`
+     - 明确 message。
+   - HTTP status 必须稳定。优先使用 `409 Conflict`，除非现有接口测试强制其他状态。
+3. UoW failed record contract：
+   - transaction 外 `get_committed_or_reserved()` 返回 same-fingerprint `failed` record 时，UoW 必须返回/抛出 failed primitive。
+   - 必须断言 handler 未执行。
+   - 必须断言 dirty scope / outbox writer 未调用。
+   - 必须断言 reserve / commit 未调用。
+   - same-key different-fingerprint failed record 仍必须返回现有 `idempotency_key_conflict`。
+   - committed replay、active in-progress 和 expired takeover 语义不得回退。
+4. Repository / mark_failed contract：
+   - In-memory `mark_failed()` 必须保留 sanitized request payload 和 response payload，不泄露 token/password/cookie/secret。
+   - PostgreSQL `mark_failed()` 默认测试使用 fake executor / SQL contract，不连接真实 PostgreSQL。
+   - PostgreSQL `mark_failed()` 必须继续使用 sanitized payload，并且不得打开 nested transaction。
+   - 如果当前 schema 没有 `last_error` 字段，不得修改 migration；本轮只使用现有 `response_payload` 表达失败 payload。
+5. Facade / HTTP response contract：
+   - confirm-link 和 cancel-link UoW path 必须把 failed primitive 映射为稳定 response。
+   - 不改变成功响应 shape。
+   - 不改变 stale write conflict、idempotency fingerprint conflict、in-progress 或 expired takeover response shape。
+6. Rollout readiness test：
+   - 如果本轮完整解决 failed reservation policy，将 readiness row 从 `blocked` 调整为 `ready` 或 `documented-risk`。
+   - 若 cleanup/retention、real PostgreSQL concurrency 或 observability 仍未覆盖，必须继续保留为 blocker / future-test-needed，不得伪装可生产打开。
+
+Required Implementation Work:
+1. 在 `workbench_idempotency.py` 中新增最小 failed primitive / helper：
+   - failed same-fingerprint response。
+   - failed payload sanitization 保持已有 `to_storage_payload()` 语义。
+   - 保持 `WorkbenchIdempotencyRecord` schema 不变。
+2. 在 `workbench_uow.py` 中集中处理 idempotency state：
+   - failed same-fingerprint 返回 failed primitive，不执行 handler。
+   - failed different-fingerprint 继续 conflict。
+   - committed replay、active reserved in-progress、expired reserved takeover 语义不变。
+   - 不引入 wait-loop 或自动 retry。
+3. 在 repository tests 中锁定 `mark_failed()`：
+   - In-memory 和 PostgreSQL fake executor 都应证明 payload 被 sanitized。
+   - PostgreSQL repository 不打开 nested transaction。
+4. 在 `workbench_write_facade.py` 中只做必要 catch：
+   - confirm-link / cancel-link 捕获 failed primitive 并返回 `HTTPStatus.CONFLICT` 或 prompt 中选定状态。
+   - 不把 failed primitive 落入 generic persistence unavailable 分支。
+5. 保持 feature flag default-off：
+   - 未设置 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 时不改变生产默认 repository wiring。
+   - 即使 failed policy 更安全，也不得宣称 durable idempotency 已可生产打开。
+
+Required Documentation:
+- 更新 rollout readiness 文档：
+  - 记录 `failed reservation policy` 本轮状态。
+  - 明确 cleanup/retention、real PostgreSQL concurrency 和 observability 是否仍是 blocker。
+  - 明确 feature flag 仍默认关闭。
+- 更新 durable idempotency plan：
+  - 记录 PF-P044 execution result / planned boundary。
+  - 记录 failed primitive 的目标语义。
+- 更新状态机和 prompt 库。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- 新增或修改测试文件对应 unittest 命令。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- `rg -n "idempotency_key_failed|WorkbenchIdempotencyFailed|mark_failed|failed reservation|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY" backend/src/fin_ops_platform/services tests docs/architecture/backend-refactor`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P044 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录变更文件、验证结果、新增 tests、failed policy 状态和剩余 blocker。
+  - 记录 PF-P040-MG 仍 deferred，后续 cumulative MG 覆盖 PF-P040 起的完整 diff。
+- 更新 `refactor-prompts.md` 的 PF-P044 执行结果。
+- 更新 `workbench-durable-idempotency-plan.md` 和 rollout readiness 文档。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+Stop Conditions:
+- 如果需要打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 才能让测试通过，停止。
+- 如果必须修改 PostgreSQL migration schema，停止并生成单独 migration prompt。
+- 如果必须同时实现 cleanup/retention 或 observability 才能完成本轮，停止并记录 blocker。
+- 如果默认 CI 需要真实 PostgreSQL 并发测试，改用 fake/contract tests 或停止。
+- 如果实现会让 failed same-fingerprint 自动重跑 handler，停止。
+- 如果实现会让 failed different-fingerprint 覆盖 conflict 语义，停止。
+```
+
+### 审查结论
+
+- PF-P044 的方向正确：PF-P043 已解决 expired reserved，下一步应处理现有 `failed` record 的稳定语义，避免失败记录导致盲目重跑或不可预测 retry。
+- 本 prompt 采用保守策略：same-fingerprint failed 返回稳定 `idempotency_key_failed`，默认不自动 retry；未来若业务需要 retry，应通过新 idempotency key 或单独 retry policy prompt 明确设计。
+- PF-P044 不应修改 schema；当前 schema 没有 `last_error` 字段，本轮只用现有 `response_payload` 表达失败 payload。
+- PF-P044 完成后仍应留在 PF-P040 起的 cumulative MG 范围内，不单独 push，不执行 Traffic Gate。
