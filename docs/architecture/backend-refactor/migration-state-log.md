@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` 已执行完成，等待用户确认 `verified` |
-| 当前 active prompt | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` (`implemented`) |
-| 最近 verified prompt | `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` |
+| 当前阶段 | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` 已由用户确认 `verified`；`PF-P039 - Workbench Durable Idempotency Repository Integration` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P039 - Workbench Durable Idempotency Repository Integration` (`planned`) |
+| 最近 verified prompt | `PF-P038 - Workbench Durable Idempotency Migration and Contract Tests` |
 | 当前分支 | `codex/workbench-durable-idempotency-planning` |
-| 最近验证 | PF-P038 已新增 `0043_workbench_idempotency_records.sql` 和默认绿 migration/schema contract tests；未实现 repository；未切 production wiring；未迁移更多 Workbench 写 API |
-| 下一条允许任务 | 用户确认 PF-P038 后标记 `verified`；然后生成并审查 `PF-P039 - Workbench Durable Idempotency Repository Integration` |
+| 最近验证 | PF-P038 已新增 `0043_workbench_idempotency_records.sql` 和默认绿 migration/schema contract tests；用户已确认 `verified`；未实现 repository；未切 production wiring；未迁移更多 Workbench 写 API |
+| 下一条允许任务 | 执行 `PF-P039`；它只允许实现 durable idempotency repository、transaction-bound UoW adapter 和 disabled-by-default wiring，不得迁移更多 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -3975,7 +3975,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P038 - Workbench Durable Idempotency Migration and Contract Tests
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4030,6 +4030,27 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 - 下一条建议 prompt：`PF-P039 - Workbench Durable Idempotency Repository Integration`。
 - PF-P039 应实现 PostgreSQL repository integration，但仍必须避免顺手迁移更多 Workbench 写 API，除非 prompt 明确授权。
+- 用户已确认 PF-P038 verified。
+
+### PF-P039 - Workbench Durable Idempotency Repository Integration
+
+状态：`planned`
+
+#### 范围
+
+- 基于 PF-P038 的 `app.workbench_idempotency_records` schema，实现 PostgreSQL durable idempotency repository。
+- 允许新增 `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`。
+- 允许为 UoW 增加 transaction-bound idempotency adapter seam，使 `reserve` / `commit` 与 facts、dirty scope、outbox 处于同一个 PostgreSQL transaction。
+- 允许增加 disabled-by-default 的 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` wiring，但默认行为必须继续使用 `InMemoryWorkbenchIdempotencyRepository`。
+- 不迁移更多 Workbench 写 API。
+- 不修改 migration schema，除非测试发现 PF-P038 schema 不能支撑必须语义；如需改 schema，PF-P039 必须停止并记录 blocker。
+
+#### 审查结论
+
+- PF-P039 是 PF-P038 后合理的下一步：schema 已有测试门禁，下一步应实现 repository 和 UoW transaction-bound 集成 seam。
+- 重点风险是当前 UoW 的 transaction-outside replay probe 与 transaction-inside reserve/commit。PF-P039 prompt 必须要求测试证明 reserve/commit 使用同一个 transaction object，而不是在 repository 内打开新事务。
+- PF-P039 仍不应迁移 ignore、cash special、withdraw、exception 等更多写 API；它只增强已存在 UoW idempotency 基础设施。
+- PF-P039 完成后应生成 cumulative Merge Gate，覆盖 PF-P038 + PF-P039 的完整 diff。
 
 ## 维护规则
 

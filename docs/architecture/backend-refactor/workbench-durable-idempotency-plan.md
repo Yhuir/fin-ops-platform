@@ -589,3 +589,27 @@ PF-P038 已落地 durable idempotency 的 schema contract，但仍未切换任�
 `PF-P039 - Workbench Durable Idempotency Repository Integration`
 
 PF-P039 应基于 `0043_workbench_idempotency_records.sql` 实现 PostgreSQL repository，并用 fake/contract/integration-style 测试验证 reserve、commit、same-fingerprint replay、different-fingerprint conflict 和 transaction-bound rollback 语义。PF-P039 仍不应顺手迁移更多 Workbench 写 API。
+
+## 13. PF-P039 Planned Boundary
+
+用户已确认 PF-P038 `verified`。下一条 planned prompt：
+
+`PF-P039 - Workbench Durable Idempotency Repository Integration`
+
+PF-P039 的目标是把 PF-P038 创建的 `app.workbench_idempotency_records` schema 接入 repository 和 UoW transaction-bound seam：
+
+- 新增 `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`。
+- 实现 `PostgresWorkbenchIdempotencyRepository`，返回现有 `WorkbenchIdempotencyRecord`，不新增平行 record type。
+- 用 default-green fake transaction tests 验证 reserve、commit、same-fingerprint replay、different-fingerprint conflict、payload sanitization 和 durable unique identity。
+- 为 `WorkbenchWriteUnitOfWork.run()` 增加最小 transaction-bound idempotency seam，确保 reserve/commit 使用同一个 UoW transaction object。
+- 允许 disabled-by-default `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` wiring，但未设置 feature flag 时必须继续使用 `InMemoryWorkbenchIdempotencyRepository`。
+
+PF-P039 不应：
+
+- 修改 PF-P038 的 SQL migration。
+- 默认启用 durable idempotency。
+- 迁移更多 Workbench 写 API。
+- 让 repository 在 reserve/commit 中自行打开新 transaction。
+- 引入真实 PostgreSQL 依赖到默认 CI。
+
+PF-P039 完成后，建议生成 cumulative Merge Gate：`PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate`，统一覆盖 PF-P038 和 PF-P039 的完整 diff。
