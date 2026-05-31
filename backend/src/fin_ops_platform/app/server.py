@@ -2073,6 +2073,7 @@ class Application:
             stale_reasons=self._workbench_sql_read_model_stale_reasons,
             emit_status_metric=self._emit_workbench_read_model_status_metric,
             missing_read_model_error=self._is_missing_workbench_groups_read_model_error,
+            transient_read_model_error=self._is_transient_workbench_read_model_error,
             refresh_status_with_source_freshness=self._workbench_refresh_status_with_source_freshness,
             normalize_refresh_status_payload=self._normalize_workbench_refresh_status_payload,
             groups_redis_version_key=self._workbench_groups_redis_version_key,
@@ -2528,6 +2529,16 @@ class Application:
                 or "read_model.workbench_generations" in message
             )
             and ("does not exist" in message or "undefinedtable" in error.__class__.__name__.lower())
+        )
+
+    @staticmethod
+    def _is_transient_workbench_read_model_error(error: Exception) -> bool:
+        message = str(error).lower()
+        class_name = error.__class__.__name__.lower()
+        return (
+            "querycanceled" in class_name
+            or "statement timeout" in message
+            or "canceling statement due to statement timeout" in message
         )
 
     @staticmethod

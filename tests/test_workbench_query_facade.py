@@ -121,6 +121,39 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
         self.assertEqual(redis.get_json_calls, [cache_key])
 
+    def test_groups_uses_fast_freshness_status_instead_of_heavy_refresh_status(self) -> None:
+        class Repository:
+            def get_workbench_groups_freshness_status(self, **_kwargs: object) -> dict[str, object]:
+                return {"read_model_status": "fresh", "scope_key": "all"}
+
+            def get_workbench_refresh_status(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("groups hot path must not run heavy refresh-status consistency audit")
+
+            def get_workbench_groups_page(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "month": "all",
+                    "zone": "open",
+                    "groups": [{"group_id": "fresh-db"}],
+                    "read_model_status": "fresh",
+                    "source_versions": {"builder": "v1"},
+                }
+
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.groups("all", zone="open")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
+        self.assertEqual(result.payload["read_model_status"], "fresh")
+
     def test_groups_refreshing_status_bypasses_and_does_not_write_redis_payload(self) -> None:
         class Repository:
             def get_workbench_refresh_status(self, **_kwargs: object) -> dict[str, object]:
@@ -170,6 +203,63 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(redis.get_json_calls, [])
         self.assertEqual(redis.set_json_calls, [])
         self.assertEqual(queue.refreshes, [("all", "api_groups_source_versions_stale")])
+
+    def test_groups_query_timeout_returns_retryable_unavailable(self) -> None:
+        class Repository:
+            def get_workbench_groups_freshness_status(self, **_kwargs: object) -> dict[str, object]:
+                return {"read_model_status": "fresh", "scope_key": "all"}
+
+            def get_workbench_groups_page(self, **_kwargs: object) -> dict[str, object]:
+                raise RuntimeError("canceling statement due to statement timeout")
+
+        metrics = MetricRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=metrics.emit,
+            missing_read_model_error=lambda _error: False,
+            transient_read_model_error=lambda error: "statement timeout" in str(error).lower(),
+        )
+
+        result = facade.groups("all", zone="open")
+
+        self.assertEqual(result.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(result.payload["error"], "read_model_temporarily_unavailable")
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(result.payload["scope_key"], "all")
+        self.assertEqual(result.payload["retryable"], True)
+        self.assertEqual(metrics.calls[0]["endpoint"], "/api/workbench/groups")
+        self.assertEqual(metrics.calls[0]["reason"], "query_timeout")
+
+    def test_refresh_status_query_timeout_returns_retryable_unavailable(self) -> None:
+        class Repository:
+            def get_workbench_refresh_status(self, **_kwargs: object) -> dict[str, object]:
+                raise RuntimeError("canceling statement due to statement timeout")
+
+        metrics = MetricRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=metrics.emit,
+            missing_read_model_error=lambda _error: False,
+            transient_read_model_error=lambda error: "statement timeout" in str(error).lower(),
+        )
+
+        result = facade.refresh_status("all")
+
+        self.assertEqual(result.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(result.payload["error"], "read_model_temporarily_unavailable")
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(result.payload["scope_key"], "all")
+        self.assertEqual(result.payload["retryable"], True)
+        self.assertEqual(metrics.calls[0]["endpoint"], "/api/workbench/refresh-status")
+        self.assertEqual(metrics.calls[0]["reason"], "query_timeout")
 
 
 if __name__ == "__main__":

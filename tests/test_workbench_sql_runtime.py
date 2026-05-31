@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from http import HTTPStatus
+from io import StringIO
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -417,6 +418,16 @@ class WorkbenchGenerationRetentionConnection(WorkbenchSqlReadConnection):
                 return False
 
         return Transaction(self)
+
+
+class WorkbenchConsistencySqlConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        return []
 
 
 class FailedWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
@@ -1274,6 +1285,76 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for sql, _params in connection.execute_calls
             )
         )
+
+    def test_repository_generation_consistency_filters_active_generations_before_aggregating_read_models(self) -> None:
+        connection = WorkbenchConsistencySqlConnection()
+
+        failures = PostgresReadModelRepository._workbench_generation_consistency_failures(
+            connection,
+            scope_key="all",
+        )
+
+        self.assertEqual(failures, [])
+        sql = connection.fetch_all_calls[0][0]
+        self.assertIn("with target_generations as", sql)
+        self.assertIn("join target_generations", sql)
+        self.assertNotIn(
+            "with row_counts as ( select generation_id, scope_key, count(distinct row_id)::bigint as actual_row_count from read_model.workbench_rows group by generation_id, scope_key",
+            sql,
+        )
+
+    def test_workbench_refresh_status_api_maps_statement_timeout_to_retryable_unavailable(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = SimpleNamespace(queue_repository=QueueRecorder(), redis_helper=None)
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_refresh_status": lambda _self, **_kwargs: (_ for _ in ()).throw(
+                    RuntimeError("canceling statement due to statement timeout")
+                )
+            },
+        )()
+
+        response = app._handle_api_workbench_refresh_status("all")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
+        self.assertEqual(payload["error"], "read_model_temporarily_unavailable")
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["scope_key"], "all")
+        self.assertEqual(payload["retryable"], True)
+
+    def test_prune_workbench_generations_cli_defaults_to_dry_run(self) -> None:
+        from fin_ops_platform.tools import prune_workbench_generations
+
+        calls: list[dict[str, object]] = []
+
+        class FakeRepository:
+            def __init__(self, _connection: object) -> None:
+                pass
+
+            def prune_workbench_generations(self, **kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                return {
+                    "dry_run": kwargs.get("dry_run"),
+                    "candidate_count": 1,
+                    "deleted_count": 0,
+                    "generations": [{"generation_id": "old-gen"}],
+                }
+
+        with patch.object(prune_workbench_generations.PostgresSettings, "from_env", return_value=object()):
+            with patch.object(prune_workbench_generations, "PostgresConnection", return_value=object()):
+                with patch.object(prune_workbench_generations, "PostgresReadModelRepository", FakeRepository):
+                    exit_code = prune_workbench_generations.main(
+                        ["--keep-days", "7", "--limit", "10"],
+                        stdout=StringIO(),
+                    )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls[0]["keep_days"], 7)
+        self.assertEqual(calls[0]["limit"], 10)
+        self.assertEqual(calls[0]["dry_run"], True)
 
     def test_repository_filters_workbench_groups_page_from_structured_group_rows(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
