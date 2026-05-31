@@ -173,6 +173,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
 )
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions, source_version_mismatch_reasons
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
@@ -2138,10 +2139,10 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if connection is None or queue_repository is None:
             return None
-        idempotency_store = getattr(self, "_workbench_confirm_link_idempotency_store", None)
-        if idempotency_store is None:
-            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
-            self._workbench_confirm_link_idempotency_store = idempotency_store
+        idempotency_store = self._workbench_write_idempotency_store(
+            "_workbench_confirm_link_idempotency_store",
+            connection,
+        )
         return WorkbenchWriteUnitOfWork(
             connection=connection,
             repository_factory=self._workbench_uow_repository_factory,
@@ -2163,10 +2164,10 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if connection is None or queue_repository is None:
             return None
-        idempotency_store = getattr(self, "_workbench_cancel_link_idempotency_store", None)
-        if idempotency_store is None:
-            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
-            self._workbench_cancel_link_idempotency_store = idempotency_store
+        idempotency_store = self._workbench_write_idempotency_store(
+            "_workbench_cancel_link_idempotency_store",
+            connection,
+        )
         return WorkbenchWriteUnitOfWork(
             connection=connection,
             repository_factory=self._workbench_uow_repository_factory,
@@ -2176,6 +2177,22 @@ class Application:
             ),
             idempotency_store=idempotency_store,
         )
+
+    @staticmethod
+    def _workbench_durable_idempotency_enabled() -> bool:
+        raw_value = str(os.getenv("FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY") or "").strip().lower()
+        return raw_value in {"1", "true", "yes", "on"}
+
+    def _workbench_write_idempotency_store(self, attribute_name: str, connection: object) -> object:
+        idempotency_store = getattr(self, attribute_name, None)
+        if idempotency_store is not None:
+            return idempotency_store
+        if self._workbench_durable_idempotency_enabled():
+            idempotency_store = PostgresWorkbenchIdempotencyRepository(connection)
+        else:
+            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+        setattr(self, attribute_name, idempotency_store)
+        return idempotency_store
 
     @staticmethod
     def _workbench_uow_repository_factory(transaction: object) -> SimpleNamespace:

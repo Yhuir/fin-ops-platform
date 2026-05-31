@@ -53,9 +53,15 @@ class WorkbenchWriteUnitOfWork:
 
         with self._connection.transaction() as transaction:
             assert_workbench_stale_preconditions(command)
+            idempotency_store = _transaction_bound_idempotency_store(self._idempotency_store, transaction)
 
             if idempotency is not None:
-                _idempotency_reserve(self._idempotency_store, idempotency)
+                reserved = _idempotency_reserve(idempotency_store, idempotency)
+                if reserved is not None:
+                    _raise_on_fingerprint_conflict(reserved, idempotency)
+                    replayed = _replay_committed_idempotency_response(reserved)
+                    if replayed is not None:
+                        return replayed
 
             repositories = self._repository_factory(transaction)
             context = WorkbenchWriteUnitOfWorkContext(
@@ -64,7 +70,7 @@ class WorkbenchWriteUnitOfWork:
                 exception_cases=repositories.exception_cases,
                 row_overrides=repositories.row_overrides,
                 candidate_matches=repositories.candidate_matches,
-                idempotency_store=self._idempotency_store,
+                idempotency_store=idempotency_store,
             )
             handler_result = handler(context)
             if not isinstance(handler_result, dict):
@@ -87,7 +93,7 @@ class WorkbenchWriteUnitOfWork:
             result["outbox_event_ids"] = outbox_event_ids
             if idempotency is not None:
                 _idempotency_commit(
-                    self._idempotency_store,
+                    idempotency_store,
                     idempotency,
                     result,
                     source_versions=source_versions,
@@ -200,6 +206,13 @@ def _idempotency_request_for(command: Any) -> _IdempotencyRequest | None:
     )
 
 
+def _transaction_bound_idempotency_store(store: Any, transaction: Any) -> Any:
+    for_transaction = getattr(store, "for_transaction", None)
+    if callable(for_transaction):
+        return for_transaction(transaction)
+    return store
+
+
 def _idempotency_get(store: Any, request: _IdempotencyRequest) -> Any:
     get_committed_or_reserved = getattr(store, "get_committed_or_reserved", None)
     if callable(get_committed_or_reserved):
@@ -219,12 +232,12 @@ def _idempotency_get(store: Any, request: _IdempotencyRequest) -> Any:
         return get(request.idempotency_key)
 
 
-def _idempotency_reserve(store: Any, request: _IdempotencyRequest) -> None:
+def _idempotency_reserve(store: Any, request: _IdempotencyRequest) -> Any:
     reserve = getattr(store, "reserve", None)
     if not callable(reserve):
-        return
+        return None
     try:
-        reserve(
+        return reserve(
             tenant_id=request.tenant_id,
             actor_id=request.actor_id,
             action_name=request.action_name,
@@ -232,11 +245,10 @@ def _idempotency_reserve(store: Any, request: _IdempotencyRequest) -> None:
             request_fingerprint=request.request_fingerprint,
             request_payload=request.request_payload,
         )
-        return
     except TypeError:
         pass
     try:
-        reserve(
+        return reserve(
             request.idempotency_key,
             tenant_id=request.tenant_id,
             actor_id=request.actor_id,
@@ -245,7 +257,7 @@ def _idempotency_reserve(store: Any, request: _IdempotencyRequest) -> None:
             request_payload=request.request_payload,
         )
     except TypeError:
-        reserve(request.idempotency_key)
+        return reserve(request.idempotency_key)
 
 
 def _idempotency_commit(

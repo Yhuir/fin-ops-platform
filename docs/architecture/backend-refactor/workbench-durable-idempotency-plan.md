@@ -613,3 +613,54 @@ PF-P039 不应：
 - 引入真实 PostgreSQL 依赖到默认 CI。
 
 PF-P039 完成后，建议生成 cumulative Merge Gate：`PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate`，统一覆盖 PF-P038 和 PF-P039 的完整 diff。
+
+## 14. PF-P039 Execution Result
+
+PF-P039 已完成 repository integration，但没有切换默认生产行为，也没有迁移更多 Workbench 写 API。
+
+已完成：
+
+- 新增 `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`。
+- 实现 `PostgresWorkbenchIdempotencyRepository`：
+  - `get_committed_or_reserved(tenant_id, actor_id, idempotency_key)` 从 `app.workbench_idempotency_records` 返回现有 `WorkbenchIdempotencyRecord`。
+  - `reserve(...)` 写入 `reserved` 记录并复用 `WorkbenchIdempotencyRecord.to_storage_payload()` 做 payload sanitization。
+  - `commit(...)` 更新 `committed`、`response_payload`、`source_versions`、`outbox_event_ids` 和 `completed_at`。
+  - `mark_failed(...)` 保留失败状态写入能力，供后续错误路径或 ops tooling 使用。
+  - `has_fingerprint_conflict(...)` 复用 durable store 做 fingerprint conflict 判断。
+  - `for_transaction(transaction)` 返回绑定当前 transaction executor 的 repository view。
+- 更新 `backend/src/fin_ops_platform/services/workbench_uow.py`：
+  - transaction 内调用 `for_transaction(transaction)` 绑定 idempotency store。
+  - `reserve` / `commit` 使用 transaction-bound store，与 facts、dirty scope 和 outbox 共享同一个 UoW transaction object。
+  - 保留 transaction 外 replay probe，用于已 committed 记录的快速 replay。
+- 更新 `backend/src/fin_ops_platform/app/server.py`：
+  - 新增 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 显式开关。
+  - 未设置开关或设置为 `0` 时，继续使用 `InMemoryWorkbenchIdempotencyRepository`。
+  - 只有开关为 `1/true/yes/on` 时，才在 PostgreSQL storage backend 下构造 `PostgresWorkbenchIdempotencyRepository`。
+- 新增 `tests/test_workbench_postgres_idempotency_repository.py`，用 fake executor 验证 repository row mapping、transaction-bound reserve/commit、payload sanitization 和 server wiring。
+- 更新 `tests/test_workbench_uow_contract.py`，验证 UoW 的 idempotency reserve/commit 使用当前 transaction-bound store。
+
+仍未完成：
+
+- 未默认启用 durable idempotency。
+- 未执行真实 PostgreSQL integration test 或并发锁测试。
+- 未实现 expired reserved takeover、清理任务、失败重试策略或指标。
+- 未接真实 auth context 到 UoW command，因此 actor/tenant 仍可能使用默认值。
+- 未迁移更多 Workbench 写 API。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+验证结果：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，17 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`：Pass，5 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，41 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`：Pass，20 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+
+下一步：
+
+`PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate`
+
+PF-P039-MG 应统一覆盖 PF-P038 + PF-P039 的完整 diff，执行范围检查、upstream sync、合入 `main` 和 `main` 复验。它不应执行 Traffic Gate，不应部署，不应默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
