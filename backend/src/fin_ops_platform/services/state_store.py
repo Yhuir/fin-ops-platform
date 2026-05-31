@@ -335,12 +335,14 @@ class ApplicationStateStore:
             "oa_invoice_offset": {},
             "bank_transaction_tags": {},
             "pending_invoice_tag_groups": {},
+            "pending_output_invoice_tag_groups": {},
+            "input_invoice_usage_payment_status_rules": {},
         }
         if self._mongo_database is not None:
             document = self._mongo_detailed_collections["app_settings"].find_one({"_id": APP_SETTINGS_DOCUMENT_ID})
             payload = self._load_binary_payload(document)
             if isinstance(payload, dict):
-                return {
+                normalized_payload = {
                     "completed_project_ids": list(payload.get("completed_project_ids") or []),
                     "manual_projects": list(payload.get("manual_projects") or []),
                     "synced_projects": list(payload.get("synced_projects") or []),
@@ -354,7 +356,20 @@ class ApplicationStateStore:
                     "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
                     "bank_transaction_tags": dict(payload.get("bank_transaction_tags") or {}),
                     "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
+                    "pending_output_invoice_tag_groups": dict(payload.get("pending_output_invoice_tag_groups") or {}),
+                    "input_invoice_usage_payment_status_rules": dict(
+                        payload.get("input_invoice_usage_payment_status_rules") or {}
+                    ),
                 }
+                if "no_oa_bank_batch_tag_selection" in payload:
+                    normalized_payload["no_oa_bank_batch_tag_selection"] = dict(
+                        payload.get("no_oa_bank_batch_tag_selection") or {}
+                    )
+                if "turnover_ledger_tag_selection" in payload:
+                    normalized_payload["turnover_ledger_tag_selection"] = dict(
+                        payload.get("turnover_ledger_tag_selection") or {}
+                    )
+                return normalized_payload
             return default_payload
 
         if not self._app_settings_path.exists():
@@ -365,7 +380,7 @@ class ApplicationStateStore:
             return default_payload
         if not isinstance(loaded, dict):
             return default_payload
-        return {
+        normalized_payload = {
             "completed_project_ids": list(loaded.get("completed_project_ids") or []),
             "manual_projects": list(loaded.get("manual_projects") or []),
             "synced_projects": list(loaded.get("synced_projects") or []),
@@ -379,7 +394,20 @@ class ApplicationStateStore:
             "oa_invoice_offset": dict(loaded.get("oa_invoice_offset") or {}),
             "bank_transaction_tags": dict(loaded.get("bank_transaction_tags") or {}),
             "pending_invoice_tag_groups": dict(loaded.get("pending_invoice_tag_groups") or {}),
+            "pending_output_invoice_tag_groups": dict(loaded.get("pending_output_invoice_tag_groups") or {}),
+            "input_invoice_usage_payment_status_rules": dict(
+                loaded.get("input_invoice_usage_payment_status_rules") or {}
+            ),
         }
+        if "no_oa_bank_batch_tag_selection" in loaded:
+            normalized_payload["no_oa_bank_batch_tag_selection"] = dict(
+                loaded.get("no_oa_bank_batch_tag_selection") or {}
+            )
+        if "turnover_ledger_tag_selection" in loaded:
+            normalized_payload["turnover_ledger_tag_selection"] = dict(
+                loaded.get("turnover_ledger_tag_selection") or {}
+            )
+        return normalized_payload
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
         normalized_payload = {
@@ -396,29 +424,48 @@ class ApplicationStateStore:
             "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
             "bank_transaction_tags": dict(payload.get("bank_transaction_tags") or {}),
             "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
+            "pending_output_invoice_tag_groups": dict(payload.get("pending_output_invoice_tag_groups") or {}),
+            "input_invoice_usage_payment_status_rules": dict(
+                payload.get("input_invoice_usage_payment_status_rules") or {}
+            ),
         }
+        if "no_oa_bank_batch_tag_selection" in payload:
+            normalized_payload["no_oa_bank_batch_tag_selection"] = dict(
+                payload.get("no_oa_bank_batch_tag_selection") or {}
+            )
+        if "turnover_ledger_tag_selection" in payload:
+            normalized_payload["turnover_ledger_tag_selection"] = dict(
+                payload.get("turnover_ledger_tag_selection") or {}
+            )
         if self._mongo_database is not None:
+            set_payload = {
+                "completed_project_ids": normalized_payload["completed_project_ids"],
+                "manual_projects": normalized_payload["manual_projects"],
+                "synced_projects": normalized_payload["synced_projects"],
+                "bank_account_mappings": normalized_payload["bank_account_mappings"],
+                "allowed_usernames": normalized_payload["allowed_usernames"],
+                "readonly_export_usernames": normalized_payload["readonly_export_usernames"],
+                "admin_usernames": normalized_payload["admin_usernames"],
+                "workbench_column_layouts": normalized_payload["workbench_column_layouts"],
+                "oa_retention": normalized_payload["oa_retention"],
+                "oa_import": normalized_payload["oa_import"],
+                "oa_invoice_offset": normalized_payload["oa_invoice_offset"],
+                "bank_transaction_tags": normalized_payload["bank_transaction_tags"],
+                "pending_invoice_tag_groups": normalized_payload["pending_invoice_tag_groups"],
+                "pending_output_invoice_tag_groups": normalized_payload["pending_output_invoice_tag_groups"],
+                "input_invoice_usage_payment_status_rules": normalized_payload[
+                    "input_invoice_usage_payment_status_rules"
+                ],
+                "payload": Binary(pickle.dumps(normalized_payload)),
+                "updated_at": datetime.now(UTC),
+            }
+            if "no_oa_bank_batch_tag_selection" in normalized_payload:
+                set_payload["no_oa_bank_batch_tag_selection"] = normalized_payload["no_oa_bank_batch_tag_selection"]
+            if "turnover_ledger_tag_selection" in normalized_payload:
+                set_payload["turnover_ledger_tag_selection"] = normalized_payload["turnover_ledger_tag_selection"]
             self._mongo_detailed_collections["app_settings"].update_one(
                 {"_id": APP_SETTINGS_DOCUMENT_ID},
-                {
-                    "$set": {
-                        "completed_project_ids": normalized_payload["completed_project_ids"],
-                        "manual_projects": normalized_payload["manual_projects"],
-                        "synced_projects": normalized_payload["synced_projects"],
-                        "bank_account_mappings": normalized_payload["bank_account_mappings"],
-                        "allowed_usernames": normalized_payload["allowed_usernames"],
-                        "readonly_export_usernames": normalized_payload["readonly_export_usernames"],
-                        "admin_usernames": normalized_payload["admin_usernames"],
-                        "workbench_column_layouts": normalized_payload["workbench_column_layouts"],
-                        "oa_retention": normalized_payload["oa_retention"],
-                        "oa_import": normalized_payload["oa_import"],
-                        "oa_invoice_offset": normalized_payload["oa_invoice_offset"],
-                        "bank_transaction_tags": normalized_payload["bank_transaction_tags"],
-                        "pending_invoice_tag_groups": normalized_payload["pending_invoice_tag_groups"],
-                        "payload": Binary(pickle.dumps(normalized_payload)),
-                        "updated_at": datetime.now(UTC),
-                    }
-                },
+                {"$set": set_payload},
                 upsert=True,
             )
             return

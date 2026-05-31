@@ -277,7 +277,60 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             },
         )
         self.assertEqual(income_payload["rows"][0]["id"], "txn_income")
-        self.assertTrue(income_payload["rows"][0]["can_create_invoice"])
+        self.assertFalse(income_payload["rows"][0]["can_create_invoice"])
+
+    def test_all_direction_combines_expense_and_income_rows(self) -> None:
+        expense_txn = self._bank_transaction("txn_expense_all", TransactionDirection.OUTFLOW, "Vendor", "10.00")
+        income_txn = self._bank_transaction("txn_income_all", TransactionDirection.INFLOW, "Customer", "20.00")
+        service = self._query_service(transactions=[expense_txn, income_txn])
+
+        payload = service.list_rows(direction="all", filter="all")
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["txn_expense_all", "txn_income_all"])
+        self.assertEqual(payload["summary"]["source_summary"]["current_direction_rows"], 2)
+        self.assertEqual(payload["summary"]["source_summary"]["excluded_direction_rows"], 0)
+
+    def test_income_statuses_use_output_invoices_rules_and_manual_override(self) -> None:
+        customer = self._counterparty("cp_income_status", "Customer Status")
+        invoiced_txn = self._bank_transaction("txn_income_invoiced", TransactionDirection.INFLOW, "Customer Status", "100.00")
+        no_invoice_txn = self._bank_transaction("txn_income_no_invoice", TransactionDirection.INFLOW, "Customer No", "20.00")
+        cash_txn = self._bank_transaction("txn_income_cash", TransactionDirection.INFLOW, "Customer Cash", "30.00")
+        override_txn = self._bank_transaction("txn_income_override", TransactionDirection.INFLOW, "Customer Override", "40.00")
+        pending_txn = self._bank_transaction("txn_income_pending", TransactionDirection.INFLOW, "Customer Pending", "50.00")
+        output_invoice = self._invoice("inv_income_status", InvoiceType.OUTPUT, "OUT-STATUS", customer, buyer_name="Customer Status")
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case_income_status",
+            row_ids=[invoiced_txn.id, output_invoice.id],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+        )
+        category_service = BankTransactionCategoryService(
+            categories={
+                no_invoice_txn.id: {"category_code": "salary", "version": 1},
+                cash_txn.id: {"category_code": "fee", "version": 1},
+            }
+        )
+        service = self._query_service(
+            transactions=[invoiced_txn, no_invoice_txn, cash_txn, override_txn, pending_txn],
+            invoices=[output_invoice],
+            pair_service=pair_service,
+            category_service=category_service,
+            income_tag_groups={"no_invoice_required": ["salary"], "cash_income": ["fee"]},
+            income_status_override_provider=lambda transaction_id: (
+                {"status_code": "income_no_invoice_required"} if transaction_id == override_txn.id else None
+            ),
+        )
+
+        payload = service.list_rows(direction="income", filter="all", page_size=10)
+
+        statuses = {row["id"]: row["invoice_acquisition_status"]["code"] for row in payload["rows"]}
+        self.assertEqual(statuses[invoiced_txn.id], "income_invoiced")
+        self.assertEqual(statuses[no_invoice_txn.id], "income_no_invoice_required")
+        self.assertEqual(statuses[cash_txn.id], "cash_income")
+        self.assertEqual(statuses[override_txn.id], "income_no_invoice_required")
+        self.assertEqual(statuses[pending_txn.id], "income_pending_invoice")
 
     def test_requires_invoice_filter_uses_active_tag_complement(self) -> None:
         fee_txn = self._bank_transaction("txn_fee", TransactionDirection.OUTFLOW, "Fee Vendor", "10.00")
@@ -663,8 +716,10 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         category_service: BankTransactionCategoryService | None = None,
         effective_category_provider: object | None = None,
         tag_groups: dict[str, list[str]] | None = None,
+        income_tag_groups: dict[str, list[str]] | None = None,
         bank_account_mappings: list[dict[str, str]] | None = None,
         oa_projection: object | None = None,
+        income_status_override_provider: object | None = None,
     ) -> PendingInvoiceQueryService:
         resolved_import_service = import_service or ImportNormalizationService(
             existing_transactions=transactions,
@@ -685,6 +740,14 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
                     "no_invoice_required": {"tag_codes": list((tag_groups or {}).get("no_invoice_required") or [])},
                 },
             },
+            "pending_output_invoice_tag_groups": {
+                "version": 1,
+                "groups": {
+                    "requires_invoice": {"tag_codes": []},
+                    "no_invoice_required": {"tag_codes": list((income_tag_groups or {}).get("no_invoice_required") or [])},
+                    "cash_income": {"tag_codes": list((income_tag_groups or {}).get("cash_income") or [])},
+                },
+            },
         }
         return PendingInvoiceQueryService(
             import_service=resolved_import_service,
@@ -693,6 +756,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             app_settings_provider=lambda: settings_payload,
             effective_category_provider=effective_category_provider,
             oa_projection=oa_projection,
+            income_status_override_provider=income_status_override_provider,
         )
 
 

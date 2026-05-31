@@ -38,6 +38,7 @@ type InputInvoiceUsageDetailDrawerProps = {
   open: boolean;
   target: InputInvoiceUsageDetailTarget | null;
   loadDetail: (target: InputInvoiceUsageDetailTarget) => Promise<InputInvoiceUsageDetailPayload>;
+  variant?: "temporary" | "persistent";
   onClose: () => void;
 };
 
@@ -52,6 +53,7 @@ export default function InputInvoiceUsageDetailDrawer({
   open,
   target,
   loadDetail,
+  variant = "temporary",
   onClose,
 }: InputInvoiceUsageDetailDrawerProps) {
   const [detail, setDetail] = useState<InputInvoiceUsageDetailPayload | null>(null);
@@ -98,6 +100,7 @@ export default function InputInvoiceUsageDetailDrawer({
     <Drawer
       anchor="right"
       open={open}
+      variant={variant}
       onClose={onClose}
       transitionDuration={{ enter: 180, exit: 140 }}
       PaperProps={{

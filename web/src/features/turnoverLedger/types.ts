@@ -2,6 +2,31 @@ export type TurnoverLedgerFamily = "all" | "personal" | "company" | "bank" | "bu
 
 export type TurnoverLedgerDirectionFilter = "all" | "borrow_in" | "borrow_out";
 
+export type TurnoverLedgerTagDefinition = {
+  code: string;
+  label: string;
+  path: string[];
+  source: string;
+  status: string;
+  outputPrimaryLabel: string;
+  outputSubLabel: string;
+  turnoverRole: string;
+  turnoverActionType: string;
+};
+
+export type TurnoverLedgerTagSelection = {
+  version: number;
+  selectedTagCodes: string[];
+  inactiveSelectedTagCodes: string[];
+  activeTags: TurnoverLedgerTagDefinition[];
+};
+
+export type SaveTurnoverLedgerTagSelectionRequest = {
+  expectedVersion: number;
+  selectedTagCodes: string[];
+  signal?: AbortSignal;
+};
+
 export type TurnoverRelationStatus =
   | "suggested"
   | "deterministic"
@@ -93,6 +118,9 @@ export type TurnoverLedgerGroupedRow = {
   businessType: string | null;
   categoryCode: string;
   categoryLabel: string;
+  categoryPrimaryLabel: string;
+  categorySubLabel: string;
+  categoryThirdLabel: string;
   categoryLabelPath: string[];
   categoryVersion: number;
   counterpartyBankName: string;

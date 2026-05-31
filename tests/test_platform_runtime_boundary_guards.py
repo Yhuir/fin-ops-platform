@@ -165,6 +165,29 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_pending_invoice_services_do_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
+        pending_invoice_paths = {
+            SERVICES_ROOT / "pending_invoice_service.py",
+            SERVICES_ROOT / "pending_invoice_rules.py",
+            SERVICES_ROOT / "search_pending_sql_projection.py",
+            SERVICES_ROOT / "search_pending_read_model_refresh.py",
+        }
+        forbidden_modules = {
+            "redis",
+            "pika",
+            "fin_ops_platform.services.runtime_redis",
+            "fin_ops_platform.services.rabbitmq_runtime",
+        }
+        violations: list[str] = []
+
+        for path in sorted(pending_invoice_paths):
+            modules = _imported_modules(_parse(path))
+            imported_forbidden = sorted(module for module in forbidden_modules if module in modules)
+            if imported_forbidden:
+                violations.append(f"{_relative(path)} imports {imported_forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_oa_mongo_adapter_direct_use_is_allowlisted(self) -> None:
         allowed_paths = {
             "backend/src/fin_ops_platform/app/oa_attachment_audit.py",

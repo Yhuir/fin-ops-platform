@@ -50,6 +50,21 @@ class InvoiceUsageCollectionReadModelRefreshService:
                 if shard_result is not None:
                     return shard_result
             rebuild = getattr(self._projection_builder, "rebuild_output_invoice_collection_read_model_scope", None)
+        elif event.event_type == "oa_pending_payment.read_model.refresh":
+            if scope_type != "oa_pending_payment" or not scope_key:
+                raise ValueError("OA pending payment refresh requires scope_type='oa_pending_payment' and scope_key.")
+            if _invoice_scope_requires_expansion(scope_key):
+                shard_result = self._enqueue_scope_shards(
+                    event,
+                    scope_type=scope_type,
+                    scope_key=scope_key,
+                    list_method_name="list_oa_pending_payment_scope_shards",
+                    empty_method_name="mark_oa_pending_payment_scope_empty",
+                    shard_reason="oa_pending_payment_month_shard",
+                )
+                if shard_result is not None:
+                    return shard_result
+            rebuild = getattr(self._projection_builder, "rebuild_oa_pending_payment_read_model_scope", None)
         else:
             raise ValueError(f"Unsupported invoice relation read model event type: {event.event_type}")
         if not callable(rebuild):

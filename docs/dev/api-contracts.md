@@ -103,6 +103,51 @@
 
 撤回已提交免 OA 批次。撤回必须使用批次 API，不能从关联台绕过批次直接普通取消 relation。
 
+## 外部往来款管理 API
+
+`GET /api/turnover-ledger/tag-selection`
+
+返回外部往来款管理页面的标签准入范围。该接口只读取银行明细自动标签规则中的可用外部往来规则作为候选，不创建独立标签事实源。
+
+响应字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `version` | 外部往来款标签准入配置版本，用于保存时乐观锁。 |
+| `selected_tag_codes` | 当前已保存、仍处于可用状态且属于外部往来的银行明细标签 code。首次默认为全部可用外部往来规则。 |
+| `inactive_selected_tag_codes` | 历史配置中已停用、未知或不再属于外部往来的标签 code；不参与台账候选，保存后会被清理。 |
+| `active_tags` | 银行明细自动标签规则中的可用外部往来标签，供抽屉按主/子标签层级展示。 |
+
+`active_tags[*]` 至少包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `code` | 银行明细标签稳定身份。 |
+| `label` | 标签显示名称。 |
+| `path` | 标签路径，可用于审计或调试。 |
+| `status` | 当前只返回 `active`。 |
+| `output_primary_label` / `output_sub_label` | 抽屉展示的主/子标签；不包含子子标签。 |
+| `turnover_role` / `turnover_action_type` | 外部往来台账语义字段。 |
+
+`PUT /api/turnover-ledger/tag-selection`
+
+请求示例：
+
+```json
+{
+  "expected_version": 2,
+  "selected_tag_codes": ["external_turnover_payment_borrow_out"]
+}
+```
+
+保存规则：
+
+- `expected_version` 必填；版本不一致返回 `409 turnover_ledger_tag_selection_version_conflict`。
+- `selected_tag_codes` 可为空数组，表示外部往来款管理暂不拉取新的流水。
+- 只能提交当前 `active_tags` 中存在且处于可用状态的标签 code；未知、停用或非外部往来标签返回业务错误。
+- 成功后返回与 GET 相同结构，并写审计动作 `turnover_ledger_tag_selection_updated`。
+- 外部往来款管理列表只纳入 `effective_category_code` 位于 `selected_tag_codes`，且已经在银行明细确认 `个人往来`、`公司往来`、`银行往来` 或 `业务往来` 第三层分类的流水；未确认第三层分类的外部往来候选继续留在银行明细处理。
+
 ## 银行明细自动标签规则 API
 
 `GET /api/bank-details/accounts`
@@ -455,3 +500,28 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 ## 版本和兼容
 
 当前项目仍保留部分旧接口。新增能力应优先接入 `/api/*` 契约层；旧接口只用于兼容测试或历史页面，不应继续扩展。
+
+## 销项发票收款情况 API
+
+`/api/output-invoice-collections/*` 由 Invoices 模块承接。`server.py` 只做 HTTP dispatch、统一 JSON/error 包装和 route object 装配；参数解析、权限 gate 与业务调用在 `app/routes_output_invoice_collections.py`，业务事实写入在 service/repository 层。
+
+读接口：
+
+- `GET /api/output-invoice-collections/rows`：优先读取 SQL read model；miss/stale/schema/source version 不匹配时返回 `202` 与 `read_model_status=refreshing`，不在请求线程 live rebuild。响应包含 `summary`、`bank.receivedTotal`、`bank.hasMultiple`、手动状态/提醒、人工红蓝票关系和正式收据摘要。
+- `GET /api/output-invoice-collections/filter-options`：基于同一行集生成筛选项。
+- `GET /api/output-invoice-collections/status-rules`：返回 Sheet6 静态规则、手动状态选项和权限。
+- `GET /api/output-invoice-collections/receipts/history?invoice_id=...`：返回正式收据 lifecycle facts，不再伪造空历史。
+
+写接口：
+
+- `PUT /api/output-invoice-collections/rows/{row_id}/collection-status`
+- `PUT /api/output-invoice-collections/rows/{row_id}/collection-reminder`
+- `DELETE /api/output-invoice-collections/rows/{row_id}/collection-reminder/{reminder_id}`
+- `POST /api/output-invoice-collections/rows/{row_id}/red-invoice-relations`
+- `DELETE /api/output-invoice-collections/red-invoice-relations/{relation_id}`
+- `POST /api/output-invoice-collections/rows/{row_id}/receipts`
+- `POST /api/output-invoice-collections/receipts/{receipt_id}/void`
+- `POST /api/output-invoice-collections/receipts/{receipt_id}/reissue`
+- `GET|PUT /api/output-invoice-collections/receipt-settings`
+
+写接口必须使用 OA session 派生的 `actor_id`、tenant 和权限布尔值；service 不读取 headers。PostgreSQL 模式下 lifecycle facts、dirty scope、outbox 通过 transaction-bound queue writer 在同一事务内提交。正式收据创建必须提供 `Idempotency-Key` 或 body `idempotencyKey`。

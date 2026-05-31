@@ -191,6 +191,102 @@ class PendingComplementProjectionConnection:
         }
 
 
+class PendingIncomeProjectionConnection:
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized:
+            return [
+                self._row("txn-output", "service_income", "服务收入", invoices=[{"id": "out-1", "total_with_tax": "118.00"}]),
+                self._row("txn-no-invoice", "internal_transfer", "内部转账"),
+                self._row("txn-cash", "cash_sale", "现金销售"),
+                self._row("txn-manual", "other_income", "其他收入", status_override={"status_code": "cash_income"}),
+                self._row("txn-pending", "other_income", "其他收入"),
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "bank_transaction_tags": {
+                        "version": 9,
+                        "definitions": [
+                            {
+                                "code": "service_income",
+                                "label": "服务收入",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["服务"]},
+                            },
+                            {
+                                "code": "internal_transfer",
+                                "label": "内部转账",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["内部"]},
+                            },
+                            {
+                                "code": "cash_sale",
+                                "label": "现金销售",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["现金"]},
+                            },
+                            {
+                                "code": "other_income",
+                                "label": "其他收入",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["其他"]},
+                            },
+                        ],
+                    },
+                    "pending_output_invoice_tag_groups": {
+                        "version": 3,
+                        "groups": {
+                            "no_invoice_required": {"tag_codes": ["internal_transfer"]},
+                            "cash_income": {"tag_codes": ["cash_sale"]},
+                        },
+                    },
+                }
+            }
+        return None
+
+    @staticmethod
+    def _row(
+        transaction_id: str,
+        category_code: str,
+        category_label: str,
+        *,
+        invoices: list[dict] | None = None,
+        status_override: dict | None = None,
+    ) -> dict:
+        return {
+            "transaction_id": transaction_id,
+            "counterparty_name_raw": transaction_id,
+            "trade_time": "2026-05-20 10:00:00",
+            "txn_date": "2026-05-20",
+            "amount": "118.00",
+            "balance": "1000.00",
+            "currency": "CNY",
+            "summary": "收款",
+            "remark": "",
+            "bank_serial_no": transaction_id,
+            "account_name": "工商银行",
+            "account_no": "622200001234",
+            "category_payload": {
+                "category_code": category_code,
+                "category_label": category_label,
+                "category_primary_label": "收入",
+                "category_sub_label": category_label,
+                "category_label_path": ["收入", category_label],
+            },
+            "invoices": list(invoices or []),
+            "paid_total": "0.00",
+            "oa_applicant": "",
+            "oa_project_name": "",
+            "income_status_override": dict(status_override) if status_override else None,
+            "relation_case_ids": [],
+        }
+
+
 class SearchPendingSqlRuntimeTests(unittest.TestCase):
     def test_search_repository_reads_index_rows_without_state_fallback(self) -> None:
         connection = SearchPendingConnection(
@@ -304,6 +400,30 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 "excluded_direction_rows": 75,
             },
         )
+
+    def test_pending_invoice_repository_all_direction_combines_direction_summaries(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {"id": "txn-expense", "bank_transaction": {"id": "txn-expense"}, "can_create_invoice": True},
+                    "missing_invoice": True,
+                    "can_create_invoice": True,
+                },
+                {
+                    "payload": {"id": "txn-income", "bank_transaction": {"id": "txn-income"}, "can_create_invoice": False},
+                    "missing_invoice": True,
+                    "can_create_invoice": False,
+                },
+            ],
+            pending_source_counts={"expense": 356, "income": 75},
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_rows(direction="all", filter="all", date_from=None, date_to=None, keyword=None, page=1, page_size=50)
+
+        self.assertEqual(payload["pagination"]["total"], 2)
+        self.assertEqual(payload["summary"]["source_summary"]["current_direction_rows"], 431)
+        self.assertEqual(payload["summary"]["source_summary"]["excluded_direction_rows"], 0)
 
     def test_pending_invoice_repository_returns_fresh_empty_scope_without_api_miss(self) -> None:
         connection = SearchPendingConnection(pending_rows=[], dirty=False)
@@ -471,6 +591,78 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_schema_stale")])
 
+    def test_pending_invoice_api_source_version_stale_enqueues_refresh_without_sync_scan(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._pending_invoice_sql_read_repository = type(
+            "PendingRepo",
+            (),
+            {
+                "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": "txn-stale-version",
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                    "source_versions": {
+                        "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
+                        "pending_invoice_tag_groups_version": 999,
+                    },
+                }
+            },
+        )()
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("source-version stale pending invoice API must not scan in-memory state"))},
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
+
+    def test_pending_invoice_all_direction_miss_enqueues_expense_and_income_refresh_without_sync_scan(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._pending_invoice_sql_read_repository = type(
+            "PendingRepo",
+            (),
+            {"list_pending_invoice_rows": lambda *_args, **_kwargs: None},
+        )()
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("all-direction pending invoice API miss must not scan in-memory state"))},
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["all"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("pending_invoice", "expense:all", "api_miss"),
+                ("pending_invoice", "income:all", "api_miss"),
+            ],
+        )
+
     def test_pending_invoice_api_serves_existing_rows_while_scope_refreshes(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -633,6 +825,21 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             rows[0]["payload"]["invoice_acquisition_status"]["matched_rule"]["group"],
             "requires_invoice",
         )
+
+    def test_pending_invoice_sql_projection_emits_income_output_statuses(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingIncomeProjectionConnection())
+
+        rows = builder._pending_invoice_rows(direction="income", filter_name="all", month="2026-05")
+        by_id = {row["payload"]["id"]: row["payload"] for row in rows}
+
+        self.assertEqual(by_id["txn-output"]["invoice_acquisition_status"]["code"], "income_invoiced")
+        self.assertEqual(by_id["txn-no-invoice"]["invoice_acquisition_status"]["code"], "income_no_invoice_required")
+        self.assertEqual(by_id["txn-cash"]["invoice_acquisition_status"]["code"], "cash_income")
+        self.assertEqual(by_id["txn-manual"]["invoice_acquisition_status"]["code"], "cash_income")
+        self.assertEqual(by_id["txn-pending"]["invoice_acquisition_status"]["code"], "income_pending_invoice")
+        self.assertEqual(by_id["txn-pending"]["invoice_acquisition_status"]["primary_action"], "mark_income_status")
+        self.assertFalse(any(payload["can_create_invoice"] for payload in by_id.values()))
+        self.assertEqual(by_id["txn-cash"]["bank_transaction"]["effective_tag_label_path"], ["收入", "现金销售"])
 
     def test_refresh_handler_rebuilds_search_and_pending_scopes(self) -> None:
         class FakeBuilder:

@@ -1,4 +1,4 @@
-export type PendingInvoiceDirection = "expense" | "income";
+export type PendingInvoiceDirection = "expense" | "income" | "all";
 
 export type PendingInvoiceFilter =
   | "all"
@@ -16,6 +16,10 @@ export type PendingInvoiceStatusCode =
   | "no_invoice_required"
   | "bank_statement_as_invoice"
   | "pending"
+  | "income_invoiced"
+  | "income_pending_invoice"
+  | "income_no_invoice_required"
+  | "cash_income"
   | (string & {});
 
 export type PendingInvoiceStatusSeverity = "success" | "info" | "warning" | "error" | "default" | (string & {});
@@ -28,6 +32,7 @@ export type PendingInvoicePrimaryAction =
   | "manual_invoice"
   | "view_rules"
   | "open_rules"
+  | "mark_income_status"
   | "none"
   | (string & {});
 
@@ -80,7 +85,7 @@ export type PendingInvoiceTagGroups = {
   noInvoiceRequired: string[];
 };
 
-export type PendingInvoiceRuleGroupCode = "requires_invoice" | "bank_statement_as_invoice" | "no_invoice_required";
+export type PendingInvoiceRuleGroupCode = "requires_invoice" | "bank_statement_as_invoice" | "no_invoice_required" | "cash_income";
 
 export type PendingInvoiceRuleTag = {
   code: string;
@@ -99,11 +104,13 @@ export type PendingInvoiceRuleGroup = {
 
 export type PendingInvoiceRulesPayload = {
   version: number;
+  direction: PendingInvoiceDirection;
   availableTags: PendingInvoiceRuleTag[];
   groups: {
     requiresInvoice: PendingInvoiceRuleGroup;
     bankStatementAsInvoice: PendingInvoiceRuleGroup;
     noInvoiceRequired: PendingInvoiceRuleGroup;
+    cashIncome: PendingInvoiceRuleGroup;
   };
   permissions: {
     canSave: boolean;

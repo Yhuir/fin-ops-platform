@@ -1,15 +1,21 @@
 import { apiRequestJson } from "../apiClient";
 import type {
+  CreateInputInvoiceUsageOaReverseBatchRequest,
   InputInvoiceUsageDetailResponse,
   InputInvoiceUsageDetailTarget,
   InputInvoiceUsageFilter,
   InputInvoiceUsageFilterOptionsResponse,
+  InputInvoiceUsageOaReverseBatch,
   InputInvoiceUsageOaReversePreviewRequest,
   InputInvoiceUsageOaReversePreviewResponse,
   InputInvoiceUsagePaymentStatusRulesResponse,
   InputInvoiceUsageQuery,
   InputInvoiceUsageRowsResponse,
   InputInvoiceUsageSortDirection,
+  ManualInputInvoiceUsageOaReverseStatusRequest,
+  RevokeInputInvoiceUsageOaReverseDraftRequest,
+  SaveInputInvoiceUsagePaymentStatusRulesRequest,
+  InputInvoiceUsageOaReverseVersionedRequest,
 } from "./types";
 
 type FetchRowsRequest = Pick<
@@ -40,8 +46,23 @@ function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function maybeNumber(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function camelOrSnake(source: Record<string, unknown>, camel: string, snake: string) {
   return source[camel] ?? source[snake];
+}
+
+function unwrapData<T>(payload: T | { data?: T }): T {
+  if (payload && typeof payload === "object" && "data" in payload) {
+    const data = (payload as { data?: T }).data;
+    if (data !== undefined && data !== null) {
+      return data;
+    }
+  }
+  return payload as T;
 }
 
 function encodeFilters(filters: InputInvoiceUsageFilter[]) {
@@ -404,6 +425,148 @@ function mapFilterOptionsResponse(payload: unknown): InputInvoiceUsageFilterOpti
   };
 }
 
+function mapPermissions(rawValue: unknown) {
+  const raw = objectValue(rawValue);
+  return {
+    canSave: booleanValue(camelOrSnake(raw, "canSave", "can_save")),
+  };
+}
+
+function mapPaymentStatusRulesResponse(payload: unknown): InputInvoiceUsagePaymentStatusRulesResponse {
+  const raw = objectValue(unwrapData(payload));
+  const source = objectValue(raw.source ?? raw.metadata);
+  return {
+    version: (raw.version as number | string | null | undefined) ?? null,
+    readOnly: camelOrSnake(raw, "readOnly", "read_only") === undefined
+      ? true
+      : booleanValue(camelOrSnake(raw, "readOnly", "read_only")),
+    permissions: mapPermissions(raw.permissions),
+    rules: arrayValue(raw.rules).map((item) => {
+      const rule = objectValue(item);
+      return {
+        id: stringValue(rule.id),
+        code: stringValue(rule.code),
+        label: stringValue(rule.label),
+        description: stringValue(rule.description),
+        priority: numberValue(rule.priority, 0),
+        enabled: rule.enabled === undefined ? undefined : booleanValue(rule.enabled),
+        applicantConstraints: arrayValue(camelOrSnake(rule, "applicantConstraints", "applicant_constraints")).map(stringValue),
+      };
+    }),
+    pendingDirections: arrayValue(camelOrSnake(raw, "pendingDirections", "pending_directions")).map((item) => {
+      const direction = objectValue(item);
+      return {
+        code: stringValue(direction.code),
+        label: stringValue(direction.label),
+      };
+    }),
+    source: Object.keys(source).length > 0 ? {
+      version: stringValue(source.version),
+      updatedAt: stringValue(camelOrSnake(source, "updatedAt", "updated_at")),
+      updatedBy: stringValue(camelOrSnake(source, "updatedBy", "updated_by")),
+    } : undefined,
+  };
+}
+
+function mapOaReverseInvoice(rawValue: unknown) {
+  const raw = objectValue(rawValue);
+  const invoiceId = stringValue(camelOrSnake(raw, "invoiceId", "invoice_id") ?? raw.id);
+  const displayNo = stringValue(camelOrSnake(raw, "displayNo", "display_no") ?? camelOrSnake(raw, "invoiceNumber", "invoice_number") ?? camelOrSnake(raw, "invoiceNo", "invoice_no") ?? invoiceId);
+  return {
+    invoiceId,
+    invoiceNumber: stringValue(camelOrSnake(raw, "invoiceNumber", "invoice_number") ?? camelOrSnake(raw, "invoiceNo", "invoice_no") ?? displayNo),
+    displayNo,
+    sellerName: stringValue(camelOrSnake(raw, "sellerName", "seller_name")),
+    issueDate: stringValue(camelOrSnake(raw, "issueDate", "issue_date") ?? camelOrSnake(raw, "invoiceDate", "invoice_date")),
+    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
+    paymentStatusLabel: stringValue(camelOrSnake(raw, "paymentStatusLabel", "payment_status_label") ?? camelOrSnake(raw, "statusLabel", "status_label") ?? raw.status),
+    targetApplicantName: stringValue(camelOrSnake(raw, "targetApplicantName", "target_applicant_name")),
+  };
+}
+
+function mapRejectedInvoice(rawValue: unknown) {
+  const raw = objectValue(rawValue);
+  return {
+    invoiceId: stringValue(camelOrSnake(raw, "invoiceId", "invoice_id") ?? raw.id),
+    invoiceNumber: stringValue(camelOrSnake(raw, "invoiceNumber", "invoice_number") ?? camelOrSnake(raw, "invoiceNo", "invoice_no")),
+    reasonCode: stringValue(camelOrSnake(raw, "reasonCode", "reason_code")),
+    reason: stringValue(raw.reason),
+  };
+}
+
+function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaReversePreviewResponse {
+  const raw = objectValue(unwrapData(payload));
+  const topLevelCandidates = arrayValue(camelOrSnake(raw, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice);
+  const groups = arrayValue(raw.groups).map((item) => {
+    const group = objectValue(item);
+    const groupCandidates = arrayValue(camelOrSnake(group, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice);
+    const candidateIds = arrayValue(camelOrSnake(group, "candidateInvoiceIds", "candidate_invoice_ids")).map(stringValue);
+    return {
+      targetApplicantCode: stringValue(camelOrSnake(group, "targetApplicantCode", "target_applicant_code")) || null,
+      targetApplicantName: stringValue(camelOrSnake(group, "targetApplicantName", "target_applicant_name")),
+      invoiceCount: numberValue(camelOrSnake(group, "invoiceCount", "invoice_count"), groupCandidates.length || candidateIds.length),
+      totalWithTax: stringValue(camelOrSnake(group, "totalWithTax", "total_with_tax")),
+      candidateInvoiceIds: candidateIds,
+      candidateInvoices: groupCandidates,
+      rejectedInvoices: arrayValue(camelOrSnake(group, "rejectedInvoices", "rejected_invoices")).map(mapRejectedInvoice),
+    };
+  });
+  return {
+    previewId: stringValue(camelOrSnake(raw, "previewId", "preview_id")),
+    previewHash: stringValue(camelOrSnake(raw, "previewHash", "preview_hash") ?? camelOrSnake(raw, "expectedPreviewHash", "expected_preview_hash")),
+    source: stringValue(raw.source),
+    invoiceCount: numberValue(camelOrSnake(raw, "invoiceCount", "invoice_count"), topLevelCandidates.length),
+    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
+    groups,
+    candidateInvoices: topLevelCandidates,
+    warnings: arrayValue(raw.warnings).map(stringValue),
+    canCreateDraft: booleanValue(camelOrSnake(raw, "canCreateDraft", "can_create_draft")),
+    nextAction: stringValue(camelOrSnake(raw, "nextAction", "next_action")),
+    unavailableReason: stringValue(camelOrSnake(raw, "unavailableReason", "unavailable_reason")),
+    permissions: {
+      canCreateBatch: booleanValue(camelOrSnake(objectValue(raw.permissions), "canCreateBatch", "can_create_batch")),
+      canCreateDraft: booleanValue(camelOrSnake(objectValue(raw.permissions), "canCreateDraft", "can_create_draft")),
+      canRevoke: booleanValue(camelOrSnake(objectValue(raw.permissions), "canRevoke", "can_revoke")),
+      canManualStatus: booleanValue(camelOrSnake(objectValue(raw.permissions), "canManualStatus", "can_manual_status")),
+    },
+  };
+}
+
+function mapOaReverseBatch(payload: unknown): InputInvoiceUsageOaReverseBatch {
+  const raw = objectValue(unwrapData(payload));
+  return {
+    batchId: stringValue(camelOrSnake(raw, "batchId", "batch_id") ?? raw.id),
+    version: numberValue(raw.version, 0),
+    status: stringValue(raw.status),
+    selectedInvoiceIds: arrayValue(camelOrSnake(raw, "selectedInvoiceIds", "selected_invoice_ids")).map(stringValue),
+    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
+    targetApplicantCode: stringValue(camelOrSnake(raw, "targetApplicantCode", "target_applicant_code")) || null,
+    targetApplicantName: stringValue(camelOrSnake(raw, "targetApplicantName", "target_applicant_name")) || null,
+    invoices: arrayValue(raw.invoices ?? camelOrSnake(raw, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice),
+    rejectedInvoices: arrayValue(camelOrSnake(raw, "rejectedInvoices", "rejected_invoices")).map(mapRejectedInvoice),
+    oaDraftId: stringValue(camelOrSnake(raw, "oaDraftId", "oa_draft_id")) || null,
+    oaDraftUrl: stringValue(camelOrSnake(raw, "oaDraftUrl", "oa_draft_url")) || null,
+    oaProcessStatus: stringValue(camelOrSnake(raw, "oaProcessStatus", "oa_process_status")) || null,
+    oaDetectionStatus: stringValue(camelOrSnake(raw, "oaDetectionStatus", "oa_detection_status")) || null,
+    nextRunAt: stringValue(camelOrSnake(raw, "nextRunAt", "next_run_at")) || null,
+    attempts: maybeNumber(raw.attempts),
+    conflictCandidates: arrayValue(camelOrSnake(raw, "conflictCandidates", "conflict_candidates")).map((item) => {
+      const candidate = objectValue(item);
+      return {
+        id: stringValue(candidate.id),
+        label: stringValue(candidate.label),
+        reason: stringValue(candidate.reason),
+      };
+    }),
+    idempotentReplay: booleanValue(camelOrSnake(raw, "idempotentReplay", "idempotent_replay")),
+    auditEventId: stringValue(camelOrSnake(raw, "auditEventId", "audit_event_id")) || null,
+    canCreateDraft: camelOrSnake(raw, "canCreateDraft", "can_create_draft") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canCreateDraft", "can_create_draft")),
+    canRevoke: camelOrSnake(raw, "canRevoke", "can_revoke") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canRevoke", "can_revoke")),
+    canRefreshStatus: camelOrSnake(raw, "canRefreshStatus", "can_refresh_status") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canRefreshStatus", "can_refresh_status")),
+    canManualStatus: camelOrSnake(raw, "canManualStatus", "can_manual_status") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canManualStatus", "can_manual_status")),
+  };
+}
+
 export async function fetchInputInvoiceUsageRows(request: FetchRowsRequest): Promise<InputInvoiceUsageRowsResponse> {
   const params = new URLSearchParams();
   appendRowsQuery(params, request);
@@ -461,26 +624,151 @@ export async function fetchInputInvoiceUsageRowRelationDetail(target: InputInvoi
 }
 
 export async function fetchInputInvoiceUsagePaymentStatusRules(signal?: AbortSignal) {
-  return apiRequestJson<InputInvoiceUsagePaymentStatusRulesResponse>("/api/input-invoice-usage/payment-status-rules", {
+  const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/payment-status-rules", {
     method: "GET",
     signal,
   });
+  return mapPaymentStatusRulesResponse(payload);
+}
+
+export async function saveInputInvoiceUsagePaymentStatusRules(
+  request: SaveInputInvoiceUsagePaymentStatusRulesRequest,
+) {
+  const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/payment-status-rules", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      expectedVersion: request.expectedVersion,
+      idempotencyKey: request.idempotencyKey,
+      rules: request.rules,
+      pendingDirections: request.pendingDirections,
+    }),
+  });
+  return mapPaymentStatusRulesResponse(payload);
 }
 
 export async function previewInputInvoiceUsageOaReverse(
   request: InputInvoiceUsageOaReversePreviewRequest,
   signal?: AbortSignal,
 ) {
-  return apiRequestJson<InputInvoiceUsageOaReversePreviewResponse>("/api/input-invoice-usage/oa-reverse/preview", {
+  const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/oa-reverse/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       source: request.source ?? (request.selectedInvoiceIds.length > 0 ? "explicitSelection" : "currentFilters"),
       filters: request.filters,
       invoiceIds: request.selectedInvoiceIds,
+      ...(request.targetApplicantCode ? { targetApplicantCode: request.targetApplicantCode } : {}),
     }),
     signal,
   });
+  return mapOaReversePreviewResponse(payload);
+}
+
+export async function createInputInvoiceUsageOaReverseBatch(
+  request: CreateInputInvoiceUsageOaReverseBatchRequest,
+) {
+  const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/oa-reverse/batches", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      previewId: request.previewId,
+      ...(request.expectedPreviewHash ? { expectedPreviewHash: request.expectedPreviewHash } : {}),
+      idempotencyKey: request.idempotencyKey,
+      ...(request.selectedInvoiceIds ? { invoiceIds: request.selectedInvoiceIds } : {}),
+      ...(request.targetApplicantCode ? { targetApplicantCode: request.targetApplicantCode } : {}),
+    }),
+  });
+  return mapOaReverseBatch(payload);
+}
+
+export async function fetchInputInvoiceUsageOaReverseBatch(batchId: string, signal?: AbortSignal) {
+  const payload = await apiRequestJson<unknown>(
+    `/api/input-invoice-usage/oa-reverse/batches/${encodeURIComponent(batchId)}`,
+    { method: "GET", signal },
+  );
+  return mapOaReverseBatch(payload);
+}
+
+export async function createInputInvoiceUsageOaReverseDraft(
+  batchId: string,
+  request: InputInvoiceUsageOaReverseVersionedRequest,
+) {
+  const payload = await apiRequestJson<unknown>(
+    `/api/input-invoice-usage/oa-reverse/batches/${encodeURIComponent(batchId)}/oa-draft`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: request.expectedVersion,
+        ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+      }),
+    },
+  );
+  return mapOaReverseBatch(payload);
+}
+
+export async function revokeInputInvoiceUsageOaReverseDraft(
+  batchId: string,
+  request: RevokeInputInvoiceUsageOaReverseDraftRequest,
+) {
+  const reason = request.reason.trim();
+  if (!reason) {
+    throw new Error("撤销原因不能为空。");
+  }
+  const payload = await apiRequestJson<unknown>(
+    `/api/input-invoice-usage/oa-reverse/batches/${encodeURIComponent(batchId)}/oa-draft/revoke`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: request.expectedVersion,
+        reason,
+        ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+      }),
+    },
+  );
+  return mapOaReverseBatch(payload);
+}
+
+export async function refreshInputInvoiceUsageOaReverseStatus(
+  batchId: string,
+  request: Pick<InputInvoiceUsageOaReverseVersionedRequest, "expectedVersion">,
+) {
+  const payload = await apiRequestJson<unknown>(
+    `/api/input-invoice-usage/oa-reverse/batches/${encodeURIComponent(batchId)}/oa-status/refresh`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: request.expectedVersion }),
+    },
+  );
+  return mapOaReverseBatch(payload);
+}
+
+export async function manualInputInvoiceUsageOaReverseStatus(
+  batchId: string,
+  request: ManualInputInvoiceUsageOaReverseStatusRequest,
+) {
+  const reason = request.reason.trim();
+  if (!reason) {
+    throw new Error("人工处理原因不能为空。");
+  }
+  const payload = await apiRequestJson<unknown>(
+    `/api/input-invoice-usage/oa-reverse/batches/${encodeURIComponent(batchId)}/manual-oa-status`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        decision: request.decision,
+        expectedVersion: request.expectedVersion,
+        reason,
+        ...(request.candidateOaRowId ? { candidateOaRowId: request.candidateOaRowId } : {}),
+        ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+      }),
+    },
+  );
+  return mapOaReverseBatch(payload);
 }
 
 export function nextSortDirection(currentField: string, currentDirection: InputInvoiceUsageSortDirection | "", field: string) {

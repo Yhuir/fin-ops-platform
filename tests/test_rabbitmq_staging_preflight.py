@@ -53,12 +53,13 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
             "rabbitmq.consumer_worker_check.workbench",
             "rabbitmq.consumer_worker_check.search_pending",
             "rabbitmq.consumer_worker_check.bank_detail",
+            "rabbitmq.consumer_worker_check.invoice_usage_collection",
             "rabbitmq.consumer_worker_check.cost_tax",
             "rabbitmq.consumer_worker_check.oa_sync",
             "rabbitmq.consumer_worker_check.file_migration",
             "rabbitmq.consumer_worker_check.import_job",
         ])
-        self.assertEqual(len(runner.calls), 11)
+        self.assertEqual(len(runner.calls), 12)
         dispatcher_env = runner.calls[3][1]
         self.assertEqual(dispatcher_env["FIN_OPS_QUEUE_BACKEND"], "postgres")
         self.assertEqual(dispatcher_env["RABBITMQ_SHADOW_PUBLISH"], "true")
@@ -68,6 +69,8 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         self.assertIn("--event-type", dispatcher_command)
         self.assertIn("workbench.read_model.refresh", dispatcher_command)
         self.assertIn("bank_detail.read_model.refresh", dispatcher_command)
+        self.assertIn("input_invoice_usage.read_model.refresh", dispatcher_command)
+        self.assertIn("output_invoice_collection.read_model.refresh", dispatcher_command)
         self.assertIn("file_object.gridfs_migration", dispatcher_command)
         self.assertIn("import.process.requested", dispatcher_command)
         worker_env = runner.calls[4][1]

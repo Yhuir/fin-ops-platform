@@ -1,6 +1,7 @@
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
@@ -26,6 +27,8 @@ type ReceiptPreviewDrawerProps = {
   open: boolean;
   row: OutputInvoiceCollectionRow | null;
   loadPreview: (request: OutputInvoiceReceiptPreviewRequest) => Promise<OutputInvoiceReceiptPreviewResponse>;
+  createReceipt?: (rowId: string, bankTransactionId: string) => Promise<void>;
+  onChanged?: () => void;
   onClose: () => void;
 };
 
@@ -33,11 +36,14 @@ export default function ReceiptPreviewDrawer({
   open,
   row,
   loadPreview,
+  createReceipt,
+  onChanged,
   onClose,
 }: ReceiptPreviewDrawerProps) {
   const [payload, setPayload] = useState<OutputInvoiceReceiptPreviewResponse | null>(null);
   const [selectedBankTransactionId, setSelectedBankTransactionId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rowId = row?.id ?? "";
 
@@ -74,6 +80,23 @@ export default function ReceiptPreviewDrawer({
   }, [loadPreview, open, rowId, selectedBankTransactionId]);
 
   const candidates = useMemo(() => payload?.candidates ?? [], [payload]);
+  const handleCreate = async () => {
+    const bankTransactionId = payload?.receipt?.bankTransactionId || selectedBankTransactionId;
+    if (!rowId || !bankTransactionId || !createReceipt) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createReceipt(rowId, bankTransactionId);
+      onChanged?.();
+      onClose();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "正式收据创建失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <Drawer
@@ -166,8 +189,17 @@ export default function ReceiptPreviewDrawer({
                   <Typography variant="body2" fontWeight={900}>小写：{payload.receipt.amount}</Typography>
                 </Stack>
                 <Typography variant="caption" color="text.secondary">
-                  第一阶段仅预览，不生成正式收据编号。
+                  正式创建后会分配收据编号并写入收据历史。
                 </Typography>
+                <Stack direction="row" justifyContent="flex-end">
+                  <Button
+                    variant="contained"
+                    disabled={submitting || !createReceipt || !payload.receipt.bankTransactionId}
+                    onClick={handleCreate}
+                  >
+                    创建正式收据
+                  </Button>
+                </Stack>
               </Stack>
             </Paper>
           ) : null}

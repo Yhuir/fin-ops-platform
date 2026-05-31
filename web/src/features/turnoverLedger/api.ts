@@ -5,6 +5,7 @@ import type {
   SaveTurnoverBankRowTagsResponse,
   SaveTurnoverLedgerExtraRequest,
   SaveTurnoverLedgerExtraResponse,
+  SaveTurnoverLedgerTagSelectionRequest,
   TurnoverBankRow,
   TurnoverLedgerChip,
   TurnoverLedgerAllocationLot,
@@ -20,6 +21,7 @@ import type {
   TurnoverLedgerResponse,
   TurnoverLedgerRow,
   TurnoverLedgerSummary,
+  TurnoverLedgerTagSelection,
   TurnoverRelationDetail,
   TurnoverRelationMutationResponse,
   WithdrawTurnoverRelationRequest,
@@ -112,6 +114,9 @@ type ApiTurnoverLedgerGroupedRow = {
   business_type?: string | null;
   category_code?: string | null;
   category_label?: string | null;
+  category_primary_label?: string | null;
+  category_sub_label?: string | null;
+  category_third_label?: string | null;
   category_label_path?: string[];
   category_version?: number | null;
   counterparty_bank_name?: string | null;
@@ -128,6 +133,25 @@ type ApiTurnoverLedgerGroupedRow = {
   interest_payment_method?: string | null;
   note?: string | null;
   bank_row_ids?: string[];
+};
+
+type ApiTurnoverLedgerTagDefinition = {
+  code?: string | null;
+  label?: string | null;
+  path?: string[] | null;
+  source?: string | null;
+  status?: string | null;
+  output_primary_label?: string | null;
+  output_sub_label?: string | null;
+  turnover_role?: string | null;
+  turnover_action_type?: string | null;
+};
+
+type ApiTurnoverLedgerTagSelection = {
+  version?: number | string | null;
+  selected_tag_codes?: string[] | null;
+  inactive_selected_tag_codes?: string[] | null;
+  active_tags?: ApiTurnoverLedgerTagDefinition[] | null;
 };
 
 type ApiTurnoverLedgerGroup = {
@@ -424,6 +448,30 @@ function mapFamilySummaries(
   });
 }
 
+function mapTagDefinition(tag: ApiTurnoverLedgerTagDefinition = {}) {
+  return {
+    code: text(tag.code),
+    label: text(tag.label),
+    path: stringList(tag.path ?? undefined),
+    source: text(tag.source),
+    status: text(tag.status, "active"),
+    outputPrimaryLabel: text(tag.output_primary_label ?? tag.label ?? tag.code),
+    outputSubLabel: text(tag.output_sub_label),
+    turnoverRole: text(tag.turnover_role),
+    turnoverActionType: text(tag.turnover_action_type),
+  };
+}
+
+function mapTagSelection(payload: ApiTurnoverLedgerTagSelection = {}): TurnoverLedgerTagSelection {
+  const parsedVersion = Number(payload.version ?? 1);
+  return {
+    version: Number.isFinite(parsedVersion) ? parsedVersion : 1,
+    selectedTagCodes: stringList(payload.selected_tag_codes ?? undefined),
+    inactiveSelectedTagCodes: stringList(payload.inactive_selected_tag_codes ?? undefined),
+    activeTags: Array.isArray(payload.active_tags) ? payload.active_tags.map(mapTagDefinition) : [],
+  };
+}
+
 function mapRow(row: ApiTurnoverLedgerRow): TurnoverLedgerRow {
   return {
     relationId: text(row.relation_id),
@@ -478,6 +526,9 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     businessType: row.business_type ?? null,
     categoryCode: text(row.category_code),
     categoryLabel: text(row.category_label),
+    categoryPrimaryLabel: text(row.category_primary_label),
+    categorySubLabel: text(row.category_sub_label),
+    categoryThirdLabel: text(row.category_third_label),
     categoryLabelPath: stringList(row.category_label_path),
     categoryVersion: numberValue(row.category_version),
     counterpartyBankName: text(row.counterparty_bank_name),
@@ -678,6 +729,31 @@ export async function fetchTurnoverLedgerGrouped({
       total: payload.pagination?.total ?? payload.groups?.length ?? 0,
     },
   };
+}
+
+export async function fetchTurnoverLedgerTagSelection(signal?: AbortSignal): Promise<TurnoverLedgerTagSelection> {
+  const payload = await requestJson<ApiTurnoverLedgerTagSelection>(
+    "/api/turnover-ledger/tag-selection",
+    { method: "GET", signal },
+  );
+  return mapTagSelection(payload);
+}
+
+export async function saveTurnoverLedgerTagSelection({
+  expectedVersion,
+  selectedTagCodes,
+  signal,
+}: SaveTurnoverLedgerTagSelectionRequest): Promise<TurnoverLedgerTagSelection> {
+  const payload = await requestJson<ApiTurnoverLedgerTagSelection>(
+    "/api/turnover-ledger/tag-selection",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_version: expectedVersion, selected_tag_codes: selectedTagCodes }),
+      signal,
+    },
+  );
+  return mapTagSelection(payload);
 }
 
 export async function saveTurnoverBankRowTags({

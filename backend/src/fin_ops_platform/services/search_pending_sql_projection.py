@@ -182,7 +182,7 @@ class SearchPendingSqlProjectionBuilder:
     def _pending_invoice_rows(self, *, direction: str, filter_name: str, month: str) -> list[dict[str, object]]:
         txn_direction = "outflow" if direction == "expense" else "inflow"
         target_invoice_type = "input" if direction == "expense" else "output"
-        tag_groups = self._pending_invoice_tag_groups()
+        tag_groups = self._pending_invoice_tag_groups(direction=direction)
         rows = self._connection.fetch_all(
             """
             select
@@ -205,6 +205,7 @@ class SearchPendingSqlProjectionBuilder:
                 coalesce(pay.paid_total, 0)::text as paid_total,
                 coalesce(rel.oa_applicant, '') as oa_applicant,
                 coalesce(rel.oa_project_name, '') as oa_project_name,
+                iso.income_status_override,
                 coalesce(rel.case_ids, array[]::text[]) as relation_case_ids
             from app.bank_transactions t
             left join lateral (
@@ -272,6 +273,15 @@ class SearchPendingSqlProjectionBuilder:
                 where pr.status = 'active'
                   and coalesce(t.legacy_mongo_id, t.id::text) = any(pr.row_ids)
             ) rel on true
+            left join lateral (
+                select command_payload->'income_status_override' as income_status_override
+                from app.pending_invoice_manual_invoice_commands command
+                where command.status = 'completed'
+                  and command.command_payload->>'operation' = 'income_status_override'
+                  and command.command_payload->'income_status_override'->>'transaction_id' = coalesce(t.legacy_mongo_id, t.id::text)
+                order by command.updated_at desc
+                limit 1
+            ) iso on true
             where t.txn_direction = %s
               and t.status <> 'deleted'
               and t.txn_month = %s::date
@@ -284,12 +294,12 @@ class SearchPendingSqlProjectionBuilder:
             category = row_payload(row, "category_payload")
             category = category if isinstance(category, dict) else {}
             category_code = str(category.get("category_code") or category.get("category") or "").strip()
-            filter_group = _filter_group_for_category(category_code, tag_groups) or "all"
+            filter_group = _filter_group_for_category(category_code, tag_groups, direction=direction) or "all"
             if direction == "expense" and filter_name != "all" and filter_group != filter_name:
                 continue
             invoices = row.get("invoices") if isinstance(row.get("invoices"), list) else []
             payment_summary = _payment_summary_from_invoices(invoices, paid_total=row.get("paid_total"))
-            can_create_invoice = not invoices and not (direction == "expense" and filter_group == "no_invoice_required")
+            can_create_invoice = direction == "expense" and not invoices and filter_group != "no_invoice_required"
             transaction_id = str(row.get("transaction_id") or "").strip()
             relation_case_ids = list(row.get("relation_case_ids") or [])
             oa_applicant = str(row.get("oa_applicant") or "").strip()
@@ -310,7 +320,9 @@ class SearchPendingSqlProjectionBuilder:
                     group=filter_group if filter_group != "all" else None,
                     category_code=category_code,
                     category_label=category.get("category_label"),
+                    category=category,
                 ),
+                status_override=row.get("income_status_override") if isinstance(row.get("income_status_override"), dict) else None,
             )
             bank_transaction = {
                 "id": transaction_id,
@@ -336,6 +348,9 @@ class SearchPendingSqlProjectionBuilder:
                 "voucher_no": "",
                 "effective_tag_code": category_code or None,
                 "effective_tag_label": category.get("category_label"),
+                "effective_tag_primary_label": category.get("category_primary_label"),
+                "effective_tag_sub_label": category.get("category_sub_label"),
+                "effective_tag_label_path": list(category.get("category_label_path") or []),
             }
             input_invoices = {
                 "primary": invoices[0] if invoices else None,
@@ -373,13 +388,13 @@ class SearchPendingSqlProjectionBuilder:
             result.append({"filter_group": filter_group, "searchable_text": searchable_text, "payload": payload})
         return result
 
-    def _pending_invoice_tag_groups(self) -> dict[str, set[str]]:
+    def _pending_invoice_tag_groups(self, *, direction: str) -> dict[str, set[str]]:
         row = self._connection.fetch_one(
             "select settings_payload from app.app_settings where settings_key = %s",
             ("app_settings",),
         )
         payload = row.get("settings_payload") if isinstance(row, dict) else {}
-        return pending_invoice_tag_group_sets(payload if isinstance(payload, dict) else {})
+        return pending_invoice_tag_group_sets(payload if isinstance(payload, dict) else {}, direction=direction)
 
     def _search_source_versions(self) -> dict[str, object]:
         return {
@@ -393,10 +408,12 @@ class SearchPendingSqlProjectionBuilder:
     def _pending_invoice_source_versions(self) -> dict[str, object]:
         settings = _settings_payload(self._connection)
         pending_groups = settings.get("pending_invoice_tag_groups")
+        pending_output_groups = settings.get("pending_output_invoice_tag_groups")
         bank_tags = settings.get("bank_transaction_tags")
         return {
             "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
             "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
+            "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
             "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,
             "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
@@ -471,17 +488,27 @@ def _status_label(status: str) -> str:
     }.get(status, status)
 
 
-def _filter_group_for_category(category_code: str, tag_groups: dict[str, set[str]]) -> str | None:
-    return pending_invoice_group_for_category(category_code, tag_groups)
+def _filter_group_for_category(category_code: str, tag_groups: dict[str, set[str]], *, direction: str) -> str | None:
+    return pending_invoice_group_for_category(category_code, tag_groups, direction=direction)
 
 
-def _matched_rule_payload(*, group: str | None, category_code: str, category_label: object) -> dict[str, object] | None:
+def _matched_rule_payload(
+    *,
+    group: str | None,
+    category_code: str,
+    category_label: object,
+    category: dict[str, object] | None = None,
+) -> dict[str, object] | None:
     if not group:
         return None
+    category_payload = category if isinstance(category, dict) else {}
     return {
         "group": group,
         "tag_code": category_code or None,
         "tag_label": category_label,
+        "tag_primary_label": category_payload.get("category_primary_label"),
+        "tag_sub_label": category_payload.get("category_sub_label"),
+        "tag_label_path": list(category_payload.get("category_label_path") or []),
     }
 
 
@@ -492,14 +519,62 @@ def _pending_invoice_status_payload(
     has_invoices: bool,
     payment_summary: dict[str, object],
     matched_rule: dict[str, object] | None,
+    status_override: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    if direction != "expense":
+    if direction == "income":
+        if has_invoices:
+            return {
+                "code": "income_invoiced",
+                "label": "已开票",
+                "reason": "收入流水已关联销项发票。",
+                "severity": "success",
+                "primary_action": "view_relation",
+                "matched_rule": matched_rule,
+            }
+        if isinstance(status_override, dict):
+            status_code = str(status_override.get("status_code") or "").strip()
+            if status_code == "income_no_invoice_required":
+                return {
+                    "code": "income_no_invoice_required",
+                    "label": "无需开票",
+                    "reason": "收入流水已人工标记为无需开票。",
+                    "severity": "default",
+                    "primary_action": "none",
+                    "matched_rule": matched_rule,
+                }
+            if status_code == "cash_income":
+                return {
+                    "code": "cash_income",
+                    "label": "现金收入",
+                    "reason": "收入流水已人工标记为现金收入。",
+                    "severity": "info",
+                    "primary_action": "none",
+                    "matched_rule": matched_rule,
+                }
+        if group == "no_invoice_required":
+            return {
+                "code": "income_no_invoice_required",
+                "label": "无需开票",
+                "reason": "收入流水分类命中无需开票规则。",
+                "severity": "default",
+                "primary_action": "view_rules",
+                "matched_rule": matched_rule,
+            }
+        if group == "cash_income":
+            return {
+                "code": "cash_income",
+                "label": "现金收入",
+                "reason": "收入流水分类命中现金收入规则。",
+                "severity": "info",
+                "primary_action": "view_rules",
+                "matched_rule": matched_rule,
+            }
         return {
-            "code": "pending",
-            "label": "待确认",
-            "reason": "收入方向保留原有待找发票逻辑。",
-            "severity": "default",
-            "primary_action": None,
+            "code": "income_pending_invoice",
+            "label": "未开票",
+            "reason": "收入流水未关联销项发票，也未命中无需开票或现金收入规则。",
+            "severity": "error",
+            "primary_action": "mark_income_status",
             "matched_rule": matched_rule,
         }
     invoice_total = _decimal_from_text(payment_summary.get("invoice_total"))

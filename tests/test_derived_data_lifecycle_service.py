@@ -124,6 +124,20 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual([domain["domain"] for domain in attach_plan["domains"]], [domain["domain"] for domain in plan["domains"]])
         self.assertEqual(attach_plan["will_enqueue_jobs"], plan["will_enqueue_jobs"])
 
+    def test_income_status_override_only_refreshes_pending_invoice_and_search_domains(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("pending_invoice_income_status_override_confirmed", months=["2026-05"])
+
+        self.assertEqual(plan["affected_scopes"], ["2026-05", "all"])
+        self.assertEqual(
+            [domain["domain"] for domain in plan["domains"]],
+            [
+                "pending_invoice_read_model",
+                "search_cache",
+            ],
+        )
+
     def test_bank_auto_tag_rules_changed_does_not_refresh_account_balances(self) -> None:
         service = DerivedDataLifecycleService()
 
@@ -244,6 +258,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "bank_auto_tag_rules_changed",
                 "pending_invoice_manual_invoice_confirmed",
                 "pending_invoice_attach_existing_invoice_confirmed",
+                "pending_invoice_income_status_override_confirmed",
                 "no_oa_bank_batch_changed",
                 "batch_accounting_relation_changed",
                 "turnover_relation_changed",

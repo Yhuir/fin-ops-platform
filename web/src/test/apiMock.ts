@@ -5790,6 +5790,37 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/turnover-ledger/tag-selection": () => ({
+      body: {
+        version: 1,
+        selected_tag_codes: ["external_rule_borrow_out", "external_rule_repaid"],
+        inactive_selected_tag_codes: [],
+        active_tags: [
+          {
+            code: "external_rule_borrow_out",
+            label: "借出款",
+            path: ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款付款",
+            output_sub_label: "借出款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "pending_collection",
+          },
+          {
+            code: "external_rule_repaid",
+            label: "归还借款",
+            path: ["银行明细自动标签规则", "外部往来款付款", "归还借款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款付款",
+            output_sub_label: "归还借款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "repaid",
+          },
+        ],
+      },
+    }),
     "/api/turnover-ledger": ({ url }) => {
       const view = url.searchParams.get("view") ?? "";
       const family = url.searchParams.get("family") ?? "all";

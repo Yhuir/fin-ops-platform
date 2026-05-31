@@ -14,6 +14,8 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.pending_invoice_rules import (
+    PENDING_INVOICE_CASH_INCOME_GROUP,
+    PENDING_INVOICE_NO_INVOICE_GROUP,
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
 )
@@ -59,6 +61,29 @@ COMMAND_STATUSES = {
     "failed_recoverable",
     "failed_terminal",
 }
+INCOME_STATUS_OVERRIDE_CODES = {
+    "income_no_invoice_required",
+    "cash_income",
+}
+
+
+def latest_income_status_override_from_commands(
+    command_store: dict[str, dict[str, Any]] | None,
+    transaction_id: str,
+) -> dict[str, Any] | None:
+    normalized_transaction_id = str(transaction_id or "").strip()
+    latest: dict[str, Any] | None = None
+    for command in dict(command_store or {}).values():
+        if not isinstance(command, dict) or command.get("operation") != "income_status_override":
+            continue
+        if command.get("status") != "completed":
+            continue
+        override = command.get("income_status_override")
+        if not isinstance(override, dict) or str(override.get("transaction_id") or "") != normalized_transaction_id:
+            continue
+        if latest is None or str(override.get("updated_at") or "") >= str(latest.get("updated_at") or ""):
+            latest = dict(override)
+    return deepcopy(latest) if latest is not None else None
 
 
 class PendingInvoiceError(ValueError):
@@ -86,6 +111,7 @@ class PendingInvoiceQueryService:
         app_settings_provider: Callable[[], dict[str, Any]],
         effective_category_provider: Any | None = None,
         oa_projection: Any | None = None,
+        income_status_override_provider: Callable[[str], dict[str, Any] | None] | None = None,
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
@@ -93,6 +119,7 @@ class PendingInvoiceQueryService:
         self._app_settings_provider = app_settings_provider
         self._effective_category_provider = effective_category_provider
         self._oa_projection = oa_projection
+        self._income_status_override_provider = income_status_override_provider
 
     def clear_cache(self) -> None:
         return None
@@ -113,10 +140,10 @@ class PendingInvoiceQueryService:
     ) -> dict[str, Any]:
         normalized_direction = self._normalize_direction(direction)
         normalized_filter = self._normalize_filter(filter)
-        if normalized_direction == "income" and normalized_filter in EXPENSE_FILTERS:
+        if normalized_direction in {"income", "all"} and normalized_filter in EXPENSE_FILTERS:
             raise PendingInvoiceError(
                 "invalid_filter_for_income",
-                "Income pending invoice rows do not support expense invoice tag filters.",
+                "Income/all pending invoice rows do not support expense invoice tag filters.",
                 status_code=HTTPStatus.BAD_REQUEST,
             )
         page_number = max(_optional_int(page, default=1), 1)
@@ -133,13 +160,16 @@ class PendingInvoiceQueryService:
             if self._transaction_matches_direction(transaction, normalized_direction)
         ]
         categories = self._effective_categories(transactions)
-        tag_groups = self._pending_invoice_tag_groups()
+        tag_groups_by_direction = {
+            "expense": self._pending_invoice_tag_groups(direction="expense"),
+            "income": self._pending_invoice_tag_groups(direction="income"),
+        }
         rows = [
             self._row_payload(
                 transaction,
-                direction=normalized_direction,
+                direction=self.direction_for_transaction(transaction),
                 category=categories.get(transaction.id, {}),
-                tag_groups=tag_groups,
+                tag_groups=tag_groups_by_direction[self.direction_for_transaction(transaction)],
             )
             for transaction in transactions
             if self._transaction_matches_filter(
@@ -147,7 +177,7 @@ class PendingInvoiceQueryService:
                 direction=normalized_direction,
                 filter_name=normalized_filter,
                 category=categories.get(transaction.id, {}),
-                tag_groups=tag_groups,
+                tag_groups=tag_groups_by_direction[self.direction_for_transaction(transaction)],
             )
         ]
         if keyword:
@@ -209,7 +239,7 @@ class PendingInvoiceQueryService:
             transaction,
             direction=normalized_direction,
             category=category,
-            tag_groups=self._pending_invoice_tag_groups(),
+            tag_groups=self._pending_invoice_tag_groups(direction=normalized_direction),
         )
 
     def normalize_row_payloads(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -235,8 +265,8 @@ class PendingInvoiceQueryService:
     @staticmethod
     def _normalize_direction(direction: str) -> str:
         normalized = str(direction or "").strip()
-        if normalized not in {"expense", "income"}:
-            raise PendingInvoiceError("invalid_direction", "direction must be expense or income.")
+        if normalized not in {"expense", "income", "all"}:
+            raise PendingInvoiceError("invalid_direction", "direction must be expense, income or all.")
         return normalized
 
     @staticmethod
@@ -248,8 +278,18 @@ class PendingInvoiceQueryService:
 
     @staticmethod
     def _transaction_matches_direction(transaction: BankTransaction, direction: str) -> bool:
+        if direction == "all":
+            return transaction.txn_direction in {TransactionDirection.OUTFLOW, TransactionDirection.INFLOW}
         expected = TransactionDirection.OUTFLOW if direction == "expense" else TransactionDirection.INFLOW
         return transaction.txn_direction == expected
+
+    @staticmethod
+    def direction_for_transaction(transaction: BankTransaction) -> str:
+        if transaction.txn_direction == TransactionDirection.OUTFLOW:
+            return "expense"
+        if transaction.txn_direction == TransactionDirection.INFLOW:
+            return "income"
+        raise PendingInvoiceError("invalid_direction", "Unsupported bank transaction direction.")
 
     @classmethod
     def _source_summary_for_transactions(
@@ -261,7 +301,7 @@ class PendingInvoiceQueryService:
         expense_rows = sum(1 for transaction in transactions if cls._transaction_matches_direction(transaction, "expense"))
         income_rows = sum(1 for transaction in transactions if cls._transaction_matches_direction(transaction, "income"))
         total_rows = expense_rows + income_rows
-        current_rows = expense_rows if direction == "expense" else income_rows
+        current_rows = total_rows if direction == "all" else (expense_rows if direction == "expense" else income_rows)
         return {
             "bank_transaction_rows": total_rows,
             "expense_rows": expense_rows,
@@ -284,12 +324,12 @@ class PendingInvoiceQueryService:
             return False
         return True
 
-    def _pending_invoice_tag_groups(self) -> dict[str, set[str]]:
-        return pending_invoice_tag_group_sets(self._app_settings_provider())
+    def _pending_invoice_tag_groups(self, *, direction: str) -> dict[str, set[str]]:
+        return pending_invoice_tag_group_sets(self._app_settings_provider(), direction=direction)
 
     @staticmethod
-    def _group_for_category(category_code: str | None, tag_groups: dict[str, set[str]]) -> str | None:
-        return pending_invoice_group_for_category(category_code, tag_groups)
+    def _group_for_category(category_code: str | None, tag_groups: dict[str, set[str]], *, direction: str) -> str | None:
+        return pending_invoice_group_for_category(category_code, tag_groups, direction=direction)
 
     def _transaction_matches_filter(
         self,
@@ -300,9 +340,9 @@ class PendingInvoiceQueryService:
         category: dict[str, Any],
         tag_groups: dict[str, set[str]],
     ) -> bool:
-        if direction == "income" or filter_name == "all":
+        if direction in {"income", "all"} or filter_name == "all":
             return True
-        group = self._group_for_category(category.get("category_code"), tag_groups)
+        group = self._group_for_category(category.get("category_code"), tag_groups, direction="expense")
         return group == filter_name
 
     def _bank_account_mappings_by_last4(self) -> dict[str, dict[str, str]]:
@@ -361,8 +401,13 @@ class PendingInvoiceQueryService:
         invoice_relations.sort(key=lambda item: str(item[0].get("case_id") or ""))
         invoices = [self._invoice_payload(invoice, direction=direction) for _, invoice in invoice_relations]
         category_code = category.get("category_code")
-        group = self._group_for_category(category_code, tag_groups)
-        can_create_invoice = not invoices and not (direction == "expense" and group == "no_invoice_required")
+        group = self._group_for_category(category_code, tag_groups, direction=direction)
+        status_override = self._income_status_override(transaction.id) if direction == "income" else None
+        can_create_invoice = (
+            direction == "expense"
+            and not invoices
+            and group != PENDING_INVOICE_NO_INVOICE_GROUP
+        )
         payment_summary = self._payment_summary_for_relations(invoice_relations)
         oa_payload = self._oa_payload_from_relations(relations)
         status_payload = self._status_payload(
@@ -371,6 +416,7 @@ class PendingInvoiceQueryService:
             has_invoices=bool(invoices),
             payment_summary=payment_summary,
             matched_rule=self._matched_rule_payload(group=group, category=category),
+            status_override=status_override,
         )
         input_invoices = {
             "primary": invoices[0] if invoices else None,
@@ -479,14 +525,62 @@ class PendingInvoiceQueryService:
         has_invoices: bool,
         payment_summary: dict[str, Any],
         matched_rule: dict[str, Any] | None,
+        status_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if direction != "expense":
+        if direction == "income":
+            if has_invoices:
+                return {
+                    "code": "income_invoiced",
+                    "label": "已开票",
+                    "reason": "收入流水已关联销项发票。",
+                    "severity": "success",
+                    "primary_action": "view_relation",
+                    "matched_rule": matched_rule,
+                }
+            if isinstance(status_override, dict):
+                status_code = str(status_override.get("status_code") or "").strip()
+                if status_code == "income_no_invoice_required":
+                    return {
+                        "code": "income_no_invoice_required",
+                        "label": "无需开票",
+                        "reason": "收入流水已人工标记为无需开票。",
+                        "severity": "default",
+                        "primary_action": "none",
+                        "matched_rule": matched_rule,
+                    }
+                if status_code == "cash_income":
+                    return {
+                        "code": "cash_income",
+                        "label": "现金收入",
+                        "reason": "收入流水已人工标记为现金收入。",
+                        "severity": "info",
+                        "primary_action": "none",
+                        "matched_rule": matched_rule,
+                    }
+            if group == PENDING_INVOICE_NO_INVOICE_GROUP:
+                return {
+                    "code": "income_no_invoice_required",
+                    "label": "无需开票",
+                    "reason": "收入流水分类命中无需开票规则。",
+                    "severity": "default",
+                    "primary_action": "view_rules",
+                    "matched_rule": matched_rule,
+                }
+            if group == PENDING_INVOICE_CASH_INCOME_GROUP:
+                return {
+                    "code": "cash_income",
+                    "label": "现金收入",
+                    "reason": "收入流水分类命中现金收入规则。",
+                    "severity": "info",
+                    "primary_action": "view_rules",
+                    "matched_rule": matched_rule,
+                }
             return {
-                "code": "pending",
-                "label": "待确认",
-                "reason": "收入方向保留原有待找发票逻辑。",
-                "severity": "default",
-                "primary_action": None,
+                "code": "income_pending_invoice",
+                "label": "未开票",
+                "reason": "收入流水未关联销项发票，也未命中无需开票或现金收入规则。",
+                "severity": "error",
+                "primary_action": "mark_income_status",
                 "matched_rule": matched_rule,
             }
         invoice_total = _decimal_from_text(payment_summary.get("invoice_total"))
@@ -535,6 +629,12 @@ class PendingInvoiceQueryService:
             "primary_action": "attach_or_create_invoice",
             "matched_rule": matched_rule,
         }
+
+    def _income_status_override(self, transaction_id: str) -> dict[str, Any] | None:
+        if self._income_status_override_provider is None:
+            return None
+        override = self._income_status_override_provider(transaction_id)
+        return override if isinstance(override, dict) else None
 
     @staticmethod
     def _invoice_payload(invoice: Invoice, *, direction: str) -> dict[str, Any]:
@@ -1651,6 +1751,97 @@ class PendingInvoiceApplicationService:
             self._mark_command(command, "failed_recoverable")
             raise
 
+    def confirm_income_status_override(
+        self,
+        *,
+        transaction_id: str,
+        payload: dict[str, Any],
+        actor_id: str,
+    ) -> dict[str, Any]:
+        request_id = str(payload.get("request_id") or "").strip()
+        status_code = str(payload.get("status_code") or payload.get("code") or "").strip()
+        reason = str(payload.get("reason") or "").strip()
+        if not request_id or status_code not in INCOME_STATUS_OVERRIDE_CODES:
+            raise PendingInvoiceError(
+                "invalid_income_status_override_payload",
+                "request_id and a supported status_code are required.",
+            )
+        transaction = self._get_transaction(transaction_id)
+        if self.direction_for_transaction(transaction) != "income":
+            raise PendingInvoiceError("invalid_direction", "Only income rows can be manually marked.")
+        current_row = self._row_provider(transaction.id, "income") if self._row_provider is not None else None
+        if isinstance(current_row, dict) and current_row.get("invoices"):
+            raise PendingInvoiceError(
+                "income_invoice_already_linked",
+                "Income rows that already have output invoices cannot be manually marked.",
+                status_code=HTTPStatus.CONFLICT,
+            )
+        request_key = f"pending_invoice_income_status:{transaction.id}:{status_code}"
+        command = self._command_store.get(request_id)
+        if isinstance(command, dict) and command.get("status") == "completed":
+            return deepcopy(command["result"])
+        if not isinstance(command, dict):
+            command = {
+                "request_id": request_id,
+                "request_key": request_key,
+                "operation": "income_status_override",
+                "status": "started",
+                "status_history": ["started"],
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+            self._command_store[request_id] = command
+        elif command.get("request_key") != request_key:
+            raise PendingInvoiceError(
+                "invalid_income_status_override_payload",
+                "request_id was already used for another income status payload.",
+            )
+        affected_months = self._affected_months_for_transaction(transaction)
+        override = {
+            "transaction_id": transaction.id,
+            "status_code": status_code,
+            "reason": reason,
+            "actor_id": actor_id,
+            "updated_at": _now(),
+        }
+        command["income_status_override"] = override
+        self._mark_command(command, "completed")
+        result = {
+            "status": "completed",
+            "request_id": request_id,
+            "request_key": request_key,
+            "transaction_id": transaction.id,
+            "status_code": status_code,
+            "affected_transaction_ids": [transaction.id],
+            "affected_months": affected_months,
+        }
+        if self._row_provider is not None:
+            result["row"] = self._row_provider(transaction.id, "income")
+        command["result"] = deepcopy(result)
+        self._record_income_status_override_audit(
+            actor_id=actor_id,
+            transaction_id=transaction.id,
+            request_id=request_id,
+            request_key=request_key,
+            status_code=status_code,
+            affected_months=affected_months,
+        )
+        self._finalize(
+            {
+                "action": "pending_invoice_income_status_override_confirmed",
+                "source": "pending_invoice_income_status_override",
+                "entity_type": "pending_invoice_income_status_override",
+                "transaction_id": transaction.id,
+                "request_id": request_id,
+                "request_key": request_key,
+                "affected_months": affected_months,
+            }
+        )
+        return result
+
+    def latest_income_status_override(self, transaction_id: str) -> dict[str, Any] | None:
+        return latest_income_status_override_from_commands(self._command_store, transaction_id)
+
     def batch_type_for_direction(self, direction: str) -> BatchType:
         return BatchType.INPUT_INVOICE if direction == "expense" else BatchType.OUTPUT_INVOICE
 
@@ -1939,6 +2130,32 @@ class PendingInvoiceApplicationService:
                 "relation_case_id": relation_case_id,
                 "request_id": request_id,
                 "request_key": request_key,
+                "affected_months": list(affected_months),
+            }
+        )
+
+    def _record_income_status_override_audit(
+        self,
+        *,
+        actor_id: str,
+        transaction_id: str,
+        request_id: str,
+        request_key: str,
+        status_code: str,
+        affected_months: list[str],
+    ) -> None:
+        if self._audit_recorder is None:
+            return
+        self._audit_recorder(
+            {
+                "actor_id": actor_id,
+                "action": "pending_invoice_income_status_override_confirmed",
+                "source": "pending_invoice_income_status_override",
+                "entity_type": "pending_invoice_income_status_override",
+                "transaction_id": transaction_id,
+                "request_id": request_id,
+                "request_key": request_key,
+                "status_code": status_code,
                 "affected_months": list(affected_months),
             }
         )

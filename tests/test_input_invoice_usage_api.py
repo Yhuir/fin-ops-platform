@@ -104,7 +104,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertTrue(json.loads(oa_response.body)["detailAvailable"])
         self.assertEqual(json.loads(relation_response.body)["kind"], "oa")
 
-    def test_oa_reverse_preview_route_is_read_only(self) -> None:
+    def test_oa_reverse_preview_batch_and_missing_client_draft_routes_are_formal_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             oa_projection = StaticOAProjection([])
@@ -130,9 +130,53 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["invoiceCount"], 1)
         self.assertEqual(payload["totalWithTax"], "99.72")
-        self.assertFalse(payload["canCreateDraft"])
-        self.assertEqual(payload["nextAction"], "future_contract_only")
+        self.assertTrue(payload["canCreateDraft"])
+        self.assertEqual(payload["nextAction"], "create_batch")
+        self.assertEqual(payload["invoiceRows"][0]["invoiceId"], "inv-preview")
+        self.assertEqual(len(payload["previewHash"]), 64)
         self.assertEqual(oa_projection.write_calls, [])
+
+        batch_response = app.handle_request(
+            "POST",
+            "/api/input-invoice-usage/oa-reverse/batches",
+            body=json.dumps(
+                {
+                    "invoiceIds": ["inv-preview"],
+                    "targetApplicantCode": "chen_xiuyun",
+                    "expectedPreviewHash": payload["previewHash"],
+                    "idempotencyKey": "oa-reverse-create-1",
+                }
+            ),
+        )
+        batch_payload = json.loads(batch_response.body)
+
+        self.assertEqual(batch_response.status_code, 200)
+        self.assertEqual(batch_payload["status"], "draft")
+        self.assertEqual(batch_payload["version"], 1)
+        self.assertEqual(batch_payload["invoiceRows"][0]["sellerName"], "预览供应商")
+
+        get_response = app.handle_request(
+            "GET",
+            f"/api/input-invoice-usage/oa-reverse/batches/{batch_payload['batchId']}",
+        )
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(json.loads(get_response.body)["batchId"], batch_payload["batchId"])
+
+        draft_response = app.handle_request(
+            "POST",
+            f"/api/input-invoice-usage/oa-reverse/batches/{batch_payload['batchId']}/oa-draft",
+            body=json.dumps({"expectedVersion": 1, "idempotencyKey": "oa-reverse-draft-1"}),
+        )
+
+        self.assertEqual(draft_response.status_code, 503)
+        self.assertEqual(json.loads(draft_response.body)["error"], "oa_reverse_missing_oa_client")
+        failed_response = app.handle_request(
+            "GET",
+            f"/api/input-invoice-usage/oa-reverse/batches/{batch_payload['batchId']}",
+        )
+        failed_payload = json.loads(failed_response.body)
+        self.assertEqual(failed_payload["status"], "oa_draft_failed")
+        self.assertEqual(failed_payload["version"], 2)
 
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

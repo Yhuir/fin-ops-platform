@@ -98,6 +98,10 @@ function categoryPathText(row: TurnoverLedgerGroupedRow) {
   if (path.length > 0) {
     return path.join(" / ");
   }
+  const labelPath = [row.categoryPrimaryLabel, row.categorySubLabel, row.categoryThirdLabel].filter(Boolean);
+  if (labelPath.length > 0) {
+    return labelPath.join(" / ");
+  }
   return formatNullable(row.categoryLabel);
 }
 

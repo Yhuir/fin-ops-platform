@@ -140,26 +140,52 @@ export type InputInvoiceUsageDetailResponse = {
 };
 
 export type InputInvoiceUsagePaymentStatusRulesResponse = {
-  version?: string;
-  readOnly?: boolean;
-  rules: Array<{
-    id?: string;
-    code?: string;
-    label: string;
-    description: string;
-    priority: number;
-  }>;
-  pendingDirections: Array<{ code?: string; label: string }>;
+  version: number | string | null;
+  readOnly: boolean;
+  permissions: {
+    canSave: boolean;
+  };
+  rules: InputInvoiceUsagePaymentStatusRule[];
+  pendingDirections: InputInvoiceUsagePendingDirection[];
+  source?: {
+    version?: string;
+    updatedAt?: string;
+    updatedBy?: string;
+  };
+};
+
+export type InputInvoiceUsagePaymentStatusRule = {
+  id?: string;
+  code?: string;
+  label: string;
+  description: string;
+  priority: number;
+  enabled?: boolean;
+  applicantConstraints?: string[];
+};
+
+export type InputInvoiceUsagePendingDirection = {
+  code?: string;
+  label: string;
+};
+
+export type SaveInputInvoiceUsagePaymentStatusRulesRequest = {
+  expectedVersion: number | string | null;
+  idempotencyKey: string;
+  rules: InputInvoiceUsagePaymentStatusRule[];
+  pendingDirections: InputInvoiceUsagePendingDirection[];
 };
 
 export type InputInvoiceUsageOaReversePreviewRequest = {
   source?: "currentFilters" | "explicitSelection";
   filters: InputInvoiceUsageFilter[];
   selectedInvoiceIds: string[];
+  targetApplicantCode?: string;
 };
 
 export type InputInvoiceUsageOaReversePreviewResponse = {
   previewId?: string;
+  previewHash?: string;
   source?: string;
   invoiceCount: number;
   totalWithTax: string;
@@ -169,6 +195,7 @@ export type InputInvoiceUsageOaReversePreviewResponse = {
     invoiceCount: number;
     totalWithTax: string;
     candidateInvoiceIds?: string[];
+    candidateInvoices?: InputInvoiceUsageOaReverseInvoice[];
     rejectedInvoices?: Array<{
       invoiceId: string;
       invoiceNumber?: string | null;
@@ -176,7 +203,81 @@ export type InputInvoiceUsageOaReversePreviewResponse = {
       reason: string;
     }>;
   }>;
+  candidateInvoices?: InputInvoiceUsageOaReverseInvoice[];
   warnings?: string[];
   canCreateDraft?: boolean;
   nextAction?: string;
+  unavailableReason?: string;
+  permissions?: {
+    canCreateBatch?: boolean;
+    canCreateDraft?: boolean;
+    canRevoke?: boolean;
+    canManualStatus?: boolean;
+  };
+};
+
+export type InputInvoiceUsageOaReverseInvoice = {
+  invoiceId: string;
+  invoiceNumber: string;
+  displayNo: string;
+  sellerName: string;
+  issueDate: string;
+  totalWithTax: string;
+  paymentStatusLabel: string;
+  targetApplicantName?: string;
+};
+
+export type InputInvoiceUsageOaReverseRejectedInvoice = {
+  invoiceId: string;
+  invoiceNumber?: string | null;
+  reasonCode?: string | null;
+  reason: string;
+};
+
+export type InputInvoiceUsageOaReverseBatch = {
+  batchId: string;
+  version: number;
+  status: string;
+  selectedInvoiceIds: string[];
+  totalWithTax: string;
+  targetApplicantCode?: string | null;
+  targetApplicantName?: string | null;
+  invoices: InputInvoiceUsageOaReverseInvoice[];
+  rejectedInvoices: InputInvoiceUsageOaReverseRejectedInvoice[];
+  oaDraftId?: string | null;
+  oaDraftUrl?: string | null;
+  oaProcessStatus?: string | null;
+  oaDetectionStatus?: string | null;
+  nextRunAt?: string | null;
+  attempts?: number;
+  conflictCandidates?: Array<{ id: string; label: string; reason?: string }>;
+  idempotentReplay?: boolean;
+  auditEventId?: string | null;
+  canCreateDraft?: boolean;
+  canRevoke?: boolean;
+  canRefreshStatus?: boolean;
+  canManualStatus?: boolean;
+};
+
+export type CreateInputInvoiceUsageOaReverseBatchRequest = {
+  previewId: string;
+  expectedPreviewHash?: string;
+  idempotencyKey: string;
+  selectedInvoiceIds?: string[];
+  targetApplicantCode?: string | null;
+};
+
+export type InputInvoiceUsageOaReverseVersionedRequest = {
+  expectedVersion: number;
+  idempotencyKey?: string;
+};
+
+export type RevokeInputInvoiceUsageOaReverseDraftRequest = InputInvoiceUsageOaReverseVersionedRequest & {
+  reason: string;
+};
+
+export type ManualInputInvoiceUsageOaReverseStatusRequest = InputInvoiceUsageOaReverseVersionedRequest & {
+  decision: "submitted" | "not_submitted";
+  reason: string;
+  candidateOaRowId?: string;
 };

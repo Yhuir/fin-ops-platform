@@ -3,11 +3,13 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   confirmTurnoverRelation,
   downloadTurnoverLedgerExport,
+  fetchTurnoverLedgerTagSelection,
   fetchTurnoverLedger,
   fetchTurnoverLedgerExportPreview,
   fetchTurnoverLedgerGrouped,
   fetchTurnoverRelationExtra,
   fetchTurnoverRelationDetail,
+  saveTurnoverLedgerTagSelection,
   saveTurnoverBankRowTags,
   saveTurnoverRelationExtra,
   withdrawTurnoverRelation,
@@ -18,6 +20,78 @@ afterEach(() => {
 });
 
 describe("turnover ledger API", () => {
+  test("maps turnover ledger tag selection and saves selected codes", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (init?.method === "PUT") {
+        expect(url.pathname).toBe("/api/turnover-ledger/tag-selection");
+        expect(JSON.parse(String(init.body))).toEqual({
+          expected_version: 2,
+          selected_tag_codes: ["external_rule_borrow_out"],
+        });
+        return Response.json({
+          version: 3,
+          selected_tag_codes: ["external_rule_borrow_out"],
+          inactive_selected_tag_codes: [],
+          active_tags: [
+            {
+              code: "external_rule_borrow_out",
+              label: "借出款",
+              path: ["外部往来款付款", "借出款"],
+              source: "custom",
+              status: "active",
+              output_primary_label: "外部往来款付款",
+              output_sub_label: "借出款",
+              turnover_role: "external_turnover",
+              turnover_action_type: "pending_collection",
+            },
+          ],
+        });
+      }
+      expect(url.pathname).toBe("/api/turnover-ledger/tag-selection");
+      return Response.json({
+        version: "2",
+        selected_tag_codes: ["external_rule_borrow_out", "external_rule_repaid"],
+        inactive_selected_tag_codes: ["archived_external_rule"],
+        active_tags: [
+          {
+            code: "external_rule_borrow_out",
+            label: "借出款",
+            path: ["外部往来款付款", "借出款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款付款",
+            output_sub_label: "借出款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "pending_collection",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const selection = await fetchTurnoverLedgerTagSelection();
+    expect(selection).toMatchObject({
+      version: 2,
+      selectedTagCodes: ["external_rule_borrow_out", "external_rule_repaid"],
+      inactiveSelectedTagCodes: ["archived_external_rule"],
+    });
+    expect(selection.activeTags[0]).toMatchObject({
+      code: "external_rule_borrow_out",
+      outputPrimaryLabel: "外部往来款付款",
+      outputSubLabel: "借出款",
+      turnoverActionType: "pending_collection",
+    });
+
+    await expect(saveTurnoverLedgerTagSelection({
+      expectedVersion: 2,
+      selectedTagCodes: ["external_rule_borrow_out"],
+    })).resolves.toMatchObject({
+      version: 3,
+      selectedTagCodes: ["external_rule_borrow_out"],
+    });
+  });
+
   test("saves turnover bank row tags with expected versions", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");

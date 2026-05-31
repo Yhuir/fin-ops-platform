@@ -8,6 +8,7 @@ from pathlib import Path
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.pending_invoice_rules import pending_invoice_rules_payload
 
 
 class PendingInvoiceApiTests(unittest.TestCase):
@@ -349,7 +350,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            payload = app._pending_invoice_rules_payload(app._app_settings_service.get_settings_payload())
+            payload = pending_invoice_rules_payload(app._app_settings_service.get_pending_invoice_settings_payload())
 
         available_codes = {tag["code"] for tag in payload["available_tags"]}
         requires_codes = set(payload["groups"]["requires_invoice"]["tag_codes"])
@@ -412,6 +413,65 @@ class PendingInvoiceApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["error"], "duplicate_pending_invoice_tag_mapping")
+
+    def test_income_pending_invoice_rules_are_saved_separately_from_expense_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_rule_tags(app)
+
+            response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/rules?direction=income",
+                body=json.dumps({
+                    "groups": {
+                        "requires_invoice": {"tag_codes": ["ignored_requires"]},
+                        "no_invoice_required": {"tag_codes": ["custom_meal"]},
+                        "cash_income": {"tag_codes": ["custom_cash"]},
+                    }
+                }),
+            )
+            settings = app._app_settings_service.get_settings_payload()
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["direction"], "income")
+        self.assertEqual(payload["groups"]["no_invoice_required"]["tag_codes"], ["custom_meal"])
+        self.assertEqual(payload["groups"]["cash_income"]["tag_codes"], ["custom_cash"])
+        self.assertNotIn("ignored_requires", payload["groups"]["requires_invoice"]["tag_codes"])
+        self.assertEqual(
+            settings["pending_invoice_tag_groups"]["groups"]["bank_statement_as_invoice"]["tag_codes"],
+            [],
+        )
+        self.assertEqual(
+            settings["pending_output_invoice_tag_groups"]["groups"]["cash_income"]["tag_codes"],
+            ["custom_cash"],
+        )
+
+    def test_income_status_override_endpoint_is_idempotent_and_updates_row_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_bank_transaction(app, counterparty_name="Income Customer", credit=True)
+            body = {"status_code": "cash_income", "request_id": "income-status-001"}
+
+            response = app.handle_request(
+                "PUT",
+                f"/api/pending-invoices/rows/{transaction_id}/income-status",
+                body=json.dumps(body),
+            )
+            retry_response = app.handle_request(
+                "PUT",
+                f"/api/pending-invoices/rows/{transaction_id}/income-status",
+                body=json.dumps(body),
+            )
+            rows_response = app.handle_request("GET", "/api/pending-invoices/rows?direction=income&filter=all")
+
+        payload = json.loads(response.body)
+        retry_payload = json.loads(retry_response.body)
+        rows_payload = json.loads(rows_response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(retry_response.status_code, 200)
+        self.assertEqual(retry_payload, payload)
+        self.assertEqual(rows_payload["rows"][0]["invoice_acquisition_status"]["code"], "cash_income")
 
     def test_recoverable_manual_invoice_failure_persists_command_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -528,6 +588,16 @@ class PendingInvoiceApiTests(unittest.TestCase):
                     "output_primary_label": "餐饮",
                     "output_sub_label": "",
                     "rules": {"match_fields": ["all_text"], "contains": ["餐饮"]},
+                },
+                {
+                    "code": "custom_cash",
+                    "label": "现金收入",
+                    "path": ["收入", "现金收入"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "收入",
+                    "output_sub_label": "现金收入",
+                    "rules": {"match_fields": ["all_text"], "contains": ["现金"]},
                 },
                 {
                     "code": "old_tag",

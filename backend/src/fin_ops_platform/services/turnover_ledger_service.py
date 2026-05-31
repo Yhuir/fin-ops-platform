@@ -10,6 +10,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
     BankTransactionCategoryService,
 )
+from fin_ops_platform.services.bank_turnover_tag_semantics import EXTERNAL_TURNOVER_ROLE
 from fin_ops_platform.services.turnover_relation_service import (
     TURNOVER_CATEGORY_RULES,
     TurnoverRelationService,
@@ -57,6 +58,7 @@ class TurnoverLedgerService:
         relation_service: TurnoverRelationService,
         extra_service: Any | None = None,
         category_provider: Any | None = None,
+        selected_tag_codes_provider: Callable[[], list[str]] | None = None,
         today_provider: Callable[[], date] | None = None,
     ) -> None:
         self._import_service = import_service
@@ -64,6 +66,7 @@ class TurnoverLedgerService:
         self._category_provider = category_provider
         self._relation_service = relation_service
         self._extra_service = extra_service
+        self._selected_tag_codes_provider = selected_tag_codes_provider
         self._today_provider = today_provider or date.today
 
     def list_ledger(
@@ -219,6 +222,13 @@ class TurnoverLedgerService:
 
     def _bank_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
+        selected_tag_codes: set[str] | None = None
+        if self._selected_tag_codes_provider is not None:
+            selected_tag_codes = {
+                str(code or "").strip()
+                for code in list(self._selected_tag_codes_provider() or [])
+                if str(code or "").strip()
+            }
         try:
             transactions = list(self._import_service.list_transactions(month="all"))
         except TypeError:
@@ -234,8 +244,14 @@ class TurnoverLedgerService:
                 continue
             category = categories_by_transaction_id.get(transaction_id, {})
             category_code = category.get("category_code")
-            if category_code not in BANK_TRANSACTION_CATEGORY_DEFINITIONS and category_code != "external_turnover":
-                continue
+            if selected_tag_codes is None:
+                if category_code not in BANK_TRANSACTION_CATEGORY_DEFINITIONS and category_code != "external_turnover":
+                    continue
+            else:
+                if str(category_code or "").strip() not in selected_tag_codes:
+                    continue
+                if not self._is_selected_external_turnover_category(category):
+                    continue
             enriched = dict(row)
             enriched["category_code"] = category_code
             enriched["category_label"] = category.get("category_label") or BANK_TRANSACTION_CATEGORY_LABELS.get(
@@ -255,6 +271,23 @@ class TurnoverLedgerService:
             enriched["counterparty_name"] = str(row.get("counterparty_name_raw") or row.get("counterparty_name") or "")
             rows.append(enriched)
         return rows
+
+    @staticmethod
+    def _is_selected_external_turnover_category(category: dict[str, Any]) -> bool:
+        if not isinstance(category, dict):
+            return False
+        role = str(category.get("turnover_role") or "").strip()
+        primary_label = str(category.get("category_primary_label") or category.get("effective_category_primary_label") or "").strip()
+        action_type = str(category.get("turnover_action_type") or "").strip()
+        family = str(category.get("turnover_family") or "").strip()
+        third_label = str(category.get("category_third_label") or category.get("effective_category_third_label") or "").strip()
+        if role != EXTERNAL_TURNOVER_ROLE and "外部往来款" not in primary_label and "往来款" not in primary_label:
+            return False
+        if not action_type:
+            return False
+        if family not in {"personal", "company", "bank", "business"}:
+            return False
+        return bool(third_label)
 
     def _categories_for_rows(self, bank_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         transaction_ids = [
@@ -617,6 +650,9 @@ class TurnoverLedgerService:
                     "business_type": business_type,
                     "category_code": str(bank_row.get("category_code") or "").strip(),
                     "category_label": str(bank_row.get("category_label") or "").strip(),
+                    "category_primary_label": str(bank_row.get("category_primary_label") or "").strip(),
+                    "category_sub_label": str(bank_row.get("category_sub_label") or "").strip(),
+                    "category_third_label": str(bank_row.get("category_third_label") or "").strip(),
                     "category_label_path": list(bank_row.get("category_label_path") or []),
                     "category_version": int(bank_row.get("category_version") or 0),
                     "counterparty_bank_name": self._counterparty_bank_name([bank_row]),
@@ -653,6 +689,9 @@ class TurnoverLedgerService:
             "business_type": "",
             "category_code": str(row.get("category_code") or "").strip(),
             "category_label": str(row.get("category_label") or "外部往来款").strip(),
+            "category_primary_label": str(row.get("category_primary_label") or "").strip(),
+            "category_sub_label": str(row.get("category_sub_label") or "").strip(),
+            "category_third_label": str(row.get("category_third_label") or "").strip(),
             "category_label_path": list(row.get("category_label_path") or []),
             "category_version": int(row.get("category_version") or 0),
             "counterparty_bank_name": self._counterparty_bank_name([row]),

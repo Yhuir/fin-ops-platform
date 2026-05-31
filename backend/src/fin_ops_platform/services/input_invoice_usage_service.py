@@ -13,6 +13,11 @@ from urllib.parse import unquote
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    InputInvoiceUsagePaymentRulesProvider,
+    PaymentStatusEvaluationContext,
+    StaticInputInvoiceUsagePaymentRulesProvider,
+)
 from fin_ops_platform.services.invoice_relation_query_context import InvoiceRelationQueryContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
@@ -90,10 +95,12 @@ class InputInvoiceUsageQueryService:
         import_service: ImportNormalizationService,
         pair_relation_service: WorkbenchPairRelationService,
         oa_projection: Any | None = None,
+        payment_rules_provider: InputInvoiceUsagePaymentRulesProvider | None = None,
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
         self._oa_projection = oa_projection
+        self._payment_rules_provider = payment_rules_provider or StaticInputInvoiceUsagePaymentRulesProvider()
 
     def list_rows(
         self,
@@ -379,43 +386,7 @@ class InputInvoiceUsageQueryService:
         }
 
     def payment_status_rules(self) -> dict[str, Any]:
-        return {
-            "version": "2026-05-24-static-readonly",
-            "readOnly": True,
-            "rules": [
-                {
-                    "id": "cash_turnover_chen_xiuyun",
-                    "label": "现金往来",
-                    "description": "陈秀云 OA + 流水 + 关联台完全匹配",
-                    "priority": 1,
-                },
-                {
-                    "id": "paid_full_match",
-                    "label": "已付款",
-                    "description": "有 OA、有流水，并且关联台完全匹配",
-                    "priority": 2,
-                },
-                {
-                    "id": "offset_zhou_jieying",
-                    "label": "冲",
-                    "description": "周洁莹 OA、无流水，发票和 OA 金额匹配",
-                    "priority": 3,
-                },
-                {"id": "offset_liu_shugang_no_pay", "label": "冲", "description": "刘树刚不付 OA、无流水", "priority": 4},
-                {"id": "offset_wei_dailian", "label": "冲", "description": "韦代连 OA、无流水", "priority": 5},
-                {"id": "waiting_payment", "label": "待付款", "description": "有 OA、无流水", "priority": 6},
-                {"id": "pending_default", "label": "待处理", "description": "规则不能自动闭环", "priority": 7},
-            ],
-            "pendingDirections": [
-                {"code": "pending", "label": "待处理"},
-                {"code": "wei_dailian_batch_reverse", "label": "韦代连批量反提oa"},
-                {"code": "chen_xiuyun_batch_reverse", "label": "陈秀云批量反提oa"},
-                {"code": "zhou_jieying_batch_reverse", "label": "周洁莹批量反提oa"},
-                {"code": "liu_shugang_pay_batch_reverse", "label": "刘树刚付批量反提oa"},
-                {"code": "liu_shugang_no_pay_batch_reverse", "label": "刘树刚不付批量反提oa"},
-                {"code": "liu_hanjing_batch_reverse", "label": "刘涵静批量反提oa"},
-            ],
-        }
+        return self._payment_rules_provider.payment_status_rules_payload(can_save=True)
 
     def oa_reverse_preview(self, request: dict[str, Any] | None) -> dict[str, Any]:
         payload = dict(request or {})
@@ -700,21 +671,17 @@ class InputInvoiceUsageQueryService:
         has_bank = int(bank_payload.get("relationCount") or 0) > 0
         applicant = str(oa_payload.get("applicantName") or "")
         fully_matched = self._has_fully_matched_relation(line_items, relations, context=context)
-        if has_oa and has_bank and fully_matched and applicant == "陈秀云":
-            return _payment_status("cash_turnover", "现金往来", "自动识别陈秀云 OA，有流水且完全匹配", "cash_turnover_chen_xiuyun")
-        if has_oa and has_bank and fully_matched:
-            return _payment_status("paid", "已付款", "自动识别有 OA 有流水且完全匹配", "paid_full_match")
-        if has_oa and has_bank:
+        if has_oa and has_bank and not fully_matched:
             return _payment_status("pending", "待处理", "有 OA 和流水，但关联台不能证明发票、OA、流水完全匹配", "pending_default")
-        if has_oa and not has_bank and applicant == "周洁莹" and self._has_invoice_oa_amount_match(line_items, relations, context=context):
-            return _payment_status("offset_zhou_jieying", "冲", "自动识别周洁莹 OA，无流水且金额匹配", "offset_zhou_jieying")
-        if has_oa and not has_bank and applicant == "刘树刚不付":
-            return _payment_status("offset_liu_shugang_no_pay", "冲", "自动识别刘树刚不付 OA，无流水", "offset_liu_shugang_no_pay")
-        if has_oa and not has_bank and applicant == "韦代连":
-            return _payment_status("offset_wei_dailian", "冲", "自动识别韦代连 OA，无流水", "offset_wei_dailian")
-        if has_oa and not has_bank:
-            return _payment_status("waiting_payment", "待付款", "自动识别有 OA 无流水", "waiting_payment")
-        return _payment_status("pending", "待处理", "规则不能自动闭环", "pending_default")
+        return self._payment_rules_provider.evaluate(
+            PaymentStatusEvaluationContext(
+                has_oa=has_oa,
+                has_bank=has_bank,
+                applicant_name=applicant,
+                fully_matched=fully_matched,
+                invoice_oa_amount_matched=self._has_invoice_oa_amount_match(line_items, relations, context=context),
+            )
+        )
 
     def _has_fully_matched_relation(
         self,

@@ -15,6 +15,8 @@ export type OutputInvoiceCollectionFilter = {
 
 export type OutputInvoiceCollectionWorkflow =
   | { kind: "statusRules" }
+  | { kind: "collectionStatus"; rowId: string }
+  | { kind: "redRelation"; rowId: string }
   | { kind: "receiptHistory"; invoiceId: string; rowId: string }
   | { kind: "receiptPreview"; rowId: string }
   | null;
@@ -66,6 +68,22 @@ export type OutputInvoiceCollectionStatus = {
   collectedAmount: string;
   pendingAmount: string;
   severity?: "success" | "warning" | "error" | "info" | string;
+  matchedRuleId?: string;
+  manualOverride?: {
+    id?: string;
+    statusCode?: string;
+    expectedCollectionDate?: string | null;
+    note?: string;
+    version?: number;
+  } | null;
+  expectedCollectionDate?: string | null;
+  reminder?: {
+    id?: string;
+    remindAt?: string;
+    channel?: string;
+    note?: string;
+    status?: string;
+  } | null;
 };
 
 export type OutputInvoiceCollectionBankSummary = {
@@ -86,6 +104,7 @@ export type OutputInvoiceCollectionRelationSummary<T> = {
   primary: T | null;
   relationCount: number;
   hasMultiple: boolean;
+  receivedTotal?: string;
   detailMode: "none" | "single" | "list";
   summaries: T[];
 };
@@ -98,6 +117,9 @@ export type OutputInvoiceCollectionRedInvoiceSummary = {
   totalWithTax: string;
   relationType: string;
   reason: string;
+  evidence?: string;
+  confidence?: string;
+  source?: string;
 };
 
 export type OutputInvoiceCollectionReceiptSummary = {
@@ -106,6 +128,13 @@ export type OutputInvoiceCollectionReceiptSummary = {
   reason: string;
   previewAvailable: boolean;
   sourceAvailable: boolean;
+  latestReceipt?: {
+    id?: string;
+    receiptNo?: string;
+    amount?: string;
+    status?: string;
+    createdAt?: string;
+  } | null;
 };
 
 export type OutputInvoiceCollectionRow = {
@@ -120,6 +149,15 @@ export type OutputInvoiceCollectionRow = {
 
 export type OutputInvoiceCollectionRowsResponse = {
   rows: OutputInvoiceCollectionRow[];
+  summary?: {
+    invoiceCount: number;
+    totalWithTax: string;
+    collectedAmount: string;
+    pendingAmount: string;
+    pendingCollectionCount: number;
+    partialCollectionCount: number;
+    receiptPendingCount: number;
+  };
   pagination: {
     page: number;
     pageSize: number;
@@ -178,6 +216,16 @@ export type OutputInvoiceCollectionStatusRulesResponse = {
     workbenchRequirement?: string;
     priority: number;
   }>;
+  manualStatusOptions?: Array<{
+    code: string;
+    label: string;
+    severity?: string;
+    matchedRuleId?: string;
+  }>;
+  permissions?: {
+    can_save?: boolean;
+    can_admin?: boolean;
+  };
   futureWriteBoundary?: Record<string, string>;
 };
 
@@ -193,6 +241,33 @@ export type OutputInvoiceReceiptHistoryResponse = {
     status?: string;
   }>;
   message?: string;
+};
+
+export type OutputInvoiceCollectionStatusUpdateRequest = {
+  statusCode?: string;
+  expectedCollectionDate?: string;
+  note?: string;
+  expectedVersion?: number;
+};
+
+export type OutputInvoiceCollectionReminderUpdateRequest = {
+  remindAt: string;
+  channel: string;
+  note?: string;
+};
+
+export type OutputInvoiceCollectionRedRelationRequest = {
+  relatedInvoiceIdentityKey?: string;
+  relatedInvoiceId?: string;
+  relationType: "red_invoice" | "blue_invoice";
+  evidence: string;
+  confidence?: string;
+};
+
+export type OutputInvoiceReceiptCreateRequest = {
+  bankTransactionId?: string;
+  selectedBankTransactionId?: string;
+  idempotencyKey: string;
 };
 
 export type OutputInvoiceReceiptPreviewRequest = {

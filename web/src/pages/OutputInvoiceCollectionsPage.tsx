@@ -2,15 +2,20 @@ import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import MenuItem from "@mui/material/MenuItem";
+import Paper from "@mui/material/Paper";
 import Skeleton from "@mui/material/Skeleton";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import CollectionStatusReminderDrawer from "../components/outputInvoiceCollections/CollectionStatusReminderDrawer";
 import CollectionStatusRulesDrawer from "../components/outputInvoiceCollections/CollectionStatusRulesDrawer";
 import OutputInvoiceCollectionDetailDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer";
 import OutputInvoiceCollectionsTable from "../components/outputInvoiceCollections/OutputInvoiceCollectionsTable";
+import RedInvoiceRelationDrawer from "../components/outputInvoiceCollections/RedInvoiceRelationDrawer";
 import ReceiptHistoryDrawer from "../components/outputInvoiceCollections/ReceiptHistoryDrawer";
 import ReceiptPreviewDrawer from "../components/outputInvoiceCollections/ReceiptPreviewDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
@@ -22,8 +27,12 @@ import {
   fetchOutputInvoiceCollectionRowRelationDetail,
   fetchOutputInvoiceCollectionStatusRules,
   fetchOutputInvoiceReceiptHistory,
+  createOutputInvoiceReceipt,
+  confirmOutputInvoiceRedRelation,
   nextSortDirection,
   previewOutputInvoiceReceipt,
+  updateOutputInvoiceCollectionReminder,
+  updateOutputInvoiceCollectionStatus,
 } from "../features/outputInvoiceCollections/api";
 import type {
   OutputInvoiceCollectionDetailTarget,
@@ -83,11 +92,11 @@ function isWorkflow(value: unknown): value is OutputInvoiceCollectionWorkflow {
   if (workflow.kind === "statusRules") {
     return true;
   }
+  if (workflow.kind === "collectionStatus" || workflow.kind === "redRelation" || workflow.kind === "receiptPreview") {
+    return typeof workflow.rowId === "string";
+  }
   if (workflow.kind === "receiptHistory") {
     return typeof workflow.invoiceId === "string" && typeof workflow.rowId === "string";
-  }
-  if (workflow.kind === "receiptPreview") {
-    return typeof workflow.rowId === "string";
   }
   return false;
 }
@@ -173,6 +182,15 @@ export default function OutputInvoiceCollectionsPage() {
   const setQuery = querySession.setValue;
   const [rows, setRows] = useState<OutputInvoiceCollectionRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState({
+    invoiceCount: 0,
+    totalWithTax: "0.00",
+    collectedAmount: "0.00",
+    pendingAmount: "0.00",
+    pendingCollectionCount: 0,
+    partialCollectionCount: 0,
+    receiptPendingCount: 0,
+  });
   const [filterConfigs, setFilterConfigs] = useState<OutputInvoiceCollectionFilterFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OutputInvoiceCollectionFilterOption[]>>({});
   const [loading, setLoading] = useState(true);
@@ -225,6 +243,15 @@ export default function OutputInvoiceCollectionsPage() {
         }
         setRows(payload.rows);
         setTotal(payload.pagination.total);
+        setSummary(payload.summary ?? {
+          invoiceCount: payload.pagination.total,
+          totalWithTax: "0.00",
+          collectedAmount: "0.00",
+          pendingAmount: "0.00",
+          pendingCollectionCount: 0,
+          partialCollectionCount: 0,
+          receiptPendingCount: 0,
+        });
         setFilterConfigs(payload.filterConfig.length > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields));
         setFilterOptions(filterOptionsByField(optionsPayload.fields));
         setReadModelStatus(
@@ -239,6 +266,15 @@ export default function OutputInvoiceCollectionsPage() {
         }
         setRows([]);
         setTotal(0);
+        setSummary({
+          invoiceCount: 0,
+          totalWithTax: "0.00",
+          collectedAmount: "0.00",
+          pendingAmount: "0.00",
+          pendingCollectionCount: 0,
+          partialCollectionCount: 0,
+          receiptPendingCount: 0,
+        });
         setFilterConfigs([]);
         setFilterOptions({});
         setReadModelStatus("");
@@ -370,6 +406,27 @@ export default function OutputInvoiceCollectionsPage() {
   const receiptPreviewRow = activeWorkflow?.kind === "receiptPreview"
     ? rows.find((row) => row.id === activeWorkflow.rowId) ?? null
     : null;
+  const collectionStatusRow = activeWorkflow?.kind === "collectionStatus"
+    ? rows.find((row) => row.id === activeWorkflow.rowId) ?? null
+    : null;
+  const redRelationRow = activeWorkflow?.kind === "redRelation"
+    ? rows.find((row) => row.id === activeWorkflow.rowId) ?? null
+    : null;
+
+  const applyQuickStatusFilter = useCallback((statusCode: string) => {
+    setQuery((current) => {
+      const filters = current.filters.filter((filter) => filter.field !== "collection_status");
+      return {
+        ...current,
+        page: 1,
+        filters: statusCode ? [...filters, { field: "collection_status", operator: "in", values: [statusCode] }] : filters,
+      };
+    });
+  }, [setQuery]);
+
+  const handleLifecycleChanged = useCallback(() => {
+    loadRows("refresh");
+  }, [loadRows]);
 
   const actions = useMemo(() => (
     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -415,6 +472,35 @@ export default function OutputInvoiceCollectionsPage() {
             <Button variant="outlined" onClick={handleKeywordSubmit}>
               查询
             </Button>
+            <TextField
+              label="月份"
+              size="small"
+              type="month"
+              value={query.month}
+              onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
+              InputLabelProps={{ shrink: true }}
+              sx={{ width: { xs: "100%", md: 150 } }}
+            />
+            <TextField
+              select
+              label="收款状态"
+              size="small"
+              value={query.filters.find((filter) => filter.field === "collection_status")?.values?.[0] ?? ""}
+              onChange={(event) => applyQuickStatusFilter(event.target.value)}
+              sx={{ width: { xs: "100%", md: 170 } }}
+            >
+              <MenuItem value="">全部</MenuItem>
+              <MenuItem value="pending_collection">待收款</MenuItem>
+              <MenuItem value="partial_collected">已收部分款</MenuItem>
+              <MenuItem value="collected">已收款</MenuItem>
+              <MenuItem value="pending_red_invoice">待冲红</MenuItem>
+            </TextField>
+          </Stack>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1.25}>
+            <SummaryTile label="销项发票数" value={String(summary.invoiceCount)} />
+            <SummaryTile label="待收款金额" value={formatMoney(summary.pendingAmount)} />
+            <SummaryTile label="已收金额" value={formatMoney(summary.collectedAmount)} />
+            <SummaryTile label="待出收据数" value={String(summary.receiptPendingCount)} />
           </Stack>
           {error ? <Alert severity="error">{error}</Alert> : null}
           {readModelStatus === "refreshing" ? (
@@ -472,8 +558,45 @@ export default function OutputInvoiceCollectionsPage() {
       open={query.activeWorkflow?.kind === "receiptPreview"}
       row={receiptPreviewRow}
       loadPreview={previewOutputInvoiceReceipt}
+      createReceipt={(rowId, bankTransactionId) => createOutputInvoiceReceipt(rowId, {
+        bankTransactionId,
+        idempotencyKey: `${rowId}:${bankTransactionId}:${Date.now()}`,
+      }).then(() => undefined)}
+      onChanged={handleLifecycleChanged}
+      onClose={handleCloseWorkflow}
+    />
+    <CollectionStatusReminderDrawer
+      open={query.activeWorkflow?.kind === "collectionStatus"}
+      row={collectionStatusRow}
+      onSaveStatus={(rowId, payload) => updateOutputInvoiceCollectionStatus(rowId, payload).then(() => handleLifecycleChanged())}
+      onSaveReminder={(rowId, payload) => updateOutputInvoiceCollectionReminder(rowId, payload).then(() => handleLifecycleChanged())}
+      onClose={handleCloseWorkflow}
+    />
+    <RedInvoiceRelationDrawer
+      open={query.activeWorkflow?.kind === "redRelation"}
+      row={redRelationRow}
+      onConfirm={(rowId, payload) => confirmOutputInvoiceRedRelation(rowId, payload).then(() => handleLifecycleChanged())}
       onClose={handleCloseWorkflow}
     />
     </>
+  );
+}
+
+function formatMoney(value: string) {
+  const parsed = Number(String(value ?? "").replace(/,/g, ""));
+  if (!Number.isFinite(parsed)) {
+    return value || "0.00";
+  }
+  return parsed.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <Paper variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 1, p: 1.5 }}>
+      <Typography variant="caption" color="text.secondary">{label}</Typography>
+      <Typography variant="h6" fontWeight={900} sx={{ mt: 0.25, fontVariantNumeric: "tabular-nums" }}>
+        {value}
+      </Typography>
+    </Paper>
   );
 }

@@ -9,7 +9,6 @@ from threading import RLock
 from typing import Any
 
 from fin_ops_platform.services.bank_turnover_tag_semantics import (
-    EXTERNAL_TURNOVER_CATEGORY_CODE,
     turnover_relation_rule_from_bank_category,
 )
 
@@ -575,9 +574,7 @@ class TurnoverRelationService:
         if not row_id:
             return None
         category_code = str(row.get("category_code") or "").strip()
-        dynamic_rule = None
-        if category_code == EXTERNAL_TURNOVER_CATEGORY_CODE:
-            dynamic_rule = turnover_relation_rule_from_bank_category(row)
+        dynamic_rule = turnover_relation_rule_from_bank_category(row)
         if category_code in LEGACY_TURNOVER_CATEGORY_CODES and dynamic_rule is None:
             return None
         if not category_code:

@@ -1,0 +1,105 @@
+import { apiRequestJson } from "../apiClient";
+import type {
+  OaPendingPaymentDetailResponse,
+  OaPendingPaymentDetailTarget,
+  OaPendingPaymentFilter,
+  OaPendingPaymentFilterOptionsResponse,
+  OaPendingPaymentQuery,
+  OaPendingPaymentRowsResponse,
+  OaPendingPaymentSortDirection,
+} from "./types";
+
+type FetchRowsRequest = Pick<
+  OaPendingPaymentQuery,
+  "page" | "pageSize" | "keyword" | "month" | "tradeDateFrom" | "tradeDateTo" | "filters" | "sortField" | "sortDirection"
+> & {
+  signal?: AbortSignal;
+};
+
+type FetchFilterOptionsRequest = Pick<
+  OaPendingPaymentQuery,
+  "keyword" | "month" | "tradeDateFrom" | "tradeDateTo" | "filters"
+> & {
+  signal?: AbortSignal;
+};
+
+export function nextOaPendingPaymentSortDirection(
+  currentField: string,
+  currentDirection: OaPendingPaymentSortDirection | "",
+  field: string,
+): OaPendingPaymentSortDirection {
+  if (currentField !== field) {
+    return "desc";
+  }
+  return currentDirection === "desc" ? "asc" : "desc";
+}
+
+export async function fetchOaPendingPaymentRows(request: FetchRowsRequest): Promise<OaPendingPaymentRowsResponse> {
+  const params = new URLSearchParams();
+  appendRowsQuery(params, request);
+  return apiRequestJson<OaPendingPaymentRowsResponse>(`/api/oa-pending-payments/rows?${params.toString()}`, {
+    method: "GET",
+    signal: request.signal,
+  });
+}
+
+export async function fetchOaPendingPaymentFilterOptions(
+  request: FetchFilterOptionsRequest,
+): Promise<OaPendingPaymentFilterOptionsResponse> {
+  const params = new URLSearchParams();
+  appendContextQuery(params, request);
+  return apiRequestJson<OaPendingPaymentFilterOptionsResponse>(`/api/oa-pending-payments/filter-options?${params.toString()}`, {
+    method: "GET",
+    signal: request.signal,
+  });
+}
+
+export async function fetchOaPendingPaymentDetail(
+  target: OaPendingPaymentDetailTarget,
+): Promise<OaPendingPaymentDetailResponse> {
+  if (target.kind === "oa") {
+    return apiRequestJson<OaPendingPaymentDetailResponse>(`/api/oa-pending-payments/oa/${encodeURIComponent(target.id)}/detail`);
+  }
+  if (target.kind === "bank") {
+    return apiRequestJson<OaPendingPaymentDetailResponse>(`/api/oa-pending-payments/bank-transactions/${encodeURIComponent(target.id)}/detail`);
+  }
+  if (target.kind === "invoice") {
+    return apiRequestJson<OaPendingPaymentDetailResponse>(`/api/oa-pending-payments/invoices/${encodeURIComponent(target.id)}/detail`);
+  }
+  const kind = target.relationKind ?? "bank";
+  return apiRequestJson<OaPendingPaymentDetailResponse>(
+    `/api/oa-pending-payments/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?kind=${encodeURIComponent(kind)}`,
+  );
+}
+
+function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest) {
+  params.set("page", String(request.page));
+  params.set("page_size", String(request.pageSize));
+  appendContextQuery(params, request);
+  if (request.sortField && request.sortDirection) {
+    params.set("sort_field", request.sortField);
+    params.set("sort_direction", request.sortDirection);
+  }
+}
+
+function appendContextQuery(params: URLSearchParams, request: FetchFilterOptionsRequest) {
+  if (request.keyword.trim()) {
+    params.set("keyword", request.keyword.trim());
+  }
+  if (request.month) {
+    params.set("month", request.month);
+  }
+  if (request.tradeDateFrom) {
+    params.set("trade_date_from", request.tradeDateFrom);
+  }
+  if (request.tradeDateTo) {
+    params.set("trade_date_to", request.tradeDateTo);
+  }
+  if (request.filters.length > 0) {
+    params.set("filters", encodeFilters(request.filters));
+  }
+}
+
+function encodeFilters(filters: OaPendingPaymentFilter[]) {
+  return encodeURIComponent(JSON.stringify(filters));
+}

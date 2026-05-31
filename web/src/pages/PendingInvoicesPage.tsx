@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
@@ -28,6 +27,7 @@ import {
   fetchPendingInvoiceRules,
   previewAttachExistingInvoice,
   savePendingInvoiceRules,
+  savePendingInvoiceIncomeStatus,
 } from "../features/pendingInvoices/api";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import type {
@@ -93,7 +93,7 @@ function readPersistedTagVersion() {
 }
 
 export default function PendingInvoicesPage() {
-  const direction: PendingInvoiceDirection = "expense";
+  const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
   const [filter, setFilter] = useState<PendingInvoiceFilter>("all");
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -103,7 +103,6 @@ export default function PendingInvoicesPage() {
   const [keyword, setKeyword] = useState("");
   const [sortField, setSortField] = useState<PendingInvoiceSortField>("trade_date");
   const [sortDirection, setSortDirection] = useState<PendingInvoiceSortDirection>("desc");
-  const [expandedCellIds, setExpandedCellIds] = useState<Set<string>>(() => new Set());
   const [activeDrawer, setActiveDrawer] = useState<ActiveDrawer>(null);
   const [detailTarget, setDetailTarget] = useState<PendingInvoiceObjectDetailTarget | null>(null);
   const [relationTarget, setRelationTarget] = useState<RelationTarget>(null);
@@ -202,18 +201,19 @@ export default function PendingInvoicesPage() {
     };
   }, []);
 
-  const filterOptions = useMemo<PendingInvoiceFilter[]>(() => [
+  const filterOptions = useMemo<PendingInvoiceFilter[]>(() => (
+    direction === "expense" ? [
     "all",
     "requires_invoice",
     "bank_statement_as_invoice",
     "no_invoice_required",
-  ], []);
+  ] : ["all"]
+  ), [direction]);
 
   const tableConfig = useMemo(() => ({
     sortField,
     sortDirection,
-    expandedCellIds,
-  }), [expandedCellIds, sortDirection, sortField]);
+  }), [sortDirection, sortField]);
 
   const handleSortChange = useCallback((field: PendingInvoiceSortField) => {
     setPage(1);
@@ -224,18 +224,6 @@ export default function PendingInvoicesPage() {
     setSortField(field);
     setSortDirection("asc");
   }, [sortField]);
-
-  const handleToggleCellExpand = useCallback((cellId: string) => {
-    setExpandedCellIds((current) => {
-      const next = new Set(current);
-      if (next.has(cellId)) {
-        next.delete(cellId);
-      } else {
-        next.add(cellId);
-      }
-      return next;
-    });
-  }, []);
 
   const handleOpenRelation = useCallback((row: PendingInvoiceRow) => {
     setRelationTarget({ transactionId: row.bankTransaction.id || row.id });
@@ -304,8 +292,8 @@ export default function PendingInvoicesPage() {
 
   const loadRelation = useCallback((transactionId: string) => fetchPendingInvoiceRelationDetail(transactionId), []);
   const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => fetchPendingInvoiceObjectDetail(target), []);
-  const loadRules = useCallback(() => fetchPendingInvoiceRules(), []);
-  const saveRules = useCallback((payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload), []);
+  const loadRules = useCallback(() => fetchPendingInvoiceRules(direction), [direction]);
+  const saveRules = useCallback((payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload, direction), [direction]);
   const loadCandidates = useCallback((transactionId: string) => fetchPendingInvoiceCandidates({
     transactionId,
     sortField: "amount_difference_abs",
@@ -316,6 +304,25 @@ export default function PendingInvoicesPage() {
   const loadExportPreview = useCallback(() => fetchPendingInvoiceExportPreview(query), [query]);
   const handleDownloadExport = useCallback(() => downloadPendingInvoiceExport(query), [query]);
 
+  const handleDirectionChange = useCallback((nextDirection: PendingInvoiceDirection) => {
+    setDirection(nextDirection);
+    setFilter("all");
+    setPage(1);
+  }, []);
+
+  const handleMarkIncomeStatus = useCallback((row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => {
+    savePendingInvoiceIncomeStatus(row.id, statusCode)
+      .then((result) => {
+        if (result.row) {
+          setRows((current) => current.map((item) => (item.id === result.row?.id ? result.row : item)));
+        }
+        setRefreshToken((current) => current + 1);
+      })
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : "收入流水状态保存失败。");
+      });
+  }, []);
+
   return (
     <Box data-testid="pending-invoices-page" sx={{ px: { xs: 2, md: 3 }, py: 2 }}>
       <Stack spacing={2}>
@@ -323,37 +330,53 @@ export default function PendingInvoicesPage() {
           <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between">
             <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
               <Typography variant="h6" fontWeight={900}>待找发票</Typography>
-              <Button
-                variant="outlined"
-                size="small"
-                aria-haspopup="menu"
-                onClick={(event) => setFilterAnchorEl(event.currentTarget)}
-              >
-                {FILTER_LABELS[filter]}
-              </Button>
-              <Menu anchorEl={filterAnchorEl} open={filterOpen} onClose={() => setFilterAnchorEl(null)}>
-                {filterOptions.map((option) => (
-                  <MenuItem
-                    key={option}
-                    selected={option === filter}
-                    onClick={() => {
-                      setFilter(option);
-                      setPage(1);
-                      setFilterAnchorEl(null);
-                    }}
+              {sourceSummary ? (
+                <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap" aria-label="待找发票流水范围">
+                  {([
+                    ["all", `全部流水 ${sourceSummary.bankTransactionRows}`],
+                    ["expense", `支出流水 ${sourceSummary.expenseRows}`],
+                    ["income", `收入流水 ${sourceSummary.incomeRows}`],
+                  ] as Array<[PendingInvoiceDirection, string]>).map(([value, label]) => (
+                    <Button
+                      key={value}
+                      size="small"
+                      variant={direction === value ? "contained" : "outlined"}
+                      color={value === "expense" ? "success" : "primary"}
+                      onClick={() => handleDirectionChange(value)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </Stack>
+              ) : null}
+              {direction === "expense" ? (
+                <>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    aria-haspopup="menu"
+                    onClick={(event) => setFilterAnchorEl(event.currentTarget)}
                   >
-                    {FILTER_LABELS[option]}
-                  </MenuItem>
-                ))}
-              </Menu>
+                    {FILTER_LABELS[filter]}
+                  </Button>
+                  <Menu anchorEl={filterAnchorEl} open={filterOpen} onClose={() => setFilterAnchorEl(null)}>
+                    {filterOptions.map((option) => (
+                      <MenuItem
+                        key={option}
+                        selected={option === filter}
+                        onClick={() => {
+                          setFilter(option);
+                          setPage(1);
+                          setFilterAnchorEl(null);
+                        }}
+                      >
+                        {FILTER_LABELS[option]}
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </>
+              ) : null}
             </Stack>
-            {sourceSummary ? (
-              <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap" aria-label="待找发票流水范围">
-                <Chip size="small" color="primary" variant="outlined" label={`全部流水 ${sourceSummary.bankTransactionRows}`} />
-                <Chip size="small" color="success" variant="outlined" label={`支出流水 ${sourceSummary.expenseRows}`} />
-                <Chip size="small" variant="outlined" label={`收入流水 ${sourceSummary.incomeRows}`} />
-              </Stack>
-            ) : null}
             <Stack direction="row" spacing={1} alignItems="center">
               <TextField
                 size="small"
@@ -385,7 +408,8 @@ export default function PendingInvoicesPage() {
           onOpenObjectDetail={handleOpenDetail}
           onOpenRules={() => setActiveDrawer("rules")}
           onOpenExport={() => setActiveDrawer("export")}
-          onToggleCellExpand={handleToggleCellExpand}
+          onMarkIncomeStatus={handleMarkIncomeStatus}
+          direction={direction}
         />
         <TablePagination
           component="div"

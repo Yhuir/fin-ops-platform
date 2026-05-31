@@ -3,13 +3,18 @@ import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
 import Divider from "@mui/material/Divider";
+import Drawer from "@mui/material/Drawer";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
+import CloseIcon from "@mui/icons-material/Close";
 
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
@@ -27,8 +32,10 @@ import {
   downloadTurnoverLedgerExport,
   fetchTurnoverLedgerExportPreview,
   fetchTurnoverLedgerGrouped,
+  fetchTurnoverLedgerTagSelection,
   fetchTurnoverRelationDetail,
   fetchTurnoverRelationExtra,
+  saveTurnoverLedgerTagSelection,
   saveTurnoverRelationExtra,
   withdrawTurnoverRelation,
 } from "../features/turnoverLedger/api";
@@ -40,6 +47,8 @@ import type {
   TurnoverLedgerGroupedResponse,
   TurnoverLedgerGroupedRow,
   TurnoverLedgerSummary,
+  TurnoverLedgerTagDefinition,
+  TurnoverLedgerTagSelection,
   TurnoverRelationDetail,
 } from "../features/turnoverLedger/types";
 
@@ -81,6 +90,15 @@ const DEFAULT_EXTRA: TurnoverLedgerExtra = {
   updatedAt: null,
   updatedBy: "",
 };
+
+const EMPTY_TAG_SELECTION: TurnoverLedgerTagSelection = {
+  version: 1,
+  selectedTagCodes: [],
+  inactiveSelectedTagCodes: [],
+  activeTags: [],
+};
+
+const SELF_SUB_LABEL = "主标签本身";
 
 function isAbortLikeError(caught: unknown) {
   if (caught instanceof DOMException && caught.name === "AbortError") {
@@ -125,11 +143,28 @@ function relationIdForRow(row: TurnoverLedgerGroupedRow) {
   return row.relationId || row.parentRelationId || "";
 }
 
+function cleanText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function tagPrimaryLabel(tag: TurnoverLedgerTagDefinition) {
+  return cleanText(tag.outputPrimaryLabel) || cleanText(tag.label) || cleanText(tag.code);
+}
+
+function tagSubLabel(tag: TurnoverLedgerTagDefinition) {
+  return cleanText(tag.outputSubLabel);
+}
+
 export default function TurnoverLedgerPage() {
   const { canMutateData } = useSessionPermissions();
   const [direction, setDirection] = useState<TurnoverLedgerDirectionFilter>("all");
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
+  const [tagSelection, setTagSelection] = useState<TurnoverLedgerTagSelection>(EMPTY_TAG_SELECTION);
+  const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
+  const [draftSelectedTagCodes, setDraftSelectedTagCodes] = useState<Set<string>>(() => new Set());
+  const [tagLoading, setTagLoading] = useState(false);
+  const [tagSaving, setTagSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRow, setSelectedRow] = useState<TurnoverLedgerGroupedRow | null>(null);
@@ -150,6 +185,21 @@ export default function TurnoverLedgerPage() {
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
+
+  const loadTagSelection = useCallback((signal?: AbortSignal) => {
+    setTagLoading(true);
+    fetchTurnoverLedgerTagSelection(signal)
+      .then((nextSelection) => {
+        setTagSelection(nextSelection);
+        setDraftSelectedTagCodes(new Set(nextSelection.selectedTagCodes));
+      })
+      .catch((caught: unknown) => {
+        if (!isAbortLikeError(caught)) {
+          setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来款标签设置加载失败" });
+        }
+      })
+      .finally(() => setTagLoading(false));
+  }, []);
 
   const loadLedger = useCallback((signal?: AbortSignal) => {
     setLoading(true);
@@ -178,11 +228,18 @@ export default function TurnoverLedgerPage() {
   }, [loadLedger]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    loadTagSelection(controller.signal);
+    return () => controller.abort();
+  }, [loadTagSelection]);
+
+  useEffect(() => {
     const handleCategoryUpdated = () => {
+      loadTagSelection();
       loadLedger();
     };
     return subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
-  }, [loadLedger]);
+  }, [loadLedger, loadTagSelection]);
 
   useEffect(() => {
     if (!exportOpen) {
@@ -215,6 +272,15 @@ export default function TurnoverLedgerPage() {
       ? FAMILY_TABS.filter((tab) => tab.value !== "business")
       : FAMILY_TABS
   ), [direction]);
+
+  const drawerGroups = useMemo(() => {
+    const grouped = new Map<string, TurnoverLedgerTagDefinition[]>();
+    tagSelection.activeTags.forEach((tag) => {
+      const primary = tagPrimaryLabel(tag) || tag.label || tag.code;
+      grouped.set(primary, [...(grouped.get(primary) ?? []), tag]);
+    });
+    return Array.from(grouped.entries()).map(([primaryLabel, tags]) => ({ primaryLabel, tags }));
+  }, [tagSelection.activeTags]);
 
   const handleDirectionChange = (nextDirection: TurnoverLedgerDirectionFilter) => {
     setDirection(nextDirection);
@@ -306,6 +372,28 @@ export default function TurnoverLedgerPage() {
     setExportOpen(true);
   };
 
+  const handleSaveTagSelection = async () => {
+    if (tagSaving) {
+      return;
+    }
+    setTagSaving(true);
+    try {
+      const saved = await saveTurnoverLedgerTagSelection({
+        expectedVersion: tagSelection.version,
+        selectedTagCodes: Array.from(draftSelectedTagCodes),
+      });
+      setTagSelection(saved);
+      setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
+      setTagDrawerOpen(false);
+      setSnackbar({ severity: "success", message: "外部往来款标签设置已保存" });
+      loadLedger();
+    } catch (caught) {
+      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来款标签设置保存失败" });
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
   const handleDownloadExport = async () => {
     setExportDownloading(true);
     try {
@@ -331,8 +419,13 @@ export default function TurnoverLedgerPage() {
   return (
     <Box data-testid="turnover-ledger-page">
       <PageScaffold
-        title="往来款管理"
+        title="外部往来款管理"
         description="基于银行明细标签实时汇总外部往来关系，并把已确认关系同步到关联台。"
+        actions={(
+          <Button disabled={tagLoading} onClick={() => setTagDrawerOpen(true)} variant="outlined">
+            外部往来款标签设置
+          </Button>
+        )}
       >
         {!canMutateData ? (
           <Alert severity="info">当前账号为只读权限，可查看台账与详情，不能确认或撤销归并。</Alert>
@@ -396,6 +489,98 @@ export default function TurnoverLedgerPage() {
           </Stack>
         </Paper>
       </PageScaffold>
+
+      <Drawer
+        anchor="right"
+        open={tagDrawerOpen}
+        onClose={() => setTagDrawerOpen(false)}
+        PaperProps={{ sx: { width: { xs: "100%", sm: "520px" }, maxWidth: "100vw" }, role: "dialog", "aria-label": "外部往来款标签设置" }}
+      >
+        <Stack spacing={0} sx={{ height: "100%" }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
+            <Box>
+              <Typography component="h2" variant="h6" fontWeight={900}>外部往来款标签设置</Typography>
+              <Typography color="text.secondary" variant="caption">版本 {tagSelection.version}</Typography>
+            </Box>
+            <IconButton aria-label="关闭外部往来款标签设置" onClick={() => setTagDrawerOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          </Stack>
+          <Divider />
+          <Stack direction="row" spacing={1} sx={{ p: 2 }}>
+            <Button disabled={tagSaving} onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} size="small" variant="outlined">全选</Button>
+            <Button disabled={tagSaving} onClick={() => setDraftSelectedTagCodes(new Set())} size="small" variant="outlined">清空</Button>
+            <Button disabled={tagSaving} onClick={() => void handleSaveTagSelection()} size="small" variant="contained">保存</Button>
+          </Stack>
+          {tagSelection.inactiveSelectedTagCodes.length > 0 ? (
+            <Alert severity="warning" sx={{ mx: 2, mb: 1 }}>
+              已停用或不再属于外部往来款的标签不再生效：{tagSelection.inactiveSelectedTagCodes.join("、")}。保存后会清理这些引用。
+            </Alert>
+          ) : null}
+          <Stack divider={<Divider flexItem />} sx={{ overflow: "auto" }}>
+            {tagLoading ? <StatePanel compact tone="loading" title="标签加载中" /> : null}
+            {!tagLoading && drawerGroups.length === 0 ? <StatePanel compact tone="empty" title="暂无可用外部往来款标签" /> : null}
+            {!tagLoading ? drawerGroups.map((group) => {
+              const codes = group.tags.map((tag) => tag.code);
+              const checkedCount = codes.filter((code) => draftSelectedTagCodes.has(code)).length;
+              const allChecked = checkedCount === codes.length && codes.length > 0;
+              return (
+                <Box key={group.primaryLabel} sx={{ p: 2 }}>
+                  <FormControlLabel
+                    control={(
+                      <Checkbox
+                        checked={allChecked}
+                        indeterminate={checkedCount > 0 && !allChecked}
+                        onChange={(event) => {
+                          setDraftSelectedTagCodes((current) => {
+                            const next = new Set(current);
+                            codes.forEach((code) => {
+                              if (event.target.checked) {
+                                next.add(code);
+                              } else {
+                                next.delete(code);
+                              }
+                            });
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                    label={<Typography fontWeight={900}>{group.primaryLabel}</Typography>}
+                  />
+                  <Stack sx={{ pl: 4 }}>
+                    {group.tags.map((tag) => {
+                      const label = tagSubLabel(tag) || SELF_SUB_LABEL;
+                      return (
+                        <FormControlLabel
+                          key={tag.code}
+                          control={(
+                            <Checkbox
+                              checked={draftSelectedTagCodes.has(tag.code)}
+                              onChange={(event) => {
+                                setDraftSelectedTagCodes((current) => {
+                                  const next = new Set(current);
+                                  if (event.target.checked) {
+                                    next.add(tag.code);
+                                  } else {
+                                    next.delete(tag.code);
+                                  }
+                                  return next;
+                                });
+                              }}
+                            />
+                          )}
+                          label={label}
+                        />
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              );
+            }) : null}
+          </Stack>
+        </Stack>
+      </Drawer>
 
       <TurnoverLedgerExtraDrawer
         open={selectedRow !== null}

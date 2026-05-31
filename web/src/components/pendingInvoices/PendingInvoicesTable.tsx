@@ -1,5 +1,3 @@
-import ExpandLessIcon from "@mui/icons-material/ExpandLess";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -19,6 +17,7 @@ import type { SxProps, Theme } from "@mui/material/styles";
 import type {
   PendingInvoiceObjectDetailTarget,
   PendingInvoicePrimaryAction,
+  PendingInvoiceDirection,
   PendingInvoiceRow,
   PendingInvoiceSortDirection,
   PendingInvoiceSortField,
@@ -28,7 +27,6 @@ import type {
 export type PendingInvoicesTableConfig = {
   sortField: PendingInvoiceSortField;
   sortDirection: PendingInvoiceSortDirection;
-  expandedCellIds: Set<string>;
 };
 
 type PendingInvoicesTableProps = {
@@ -41,7 +39,8 @@ type PendingInvoicesTableProps = {
   onOpenObjectDetail: (target: PendingInvoiceObjectDetailTarget) => void;
   onOpenRules: () => void;
   onOpenExport: () => void;
-  onToggleCellExpand: (cellId: string) => void;
+  onMarkIncomeStatus: (row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => void;
+  direction: PendingInvoiceDirection;
 };
 
 const GROUP_BORDER = "2px solid";
@@ -130,10 +129,23 @@ function ActionButtons({
   onOpenInvoicePicker,
   onOpenManualInvoice,
   onOpenRules,
-}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onOpenRules"> & { row: PendingInvoiceRow }) {
+  onMarkIncomeStatus,
+}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onOpenRules" | "onMarkIncomeStatus"> & { row: PendingInvoiceRow }) {
   const action = row.invoiceAcquisitionStatus.primaryAction;
   const prefix = row.bankTransaction.counterpartyName;
 
+  if (action === "mark_income_status") {
+    return (
+      <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+        <Button size="small" variant="outlined" onClick={() => onMarkIncomeStatus(row, "income_no_invoice_required")} aria-label={`${prefix} 标记无需开票`}>
+          无需开票
+        </Button>
+        <Button size="small" variant="outlined" onClick={() => onMarkIncomeStatus(row, "cash_income")} aria-label={`${prefix} 标记现金收入`}>
+          现金收入
+        </Button>
+      </Stack>
+    );
+  }
   if (action === "attach_or_create_invoice") {
     return (
       <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
@@ -191,16 +203,16 @@ export default function PendingInvoicesTable({
   onOpenObjectDetail,
   onOpenRules,
   onOpenExport,
-  onToggleCellExpand,
+  onMarkIncomeStatus,
+  direction,
 }: PendingInvoicesTableProps) {
+  const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
+  const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
   return (
     <Box sx={{ border: CELL_BORDER, borderColor: "divider", bgcolor: "background.paper" }}>
       <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between" sx={{ px: 1.5, py: 1 }}>
-        <Typography variant="subtitle2" fontWeight={900}>
-          支出流水发票获取工作台
-        </Typography>
         <Stack direction="row" spacing={1}>
-          <Button size="small" variant="outlined" onClick={onOpenRules}>待找发票规则设置</Button>
+          {direction !== "all" ? <Button size="small" variant="outlined" onClick={onOpenRules}>待找发票规则设置</Button> : null}
           <Button size="small" variant="contained" onClick={onOpenExport}>筛选内容导出</Button>
         </Stack>
       </Stack>
@@ -228,9 +240,9 @@ export default function PendingInvoicesTable({
           </colgroup>
           <TableHead>
             <TableRow>
-              <TableCell colSpan={3} scope="colgroup" sx={groupHeaderSx("#edf5ff")}>支出流水</TableCell>
+              <TableCell colSpan={3} scope="colgroup" sx={groupHeaderSx("#edf5ff")}>{bankGroupLabel}</TableCell>
               <TableCell scope="colgroup" sx={groupHeaderSx("#fff7e6", true)}>发票获取状态</TableCell>
-              <TableCell colSpan={3} scope="colgroup" sx={groupHeaderSx("#eefaf3", true)}>进项发票</TableCell>
+              <TableCell colSpan={3} scope="colgroup" sx={groupHeaderSx("#eefaf3", true)}>{invoiceGroupLabel}</TableCell>
               <TableCell colSpan={2} scope="colgroup" sx={groupHeaderSx("#f4f4f5", true)}>OA</TableCell>
             </TableRow>
             <TableRow>
@@ -276,7 +288,7 @@ export default function PendingInvoicesTable({
               onOpenManualInvoice,
               onOpenObjectDetail,
               onOpenRules,
-              onToggleCellExpand,
+              onMarkIncomeStatus,
             }))}
           </TableBody>
         </Table>
@@ -333,10 +345,8 @@ function renderRow({
   onOpenManualInvoice,
   onOpenObjectDetail,
   onOpenRules,
-  onToggleCellExpand,
-}: Omit<PendingInvoicesTableProps, "rows" | "onSortChange" | "onOpenExport"> & { row: PendingInvoiceRow }) {
-  const summaryCellId = `${row.id}:bank-summary`;
-  const summaryExpanded = config.expandedCellIds.has(summaryCellId);
+  onMarkIncomeStatus,
+}: Omit<PendingInvoicesTableProps, "rows" | "onSortChange" | "onOpenExport" | "direction"> & { row: PendingInvoiceRow }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
   const invoiceExtraCount = Math.max(0, row.inputInvoices.relationCount - 1);
@@ -361,6 +371,14 @@ function renderRow({
             </Tooltip>
           </Stack>
           <Typography variant="caption" color="text.secondary">{row.bankTransaction.tradeTime || "-"}</Typography>
+          {row.bankTransaction.effectiveTagLabel ? (
+            <Chip
+              size="small"
+              variant="outlined"
+              label={row.bankTransaction.effectiveTagLabel}
+              sx={{ alignSelf: "flex-start", maxWidth: "100%" }}
+            />
+          ) : null}
           {row.bankTransaction.counterpartyAccountNo ? (
             <Typography variant="caption" color="text.secondary" noWrap title={row.bankTransaction.counterpartyAccountNo}>
               对方尾号 {row.bankTransaction.counterpartyAccountNo.slice(-4)}
@@ -370,7 +388,7 @@ function renderRow({
       </TableCell>
       <TableCell align="right" sx={dataCellSx()}>
         <Typography component="div" variant="body2" fontWeight={900} sx={{ fontVariantNumeric: "tabular-nums" }}>
-          {formatMoney(row.bankTransaction.debitAmount)}
+          {formatMoney(row.bankTransaction.amount)}
         </Typography>
         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
           {bankAccountLabel(row.bankTransaction)}
@@ -378,20 +396,12 @@ function renderRow({
       </TableCell>
       <TableCell sx={dataCellSx()}>
         <Stack spacing={0.5}>
-          <Typography variant="body2" sx={overflowText(summaryExpanded)}>
+          <Typography variant="body2" sx={overflowText(false)}>
             {row.bankTransaction.summary || "-"}
           </Typography>
-          <Typography variant="caption" color="text.secondary" sx={overflowText(summaryExpanded)}>
+          <Typography variant="caption" color="text.secondary" sx={overflowText(false)}>
             {row.bankTransaction.remark || row.bankTransaction.voucherNo || "-"}
           </Typography>
-          <Button
-            size="small"
-            variant="text"
-            endIcon={summaryExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            onClick={() => onToggleCellExpand(summaryCellId)}
-          >
-            {summaryExpanded ? "收起" : "展开"}
-          </Button>
         </Stack>
       </TableCell>
       <TableCell sx={dataCellSx(true)}>
@@ -411,6 +421,7 @@ function renderRow({
             onOpenInvoicePicker={onOpenInvoicePicker}
             onOpenManualInvoice={onOpenManualInvoice}
             onOpenRules={onOpenRules}
+            onMarkIncomeStatus={onMarkIncomeStatus}
           />
         </Stack>
       </TableCell>

@@ -259,4 +259,6 @@ def _default_app_settings_payload() -> dict[str, Any]:
         "oa_invoice_offset": {},
         "bank_transaction_tags": {},
         "pending_invoice_tag_groups": {},
+        "pending_output_invoice_tag_groups": {},
+        "input_invoice_usage_payment_status_rules": {},
     }

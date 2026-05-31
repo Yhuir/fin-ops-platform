@@ -5,9 +5,13 @@ import type {
   OutputInvoiceCollectionFilter,
   OutputInvoiceCollectionFilterOptionsResponse,
   OutputInvoiceCollectionQuery,
+  OutputInvoiceCollectionRedRelationRequest,
   OutputInvoiceCollectionRowsResponse,
   OutputInvoiceCollectionSortDirection,
+  OutputInvoiceCollectionReminderUpdateRequest,
+  OutputInvoiceCollectionStatusUpdateRequest,
   OutputInvoiceCollectionStatusRulesResponse,
+  OutputInvoiceReceiptCreateRequest,
   OutputInvoiceReceiptHistoryResponse,
   OutputInvoiceReceiptPreviewRequest,
   OutputInvoiceReceiptPreviewResponse,
@@ -97,6 +101,8 @@ function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["row
 
 function mapCollectionStatus(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["collectionStatus"] {
   const raw = objectValue(rawValue);
+  const manualOverride = objectValue(camelOrSnake(raw, "manualOverride", "manual_override"));
+  const reminder = objectValue(raw.reminder);
   return {
     code: stringValue(raw.code),
     label: stringValue(raw.label),
@@ -104,6 +110,22 @@ function mapCollectionStatus(rawValue: unknown): OutputInvoiceCollectionRowsResp
     collectedAmount: stringValue(camelOrSnake(raw, "collectedAmount", "collected_amount")),
     pendingAmount: stringValue(camelOrSnake(raw, "pendingAmount", "pending_amount")),
     severity: stringValue(raw.severity),
+    matchedRuleId: stringValue(camelOrSnake(raw, "matchedRuleId", "matched_rule_id")),
+    manualOverride: Object.keys(manualOverride).length > 0 ? {
+      id: stringValue(manualOverride.id),
+      statusCode: stringValue(camelOrSnake(manualOverride, "statusCode", "status_code")),
+      expectedCollectionDate: stringValue(camelOrSnake(manualOverride, "expectedCollectionDate", "expected_collection_date")),
+      note: stringValue(manualOverride.note),
+      version: numberValue(manualOverride.version, 0),
+    } : null,
+    expectedCollectionDate: stringValue(camelOrSnake(raw, "expectedCollectionDate", "expected_collection_date")),
+    reminder: Object.keys(reminder).length > 0 ? {
+      id: stringValue(reminder.id),
+      remindAt: stringValue(camelOrSnake(reminder, "remindAt", "remind_at")),
+      channel: stringValue(reminder.channel),
+      note: stringValue(reminder.note),
+      status: stringValue(reminder.status),
+    } : null,
   };
 }
 
@@ -146,6 +168,9 @@ function mapRedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["
     totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
     relationType: stringValue(camelOrSnake(raw, "relationType", "relation_type")),
     reason: stringValue(raw.reason),
+    evidence: stringValue(raw.evidence),
+    confidence: stringValue(raw.confidence),
+    source: stringValue(raw.source),
   };
 }
 
@@ -153,6 +178,7 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
   primary: T | null;
   relationCount: number;
   hasMultiple: boolean;
+  receivedTotal?: string;
   detailMode: "none" | "single" | "list";
   summaries: T[];
 } {
@@ -164,6 +190,7 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
     primary,
     relationCount: numberValue(camelOrSnake(raw, "relationCount", "relation_count"), primary ? 1 : 0),
     hasMultiple: booleanValue(camelOrSnake(raw, "hasMultiple", "has_multiple")),
+    receivedTotal: stringValue(camelOrSnake(raw, "receivedTotal", "received_total")),
     detailMode: detailMode === "list" || detailMode === "single" ? detailMode : primary ? "single" : "none",
     summaries,
   };
@@ -176,6 +203,7 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
     rows: arrayValue(raw.rows).map((item) => {
       const row = objectValue(item);
       const receipt = objectValue(row.receipt);
+      const latestReceipt = objectValue(camelOrSnake(receipt, "latestReceipt", "latest_receipt"));
       return {
         id: stringValue(row.id),
         invoiceId: stringValue(camelOrSnake(row, "invoiceId", "invoice_id")),
@@ -192,9 +220,28 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
           reason: stringValue(receipt.reason),
           previewAvailable: booleanValue(camelOrSnake(receipt, "previewAvailable", "preview_available")),
           sourceAvailable: booleanValue(camelOrSnake(receipt, "sourceAvailable", "source_available")),
+          latestReceipt: Object.keys(latestReceipt).length > 0 ? {
+            id: stringValue(latestReceipt.id),
+            receiptNo: stringValue(camelOrSnake(latestReceipt, "receiptNo", "receipt_no")),
+            amount: stringValue(latestReceipt.amount),
+            status: stringValue(latestReceipt.status),
+            createdAt: stringValue(camelOrSnake(latestReceipt, "createdAt", "created_at")),
+          } : null,
         },
       };
     }),
+    summary: (() => {
+      const summary = objectValue(raw.summary);
+      return {
+        invoiceCount: numberValue(camelOrSnake(summary, "invoiceCount", "invoice_count"), 0),
+        totalWithTax: stringValue(camelOrSnake(summary, "totalWithTax", "total_with_tax")),
+        collectedAmount: stringValue(camelOrSnake(summary, "collectedAmount", "collected_amount")),
+        pendingAmount: stringValue(camelOrSnake(summary, "pendingAmount", "pending_amount")),
+        pendingCollectionCount: numberValue(camelOrSnake(summary, "pendingCollectionCount", "pending_collection_count"), 0),
+        partialCollectionCount: numberValue(camelOrSnake(summary, "partialCollectionCount", "partial_collection_count"), 0),
+        receiptPendingCount: numberValue(camelOrSnake(summary, "receiptPendingCount", "receipt_pending_count"), 0),
+      };
+    })(),
     pagination: {
       page: numberValue(pagination.page, 1),
       pageSize: numberValue(camelOrSnake(pagination, "pageSize", "page_size"), 20),
@@ -420,6 +467,38 @@ export async function previewOutputInvoiceReceipt(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
     signal,
+  });
+}
+
+export async function updateOutputInvoiceCollectionStatus(rowId: string, request: OutputInvoiceCollectionStatusUpdateRequest) {
+  return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-status`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+}
+
+export async function updateOutputInvoiceCollectionReminder(rowId: string, request: OutputInvoiceCollectionReminderUpdateRequest) {
+  return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-reminder`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+}
+
+export async function confirmOutputInvoiceRedRelation(rowId: string, request: OutputInvoiceCollectionRedRelationRequest) {
+  return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/red-invoice-relations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+}
+
+export async function createOutputInvoiceReceipt(rowId: string, request: OutputInvoiceReceiptCreateRequest) {
+  return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/receipts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": request.idempotencyKey },
+    body: JSON.stringify(request),
   });
 }
 

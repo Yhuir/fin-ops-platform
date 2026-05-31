@@ -100,6 +100,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             actor="test",
         )
         app._turnover_ledger_service._category_provider = None
+        app._turnover_ledger_service._selected_tag_codes_provider = None
         app._state_store.save_bank_transaction_categories(app._bank_transaction_category_service.snapshot())
         app._turnover_ledger_service.list_ledger()
         app._state_store.save_turnover_relations(app._turnover_relation_service.snapshot())
@@ -160,6 +161,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             actor="test",
         )
         app._turnover_ledger_service._category_provider = None
+        app._turnover_ledger_service._selected_tag_codes_provider = None
         app._state_store.save_bank_transaction_categories(app._bank_transaction_category_service.snapshot())
         app._turnover_ledger_service.list_ledger()
         app._state_store.save_turnover_relations(app._turnover_relation_service.snapshot())
@@ -249,6 +251,125 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["groups"][0]["row_span"], 1 + len(payload["groups"][0]["flow_rows"]))
         self.assertNotIn("rows", payload)
         self.assertNotIn("rows", payload["groups"][0])
+
+    def test_turnover_ledger_tag_selection_get_put_and_version_conflict(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            ApplicationStateStore(Path(temp_dir)).save_app_settings(
+                {
+                    "bank_transaction_tags": {
+                        "version": 1,
+                        "definitions": [
+                            {
+                                "code": "external_rule_borrow_out",
+                                "label": "借出款",
+                                "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                                "source": "custom",
+                                "status": "active",
+                                "output_primary_label": "外部往来款付款",
+                                "output_sub_label": "借出款",
+                                "turnover_role": "external_turnover",
+                                "turnover_action_type": "pending_collection",
+                                "direction": "any",
+                                "account_scope": {"type": "any", "values": []},
+                                "rules": {
+                                    "match_fields": ["all_text"],
+                                    "contains_any": ["借出"],
+                                    "contains_all": [],
+                                    "exact_any": [],
+                                    "regex_any": [],
+                                    "none_of": [],
+                                },
+                            },
+                            {
+                                "code": "external_rule_repaid",
+                                "label": "归还借款",
+                                "path": ["银行明细自动标签规则", "外部往来款付款", "归还借款"],
+                                "source": "custom",
+                                "status": "active",
+                                "output_primary_label": "外部往来款付款",
+                                "output_sub_label": "归还借款",
+                                "turnover_role": "external_turnover",
+                                "turnover_action_type": "repaid",
+                                "direction": "any",
+                                "account_scope": {"type": "any", "values": []},
+                                "rules": {
+                                    "match_fields": ["all_text"],
+                                    "contains_any": ["归还"],
+                                    "contains_all": [],
+                                    "exact_any": [],
+                                    "regex_any": [],
+                                    "none_of": [],
+                                },
+                            },
+                            {
+                                "code": "fee",
+                                "label": "手续费",
+                                "path": ["费用", "手续费"],
+                                "source": "system",
+                                "status": "active",
+                                "output_primary_label": "费用",
+                                "output_sub_label": "手续费",
+                            },
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "version": 1,
+                        "groups": {
+                            "requires_invoice": {"tag_codes": []},
+                            "bank_statement_as_invoice": {"tag_codes": []},
+                            "no_invoice_required": {"tag_codes": []},
+                        },
+                    },
+                }
+            )
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request("GET", "/api/turnover-ledger/tag-selection")
+            payload = json.loads(response.body)
+            save_response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(
+                    {
+                        "expected_version": payload["version"],
+                        "selected_tag_codes": ["external_rule_borrow_out"],
+                    }
+                ),
+            )
+            saved_payload = json.loads(save_response.body)
+            conflict_response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(
+                    {
+                        "expected_version": payload["version"],
+                        "selected_tag_codes": ["external_rule_borrow_out"],
+                    }
+                ),
+            )
+            invalid_response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(
+                    {
+                        "expected_version": saved_payload["version"],
+                        "selected_tag_codes": ["fee"],
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {tag["code"] for tag in payload["active_tags"]},
+            {"external_rule_borrow_out", "external_rule_repaid"},
+        )
+        self.assertEqual(set(payload["selected_tag_codes"]), {"external_rule_borrow_out", "external_rule_repaid"})
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(saved_payload["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(json.loads(conflict_response.body)["error"], "turnover_ledger_tag_selection_version_conflict")
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertEqual(json.loads(invalid_response.body)["error"], "invalid_turnover_ledger_tag")
 
     def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
         with TemporaryDirectory() as temp_dir:

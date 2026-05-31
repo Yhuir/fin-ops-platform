@@ -56,6 +56,10 @@ EXPECTED_MIGRATIONS = [
     "0041_bank_transaction_category_confirmations.sql",
     "0042_bank_detail_candidate_projection.sql",
     "0043_workbench_idempotency_records.sql",
+    "0044_bank_detail_external_turnover_third_labels.sql",
+    "0045_output_invoice_collection_lifecycle.sql",
+    "0046_input_invoice_usage_oa_reverse_batches.sql",
+    "0047_oa_pending_payment_read_model.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -113,6 +117,14 @@ EXPECTED_TABLES = [
     "app.app_settings",
     "app.pending_invoice_manual_invoice_commands",
     "app.workbench_idempotency_records",
+    "app.output_invoice_collection_status_overrides",
+    "app.output_invoice_collection_reminders",
+    "app.output_invoice_collection_red_relations",
+    "app.output_invoice_receipt_settings",
+    "app.output_invoice_receipt_number_counters",
+    "app.output_invoice_receipts",
+    "app.output_invoice_receipt_events",
+    "app.input_invoice_usage_oa_reverse_batches",
     "read_model.workbench_rows",
     "read_model.workbench_groups",
     "read_model.workbench_group_rows",
@@ -129,6 +141,8 @@ EXPECTED_TABLES = [
     "read_model.input_invoice_usage_scopes",
     "read_model.output_invoice_collection_rows",
     "read_model.output_invoice_collection_scopes",
+    "read_model.oa_pending_payment_rows",
+    "read_model.oa_pending_payment_scopes",
     "read_model.bank_detail_rows",
     "read_model.bank_detail_scopes",
     "read_model.cost_statistics_read_models",
@@ -153,7 +167,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 44)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 48)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -360,6 +374,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_migrator",
             "grant select, insert, update, delete on read_model.input_invoice_usage_rows to fin_ops_app_runtime",
             "grant select, insert, update, delete on read_model.output_invoice_collection_rows to fin_ops_app_runtime",
+            "grant select, insert, update, delete on read_model.oa_pending_payment_rows to fin_ops_app_runtime",
             "grant select, insert, update, delete on read_model.workbench_reconciliation_decisions to fin_ops_app_runtime",
             "grant select, insert, update on job.workbench_matching_dirty_scopes to fin_ops_app_runtime",
             "grant select, insert, update on app.matching_runs to fin_ops_app_runtime",

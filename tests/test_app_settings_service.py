@@ -49,11 +49,155 @@ class RecordingSyncService:
 
 
 class AppSettingsServiceTests(unittest.TestCase):
+    def _seed_settings(self, temp_dir: str, *, definitions: list[dict[str, object]]) -> None:
+        ApplicationStateStore(Path(temp_dir)).save_app_settings(
+            {
+                "bank_transaction_tags": {
+                    "version": 1,
+                    "definitions": definitions,
+                },
+                "pending_invoice_tag_groups": {
+                    "version": 1,
+                    "groups": {
+                        "requires_invoice": {"tag_codes": []},
+                        "bank_statement_as_invoice": {"tag_codes": []},
+                        "no_invoice_required": {"tag_codes": []},
+                    },
+                },
+            }
+        )
+
+    def _external_rule(self, code: str = "external_rule_borrow_out") -> dict[str, object]:
+        return {
+            "code": code,
+            "label": "借出款",
+            "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+            "source": "custom",
+            "status": "active",
+            "output_primary_label": "外部往来款付款",
+            "output_sub_label": "借出款",
+            "turnover_role": "external_turnover",
+            "turnover_action_type": "pending_collection",
+            "direction": "any",
+            "account_scope": {"type": "any", "values": []},
+            "rules": {
+                "match_fields": ["all_text"],
+                "contains_any": ["借出"],
+                "contains_all": [],
+                "exact_any": [],
+                "regex_any": [],
+                "none_of": [],
+            },
+        }
+
+    def test_turnover_ledger_tag_selection_defaults_to_all_active_external_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    self._external_rule("external_rule_borrow_out"),
+                    {
+                        **self._external_rule("external_rule_repaid"),
+                        "output_sub_label": "归还借款",
+                        "turnover_action_type": "repaid",
+                    },
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["费用", "手续费"],
+                        "source": "system",
+                        "status": "active",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "手续费",
+                    },
+                ],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+
+            selection = app._app_settings_service.get_turnover_ledger_tag_selection_payload()
+
+        self.assertEqual(selection["version"], 1)
+        self.assertTrue(selection["active_tags"])
+        self.assertEqual(selection["inactive_selected_tag_codes"], [])
+        self.assertEqual(set(selection["selected_tag_codes"]), {tag["code"] for tag in selection["active_tags"]})
+        for tag in selection["active_tags"]:
+            self.assertEqual(tag["turnover_role"], "external_turnover")
+            self.assertIn(tag["output_primary_label"], {"外部往来款付款", "外部往来款收款", "往来款付款", "往来款收款"})
+            self.assertTrue(tag["output_sub_label"])
+            self.assertTrue(tag["turnover_action_type"])
+
+    def test_turnover_ledger_tag_selection_saves_with_version_and_rejects_invalid_codes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    self._external_rule("external_rule_borrow_out"),
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["费用", "手续费"],
+                        "source": "system",
+                        "status": "active",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "手续费",
+                    },
+                ],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            selection = app._app_settings_service.get_turnover_ledger_tag_selection_payload()
+            first_code = selection["active_tags"][0]["code"]
+
+            saved = app._app_settings_service.update_turnover_ledger_tag_selection(
+                {
+                    "expected_version": selection["version"],
+                    "selected_tag_codes": [first_code],
+                },
+                actor_id="settings-owner",
+            )
+
+            with self.assertRaises(AppSettingsValidationError) as version_context:
+                app._app_settings_service.update_turnover_ledger_tag_selection(
+                    {
+                        "expected_version": selection["version"],
+                        "selected_tag_codes": [first_code],
+                    },
+                    actor_id="settings-owner",
+                )
+
+            with self.assertRaises(AppSettingsValidationError) as invalid_context:
+                app._app_settings_service.update_turnover_ledger_tag_selection(
+                    {
+                        "expected_version": saved["version"],
+                        "selected_tag_codes": ["fee"],
+                    },
+                    actor_id="settings-owner",
+                )
+
+        self.assertEqual(saved["selected_tag_codes"], [first_code])
+        self.assertEqual(saved["version"], selection["version"] + 1)
+        self.assertEqual(version_context.exception.error_code, "turnover_ledger_tag_selection_version_conflict")
+        self.assertEqual(invalid_context.exception.error_code, "invalid_turnover_ledger_tag")
+
     def test_file_rule_replacement_detaches_pending_invoice_and_no_oa_archived_codes_atomically(self) -> None:
         fixture = json.loads(
             Path("fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json").read_text(encoding="utf-8")
         )
         with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    {
+                        "code": "salary",
+                        "label": "工资",
+                        "path": ["费用", "工资"],
+                        "source": "system",
+                        "status": "active",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "工资",
+                    },
+                    self._external_rule("external_rule_borrow_out"),
+                ],
+            )
             app = build_application(data_dir=Path(temp_dir))
             current = app._app_settings_service.get_settings_payload()
             app._app_settings_service.update_settings(
@@ -62,7 +206,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                 allowed_usernames=[],
                 readonly_export_usernames=[],
                 admin_usernames=[],
-                bank_transaction_tags=current["bank_transaction_tags"],
                 pending_invoice_tag_groups={
                     "version": current["pending_invoice_tag_groups"]["version"],
                     "groups": {
@@ -76,6 +219,12 @@ class AppSettingsServiceTests(unittest.TestCase):
             selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
             app._app_settings_service.update_no_oa_bank_batch_tag_selection(
                 {"expected_version": selection["version"], "selected_tag_codes": ["salary"]},
+                actor_id="settings-owner",
+            )
+            turnover_selection = app._app_settings_service.get_turnover_ledger_tag_selection_payload()
+            turnover_code = turnover_selection["active_tags"][0]["code"]
+            app._app_settings_service.update_turnover_ledger_tag_selection(
+                {"expected_version": turnover_selection["version"], "selected_tag_codes": [turnover_code]},
                 actor_id="settings-owner",
             )
 
@@ -102,6 +251,10 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(
             audit["metadata"]["detached_no_oa_bank_batch_tag_references"],
             [{"tag_code": "salary"}],
+        )
+        self.assertEqual(
+            audit["metadata"]["detached_turnover_ledger_tag_references"],
+            [{"tag_code": turnover_code}],
         )
         self.assertEqual(audit["metadata"]["source"]["source_name"], "银行流水标签ui2.numbers")
 

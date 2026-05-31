@@ -141,7 +141,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         payload = service.list_rows()
 
         self.assertEqual(payload["readModelStatus"], "live_query")
-        self.assertEqual(payload["sourceVersion"], "output-invoice-collections:v1")
+        self.assertEqual(payload["sourceVersion"], "output-invoice-collections:v2")
         self.assertIn("generatedAt", payload)
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 50, "total": 1})
         row = payload["rows"][0]

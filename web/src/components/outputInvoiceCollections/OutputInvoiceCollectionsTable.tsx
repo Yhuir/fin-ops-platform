@@ -348,6 +348,24 @@ export default function OutputInvoiceCollectionsTable({
                         onToggle={() => onToggleCellExpand(row.id, "collection-status")}
                         threshold={24}
                       />
+                      <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap" }}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => onOpenWorkflow({ kind: "collectionStatus", rowId: row.id })}
+                          sx={{ minWidth: 0, px: 0.75 }}
+                        >
+                          状态/提醒
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => onOpenWorkflow({ kind: "redRelation", rowId: row.id })}
+                          sx={{ minWidth: 0, px: 0.75 }}
+                        >
+                          红蓝票
+                        </Button>
+                      </Stack>
                     </Stack>
                   </TableCell>
                   <TableCell sx={[bodyCellSx, bigSeparatorSx]}>
@@ -379,9 +397,14 @@ export default function OutputInvoiceCollectionsTable({
                     {bank ? (
                       <>
                         <Typography component="div" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
-                          {formatMoney(bank.amount)}
+                          {formatMoney(row.bank.hasMultiple && row.bank.receivedTotal ? row.bank.receivedTotal : bank.amount)}
                         </Typography>
-                        <Chip label={bank.directionLabel || "收入"} size="small" variant="outlined" sx={{ mt: 0.75 }} />
+                        <Stack direction="row" spacing={0.5} justifyContent="flex-end" sx={{ mt: 0.75, flexWrap: "wrap" }}>
+                          {row.bank.hasMultiple ? (
+                            <Chip label="多笔" size="small" color="info" variant="outlined" />
+                          ) : null}
+                          <Chip label={bank.directionLabel || "收入"} size="small" variant="outlined" />
+                        </Stack>
                       </>
                     ) : <EmptyCell />}
                   </TableCell>

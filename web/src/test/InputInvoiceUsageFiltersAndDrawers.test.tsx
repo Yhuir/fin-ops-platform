@@ -179,6 +179,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
 describe("Input invoice usage workflow drawers", () => {
   const previewPayload: OaReversePreviewPayload = {
     previewId: "oa_reverse_preview_001",
+    previewHash: "preview-hash-001",
     source: "explicitSelection",
     invoiceCount: 2,
     totalWithTax: "99.72",
@@ -189,6 +190,26 @@ describe("Input invoice usage workflow drawers", () => {
         invoiceCount: 2,
         totalWithTax: "99.72",
         candidateInvoiceIds: ["inv-001", "inv-002"],
+        candidateInvoices: [
+          {
+            invoiceId: "inv-001",
+            invoiceNumber: "INV-001",
+            displayNo: "SD-INV-001",
+            sellerName: "昆明供应商一",
+            issueDate: "2026-05-01",
+            totalWithTax: "49.86",
+            paymentStatusLabel: "待处理",
+          },
+          {
+            invoiceId: "inv-002",
+            invoiceNumber: "INV-002",
+            displayNo: "SD-INV-002",
+            sellerName: "昆明供应商二",
+            issueDate: "2026-05-02",
+            totalWithTax: "49.86",
+            paymentStatusLabel: "待处理",
+          },
+        ],
         rejectedInvoices: [
           { invoiceId: "inv-reject-001", reasonCode: "missing_target_account", reason: "缺少目标 OA 账号" },
         ],
@@ -226,12 +247,100 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getByText("陈秀云")).toBeInTheDocument();
     expect(screen.getByText("chen_xiuyun")).toBeInTheDocument();
     expect(screen.getByText("缺少目标 OA 账号")).toBeInTheDocument();
+    expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
+    expect(screen.getByText("昆明供应商一")).toBeInTheDocument();
+    expect(screen.getByText("2026-05-02")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /创建.*草稿|提交|保存/ })).not.toBeInTheDocument();
+  });
+
+  test("OA reverse drawer runs preview to batch to draft without fabricating unavailable draft success", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn(() => Promise.resolve({
+      ...previewPayload,
+      canCreateDraft: true,
+      nextAction: "create_batch",
+      permissions: { canCreateBatch: true, canCreateDraft: true },
+    }));
+    const createBatch = vi.fn(() => Promise.resolve({
+      batchId: "oa_reverse_batch_001",
+      version: 3,
+      status: "previewed",
+      selectedInvoiceIds: ["inv-001", "inv-002"],
+      totalWithTax: "99.72",
+      targetApplicantCode: "chen_xiuyun",
+      targetApplicantName: "陈秀云",
+      invoices: [],
+      rejectedInvoices: [],
+      canCreateDraft: true,
+    }));
+    const createDraft = vi.fn(() => Promise.resolve({
+      batchId: "oa_reverse_batch_001",
+      version: 4,
+      status: "oa_submission_detecting",
+      selectedInvoiceIds: ["inv-001", "inv-002"],
+      totalWithTax: "99.72",
+      targetApplicantCode: "chen_xiuyun",
+      targetApplicantName: "陈秀云",
+      invoices: [],
+      rejectedInvoices: [],
+      oaDraftId: "oa-draft-001",
+      oaDraftUrl: "https://oa.example.test/draft/oa-draft-001",
+      oaDetectionStatus: "detecting",
+      canRefreshStatus: true,
+    }));
+    const refreshStatus = vi.fn(() => Promise.resolve({
+      batchId: "oa_reverse_batch_001",
+      version: 5,
+      status: "oa_submitted",
+      selectedInvoiceIds: ["inv-001", "inv-002"],
+      totalWithTax: "99.72",
+      targetApplicantCode: "chen_xiuyun",
+      targetApplicantName: "陈秀云",
+      invoices: [],
+      rejectedInvoices: [],
+      oaDraftId: "oa-draft-001",
+      oaDraftUrl: "https://oa.example.test/draft/oa-draft-001",
+      oaDetectionStatus: "submitted",
+    }));
+
+    render(
+      <OaReverseWorkspaceDrawer
+        open
+        sourceFilters={[]}
+        selectedInvoiceIds={["inv-001", "inv-002"]}
+        loadPreview={loadPreview}
+        createBatch={createBatch}
+        createDraft={createDraft}
+        refreshStatus={refreshStatus}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "创建本地批次" }));
+    await waitFor(() => expect(createBatch).toHaveBeenCalledWith(expect.objectContaining({
+      previewId: "oa_reverse_preview_001",
+      expectedPreviewHash: "preview-hash-001",
+      selectedInvoiceIds: ["inv-001", "inv-002"],
+      targetApplicantCode: "chen_xiuyun",
+    })));
+    expect(await screen.findByText("oa_reverse_batch_001")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
+    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("oa_reverse_batch_001", expect.objectContaining({
+      expectedVersion: 3,
+    })));
+    expect(await screen.findByRole("link", { name: "打开 OA 草稿" })).toHaveAttribute("href", "https://oa.example.test/draft/oa-draft-001");
+
+    await user.click(screen.getByRole("button", { name: "刷新 OA 状态" }));
+    await waitFor(() => expect(refreshStatus).toHaveBeenCalledWith("oa_reverse_batch_001", { expectedVersion: 4 }));
+    expect(await screen.findByText("OA 状态已刷新。")).toBeInTheDocument();
   });
 
   test("payment status rules drawer loads Sheet4 rules as read-only content without editable controls or save state", async () => {
     const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
       version: "sheet4-v1",
+      readOnly: true,
+      permissions: { canSave: false },
       rules: [
         {
           id: "waiting_payment",
@@ -262,6 +371,73 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.queryByRole("button", { name: /保存|确认保存/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByText("保存成功")).not.toBeInTheDocument();
+  });
+
+  test("payment status rules drawer only enables edits when backend grants save permission and sends versioned save", async () => {
+    const user = userEvent.setup();
+    const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
+      version: 7,
+      readOnly: false,
+      permissions: { canSave: true },
+      rules: [
+        {
+          id: "waiting_payment",
+          label: "待付款",
+          description: "有发票、有 OA、无流水",
+          priority: 6,
+        },
+      ],
+      pendingDirections: [{ code: "pending", label: "待处理" }],
+    }));
+    const saveRules = vi.fn(() => Promise.resolve({
+      version: 8,
+      readOnly: false,
+      permissions: { canSave: true },
+      rules: [
+        {
+          id: "waiting_payment",
+          label: "待付款",
+          description: "已更新规则",
+          priority: 6,
+        },
+      ],
+      pendingDirections: [{ code: "pending", label: "待处理" }],
+    }));
+
+    render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
+
+    const ruleEditor = await screen.findByLabelText("规则");
+    await user.clear(ruleEditor);
+    await user.type(ruleEditor, "已更新规则");
+    await user.click(screen.getByRole("button", { name: "保存规则" }));
+
+    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({
+      expectedVersion: 7,
+      rules: [expect.objectContaining({ description: "已更新规则" })],
+    })));
+    expect(saveRules.mock.calls[0][0].idempotencyKey).toMatch(/^input-invoice-usage-payment-rules-save:/);
+    expect(await screen.findByText("规则已保存，读模型会按后端返回的刷新状态更新。")).toBeInTheDocument();
+  });
+
+  test("payment status rules drawer handles version conflicts by asking the user to reload", async () => {
+    const user = userEvent.setup();
+    const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
+      version: 7,
+      readOnly: false,
+      permissions: { canSave: true },
+      rules: [{ id: "paid_full_match", label: "已付款", description: "旧规则", priority: 2 }],
+      pendingDirections: [],
+    }));
+    const saveRules = vi.fn(() => Promise.reject({ status: 409, code: "payment_status_rules_version_conflict" }));
+
+    render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
+
+    const ruleEditor = await screen.findByLabelText("规则");
+    await user.clear(ruleEditor);
+    await user.type(ruleEditor, "新规则");
+    await user.click(screen.getByRole("button", { name: "保存规则" }));
+
+    expect(await screen.findByText("规则已被其他人更新，请重新加载后再编辑。")).toBeInTheDocument();
   });
 
   test("parent state can keep the two workflow drawers mutually exclusive", async () => {

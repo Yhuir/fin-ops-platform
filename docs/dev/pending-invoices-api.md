@@ -18,8 +18,8 @@
 
 | 参数 | 说明 |
 | --- | --- |
-| `direction` | `expense` 或 `income`；复杂工作流首版只升级 `expense` |
-| `filter` | `all`、`requires_invoice`、`bank_statement_as_invoice`、`no_invoice_required` |
+| `direction` | `expense`、`income` 或 `all` |
+| `filter` | `expense` 视图支持 `all`、`requires_invoice`、`bank_statement_as_invoice`、`no_invoice_required`；`income` 和 `all` 仅支持 `all` |
 | `keyword` | 全局关键字 |
 | `date_from` / `date_to` | 交易日期范围 |
 | `page` / `page_size` | 服务端分页 |
@@ -82,10 +82,10 @@
 | `bank_transaction_rows` | 当前日期范围内的全部银行流水数，等于支出和收入之和。 |
 | `expense_rows` | 当前日期范围内进入待找发票支出侧口径的流水数。 |
 | `income_rows` | 当前日期范围内收入流水数；收入侧不进入待找发票支出工作台。 |
-| `current_direction_rows` | 当前 `direction` 的流水数。 |
+| `current_direction_rows` | 当前 `direction` 的流水数；`all` 时等于支出和收入合计。 |
 | `excluded_direction_rows` | 当前页面方向之外的流水数。 |
 
-`invoice_acquisition_status.code` 固定为：
+支出 `invoice_acquisition_status.code` 固定为：
 
 - `paid_invoiced`
 - `paid_pending_invoice`
@@ -95,6 +95,13 @@
 - `bank_statement_as_invoice`
 - `pending`
 
+收入 `invoice_acquisition_status.code` 固定为：
+
+- `income_invoiced`
+- `income_pending_invoice`
+- `income_no_invoice_required`
+- `cash_income`
+
 状态优先级和业务口径见 [`../product-specs/pending-invoices.md`](../product-specs/pending-invoices.md)。
 
 ## 筛选项
@@ -102,6 +109,37 @@
 `GET /api/pending-invoices/filter-options`
 
 返回当前查询上下文下的字段配置、候选项和计数。字段至少覆盖交易时间、银行、账户、对方户名、金额、摘要/备注、状态、规则组、销方、发票金额、OA 申请人和项目。
+
+## 规则
+
+```text
+GET /api/pending-invoices/rules?direction=expense
+PUT /api/pending-invoices/rules?direction=expense
+GET /api/pending-invoices/rules?direction=income
+PUT /api/pending-invoices/rules?direction=income
+```
+
+- `expense` 返回并保存支出规则：`bank_statement_as_invoice`、`no_invoice_required` 可编辑，`requires_invoice` 由后端按 active 自动标签补集派生。
+- `income` 返回并保存收入规则：`no_invoice_required`、`cash_income` 可编辑，`requires_invoice` 表示收入 `待开发票` 补集。
+- 请求体可以携带历史 `requires_invoice`，后端接受但忽略，并以当前 active 自动标签补集重新返回。
+- 保存后写设置审计并标记 pending invoice read model dirty。
+
+## 收入人工标记
+
+```text
+PUT /api/pending-invoices/rows/{transactionId}/income-status
+```
+
+请求：
+
+```json
+{
+  "status_code": "cash_income",
+  "request_id": "income-status:txn_001:uuid"
+}
+```
+
+`status_code` 支持 `income_no_invoice_required`、`cash_income`。接口只允许收入流水、未关联销项发票的单行人工标记；`request_id` 是幂等键。成功后写 pending invoice command log、审计并刷新待找发票 read model。
 
 ## 关系明细
 
@@ -352,3 +390,11 @@ GET /api/pending-invoices/export
 - API 热路径不得因 read model miss/stale 同步扫描全量事实。
 
 实现阶段需要扩展 SQL query columns 和索引，至少覆盖 `status_code`、`seller_name`、`invoice_total`、`oa_applicant`、`project_name` 和筛选/排序需要的日期金额字段。
+
+## Redis / RabbitMQ 边界
+
+- `/api/pending-invoices/rows`、规则抽屉、收入人工标记和导出接口不得直接依赖 Redis；列表正确性以 PostgreSQL `read_model.pending_invoice_rows` 和 `source_versions` 为准。
+- RabbitMQ 只能通过 runtime queue/outbox 链路承载 `pending_invoice.read_model.refresh` 投递；业务代码只调用 queue repository 抽象，不导入 `pika` 或 RabbitMQ adapter。
+- 生产 search/pending worker 必须启用 `--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh`，并订阅 `search.read_model.refresh` 与 `pending_invoice.read_model.refresh`。
+- RabbitMQ dispatcher allowlist 必须包含 `pending_invoice.read_model.refresh`；灰度期间保持 PostgreSQL polling worker 可回退。
+- 若未来引入 Redis 短 TTL cache，必须在独立 service/helper 中实现，key 包含 `source_versions`、direction/filter/page/sort/filter hash，并由 derived lifecycle 统一失效；不得在 `server.py` 写缓存实现。

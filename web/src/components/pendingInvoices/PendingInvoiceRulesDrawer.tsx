@@ -20,9 +20,11 @@ type PendingInvoiceRulesDrawerProps = {
   onClose: () => void;
 };
 
-type EditableRuleGroupKey = "bankStatementAsInvoice" | "noInvoiceRequired";
+type EditableRuleGroupKey = "bankStatementAsInvoice" | "noInvoiceRequired" | "cashIncome";
 
-const EDITABLE_GROUP_KEYS: EditableRuleGroupKey[] = ["bankStatementAsInvoice", "noInvoiceRequired"];
+function editableGroupKeys(payload: PendingInvoiceRulesPayload): EditableRuleGroupKey[] {
+  return payload.direction === "income" ? ["noInvoiceRequired", "cashIncome"] : ["bankStatementAsInvoice", "noInvoiceRequired"];
+}
 
 export default function PendingInvoiceRulesDrawer({
   open,
@@ -179,22 +181,17 @@ export default function PendingInvoiceRulesDrawer({
       {payload && !payload.permissions.canSave ? <Alert severity="info">当前账号只能查看规则，不能保存。</Alert> : null}
       {payload && requiresInvoiceGroup ? (
         <Stack spacing={1}>
-          <HierarchicalRuleBlock
-            group={payload.groups.bankStatementAsInvoice}
-            tags={payload.availableTags}
-            selectedCodes={new Set(payload.groups.bankStatementAsInvoice.tagCodes)}
-            assignedElsewhere={assignedElsewhere(payload, "bankStatementAsInvoice")}
-            disabled={!payload.permissions.canSave || saving}
-            onToggle={(tagCode) => setPayload(updateRuleGroup(payload, "bankStatementAsInvoice", tagCode))}
-          />
-          <HierarchicalRuleBlock
-            group={payload.groups.noInvoiceRequired}
-            tags={payload.availableTags}
-            selectedCodes={new Set(payload.groups.noInvoiceRequired.tagCodes)}
-            assignedElsewhere={assignedElsewhere(payload, "noInvoiceRequired")}
-            disabled={!payload.permissions.canSave || saving}
-            onToggle={(tagCode) => setPayload(updateRuleGroup(payload, "noInvoiceRequired", tagCode))}
-          />
+          {editableGroupKeys(payload).map((key) => (
+            <HierarchicalRuleBlock
+              key={key}
+              group={payload.groups[key]}
+              tags={payload.availableTags}
+              selectedCodes={new Set(payload.groups[key].tagCodes)}
+              assignedElsewhere={assignedElsewhere(payload, key)}
+              disabled={!payload.permissions.canSave || saving}
+              onToggle={(tagCode) => setPayload(updateRuleGroup(payload, key, tagCode))}
+            />
+          ))}
           <HierarchicalRuleBlock
             group={requiresInvoiceGroup}
             tags={requiresInvoiceGroup.tags}
@@ -225,20 +222,22 @@ function updateRuleGroup(
     tagCodes: nextTagCodes,
     tags: nextTagCodes.map((code) => tagsByCode.get(code) ?? fallbackRuleTag(code)),
   };
-  const otherKey: EditableRuleGroupKey = key === "bankStatementAsInvoice" ? "noInvoiceRequired" : "bankStatementAsInvoice";
-  const otherGroup = payload.groups[otherKey];
-  const nextOtherCodes = exists ? otherGroup.tagCodes : otherGroup.tagCodes.filter((code) => code !== tagCode);
+  const nextGroups = { ...payload.groups, [key]: nextGroup };
+  for (const otherKey of editableGroupKeys(payload)) {
+    if (otherKey === key) {
+      continue;
+    }
+    const otherGroup = payload.groups[otherKey];
+    const nextOtherCodes = exists ? otherGroup.tagCodes : otherGroup.tagCodes.filter((code) => code !== tagCode);
+    nextGroups[otherKey] = {
+      ...otherGroup,
+      tagCodes: nextOtherCodes,
+      tags: nextOtherCodes.map((code) => tagsByCode.get(code) ?? fallbackRuleTag(code)),
+    };
+  }
   return {
     ...payload,
-    groups: {
-      ...payload.groups,
-      [key]: nextGroup,
-      [otherKey]: {
-        ...otherGroup,
-        tagCodes: nextOtherCodes,
-        tags: nextOtherCodes.map((code) => tagsByCode.get(code) ?? fallbackRuleTag(code)),
-      },
-    },
+    groups: nextGroups,
   };
 }
 
@@ -249,7 +248,7 @@ function hasUnsavedEditableSelections(
   if (!baseline) {
     return false;
   }
-  return EDITABLE_GROUP_KEYS.some((key) => !sameTagCodes(payload.groups[key].tagCodes, baseline.groups[key].tagCodes));
+  return editableGroupKeys(payload).some((key) => !sameTagCodes(payload.groups[key].tagCodes, baseline.groups[key].tagCodes));
 }
 
 function sameTagCodes(left: string[], right: string[]) {
@@ -265,35 +264,20 @@ function mergeRefreshedRulesWithDraft(
   baseline: PendingInvoiceRulesPayload | null,
 ): PendingInvoiceRulesPayload {
   const tagsByCode = new Map(refreshed.availableTags.map((tag) => [tag.code, tag]));
-  const bankStatementDrafted = !sameTagCodes(
-    draft.groups.bankStatementAsInvoice.tagCodes,
-    baseline?.groups.bankStatementAsInvoice.tagCodes ?? [],
-  );
-  const noInvoiceDrafted = !sameTagCodes(
-    draft.groups.noInvoiceRequired.tagCodes,
-    baseline?.groups.noInvoiceRequired.tagCodes ?? [],
-  );
-  const bankStatementCodes = activeUniqueCodes(
-    bankStatementDrafted
-      ? draft.groups.bankStatementAsInvoice.tagCodes
-      : refreshed.groups.bankStatementAsInvoice.tagCodes,
-    tagsByCode,
-  );
-  const bankStatementCodeSet = new Set(bankStatementCodes);
-  const noInvoiceCodes = activeUniqueCodes(
-    (noInvoiceDrafted
-      ? draft.groups.noInvoiceRequired.tagCodes
-      : refreshed.groups.noInvoiceRequired.tagCodes
-    ).filter((code) => !bankStatementCodeSet.has(code)),
-    tagsByCode,
-  );
+  const nextGroups = { ...refreshed.groups };
+  const assigned = new Set<string>();
+  for (const key of editableGroupKeys(refreshed)) {
+    const drafted = !sameTagCodes(draft.groups[key].tagCodes, baseline?.groups[key].tagCodes ?? []);
+    const codes = activeUniqueCodes(
+      (drafted ? draft.groups[key].tagCodes : refreshed.groups[key].tagCodes).filter((code) => !assigned.has(code)),
+      tagsByCode,
+    );
+    codes.forEach((code) => assigned.add(code));
+    nextGroups[key] = groupWithCodes(refreshed.groups[key], codes, tagsByCode);
+  }
   return {
     ...refreshed,
-    groups: {
-      ...refreshed.groups,
-      bankStatementAsInvoice: groupWithCodes(refreshed.groups.bankStatementAsInvoice, bankStatementCodes, tagsByCode),
-      noInvoiceRequired: groupWithCodes(refreshed.groups.noInvoiceRequired, noInvoiceCodes, tagsByCode),
-    },
+    groups: nextGroups,
   };
 }
 
@@ -325,7 +309,7 @@ function groupWithCodes(
 
 function assignedElsewhere(payload: PendingInvoiceRulesPayload, current: EditableRuleGroupKey) {
   const assigned = new Set<string>();
-  EDITABLE_GROUP_KEYS.forEach((key) => {
+  editableGroupKeys(payload).forEach((key) => {
     if (key === current) {
       return;
     }
@@ -336,8 +320,7 @@ function assignedElsewhere(payload: PendingInvoiceRulesPayload, current: Editabl
 
 function derivedRequiresInvoiceGroup(payload: PendingInvoiceRulesPayload): PendingInvoiceRuleGroup {
   const selectedNoInvoiceCodes = new Set<string>([
-    ...payload.groups.bankStatementAsInvoice.tagCodes,
-    ...payload.groups.noInvoiceRequired.tagCodes,
+    ...editableGroupKeys(payload).flatMap((key) => payload.groups[key].tagCodes),
   ]);
   const tags = payload.availableTags.filter((tag) => !selectedNoInvoiceCodes.has(tag.code));
   return {

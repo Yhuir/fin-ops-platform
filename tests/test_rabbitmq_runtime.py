@@ -269,6 +269,27 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["event_types"], list(SUPPORTED_EVENT_TYPES))
         self.assertEqual(payload["event_routes"]["search.read_model.refresh"]["queue"], "finops.search.read_model.refresh")
 
+    def test_rabbitmq_routes_include_pending_invoice_read_model_refresh(self) -> None:
+        settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
+        routes = rabbitmq_event_routes(settings)
+        topology = RabbitMqTopologyManager(settings).plan()
+
+        self.assertIn("pending_invoice.read_model.refresh", SUPPORTED_EVENT_TYPES)
+        self.assertEqual(
+            routes["pending_invoice.read_model.refresh"].queue,
+            "finops.pending_invoice.read_model.refresh",
+        )
+        self.assertIn(
+            {
+                "event_type": "pending_invoice.read_model.refresh",
+                "queue": "finops.pending_invoice.read_model.refresh",
+                "routing_key": "pending_invoice.read_model.refresh",
+                "dead_letter_queue": "finops.pending_invoice.read_model.refresh.dlq",
+                "dead_letter_routing_key": "pending_invoice.read_model.refresh.dead",
+            },
+            topology["queues"],
+        )
+
     def test_consumer_subscribes_to_queues_for_registered_event_types(self) -> None:
         queue = FakeQueue()
         channel = FakeChannel()

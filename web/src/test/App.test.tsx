@@ -19,10 +19,11 @@ describe("Finance operations shell", () => {
     expect(bankDetailsIndex).toBeGreaterThanOrEqual(0);
     expect(financeLabels?.[bankDetailsIndex + 1]).toBe("待找发票");
     expect(financeLabels?.[bankDetailsIndex + 2]).toBe("进项发票使用情况");
-    expect(financeLabels?.[bankDetailsIndex + 3]).toBe("销项发票收款情况");
-    expect(financeLabels?.[bankDetailsIndex + 4]).toBe("免OA流水批量处理");
-    expect(financeLabels?.[bankDetailsIndex + 5]).toBe("批量账务");
-    expect(financeLabels?.[bankDetailsIndex + 6]).toBe("往来款管理");
+    expect(financeLabels?.[bankDetailsIndex + 3]).toBe("OA待付款核对");
+    expect(financeLabels?.[bankDetailsIndex + 4]).toBe("销项发票收款情况");
+    expect(financeLabels?.[bankDetailsIndex + 5]).toBe("免OA流水批量处理");
+    expect(financeLabels?.[bankDetailsIndex + 6]).toBe("批量账务");
+    expect(financeLabels?.[bankDetailsIndex + 7]).toBe("外部往来款管理");
   });
 
   test("loads the workbench as an all-time view and keeps the month picker scoped to tax offset", async () => {
@@ -90,8 +91,8 @@ describe("Finance operations shell", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "往来款管理" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "往来款管理" })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "外部往来款管理" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "外部往来款管理" })).toHaveAttribute("aria-current", "page");
   });
 
   test("refreshes the workbench when turnover relations change", async () => {

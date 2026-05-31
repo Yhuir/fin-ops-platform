@@ -174,16 +174,19 @@ type ApiPendingInvoiceRowsResponse = {
 
 type ApiPendingInvoiceRulesPayload = {
   version?: number | string | null;
+  direction?: string | null;
   permissions?: { can_save?: boolean | null } | null;
   available_tags?: ApiTagDefinition[] | null;
   bank_transaction_tags?: ApiTagDictionary | null;
-  groups?: Partial<Record<"requires_invoice" | "bank_statement_as_invoice" | "no_invoice_required", {
+  groups?: Partial<Record<"requires_invoice" | "bank_statement_as_invoice" | "no_invoice_required" | "cash_income", {
     tag_codes?: unknown[] | null;
     tags?: ApiTagDefinition[] | null;
+    label?: string | null;
   }>> | null;
   requires_invoice?: unknown[] | null;
   bank_statement_as_invoice?: unknown[] | null;
   no_invoice_required?: unknown[] | null;
+  cash_income?: unknown[] | null;
 };
 
 type ApiRelationDetail = {
@@ -365,24 +368,31 @@ export function mapBankTransactionTagDictionary(value: ApiTagDictionary | null |
   }
   return {
     version: Number(value.version ?? 0) || 0,
-    tags: (value.tags ?? value.definitions ?? []).map((tag): BankTransactionTagDefinition => ({
-      code: stringValue(tag.code),
-      label: stringValue(tag.label, stringValue(tag.code)),
-      path: stringList(tag.path),
-      outputPrimaryLabel: stringValue(tag.output_primary_label, stringValue(tag.label, stringValue(tag.code))),
-      outputSubLabel: stringValue(tag.output_sub_label),
-      outputThirdLabel: stringValue(tag.output_third_label),
-      turnoverRole: stringValue(tag.turnover_role),
-      turnoverActionType: stringValue(tag.turnover_action_type),
-      turnoverFamily: stringValue(tag.turnover_family),
-      status: stringValue(tag.status, "active") as BankTransactionTagDefinition["status"],
-      source: stringValue(tag.source, "system") as BankTransactionTagDefinition["source"],
-    })).filter((tag) => tag.code.length > 0),
+    tags: (value.tags ?? value.definitions ?? []).map((tag): BankTransactionTagDefinition => {
+      const mapped: BankTransactionTagDefinition = {
+        code: stringValue(tag.code),
+        label: stringValue(tag.label, stringValue(tag.code)),
+        path: stringList(tag.path),
+        outputPrimaryLabel: stringValue(tag.output_primary_label, stringValue(tag.label, stringValue(tag.code))),
+        outputSubLabel: stringValue(tag.output_sub_label),
+        status: stringValue(tag.status, "active") as BankTransactionTagDefinition["status"],
+        source: stringValue(tag.source, "system") as BankTransactionTagDefinition["source"],
+      };
+      const outputThirdLabel = stringValue(tag.output_third_label);
+      const turnoverRole = stringValue(tag.turnover_role);
+      const turnoverActionType = stringValue(tag.turnover_action_type);
+      const turnoverFamily = stringValue(tag.turnover_family);
+      if (outputThirdLabel) mapped.outputThirdLabel = outputThirdLabel;
+      if (turnoverRole) mapped.turnoverRole = turnoverRole;
+      if (turnoverActionType) mapped.turnoverActionType = turnoverActionType;
+      if (turnoverFamily) mapped.turnoverFamily = turnoverFamily;
+      return mapped;
+    }).filter((tag) => tag.code.length > 0),
   };
 }
 
 function mapBankTransaction(value: ApiPendingInvoiceRow["bank_transaction"], fallbackId: string): PendingInvoiceBankTransaction {
-  const debitAmount = stringValue(value?.debit_amount, stringValue(value?.amount));
+  const amount = stringValue(value?.amount, stringValue(value?.debit_amount, stringValue(value?.credit_amount)));
   return {
     id: stringValue(value?.id, fallbackId),
     accountNo: stringValue(value?.account_no),
@@ -391,9 +401,9 @@ function mapBankTransaction(value: ApiPendingInvoiceRow["bank_transaction"], fal
     counterpartyBankName: stringValue(value?.counterparty_bank_name),
     tradeTime: displayDateTime(value?.trade_time),
     bookedDate: stringValue(value?.booked_date),
-    debitAmount,
+    debitAmount: stringValue(value?.debit_amount),
     creditAmount: stringValue(value?.credit_amount),
-    amount: debitAmount,
+    amount,
     balance: stringValue(value?.balance),
     currency: stringValue(value?.currency),
     bankName: stringValue(value?.bank_name),
@@ -453,6 +463,10 @@ function statusLabel(code: string) {
     no_invoice_required: "无需开票",
     bank_statement_as_invoice: "流水代替发票",
     pending: "待处理",
+    income_invoiced: "已开票",
+    income_pending_invoice: "未开票",
+    income_no_invoice_required: "无需开票",
+    cash_income: "现金收入",
   };
   return labels[code] ?? code;
 }
@@ -636,6 +650,7 @@ const RULE_LABELS = {
   requires_invoice: "需要开票",
   bank_statement_as_invoice: "流水代替发票",
   no_invoice_required: "无需开票",
+  cash_income: "现金收入",
 } as const;
 
 function mapRuleGroup(payload: ApiPendingInvoiceRulesPayload, code: keyof typeof RULE_LABELS): PendingInvoiceRuleGroup {
@@ -650,7 +665,7 @@ function mapRuleGroup(payload: ApiPendingInvoiceRulesPayload, code: keyof typeof
   })).filter((tag) => tag.code);
   return {
     code,
-    label: RULE_LABELS[code],
+    label: stringValue(group?.label, RULE_LABELS[code]),
     tagCodes: tagCodes.length > 0 ? tagCodes : tags.map((tag) => tag.code),
     tags,
   };
@@ -669,11 +684,13 @@ function mapRulesPayload(payload: ApiPendingInvoiceRulesPayload): PendingInvoice
     .filter((tag) => tag.code && tag.status === "active");
   return {
     version: numberValue(payload.version),
+    direction: stringValue(payload.direction, "expense") as PendingInvoiceRulesPayload["direction"],
     availableTags,
     groups: {
       requiresInvoice: mapRuleGroup(payload, "requires_invoice"),
       bankStatementAsInvoice: mapRuleGroup(payload, "bank_statement_as_invoice"),
       noInvoiceRequired: mapRuleGroup(payload, "no_invoice_required"),
+      cashIncome: mapRuleGroup(payload, "cash_income"),
     },
     permissions: {
       canSave: payload.permissions?.can_save !== false,
@@ -682,21 +699,35 @@ function mapRulesPayload(payload: ApiPendingInvoiceRulesPayload): PendingInvoice
 }
 
 function rulesRequestBody(payload: PendingInvoiceRulesPayload) {
-  return {
+  const groups: Record<string, { tag_codes: string[] }> = {
+    no_invoice_required: { tag_codes: payload.groups.noInvoiceRequired.tagCodes },
+  };
+  if (payload.direction === "income") {
+    groups.cash_income = { tag_codes: payload.groups.cashIncome.tagCodes };
+  } else {
+    groups.bank_statement_as_invoice = { tag_codes: payload.groups.bankStatementAsInvoice.tagCodes };
+  }
+  const body = {
     groups: {
-      bank_statement_as_invoice: { tag_codes: payload.groups.bankStatementAsInvoice.tagCodes },
-      no_invoice_required: { tag_codes: payload.groups.noInvoiceRequired.tagCodes },
+      ...groups,
     },
   };
+  return body;
 }
 
-export async function fetchPendingInvoiceRules(signal?: AbortSignal): Promise<PendingInvoiceRulesPayload> {
-  const payload = await requestJson<ApiPendingInvoiceRulesPayload>("/api/pending-invoices/rules", { method: "GET", signal });
+export async function fetchPendingInvoiceRules(direction: PendingInvoiceDirection = "expense", signal?: AbortSignal): Promise<PendingInvoiceRulesPayload> {
+  const params = new URLSearchParams({ direction });
+  const payload = await requestJson<ApiPendingInvoiceRulesPayload>(`/api/pending-invoices/rules?${params.toString()}`, { method: "GET", signal });
   return mapRulesPayload(payload);
 }
 
-export async function savePendingInvoiceRules(payload: PendingInvoiceRulesPayload, signal?: AbortSignal): Promise<PendingInvoiceRulesPayload> {
-  const response = await requestJson<ApiPendingInvoiceRulesPayload>("/api/pending-invoices/rules", {
+export async function savePendingInvoiceRules(
+  payload: PendingInvoiceRulesPayload,
+  direction: PendingInvoiceDirection = "expense",
+  signal?: AbortSignal,
+): Promise<PendingInvoiceRulesPayload> {
+  const params = new URLSearchParams({ direction });
+  const response = await requestJson<ApiPendingInvoiceRulesPayload>(`/api/pending-invoices/rules?${params.toString()}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(rulesRequestBody(payload)),
@@ -1022,6 +1053,26 @@ export async function confirmManualPendingInvoice(request: ManualPendingInvoiceR
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody(request)),
+  });
+  return {
+    invoiceId: stringValue(payload.invoice_id),
+    relationCaseId: stringValue(payload.relation_case_id),
+    affectedTransactionIds: stringList(payload.affected_transaction_ids),
+    affectedInvoiceIds: stringList(payload.affected_invoice_ids),
+    affectedMonths: stringList(payload.affected_months),
+    row: payload.row ? mapPendingInvoiceRow(payload.row) : null,
+  };
+}
+
+export async function savePendingInvoiceIncomeStatus(
+  transactionId: string,
+  statusCode: "income_no_invoice_required" | "cash_income",
+): Promise<ManualPendingInvoiceResult> {
+  const requestId = `income-status-${transactionId}-${statusCode}-${Date.now()}`;
+  const payload = await requestJson<ApiManualPendingInvoiceResult>(`/api/pending-invoices/rows/${encodeURIComponent(transactionId)}/income-status`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status_code: statusCode, request_id: requestId }),
   });
   return {
     invoiceId: stringValue(payload.invoice_id),

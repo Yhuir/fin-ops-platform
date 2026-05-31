@@ -14,13 +14,18 @@ from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_relation_query_context import InvoiceRelationQueryContext
+from fin_ops_platform.services.output_invoice_collection_models import (
+    OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
+    RED_REFUND_STATUS_CODES,
+)
+from fin_ops_platform.services.output_invoice_collection_status_service import OutputInvoiceCollectionStatusOverlayService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 READ_MODEL_STATUS = "live_query"
-SOURCE_VERSION = "output-invoice-collections:v1"
+SOURCE_VERSION = OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION
 
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
@@ -320,11 +325,15 @@ class OutputInvoiceCollectionQueryService:
         pair_relation_service: WorkbenchPairRelationService,
         status_rule_service: OutputInvoiceCollectionStatusRuleService | None = None,
         receipt_preview_service: OutputInvoiceReceiptPreviewService | None = None,
+        lifecycle_repository: Any | None = None,
+        status_overlay_service: OutputInvoiceCollectionStatusOverlayService | None = None,
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
         self._status_rule_service = status_rule_service or OutputInvoiceCollectionStatusRuleService()
         self._receipt_preview_service = receipt_preview_service or OutputInvoiceReceiptPreviewService()
+        self._lifecycle_repository = lifecycle_repository
+        self._status_overlay_service = status_overlay_service or OutputInvoiceCollectionStatusOverlayService()
 
     def list_rows(
         self,
@@ -592,7 +601,7 @@ class OutputInvoiceCollectionQueryService:
         }
 
     def status_rules(self) -> dict[str, Any]:
-        return self._status_rule_service.rules_payload()
+        return self._status_overlay_service.status_rules_payload(self._status_rule_service.rules_payload())
 
     def receipt_preview(self, request: dict[str, Any] | None) -> dict[str, Any]:
         payload = dict(request or {})
@@ -616,12 +625,24 @@ class OutputInvoiceCollectionQueryService:
 
     def receipt_history(self, *, invoice_id: str) -> dict[str, Any]:
         context = self._query_context()
-        if self._invoice_group_for_invoice_id(invoice_id, context=context) is None:
+        group = self._invoice_group_for_invoice_id(invoice_id, context=context)
+        if group is None:
             raise OutputInvoiceCollectionError(
                 "invoice_not_found",
                 f"Invoice not found for receipt history: {invoice_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
+        repository = self._lifecycle_repository
+        list_receipts = getattr(repository, "list_receipts", None)
+        if callable(list_receipts):
+            identity_key = str(group.get("identity_key") or "")
+            receipts = list_receipts(invoice_id=invoice_id, invoice_identity_key=identity_key, tenant_id="default")
+            return {
+                "invoiceId": invoice_id,
+                "sourceAvailable": True,
+                "sourceName": "formal_receipt_lifecycle",
+                "receipts": receipts,
+            }
         return {
             "invoiceId": invoice_id,
             "sourceAvailable": False,
@@ -645,7 +666,16 @@ class OutputInvoiceCollectionQueryService:
 
     def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext) -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
-        return [self._row_payload(group, groups, context=context) for group in groups]
+        rows = [self._row_payload(group, groups, context=context) for group in groups]
+        return self._apply_lifecycle_overlays(rows)
+
+    def row_by_id(self, row_id: str) -> dict[str, Any] | None:
+        context = self._query_context()
+        normalized_id = str(row_id or "").strip()
+        row = self._row_by_id(normalized_id, context=context)
+        if row is not None:
+            return row
+        return self._row_by_invoice_id(normalized_id, context=context)
 
     def _invoice_groups(
         self,
@@ -804,11 +834,13 @@ class OutputInvoiceCollectionQueryService:
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
+        received_total = self._bank_total(public_summaries, direction="inflow")
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
             "counterpartyName": primary.get("counterpartyName", ""),
             "tradeTime": primary.get("tradeTime", ""),
             "amount": primary.get("amount", ""),
+            "receivedTotal": _money(received_total),
             "direction": primary.get("direction", ""),
             "directionLabel": primary.get("directionLabel", ""),
             "bankName": primary.get("bankName", ""),
@@ -883,6 +915,9 @@ class OutputInvoiceCollectionQueryService:
                     "totalWithTax": _money(candidate_total),
                     "relationType": "red_invoice" if _invoice_sign(candidate_primary, candidate_total) < 0 else "blue_invoice",
                     "reason": "同购方、价税合计绝对值一致、正负方向相反。",
+                    "evidence": "同购方、价税合计绝对值一致、正负方向相反。",
+                    "confidence": "auto_high",
+                    "source": "auto",
                 }
             )
         summaries.sort(key=lambda item: (item["invoiceDate"], item["relatedInvoiceId"]), reverse=True)
@@ -1018,6 +1053,114 @@ class OutputInvoiceCollectionQueryService:
             "hasMultiple": False,
             "detailMode": "none",
         }
+
+    def _apply_lifecycle_overlays(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        repository = self._lifecycle_repository
+        overlay_loader = getattr(repository, "overlays_for_identity_keys", None)
+        if not callable(overlay_loader) or not rows:
+            return rows
+        overlays = overlay_loader(
+            [
+                str(row.get("invoiceIdentityKey") or "")
+                for row in rows
+                if str(row.get("invoiceIdentityKey") or "").strip()
+            ]
+        )
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            identity_key = str(row.get("invoiceIdentityKey") or "")
+            overlay = overlays.get(identity_key) if isinstance(overlays, dict) else None
+            if not isinstance(overlay, dict):
+                result.append(row)
+                continue
+            updated = deepcopy(row)
+            updated["collectionStatus"] = self._status_overlay_service.apply_manual_override(
+                dict(updated.get("collectionStatus") or {}),
+                override=overlay.get("override") if isinstance(overlay.get("override"), dict) else None,
+                reminder=overlay.get("reminder") if isinstance(overlay.get("reminder"), dict) else None,
+            )
+            updated["redInvoiceRelation"] = self._overlay_red_relations(
+                dict(updated.get("redInvoiceRelation") or {}),
+                list(overlay.get("redRelations") or []),
+            )
+            updated["receipt"] = self._overlay_receipt_payload(
+                dict(updated.get("receipt") or {}),
+                list(overlay.get("receipts") or []),
+                updated.get("collectionStatus") if isinstance(updated.get("collectionStatus"), dict) else {},
+            )
+            result.append(updated)
+        return result
+
+    @staticmethod
+    def _overlay_red_relations(payload: dict[str, Any], manual_relations: list[dict[str, Any]]) -> dict[str, Any]:
+        if not manual_relations:
+            return payload
+        summaries = [dict(item) for item in list(payload.get("summaries") or []) if isinstance(item, dict)]
+        seen = {
+            (str(item.get("relatedInvoiceIdentityKey") or ""), str(item.get("relatedInvoiceId") or ""))
+            for item in summaries
+        }
+        for relation in manual_relations:
+            key = (str(relation.get("relatedInvoiceIdentityKey") or ""), str(relation.get("relatedInvoiceId") or ""))
+            if key in seen:
+                continue
+            summaries.append(
+                {
+                    "relationId": relation.get("id"),
+                    "relatedInvoiceIdentityKey": relation.get("relatedInvoiceIdentityKey"),
+                    "relatedInvoiceId": relation.get("relatedInvoiceId"),
+                    "invoiceNo": relation.get("relatedInvoiceNo") or relation.get("relatedInvoiceId"),
+                    "invoiceDate": relation.get("relatedInvoiceDate") or "",
+                    "buyerName": relation.get("buyerName") or "",
+                    "totalWithTax": relation.get("relatedTotalWithTax") or "",
+                    "relationType": relation.get("relationType") or "red_invoice",
+                    "reason": relation.get("evidence") or "人工确认红蓝票关系。",
+                    "evidence": relation.get("evidence") or "",
+                    "confidence": relation.get("confidence") or "manual_confirmed",
+                    "source": "manual",
+                }
+            )
+            seen.add(key)
+        payload["summaries"] = summaries
+        payload["relationCount"] = len(summaries)
+        payload["hasMultiple"] = len(summaries) > 1
+        payload["detailMode"] = "none" if not summaries else "list" if len(summaries) > 1 else "single"
+        if summaries and not payload.get("primaryRelatedInvoiceId"):
+            payload["primaryRelatedInvoiceId"] = summaries[0].get("relatedInvoiceId")
+        return payload
+
+    @staticmethod
+    def _overlay_receipt_payload(
+        payload: dict[str, Any],
+        receipts: list[dict[str, Any]],
+        collection_status: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not receipts:
+            return payload
+        active_receipts = [dict(item) for item in receipts if str(item.get("status") or "") == "issued"]
+        latest = active_receipts[0] if active_receipts else dict(receipts[0])
+        status = str(latest.get("status") or "issued")
+        if status == "issued":
+            payload.update(
+                {
+                    "status": "issued",
+                    "label": "已出收据",
+                    "reason": "已存在正式收据。",
+                    "historyAvailable": True,
+                    "sourceAvailable": True,
+                    "previewAvailable": False,
+                    "relationCount": len(receipts),
+                    "hasMultiple": len(receipts) > 1,
+                    "detailMode": "list" if len(receipts) > 1 else "single",
+                    "latestReceipt": latest,
+                    "summaries": receipts,
+                }
+            )
+        elif str(collection_status.get("code") or "") in RED_REFUND_STATUS_CODES:
+            payload["status"] = "blocked"
+        else:
+            payload.update({"historyAvailable": True, "sourceAvailable": True, "latestReceipt": latest, "summaries": receipts})
+        return payload
 
     def _has_fully_matched_invoice_bank_relation(
         self,

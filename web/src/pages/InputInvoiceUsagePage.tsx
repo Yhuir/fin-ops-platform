@@ -21,8 +21,14 @@ import {
   fetchInputInvoiceUsagePaymentStatusRules,
   fetchInputInvoiceUsageRows,
   fetchInputInvoiceUsageRowRelationDetail,
+  createInputInvoiceUsageOaReverseBatch,
+  createInputInvoiceUsageOaReverseDraft,
+  manualInputInvoiceUsageOaReverseStatus,
   nextSortDirection,
   previewInputInvoiceUsageOaReverse,
+  refreshInputInvoiceUsageOaReverseStatus,
+  revokeInputInvoiceUsageOaReverseDraft,
+  saveInputInvoiceUsagePaymentStatusRules,
 } from "../features/inputInvoiceUsage/api";
 import type {
   InputInvoiceUsageDetailTarget,
@@ -450,11 +456,17 @@ export default function InputInvoiceUsagePage() {
       sourceFilters={query.filters}
       selectedInvoiceIds={[]}
       loadPreview={loadOaReversePreview}
+      createBatch={createInputInvoiceUsageOaReverseBatch}
+      createDraft={createInputInvoiceUsageOaReverseDraft}
+      refreshStatus={refreshInputInvoiceUsageOaReverseStatus}
+      revokeDraft={revokeInputInvoiceUsageOaReverseDraft}
+      manualStatus={manualInputInvoiceUsageOaReverseStatus}
       onClose={handleCloseWorkflow}
     />
     <PaymentStatusRulesDrawer
       open={query.activeWorkflow === "paymentRules"}
       loadRules={fetchInputInvoiceUsagePaymentStatusRules}
+      saveRules={saveInputInvoiceUsagePaymentStatusRules}
       onClose={handleCloseWorkflow}
     />
     </>

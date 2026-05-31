@@ -12,6 +12,7 @@ import EtcTicketManagementPage from "../pages/EtcTicketManagementPage";
 import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
 import TurnoverLedgerPage from "../pages/TurnoverLedgerPage";
 import InputInvoiceUsagePage from "../pages/InputInvoiceUsagePage";
+import OaPendingPaymentsPage from "../pages/OaPendingPaymentsPage";
 import OutputInvoiceCollectionsPage from "../pages/OutputInvoiceCollectionsPage";
 import ImportBankTransactionsPage from "../pages/imports/ImportBankTransactionsPage";
 import ImportInvoicesPage from "../pages/imports/ImportInvoicesPage";
@@ -29,6 +30,7 @@ export default function AppRouter() {
       <Route path="/bank-details" element={<BankDetailsPage />} />
       <Route path="/pending-invoices" element={<PendingInvoicesPage />} />
       <Route path="/input-invoice-usage" element={<InputInvoiceUsagePage />} />
+      <Route path="/oa-pending-payments" element={<OaPendingPaymentsPage />} />
       <Route path="/output-invoice-collections" element={<OutputInvoiceCollectionsPage />} />
       <Route path="/no-oa-bank-batches" element={<NoOaBankBatchPage />} />
       <Route path="/batch-accounting" element={<BatchAccountingPage />} />

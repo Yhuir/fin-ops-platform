@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+from decimal import Decimal
+import unittest
+
+from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
+from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
+from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_pending_payment_service import (
+    OaPendingPaymentError,
+    OaPendingPaymentQueryService,
+)
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
+
+class StaticOAProjection:
+    def __init__(self, records: list[OAApplicationRecord]) -> None:
+        self.records = records
+
+    def list_all_application_records(self) -> list[OAApplicationRecord]:
+        return list(self.records)
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        wanted = {str(row_id) for row_id in row_ids}
+        return [record for record in self.records if record.id in wanted]
+
+
+class OaPendingPaymentQueryServiceTests(unittest.TestCase):
+    def test_statuses_use_oa_as_primary_row_and_decimal_payment_totals(self) -> None:
+        bank_paid = self._bank("bank-paid", "100.00")
+        bank_less = self._bank("bank-less", "80.00")
+        bank_more = self._bank("bank-more", "140.00")
+        bank_merged = self._bank("bank-merged", "150.00")
+        invoice = self._invoice("inv-paid", "SD-001", "供应商A", "100.00")
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-paid", ["oa-paid", bank_paid.id, invoice.id], matched=True)
+        self._relation(pair_service, "case-less", ["oa-less", bank_less.id], matched=False)
+        self._relation(pair_service, "case-more", ["oa-more", bank_more.id], matched=False)
+        self._relation(pair_service, "case-merged-a", ["oa-merged-a", bank_merged.id], matched=True)
+        self._relation(pair_service, "case-merged-b", ["oa-merged-b", bank_merged.id], matched=True)
+        service = self._service(
+            oa_records=[
+                self._oa("oa-unpaid", "张三", "30.00"),
+                self._oa("oa-paid", "李四", "100.00"),
+                self._oa("oa-less", "王五", "100.00"),
+                self._oa("oa-more", "赵六", "100.00"),
+                self._oa("oa-merged-a", "钱七", "60.00"),
+                self._oa("oa-merged-b", "孙八", "90.00"),
+                self._oa("oa-bad", "周九", ""),
+            ],
+            transactions=[bank_paid, bank_less, bank_more, bank_merged],
+            invoices=[invoice],
+            pair_service=pair_service,
+        )
+
+        rows = {row["oa"]["id"]: row for row in service.list_rows(page_size=20)["rows"]}
+
+        self.assertEqual(rows["oa-unpaid"]["paymentStatus"]["code"], "unpaid")
+        self.assertEqual(rows["oa-paid"]["paymentStatus"]["code"], "paid")
+        self.assertEqual(rows["oa-less"]["paymentStatus"]["code"], "partially_paid")
+        self.assertEqual(rows["oa-more"]["paymentStatus"]["code"], "overpaid")
+        self.assertEqual(rows["oa-merged-a"]["paymentStatus"]["code"], "merged_paid")
+        self.assertEqual(rows["oa-merged-b"]["paymentStatus"]["code"], "merged_paid")
+        self.assertEqual(rows["oa-bad"]["paymentStatus"]["code"], "pending_review")
+        self.assertEqual(rows["oa-paid"]["bankTransaction"]["primaryBankTransactionId"], "bank-paid")
+        self.assertEqual(rows["oa-paid"]["invoice"]["primaryInvoiceId"], "inv-paid")
+        self.assertEqual(rows["oa-paid"]["invoice"]["digitalInvoiceNo"], "SD-001")
+
+    def test_filter_sort_pagination_and_validation_are_server_side_contracts(self) -> None:
+        service = self._service(
+            oa_records=[
+                self._oa("oa-1", "张三", "30.00", project_name="甲项目", apply_type="报销"),
+                self._oa("oa-2", "李四", "80.00", project_name="乙项目", apply_type="支付"),
+                self._oa("oa-3", "张三", "20.00", project_name="甲项目", apply_type="报销"),
+            ]
+        )
+
+        payload = service.list_rows(
+            page=1,
+            page_size=1,
+            keyword="甲项目",
+            filters='[{"field":"oa_applicant","operator":"in","values":["张三"]}]',
+            sort_field="oa_amount",
+            sort_direction="desc",
+        )
+
+        self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 1, "total": 2})
+        self.assertEqual(payload["rows"][0]["oa"]["id"], "oa-1")
+        self.assertEqual(payload["summary"]["rowCount"], 2)
+        self.assertEqual(payload["sort"], {"field": "oa_amount", "direction": "desc"})
+        filter_fields = [field["field"] for field in service.filter_options()["fields"]]
+        self.assertIn("oa_applicant", filter_fields)
+        self.assertIn("payment_status", filter_fields)
+
+        with self.assertRaises(OaPendingPaymentError) as field_error:
+            service.list_rows(filters='[{"field":"bad","operator":"equals","value":"x"}]')
+        with self.assertRaises(OaPendingPaymentError) as sort_error:
+            service.list_rows(sort_field="bad")
+
+        self.assertEqual(field_error.exception.error_code, "invalid_filter_field")
+        self.assertEqual(sort_error.exception.error_code, "invalid_sort_field")
+
+    def test_detail_routes_return_oa_bank_invoice_and_relation_payloads(self) -> None:
+        bank = self._bank("bank-detail", "100.00")
+        invoice = self._invoice("inv-detail", "SD-DETAIL", "详情供应商", "100.00")
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-detail", ["oa-detail", bank.id, invoice.id], matched=True)
+        service = self._service(
+            oa_records=[self._oa("oa-detail", "陈秀云", "100.00")],
+            transactions=[bank],
+            invoices=[invoice],
+            pair_service=pair_service,
+        )
+        row_id = service.list_rows()["rows"][0]["id"]
+
+        self.assertEqual(service.oa_detail("oa-detail")["id"], "oa-detail")
+        self.assertEqual(service.bank_transaction_detail("bank-detail")["id"], "bank-detail")
+        self.assertEqual(service.invoice_detail("inv-detail")["id"], "inv-detail")
+        self.assertEqual(service.row_relation_details(row_id, kind="bank")["kind"], "bank")
+        self.assertEqual(service.row_relation_details(row_id, kind="invoice")["kind"], "invoice")
+
+    def _service(
+        self,
+        *,
+        oa_records: list[OAApplicationRecord],
+        transactions: list[BankTransaction] | None = None,
+        invoices: list[Invoice] | None = None,
+        pair_service: WorkbenchPairRelationService | None = None,
+    ) -> OaPendingPaymentQueryService:
+        return OaPendingPaymentQueryService(
+            import_service=ImportNormalizationService(
+                existing_transactions=transactions or [],
+                existing_invoices=invoices or [],
+            ),
+            pair_relation_service=pair_service or WorkbenchPairRelationService(),
+            oa_projection=StaticOAProjection(oa_records),
+        )
+
+    @staticmethod
+    def _oa(
+        oa_id: str,
+        applicant: str,
+        amount: str,
+        *,
+        project_name: str = "测试项目",
+        apply_type: str = "报销",
+    ) -> OAApplicationRecord:
+        return OAApplicationRecord(
+            id=oa_id,
+            month="2026-05",
+            section="审批通过",
+            case_id=None,
+            applicant=applicant,
+            project_name=project_name,
+            apply_type=apply_type,
+            amount=amount,
+            counterparty_name="测试供应商",
+            reason="测试付款",
+            relation_code="",
+            relation_label="",
+            relation_tone="",
+            project_name_display=project_name,
+        )
+
+    @staticmethod
+    def _bank(bank_id: str, amount: str) -> BankTransaction:
+        return BankTransaction(
+            id=bank_id,
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="测试供应商",
+            amount=Decimal(amount),
+            signed_amount=-Decimal(amount),
+            txn_date="2026-05-21",
+            trade_time="2026-05-21 10:00:00",
+            account_name="云南溯源科技有限公司",
+            balance=Decimal("900.00"),
+            currency="人民币元",
+            counterparty_account_no="621700001",
+            counterparty_bank_name="建行昆明支行",
+            booked_date="20260521",
+            summary="电子转账",
+            remark="测试付款备注",
+            account_detail_no=f"detail-{bank_id}",
+            enterprise_serial_no=f"enterprise-{bank_id}",
+            voucher_kind="电子转账凭证",
+            voucher_no=f"voucher-{bank_id}",
+            imported_bank_name="建设银行",
+            imported_bank_last4="1234",
+        )
+
+    @staticmethod
+    def _invoice(invoice_id: str, digital_no: str, seller_name: str, total: str) -> Invoice:
+        counterparty = Counterparty(
+            id=f"cp-{invoice_id}",
+            name=seller_name,
+            normalized_name=seller_name,
+            counterparty_type="supplier",
+        )
+        return Invoice(
+            id=invoice_id,
+            invoice_type=InvoiceType.INPUT,
+            invoice_no=digital_no,
+            digital_invoice_no=digital_no,
+            counterparty=counterparty,
+            amount=Decimal(total),
+            signed_amount=Decimal(total),
+            invoice_date="2026-05-20",
+            seller_name=seller_name,
+            buyer_name="云南溯源科技有限公司",
+            total_with_tax=Decimal(total),
+        )
+
+    @staticmethod
+    def _relation(
+        service: WorkbenchPairRelationService,
+        case_id: str,
+        row_ids: list[str],
+        *,
+        matched: bool,
+    ) -> None:
+        service.create_active_relation(
+            case_id=case_id,
+            row_ids=row_ids,
+            row_types=[
+                "oa" if row_id.startswith("oa-") else "bank" if row_id.startswith("bank-") else "invoice"
+                for row_id in row_ids
+            ],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            amount_check={"matched": matched},
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

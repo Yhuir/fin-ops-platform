@@ -408,6 +408,91 @@ function installTurnoverLedgerFetch() {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const method = (init?.method ?? "GET").toUpperCase();
 
+    if (url.pathname === "/api/turnover-ledger/tag-selection" && method === "GET") {
+      return Response.json({
+        version: 2,
+        selected_tag_codes: ["external_rule_borrow_out", "external_rule_repaid"],
+        inactive_selected_tag_codes: [],
+        active_tags: [
+          {
+            code: "external_rule_borrow_out",
+            label: "借出款",
+            path: ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款付款",
+            output_sub_label: "借出款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "pending_collection",
+          },
+          {
+            code: "external_rule_repaid",
+            label: "归还借款",
+            path: ["银行明细自动标签规则", "外部往来款付款", "归还借款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款付款",
+            output_sub_label: "归还借款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "repaid",
+          },
+          {
+            code: "external_rule_borrow_in",
+            label: "借入款",
+            path: ["银行明细自动标签规则", "外部往来款收款", "借入款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款收款",
+            output_sub_label: "借入款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "pending_repayment",
+          },
+        ],
+      });
+    }
+    if (url.pathname === "/api/turnover-ledger/tag-selection" && method === "PUT") {
+      const body = JSON.parse(String(init?.body));
+      return Response.json({
+        version: 3,
+        selected_tag_codes: body.selected_tag_codes,
+        inactive_selected_tag_codes: [],
+        active_tags: [
+          {
+            code: "external_rule_borrow_out",
+            label: "借出款",
+            path: ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款付款",
+            output_sub_label: "借出款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "pending_collection",
+          },
+          {
+            code: "external_rule_repaid",
+            label: "归还借款",
+            path: ["银行明细自动标签规则", "外部往来款付款", "归还借款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款付款",
+            output_sub_label: "归还借款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "repaid",
+          },
+          {
+            code: "external_rule_borrow_in",
+            label: "借入款",
+            path: ["银行明细自动标签规则", "外部往来款收款", "借入款"],
+            source: "custom",
+            status: "active",
+            output_primary_label: "外部往来款收款",
+            output_sub_label: "借入款",
+            turnover_role: "external_turnover",
+            turnover_action_type: "pending_repayment",
+          },
+        ],
+      });
+    }
     if (url.pathname === "/api/turnover-ledger" && method === "GET") {
       expect(url.searchParams.get("view")).toBe("grouped");
       return Response.json(groupedPayload(url.searchParams.get("family") ?? "all"));
@@ -535,7 +620,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    expect(within(page).getByRole("heading", { name: "往来款管理" })).toBeInTheDocument();
+    expect(within(page).getByRole("heading", { name: "外部往来款管理" })).toBeInTheDocument();
     expect(within(page).getByRole("tab", { name: "全部" })).toHaveAttribute("aria-selected", "true");
     expect(within(page).getByText("待还款金额")).toBeInTheDocument();
     expect(within(page).getByText("已还款金额")).toBeInTheDocument();
@@ -590,6 +675,42 @@ describe("Turnover ledger page", () => {
     expect(within(table).getByTestId("amount-expense-rel-personal-1-repayment")).toHaveClass("turnover-amount-expense");
     expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-row-warning");
     expect(within(table).queryByText("待人工确认")).not.toBeInTheDocument();
+  });
+
+  test("opens tag selection drawer, saves selected bank detail labels, and reloads ledger", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch();
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    await within(page).findByText("张三");
+    const before = requestUrls(fetchMock, "/api/turnover-ledger").length;
+
+    await user.click(within(page).getByRole("button", { name: "外部往来款标签设置" }));
+    const drawer = await screen.findByRole("dialog", { name: "外部往来款标签设置" });
+    expect(within(drawer).getByRole("heading", { name: "外部往来款标签设置" })).toBeInTheDocument();
+    expect(within(drawer).getByLabelText("外部往来款付款")).toBeChecked();
+    expect(within(drawer).getByLabelText("借出款")).toBeChecked();
+    expect(within(drawer).getByLabelText("归还借款")).toBeChecked();
+    expect(within(drawer).getByLabelText("借入款")).not.toBeChecked();
+
+    await user.click(within(drawer).getByLabelText("归还借款"));
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      const saveRequest = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/tag-selection" && init?.method === "PUT";
+      });
+      expect(saveRequest).toBeDefined();
+      expect(JSON.parse(String(saveRequest?.[1]?.body))).toEqual({
+        expected_version: 2,
+        selected_tag_codes: ["external_rule_borrow_out"],
+      });
+    });
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThan(before);
+    });
   });
 
   test("expands Jia Xiaohua with real flow rows instead of allocation lot rows", async () => {

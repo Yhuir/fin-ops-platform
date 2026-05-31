@@ -22,6 +22,19 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertIn("input_invoice_usage.read_model.refresh", env_example)
         self.assertIn("output_invoice_collection.read_model.refresh", env_example)
+        self.assertIn("oa_pending_payment.read_model.refresh", env_example)
+
+    def test_search_pending_workers_and_dispatcher_include_pending_invoice_refresh(self) -> None:
+        postgres_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending.env.example").read_text()
+        rabbitmq_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending-rabbitmq.env.example").read_text()
+        dispatcher_env = (REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example").read_text()
+
+        for env_example in (postgres_worker_env, rabbitmq_worker_env):
+            self.assertIn("--enable-search-read-model-refresh", env_example)
+            self.assertIn("--enable-pending-invoice-read-model-refresh", env_example)
+            self.assertIn("--event-type search.read_model.refresh", env_example)
+            self.assertIn("--event-type pending_invoice.read_model.refresh", env_example)
+        self.assertIn("pending_invoice.read_model.refresh", dispatcher_env)
 
 
 if __name__ == "__main__":

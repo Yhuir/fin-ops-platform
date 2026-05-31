@@ -10,8 +10,22 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
     default_bank_transaction_tag_dictionary_payload,
 )
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    EXTERNAL_TURNOVER_ROLE,
+    is_external_turnover_definition,
+    normalize_turnover_action_type,
+)
+from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    AppSettingsInputInvoiceUsagePaymentRulesProvider,
+    InputInvoiceUsagePaymentRulesValidationError,
+    SETTINGS_KEY as INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
+    normalize_payment_status_rules_settings,
+)
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
-from fin_ops_platform.services.pending_invoice_rules import active_pending_invoice_rule_tags
+from fin_ops_platform.services.pending_invoice_rules import (
+    PENDING_INVOICE_GROUP_LABELS_BY_DIRECTION,
+    active_pending_invoice_rule_tags,
+)
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
@@ -37,9 +51,14 @@ PENDING_INVOICE_TAG_GROUP_LABELS = {
     "bank_statement_as_invoice": "流水代替发票",
     "no_invoice_required": "无需开票",
 }
+PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS = PENDING_INVOICE_GROUP_LABELS_BY_DIRECTION["income"]
 DEFAULT_NO_OA_BANK_BATCH_TAG_SELECTION = {
     "version": 1,
     "selected_tag_codes": [],
+}
+DEFAULT_TURNOVER_LEDGER_TAG_SELECTION = {
+    "version": 1,
+    "selected_tag_codes": None,
 }
 
 
@@ -86,12 +105,28 @@ class AppSettingsService:
         loaded_settings = self._state_store.load_app_settings()
         if (
             isinstance(loaded_settings, dict)
-            and "no_oa_bank_batch_tag_selection" not in loaded_settings
+            and (
+                "no_oa_bank_batch_tag_selection" not in loaded_settings
+                or "turnover_ledger_tag_selection" not in loaded_settings
+            )
             and isinstance(getattr(self, "_snapshot", None), dict)
         ):
             loaded_settings = {
                 **loaded_settings,
-                "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
+                **(
+                    {
+                        "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
+                    }
+                    if "no_oa_bank_batch_tag_selection" not in loaded_settings
+                    else {}
+                ),
+                **(
+                    {
+                        "turnover_ledger_tag_selection": self._snapshot.get("turnover_ledger_tag_selection", {}),
+                    }
+                    if "turnover_ledger_tag_selection" not in loaded_settings
+                    else {}
+                ),
             }
         normalized_snapshot = self._normalize_settings(
             loaded_settings,
@@ -166,17 +201,36 @@ class AppSettingsService:
                 self._snapshot["no_oa_bank_batch_tag_selection"],
                 bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             ),
+            "turnover_ledger_tag_selection": self._public_turnover_ledger_tag_selection(
+                self._snapshot["turnover_ledger_tag_selection"],
+                bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            ),
             "pending_invoice_tag_groups": self._public_pending_invoice_tag_groups(
                 self._snapshot["pending_invoice_tag_groups"],
                 version=int(self._snapshot["bank_transaction_tags"]["version"]),
+                group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+            ),
+            "pending_output_invoice_tag_groups": self._public_pending_invoice_tag_groups(
+                self._snapshot["pending_output_invoice_tag_groups"],
+                version=int(self._snapshot["bank_transaction_tags"]["version"]),
+                group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
+            ),
+            INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: self.get_input_invoice_usage_payment_status_rules_payload(
+                can_save=True,
             ),
         }
 
     def get_pending_invoice_settings_payload(self) -> dict[str, Any]:
         payload = self.get_settings_payload()
-        payload["pending_invoice_available_tags"] = active_pending_invoice_rule_tags(
-            self._snapshot["bank_transaction_tags"]
+        payload["pending_invoice_available_tags_expense"] = active_pending_invoice_rule_tags(
+            self._snapshot["bank_transaction_tags"],
+            direction="expense",
         )
+        payload["pending_invoice_available_tags_income"] = active_pending_invoice_rule_tags(
+            self._snapshot["bank_transaction_tags"],
+            direction="income",
+        )
+        payload["pending_invoice_available_tags"] = payload["pending_invoice_available_tags_expense"]
         return payload
 
     def update_settings(
@@ -194,6 +248,7 @@ class AppSettingsService:
         manual_projects: list[dict[str, Any]] | None = None,
         bank_transaction_tags: dict[str, Any] | None = None,
         pending_invoice_tag_groups: dict[str, Any] | None = None,
+        pending_output_invoice_tag_groups: dict[str, Any] | None = None,
         actor_id: str | None = None,
         after_bank_transaction_tag_settings_saved: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
@@ -203,6 +258,7 @@ class AppSettingsService:
             previous_snapshot,
             bank_transaction_tags=bank_transaction_tags,
             pending_invoice_tag_groups=pending_invoice_tag_groups,
+            pending_output_invoice_tag_groups=pending_output_invoice_tag_groups,
         )
         normalized_snapshot = self._normalize_settings(
             {
@@ -235,7 +291,17 @@ class AppSettingsService:
                     if pending_invoice_tag_groups is not None
                     else self._snapshot.get("pending_invoice_tag_groups", {})
                 ),
+                "pending_output_invoice_tag_groups": (
+                    pending_output_invoice_tag_groups
+                    if pending_output_invoice_tag_groups is not None
+                    else self._snapshot.get("pending_output_invoice_tag_groups", {})
+                ),
                 "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
+                "turnover_ledger_tag_selection": self._snapshot.get("turnover_ledger_tag_selection", {}),
+                INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: self._snapshot.get(
+                    INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
+                    {},
+                ),
             },
             validate_pending_invoice_tag_groups=True,
         )
@@ -248,6 +314,7 @@ class AppSettingsService:
             version = int(previous_snapshot["bank_transaction_tags"]["version"]) + 1
             normalized_snapshot["bank_transaction_tags"]["version"] = version
             normalized_snapshot["pending_invoice_tag_groups"]["version"] = version
+            normalized_snapshot["pending_output_invoice_tag_groups"]["version"] = version
             tag_settings_event["new_version"] = version
         if self._oa_role_sync_service is not None:
             self._oa_role_sync_service.sync_access_control(normalized_snapshot)
@@ -298,12 +365,28 @@ class AppSettingsService:
         next_pending_invoice_groups, detached_pending_invoice_references = self._detach_pending_invoice_tag_references(
             previous_snapshot["pending_invoice_tag_groups"],
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
+            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+        )
+        next_pending_output_invoice_groups, detached_pending_output_invoice_references = self._detach_pending_invoice_tag_references(
+            previous_snapshot["pending_output_invoice_tag_groups"],
+            tag_codes=set(normalized["changes"].get("archived_codes") or []),
+            group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
         )
         next_no_oa_selection, detached_no_oa_references = self._detach_no_oa_bank_batch_tag_references(
             previous_snapshot["no_oa_bank_batch_tag_selection"],
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
         )
-        if not normalized["changes"]["changed"] and not detached_pending_invoice_references and not detached_no_oa_references:
+        next_turnover_selection, detached_turnover_references = self._detach_turnover_ledger_tag_references(
+            previous_snapshot["turnover_ledger_tag_selection"],
+            tag_codes=set(normalized["changes"].get("archived_codes") or []),
+        )
+        if (
+            not normalized["changes"]["changed"]
+            and not detached_pending_invoice_references
+            and not detached_pending_output_invoice_references
+            and not detached_no_oa_references
+            and not detached_turnover_references
+        ):
             return self.get_bank_auto_tag_rules_payload(can_save=True)
 
         next_snapshot = dict(self._snapshot)
@@ -312,7 +395,12 @@ class AppSettingsService:
             **next_pending_invoice_groups,
             "version": int(next_tags["version"]),
         }
+        next_snapshot["pending_output_invoice_tag_groups"] = {
+            **next_pending_output_invoice_groups,
+            "version": int(next_tags["version"]),
+        }
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
+        next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
         saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
         self._snapshot = saved_snapshot
         self._configure_category_service(saved_snapshot)
@@ -322,7 +410,9 @@ class AppSettingsService:
             "new_version": int(normalized["new_version"]),
             **normalized["changes"],
             "detached_pending_invoice_tag_references": detached_pending_invoice_references,
+            "detached_pending_output_invoice_tag_references": detached_pending_output_invoice_references,
             "detached_no_oa_bank_batch_tag_references": detached_no_oa_references,
+            "detached_turnover_ledger_tag_references": detached_turnover_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
         if after_bank_auto_tag_rules_saved is not None:
@@ -347,12 +437,28 @@ class AppSettingsService:
         next_pending_invoice_groups, detached_pending_invoice_references = self._detach_pending_invoice_tag_references(
             previous_snapshot["pending_invoice_tag_groups"],
             tag_codes=archived_codes,
+            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+        )
+        next_pending_output_invoice_groups, detached_pending_output_invoice_references = self._detach_pending_invoice_tag_references(
+            previous_snapshot["pending_output_invoice_tag_groups"],
+            tag_codes=archived_codes,
+            group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
         )
         next_no_oa_selection, detached_no_oa_references = self._detach_no_oa_bank_batch_tag_references(
             previous_snapshot["no_oa_bank_batch_tag_selection"],
             tag_codes=archived_codes,
         )
-        if not normalized["changes"]["changed"] and not detached_pending_invoice_references and not detached_no_oa_references:
+        next_turnover_selection, detached_turnover_references = self._detach_turnover_ledger_tag_references(
+            previous_snapshot["turnover_ledger_tag_selection"],
+            tag_codes=archived_codes,
+        )
+        if (
+            not normalized["changes"]["changed"]
+            and not detached_pending_invoice_references
+            and not detached_pending_output_invoice_references
+            and not detached_no_oa_references
+            and not detached_turnover_references
+        ):
             return self.get_bank_auto_tag_rules_payload(can_save=True)
 
         next_snapshot = dict(self._snapshot)
@@ -361,7 +467,12 @@ class AppSettingsService:
             **next_pending_invoice_groups,
             "version": int(next_tags["version"]),
         }
+        next_snapshot["pending_output_invoice_tag_groups"] = {
+            **next_pending_output_invoice_groups,
+            "version": int(next_tags["version"]),
+        }
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
+        next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
         saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
         self._snapshot = saved_snapshot
         self._configure_category_service(saved_snapshot)
@@ -371,7 +482,9 @@ class AppSettingsService:
             "new_version": int(normalized["new_version"]),
             **normalized["changes"],
             "detached_pending_invoice_tag_references": detached_pending_invoice_references,
+            "detached_pending_output_invoice_tag_references": detached_pending_output_invoice_references,
             "detached_no_oa_bank_batch_tag_references": detached_no_oa_references,
+            "detached_turnover_ledger_tag_references": detached_turnover_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
         if after_bank_auto_tag_rules_saved is not None:
@@ -425,6 +538,91 @@ class AppSettingsService:
             }
         )
         return self.get_no_oa_bank_batch_tag_selection_payload()
+
+    def get_turnover_ledger_tag_selection_payload(self) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        return self._public_turnover_ledger_tag_selection(
+            self._snapshot["turnover_ledger_tag_selection"],
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+        )
+
+    def get_input_invoice_usage_payment_status_rules_payload(self, *, can_save: bool = True) -> dict[str, Any]:
+        provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
+            state_store=self._state_store,
+            audit_service=self._audit_service,
+        )
+        return provider.payment_status_rules_payload(can_save=can_save)
+
+    def update_input_invoice_usage_payment_status_rules(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+        after_input_invoice_usage_payment_rules_saved: Callable[[dict[str, object]], None] | None = None,
+    ) -> dict[str, Any]:
+        provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
+            state_store=self._state_store,
+            audit_service=self._audit_service,
+        )
+        try:
+            updated = provider.update_payment_status_rules(
+                payload,
+                actor_id=actor_id,
+                after_saved=after_input_invoice_usage_payment_rules_saved,
+            )
+        except InputInvoiceUsagePaymentRulesValidationError as exc:
+            raise AppSettingsValidationError(exc.error_code, str(exc)) from exc
+        self._refresh_snapshot_from_state_store()
+        return updated
+
+    def turnover_ledger_selected_tag_codes(self) -> list[str]:
+        payload = self.get_turnover_ledger_tag_selection_payload()
+        return [
+            str(code)
+            for code in list(payload.get("selected_tag_codes") or [])
+            if str(code).strip()
+        ]
+
+    def update_turnover_ledger_tag_selection(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        current = self._snapshot["turnover_ledger_tag_selection"]
+        requested_version = BankTransactionCategoryService._normalize_version(
+            payload.get("expected_version", payload.get("version", 0))
+        )
+        if requested_version != int(current.get("version") or 1):
+            raise AppSettingsValidationError(
+                "turnover_ledger_tag_selection_version_conflict",
+                "Turnover ledger tag selection version conflict.",
+            )
+        next_selection = self._normalize_turnover_ledger_tag_selection(
+            {
+                "version": int(current.get("version") or 1) + 1,
+                "selected_tag_codes": payload.get("selected_tag_codes"),
+            },
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            validate=True,
+        )
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["turnover_ledger_tag_selection"] = next_selection
+        if self._state_store is not None:
+            self._state_store.save_app_settings(next_snapshot)
+        self._snapshot = next_snapshot
+        self._configure_category_service(next_snapshot)
+        self._record_turnover_ledger_tag_selection_audit(
+            {
+                "actor_id": actor_id,
+                "old_version": int(current.get("version") or 1),
+                "new_version": int(next_selection.get("version") or 1),
+                "old_selected_tag_codes": list(current.get("selected_tag_codes") or []),
+                "new_selected_tag_codes": list(next_selection.get("selected_tag_codes") or []),
+            }
+        )
+        return self.get_turnover_ledger_tag_selection_payload()
 
     def sync_oa_projects(self, *, actor_id: str) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
@@ -514,6 +712,8 @@ class AppSettingsService:
         if (
             persisted_snapshot["bank_transaction_tags"] != normalized_snapshot["bank_transaction_tags"]
             or persisted_snapshot["pending_invoice_tag_groups"] != normalized_snapshot["pending_invoice_tag_groups"]
+            or persisted_snapshot["no_oa_bank_batch_tag_selection"] != normalized_snapshot["no_oa_bank_batch_tag_selection"]
+            or persisted_snapshot["turnover_ledger_tag_selection"] != normalized_snapshot["turnover_ledger_tag_selection"]
         ):
             raise BankAutoTagRulesPersistenceError(
                 "bank_auto_tag_rules_persistence_failed",
@@ -837,11 +1037,27 @@ class AppSettingsService:
             raw_payload.get("pending_invoice_tag_groups"),
             bank_transaction_tags=bank_transaction_tags,
             validate=validate_pending_invoice_tag_groups,
+            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+        )
+        pending_output_invoice_tag_groups = AppSettingsService._normalize_pending_invoice_tag_groups(
+            raw_payload.get("pending_output_invoice_tag_groups"),
+            bank_transaction_tags=bank_transaction_tags,
+            validate=validate_pending_invoice_tag_groups,
+            group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
         )
         no_oa_bank_batch_tag_selection = AppSettingsService._normalize_no_oa_bank_batch_tag_selection(
             raw_payload.get("no_oa_bank_batch_tag_selection"),
             bank_transaction_tags=bank_transaction_tags,
             validate=False,
+        )
+        turnover_ledger_tag_selection = AppSettingsService._normalize_turnover_ledger_tag_selection(
+            raw_payload.get("turnover_ledger_tag_selection"),
+            bank_transaction_tags=bank_transaction_tags,
+            validate=False,
+            default_all_external="turnover_ledger_tag_selection" not in raw_payload,
+        )
+        input_invoice_usage_payment_rules = normalize_payment_status_rules_settings(
+            raw_payload.get(INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY)
         )
         return {
             "completed_project_ids": completed_ids,
@@ -861,7 +1077,10 @@ class AppSettingsService:
             "oa_invoice_offset": {"applicant_names": applicant_names},
             "bank_transaction_tags": bank_transaction_tags,
             "pending_invoice_tag_groups": pending_invoice_tag_groups,
+            "pending_output_invoice_tag_groups": pending_output_invoice_tag_groups,
             "no_oa_bank_batch_tag_selection": no_oa_bank_batch_tag_selection,
+            "turnover_ledger_tag_selection": turnover_ledger_tag_selection,
+            INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: input_invoice_usage_payment_rules,
         }
 
     @staticmethod
@@ -875,7 +1094,9 @@ class AppSettingsService:
         *,
         bank_transaction_tags: dict[str, Any],
         validate: bool,
+        group_labels: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        labels = group_labels or PENDING_INVOICE_TAG_GROUP_LABELS
         raw_payload = value if isinstance(value, dict) else {}
         version = BankTransactionCategoryService._normalize_version(
             raw_payload.get("version", bank_transaction_tags.get("version", 1))
@@ -893,7 +1114,7 @@ class AppSettingsService:
         }
         groups: dict[str, dict[str, Any]] = {}
         claimed_codes: dict[str, str] = {}
-        for group_id, label in PENDING_INVOICE_TAG_GROUP_LABELS.items():
+        for group_id, label in labels.items():
             raw_group = raw_groups.get(group_id)
             if isinstance(raw_group, dict):
                 raw_codes = raw_group.get("tag_codes")
@@ -959,7 +1180,13 @@ class AppSettingsService:
         }
 
     @staticmethod
-    def _public_pending_invoice_tag_groups(payload: dict[str, Any], *, version: int) -> dict[str, Any]:
+    def _public_pending_invoice_tag_groups(
+        payload: dict[str, Any],
+        *,
+        version: int,
+        group_labels: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        labels = group_labels or PENDING_INVOICE_TAG_GROUP_LABELS
         groups = payload.get("groups") if isinstance(payload.get("groups"), dict) else {}
         return {
             "version": version,
@@ -975,7 +1202,7 @@ class AppSettingsService:
                     if isinstance(groups.get(group_id), dict)
                     else [],
                 }
-                for group_id, label in PENDING_INVOICE_TAG_GROUP_LABELS.items()
+                for group_id, label in labels.items()
             },
         }
 
@@ -987,6 +1214,15 @@ class AppSettingsService:
             if isinstance(definition, dict)
             and str(definition.get("code") or "").strip()
             and str(definition.get("status") or "active") == "active"
+        ]
+
+    @staticmethod
+    def _active_turnover_ledger_tag_definitions(bank_transaction_tags: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            definition
+            for definition in AppSettingsService._active_bank_transaction_tag_definitions(bank_transaction_tags)
+            if is_external_turnover_definition(definition)
+            and normalize_turnover_action_type(definition.get("turnover_action_type"))
         ]
 
     @staticmethod
@@ -1073,6 +1309,105 @@ class AppSettingsService:
             "active_tags": active_tags,
         }
 
+    @staticmethod
+    def _normalize_turnover_ledger_tag_selection(
+        value: Any,
+        *,
+        bank_transaction_tags: dict[str, Any],
+        validate: bool,
+        default_all_external: bool = False,
+    ) -> dict[str, Any]:
+        raw_payload = value if isinstance(value, dict) else {}
+        version = BankTransactionCategoryService._normalize_version(
+            raw_payload.get("version", DEFAULT_TURNOVER_LEDGER_TAG_SELECTION["version"])
+        )
+        if version <= 0:
+            version = int(DEFAULT_TURNOVER_LEDGER_TAG_SELECTION["version"])
+        active_external_by_code = {
+            str(definition.get("code") or "").strip(): definition
+            for definition in AppSettingsService._active_turnover_ledger_tag_definitions(bank_transaction_tags)
+            if str(definition.get("code") or "").strip()
+        }
+        definitions_by_code = {
+            str(definition.get("code") or "").strip(): definition
+            for definition in list(bank_transaction_tags.get("definitions") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+        raw_codes = (
+            list(active_external_by_code.keys())
+            if default_all_external and "selected_tag_codes" not in raw_payload
+            else list(raw_payload.get("selected_tag_codes") or [])
+        )
+        selected_tag_codes: list[str] = []
+        seen: set[str] = set()
+        for item in raw_codes:
+            tag_code = str(item or "").strip()
+            if not tag_code or tag_code in seen:
+                continue
+            definition = definitions_by_code.get(tag_code)
+            if not isinstance(definition, dict):
+                if validate:
+                    raise AppSettingsValidationError(
+                        "unknown_bank_transaction_tag",
+                        f"Unknown bank transaction tag code in turnover ledger selection: {tag_code}",
+                    )
+                continue
+            if tag_code not in active_external_by_code:
+                if validate:
+                    raise AppSettingsValidationError(
+                        "invalid_turnover_ledger_tag",
+                        f"Bank transaction tag cannot enter turnover ledger selection: {tag_code}",
+                    )
+                selected_tag_codes.append(tag_code)
+                seen.add(tag_code)
+                continue
+            seen.add(tag_code)
+            selected_tag_codes.append(tag_code)
+        return {
+            "version": version,
+            "selected_tag_codes": selected_tag_codes,
+        }
+
+    @staticmethod
+    def _public_turnover_ledger_tag_selection(
+        payload: dict[str, Any],
+        *,
+        bank_transaction_tags: dict[str, Any],
+    ) -> dict[str, Any]:
+        active_tags = [
+            {
+                "code": str(definition.get("code") or ""),
+                "label": str(definition.get("label") or definition.get("code") or ""),
+                "path": list(definition.get("path") or []),
+                "source": str(definition.get("source") or ""),
+                "status": str(definition.get("status") or "active"),
+                "output_primary_label": str(
+                    definition.get("output_primary_label") or definition.get("label") or definition.get("code") or ""
+                ),
+                "output_sub_label": str(definition.get("output_sub_label") or ""),
+                "turnover_role": str(definition.get("turnover_role") or EXTERNAL_TURNOVER_ROLE),
+                "turnover_action_type": str(definition.get("turnover_action_type") or ""),
+            }
+            for definition in AppSettingsService._active_turnover_ledger_tag_definitions(bank_transaction_tags)
+        ]
+        active_codes = {tag["code"] for tag in active_tags}
+        selected = [
+            str(tag_code)
+            for tag_code in list(payload.get("selected_tag_codes") or [])
+            if str(tag_code) in active_codes
+        ]
+        inactive_selected = [
+            str(tag_code)
+            for tag_code in list(payload.get("selected_tag_codes") or [])
+            if str(tag_code) and str(tag_code) not in active_codes
+        ]
+        return {
+            "version": int(payload.get("version") or 1),
+            "selected_tag_codes": selected,
+            "inactive_selected_tag_codes": inactive_selected,
+            "active_tags": active_tags,
+        }
+
     def _configure_category_service(self, snapshot: dict[str, Any]) -> None:
         tag_dictionary = (
             snapshot.get("bank_transaction_tags")
@@ -1091,12 +1426,20 @@ class AppSettingsService:
         groups = AppSettingsService._public_pending_invoice_tag_groups(
             snapshot["pending_invoice_tag_groups"],
             version=int(tags["version"]),
+            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+        )
+        output_groups = AppSettingsService._public_pending_invoice_tag_groups(
+            snapshot["pending_output_invoice_tag_groups"],
+            version=int(tags["version"]),
+            group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
         )
         tags_without_version = {key: value for key, value in tags.items() if key != "version"}
         groups_without_version = {key: value for key, value in groups.items() if key != "version"}
+        output_groups_without_version = {key: value for key, value in output_groups.items() if key != "version"}
         return {
             "bank_transaction_tags": tags_without_version,
             "pending_invoice_tag_groups": groups_without_version,
+            "pending_output_invoice_tag_groups": output_groups_without_version,
         }
 
     def _prepare_tag_settings_event(
@@ -1115,12 +1458,23 @@ class AppSettingsService:
         groups_changed = (
             previous_comparable["pending_invoice_tag_groups"]
             != next_comparable["pending_invoice_tag_groups"]
+            or previous_comparable["pending_output_invoice_tag_groups"]
+            != next_comparable["pending_output_invoice_tag_groups"]
         )
         if not tags_changed and not groups_changed:
             return None
         affected_groups = self._affected_pending_invoice_groups(
             previous_snapshot["pending_invoice_tag_groups"],
             next_snapshot["pending_invoice_tag_groups"],
+            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+        )
+        affected_groups.extend(
+            f"income:{group_id}"
+            for group_id in self._affected_pending_invoice_groups(
+                previous_snapshot["pending_output_invoice_tag_groups"],
+                next_snapshot["pending_output_invoice_tag_groups"],
+                group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
+            )
         )
         return {
             "actor_id": str(actor_id or "workbench_settings").strip() or "workbench_settings",
@@ -1136,11 +1490,14 @@ class AppSettingsService:
     def _affected_pending_invoice_groups(
         previous_groups_payload: dict[str, Any],
         next_groups_payload: dict[str, Any],
+        *,
+        group_labels: dict[str, str] | None = None,
     ) -> list[str]:
+        labels = group_labels or PENDING_INVOICE_TAG_GROUP_LABELS
         previous_groups = previous_groups_payload.get("groups") if isinstance(previous_groups_payload.get("groups"), dict) else {}
         next_groups = next_groups_payload.get("groups") if isinstance(next_groups_payload.get("groups"), dict) else {}
         affected = []
-        for group_id in PENDING_INVOICE_TAG_GROUP_LABELS:
+        for group_id in labels:
             previous_codes = (
                 list(previous_groups.get(group_id, {}).get("tag_codes") or [])
                 if isinstance(previous_groups.get(group_id), dict)
@@ -1161,6 +1518,8 @@ class AppSettingsService:
         definitions = list(tags.get("definitions") or [])
         groups = snapshot["pending_invoice_tag_groups"].get("groups")
         groups = groups if isinstance(groups, dict) else {}
+        output_groups = snapshot["pending_output_invoice_tag_groups"].get("groups")
+        output_groups = output_groups if isinstance(output_groups, dict) else {}
         return {
             "version": int(tags.get("version") or 1),
             "definition_count": len(definitions),
@@ -1174,6 +1533,12 @@ class AppSettingsService:
                 if isinstance(groups.get(group_id), dict)
                 else 0
                 for group_id in PENDING_INVOICE_TAG_GROUP_LABELS
+            },
+            "output_group_tag_counts": {
+                group_id: len(list(output_groups.get(group_id, {}).get("tag_codes") or []))
+                if isinstance(output_groups.get(group_id), dict)
+                else 0
+                for group_id in PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS
             },
         }
 
@@ -1227,8 +1592,14 @@ class AppSettingsService:
                 "detached_pending_invoice_tag_references": list(
                     event.get("detached_pending_invoice_tag_references") or []
                 ),
+                "detached_pending_output_invoice_tag_references": list(
+                    event.get("detached_pending_output_invoice_tag_references") or []
+                ),
                 "detached_no_oa_bank_batch_tag_references": list(
                     event.get("detached_no_oa_bank_batch_tag_references") or []
+                ),
+                "detached_turnover_ledger_tag_references": list(
+                    event.get("detached_turnover_ledger_tag_references") or []
                 ),
             },
         )
@@ -1249,12 +1620,29 @@ class AppSettingsService:
             },
         )
 
+    def _record_turnover_ledger_tag_selection_audit(self, event: dict[str, Any]) -> None:
+        if self._audit_service is None:
+            return
+        self._audit_service.record_action(
+            actor_id=str(event.get("actor_id") or "turnover_ledger_tag_selection"),
+            action="turnover_ledger_tag_selection_updated",
+            entity_type="app_settings",
+            entity_id="turnover_ledger_tag_selection",
+            metadata={
+                "old_version": int(event.get("old_version") or 0),
+                "new_version": int(event.get("new_version") or 0),
+                "old_selected_tag_codes": list(event.get("old_selected_tag_codes") or []),
+                "new_selected_tag_codes": list(event.get("new_selected_tag_codes") or []),
+            },
+        )
+
     @staticmethod
     def _validate_bank_transaction_tag_settings_update(
         previous_snapshot: dict[str, Any],
         *,
         bank_transaction_tags: dict[str, Any] | None,
         pending_invoice_tag_groups: dict[str, Any] | None,
+        pending_output_invoice_tag_groups: dict[str, Any] | None = None,
     ) -> None:
         previous_tags = previous_snapshot["bank_transaction_tags"]
         previous_version = int(previous_tags.get("version") or 1)
@@ -1296,6 +1684,14 @@ class AppSettingsService:
         mapped_codes = AppSettingsService._pending_invoice_tag_codes_for_archive_guard(
             pending_invoice_tag_groups,
             fallback_groups=previous_snapshot["pending_invoice_tag_groups"],
+            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+        )
+        mapped_codes.update(
+            AppSettingsService._pending_invoice_tag_codes_for_archive_guard(
+                pending_output_invoice_tag_groups,
+                fallback_groups=previous_snapshot["pending_output_invoice_tag_groups"],
+                group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
+            )
         )
         blocked_codes = sorted(newly_archived_codes.intersection(mapped_codes))
         if blocked_codes:
@@ -1309,13 +1705,15 @@ class AppSettingsService:
         value: Any,
         *,
         fallback_groups: dict[str, Any],
+        group_labels: dict[str, str] | None = None,
     ) -> set[str]:
+        labels = group_labels or PENDING_INVOICE_TAG_GROUP_LABELS
         raw_payload = value if isinstance(value, dict) else fallback_groups
         raw_groups = raw_payload.get("groups") if isinstance(raw_payload.get("groups"), dict) else raw_payload
         if not isinstance(raw_groups, dict):
             raw_groups = {}
         mapped_codes: set[str] = set()
-        for group_id in PENDING_INVOICE_TAG_GROUP_LABELS:
+        for group_id in labels:
             raw_group = raw_groups.get(group_id)
             if isinstance(raw_group, dict):
                 raw_codes = raw_group.get("tag_codes")
@@ -1332,12 +1730,27 @@ class AppSettingsService:
 
     @staticmethod
     def _pending_invoice_reference_map(value: Any) -> dict[str, list[dict[str, Any]]]:
+        return AppSettingsService._pending_invoice_reference_map_for_labels(
+            value,
+            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+            domain="pending_invoice_tag_groups",
+            label_prefix="待找发票规则",
+        )
+
+    @staticmethod
+    def _pending_invoice_reference_map_for_labels(
+        value: Any,
+        *,
+        group_labels: dict[str, str],
+        domain: str,
+        label_prefix: str,
+    ) -> dict[str, list[dict[str, Any]]]:
         raw_payload = value if isinstance(value, dict) else {}
         raw_groups = raw_payload.get("groups") if isinstance(raw_payload.get("groups"), dict) else raw_payload
         if not isinstance(raw_groups, dict):
             raw_groups = {}
         references: dict[str, list[dict[str, Any]]] = {}
-        for group_id, default_label in PENDING_INVOICE_TAG_GROUP_LABELS.items():
+        for group_id, default_label in group_labels.items():
             group = raw_groups.get(group_id)
             if isinstance(group, dict):
                 tag_codes = group.get("tag_codes")
@@ -1354,8 +1767,8 @@ class AppSettingsService:
                     continue
                 references.setdefault(tag_code, []).append(
                     {
-                        "domain": "pending_invoice_tag_groups",
-                        "label": f"待找发票规则：{label}",
+                        "domain": domain,
+                        "label": f"{label_prefix}：{label}",
                         "tag_code": tag_code,
                     }
                 )
@@ -1366,7 +1779,9 @@ class AppSettingsService:
         value: Any,
         *,
         tag_codes: set[str],
+        group_labels: dict[str, str] | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, str]]]:
+        labels = group_labels or PENDING_INVOICE_TAG_GROUP_LABELS
         normalized_codes = {str(code or "").strip() for code in tag_codes if str(code or "").strip()}
         raw_payload = value if isinstance(value, dict) else {}
         raw_groups = raw_payload.get("groups") if isinstance(raw_payload.get("groups"), dict) else raw_payload
@@ -1375,7 +1790,7 @@ class AppSettingsService:
 
         next_groups: dict[str, dict[str, Any]] = {}
         detached: list[dict[str, str]] = []
-        for group_id, default_label in PENDING_INVOICE_TAG_GROUP_LABELS.items():
+        for group_id, default_label in labels.items():
             raw_group = raw_groups.get(group_id)
             if isinstance(raw_group, dict):
                 label = str(raw_group.get("label") or default_label)
@@ -1403,6 +1818,34 @@ class AppSettingsService:
 
     @staticmethod
     def _detach_no_oa_bank_batch_tag_references(
+        value: Any,
+        *,
+        tag_codes: set[str],
+    ) -> tuple[dict[str, Any], list[dict[str, str]]]:
+        normalized_codes = {str(code or "").strip() for code in tag_codes if str(code or "").strip()}
+        raw_payload = value if isinstance(value, dict) else {}
+        selected: list[str] = []
+        detached: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in list(raw_payload.get("selected_tag_codes") or []):
+            tag_code = str(item or "").strip()
+            if not tag_code or tag_code in seen:
+                continue
+            seen.add(tag_code)
+            if tag_code in normalized_codes:
+                detached.append({"tag_code": tag_code})
+                continue
+            selected.append(tag_code)
+        current_version = BankTransactionCategoryService._normalize_version(raw_payload.get("version", 1)) or 1
+        next_version = current_version + 1 if detached else current_version
+        return {
+            **dict(raw_payload),
+            "version": next_version,
+            "selected_tag_codes": selected,
+        }, detached
+
+    @staticmethod
+    def _detach_turnover_ledger_tag_references(
         value: Any,
         *,
         tag_codes: set[str],

@@ -90,7 +90,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(json.loads(bank_response.body)["id"], "bank-detail")
         self.assertEqual(json.loads(relation_response.body)["kind"], "bank")
         self.assertTrue(json.loads(preview_response.body)["canPreview"])
-        self.assertFalse(json.loads(history_response.body)["sourceAvailable"])
+        self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
         self.assertEqual(json.loads(history_response.body)["receipts"], [])
 
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
@@ -115,6 +115,76 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(missing_detail.status_code, 404)
         self.assertEqual(json.loads(missing_detail.body)["error"]["code"], "invoice_not_found")
 
+    def test_lifecycle_write_routes_overlay_rows_and_create_real_receipt_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            invoice = self._invoice("out-lifecycle", "3001", "生命周期客户", total_with_tax="100.00")
+            red_invoice = self._invoice("out-red", "3002", "生命周期客户", total_with_tax="-100.00")
+            bank = self._bank("bank-lifecycle", "100.00", TransactionDirection.INFLOW)
+            pair_service = WorkbenchPairRelationService()
+            pair_service.create_active_relation(
+                case_id="case-lifecycle",
+                row_ids=[invoice.id, bank.id],
+                row_types=["invoice", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
+            )
+            self._install_service(app, invoices=[invoice, red_invoice], transactions=[bank], pair_service=pair_service)
+            rows = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"]
+            row = next(item for item in rows if item["invoiceId"] == "out-lifecycle")
+
+            status_response = app.handle_request(
+                "PUT",
+                f"/api/output-invoice-collections/rows/{row['id']}/collection-status",
+                body=json.dumps(
+                    {
+                        "statusCode": "pending_red_invoice",
+                        "expectedCollectionDate": "2026-06-20",
+                        "note": "待冲红",
+                        "expectedVersion": 0,
+                    }
+                ),
+            )
+            reminder_response = app.handle_request(
+                "PUT",
+                f"/api/output-invoice-collections/rows/{row['id']}/collection-reminder",
+                body=json.dumps({"remindAt": "2026-06-15T09:00:00+08:00", "channel": "oa", "note": "提醒"}),
+            )
+            red_relation_response = app.handle_request(
+                "POST",
+                f"/api/output-invoice-collections/rows/{row['id']}/red-invoice-relations",
+                body=json.dumps(
+                    {
+                        "relatedInvoiceIdentityKey": "id:out-red",
+                        "relatedInvoiceId": "out-red",
+                        "relationType": "red_invoice",
+                        "evidence": "客户邮件确认",
+                    }
+                ),
+            )
+            receipt_response = app.handle_request(
+                "POST",
+                f"/api/output-invoice-collections/rows/{row['id']}/receipts",
+                body=json.dumps({"bankTransactionId": "bank-lifecycle", "idempotencyKey": "receipt-api-1"}),
+            )
+            history_response = app.handle_request(
+                "GET",
+                "/api/output-invoice-collections/receipts/history?invoice_id=out-lifecycle",
+            )
+            refreshed_row = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"][0]
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(reminder_response.status_code, 200)
+        self.assertEqual(red_relation_response.status_code, 200)
+        self.assertEqual(receipt_response.status_code, 200)
+        self.assertEqual(refreshed_row["collectionStatus"]["code"], "pending_red_invoice")
+        self.assertEqual(refreshed_row["collectionStatus"]["reminder"]["channel"], "oa")
+        self.assertTrue(any(item["source"] == "manual" for item in refreshed_row["redInvoiceRelation"]["summaries"]))
+        self.assertEqual(refreshed_row["receipt"]["status"], "issued")
+        self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
+        self.assertEqual(json.loads(history_response.body)["receipts"][0]["status"], "issued")
+
     @staticmethod
     def _install_service(
         app: object,
@@ -133,6 +203,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         app._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=import_service,
             pair_relation_service=relation_service,
+            lifecycle_repository=getattr(app, "_output_invoice_collection_lifecycle_repository", None),
         )
 
     @staticmethod
