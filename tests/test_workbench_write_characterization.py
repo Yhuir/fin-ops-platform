@@ -8,6 +8,7 @@ from unittest.mock import patch
 from fin_ops_platform.app.server import Application, build_application
 from fin_ops_platform.app.worker import _run_workbench_matching_dirty_queue_loop
 from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
+from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from tests.test_workbench_uow_contract import (
     _RecordingConnection,
@@ -351,6 +352,57 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertGreater(first_outbox_count, 0)
         self.assertEqual(len(writer.calls), first_outbox_count)
 
+    def test_confirm_link_uow_returns_failed_idempotency_response_without_retry(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+        app._workbench_confirm_link_uow_override = WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=_RecordingRepositoryFactory(),
+            read_model_refresh_writer=writer,
+            idempotency_store=idempotency_store,
+        )
+        request_payload = {
+            "month": "2026-03",
+            "row_ids": row_ids,
+            "case_id": "CASE-UOW-FAILED",
+            "idempotency_key": "confirm:uow-idem-failed",
+        }
+        request_fingerprint = workbench_request_fingerprint(
+            tenant_id="default",
+            actor_id="test-user-id",
+            action_name="confirm_link",
+            payload=request_payload,
+        )
+        idempotency_store.reserve(
+            tenant_id="default",
+            actor_id="test-user-id",
+            action_name="confirm_link",
+            idempotency_key="confirm:uow-idem-failed",
+            request_fingerprint=request_fingerprint,
+            request_payload=request_payload,
+        )
+        idempotency_store.mark_failed(
+            tenant_id="default",
+            actor_id="test-user-id",
+            action_name="confirm_link",
+            idempotency_key="confirm:uow-idem-failed",
+            request_fingerprint=request_fingerprint,
+            response_payload={"error": "previous_failure", "token": "SECRET"},
+        )
+
+        response = self._post(app, "/api/workbench/actions/confirm-link", request_payload)
+
+        self.assertEqual(response.status_code, 409, response.body)
+        payload = _json_response(response)
+        self.assertEqual(payload["error"], "idempotency_key_failed")
+        self.assertEqual(payload["idempotency_key"], "confirm:uow-idem-failed")
+        self.assertFalse(payload["retryable"])
+        self.assertEqual(connection.opened, 0)
+        self.assertEqual(writer.calls, [])
+
     def test_duplicate_confirm_link_without_case_id_allocates_new_case_and_replaces_active_relation(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
@@ -502,6 +554,55 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(len(persisted), 1)
         self.assertGreater(first_outbox_count, 0)
         self.assertEqual(len(writer.calls), first_outbox_count)
+
+    def test_cancel_link_uow_returns_failed_idempotency_response_before_relation_lookup(self) -> None:
+        app = self._build_app()
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+        app._workbench_cancel_link_uow_override = WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=_RecordingRepositoryFactory(),
+            read_model_refresh_writer=writer,
+            idempotency_store=idempotency_store,
+        )
+        request_payload = {
+            "month": "2026-03",
+            "row_id": "missing-row",
+            "idempotency_key": "cancel:uow-idem-failed",
+        }
+        request_fingerprint = workbench_request_fingerprint(
+            tenant_id="default",
+            actor_id="test-user-id",
+            action_name="cancel_link",
+            payload=request_payload,
+        )
+        idempotency_store.reserve(
+            tenant_id="default",
+            actor_id="test-user-id",
+            action_name="cancel_link",
+            idempotency_key="cancel:uow-idem-failed",
+            request_fingerprint=request_fingerprint,
+            request_payload=request_payload,
+        )
+        idempotency_store.mark_failed(
+            tenant_id="default",
+            actor_id="test-user-id",
+            action_name="cancel_link",
+            idempotency_key="cancel:uow-idem-failed",
+            request_fingerprint=request_fingerprint,
+            response_payload={"error": "previous_failure"},
+        )
+
+        response = self._post(app, "/api/workbench/actions/cancel-link", request_payload)
+
+        self.assertEqual(response.status_code, 409, response.body)
+        payload = _json_response(response)
+        self.assertEqual(payload["error"], "idempotency_key_failed")
+        self.assertEqual(payload["idempotency_key"], "cancel:uow-idem-failed")
+        self.assertFalse(payload["retryable"])
+        self.assertEqual(connection.opened, 0)
+        self.assertEqual(writer.calls, [])
 
     def test_cancel_link_uow_outbox_failure_restores_relation(self) -> None:
         app = self._build_app()

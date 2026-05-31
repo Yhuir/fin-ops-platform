@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.common import jsonb
-from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotencyRecord
+from fin_ops_platform.services.workbench_idempotency import (
+    WorkbenchIdempotencyRecord,
+    WorkbenchIdempotencyReservation,
+)
 
 
 _COLUMNS = """
@@ -62,7 +65,7 @@ class PostgresWorkbenchIdempotencyRepository:
         request_fingerprint: str,
         request_payload: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
-    ) -> WorkbenchIdempotencyRecord:
+    ) -> WorkbenchIdempotencyReservation:
         created_at = _utcnow()
         storage = WorkbenchIdempotencyRecord(
             tenant_id=tenant_id,
@@ -77,17 +80,64 @@ class PostgresWorkbenchIdempotencyRepository:
         ).to_storage_payload()
         row = self._executor.fetch_one(
             f"""
-            insert into app.workbench_idempotency_records (
-                {_COLUMNS}
+            with inserted as (
+                insert into app.workbench_idempotency_records (
+                    {_COLUMNS}
+                )
+                values (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s
+                )
+                on conflict (tenant_id, actor_id, idempotency_key) do nothing
+                returning 'inserted' as reservation_outcome, true as inserted, {_COLUMNS}
+            ),
+            locked as (
+                select {_COLUMNS}
+                from app.workbench_idempotency_records
+                where tenant_id = %s
+                  and actor_id = %s
+                  and idempotency_key = %s
+                  and not exists (select 1 from inserted)
+                for update
+            ),
+            taken_over as (
+                update app.workbench_idempotency_records target
+                set action_name = %s,
+                    request_fingerprint = %s,
+                    status = 'reserved',
+                    request_payload = %s,
+                    response_payload = %s,
+                    source_versions = %s,
+                    outbox_event_ids = %s,
+                    created_at = %s,
+                    completed_at = null,
+                    expires_at = %s,
+                    updated_at = now()
+                where target.tenant_id = %s
+                  and target.actor_id = %s
+                  and target.idempotency_key = %s
+                  and exists (
+                      select 1
+                      from locked
+                      where locked.status = 'reserved'
+                        and locked.request_fingerprint = %s
+                        and locked.expires_at is not null
+                        and locked.expires_at <= %s
+                  )
+                returning 'taken_over_expired' as reservation_outcome, false as inserted, {_COLUMNS}
+            ),
+            existing as (
+                select 'existing' as reservation_outcome, false as inserted, {_COLUMNS}
+                from locked
+                where not exists (select 1 from taken_over)
             )
-            values (
-                %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s
-            )
-            on conflict (tenant_id, actor_id, idempotency_key) do update
-            set updated_at = app.workbench_idempotency_records.updated_at
-            returning {_COLUMNS}
+            select * from inserted
+            union all
+            select * from taken_over
+            union all
+            select * from existing
+            limit 1
             """,
             (
                 storage["tenant_id"],
@@ -103,12 +153,33 @@ class PostgresWorkbenchIdempotencyRepository:
                 storage["created_at"],
                 storage["completed_at"],
                 storage["expires_at"],
+                storage["tenant_id"],
+                storage["actor_id"],
+                storage["idempotency_key"],
+                storage["action_name"],
+                storage["request_fingerprint"],
+                jsonb(storage["request_payload"]),
+                jsonb(storage["response_payload"]),
+                jsonb(storage["source_versions"]),
+                jsonb(storage["outbox_event_ids"]),
+                storage["created_at"],
+                storage["expires_at"],
+                storage["tenant_id"],
+                storage["actor_id"],
+                storage["idempotency_key"],
+                storage["request_fingerprint"],
+                storage["created_at"],
             ),
         )
         record = _record_from_row(row)
         if record is None:
             raise RuntimeError("failed to reserve Workbench idempotency record")
-        return record
+        outcome = str((row or {}).get("reservation_outcome") or "")
+        return WorkbenchIdempotencyReservation(
+            record=record,
+            created=bool((row or {}).get("inserted", outcome == "inserted")),
+            taken_over_expired=outcome == "taken_over_expired" or bool((row or {}).get("taken_over_expired")),
+        )
 
     def commit(
         self,

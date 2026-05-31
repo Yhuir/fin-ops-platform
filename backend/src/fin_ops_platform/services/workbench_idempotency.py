@@ -111,6 +111,54 @@ class WorkbenchIdempotencyKeyConflict(ValueError):
         }
 
 
+class WorkbenchIdempotencyInProgress(RuntimeError):
+    status_code = 409
+
+    def __init__(self, *, idempotency_key: str, action_name: str) -> None:
+        super().__init__("same idempotency key is already processing an identical Workbench request")
+        self.idempotency_key = idempotency_key
+        self.action_name = action_name
+
+    def to_response_payload(self) -> dict[str, Any]:
+        return {
+            "success": False,
+            "error": "idempotency_key_in_progress",
+            "idempotency_key": self.idempotency_key,
+            "action_name": self.action_name,
+            "retryable": True,
+            "message": "The same idempotency key is already processing an identical Workbench request.",
+        }
+
+
+class WorkbenchIdempotencyFailed(RuntimeError):
+    status_code = 409
+
+    def __init__(self, *, idempotency_key: str, action_name: str) -> None:
+        super().__init__("same idempotency key belongs to a failed Workbench request")
+        self.idempotency_key = idempotency_key
+        self.action_name = action_name
+
+    def to_response_payload(self) -> dict[str, Any]:
+        return {
+            "success": False,
+            "error": "idempotency_key_failed",
+            "idempotency_key": self.idempotency_key,
+            "action_name": self.action_name,
+            "retryable": False,
+            "message": "The same idempotency key belongs to a failed Workbench request. Use a new idempotency key to retry.",
+        }
+
+
+@dataclass(frozen=True)
+class WorkbenchIdempotencyReservation:
+    record: WorkbenchIdempotencyRecord
+    created: bool
+    taken_over_expired: bool = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.record, name)
+
+
 class InMemoryWorkbenchIdempotencyRepository:
     def __init__(self) -> None:
         self._records: dict[tuple[str, str, str], WorkbenchIdempotencyRecord] = {}
@@ -133,7 +181,31 @@ class InMemoryWorkbenchIdempotencyRepository:
         request_fingerprint: str,
         request_payload: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
-    ) -> WorkbenchIdempotencyRecord:
+    ) -> WorkbenchIdempotencyReservation:
+        identity = (tenant_id, actor_id, idempotency_key)
+        now = _utcnow()
+        existing = self._records.get(identity)
+        if existing is not None:
+            if (
+                existing.status == "reserved"
+                and existing.request_fingerprint == request_fingerprint
+                and is_workbench_idempotency_reserved_expired(existing, now=now)
+            ):
+                record = WorkbenchIdempotencyRecord(
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action_name=action_name,
+                    idempotency_key=idempotency_key,
+                    request_fingerprint=request_fingerprint,
+                    status="reserved",
+                    request_payload=request_payload or {},
+                    created_at=now,
+                    expires_at=expires_at,
+                )
+                self._records[identity] = record
+                return WorkbenchIdempotencyReservation(record=record, created=False, taken_over_expired=True)
+            return WorkbenchIdempotencyReservation(record=existing, created=False)
+
         record = WorkbenchIdempotencyRecord(
             tenant_id=tenant_id,
             actor_id=actor_id,
@@ -142,11 +214,11 @@ class InMemoryWorkbenchIdempotencyRepository:
             request_fingerprint=request_fingerprint,
             status="reserved",
             request_payload=request_payload or {},
-            created_at=_utcnow(),
+            created_at=now,
             expires_at=expires_at,
         )
         self._records[record.unique_identity] = record
-        return record
+        return WorkbenchIdempotencyReservation(record=record, created=True)
 
     def commit(
         self,
@@ -199,8 +271,8 @@ class InMemoryWorkbenchIdempotencyRepository:
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
             status="failed",
-            request_payload=existing.request_payload if existing is not None else {},
-            response_payload=response_payload or {},
+            request_payload=_sanitize_payload(existing.request_payload) if existing is not None else {},
+            response_payload=_sanitize_payload(response_payload or {}),
             created_at=existing.created_at if existing is not None else _utcnow(),
             completed_at=_utcnow(),
             expires_at=existing.expires_at if existing is not None else None,
@@ -228,6 +300,23 @@ def workbench_request_fingerprint(
     }
     encoded = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def is_workbench_idempotency_reserved_expired(record: Any, *, now: datetime | None = None) -> bool:
+    status = _value(record, "status")
+    if status != "reserved":
+        return False
+
+    expires_at = _datetime_value(_value(record, "expires_at"))
+    if expires_at is None:
+        return False
+
+    current = now or _utcnow()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= current
 
 
 def _fingerprint_payload(value: Any) -> Any:
@@ -265,6 +354,25 @@ def _sanitize_payload(value: Any) -> Any:
 def _is_sensitive_key(key: str) -> bool:
     normalized = key.lower()
     return normalized in _SENSITIVE_KEYS or any(token in normalized for token in ("secret", "token", "password", "cookie"))
+
+
+def _value(record: Any, name: str) -> Any:
+    if isinstance(record, WorkbenchIdempotencyRecord):
+        return getattr(record, name)
+    if isinstance(record, dict):
+        return record.get(name)
+    return getattr(record, name, None)
+
+
+def _datetime_value(value: Any) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _datetime_to_storage(value: datetime | None) -> str | None:

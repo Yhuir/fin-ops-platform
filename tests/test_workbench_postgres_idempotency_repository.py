@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,6 +10,7 @@ from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.workbench_idempotency import (
     InMemoryWorkbenchIdempotencyRepository,
     WorkbenchIdempotencyRecord,
+    WorkbenchIdempotencyReservation,
 )
 
 
@@ -119,6 +120,73 @@ class WorkbenchPostgresIdempotencyRepositoryTests(unittest.TestCase):
         self.assertNotIn("SECRET", repr(stored_request_payload))
         self.assertNotIn("password", stored_request_payload)
 
+    def test_transaction_bound_reserve_reports_existing_reserved_without_nested_transaction(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+            PostgresWorkbenchIdempotencyRepository,
+        )
+
+        connection = _RecordingSqlExecutor()
+        transaction = _RecordingSqlExecutor(rows=[_record_row(status="reserved", inserted=False)])
+        repository = PostgresWorkbenchIdempotencyRepository(connection).for_transaction(transaction)
+
+        reservation = repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:idem-1",
+            request_fingerprint="fp:confirm:idem-1",
+            request_payload={"case_id": "CASE-1"},
+        )
+
+        self.assertIsInstance(reservation, WorkbenchIdempotencyReservation)
+        self.assertFalse(reservation.created)
+        self.assertEqual(reservation.record.status, "reserved")
+        self.assertFalse(connection.transaction_opened)
+        sql, _params = transaction.fetch_one_calls[0]
+        self.assertIn("on conflict", sql)
+        self.assertIn("do nothing", sql)
+        self.assertIn("for update", sql)
+
+    def test_transaction_bound_reserve_reports_expired_reserved_takeover_without_nested_transaction(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+            PostgresWorkbenchIdempotencyRepository,
+        )
+
+        now = datetime(2026, 5, 31, 9, 0, tzinfo=timezone.utc)
+        connection = _RecordingSqlExecutor()
+        transaction = _RecordingSqlExecutor(
+            rows=[
+                _record_row(
+                    status="reserved",
+                    inserted=False,
+                    reservation_outcome="taken_over_expired",
+                    expires_at=now + timedelta(minutes=5),
+                )
+            ]
+        )
+        repository = PostgresWorkbenchIdempotencyRepository(connection).for_transaction(transaction)
+
+        reservation = repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:idem-1",
+            request_fingerprint="fp:confirm:idem-1",
+            request_payload={"case_id": "CASE-RETRY", "authorization": "Bearer SECRET"},
+            expires_at=now + timedelta(minutes=5),
+        )
+
+        self.assertIsInstance(reservation, WorkbenchIdempotencyReservation)
+        self.assertFalse(reservation.created)
+        self.assertTrue(reservation.taken_over_expired)
+        self.assertFalse(connection.transaction_opened)
+        sql, params = transaction.fetch_one_calls[0]
+        self.assertIn("for update", sql)
+        self.assertIn("expires_at <=", sql)
+        self.assertIn("request_fingerprint", sql)
+        stored_request_payload = _json_obj(params[6])
+        self.assertNotIn("SECRET", repr(stored_request_payload))
+
     def test_transaction_bound_commit_updates_committed_record_with_sanitized_response(self) -> None:
         from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
             PostgresWorkbenchIdempotencyRepository,
@@ -148,6 +216,42 @@ class WorkbenchPostgresIdempotencyRepositoryTests(unittest.TestCase):
         self.assertNotIn("token", stored_response_payload)
         self.assertEqual(_json_obj(params[1]), {"workbench:2026-05": 7})
         self.assertEqual(_json_obj(params[2]), ["event-1"])
+
+    def test_transaction_bound_mark_failed_updates_failed_record_with_sanitized_response(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+            PostgresWorkbenchIdempotencyRepository,
+        )
+
+        connection = _RecordingSqlExecutor()
+        transaction = _RecordingSqlExecutor(
+            rows=[
+                _record_row(
+                    status="failed",
+                    response_payload={"error": "previous_failure"},
+                    completed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                )
+            ]
+        )
+        repository = PostgresWorkbenchIdempotencyRepository(connection).for_transaction(transaction)
+
+        record = repository.mark_failed(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:idem-1",
+            request_fingerprint="fp:confirm:idem-1",
+            response_payload={"error": "boom", "authorization": "Bearer SECRET"},
+        )
+
+        self.assertFalse(connection.transaction_opened)
+        self.assertEqual(len(transaction.execute_calls), 1)
+        sql, params = transaction.execute_calls[0]
+        self.assertIn("update app.workbench_idempotency_records", sql)
+        self.assertIn("status = 'failed'", sql)
+        stored_response_payload = _json_obj(params[0])
+        self.assertNotIn("SECRET", repr(stored_response_payload))
+        self.assertNotIn("authorization", stored_response_payload)
+        self.assertEqual(record.status, "failed")
 
     def test_server_uses_in_memory_idempotency_repository_by_default(self) -> None:
         app = object.__new__(Application)

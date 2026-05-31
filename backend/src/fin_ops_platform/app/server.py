@@ -32,8 +32,10 @@ from fin_ops_platform.app.auth import (
     OAAuthError,
     OARequestSession,
     UnauthorizedOASessionError,
+    actor_id_for_session,
     extract_oa_token,
     resolve_oa_request_session,
+    tenant_id_for_session,
 )
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_turnover_ledger import (
@@ -1344,7 +1346,7 @@ class Application:
         if method == "POST" and route_path == "/api/workbench/exception/apply":
             return self._handle_api_workbench_exception_apply(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
-            response = self._handle_api_workbench_confirm_link(body, request_id=request_id)
+            response = self._handle_api_workbench_confirm_link(body, request_id=request_id, headers=headers)
             self._emit_workbench_action_timing(
                 request_id=request_id or "no-request-id",
                 action_name="confirm_link",
@@ -1358,7 +1360,7 @@ class Application:
         if method == "POST" and route_path == "/api/workbench/actions/mark-exception":
             return self._handle_api_workbench_mark_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
-            response = self._handle_api_workbench_cancel_link(body, request_id=request_id)
+            response = self._handle_api_workbench_cancel_link(body, request_id=request_id, headers=headers)
             self._emit_workbench_action_timing(
                 request_id=request_id or "no-request-id",
                 action_name="cancel_link",
@@ -6938,6 +6940,47 @@ class Application:
                 )
         return None
 
+    def _workbench_write_auth_context(self, headers: dict[str, str] | None) -> tuple[str, str] | Response:
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+            if not session.allowed:
+                raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
+            if not session.can_mutate_data:
+                return self._json_response(
+                    HTTPStatus.FORBIDDEN,
+                    {"error": "permission_denied", "message": "当前账户没有修改工作台数据的权限。"},
+                )
+        except UnauthorizedOASessionError as error:
+            return self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": "invalid_oa_session", "message": str(error) or "缺少 OA 登录态，请从 OA 系统进入。"},
+            )
+        except OASessionExpiredError as error:
+            return self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": "invalid_oa_session", "message": str(error) or "OA 登录状态已过期。"},
+            )
+        except ForbiddenOAAccessError as error:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "forbidden", "message": str(error) or "当前 OA 账户未被授权访问财务运营平台。"},
+            )
+        except OAIdentityConfigurationError as error:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "oa_identity_unavailable", "message": str(error) or "OA 身份服务未配置。"},
+            )
+        except OAIdentityServiceError as error:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {"error": "oa_identity_lookup_failed", "message": str(error) or "OA 身份解析失败。"},
+            )
+        return actor_id_for_session(session), tenant_id_for_session(session)
+
     def _input_invoice_usage_service(self) -> InputInvoiceUsageQueryService:
         service = getattr(self, "_input_invoice_usage_query_service", None)
         if isinstance(service, InputInvoiceUsageQueryService):
@@ -9836,14 +9879,29 @@ class Application:
             },
         )
 
-    def _handle_api_workbench_confirm_link(self, body: str | None, *, request_id: str | None = None) -> Response:
+    def _handle_api_workbench_confirm_link(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        return self._handle_live_workbench_confirm_link(payload, request_id=request_id)
+        auth_context = self._workbench_write_auth_context(headers)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, tenant_id = auth_context
+        return self._handle_live_workbench_confirm_link(
+            payload,
+            request_id=request_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
 
     def _handle_api_workbench_confirm_link_preview(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -9905,14 +9963,29 @@ class Application:
             return freshness_error
         return self._handle_live_workbench_mark_exception(payload)
 
-    def _handle_api_workbench_cancel_link(self, body: str | None, *, request_id: str | None = None) -> Response:
+    def _handle_api_workbench_cancel_link(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        return self._handle_live_workbench_cancel_link(payload, request_id=request_id)
+        auth_context = self._workbench_write_auth_context(headers)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, tenant_id = auth_context
+        return self._handle_live_workbench_cancel_link(
+            payload,
+            request_id=request_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
 
     def _handle_api_workbench_withdraw_link_preview(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -13106,8 +13179,15 @@ class Application:
         payload: dict[str, object],
         *,
         request_id: str | None = None,
+        actor_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> Response:
-        result = self._workbench_write_facade().confirm_link(payload, request_id=request_id)
+        result = self._workbench_write_facade().confirm_link(
+            payload,
+            request_id=request_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
         return self._workbench_write_response(result)
 
     def _preview_confirm_link(self, payload: dict[str, object]) -> dict[str, object]:
@@ -13158,8 +13238,15 @@ class Application:
         payload: dict[str, object],
         *,
         request_id: str | None = None,
+        actor_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> Response:
-        result = self._workbench_write_facade().cancel_link(payload, request_id=request_id)
+        result = self._workbench_write_facade().cancel_link(
+            payload,
+            request_id=request_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
         return self._workbench_write_response(result)
 
     def _handle_live_workbench_withdraw_link(

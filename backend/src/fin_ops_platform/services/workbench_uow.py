@@ -5,8 +5,12 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.workbench_idempotency import (
     InMemoryWorkbenchIdempotencyRepository,
+    WorkbenchIdempotencyFailed,
+    WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
     WorkbenchIdempotencyRecord,
+    WorkbenchIdempotencyReservation,
+    is_workbench_idempotency_reserved_expired,
     workbench_request_fingerprint,
 )
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
@@ -46,10 +50,13 @@ class WorkbenchWriteUnitOfWork:
         if idempotency is not None:
             existing = _idempotency_get(self._idempotency_store, idempotency)
             if existing is not None:
-                _raise_on_fingerprint_conflict(existing, idempotency)
-                replayed = _replay_committed_idempotency_response(existing)
+                existing_record = _idempotency_record(existing)
+                _raise_on_fingerprint_conflict(existing_record, idempotency)
+                _raise_if_idempotency_failed(existing_record, idempotency)
+                replayed = _replay_committed_idempotency_response(existing_record)
                 if replayed is not None:
                     return replayed
+                _raise_if_idempotency_in_progress(existing_record, idempotency)
 
         with self._connection.transaction() as transaction:
             assert_workbench_stale_preconditions(command)
@@ -58,10 +65,14 @@ class WorkbenchWriteUnitOfWork:
             if idempotency is not None:
                 reserved = _idempotency_reserve(idempotency_store, idempotency)
                 if reserved is not None:
-                    _raise_on_fingerprint_conflict(reserved, idempotency)
-                    replayed = _replay_committed_idempotency_response(reserved)
+                    reserved_record = _idempotency_record(reserved)
+                    _raise_on_fingerprint_conflict(reserved_record, idempotency)
+                    _raise_if_idempotency_failed(reserved_record, idempotency)
+                    replayed = _replay_committed_idempotency_response(reserved_record)
                     if replayed is not None:
                         return replayed
+                    if _is_existing_reservation(reserved) and not _is_taken_over_expired_reservation(reserved):
+                        _raise_if_idempotency_in_progress(reserved_record, idempotency)
 
             repositories = self._repository_factory(transaction)
             context = WorkbenchWriteUnitOfWorkContext(
@@ -108,8 +119,11 @@ class WorkbenchWriteUnitOfWork:
         existing = _idempotency_get(self._idempotency_store, idempotency)
         if existing is None:
             return None
-        _raise_on_fingerprint_conflict(existing, idempotency)
-        return _replay_committed_idempotency_response(existing)
+        existing_record = _idempotency_record(existing)
+        _raise_on_fingerprint_conflict(existing_record, idempotency)
+        _raise_if_idempotency_failed(existing_record, idempotency)
+        _raise_if_idempotency_in_progress(existing_record, idempotency)
+        return _replay_committed_idempotency_response(existing_record)
 
 
 class RuntimeQueueReadModelRefreshWriter:
@@ -312,6 +326,28 @@ def _raise_on_fingerprint_conflict(existing: Any, request: _IdempotencyRequest) 
     )
 
 
+def _raise_if_idempotency_in_progress(existing: Any, request: _IdempotencyRequest) -> None:
+    status = _record_value(existing, "status")
+    if status != "reserved":
+        return
+    if is_workbench_idempotency_reserved_expired(existing):
+        return
+    raise WorkbenchIdempotencyInProgress(
+        idempotency_key=request.idempotency_key,
+        action_name=request.action_name,
+    )
+
+
+def _raise_if_idempotency_failed(existing: Any, request: _IdempotencyRequest) -> None:
+    status = _record_value(existing, "status")
+    if status != "failed":
+        return
+    raise WorkbenchIdempotencyFailed(
+        idempotency_key=request.idempotency_key,
+        action_name=request.action_name,
+    )
+
+
 def _replay_committed_idempotency_response(existing: Any) -> dict[str, Any] | None:
     status = _record_value(existing, "status")
     if status is not None and status != "committed":
@@ -331,6 +367,29 @@ def _replay_committed_idempotency_response(existing: Any) -> dict[str, Any] | No
     if outbox_event_ids is not None:
         result["outbox_event_ids"] = list(outbox_event_ids)
     return result
+
+
+def _idempotency_record(value: Any) -> Any:
+    if isinstance(value, WorkbenchIdempotencyReservation):
+        return value.record
+    record = getattr(value, "record", None)
+    if record is not None and hasattr(value, "created"):
+        return record
+    return value
+
+
+def _is_existing_reservation(value: Any) -> bool:
+    if isinstance(value, WorkbenchIdempotencyReservation):
+        return not value.created
+    if hasattr(value, "record") and hasattr(value, "created"):
+        return not bool(getattr(value, "created"))
+    return False
+
+
+def _is_taken_over_expired_reservation(value: Any) -> bool:
+    if isinstance(value, WorkbenchIdempotencyReservation):
+        return value.taken_over_expired
+    return bool(getattr(value, "taken_over_expired", False))
 
 
 def _record_value(record: Any, name: str) -> Any:
