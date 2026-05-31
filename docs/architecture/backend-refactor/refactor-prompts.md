@@ -11757,3 +11757,22 @@ Stop Conditions:
 - PF-P040 应优先把当前真实缺口机械化：actor/tenant auth context、expired reserved takeover、failed/cleanup policy、真实 PostgreSQL 并发语义和观测指标。
 - PF-P040 可以增加默认绿色 contract tests；对尚未实现的目标语义必须使用 `expectedFailure` 或文档 blocker，不能破坏默认 CI。
 - PF-P040 完成后不应直接 push 或执行 Traffic Gate；如果有代码/测试变更，应先经用户确认 `verified`，再生成对应 MG。
+
+### 执行结果
+
+- 状态：`implemented`，等待用户确认，未经确认不得标记 `verified`。
+- 新增 `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`，记录 rollout readiness matrix、打开前 checklist、rollback、migration 注意事项和 blocker。
+- 新增 `tests/test_workbench_durable_idempotency_rollout.py`，用默认绿色测试锁定 default-off safety、显式 opt-in feature flag wiring 和未实现目标能力的 blocker 文档化。
+- RED：新增 rollout test 先因 readiness 文档缺失失败。
+- GREEN：补齐 readiness 文档后 rollout test 通过。
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未修改 deployment/env/gateway/worker/auth/frontend。
+- 未迁移更多 Workbench 写 API。
+- 未修改 `0043_workbench_idempotency_records.sql`。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+下一步建议：
+
+`PF-P040-MG - Workbench Durable Idempotency Rollout Readiness Merge Gate`
+
+PF-P040-MG 应覆盖 PF-P040 的完整 diff，并继续禁止打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`、Traffic Gate、部署和 push。

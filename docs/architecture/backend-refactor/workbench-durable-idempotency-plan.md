@@ -689,3 +689,35 @@ PF-P040 不应：
 - 迁移更多 Workbench 写 API。
 - 修改 `0043_workbench_idempotency_records.sql`。
 - 执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+## 16. PF-P040 Execution Result
+
+PF-P040 已建立 durable idempotency 启用前 rollout readiness 门禁，但没有打开 feature flag，也没有迁移更多 Workbench 写 API。
+
+已完成：
+
+- 新增 `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`。
+- 新增 `tests/test_workbench_durable_idempotency_rollout.py`。
+- 用测试锁定默认关闭和显式 opt-in 行为：
+  - 未设置或为空时继续使用 `InMemoryWorkbenchIdempotencyRepository`。
+  - 只有 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY=1` 时才构造 `PostgresWorkbenchIdempotencyRepository`。
+- 用文档矩阵固化 rollout readiness 状态：
+  - `ready`：default-off safety、opt-in feature flag wiring、transaction-bound reserve/commit、committed replay、same-key different-fingerprint conflict、payload sanitization、rollback。
+  - `documented-risk`：migration apply readiness。
+  - `blocked`：reserved/in-progress duplicate policy、expired reserved takeover、failed reservation policy、cleanup/retention、actor/tenant auth context。
+  - `future-test-needed`：real PostgreSQL row-lock concurrency、observability/metrics/logging。
+
+仍未完成：
+
+- 未默认启用 durable idempotency。
+- 未执行真实 PostgreSQL integration/concurrency test。
+- 未实现 actor/tenant auth context 注入。
+- 未实现 reserved/in-progress duplicate、expired takeover、failed policy 或 cleanup/retention。
+- 未新增专用 observability 指标。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+下一步建议：
+
+`PF-P040-MG - Workbench Durable Idempotency Rollout Readiness Merge Gate`
+
+PF-P040-MG 应覆盖本轮 rollout readiness 文档、测试和状态机/prompt 更新的完整 diff，执行范围检查、验证和合入前门禁。PF-P040-MG 不应打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不应执行 Traffic Gate 或部署。
