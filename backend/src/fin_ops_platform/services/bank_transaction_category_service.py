@@ -457,10 +457,8 @@ def _default_auto_tag_rule_fields(code: str) -> dict[str, Any]:
         "account_scope",
         "output_primary_label",
         "output_sub_label",
-        "output_third_label",
         "turnover_role",
         "turnover_action_type",
-        "turnover_family",
         "stop_on_match",
         "review_required",
         "route_to",
@@ -1421,15 +1419,11 @@ class BankTransactionCategoryService:
         }
         if (
             is_external_turnover_primary_label(payload["output_primary_label"])
-            or definition.get("output_third_label")
             or definition.get("turnover_action_type")
         ):
-            output_third_label = normalize_external_third_label(definition.get("output_third_label"))
             action_type = normalize_turnover_action_type(definition.get("turnover_action_type"))
             payload["turnover_role"] = EXTERNAL_TURNOVER_ROLE
-            payload["output_third_label"] = output_third_label
             payload["turnover_action_type"] = action_type
-            payload["turnover_family"] = turnover_family_for_third_label(output_third_label)
         if priority_index is not None:
             payload["priority"] = priority
             payload["priority_label"] = f"优先级 {priority}"
@@ -1495,13 +1489,8 @@ class BankTransactionCategoryService:
             or bool(raw_turnover_action_type)
             or str(item.get("turnover_role") or "").strip() == EXTERNAL_TURNOVER_ROLE
         )
-        output_third_label = ""
         turnover_action_type = ""
-        turnover_family = ""
         if external_turnover_rule and configured_external_turnover_rule:
-            output_third_label = normalize_external_third_label(raw_output_third_label)
-            if raw_output_third_label and not output_third_label:
-                field_errors.append({"path": f"{path_prefix}.output_third_label", "message": "外部往来款子子标签只能是个人往来、公司往来、银行往来、业务往来。"})
             turnover_action_type = normalize_turnover_action_type(raw_turnover_action_type)
             if raw_turnover_action_type and not turnover_action_type:
                 field_errors.append({"path": f"{path_prefix}.turnover_action_type", "message": "台账动作类型无效。"})
@@ -1513,7 +1502,6 @@ class BankTransactionCategoryService:
                 )
             if not turnover_action_type:
                 field_errors.append({"path": f"{path_prefix}.turnover_action_type", "message": "外部往来款规则必须配置台账动作类型。"})
-            turnover_family = turnover_family_for_third_label(output_third_label)
         else:
             if raw_output_third_label:
                 field_errors.append({"path": f"{path_prefix}.output_third_label", "message": "只有外部往来款付款/收款规则可以配置子子标签。"})
@@ -1568,9 +1556,6 @@ class BankTransactionCategoryService:
         if configured_external_turnover_rule:
             definition["turnover_role"] = EXTERNAL_TURNOVER_ROLE
             definition["turnover_action_type"] = turnover_action_type
-            definition["turnover_family"] = turnover_family
-            if output_third_label:
-                definition["output_third_label"] = output_third_label
         for system_key in ("stop_on_match", "review_required", "route_to"):
             previous_value = previous_definitions_by_code.get(code, {}).get(system_key)
             if previous_value is not None:
@@ -1612,8 +1597,8 @@ class BankTransactionCategoryService:
         *,
         field_errors: list[dict[str, str]],
     ) -> None:
-        seen_active_label_paths: dict[tuple[str, str, str], int] = {
-            (str(BANK_AUTO_TAG_SYSTEM_RULE.get("label") or BANK_AUTO_TAG_INTERNAL_TRANSFER_LABEL).strip(), "", ""): -1
+        seen_active_label_paths: dict[tuple[str, str], int] = {
+            (str(BANK_AUTO_TAG_SYSTEM_RULE.get("label") or BANK_AUTO_TAG_INTERNAL_TRANSFER_LABEL).strip(), ""): -1
         }
         for index, definition in enumerate(definitions):
             status = str(definition.get("status") or "active")
@@ -1621,10 +1606,9 @@ class BankTransactionCategoryService:
                 continue
             primary_label = str(definition.get("output_primary_label") or "").strip()
             sub_label = str(definition.get("output_sub_label") or "").strip()
-            third_label = str(definition.get("output_third_label") or "").strip()
             if not primary_label:
                 continue
-            label_path = (primary_label, sub_label, third_label)
+            label_path = (primary_label, sub_label)
             if label_path in seen_active_label_paths:
                 field_errors.append({"path": f"active_rules[{index}].output_sub_label", "message": "主标签名称和子标签名称组合不能重复。"})
                 continue
@@ -1677,8 +1661,6 @@ class BankTransactionCategoryService:
                 "new_output_primary_label": next_by_code[code].get("output_primary_label"),
                 "old_output_sub_label": previous_by_code[code].get("output_sub_label"),
                 "new_output_sub_label": next_by_code[code].get("output_sub_label"),
-                "old_output_third_label": previous_by_code[code].get("output_third_label"),
-                "new_output_third_label": next_by_code[code].get("output_third_label"),
                 "old_turnover_action_type": previous_by_code[code].get("turnover_action_type"),
                 "new_turnover_action_type": next_by_code[code].get("turnover_action_type"),
             }
@@ -1694,10 +1676,6 @@ class BankTransactionCategoryService:
                     or (
                         previous_by_code[code].get("output_sub_label")
                         != next_by_code[code].get("output_sub_label")
-                    )
-                    or (
-                        previous_by_code[code].get("output_third_label")
-                        != next_by_code[code].get("output_third_label")
                     )
                     or (
                         previous_by_code[code].get("turnover_action_type")
@@ -1786,10 +1764,8 @@ class BankTransactionCategoryService:
                         "account_scope",
                         "output_primary_label",
                         "output_sub_label",
-                        "output_third_label",
                         "turnover_role",
                         "turnover_action_type",
-                        "turnover_family",
                         "sort_order",
                         "stop_on_match",
                         "review_required",
@@ -1875,11 +1851,9 @@ class BankTransactionCategoryService:
             output_sub_label = str(item.get("output_sub_label") or "").strip()
             if output_sub_label:
                 definition["output_sub_label"] = output_sub_label
-            output_third_label = normalize_external_third_label(item.get("output_third_label"))
             raw_action_type = str(item.get("turnover_action_type") or "").strip()
             external_turnover_definition = (
                 is_external_turnover_primary_label(output_primary_label)
-                or bool(output_third_label)
                 or bool(raw_action_type)
                 or str(item.get("turnover_role") or "").strip() == EXTERNAL_TURNOVER_ROLE
             )
@@ -1890,9 +1864,6 @@ class BankTransactionCategoryService:
                     direction=item.get("direction"),
                 )
                 definition["turnover_role"] = EXTERNAL_TURNOVER_ROLE
-                if output_third_label:
-                    definition["output_third_label"] = output_third_label
-                    definition["turnover_family"] = turnover_family_for_third_label(output_third_label)
                 if action_type:
                     definition["turnover_action_type"] = action_type
             derived_label = output_sub_label or output_primary_label

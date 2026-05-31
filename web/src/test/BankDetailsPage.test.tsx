@@ -631,14 +631,60 @@ describe("Bank details page", () => {
     const primaryMenu = await screen.findByRole("menu", { name: "待确认主标签" });
     await user.click(within(primaryMenu).getByRole("menuitem", { name: "外部往来款付款" }));
     const childMenu = await screen.findByRole("menu", { name: "外部往来款付款候选标签" });
-    expect(within(childMenu).getByRole("menuitem", { name: "借出款 / 个人往来" })).toBeInTheDocument();
-    expect(within(childMenu).getByRole("menuitem", { name: "借出款 / 公司往来" })).toBeInTheDocument();
+    expect(within(childMenu).getByRole("menuitem", { name: "借出款" })).toBeInTheDocument();
+    expect(within(childMenu).queryByRole("menuitem", { name: "借出款 / 公司往来" })).not.toBeInTheDocument();
 
-    await user.click(within(childMenu).getByRole("menuitem", { name: "借出款 / 公司往来" }));
+    await user.click(within(childMenu).getByRole("menuitem", { name: "借出款" }));
+    const thirdMenu = await screen.findByRole("menu", { name: "借出款候选子子标签" });
+    expect(within(thirdMenu).getByRole("menuitem", { name: "个人往来" })).toBeInTheDocument();
+    expect(within(thirdMenu).getByRole("menuitem", { name: "公司往来" })).toBeInTheDocument();
+
+    await user.click(within(thirdMenu).getByRole("menuitem", { name: "公司往来" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/bank-details/transactions/bank-detail-external-turnover-needs-confirmation/category-confirmation",
         expect.objectContaining({ body: JSON.stringify({ category_code: "external_payment", category_third_label: "公司往来" }) }),
+      );
+    });
+  });
+
+  test("external turnover manual classification chooses primary, sub tag, then third-level label", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const supplierName = await within(table).findByText("普通供应商");
+    const row = supplierName.closest("tr");
+    expect(row).toBeInstanceOf(HTMLElement);
+
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "待分类" }));
+    const primaryMenu = await screen.findByRole("menu", { name: "待分类主标签" });
+    await user.click(within(primaryMenu).getByRole("menuitem", { name: "外部往来款付款" }));
+    const childMenu = await screen.findByRole("menu", { name: "外部往来款付款可选标签" });
+    expect(within(childMenu).getByRole("menuitem", { name: "借出款" })).toBeInTheDocument();
+    expect(within(childMenu).queryByRole("menuitem", { name: "借出款 / 业务往来" })).not.toBeInTheDocument();
+
+    await user.click(within(childMenu).getByRole("menuitem", { name: "借出款" }));
+    const thirdMenu = await screen.findByRole("menu", { name: "借出款可选子子标签" });
+    await user.click(within(thirdMenu).getByRole("menuitem", { name: "业务往来" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-details/transactions/bank-detail-search-filler/category-assignment",
+        expect.objectContaining({
+          body: JSON.stringify({
+            category_code: "external_payment",
+            category_primary_label: "外部往来款付款",
+            category_sub_label: "借出款",
+            category_third_label: "业务往来",
+            category_label_path: ["外部往来款付款", "借出款", "业务往来"],
+            turnover_action_type: "pending_collection",
+            turnover_family: "business",
+          }),
+        }),
       );
     });
   });

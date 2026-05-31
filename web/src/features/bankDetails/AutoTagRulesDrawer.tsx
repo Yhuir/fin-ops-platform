@@ -108,11 +108,10 @@ function isExternalTurnoverPrimaryLabel(value: string | null | undefined) {
   return EXTERNAL_TURNOVER_PRIMARY_LABELS.has(String(value ?? "").trim());
 }
 
-function isExternalTurnoverRule(rule: Pick<DraftRule, "outputPrimaryLabel" | "outputThirdLabel" | "turnoverRole" | "turnoverActionType">) {
+function isExternalTurnoverRule(rule: Pick<DraftRule, "outputPrimaryLabel" | "turnoverRole" | "turnoverActionType">) {
   return (
     isExternalTurnoverPrimaryLabel(rule.outputPrimaryLabel)
     || rule.turnoverRole === EXTERNAL_TURNOVER_ROLE
-    || Boolean(rule.outputThirdLabel?.trim())
     || Boolean(rule.turnoverActionType?.trim())
   );
 }
@@ -147,6 +146,7 @@ function normalizeExternalFields(rule: DraftRule): DraftRule {
   }
   return {
     ...rule,
+    outputThirdLabel: "",
     turnoverRole: EXTERNAL_TURNOVER_ROLE,
     turnoverActionType: rule.turnoverActionType || inferTurnoverActionType(rule),
   };
@@ -156,6 +156,7 @@ function cloneRule(rule: BankAutoTagEditableRule, index: number): DraftRule {
   const sortOrder = typeof rule.sortOrder === "number" ? rule.sortOrder : index + 1;
   return {
     ...rule,
+    outputThirdLabel: "",
     priority: normalizeRulePriority(rule.priority),
     sortOrder,
     localId: rule.code || `new-${index}`,
@@ -194,7 +195,6 @@ function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
   const turnoverActionType = externalRule ? rule.turnoverActionType || inferTurnoverActionType(rule) : "";
   const outputPrimaryLabel = rule.outputPrimaryLabel.trim();
   const outputSubLabel = rule.outputSubLabel.trim();
-  const outputThirdLabel = externalRule ? String(rule.outputThirdLabel ?? "").trim() : "";
   const label = outputSubLabel || outputPrimaryLabel;
   return {
     ...(rule.code ? { code: rule.code } : {}),
@@ -203,7 +203,6 @@ function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
     ...(typeof rule.sortOrder === "number" ? { sortOrder: rule.sortOrder } : {}),
     outputPrimaryLabel,
     outputSubLabel,
-    ...(outputThirdLabel ? { outputThirdLabel } : {}),
     ...(turnoverActionType ? { turnoverActionType } : {}),
     direction: rule.direction,
     accountScope: { type: "any", values: [] },
@@ -246,7 +245,7 @@ function validateDraft(activeRules: DraftRule[]) {
       return `${outputPrimaryLabel} 的普通规则优先级必须是大于等于 2 的整数。`;
     }
     const externalRule = isExternalTurnoverRule(rule);
-    const labelPathKey = `${outputPrimaryLabel}\u0000${outputSubLabel}\u0000${externalRule ? rule.outputThirdLabel?.trim() ?? "" : ""}`;
+    const labelPathKey = `${outputPrimaryLabel}\u0000${outputSubLabel}`;
     if (seenLabelPaths.has(labelPathKey)) {
       return `${ruleDisplayLabel(rule)} 的标签组合不能重复。`;
     }
@@ -264,11 +263,10 @@ function validateDraft(activeRules: DraftRule[]) {
   return "";
 }
 
-function ruleDisplayLabel(rule: Pick<DraftRule, "label" | "outputPrimaryLabel" | "outputSubLabel" | "outputThirdLabel">) {
+function ruleDisplayLabel(rule: Pick<DraftRule, "label" | "outputPrimaryLabel" | "outputSubLabel">) {
   const primary = rule.outputPrimaryLabel.trim();
   const sub = rule.outputSubLabel.trim();
-  const third = rule.outputThirdLabel?.trim() ?? "";
-  const path = [primary, sub, third].filter(Boolean);
+  const path = [primary, sub].filter(Boolean);
   if (path.length > 0) {
     return path.join(" / ");
   }
@@ -700,15 +698,11 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                               variant="standard"
                               size="small"
                               displayEmpty
-                              value={rule.outputThirdLabel ?? ""}
-                              disabled={readonly}
+                              value=""
+                              disabled
                               aria-label={`${ruleDisplayLabel(rule)} 子子标签`}
                               inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 子子标签` }}
-                              onChange={(event) => updateActiveRule(rule.localId, (current) => ({
-                                ...current,
-                                outputThirdLabel: String(event.target.value || ""),
-                                turnoverRole: EXTERNAL_TURNOVER_ROLE,
-                              }))}
+                              SelectDisplayProps={{ "aria-disabled": true }}
                             >
                               <MenuItem value="">
                                 <em>匹配后待确认</em>

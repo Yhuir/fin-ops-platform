@@ -676,7 +676,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(repository.saved_rows[0]["category_label_path"], ["费用", "手续费"])
         self.assertEqual(repository.saved_rows[0]["source_versions"]["bank_auto_tag_rules_version"], 2)
 
-    def test_rebuild_projects_external_turnover_third_label_and_action_type(self) -> None:
+    def test_rebuild_projects_legacy_external_turnover_third_label_as_confirmation_candidates(self) -> None:
         repository = CaptureBankDetailReadModelRepository()
         connection = FakeConnection(
             app_settings_payload={
@@ -741,15 +741,28 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
 
         self.assertEqual(result["row_count"], 1)
         row = repository.saved_rows[0]
-        self.assertEqual(row["auto_category_code"], "custom_external_company_borrow_out")
-        self.assertEqual(row["auto_category_primary_label"], "外部往来款付款")
-        self.assertEqual(row["auto_category_sub_label"], "借出款")
-        self.assertEqual(row["auto_category_third_label"], "公司往来")
-        self.assertEqual(row["auto_category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
-        self.assertEqual(row["effective_category_third_label"], "公司往来")
-        self.assertEqual(row["category_third_label"], "公司往来")
-        self.assertEqual(row["turnover_action_type"], "pending_collection")
-        self.assertEqual(row["turnover_family"], "company")
+        self.assertIsNone(row["auto_category_code"])
+        self.assertEqual(row["category_resolution_status"], "needs_confirmation")
+        self.assertIsNone(row["auto_category_third_label"])
+        self.assertEqual(row["auto_turnover_action_type"], "pending_collection")
+        self.assertEqual(row["auto_turnover_role"], "external_turnover")
+        self.assertEqual(
+            [candidate["category_third_label"] for candidate in row["auto_candidate_categories"]],
+            ["个人往来", "公司往来", "银行往来", "业务往来"],
+        )
+        self.assertTrue(
+            all(
+                candidate["category_code"] == "custom_external_company_borrow_out"
+                and candidate["category_primary_label"] == "外部往来款付款"
+                and candidate["category_sub_label"] == "借出款"
+                and candidate["turnover_action_type"] == "pending_collection"
+                for candidate in row["auto_candidate_categories"]
+            )
+        )
+        self.assertIsNone(row["effective_category_third_label"])
+        self.assertIsNone(row["category_third_label"])
+        self.assertIsNone(row["turnover_action_type"])
+        self.assertIsNone(row["turnover_family"])
 
     def test_rebuild_uses_manual_category_for_unmatched_transaction(self) -> None:
         repository = CaptureBankDetailReadModelRepository()

@@ -228,7 +228,7 @@ describe("AutoTagRulesDrawer", () => {
     ]));
   });
 
-  test("shows external turnover third label and action controls only for external turnover rules", async () => {
+  test("shows external turnover third label candidates as read-only and saves only action type", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderDrawer();
@@ -243,8 +243,8 @@ describe("AutoTagRulesDrawer", () => {
     const thirdLabelSelect = within(externalRow).getAllByLabelText(/子子标签/)
       .find((element) => element.getAttribute("role") === "combobox");
     expect(thirdLabelSelect).toBeDefined();
-    await user.click(thirdLabelSelect as HTMLElement);
-    await user.click(await screen.findByRole("option", { name: "公司往来" }));
+    expect(thirdLabelSelect).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("option", { name: "公司往来" })).not.toBeInTheDocument();
     const actionTypeSelect = within(externalRow).getAllByLabelText(/台账动作类型/)
       .find((element) => element.getAttribute("role") === "combobox");
     expect(actionTypeSelect).toBeDefined();
@@ -258,10 +258,12 @@ describe("AutoTagRulesDrawer", () => {
         code: "external_payment",
         output_primary_label: "外部往来款付款",
         output_sub_label: "借出款",
-        output_third_label: "公司往来",
         turnover_action_type: "collected",
       }),
     ]));
+    const savedExternalRule = (payload?.active_rules as Array<Record<string, unknown>>)
+      .find((rule) => rule.code === "external_payment");
+    expect(savedExternalRule).not.toHaveProperty("output_third_label");
   });
 
   test("manages match fields with select all and clear actions without showing all text as an option", async () => {

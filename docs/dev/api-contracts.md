@@ -210,7 +210,7 @@
 | `active_rules` | 可用文本类标签，按优先级升序返回。 |
 | `archived_rules` | 停用文本类标签，不参与自动命中。 |
 | `field_options` | 可用于规则配置的稳定语义字段。 |
-| `turnover_third_label_options` | 外部往来可选第三层标签：个人往来、公司往来、银行往来、业务往来。 |
+| `turnover_third_label_options` | 外部往来流水级可选第三层标签：个人往来、公司往来、银行往来、业务往来。自动标签规则抽屉只读展示这些候选，不保存到规则。 |
 | `turnover_action_type_options` | 外部往来可选台账动作类型。 |
 | `permissions.can_save` | 当前用户是否可以保存。 |
 | `read_model_status` | 可选，说明保存后派生数据是否仍在刷新。 |
@@ -232,8 +232,8 @@
 | `rules.contains_all` | 必须同时包含字样列表，可为空。 |
 | `rules.none_of` | 不包含任一字样列表，可为空。旧字段 `excludes` 作为兼容别名读取。 |
 | `rules.regex_any` | 兼容保留的正则命中任一列表，可为空。普通维护 UI 不编辑正则，保存时固定写空数组。 |
-| `output_primary_label` / `output_sub_label` / `output_third_label` | 输出标签；子标签可为空，第三层标签只允许外部往来付款/收款规则使用。 |
-| `turnover_role` / `turnover_action_type` / `turnover_family` | 外部往来语义字段；非外部往来规则不得提交这些字段。 |
+| `output_primary_label` / `output_sub_label` | 规则输出标签；子标签可为空。`output_third_label` 不再是有效规则字段，外部往来旧 payload 中携带时由后端清理为空。 |
+| `turnover_role` / `turnover_action_type` | 外部往来规则级语义字段；非外部往来规则不得提交这些字段。`turnover_family` 由具体流水确认的第三层标签产生，不作为规则级配置保存。 |
 | `rule_summary` | 后端生成的人类可读摘要。 |
 | `editable` / `archivable` / `sortable` | 前端交互能力标志。 |
 
@@ -287,7 +287,7 @@
 - 请求提交完整的可用区和停用区文本规则列表。`internal_transfer` 不在请求体中提交。
 - 已存在标签必须携带原 `code`；新建标签不得提交 `code`，由后端生成稳定 `custom_...` code。
 - 可用标签的 `output_primary_label` 去首尾空格后不能为空；唯一性按 `output_primary_label + output_sub_label` 组合判断，同主同子不允许重复，停用区允许历史重复。
-- 外部往来付款/收款规则的唯一性包含 `output_third_label`；普通非外部往来规则不得提交 `output_third_label`、`turnover_role`、`turnover_action_type` 或 `turnover_family`。
+- 可用标签唯一性按 `output_primary_label + output_sub_label` 判断。外部往来付款/收款规则提交 `output_third_label` 时后端规范化清空，用于清理旧客户端或旧配置；普通非外部往来规则不得提交 `output_third_label`、`turnover_role`、`turnover_action_type` 或 `turnover_family`。
 - 外部往来规则必须能解析台账动作类型。标准外部往来子标签可由后端推导默认 `turnover_action_type`；用户新增外部往来子标签时必须显式提交 `turnover_action_type`。
 - 可用普通标签的 `priority` 必须是大于等于 `2` 的整数；`1`、`0`、负数、小数和非数字字符串均返回 `invalid_auto_tag_rule` 结构化字段错误。缺失 priority 仅在新建或历史兼容路径按 `2` 处理。
 - 保存后返回按 `priority ASC, sort_order ASC` 排序的规则；同一优先级内不按标签名称重排，避免打散 xlsx 原始业务顺序。

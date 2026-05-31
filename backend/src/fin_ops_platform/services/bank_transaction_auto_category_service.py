@@ -17,7 +17,6 @@ from fin_ops_platform.services.bank_turnover_tag_semantics import (
     external_turnover_candidate_variants,
     is_external_turnover_definition,
     normalize_turnover_action_type,
-    turnover_family_for_third_label,
 )
 
 
@@ -494,10 +493,15 @@ class BankTransactionAutoCategoryService:
             "rule_version": self.current_rule_version(),
         }
         if is_external_turnover_definition(rule_definition):
-            third_label = str(payload.get("category_third_label") or "")
+            primary_label = str(payload.get("category_primary_label") or rule_definition.get("output_primary_label") or "").strip()
+            sub_label = str(payload.get("category_sub_label") or rule_definition.get("output_sub_label") or "").strip()
             payload["turnover_role"] = EXTERNAL_TURNOVER_ROLE
             payload["turnover_action_type"] = normalize_turnover_action_type(rule_definition.get("turnover_action_type"))
-            payload["turnover_family"] = str(rule_definition.get("turnover_family") or "").strip() or turnover_family_for_third_label(third_label)
+            payload["turnover_family"] = ""
+            payload["category_primary_label"] = primary_label or payload.get("category_primary_label")
+            payload["category_sub_label"] = sub_label or payload.get("category_sub_label")
+            payload["category_third_label"] = None
+            payload["category_label_path"] = [value for value in (primary_label, sub_label) if value]
         if evidence is not None:
             evidence_payload = dict(evidence)
             evidence_payload["tag_code"] = category_code
@@ -548,6 +552,16 @@ class BankTransactionAutoCategoryService:
         reason: str = "命中多个自动标签规则，需要用户确认。",
     ) -> dict[str, Any]:
         candidate_payloads = [self._candidate_payload(candidate) for candidate in candidates]
+        candidate_roles = {
+            str(candidate.get("turnover_role") or "").strip()
+            for candidate in candidate_payloads
+            if str(candidate.get("turnover_role") or "").strip()
+        }
+        candidate_action_types = {
+            str(candidate.get("turnover_action_type") or "").strip()
+            for candidate in candidate_payloads
+            if str(candidate.get("turnover_action_type") or "").strip()
+        }
         return {
             "transaction_id": transaction_id,
             "category_code": None,
@@ -562,6 +576,9 @@ class BankTransactionAutoCategoryService:
             "reason": reason,
             "confidence": "needs_confirmation",
             "rule_version": self.current_rule_version(),
+            "turnover_role": next(iter(candidate_roles)) if len(candidate_roles) == 1 else "",
+            "turnover_action_type": next(iter(candidate_action_types)) if len(candidate_action_types) == 1 else "",
+            "turnover_family": "",
             "category_resolution_status": "needs_confirmation",
             "auto_category_code": None,
             "auto_candidate_category_codes": [

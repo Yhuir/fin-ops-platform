@@ -438,7 +438,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestions["txn-bid-bond"]["category_code"], "external_turnover")
         self.assertNotEqual(suggestions.get("txn-tax-refund", {}).get("category_code"), "external_turnover")
 
-    def test_external_turnover_rule_with_third_label_auto_matches_three_level_path(self) -> None:
+    def test_external_turnover_rule_with_legacy_third_label_still_requires_confirmation(self) -> None:
         self.service.configure_tag_dictionary(
             {
                 "version": 21,
@@ -478,15 +478,17 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
             ]
         )["txn-external-company-out"]
 
-        self.assertEqual(suggestion["category_resolution_status"], "auto_matched")
-        self.assertEqual(suggestion["category_code"], "custom_external_borrow_out_company")
-        self.assertEqual(suggestion["category_primary_label"], "外部往来款付款")
-        self.assertEqual(suggestion["category_sub_label"], "借出款")
-        self.assertEqual(suggestion["category_third_label"], "公司往来")
-        self.assertEqual(suggestion["category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
+        self.assertEqual(suggestion["category_resolution_status"], "needs_confirmation")
+        self.assertIsNone(suggestion["category_code"])
+        self.assertIsNone(suggestion["auto_category_code"])
+        candidates = suggestion["auto_candidate_categories"]
+        self.assertEqual([candidate["category_code"] for candidate in candidates], ["custom_external_borrow_out_company"] * 4)
+        self.assertEqual(
+            [candidate["category_third_label"] for candidate in candidates],
+            ["个人往来", "公司往来", "银行往来", "业务往来"],
+        )
         self.assertEqual(suggestion["turnover_action_type"], "pending_collection")
-        self.assertEqual(suggestion["turnover_family"], "company")
-        self.assertEqual(suggestion["auto_candidate_categories"][0]["category_third_label"], "公司往来")
+        self.assertEqual({candidate["turnover_action_type"] for candidate in candidates}, {"pending_collection"})
 
     def test_external_turnover_rule_without_third_label_requires_confirmation_candidates(self) -> None:
         self.service.configure_tag_dictionary(

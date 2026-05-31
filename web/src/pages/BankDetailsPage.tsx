@@ -775,6 +775,13 @@ type ConfirmationChoiceGroup = {
   choices: ConfirmationChoice[];
 };
 
+type ConfirmationChoiceSubGroup = {
+  key: string;
+  subLabel: string;
+  choices: ConfirmationChoice[];
+  hasThirdLevel: boolean;
+};
+
 function candidateLabelPart(value: string | null | undefined) {
   return String(value ?? "").trim();
 }
@@ -829,7 +836,7 @@ function confirmationChoicesFromAutoTagRule(rule: BankAutoTagEditableRule): Conf
     subLabel,
     turnoverActionType: actionType || null,
   };
-  if (isExternalTurnoverPrimaryLabel(primaryLabel) && !rule.outputThirdLabel) {
+  if (isExternalTurnoverPrimaryLabel(primaryLabel)) {
     return EXTERNAL_TURNOVER_THIRD_LABELS.map((thirdLabel) => ({
       ...baseChoice,
       thirdLabel,
@@ -837,12 +844,11 @@ function confirmationChoicesFromAutoTagRule(rule: BankAutoTagEditableRule): Conf
       turnoverFamily: turnoverFamilyForThirdLabel(thirdLabel) || null,
     }));
   }
-  const thirdLabel = candidateLabelPart(rule.outputThirdLabel) || null;
   return [{
     ...baseChoice,
-    thirdLabel,
-    labelPath: [primaryLabel, subLabel, thirdLabel].filter((value): value is string => Boolean(value)),
-    turnoverFamily: rule.turnoverFamily || turnoverFamilyForThirdLabel(thirdLabel) || null,
+    thirdLabel: null,
+    labelPath: [primaryLabel, subLabel].filter((value): value is string => Boolean(value)),
+    turnoverFamily: null,
   }];
 }
 
@@ -850,9 +856,31 @@ function choiceKey(choice: ConfirmationChoice) {
   return `${choice.categoryCode}\u0000${choice.thirdLabel ?? ""}`;
 }
 
-function choiceDisplayLabel(choice: ConfirmationChoice) {
-  const path = [choice.subLabel, choice.thirdLabel].filter(Boolean);
-  return path.length ? path.join(" / ") : choice.primaryLabel;
+function choiceSubLabel(choice: ConfirmationChoice) {
+  return choice.subLabel || choice.primaryLabel;
+}
+
+function buildChoiceSubGroups(group: ConfirmationChoiceGroup | null): ConfirmationChoiceSubGroup[] {
+  if (!group) {
+    return [];
+  }
+  const subGroups: ConfirmationChoiceSubGroup[] = [];
+  const subGroupsByKey = new Map<string, ConfirmationChoiceSubGroup>();
+  group.choices.forEach((choice) => {
+    const subLabel = choiceSubLabel(choice);
+    const key = subLabel;
+    let subGroup = subGroupsByKey.get(key);
+    if (!subGroup) {
+      subGroup = { key, subLabel, choices: [], hasThirdLevel: false };
+      subGroupsByKey.set(key, subGroup);
+      subGroups.push(subGroup);
+    }
+    subGroup.choices.push(choice);
+    if (choice.thirdLabel) {
+      subGroup.hasThirdLevel = true;
+    }
+  });
+  return subGroups;
 }
 
 function activeAutoRuleChoiceKeySet(rules: BankAutoTagEditableRule[]) {
@@ -945,8 +973,12 @@ function TypeCell({
   const selectionGroups = confirmationGroups.length > 0 ? confirmationGroups : assignmentGroups;
   const selectionLabel = confirmationGroups.length > 0 ? "待确认" : "待分类";
   const childLabelSuffix = confirmationGroups.length > 0 ? "候选标签" : "可选标签";
+  const thirdLabelSuffix = confirmationGroups.length > 0 ? "候选子子标签" : "可选子子标签";
   const [selectedPrimaryKey, setSelectedPrimaryKey] = useState("");
+  const [selectedSubKey, setSelectedSubKey] = useState("");
   const selectedGroup = selectionGroups.find((group) => group.key === selectedPrimaryKey) ?? selectionGroups[0] ?? null;
+  const selectedSubGroups = useMemo(() => buildChoiceSubGroups(selectedGroup), [selectedGroup]);
+  const selectedSubGroup = selectedSubGroups.find((group) => group.key === selectedSubKey) ?? selectedSubGroups[0] ?? null;
 
   useEffect(() => {
     if (!selectionGroups.length) {
@@ -960,7 +992,27 @@ function TypeCell({
     }
   }, [selectionGroups, selectedPrimaryKey]);
 
+  useEffect(() => {
+    if (!selectedSubGroups.length) {
+      if (selectedSubKey) {
+        setSelectedSubKey("");
+      }
+      return;
+    }
+    if (!selectedSubGroups.some((group) => group.key === selectedSubKey)) {
+      setSelectedSubKey(selectedSubGroups[0].key);
+    }
+  }, [selectedSubGroups, selectedSubKey]);
+
   const closeConfirmationPanel = () => setAnchorEl(null);
+  const commitChoice = (choice: ConfirmationChoice) => {
+    closeConfirmationPanel();
+    if (isManualAssignment) {
+      onAssign(row, choice);
+    } else {
+      onConfirm(row, choice);
+    }
+  };
 
   if (selectionGroups.length > 0) {
     return (
@@ -1006,7 +1058,7 @@ function TypeCell({
                 }
               }}
             >
-              <Box className="bank-category-confirmation-columns">
+              <Box className={`bank-category-confirmation-columns${selectedSubGroup?.hasThirdLevel ? " bank-category-confirmation-columns--three-level" : ""}`}>
                 <MenuList
                   aria-label={`${selectionLabel}主标签`}
                   autoFocus
@@ -1019,7 +1071,10 @@ function TypeCell({
                       className="bank-category-confirmation-primary-item"
                       component="button"
                       key={group.key}
-                      onClick={() => setSelectedPrimaryKey(group.key)}
+                      onClick={() => {
+                        setSelectedPrimaryKey(group.key);
+                        setSelectedSubKey("");
+                      }}
                       role="menuitem"
                       selected={group.key === selectedGroup?.key}
                     >
@@ -1034,28 +1089,57 @@ function TypeCell({
                   dense
                   variant="menu"
                 >
-                  {(selectedGroup?.choices ?? []).map((choice) => (
+                  {selectedSubGroups.map((subGroup) => (
                     <ListItemButton
                       className="bank-category-confirmation-child-item"
                       component="button"
-                      key={choiceKey(choice)}
+                      key={subGroup.key}
                       onClick={() => {
-                        closeConfirmationPanel();
-                        if (isManualAssignment) {
-                          onAssign(row, choice);
-                        } else {
-                          onConfirm(row, choice);
+                        if (subGroup.hasThirdLevel) {
+                          setSelectedSubKey(subGroup.key);
+                          return;
+                        }
+                        const choice = subGroup.choices[0];
+                        if (choice) {
+                          commitChoice(choice);
                         }
                       }}
                       role="menuitem"
+                      selected={subGroup.key === selectedSubGroup?.key}
                     >
                       <ListItemText
                         disableTypography
-                        primary={<Typography component="span">{choiceDisplayLabel(choice)}</Typography>}
+                        primary={<Typography component="span">{subGroup.subLabel}</Typography>}
                       />
                     </ListItemButton>
                   ))}
                 </MenuList>
+                {selectedSubGroup?.hasThirdLevel ? (
+                  <>
+                    <Divider flexItem orientation="vertical" />
+                    <MenuList
+                      aria-label={`${selectedSubGroup.subLabel}${thirdLabelSuffix}`}
+                      className="bank-category-confirmation-third-list"
+                      dense
+                      variant="menu"
+                    >
+                      {selectedSubGroup.choices.map((choice) => (
+                        <ListItemButton
+                          className="bank-category-confirmation-third-item"
+                          component="button"
+                          key={choiceKey(choice)}
+                          onClick={() => commitChoice(choice)}
+                          role="menuitem"
+                        >
+                          <ListItemText
+                            disableTypography
+                            primary={<Typography component="span">{choice.thirdLabel ?? choiceSubLabel(choice)}</Typography>}
+                          />
+                        </ListItemButton>
+                      ))}
+                    </MenuList>
+                  </>
+                ) : null}
               </Box>
             </Paper>
           </ClickAwayListener>

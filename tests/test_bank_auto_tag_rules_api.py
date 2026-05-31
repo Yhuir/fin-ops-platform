@@ -712,7 +712,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         )
         self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
-    def test_put_external_turnover_rule_persists_third_label_and_action_type(self) -> None:
+    def test_put_external_turnover_rule_clears_legacy_third_label_and_persists_action_type(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             app = build_application(data_dir=data_dir)
@@ -757,11 +757,11 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         saved_target = next(rule for rule in payload["active_rules"] if rule["code"] == target["code"])
         self.assertEqual(saved_target["output_primary_label"], "外部往来款付款")
         self.assertEqual(saved_target["output_sub_label"], "借出款")
-        self.assertEqual(saved_target["output_third_label"], "公司往来")
+        self.assertNotIn("output_third_label", saved_target)
         self.assertEqual(saved_target["turnover_action_type"], "pending_collection")
-        self.assertEqual(saved_target["turnover_family"], "company")
+        self.assertEqual(saved_target.get("turnover_family", ""), "")
         reloaded_target = next(rule for rule in reloaded["active_rules"] if rule["code"] == target["code"])
-        self.assertEqual(reloaded_target["output_third_label"], "公司往来")
+        self.assertNotIn("output_third_label", reloaded_target)
         self.assertEqual(reloaded_target["turnover_action_type"], "pending_collection")
 
         suggestions = reloaded_app._bank_transaction_auto_category_service.suggest_for_rows(
@@ -775,11 +775,12 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             ]
         )
         suggestion = suggestions["txn-external-turnover-borrow-out"]
-        self.assertEqual(suggestion["category_code"], target["code"])
-        self.assertEqual(suggestion["category_primary_label"], "外部往来款付款")
-        self.assertEqual(suggestion["category_sub_label"], "借出款")
-        self.assertEqual(suggestion["category_third_label"], "公司往来")
-        self.assertEqual(suggestion["category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
+        self.assertIsNone(suggestion["category_code"])
+        self.assertEqual(suggestion["category_resolution_status"], "needs_confirmation")
+        self.assertEqual(
+            [candidate["category_third_label"] for candidate in suggestion["auto_candidate_categories"]],
+            ["个人往来", "公司往来", "银行往来", "业务往来"],
+        )
         self.assertEqual(suggestion["turnover_action_type"], "pending_collection")
 
     def test_put_rejects_non_external_rule_with_turnover_fields(self) -> None:
