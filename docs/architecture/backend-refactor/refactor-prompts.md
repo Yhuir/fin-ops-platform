@@ -12626,7 +12626,7 @@ PF-P044 已完成 Workbench durable idempotency 的 failed reservation policy，
 
 ## PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -12798,7 +12798,7 @@ Stop Conditions:
 
 ### 执行结果
 
-状态：`implemented`
+状态：`verified`
 
 - 已在 `codex/workbench-durable-idempotency-rollout-readiness` 完成 pre-flight 范围检查。
 - 已同步 `main`，`origin/main` 无新增提交需要处理。
@@ -12808,4 +12808,4 @@ Stop Conditions:
 - 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改、feature flag 打开或 push。
 - `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 仍不得视为可生产打开。
 - `cleanup/retention`、真实 PostgreSQL row-lock concurrency、observability/metrics/logging 和 migration apply/runbook 仍是后续 gate。
-- 未经用户确认，不得将 PF-P044-MG 标记为 `verified`。
+- 用户已确认 PF-P044-MG 可标记为 `verified`；本次状态更新将随 `git push origin main` 推送到远端。
