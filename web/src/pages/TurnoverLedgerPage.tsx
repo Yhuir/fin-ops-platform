@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from "react";
 import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
-import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -30,7 +29,6 @@ import {
   fetchTurnoverLedgerGrouped,
   fetchTurnoverRelationDetail,
   fetchTurnoverRelationExtra,
-  saveTurnoverBankRowTags,
   saveTurnoverRelationExtra,
   withdrawTurnoverRelation,
 } from "../features/turnoverLedger/api";
@@ -141,8 +139,6 @@ export default function TurnoverLedgerPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [savingExtra, setSavingExtra] = useState(false);
-  const [savingTags, setSavingTags] = useState(false);
-  const [tagChanges, setTagChanges] = useState<Record<string, { categoryCode: string; expectedVersion: number }>>({});
   const [mutatingRelation, setMutatingRelation] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFamily, setExportFamily] = useState<TurnoverLedgerFamily>("all");
@@ -224,60 +220,6 @@ export default function TurnoverLedgerPage() {
     setDirection(nextDirection);
     if (nextDirection === "borrow_in" && family === "business") {
       setFamily("all");
-    }
-  };
-
-  const handleTagChange = (row: TurnoverLedgerGroupedRow, categoryCode: string) => {
-    const bankRowId = row.sourceBankRowId || (row.bankRowIds.length === 1 ? row.bankRowIds[0] : "");
-    if (!bankRowId) {
-      return;
-    }
-    setTagChanges((current) => {
-      const originalCode = row.categoryCode || "";
-      if (categoryCode === originalCode) {
-        const { [bankRowId]: _removed, ...rest } = current;
-        return rest;
-      }
-      return {
-        ...current,
-        [bankRowId]: {
-          categoryCode,
-          expectedVersion: row.categoryVersion,
-        },
-      };
-    });
-  };
-
-  const handleSaveTags = async () => {
-    const updates = Object.entries(tagChanges)
-      .filter(([, change]) => change.categoryCode)
-      .map(([transactionId, change]) => ({
-        transactionId,
-        categoryCode: change.categoryCode,
-        expectedVersion: change.expectedVersion,
-      }));
-    if (!updates.length || savingTags) {
-      return;
-    }
-    setSavingTags(true);
-    try {
-      const result = await saveTurnoverBankRowTags({ updates });
-      setTagChanges({});
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
-        affectedMonths: result.affectedMonths,
-        affectedRowIds: updates.map((update) => update.transactionId),
-        source: "turnover_bank_row_tag_save",
-      });
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
-        affectedMonths: result.affectedMonths,
-        source: "turnover_bank_row_tag_save",
-      });
-      setSnackbar({ severity: "success", message: "往来款子标签已保存" });
-      loadLedger();
-    } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "往来款子标签保存失败" });
-    } finally {
-      setSavingTags(false);
     }
   };
 
@@ -386,8 +328,6 @@ export default function TurnoverLedgerPage() {
     }
   };
 
-  const dirtyTagCount = Object.keys(tagChanges).length;
-
   return (
     <Box data-testid="turnover-ledger-page">
       <PageScaffold
@@ -442,15 +382,6 @@ export default function TurnoverLedgerPage() {
                 ))}
               </Tabs>
               <Stack direction="row" spacing={1}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<SaveOutlinedIcon />}
-                  onClick={() => void handleSaveTags()}
-                  disabled={!canMutateData || dirtyTagCount === 0 || savingTags}
-                >
-                  保存修改{dirtyTagCount ? ` (${dirtyTagCount})` : ""}
-                </Button>
                 <Button variant="contained" startIcon={<DownloadOutlinedIcon />} onClick={handleOpenExport}>
                   下载表格
                 </Button>
@@ -461,9 +392,6 @@ export default function TurnoverLedgerPage() {
               groups={groups}
               loading={loading}
               onEdit={handleOpenEditor}
-              canMutateData={canMutateData}
-              tagChanges={Object.fromEntries(Object.entries(tagChanges).map(([rowId, change]) => [rowId, change.categoryCode]))}
-              onTagChange={handleTagChange}
             />
           </Stack>
         </Paper>

@@ -8,6 +8,11 @@ from hashlib import sha1
 from threading import RLock
 from typing import Any
 
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    EXTERNAL_TURNOVER_CATEGORY_CODE,
+    turnover_relation_rule_from_bank_category,
+)
+
 
 TURNOVER_RELATION_SCHEMA_VERSION = "2026-05-turnover-relation-v1"
 TURNOVER_RELATION_STATUSES = {
@@ -570,9 +575,18 @@ class TurnoverRelationService:
         if not row_id:
             return None
         category_code = str(row.get("category_code") or "").strip()
-        if category_code in LEGACY_TURNOVER_CATEGORY_CODES or not category_code:
+        dynamic_rule = None
+        if category_code == EXTERNAL_TURNOVER_CATEGORY_CODE:
+            dynamic_rule = turnover_relation_rule_from_bank_category(row)
+        if category_code in LEGACY_TURNOVER_CATEGORY_CODES and dynamic_rule is None:
             return None
-        rule = TURNOVER_CATEGORY_RULES.get(category_code)
+        if not category_code:
+            return None
+        rule = (
+            _CategoryRule(category_code=category_code, **dynamic_rule)
+            if dynamic_rule is not None
+            else TURNOVER_CATEGORY_RULES.get(category_code)
+        )
         if rule is None:
             return None
         debit = self._money_or_zero(row.get("debit_amount"))

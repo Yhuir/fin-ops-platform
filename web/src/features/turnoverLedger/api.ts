@@ -112,6 +112,7 @@ type ApiTurnoverLedgerGroupedRow = {
   business_type?: string | null;
   category_code?: string | null;
   category_label?: string | null;
+  category_label_path?: string[];
   category_version?: number | null;
   counterparty_bank_name?: string | null;
   summary_text?: string | null;
@@ -477,6 +478,7 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     businessType: row.business_type ?? null,
     categoryCode: text(row.category_code),
     categoryLabel: text(row.category_label),
+    categoryLabelPath: stringList(row.category_label_path),
     categoryVersion: numberValue(row.category_version),
     counterpartyBankName: text(row.counterparty_bank_name),
     summaryText: text(row.summary_text),

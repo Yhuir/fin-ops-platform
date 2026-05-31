@@ -148,11 +148,11 @@
 | `category_rule_version` | 生成该自动标签或候选集时使用的自动标签规则版本。 |
 | `manual_confirmed_category_code` | 用户从自动候选集中确认后的标签 code；未确认时为 `null`。 |
 | `auto_candidate_category_codes` | 当前自动规则命中的候选标签 code 列表；只有 `needs_confirmation` 时用于页面选择。 |
-| `auto_candidate_categories` | 候选标签展示对象列表，包含 `category_code`、`category_label`、`category_primary_label`、`category_sub_label`、`category_label_path`、`category_path`、`rule_code` 和 `reason`。 |
+| `auto_candidate_categories` | 候选标签展示对象列表，包含 `category_code`、`category_label`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path`、`category_path`、`turnover_role`、`turnover_action_type`、`turnover_family`、`rule_code` 和 `reason`。 |
 
-当 `category_resolution_status=needs_confirmation` 时，前端只能展示 `auto_candidate_categories` 作为确认项，不得回退到全量银行明细标签字典。确认后接口返回的行应表现为 `manual_confirmed`，`effective_*` 字段按确认标签填充；撤销后回到当前自动规则重新计算结果。
+当 `category_resolution_status=needs_confirmation` 时，前端只能展示 `auto_candidate_categories` 作为确认项，不得回退到全量银行明细标签字典。确认后接口返回的行应表现为 `manual_confirmed`，`effective_*` 字段按确认标签填充；撤销后回到当前自动规则重新计算结果。外部往来规则命中但缺少第三层标签时，候选项为同一规则展开出的 `个人往来`、`公司往来`、`银行往来`、`业务往来` 四类第三层标签，`turnover_action_type` 来自规则。
 
-当 `category_resolution_status=unmatched` 且没有 `effective_category_code` 时，前端可展示 `待分类` 人工补分类入口。该入口使用当前响应中的 `bank_transaction_tags.definitions` 过滤 active 标签后按主/子标签展示，不能调用自动候选确认接口。
+当 `category_resolution_status=unmatched` 且没有 `effective_category_code` 时，前端可展示 `待分类` 人工补分类入口。该入口使用当前响应中的 `bank_transaction_tags.definitions` 过滤 active 标签后按普通主/子标签和外部往来三层标签展示，不能调用自动候选确认接口。
 
 自动候选生成按优先级层级收敛：`内部往来款` priority `1` 先执行并命中即停止；普通规则按 priority 从小到大分桶执行。某个普通 priority 层级一旦存在命中，后端不再检查更低优先级层级；该层级命中一个标签返回 `auto_matched`，命中多个标签返回 `needs_confirmation`，候选列表只包含该层级命中的标签。
 
@@ -162,11 +162,12 @@
 
 ```json
 {
-  "category_code": "fee"
+  "category_code": "external_payment",
+  "category_third_label": "个人往来"
 }
 ```
 
-后端必须按当前流水和当前自动标签规则重新计算候选集，并校验请求标签存在、启用且属于当前候选集。不满足时返回 `400 invalid_category_confirmation_candidate`，不得接受前端伪造的非候选标签。成功后写来源为 `auto_confirmation` 的确认记录、审计记录，并标记银行明细 read model 及相关下游派生数据 dirty/enqueue。
+后端必须按当前流水和当前自动标签规则重新计算候选集，并校验请求标签存在、启用且属于当前候选集；同一 `category_code` 有多个外部往来第三层候选时，必须同时校验 `category_third_label`。不满足时返回 `400 invalid_category_confirmation_candidate`，不得接受前端伪造的非候选标签。成功后写来源为 `auto_confirmation` 的确认记录、审计记录，并标记银行明细 read model 及相关下游派生数据 dirty/enqueue。
 
 `DELETE /api/bank-details/transactions/{transaction_id}/category-confirmation`
 
@@ -178,11 +179,17 @@
 
 ```json
 {
-  "category_code": "salary"
+  "category_code": "external_payment",
+  "category_primary_label": "外部往来款付款",
+  "category_sub_label": "借出款",
+  "category_third_label": "个人往来",
+  "category_label_path": ["外部往来款付款", "借出款", "个人往来"],
+  "turnover_action_type": "pending_collection",
+  "turnover_family": "personal"
 }
 ```
 
-后端必须重新计算当前流水的自动标签解析状态；只有当前状态为 `unmatched` 时允许写入来源为 `manual` 的人工分类。请求标签必须存在且处于启用状态。`needs_confirmation`、`auto_matched`、`internal_transfer` 等状态返回 `400 invalid_manual_category_assignment_target`，不能用该接口绕过候选确认或覆盖确定性自动结果。成功后写审计动作 `bank_detail_category_manually_assigned`，记录 `selected_category_code`、`previous_resolution_status` 和 `assignment_source=manual`，并标记银行明细 read model 及相关下游派生数据 dirty/enqueue。
+后端必须重新计算当前流水的自动标签解析状态；只有当前状态为 `unmatched` 时允许写入来源为 `manual` 的人工分类。请求标签必须存在且处于启用状态；外部往来人工补分类必须携带第三层标签和可由规则解析的动作语义。`needs_confirmation`、`auto_matched`、`internal_transfer` 等状态返回 `400 invalid_manual_category_assignment_target`，不能用该接口绕过候选确认或覆盖确定性自动结果。成功后写审计动作 `bank_detail_category_manually_assigned`，记录 `selected_category_code`、`previous_resolution_status` 和 `assignment_source=manual`，并标记银行明细 read model 及相关下游派生数据 dirty/enqueue。
 
 `DELETE /api/bank-details/transactions/{transaction_id}/category-assignment`
 
@@ -203,6 +210,8 @@
 | `active_rules` | 可用文本类标签，按优先级升序返回。 |
 | `archived_rules` | 停用文本类标签，不参与自动命中。 |
 | `field_options` | 可用于规则配置的稳定语义字段。 |
+| `turnover_third_label_options` | 外部往来可选第三层标签：个人往来、公司往来、银行往来、业务往来。 |
+| `turnover_action_type_options` | 外部往来可选台账动作类型。 |
 | `permissions.can_save` | 当前用户是否可以保存。 |
 | `read_model_status` | 可选，说明保存后派生数据是否仍在刷新。 |
 
@@ -223,7 +232,8 @@
 | `rules.contains_all` | 必须同时包含字样列表，可为空。 |
 | `rules.none_of` | 不包含任一字样列表，可为空。旧字段 `excludes` 作为兼容别名读取。 |
 | `rules.regex_any` | 兼容保留的正则命中任一列表，可为空。普通维护 UI 不编辑正则，保存时固定写空数组。 |
-| `output_primary_label` / `output_sub_label` | 输出标签；子标签可为空。 |
+| `output_primary_label` / `output_sub_label` / `output_third_label` | 输出标签；子标签可为空，第三层标签只允许外部往来付款/收款规则使用。 |
+| `turnover_role` / `turnover_action_type` / `turnover_family` | 外部往来语义字段；非外部往来规则不得提交这些字段。 |
 | `rule_summary` | 后端生成的人类可读摘要。 |
 | `editable` / `archivable` / `sortable` | 前端交互能力标志。 |
 
@@ -277,6 +287,8 @@
 - 请求提交完整的可用区和停用区文本规则列表。`internal_transfer` 不在请求体中提交。
 - 已存在标签必须携带原 `code`；新建标签不得提交 `code`，由后端生成稳定 `custom_...` code。
 - 可用标签的 `output_primary_label` 去首尾空格后不能为空；唯一性按 `output_primary_label + output_sub_label` 组合判断，同主同子不允许重复，停用区允许历史重复。
+- 外部往来付款/收款规则的唯一性包含 `output_third_label`；普通非外部往来规则不得提交 `output_third_label`、`turnover_role`、`turnover_action_type` 或 `turnover_family`。
+- 外部往来规则必须能解析台账动作类型。标准外部往来子标签可由后端推导默认 `turnover_action_type`；用户新增外部往来子标签时必须显式提交 `turnover_action_type`。
 - 可用普通标签的 `priority` 必须是大于等于 `2` 的整数；`1`、`0`、负数、小数和非数字字符串均返回 `invalid_auto_tag_rule` 结构化字段错误。缺失 priority 仅在新建或历史兼容路径按 `2` 处理。
 - 保存后返回按 `priority ASC, sort_order ASC` 排序的规则；同一优先级内不按标签名称重排，避免打散 xlsx 原始业务顺序。
 - 普通维护 UI 保存时，所有规则固定提交 `account_scope={"type":"any","values":[]}` 和 `rules.regex_any=[]`。后端继续兼容读取旧数据中的账户范围和正则字段，但普通维护 UI 不生成这些高级条件。

@@ -8,6 +8,19 @@ import re
 from threading import RLock
 from typing import Any, Callable
 
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    EXTERNAL_TURNOVER_ROLE,
+    EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS,
+    TURNOVER_ACTION_TYPE_OPTIONS,
+    infer_turnover_action_type,
+    is_external_turnover_definition,
+    is_external_turnover_primary_label,
+    label_path as turnover_label_path,
+    normalize_external_third_label,
+    normalize_turnover_action_type,
+    turnover_family_for_third_label,
+)
+
 
 BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION = "2026-05-bank-transaction-category-taxonomy"
 BANK_TRANSACTION_CATEGORY_TAXONOMY: list[dict[str, Any]] = [
@@ -444,6 +457,10 @@ def _default_auto_tag_rule_fields(code: str) -> dict[str, Any]:
         "account_scope",
         "output_primary_label",
         "output_sub_label",
+        "output_third_label",
+        "turnover_role",
+        "turnover_action_type",
+        "turnover_family",
         "stop_on_match",
         "review_required",
         "route_to",
@@ -603,6 +620,8 @@ class BankTransactionCategoryService:
                 for definition in archived
             ],
             "field_options": [dict(option) for option in BANK_AUTO_TAG_FIELD_OPTIONS],
+            "turnover_third_label_options": [dict(option) for option in EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS],
+            "turnover_action_type_options": [dict(option) for option in TURNOVER_ACTION_TYPE_OPTIONS],
             "permissions": {"can_save": bool(can_save)},
         }
         if read_model_status:
@@ -1070,6 +1089,12 @@ class BankTransactionCategoryService:
         transaction_id: str,
         category_code: str,
         actor: str,
+        category_primary_label: str | None = None,
+        category_sub_label: str | None = None,
+        category_third_label: str | None = None,
+        category_label_path: list[str] | None = None,
+        turnover_action_type: str | None = None,
+        turnover_family: str | None = None,
     ) -> dict[str, Any]:
         return self._apply_updates(
             [
@@ -1077,6 +1102,12 @@ class BankTransactionCategoryService:
                     "transaction_id": transaction_id,
                     "category_code": category_code,
                     "manual_assignment": True,
+                    "category_primary_label": category_primary_label,
+                    "category_sub_label": category_sub_label,
+                    "category_third_label": category_third_label,
+                    "category_label_path": category_label_path,
+                    "turnover_action_type": turnover_action_type,
+                    "turnover_family": turnover_family,
                 }
             ],
             actor=actor,
@@ -1091,6 +1122,12 @@ class BankTransactionCategoryService:
         candidate_category_codes: list[str],
         rule_version: str,
         actor: str,
+        category_primary_label: str | None = None,
+        category_sub_label: str | None = None,
+        category_third_label: str | None = None,
+        category_label_path: list[str] | None = None,
+        turnover_action_type: str | None = None,
+        turnover_family: str | None = None,
     ) -> dict[str, Any]:
         normalized_transaction_id = self._normalize_transaction_id(transaction_id)
         normalized_category_code = str(category_code or "").strip()
@@ -1127,6 +1164,12 @@ class BankTransactionCategoryService:
                     "category_code": normalized_category_code,
                     "candidate_category_codes": normalized_candidates,
                     "rule_version": str(rule_version or "").strip(),
+                    "category_primary_label": category_primary_label,
+                    "category_sub_label": category_sub_label,
+                    "category_third_label": category_third_label,
+                    "category_label_path": category_label_path,
+                    "turnover_action_type": turnover_action_type,
+                    "turnover_family": turnover_family,
                 }
             ],
             actor=actor,
@@ -1233,16 +1276,29 @@ class BankTransactionCategoryService:
                 existing = self._categories.get(transaction_id)
                 previous_code = existing.get("category_code") if isinstance(existing, dict) else None
                 previous_source = str(existing.get("source") or "") if isinstance(existing, dict) else ""
-                if existing is not None and previous_code == category_code and previous_source == source:
+                if (
+                    existing is not None
+                    and previous_code == category_code
+                    and previous_source == source
+                    and self._stored_category_semantics(existing) == self._submitted_category_semantics(update)
+                ):
                     updated_categories.append(self._public_record(transaction_id, existing))
                     continue
 
                 next_version = self._current_version(transaction_id) + 1
+                label_fields = self._label_fields_for_update(category_code, update)
                 record = {
                     "transaction_id": transaction_id,
                     "category_code": category_code,
-                    "category_label": self._label_for(category_code),
+                    "category_label": label_fields.get("category_label") or self._label_for(category_code),
                     "category_path": self._path_for(category_code),
+                    "category_primary_label": label_fields.get("category_primary_label"),
+                    "category_sub_label": label_fields.get("category_sub_label"),
+                    "category_third_label": label_fields.get("category_third_label"),
+                    "category_label_path": list(label_fields.get("category_label_path") or []),
+                    "turnover_role": label_fields.get("turnover_role") or "",
+                    "turnover_action_type": label_fields.get("turnover_action_type"),
+                    "turnover_family": label_fields.get("turnover_family"),
                     "source": source,
                     "updated_by": normalized_actor,
                     "updated_at": timestamp,
@@ -1261,6 +1317,10 @@ class BankTransactionCategoryService:
                         "transaction_id": transaction_id,
                         "previous_category_code": previous_code,
                         "category_code": category_code,
+                        "category_label_path": list(label_fields.get("category_label_path") or []),
+                        "category_third_label": label_fields.get("category_third_label"),
+                        "turnover_action_type": label_fields.get("turnover_action_type"),
+                        "turnover_family": label_fields.get("turnover_family"),
                         "source": source,
                         "candidate_category_codes": list(update.get("candidate_category_codes") or []),
                         "rule_version": str(update.get("rule_version") or ""),
@@ -1359,6 +1419,17 @@ class BankTransactionCategoryService:
             "archivable": priority_index is not None,
             "sortable": priority_index is not None,
         }
+        if (
+            is_external_turnover_primary_label(payload["output_primary_label"])
+            or definition.get("output_third_label")
+            or definition.get("turnover_action_type")
+        ):
+            output_third_label = normalize_external_third_label(definition.get("output_third_label"))
+            action_type = normalize_turnover_action_type(definition.get("turnover_action_type"))
+            payload["turnover_role"] = EXTERNAL_TURNOVER_ROLE
+            payload["output_third_label"] = output_third_label
+            payload["turnover_action_type"] = action_type
+            payload["turnover_family"] = turnover_family_for_third_label(output_third_label)
         if priority_index is not None:
             payload["priority"] = priority
             payload["priority_label"] = f"优先级 {priority}"
@@ -1410,6 +1481,44 @@ class BankTransactionCategoryService:
             field_errors.append({"path": f"{path_prefix}.output_primary_label", "message": "主标签名称不能为空。"})
             output_primary_label = str(item.get("label") or code or "未命名标签").strip()
         label = output_sub_label or output_primary_label
+        raw_output_third_label = str(item.get("output_third_label") or item.get("category_third_label") or "").strip()
+        raw_turnover_action_type = str(item.get("turnover_action_type") or "").strip()
+        previous_definition = previous_definitions_by_code.get(code, {}) if not is_new else {}
+        external_turnover_rule = (
+            is_external_turnover_definition(previous_definition)
+            or is_external_turnover_primary_label(output_primary_label)
+            or str(item.get("turnover_role") or "").strip() == EXTERNAL_TURNOVER_ROLE
+        )
+        configured_external_turnover_rule = (
+            is_external_turnover_primary_label(output_primary_label)
+            or bool(raw_output_third_label)
+            or bool(raw_turnover_action_type)
+            or str(item.get("turnover_role") or "").strip() == EXTERNAL_TURNOVER_ROLE
+        )
+        output_third_label = ""
+        turnover_action_type = ""
+        turnover_family = ""
+        if external_turnover_rule and configured_external_turnover_rule:
+            output_third_label = normalize_external_third_label(raw_output_third_label)
+            if raw_output_third_label and not output_third_label:
+                field_errors.append({"path": f"{path_prefix}.output_third_label", "message": "外部往来款子子标签只能是个人往来、公司往来、银行往来、业务往来。"})
+            turnover_action_type = normalize_turnover_action_type(raw_turnover_action_type)
+            if raw_turnover_action_type and not turnover_action_type:
+                field_errors.append({"path": f"{path_prefix}.turnover_action_type", "message": "台账动作类型无效。"})
+            if not turnover_action_type:
+                turnover_action_type = infer_turnover_action_type(
+                    primary_label=output_primary_label,
+                    sub_label=output_sub_label,
+                    direction=item.get("direction"),
+                )
+            if not turnover_action_type:
+                field_errors.append({"path": f"{path_prefix}.turnover_action_type", "message": "外部往来款规则必须配置台账动作类型。"})
+            turnover_family = turnover_family_for_third_label(output_third_label)
+        else:
+            if raw_output_third_label:
+                field_errors.append({"path": f"{path_prefix}.output_third_label", "message": "只有外部往来款付款/收款规则可以配置子子标签。"})
+            if raw_turnover_action_type:
+                field_errors.append({"path": f"{path_prefix}.turnover_action_type", "message": "只有外部往来款付款/收款规则可以配置台账动作类型。"})
 
         rules = cls._normalize_auto_tag_rule_conditions(item.get("rules"), allow_invalid=False)
         direction = cls._normalize_auto_tag_direction(item.get("direction"))
@@ -1456,6 +1565,12 @@ class BankTransactionCategoryService:
             "rules": rules,
             "rule_code": rule_code,
         }
+        if configured_external_turnover_rule:
+            definition["turnover_role"] = EXTERNAL_TURNOVER_ROLE
+            definition["turnover_action_type"] = turnover_action_type
+            definition["turnover_family"] = turnover_family
+            if output_third_label:
+                definition["output_third_label"] = output_third_label
         for system_key in ("stop_on_match", "review_required", "route_to"):
             previous_value = previous_definitions_by_code.get(code, {}).get(system_key)
             if previous_value is not None:
@@ -1497,8 +1612,8 @@ class BankTransactionCategoryService:
         *,
         field_errors: list[dict[str, str]],
     ) -> None:
-        seen_active_label_paths: dict[tuple[str, str], int] = {
-            (str(BANK_AUTO_TAG_SYSTEM_RULE.get("label") or BANK_AUTO_TAG_INTERNAL_TRANSFER_LABEL).strip(), ""): -1
+        seen_active_label_paths: dict[tuple[str, str, str], int] = {
+            (str(BANK_AUTO_TAG_SYSTEM_RULE.get("label") or BANK_AUTO_TAG_INTERNAL_TRANSFER_LABEL).strip(), "", ""): -1
         }
         for index, definition in enumerate(definitions):
             status = str(definition.get("status") or "active")
@@ -1506,9 +1621,10 @@ class BankTransactionCategoryService:
                 continue
             primary_label = str(definition.get("output_primary_label") or "").strip()
             sub_label = str(definition.get("output_sub_label") or "").strip()
+            third_label = str(definition.get("output_third_label") or "").strip()
             if not primary_label:
                 continue
-            label_path = (primary_label, sub_label)
+            label_path = (primary_label, sub_label, third_label)
             if label_path in seen_active_label_paths:
                 field_errors.append({"path": f"active_rules[{index}].output_sub_label", "message": "主标签名称和子标签名称组合不能重复。"})
                 continue
@@ -1561,6 +1677,10 @@ class BankTransactionCategoryService:
                 "new_output_primary_label": next_by_code[code].get("output_primary_label"),
                 "old_output_sub_label": previous_by_code[code].get("output_sub_label"),
                 "new_output_sub_label": next_by_code[code].get("output_sub_label"),
+                "old_output_third_label": previous_by_code[code].get("output_third_label"),
+                "new_output_third_label": next_by_code[code].get("output_third_label"),
+                "old_turnover_action_type": previous_by_code[code].get("turnover_action_type"),
+                "new_turnover_action_type": next_by_code[code].get("turnover_action_type"),
             }
             for code in sorted(set(previous_by_code).intersection(next_by_code))
             if (
@@ -1574,6 +1694,14 @@ class BankTransactionCategoryService:
                     or (
                         previous_by_code[code].get("output_sub_label")
                         != next_by_code[code].get("output_sub_label")
+                    )
+                    or (
+                        previous_by_code[code].get("output_third_label")
+                        != next_by_code[code].get("output_third_label")
+                    )
+                    or (
+                        previous_by_code[code].get("turnover_action_type")
+                        != next_by_code[code].get("turnover_action_type")
                     )
                 )
             )
@@ -1653,7 +1781,20 @@ class BankTransactionCategoryService:
                         next_definition["rules"] = deepcopy(definition["rules"])
                     if definition.get("rule_code"):
                         next_definition["rule_code"] = definition["rule_code"]
-                    for key in ("direction", "account_scope", "output_primary_label", "output_sub_label", "sort_order", "stop_on_match", "review_required", "route_to"):
+                    for key in (
+                        "direction",
+                        "account_scope",
+                        "output_primary_label",
+                        "output_sub_label",
+                        "output_third_label",
+                        "turnover_role",
+                        "turnover_action_type",
+                        "turnover_family",
+                        "sort_order",
+                        "stop_on_match",
+                        "review_required",
+                        "route_to",
+                    ):
                         if key in definition:
                             next_definition[key] = deepcopy(definition[key])
                 definitions_by_code[code] = next_definition
@@ -1734,6 +1875,26 @@ class BankTransactionCategoryService:
             output_sub_label = str(item.get("output_sub_label") or "").strip()
             if output_sub_label:
                 definition["output_sub_label"] = output_sub_label
+            output_third_label = normalize_external_third_label(item.get("output_third_label"))
+            raw_action_type = str(item.get("turnover_action_type") or "").strip()
+            external_turnover_definition = (
+                is_external_turnover_primary_label(output_primary_label)
+                or bool(output_third_label)
+                or bool(raw_action_type)
+                or str(item.get("turnover_role") or "").strip() == EXTERNAL_TURNOVER_ROLE
+            )
+            if external_turnover_definition:
+                action_type = normalize_turnover_action_type(raw_action_type) or infer_turnover_action_type(
+                    primary_label=output_primary_label,
+                    sub_label=output_sub_label,
+                    direction=item.get("direction"),
+                )
+                definition["turnover_role"] = EXTERNAL_TURNOVER_ROLE
+                if output_third_label:
+                    definition["output_third_label"] = output_third_label
+                    definition["turnover_family"] = turnover_family_for_third_label(output_third_label)
+                if action_type:
+                    definition["turnover_action_type"] = action_type
             derived_label = output_sub_label or output_primary_label
             if derived_label:
                 definition["label"] = derived_label
@@ -1963,6 +2124,85 @@ class BankTransactionCategoryService:
         except (TypeError, ValueError):
             return None
 
+    def _stored_category_semantics(self, record: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            str(record.get("category_primary_label") or ""),
+            str(record.get("category_sub_label") or ""),
+            str(record.get("category_third_label") or ""),
+            tuple(str(item) for item in list(record.get("category_label_path") or [])),
+            str(record.get("turnover_action_type") or ""),
+            str(record.get("turnover_family") or ""),
+        )
+
+    def _submitted_category_semantics(self, update: dict[str, Any]) -> tuple[Any, ...]:
+        fields = self._label_fields_for_update(update.get("category_code"), update)
+        return (
+            str(fields.get("category_primary_label") or ""),
+            str(fields.get("category_sub_label") or ""),
+            str(fields.get("category_third_label") or ""),
+            tuple(str(item) for item in list(fields.get("category_label_path") or [])),
+            str(fields.get("turnover_action_type") or ""),
+            str(fields.get("turnover_family") or ""),
+        )
+
+    def _label_fields_for_update(self, category_code: str | None, update: dict[str, Any]) -> dict[str, Any]:
+        base = self._label_fields_for(category_code)
+        definition = self._tag_definitions_by_code.get(category_code) if category_code is not None else None
+        update_path = [
+            str(item).strip()
+            for item in list(update.get("category_label_path") or [])
+            if str(item).strip()
+        ]
+        primary_label = str(update.get("category_primary_label") or base.get("category_primary_label") or "").strip()
+        sub_label = str(update.get("category_sub_label") or base.get("category_sub_label") or "").strip()
+        third_label = (
+            normalize_external_third_label(update.get("category_third_label"))
+            or normalize_external_third_label(base.get("category_third_label"))
+        )
+        if update_path:
+            primary_label = primary_label or (update_path[0] if len(update_path) >= 1 else "")
+            sub_label = sub_label or (update_path[1] if len(update_path) >= 2 else "")
+            if len(update_path) >= 3:
+                third_label = third_label or normalize_external_third_label(update_path[2])
+        external_turnover = (
+            is_external_turnover_definition(definition)
+            or is_external_turnover_primary_label(primary_label)
+            or bool(normalize_turnover_action_type(update.get("turnover_action_type")))
+        )
+        action_type = None
+        turnover_family = None
+        turnover_role = ""
+        if external_turnover:
+            action_type = (
+                normalize_turnover_action_type(update.get("turnover_action_type"))
+                or normalize_turnover_action_type((definition or {}).get("turnover_action_type"))
+                or infer_turnover_action_type(
+                    primary_label=primary_label,
+                    sub_label=sub_label,
+                    direction=(definition or {}).get("direction"),
+                )
+            )
+            turnover_family = (
+                str(update.get("turnover_family") or "").strip()
+                or str((definition or {}).get("turnover_family") or "").strip()
+                or turnover_family_for_third_label(third_label)
+            )
+            turnover_role = EXTERNAL_TURNOVER_ROLE
+        label_path = update_path or turnover_label_path(primary_label, sub_label, third_label if external_turnover else "")
+        category_label = str(self._label_for(category_code) or "").strip()
+        if external_turnover:
+            category_label = sub_label or primary_label or category_label
+        return {
+            "category_label": category_label or None,
+            "category_primary_label": primary_label or None,
+            "category_sub_label": sub_label or None,
+            "category_third_label": third_label or None,
+            "category_label_path": label_path,
+            "turnover_role": turnover_role,
+            "turnover_action_type": action_type,
+            "turnover_family": turnover_family or None,
+        }
+
     def _normalize_categories(self, categories: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         normalized: dict[str, dict[str, Any]] = {}
         for transaction_id, record in categories.items():
@@ -1972,11 +2212,36 @@ class BankTransactionCategoryService:
             if not normalized_id:
                 continue
             category_code = self._normalize_category_code_current(record.get("category_code"))
+            category_label = str(record.get("category_label") or self._label_for(category_code) or "").strip()
+            category_path = [
+                str(item).strip()
+                for item in list(record.get("category_path") or self._path_for(category_code))
+                if str(item).strip()
+            ]
+            category_primary_label = str(record.get("category_primary_label") or "").strip() or None
+            category_sub_label = str(record.get("category_sub_label") or "").strip() or None
+            category_third_label = normalize_external_third_label(record.get("category_third_label")) or None
+            category_label_path = [
+                str(item).strip()
+                for item in list(record.get("category_label_path") or [])
+                if str(item).strip()
+            ]
+            if not category_label_path:
+                category_label_path = turnover_label_path(category_primary_label, category_sub_label, category_third_label)
+            turnover_action_type = normalize_turnover_action_type(record.get("turnover_action_type")) or None
+            turnover_family = str(record.get("turnover_family") or "").strip() or turnover_family_for_third_label(category_third_label)
             normalized[normalized_id] = {
                 "transaction_id": normalized_id,
                 "category_code": category_code,
-                "category_label": self._label_for(category_code),
-                "category_path": self._path_for(category_code),
+                "category_label": category_label or None,
+                "category_path": category_path,
+                "category_primary_label": category_primary_label,
+                "category_sub_label": category_sub_label,
+                "category_third_label": category_third_label,
+                "category_label_path": category_label_path,
+                "turnover_role": str(record.get("turnover_role") or "").strip() or (EXTERNAL_TURNOVER_ROLE if turnover_action_type else ""),
+                "turnover_action_type": turnover_action_type,
+                "turnover_family": turnover_family or None,
                 "source": str(record.get("source") or "manual").strip() or "manual",
                 "updated_by": str(record.get("updated_by") or "").strip(),
                 "updated_at": str(record.get("updated_at") or "").strip(),
@@ -2018,8 +2283,24 @@ class BankTransactionCategoryService:
                 raise BankTransactionCategoryValidationError(
                     "archived_category_code",
                     f"Archived bank transaction category code cannot be selected: {category_code}",
-                    transaction_id=transaction_id,
+                        transaction_id=transaction_id,
                 )
+        category_label_path = [
+            str(item).strip()
+            for item in list(update.get("category_label_path") or [])
+            if str(item).strip()
+        ]
+        category_primary_label = str(update.get("category_primary_label") or "").strip()
+        category_sub_label = str(update.get("category_sub_label") or "").strip()
+        category_third_label = normalize_external_third_label(update.get("category_third_label"))
+        if category_label_path:
+            category_primary_label = category_primary_label or (category_label_path[0] if len(category_label_path) >= 1 else "")
+            category_sub_label = category_sub_label or (category_label_path[1] if len(category_label_path) >= 2 else "")
+            category_third_label = category_third_label or (
+                normalize_external_third_label(category_label_path[2]) if len(category_label_path) >= 3 else ""
+            )
+        turnover_action_type = normalize_turnover_action_type(update.get("turnover_action_type"))
+        turnover_family = str(update.get("turnover_family") or "").strip() or turnover_family_for_third_label(category_third_label)
         expected_version = update.get("expected_version")
         if expected_version is not None:
             expected_version = self._normalize_version(expected_version)
@@ -2034,6 +2315,12 @@ class BankTransactionCategoryService:
             ],
             "rule_version": str(update.get("rule_version") or "").strip(),
             "manual_assignment": bool(update.get("manual_assignment")),
+            "category_primary_label": category_primary_label or None,
+            "category_sub_label": category_sub_label or None,
+            "category_third_label": category_third_label or None,
+            "category_label_path": category_label_path,
+            "turnover_action_type": turnover_action_type or None,
+            "turnover_family": turnover_family or None,
         }
 
     @staticmethod
@@ -2097,14 +2384,17 @@ class BankTransactionCategoryService:
             return {
                 "category_primary_label": None,
                 "category_sub_label": None,
+                "category_third_label": None,
                 "category_label_path": [],
             }
         definition = self._tag_definitions_by_code.get(category_code)
         primary_label = ""
         sub_label = ""
+        third_label = ""
         if isinstance(definition, dict):
             primary_label = str(definition.get("output_primary_label") or "").strip()
             sub_label = str(definition.get("output_sub_label") or "").strip()
+            third_label = normalize_external_third_label(definition.get("output_third_label"))
         if not primary_label:
             path = self._path_for(category_code)
             if len(path) >= 2 and path[0] != "自动识别":
@@ -2113,10 +2403,11 @@ class BankTransactionCategoryService:
                     sub_label = str(path[-1] or "").strip()
             else:
                 primary_label = str(label or "").strip()
-        label_path = [item for item in (primary_label, sub_label) if item]
+        label_path = turnover_label_path(primary_label, sub_label, third_label)
         return {
             "category_primary_label": primary_label or None,
             "category_sub_label": sub_label or None,
+            "category_third_label": third_label or None,
             "category_label_path": label_path,
         }
 
@@ -2138,12 +2429,56 @@ class BankTransactionCategoryService:
     def _public_record(self, transaction_id: str, record: dict[str, Any] | None) -> dict[str, Any]:
         category_code = record.get("category_code") if isinstance(record, dict) else None
         version = self._normalize_version(record.get("version")) if isinstance(record, dict) else 0
+        computed_label_fields = self._label_fields_for(category_code)
+        category_primary_label = (
+            str(record.get("category_primary_label") or "").strip()
+            if isinstance(record, dict)
+            else ""
+        ) or computed_label_fields.get("category_primary_label")
+        category_sub_label = (
+            str(record.get("category_sub_label") or "").strip()
+            if isinstance(record, dict)
+            else ""
+        ) or computed_label_fields.get("category_sub_label")
+        category_third_label = (
+            normalize_external_third_label(record.get("category_third_label"))
+            if isinstance(record, dict)
+            else ""
+        ) or computed_label_fields.get("category_third_label")
+        category_label_path = (
+            [
+                str(item).strip()
+                for item in list(record.get("category_label_path") or [])
+                if str(item).strip()
+            ]
+            if isinstance(record, dict)
+            else []
+        ) or turnover_label_path(category_primary_label, category_sub_label, category_third_label)
+        category_label = (
+            str(record.get("category_label") or "").strip()
+            if isinstance(record, dict)
+            else ""
+        ) or self._label_for(category_code)
         return {
             "transaction_id": transaction_id,
             "category_code": category_code,
-            "category_label": self._label_for(category_code),
-            **self._label_fields_for(category_code),
-            "category_path": self._path_for(category_code),
+            "category_label": category_label,
+            "category_primary_label": category_primary_label,
+            "category_sub_label": category_sub_label,
+            "category_third_label": category_third_label,
+            "category_label_path": category_label_path,
+            "category_path": (
+                [
+                    str(item).strip()
+                    for item in list(record.get("category_path") or [])
+                    if str(item).strip()
+                ]
+                if isinstance(record, dict)
+                else []
+            ) or self._path_for(category_code),
+            "turnover_role": str(record.get("turnover_role") or "") if isinstance(record, dict) else "",
+            "turnover_action_type": str(record.get("turnover_action_type") or "") if isinstance(record, dict) and record.get("turnover_action_type") else None,
+            "turnover_family": str(record.get("turnover_family") or "") if isinstance(record, dict) and record.get("turnover_family") else None,
             "category_version": version,
             "source": str(record.get("source") or "") if isinstance(record, dict) else "",
             "updated_by": str(record.get("updated_by") or "") if isinstance(record, dict) else "",

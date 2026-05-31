@@ -26,6 +26,7 @@ BANK_DETAIL_EXPORT_COLUMNS = [
     "自动分类",
     "自动分类主标签",
     "自动分类子标签",
+    "自动分类子子标签",
     "OA 关系",
     "发票关系",
     "用途/交易用途",
@@ -74,6 +75,7 @@ class BankDetailsExportService:
         category_code: str | None = None,
         category_primary_label: str | None = None,
         category_sub_label: str | None = None,
+        category_third_label: str | None = None,
         today: date | None = None,
     ) -> BankDetailsExportResult:
         normalized_mode = str(mode or "").strip().lower()
@@ -93,6 +95,7 @@ class BankDetailsExportService:
             category_code=category_code,
             category_primary_label=category_primary_label,
             category_sub_label=category_sub_label,
+            category_third_label=category_third_label,
         )
         formal_rows = [self._formal_row(row) for row in rows]
         workbook = self._build_workbook(formal_rows, mode=normalized_mode, account_payload=account_payload)
@@ -130,6 +133,7 @@ class BankDetailsExportService:
         category_code: str | None,
         category_primary_label: str | None,
         category_sub_label: str | None,
+        category_third_label: str | None,
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         page = 1
@@ -143,6 +147,7 @@ class BankDetailsExportService:
                 category_code=category_code,
                 category_primary_label=category_primary_label,
                 category_sub_label=category_sub_label,
+                category_third_label=category_third_label,
                 page=page,
                 page_size=BANK_DETAIL_EXPORT_PAGE_SIZE,
             )
@@ -184,6 +189,11 @@ class BankDetailsExportService:
                 row.get("auto_category_sub_label")
                 or row.get("effective_category_sub_label")
                 or row.get("category_sub_label")
+            ) or "-",
+            "自动分类子子标签": cls._text(
+                row.get("auto_category_third_label")
+                or row.get("effective_category_third_label")
+                or row.get("category_third_label")
             ) or "-",
             "OA 关系": cls._text(row.get("oa_relation_tag")) or "无oa",
             "发票关系": cls._text(row.get("invoice_relation_tag")) or "无发票",
@@ -256,6 +266,7 @@ class BankDetailsExportService:
             "自动分类": 18,
             "自动分类主标签": 16,
             "自动分类子标签": 16,
+            "自动分类子子标签": 16,
             "OA 关系": 10,
             "发票关系": 12,
             "用途/交易用途": 24,

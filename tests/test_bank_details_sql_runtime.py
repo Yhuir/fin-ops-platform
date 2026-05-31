@@ -475,6 +475,48 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn("费用", flattened_params)
         self.assertIn("手续费", flattened_params)
 
+    def test_transactions_filter_by_effective_third_category_label(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-04", row_count=1)],
+                {"total": 1},
+                [{"category_code": "external_turnover", "count": 1}],
+                [
+                    {
+                        "payload": {
+                            "id": "txn-external",
+                            "effective_category_code": "external_turnover",
+                            "effective_category_primary_label": "外部往来款付款",
+                            "effective_category_sub_label": "借出款",
+                            "effective_category_third_label": "公司往来",
+                            "effective_category_label_path": ["外部往来款付款", "借出款", "公司往来"],
+                        },
+                        "raw_payload": {},
+                        "summary": "",
+                        "purpose": "",
+                    }
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_transactions(
+            date_from="2026-04-01",
+            date_to="2026-04-30",
+            category_primary_label="外部往来款付款",
+            category_sub_label="借出款",
+            category_third_label="公司往来",
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["rows"][0]["effective_category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("effective_category_primary_label = %s", sql_text)
+        self.assertIn("effective_category_sub_label = %s", sql_text)
+        self.assertIn("effective_category_third_label = %s", sql_text)
+        flattened_params = [param for _kind, _sql, params in connection.calls for param in params]
+        self.assertIn("公司往来", flattened_params)
+
     def test_accounts_aggregate_from_bank_detail_rows_only_when_scopes_are_fresh(self) -> None:
         connection = FakeConnection(
             rows=[
@@ -633,6 +675,81 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(repository.saved_rows[0]["category_sub_label"], "手续费")
         self.assertEqual(repository.saved_rows[0]["category_label_path"], ["费用", "手续费"])
         self.assertEqual(repository.saved_rows[0]["source_versions"]["bank_auto_tag_rules_version"], 2)
+
+    def test_rebuild_projects_external_turnover_third_label_and_action_type(self) -> None:
+        repository = CaptureBankDetailReadModelRepository()
+        connection = FakeConnection(
+            app_settings_payload={
+                "bank_transaction_tags": {
+                    "version": 23,
+                    "definitions": [
+                        {
+                            "code": "custom_external_company_borrow_out",
+                            "label": "借出款",
+                            "path": ["自动识别", "借出款"],
+                            "output_primary_label": "外部往来款付款",
+                            "output_sub_label": "借出款",
+                            "output_third_label": "公司往来",
+                            "turnover_action_type": "pending_collection",
+                            "source": "custom",
+                            "status": "active",
+                            "priority": 2,
+                            "direction": "expense",
+                            "rules": {
+                                "match_fields": ["summary_text"],
+                                "exact": [],
+                                "contains": ["借出周转款"],
+                                "excludes": [],
+                            },
+                        }
+                    ],
+                },
+            },
+            rows=[
+                [
+                    {
+                        "id": "txn-external-company-out",
+                        "transaction_id": "uuid-external-company-out",
+                        "account_no": "6222000011116386",
+                        "account_name": "云南溯源科技有限公司",
+                        "txn_direction": "expense",
+                        "counterparty_name_raw": "云南路桥",
+                        "amount": "8000.00",
+                        "signed_amount": "-8000.00",
+                        "balance": "2138.00",
+                        "currency": "CNY",
+                        "txn_date": "2026-01-24",
+                        "trade_time": "2026-01-24 21:48:34",
+                        "summary": "借出周转款",
+                        "remark": "",
+                        "bank_text_fields": [{"label": "摘要", "value": "借出周转款"}],
+                        "raw_payload": {
+                            "normalized_payload": {
+                                "imported_bank_name": "工商银行",
+                                "imported_bank_last4": "6386",
+                            }
+                        },
+                    }
+                ],
+                [],
+                [],
+            ],
+        )
+        builder = BankDetailSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+
+        result = builder.rebuild_bank_detail_read_model_scope("2026-01", source_version=9)
+
+        self.assertEqual(result["row_count"], 1)
+        row = repository.saved_rows[0]
+        self.assertEqual(row["auto_category_code"], "custom_external_company_borrow_out")
+        self.assertEqual(row["auto_category_primary_label"], "外部往来款付款")
+        self.assertEqual(row["auto_category_sub_label"], "借出款")
+        self.assertEqual(row["auto_category_third_label"], "公司往来")
+        self.assertEqual(row["auto_category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
+        self.assertEqual(row["effective_category_third_label"], "公司往来")
+        self.assertEqual(row["category_third_label"], "公司往来")
+        self.assertEqual(row["turnover_action_type"], "pending_collection")
+        self.assertEqual(row["turnover_family"], "company")
 
     def test_rebuild_uses_manual_category_for_unmatched_transaction(self) -> None:
         repository = CaptureBankDetailReadModelRepository()

@@ -205,6 +205,8 @@ function groupedPayload(family: string) {
           status: "confirmed",
           status_label: "流水",
           row_tone: "success",
+          category_label: "外部往来款收款 / 借入款 / 个人往来",
+          category_label_path: ["外部往来款收款", "借入款", "个人往来"],
           flow_direction: "income",
           flow_amount: "200000.00",
           borrow_amount: "200000.00",
@@ -233,6 +235,8 @@ function groupedPayload(family: string) {
           status: "confirmed",
           status_label: "流水",
           row_tone: "success",
+          category_label: "外部往来款收款 / 借入款 / 个人往来",
+          category_label_path: ["外部往来款收款", "借入款", "个人往来"],
           flow_direction: "income",
           flow_amount: "100000.00",
           borrow_amount: "100000.00",
@@ -261,6 +265,8 @@ function groupedPayload(family: string) {
           status: "confirmed",
           status_label: "流水",
           row_tone: "warning",
+          category_label: "外部往来款付款 / 归还借款 / 个人往来",
+          category_label_path: ["外部往来款付款", "归还借款", "个人往来"],
           flow_direction: "expense",
           flow_amount: "300000.00",
           borrow_amount: "0.00",
@@ -543,7 +549,7 @@ describe("Turnover ledger page", () => {
     expect(within(page).getByRole("button", { name: "全部方向" })).toHaveAttribute("aria-pressed", "true");
     expect(within(page).getByRole("button", { name: "借出" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "借入" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "保存修改" })).toBeDisabled();
+    expect(within(page).queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "下载表格" })).toBeInTheDocument();
 
     await waitFor(() => {
@@ -555,6 +561,7 @@ describe("Turnover ledger page", () => {
 
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     expect(within(table).getByRole("columnheader", { name: "对方户名" })).toHaveClass("turnover-sticky-left-header");
+    expect(within(table).getByRole("columnheader", { name: "银行明细标签" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "借款金额 / 借款日" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "还款金额 / 还款日" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "开户机构" })).toBeInTheDocument();
@@ -664,11 +671,9 @@ describe("Turnover ledger page", () => {
     window.removeEventListener("turnoverLedgerExtraUpdated", extraListener);
   });
 
-  test("edits a single bank flow sub tag and saves all dirty changes in one request", async () => {
+  test("shows bank-detail tags as read-only in turnover management", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
-    const categoryListener = vi.fn();
-    window.addEventListener("bankTransactionCategoryUpdated", categoryListener);
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
@@ -676,33 +681,16 @@ describe("Turnover ledger page", () => {
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
 
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("combobox", { name: "往来款子标签 bank-jia-income-200000" }));
-    await user.click(await screen.findByRole("option", { name: "借入 / 公司往来款 / 待还款" }));
-    await user.click(within(page).getByRole("button", { name: "保存修改 (1)" }));
 
-    await waitFor(() => {
-      const saveRequest = fetchMock.mock.calls.find(([input, init]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/turnover-ledger/bank-row-tags/batch" && init?.method === "POST";
-      });
-      expect(saveRequest).toBeDefined();
-      expect(JSON.parse(String(saveRequest?.[1]?.body))).toEqual({
-        updates: [
-          {
-            transaction_id: "bank-jia-income-200000",
-            category_code: "borrow_in_company_pending_repayment",
-            expected_version: 0,
-          },
-        ],
-      });
-    });
-    await waitFor(() => {
-      expectCustomEventDetailContaining(categoryListener, {
-        affectedMonths: ["2026-02"],
-        source: "turnover_bank_row_tag_save",
-      });
-    });
-    window.removeEventListener("bankTransactionCategoryUpdated", categoryListener);
+    expect(within(table).queryByRole("combobox", { name: /往来款子标签/ })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+    expect(within(table).getAllByText("银行明细标签")).toHaveLength(4);
+    expect(within(table).getAllByText("外部往来款收款 / 借入款 / 个人往来")).toHaveLength(2);
+    expect(within(table).getByText("外部往来款付款 / 归还借款 / 个人往来")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/turnover-ledger/bank-row-tags/batch" && init?.method === "POST";
+    })).toBe(false);
   });
 
   test("reloads on category updates and downloads a previewed export for the current tab", async () => {

@@ -26,7 +26,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
-BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 5
+BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 6
 BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
@@ -467,6 +467,7 @@ class PostgresReadModelRepository:
         category_code: str | None = None,
         category_primary_label: str | None = None,
         category_sub_label: str | None = None,
+        category_third_label: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 100,
         tenant_id: str = "default",
@@ -490,6 +491,7 @@ class PostgresReadModelRepository:
                 category_code=category_code,
                 category_primary_label=category_primary_label,
                 category_sub_label=category_sub_label,
+                category_third_label=category_third_label,
                 require_current_schema=require_current_schema,
             )
             total_row = connection.fetch_one(
@@ -818,15 +820,17 @@ class PostgresReadModelRepository:
                         direction_label, amount, signed_amount, balance, currency,
                         counterparty_name, summary, purpose, manual_category_code,
                         manual_category_label, manual_category_path, manual_category_primary_label,
-                        manual_category_sub_label, manual_category_label_path, manual_category_source,
+                        manual_category_sub_label, manual_category_third_label, manual_category_label_path, manual_category_source,
                         manual_category_version, manual_confirmed_category_code, auto_category_code, auto_category_label,
-                        auto_category_path, auto_category_primary_label, auto_category_sub_label,
+                        auto_category_path, auto_category_primary_label, auto_category_sub_label, auto_category_third_label,
                         auto_category_label_path, auto_category_source, auto_category_rule_code,
                         auto_category_reason, auto_category_confidence, auto_category_rule_version,
                         auto_candidate_category_codes, auto_candidate_categories,
                         effective_category_code, effective_category_label, effective_category_path,
-                        effective_category_primary_label, effective_category_sub_label,
-                        effective_category_label_path, effective_category_source, category_version, category_source,
+                        effective_category_primary_label, effective_category_sub_label, effective_category_third_label,
+                        effective_category_label_path, effective_category_source,
+                        effective_turnover_role, effective_turnover_action_type, effective_turnover_family,
+                        category_version, category_source,
                         category_resolution_status, category_rule_version,
                         oa_relation_tag, invoice_relation_tag, relation_tags, relation_case_id,
                         search_text, schema_version, source_versions, generated_at, payload, raw_payload
@@ -873,6 +877,7 @@ class PostgresReadModelRepository:
                         manual_category_path = excluded.manual_category_path,
                         manual_category_primary_label = excluded.manual_category_primary_label,
                         manual_category_sub_label = excluded.manual_category_sub_label,
+                        manual_category_third_label = excluded.manual_category_third_label,
                         manual_category_label_path = excluded.manual_category_label_path,
                         manual_category_source = excluded.manual_category_source,
                         manual_category_version = excluded.manual_category_version,
@@ -882,6 +887,7 @@ class PostgresReadModelRepository:
                         auto_category_path = excluded.auto_category_path,
                         auto_category_primary_label = excluded.auto_category_primary_label,
                         auto_category_sub_label = excluded.auto_category_sub_label,
+                        auto_category_third_label = excluded.auto_category_third_label,
                         auto_category_label_path = excluded.auto_category_label_path,
                         auto_category_source = excluded.auto_category_source,
                         auto_category_rule_code = excluded.auto_category_rule_code,
@@ -895,8 +901,12 @@ class PostgresReadModelRepository:
                         effective_category_path = excluded.effective_category_path,
                         effective_category_primary_label = excluded.effective_category_primary_label,
                         effective_category_sub_label = excluded.effective_category_sub_label,
+                        effective_category_third_label = excluded.effective_category_third_label,
                         effective_category_label_path = excluded.effective_category_label_path,
                         effective_category_source = excluded.effective_category_source,
+                        effective_turnover_role = excluded.effective_turnover_role,
+                        effective_turnover_action_type = excluded.effective_turnover_action_type,
+                        effective_turnover_family = excluded.effective_turnover_family,
                         category_version = excluded.category_version,
                         category_source = excluded.category_source,
                         category_resolution_status = excluded.category_resolution_status,
@@ -7590,6 +7600,7 @@ def _bank_detail_filter_sql(
     category_code: str | None = None,
     category_primary_label: str | None = None,
     category_sub_label: str | None = None,
+    category_third_label: str | None = None,
     require_current_schema: bool = True,
 ) -> tuple[str, list[Any]]:
     where = ["tenant_id = %s", "scope_key = any(%s)"]
@@ -7623,6 +7634,9 @@ def _bank_detail_filter_sql(
     if normalized_category_sub_label := text(category_sub_label):
         where.append("effective_category_sub_label = %s")
         params.append(normalized_category_sub_label)
+    if normalized_category_third_label := text(category_third_label):
+        where.append("effective_category_third_label = %s")
+        params.append(normalized_category_third_label)
     return " and ".join(where), params
 
 
@@ -7771,6 +7785,7 @@ def _bank_detail_row_record(row: dict[str, Any], *, scope_key: str, scope_month:
         text_list(row.get("manual_category_path") or payload.get("manual_category_path")),
         text(row.get("manual_category_primary_label") or payload.get("manual_category_primary_label")),
         text(row.get("manual_category_sub_label") or payload.get("manual_category_sub_label")),
+        text(row.get("manual_category_third_label") or payload.get("manual_category_third_label")),
         text_list(row.get("manual_category_label_path") or payload.get("manual_category_label_path")),
         text(row.get("manual_category_source") or payload.get("manual_category_source")),
         int_value(row.get("manual_category_version") or payload.get("manual_category_version"), None),
@@ -7780,6 +7795,7 @@ def _bank_detail_row_record(row: dict[str, Any], *, scope_key: str, scope_month:
         text_list(row.get("auto_category_path") or payload.get("auto_category_path")),
         text(row.get("auto_category_primary_label") or payload.get("auto_category_primary_label")),
         text(row.get("auto_category_sub_label") or payload.get("auto_category_sub_label")),
+        text(row.get("auto_category_third_label") or payload.get("auto_category_third_label")),
         text_list(row.get("auto_category_label_path") or payload.get("auto_category_label_path")),
         text(row.get("auto_category_source") or payload.get("auto_category_source")),
         text(row.get("auto_category_rule_code") or payload.get("auto_category_rule_code")),
@@ -7793,8 +7809,12 @@ def _bank_detail_row_record(row: dict[str, Any], *, scope_key: str, scope_month:
         text_list(row.get("effective_category_path") or payload.get("effective_category_path")),
         text(row.get("effective_category_primary_label") or payload.get("effective_category_primary_label")),
         text(row.get("effective_category_sub_label") or payload.get("effective_category_sub_label")),
+        text(row.get("effective_category_third_label") or payload.get("effective_category_third_label")),
         text_list(row.get("effective_category_label_path") or payload.get("effective_category_label_path")),
         text(row.get("effective_category_source") or payload.get("effective_category_source")),
+        text(row.get("effective_turnover_role") or payload.get("effective_turnover_role") or row.get("turnover_role") or payload.get("turnover_role")),
+        text(row.get("effective_turnover_action_type") or payload.get("effective_turnover_action_type") or row.get("turnover_action_type") or payload.get("turnover_action_type")),
+        text(row.get("effective_turnover_family") or payload.get("effective_turnover_family") or row.get("turnover_family") or payload.get("turnover_family")),
         int_value(row.get("category_version") or payload.get("category_version"), None),
         text(row.get("category_source") or payload.get("category_source")),
         text(row.get("category_resolution_status") or payload.get("category_resolution_status")) or "unmatched",
@@ -7827,12 +7847,17 @@ def _bank_detail_search_text(row: dict[str, Any]) -> str:
         row.get("manual_category_label"),
         row.get("manual_category_primary_label"),
         row.get("manual_category_sub_label"),
+        row.get("manual_category_third_label"),
         row.get("auto_category_label"),
         row.get("auto_category_primary_label"),
         row.get("auto_category_sub_label"),
+        row.get("auto_category_third_label"),
         row.get("effective_category_label"),
         row.get("effective_category_primary_label"),
         row.get("effective_category_sub_label"),
+        row.get("effective_category_third_label"),
+        row.get("turnover_action_type"),
+        row.get("turnover_family"),
         row.get("oa_relation_tag"),
         row.get("invoice_relation_tag"),
         row.get("relation_case_id"),

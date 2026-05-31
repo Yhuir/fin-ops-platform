@@ -228,6 +228,42 @@ describe("AutoTagRulesDrawer", () => {
     ]));
   });
 
+  test("shows external turnover third label and action controls only for external turnover rules", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderDrawer();
+
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await waitForLoadedRule(drawer, "借出款");
+    const feeRow = rowForDisplayValue(drawer, "手续费");
+    expect(within(feeRow).queryByLabelText(/子子标签/)).not.toBeInTheDocument();
+    expect(within(feeRow).queryByLabelText(/台账动作类型/)).not.toBeInTheDocument();
+
+    const externalRow = rowForDisplayValue(drawer, "借出款");
+    const thirdLabelSelect = within(externalRow).getAllByLabelText(/子子标签/)
+      .find((element) => element.getAttribute("role") === "combobox");
+    expect(thirdLabelSelect).toBeDefined();
+    await user.click(thirdLabelSelect as HTMLElement);
+    await user.click(await screen.findByRole("option", { name: "公司往来" }));
+    const actionTypeSelect = within(externalRow).getAllByLabelText(/台账动作类型/)
+      .find((element) => element.getAttribute("role") === "combobox");
+    expect(actionTypeSelect).toBeDefined();
+    await user.click(actionTypeSelect as HTMLElement);
+    await user.click(await screen.findByRole("option", { name: "已收款" }));
+    await user.click(buttonByName(drawer, "保存"));
+
+    const payload = requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT");
+    expect(payload?.active_rules).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "external_payment",
+        output_primary_label: "外部往来款付款",
+        output_sub_label: "借出款",
+        output_third_label: "公司往来",
+        turnover_action_type: "collected",
+      }),
+    ]));
+  });
+
   test("manages match fields with select all and clear actions without showing all text as an option", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -324,7 +360,7 @@ describe("AutoTagRulesDrawer", () => {
     await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
     await user.click(buttonByName(drawer, "保存"));
 
-    expect(await within(drawer).findByText("第 3 条规则的主标签名称不能为空。")).toBeInTheDocument();
+    expect(await within(drawer).findByText("第 4 条规则的主标签名称不能为空。")).toBeInTheDocument();
     expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
     expect(within(drawer).queryByText(/正则命中/)).not.toBeInTheDocument();
   });

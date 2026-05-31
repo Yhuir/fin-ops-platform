@@ -73,7 +73,11 @@ type ApiBankDetailTransaction = {
   category_path?: string[];
   category_primary_label?: string | null;
   category_sub_label?: string | null;
+  category_third_label?: string | null;
   category_label_path?: string[];
+  turnover_role?: string | null;
+  turnover_action_type?: string | null;
+  turnover_family?: string | null;
   category_source?: string | null;
   category_version?: number | null;
   category_resolution_status?: string | null;
@@ -84,6 +88,7 @@ type ApiBankDetailTransaction = {
   auto_category_path?: string[];
   auto_category_primary_label?: string | null;
   auto_category_sub_label?: string | null;
+  auto_category_third_label?: string | null;
   auto_category_label_path?: string[];
   auto_category_source?: string | null;
   auto_category_reason?: string | null;
@@ -96,6 +101,7 @@ type ApiBankDetailTransaction = {
   effective_category_path?: string[];
   effective_category_primary_label?: string | null;
   effective_category_sub_label?: string | null;
+  effective_category_third_label?: string | null;
   effective_category_label_path?: string[];
   effective_category_source?: string | null;
   oa_relation_tag?: string | null;
@@ -109,8 +115,12 @@ type ApiBankDetailAutoCandidateCategory = {
   category_label?: string | null;
   category_primary_label?: string | null;
   category_sub_label?: string | null;
+  category_third_label?: string | null;
   category_label_path?: unknown[];
   category_path?: unknown[];
+  turnover_role?: string | null;
+  turnover_action_type?: string | null;
+  turnover_family?: string | null;
   rule_code?: string | null;
   reason?: string | null;
 };
@@ -169,6 +179,10 @@ type ApiBankAutoTagEditableRule = {
   sort_order?: number;
   output_primary_label?: string;
   output_sub_label?: string;
+  output_third_label?: string;
+  turnover_role?: string;
+  turnover_action_type?: string;
+  turnover_family?: string;
   direction?: string;
   account_scope?: ApiBankAutoTagAccountScope;
   rules?: ApiBankAutoTagRuleConditions;
@@ -195,6 +209,14 @@ type ApiBankAutoTagRulesResponse = {
   active_rules?: ApiBankAutoTagEditableRule[];
   archived_rules?: ApiBankAutoTagEditableRule[];
   field_options?: { value?: string; label?: string }[];
+  turnover_third_label_options?: { value?: string; label?: string }[];
+  turnover_action_type_options?: Array<{
+    value?: string;
+    label?: string;
+    expected_direction?: string | null;
+    business_type?: string | null;
+    side?: string | null;
+  }>;
   permissions?: { can_save?: boolean };
   read_model_status?: "fresh" | "refreshing" | string;
 };
@@ -413,8 +435,12 @@ function mapAutoCandidateCategory(value: ApiBankDetailAutoCandidateCategory): Ba
     categoryLabel: value.category_label ?? null,
     categoryPrimaryLabel: value.category_primary_label ?? null,
     categorySubLabel: value.category_sub_label ?? null,
+    categoryThirdLabel: value.category_third_label ?? null,
     categoryLabelPath: Array.isArray(value.category_label_path) ? value.category_label_path.map(String).filter(Boolean) : [],
     categoryPath: Array.isArray(value.category_path) ? value.category_path.map(String).filter(Boolean) : [],
+    turnoverRole: value.turnover_role ?? null,
+    turnoverActionType: value.turnover_action_type ?? null,
+    turnoverFamily: value.turnover_family ?? null,
     ruleCode: value.rule_code ?? null,
     reason: value.reason ?? null,
   };
@@ -446,6 +472,7 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     categoryPath: Array.isArray(row.category_path) ? row.category_path.map(String).filter(Boolean) : [],
     categoryPrimaryLabel: row.category_primary_label ?? null,
     categorySubLabel: row.category_sub_label ?? null,
+    categoryThirdLabel: row.category_third_label ?? null,
     categoryLabelPath: Array.isArray(row.category_label_path) ? row.category_label_path.map(String).filter(Boolean) : [],
     categorySource: row.category_source ?? "",
     categoryVersion: row.category_version ?? null,
@@ -457,6 +484,7 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     autoCategoryPath: Array.isArray(row.auto_category_path) ? row.auto_category_path.map(String).filter(Boolean) : [],
     autoCategoryPrimaryLabel: row.auto_category_primary_label ?? null,
     autoCategorySubLabel: row.auto_category_sub_label ?? null,
+    autoCategoryThirdLabel: row.auto_category_third_label ?? null,
     autoCategoryLabelPath: Array.isArray(row.auto_category_label_path) ? row.auto_category_label_path.map(String).filter(Boolean) : [],
     autoCategorySource: row.auto_category_source ?? "",
     autoCategoryReason: row.auto_category_reason ?? null,
@@ -473,6 +501,7 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     effectiveCategoryPath: Array.isArray(row.effective_category_path) ? row.effective_category_path.map(String).filter(Boolean) : [],
     effectiveCategoryPrimaryLabel: row.effective_category_primary_label ?? null,
     effectiveCategorySubLabel: row.effective_category_sub_label ?? null,
+    effectiveCategoryThirdLabel: row.effective_category_third_label ?? null,
     effectiveCategoryLabelPath: Array.isArray(row.effective_category_label_path) ? row.effective_category_label_path.map(String).filter(Boolean) : [],
     effectiveCategorySource: row.effective_category_source ?? "",
     oaRelationTag,
@@ -533,6 +562,10 @@ function mapAutoTagEditableRule(rule: ApiBankAutoTagEditableRule): BankAutoTagEd
     sortOrder: typeof rule.sort_order === "number" ? rule.sort_order : undefined,
     outputPrimaryLabel: String(rule.output_primary_label ?? rule.label ?? "").trim(),
     outputSubLabel: String(rule.output_sub_label ?? "").trim(),
+    outputThirdLabel: String(rule.output_third_label ?? "").trim(),
+    turnoverRole: String(rule.turnover_role ?? "").trim(),
+    turnoverActionType: String(rule.turnover_action_type ?? "").trim(),
+    turnoverFamily: String(rule.turnover_family ?? "").trim(),
     direction: mapAutoTagDirection(rule.direction),
     accountScope: mapAutoTagAccountScope(rule.account_scope),
     rules: mapAutoTagRuleConditions(rule.rules),
@@ -568,6 +601,21 @@ function mapAutoTagRulesResponse(payload: ApiBankAutoTagRulesResponse): BankAuto
         label: String(option.label ?? "").trim(),
       })).filter((option) => option.value && option.label)
       : [],
+    turnoverThirdLabelOptions: Array.isArray(payload.turnover_third_label_options)
+      ? payload.turnover_third_label_options.map((option) => ({
+        value: String(option.value ?? "").trim(),
+        label: String(option.label ?? "").trim(),
+      })).filter((option) => option.value && option.label)
+      : [],
+    turnoverActionTypeOptions: Array.isArray(payload.turnover_action_type_options)
+      ? payload.turnover_action_type_options.map((option) => ({
+        value: String(option.value ?? "").trim(),
+        label: String(option.label ?? "").trim(),
+        expectedDirection: option.expected_direction ?? null,
+        businessType: option.business_type ?? null,
+        side: option.side ?? null,
+      })).filter((option) => option.value && option.label)
+      : [],
     permissions: { canSave: payload.permissions?.can_save !== false },
     readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
   };
@@ -600,6 +648,8 @@ function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) 
       ...(typeof rule.sortOrder === "number" ? { sort_order: rule.sortOrder } : {}),
       output_primary_label: rule.outputPrimaryLabel,
       output_sub_label: rule.outputSubLabel,
+      ...(rule.outputThirdLabel ? { output_third_label: rule.outputThirdLabel } : {}),
+      ...(rule.turnoverActionType ? { turnover_action_type: rule.turnoverActionType } : {}),
       direction: rule.direction,
       account_scope: rule.accountScope,
       rules: serializeAutoTagRuleConditions(rule.rules),
@@ -611,6 +661,8 @@ function serializeSaveAutoTagRulesRequest(payload: SaveBankAutoTagRulesRequest) 
       ...(typeof rule.sortOrder === "number" ? { sort_order: rule.sortOrder } : {}),
       output_primary_label: rule.outputPrimaryLabel,
       output_sub_label: rule.outputSubLabel,
+      ...(rule.outputThirdLabel ? { output_third_label: rule.outputThirdLabel } : {}),
+      ...(rule.turnoverActionType ? { turnover_action_type: rule.turnoverActionType } : {}),
       direction: rule.direction,
       account_scope: rule.accountScope,
       rules: serializeAutoTagRuleConditions(rule.rules),
@@ -655,6 +707,7 @@ export async function fetchBankDetailTransactions({
   categoryCode,
   categoryPrimaryLabel,
   categorySubLabel,
+  categoryThirdLabel,
   page,
   pageSize,
   signal,
@@ -681,6 +734,9 @@ export async function fetchBankDetailTransactions({
   }
   if (categorySubLabel) {
     params.set("category_sub_label", categorySubLabel);
+  }
+  if (categoryThirdLabel) {
+    params.set("category_third_label", categoryThirdLabel);
   }
   if (page) {
     params.set("page", String(page));
@@ -741,11 +797,15 @@ export async function reapplyBankAutoTagRules(): Promise<BankAutoTagRulesRespons
 export async function confirmBankDetailCategory(
   transactionId: string,
   categoryCode: BankTransactionCategoryCode,
+  categoryThirdLabel?: string | null,
 ): Promise<unknown> {
   return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-confirmation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ category_code: categoryCode }),
+    body: JSON.stringify({
+      category_code: categoryCode,
+      ...(categoryThirdLabel ? { category_third_label: categoryThirdLabel } : {}),
+    }),
   });
 }
 
@@ -758,11 +818,27 @@ export async function revokeBankDetailCategoryConfirmation(transactionId: string
 export async function assignBankDetailCategory(
   transactionId: string,
   categoryCode: BankTransactionCategoryCode,
+  options: {
+    categoryPrimaryLabel?: string | null;
+    categorySubLabel?: string | null;
+    categoryThirdLabel?: string | null;
+    categoryLabelPath?: string[];
+    turnoverActionType?: string | null;
+    turnoverFamily?: string | null;
+  } = {},
 ): Promise<unknown> {
   return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-assignment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ category_code: categoryCode }),
+    body: JSON.stringify({
+      category_code: categoryCode,
+      ...(options.categoryPrimaryLabel ? { category_primary_label: options.categoryPrimaryLabel } : {}),
+      ...(options.categorySubLabel ? { category_sub_label: options.categorySubLabel } : {}),
+      ...(options.categoryThirdLabel ? { category_third_label: options.categoryThirdLabel } : {}),
+      ...(options.categoryLabelPath?.length ? { category_label_path: options.categoryLabelPath } : {}),
+      ...(options.turnoverActionType ? { turnover_action_type: options.turnoverActionType } : {}),
+      ...(options.turnoverFamily ? { turnover_family: options.turnoverFamily } : {}),
+    }),
   });
 }
 
@@ -781,6 +857,7 @@ export async function downloadBankDetailTransactionsExport({
   categoryCode,
   categoryPrimaryLabel,
   categorySubLabel,
+  categoryThirdLabel,
   signal,
 }: BankDetailExportRequest): Promise<BankDetailExportResponse> {
   const params = new URLSearchParams();
@@ -806,6 +883,9 @@ export async function downloadBankDetailTransactionsExport({
   }
   if (categorySubLabel) {
     params.set("category_sub_label", categorySubLabel);
+  }
+  if (categoryThirdLabel) {
+    params.set("category_third_label", categoryThirdLabel);
   }
   return requestBlob(`/api/bank-details/transactions/export?${params.toString()}`, {
     method: "GET",

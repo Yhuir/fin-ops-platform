@@ -438,6 +438,115 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestions["txn-bid-bond"]["category_code"], "external_turnover")
         self.assertNotEqual(suggestions.get("txn-tax-refund", {}).get("category_code"), "external_turnover")
 
+    def test_external_turnover_rule_with_third_label_auto_matches_three_level_path(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 21,
+                "definitions": [
+                    {
+                        "code": "custom_external_borrow_out_company",
+                        "label": "借出款",
+                        "path": ["自动识别", "借出款"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 2,
+                        "direction": "expense",
+                        "output_primary_label": "外部往来款付款",
+                        "output_sub_label": "借出款",
+                        "output_third_label": "公司往来",
+                        "turnover_action_type": "pending_collection",
+                        "rules": {
+                            "match_fields": ["summary_text", "purpose_text"],
+                            "exact_any": [],
+                            "contains_any": ["借出周转款"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    }
+                ],
+            }
+        )
+
+        suggestion = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-external-company-out",
+                    "debit_amount": "8000.00",
+                    "summary": "借出周转款",
+                }
+            ]
+        )["txn-external-company-out"]
+
+        self.assertEqual(suggestion["category_resolution_status"], "auto_matched")
+        self.assertEqual(suggestion["category_code"], "custom_external_borrow_out_company")
+        self.assertEqual(suggestion["category_primary_label"], "外部往来款付款")
+        self.assertEqual(suggestion["category_sub_label"], "借出款")
+        self.assertEqual(suggestion["category_third_label"], "公司往来")
+        self.assertEqual(suggestion["category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
+        self.assertEqual(suggestion["turnover_action_type"], "pending_collection")
+        self.assertEqual(suggestion["turnover_family"], "company")
+        self.assertEqual(suggestion["auto_candidate_categories"][0]["category_third_label"], "公司往来")
+
+    def test_external_turnover_rule_without_third_label_requires_confirmation_candidates(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 22,
+                "definitions": [
+                    {
+                        "code": "custom_external_borrow_out_missing_third",
+                        "label": "借出款",
+                        "path": ["自动识别", "借出款"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 2,
+                        "direction": "expense",
+                        "output_primary_label": "外部往来款付款",
+                        "output_sub_label": "借出款",
+                        "turnover_action_type": "pending_collection",
+                        "rules": {
+                            "match_fields": ["summary_text", "purpose_text"],
+                            "exact_any": [],
+                            "contains_any": ["借出周转款"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    }
+                ],
+            }
+        )
+
+        suggestion = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-external-missing-third",
+                    "debit_amount": "8000.00",
+                    "summary": "借出周转款",
+                }
+            ]
+        )["txn-external-missing-third"]
+
+        self.assertEqual(suggestion["category_resolution_status"], "needs_confirmation")
+        self.assertIsNone(suggestion["category_code"])
+        self.assertIsNone(suggestion["auto_category_code"])
+        candidates = suggestion["auto_candidate_categories"]
+        self.assertEqual([candidate["category_code"] for candidate in candidates], ["custom_external_borrow_out_missing_third"] * 4)
+        self.assertEqual(
+            [candidate["category_third_label"] for candidate in candidates],
+            ["个人往来", "公司往来", "银行往来", "业务往来"],
+        )
+        self.assertEqual(
+            [candidate["category_label_path"] for candidate in candidates],
+            [
+                ["外部往来款付款", "借出款", "个人往来"],
+                ["外部往来款付款", "借出款", "公司往来"],
+                ["外部往来款付款", "借出款", "银行往来"],
+                ["外部往来款付款", "借出款", "业务往来"],
+            ],
+        )
+        self.assertEqual({candidate["turnover_action_type"] for candidate in candidates}, {"pending_collection"})
+
     def test_detects_holiday_bonus_from_keywords(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [{"id": "txn-holiday", "purpose": "中秋过节费", "note": "员工慰问金"}]
@@ -774,6 +883,34 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(effective["effective_category_sub_label"], None)
         self.assertEqual(effective["effective_category_label_path"], ["工资"])
         self.assertEqual(effective["effective_category_source"], "manual")
+
+    def test_effective_category_preserves_confirmed_external_turnover_third_label(self) -> None:
+        category_service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-external-confirmed",
+        )
+        category_service.confirm_auto_category(
+            transaction_id="txn-external-confirmed",
+            category_code="external_turnover",
+            category_third_label="公司往来",
+            category_label_path=["外部往来款付款", "借出款", "公司往来"],
+            turnover_action_type="pending_collection",
+            turnover_family="company",
+            candidate_category_codes=["external_turnover"],
+            rule_version="bank-auto-tag-rules:22",
+            actor="YNSYLP005",
+        )
+
+        effective = resolve_effective_category(category_service.get("txn-external-confirmed"), None)
+
+        self.assertEqual(effective["effective_category_code"], "external_turnover")
+        self.assertEqual(effective["effective_category_label"], "借出款")
+        self.assertEqual(effective["effective_category_primary_label"], "外部往来款付款")
+        self.assertEqual(effective["effective_category_sub_label"], "借出款")
+        self.assertEqual(effective["effective_category_third_label"], "公司往来")
+        self.assertEqual(effective["effective_category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
+        self.assertEqual(effective["turnover_action_type"], "pending_collection")
+        self.assertEqual(effective["turnover_family"], "company")
 
     def test_effective_category_ignores_manual_clear_when_auto_exists(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(

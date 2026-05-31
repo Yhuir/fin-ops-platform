@@ -37,6 +37,10 @@ from fin_ops_platform.app.auth import (
     resolve_oa_request_session,
     tenant_id_for_session,
 )
+from fin_ops_platform.app.bank_detail_category_api import (
+    confirmation_selection,
+    manual_assignment_selection,
+)
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_turnover_ledger import (
     InMemoryTurnoverLedgerExtraService,
@@ -1075,6 +1079,7 @@ class Application:
                 category_code=query.get("category_code", [None])[0],
                 category_primary_label=query.get("category_primary_label", [None])[0],
                 category_sub_label=query.get("category_sub_label", [None])[0],
+                category_third_label=query.get("category_third_label", [None])[0],
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
@@ -10753,6 +10758,7 @@ class Application:
         category_code: str | None = None,
         category_primary_label: str | None = None,
         category_sub_label: str | None = None,
+        category_third_label: str | None = None,
         page: str | None,
         page_size: str | None,
     ) -> Response:
@@ -10766,6 +10772,7 @@ class Application:
                     category_code=category_code,
                     category_primary_label=category_primary_label,
                     category_sub_label=category_sub_label,
+                    category_third_label=category_third_label,
                     page=int(page or 1),
                     page_size=int(page_size or 100),
                 )
@@ -10786,6 +10793,7 @@ class Application:
                 category_code=category_code,
                 category_primary_label=category_primary_label,
                 category_sub_label=category_sub_label,
+                category_third_label=category_third_label,
                 page=int(page or 1),
                 page_size=int(page_size or 100),
             )
@@ -10813,12 +10821,6 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        selected_code = str(
-            payload.get("category_code")
-            or payload.get("selected_category_code")
-            or payload.get("selectedCategoryCode")
-            or ""
-        ).strip()
         actor_id = (
             session.identity.username or session.identity.user_id
             if session is not None
@@ -10827,42 +10829,26 @@ class Application:
         try:
             active_rule_codes = set(self._active_bank_auto_tag_rule_codes())
             suggestion = self._latest_bank_detail_auto_category_suggestion(transaction_id)
-            if (
-                isinstance(suggestion, dict)
-                and str(suggestion.get("category_resolution_status") or "") == "needs_confirmation"
-            ):
-                candidate_codes: list[str] = []
-                seen_candidate_codes: set[str] = set()
-                for raw_code in list((suggestion or {}).get("auto_candidate_category_codes") or []):
-                    code = str(raw_code or "").strip()
-                    if not code or code in seen_candidate_codes or code not in active_rule_codes:
-                        continue
-                    seen_candidate_codes.add(code)
-                    candidate_codes.append(code)
-                if len(candidate_codes) < 2:
-                    raise BankTransactionCategoryValidationError(
-                        "invalid_category_confirmation_candidate",
-                        "当前流水没有多个可确认的自动标签候选。",
-                        transaction_id=transaction_id,
-                    )
-                if selected_code not in seen_candidate_codes:
-                    raise BankTransactionCategoryValidationError(
-                        "invalid_category_confirmation_candidate",
-                        "只能选择当前自动规则命中的候选标签。",
-                        transaction_id=transaction_id,
-                    )
-            else:
-                raise BankTransactionCategoryValidationError(
-                    "invalid_category_confirmation_candidate",
-                    "当前流水没有需要确认的自动标签候选。",
-                    transaction_id=transaction_id,
-                )
+            selection = confirmation_selection(
+                payload=payload,
+                suggestion=suggestion if isinstance(suggestion, dict) else None,
+                active_rule_codes=active_rule_codes,
+                transaction_id=transaction_id,
+            )
+            selected_code = str(selection["category_code"])
+            candidate_codes = list(selection.get("candidate_category_codes") or [])
             result = self._bank_transaction_category_service.confirm_auto_category(
                 transaction_id=transaction_id,
                 category_code=selected_code,
                 candidate_category_codes=candidate_codes,
                 rule_version=self._bank_transaction_auto_category_service.current_rule_version(),
                 actor=str(actor_id or "bank_category_confirmation"),
+                category_primary_label=selection.get("category_primary_label"),
+                category_sub_label=selection.get("category_sub_label"),
+                category_third_label=selection.get("category_third_label"),
+                category_label_path=list(selection.get("category_label_path") or []),
+                turnover_action_type=selection.get("turnover_action_type"),
+                turnover_family=selection.get("turnover_family"),
             )
         except BankTransactionCategoryValidationError as exc:
             status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
@@ -10879,6 +10865,7 @@ class Application:
             affected_months=affected_months,
             metadata={
                 "selected_category_code": selected_code,
+                "selected_category_third_label": selection.get("category_third_label"),
                 "candidate_category_codes": candidate_codes,
             },
         )
@@ -10941,12 +10928,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        selected_code = str(
-            payload.get("category_code")
-            or payload.get("selected_category_code")
-            or payload.get("selectedCategoryCode")
-            or ""
-        ).strip()
+        selection = manual_assignment_selection(payload)
+        selected_code = str(selection["category_code"])
         actor_id = (
             session.identity.username or session.identity.user_id
             if session is not None
@@ -10974,6 +10957,12 @@ class Application:
                 transaction_id=transaction_id,
                 category_code=selected_code,
                 actor=str(actor_id or "bank_category_assignment"),
+                category_primary_label=selection.get("category_primary_label"),
+                category_sub_label=selection.get("category_sub_label"),
+                category_third_label=selection.get("category_third_label"),
+                category_label_path=list(selection.get("category_label_path") or []),
+                turnover_action_type=selection.get("turnover_action_type"),
+                turnover_family=selection.get("turnover_family"),
             )
         except BankTransactionCategoryValidationError as exc:
             status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
@@ -10990,6 +10979,7 @@ class Application:
             affected_months=affected_months,
             metadata={
                 "selected_category_code": selected_code,
+                "selected_category_third_label": selection.get("category_third_label"),
                 "previous_resolution_status": previous_resolution_status,
                 "assignment_source": "manual",
             },
@@ -11102,6 +11092,7 @@ class Application:
             category_code: str | None,
             category_primary_label: str | None,
             category_sub_label: str | None,
+            category_third_label: str | None,
             page: int,
             page_size: int,
         ) -> dict[str, object]:
@@ -11114,6 +11105,7 @@ class Application:
                     category_code=category_code,
                     category_primary_label=category_primary_label,
                     category_sub_label=category_sub_label,
+                    category_third_label=category_third_label,
                     page=page,
                     page_size=page_size,
                 )
@@ -11129,6 +11121,7 @@ class Application:
                 category_code=category_code,
                 category_primary_label=category_primary_label,
                 category_sub_label=category_sub_label,
+                category_third_label=category_third_label,
                 page=page,
                 page_size=page_size,
             )
@@ -11145,6 +11138,7 @@ class Application:
         category_code = query.get("category_code", [None])[0]
         category_primary_label = query.get("category_primary_label", [None])[0]
         category_sub_label = query.get("category_sub_label", [None])[0]
+        category_third_label = query.get("category_third_label", [None])[0]
         try:
             result = service.export(
                 mode=mode,
@@ -11155,6 +11149,7 @@ class Application:
                 category_code=category_code,
                 category_primary_label=category_primary_label,
                 category_sub_label=category_sub_label,
+                category_third_label=category_third_label,
             )
         except BankDetailReadModelRefreshing as exc:
             return self._json_response(HTTPStatus.ACCEPTED, exc.payload)
@@ -11184,6 +11179,7 @@ class Application:
                     "category_code": category_code,
                     "category_primary_label": category_primary_label,
                     "category_sub_label": category_sub_label,
+                    "category_third_label": category_third_label,
                 },
                 "row_count": result.row_count,
                 "sheet_names": result.sheet_names,
@@ -11330,6 +11326,7 @@ class Application:
         category_code: str | None,
         category_primary_label: str | None,
         category_sub_label: str | None,
+        category_third_label: str | None = None,
         page: int,
         page_size: int,
     ) -> dict[str, object] | None:
@@ -11380,6 +11377,7 @@ class Application:
                 "category_code": category_code,
                 "category_primary_label": category_primary_label,
                 "category_sub_label": category_sub_label,
+                "category_third_label": category_third_label,
                 "page": normalized_page,
                 "page_size": normalized_page_size,
             },
@@ -11408,6 +11406,7 @@ class Application:
             category_code=category_code,
             category_primary_label=category_primary_label,
             category_sub_label=category_sub_label,
+            category_third_label=category_third_label,
             page=normalized_page,
             page_size=normalized_page_size,
         )

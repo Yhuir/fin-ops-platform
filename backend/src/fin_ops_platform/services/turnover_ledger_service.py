@@ -242,6 +242,13 @@ class TurnoverLedgerService:
                 category_code
             )
             enriched["category_path"] = list(category.get("category_path") or [])
+            enriched["category_primary_label"] = category.get("category_primary_label")
+            enriched["category_sub_label"] = category.get("category_sub_label")
+            enriched["category_third_label"] = category.get("category_third_label")
+            enriched["category_label_path"] = list(category.get("category_label_path") or [])
+            enriched["turnover_role"] = category.get("turnover_role")
+            enriched["turnover_action_type"] = category.get("turnover_action_type")
+            enriched["turnover_family"] = category.get("turnover_family")
             enriched["category_version"] = int(category.get("category_version") or 0)
             enriched["debit_amount"] = self._debit_amount(row)
             enriched["credit_amount"] = self._credit_amount(row)
@@ -610,6 +617,7 @@ class TurnoverLedgerService:
                     "business_type": business_type,
                     "category_code": str(bank_row.get("category_code") or "").strip(),
                     "category_label": str(bank_row.get("category_label") or "").strip(),
+                    "category_label_path": list(bank_row.get("category_label_path") or []),
                     "category_version": int(bank_row.get("category_version") or 0),
                     "counterparty_bank_name": self._counterparty_bank_name([bank_row]),
                     "summary_text": self._summary_text([bank_row]),
@@ -645,6 +653,7 @@ class TurnoverLedgerService:
             "business_type": "",
             "category_code": str(row.get("category_code") or "").strip(),
             "category_label": str(row.get("category_label") or "外部往来款").strip(),
+            "category_label_path": list(row.get("category_label_path") or []),
             "category_version": int(row.get("category_version") or 0),
             "counterparty_bank_name": self._counterparty_bank_name([row]),
             "summary_text": self._summary_text([row]),

@@ -68,8 +68,12 @@ export type BankDetailAutoCandidateCategory = {
   categoryLabel: string | null;
   categoryPrimaryLabel: string | null;
   categorySubLabel: string | null;
+  categoryThirdLabel: string | null;
   categoryLabelPath: string[];
   categoryPath: string[];
+  turnoverRole: string | null;
+  turnoverActionType: string | null;
+  turnoverFamily: string | null;
   ruleCode: string | null;
   reason: string | null;
 };
@@ -94,6 +98,7 @@ export type BankDetailTransaction = {
   categoryPath: string[];
   categoryPrimaryLabel: string | null;
   categorySubLabel: string | null;
+  categoryThirdLabel: string | null;
   categoryLabelPath: string[];
   categorySource: string;
   categoryVersion: number | null;
@@ -105,6 +110,7 @@ export type BankDetailTransaction = {
   autoCategoryPath: string[];
   autoCategoryPrimaryLabel: string | null;
   autoCategorySubLabel: string | null;
+  autoCategoryThirdLabel: string | null;
   autoCategoryLabelPath: string[];
   autoCategorySource: string;
   autoCategoryReason: string | null;
@@ -117,6 +123,7 @@ export type BankDetailTransaction = {
   effectiveCategoryPath: string[];
   effectiveCategoryPrimaryLabel: string | null;
   effectiveCategorySubLabel: string | null;
+  effectiveCategoryThirdLabel: string | null;
   effectiveCategoryLabelPath: string[];
   effectiveCategorySource: string;
   oaRelationTag: OaRelationTag;
@@ -149,6 +156,7 @@ export type BankDetailTransactionsRequest = {
   categoryCode?: string | null;
   categoryPrimaryLabel?: string | null;
   categorySubLabel?: string | null;
+  categoryThirdLabel?: string | null;
   page?: number;
   pageSize?: number;
   signal?: AbortSignal;
@@ -165,6 +173,7 @@ export type BankDetailExportRequest = {
   categoryCode?: string | null;
   categoryPrimaryLabel?: string | null;
   categorySubLabel?: string | null;
+  categoryThirdLabel?: string | null;
   signal?: AbortSignal;
 };
 
@@ -176,6 +185,14 @@ export type BankDetailExportResponse = {
 export type BankAutoTagFieldOption = {
   value: string;
   label: string;
+};
+
+export type BankTurnoverActionTypeOption = {
+  value: string;
+  label: string;
+  expectedDirection?: string | null;
+  businessType?: string | null;
+  side?: string | null;
 };
 
 export type BankAutoTagRuleConditions = {
@@ -217,6 +234,10 @@ export type BankAutoTagEditableRule = {
   accountScope: BankAutoTagAccountScope;
   outputPrimaryLabel: string;
   outputSubLabel: string;
+  outputThirdLabel?: string;
+  turnoverRole?: string;
+  turnoverActionType?: string;
+  turnoverFamily?: string;
   rules: BankAutoTagRuleConditions;
   ruleSummary: string;
   editable: boolean;
@@ -230,6 +251,8 @@ export type BankAutoTagRulesResponse = {
   activeRules: BankAutoTagEditableRule[];
   archivedRules: BankAutoTagEditableRule[];
   fieldOptions: BankAutoTagFieldOption[];
+  turnoverThirdLabelOptions: BankAutoTagFieldOption[];
+  turnoverActionTypeOptions: BankTurnoverActionTypeOption[];
   permissions: {
     canSave: boolean;
   };
@@ -244,6 +267,8 @@ export type SaveBankAutoTagRule = {
   sortOrder?: number;
   outputPrimaryLabel: string;
   outputSubLabel: string;
+  outputThirdLabel?: string;
+  turnoverActionType?: string;
   direction: BankAutoTagDirection;
   accountScope: BankAutoTagAccountScope;
   rules: BankAutoTagRuleConditions;

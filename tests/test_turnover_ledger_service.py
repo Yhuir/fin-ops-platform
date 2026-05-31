@@ -510,6 +510,54 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["flow_rows"][0]["category_code"], "external_turnover")
         self.assertEqual(group["flow_rows"][0]["category_version"], 0)
 
+    def test_grouped_ledger_consumes_bank_detail_external_turnover_three_level_tag(self) -> None:
+        transaction = self._transaction(
+            "txn-external-company-out",
+            direction=TransactionDirection.OUTFLOW,
+            amount="8000.00",
+            counterparty="云南路桥",
+            trade_time="2026-01-16 09:00:00",
+            summary="借出周转款",
+            remark="待收回",
+        )
+        ledger_service = TurnoverLedgerService(
+            import_service=_ImportServiceStub([transaction]),
+            category_service=BankTransactionCategoryService.from_snapshot(None),
+            relation_service=TurnoverRelationService.from_snapshot(None),
+            category_provider=_EffectiveCategoryProviderStub(
+                {
+                    "txn-external-company-out": {
+                        "category_code": "external_turnover",
+                        "category_label": "借出款",
+                        "category_primary_label": "外部往来款付款",
+                        "category_sub_label": "借出款",
+                        "category_third_label": "公司往来",
+                        "category_label_path": ["外部往来款付款", "借出款", "公司往来"],
+                        "category_path": ["外部往来款付款", "借出款", "公司往来"],
+                        "category_source": "auto",
+                        "category_version": 4,
+                        "turnover_action_type": "pending_collection",
+                        "turnover_family": "company",
+                    }
+                }
+            ),
+            today_provider=lambda: date(2026, 1, 31),
+        )
+
+        payload = ledger_service.list_grouped_ledger(family="company")
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        group = payload["groups"][0]
+        self.assertEqual(group["family"], "company")
+        self.assertEqual(group["family_label"], "公司往来")
+        self.assertEqual(group["pending_direction"], "collection")
+        self.assertEqual(group["pending_direction_label"], "待收款")
+        self.assertEqual(group["pending_amount"], "8000.00")
+        self.assertEqual(group["flow_rows"][0]["source_bank_row_id"], "txn-external-company-out")
+        self.assertEqual(group["flow_rows"][0]["category_code"], "external_turnover")
+        self.assertEqual(group["flow_rows"][0]["category_label"], "借出款")
+        self.assertEqual(group["flow_rows"][0]["category_version"], 4)
+
     def test_grouped_ledger_reads_repository_backed_all_month_bank_rows(self) -> None:
         transaction = self._transaction(
             "txn-postgres-external-turnover",

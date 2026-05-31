@@ -5260,6 +5260,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             { value: "detail_text", label: "其他明细" },
             { value: "all_text", label: "全部文本" },
           ],
+          turnover_third_label_options: [
+            { value: "个人往来", label: "个人往来" },
+            { value: "公司往来", label: "公司往来" },
+            { value: "银行往来", label: "银行往来" },
+            { value: "业务往来", label: "业务往来" },
+          ],
+          turnover_action_type_options: [
+            { value: "pending_collection", label: "待收款" },
+            { value: "collected", label: "已收款" },
+            { value: "pending_repayment", label: "待还款" },
+            { value: "repaid", label: "已还款" },
+          ],
           permissions: { can_save: true },
           read_model_status: "refreshing",
           read_model_scope_keys: ["2026-01"],
@@ -5313,6 +5325,27 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             archivable: true,
             sortable: true,
           },
+          {
+            code: "external_payment",
+            label: "借出款",
+            output_primary_label: "外部往来款付款",
+            output_sub_label: "借出款",
+            output_third_label: "个人往来",
+            turnover_role: "external_turnover",
+            turnover_action_type: "pending_collection",
+            turnover_family: "personal",
+            direction: "expense",
+            status: "active",
+            source: "custom",
+            priority: 30,
+            priority_label: "优先级 30",
+            sort_order: 3,
+            rules: { match_fields: ["purpose_text", "summary_text"], exact: [], contains: ["借款"], excludes: [] },
+            rule_summary: "用途/摘要包含：借款",
+            editable: true,
+            archivable: true,
+            sortable: true,
+          },
         ],
         archived_rules: [
           {
@@ -5337,6 +5370,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           { value: "detail_text", label: "其他明细" },
           { value: "all_text", label: "全部文本" },
         ],
+        turnover_third_label_options: [
+          { value: "个人往来", label: "个人往来" },
+          { value: "公司往来", label: "公司往来" },
+          { value: "银行往来", label: "银行往来" },
+          { value: "业务往来", label: "业务往来" },
+        ],
+        turnover_action_type_options: [
+          { value: "pending_collection", label: "待收款" },
+          { value: "collected", label: "已收款" },
+          { value: "pending_repayment", label: "待还款" },
+          { value: "repaid", label: "已还款" },
+        ],
         permissions: { can_save: true },
       };
       if (String(init?.method || "GET").toUpperCase() !== "PUT") {
@@ -5356,6 +5401,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             label: String(rule.label || ""),
             output_primary_label: String(rule.output_primary_label || ""),
             output_sub_label: String(rule.output_sub_label || ""),
+            output_third_label: String(rule.output_third_label || ""),
+            turnover_role: rule.turnover_action_type || rule.output_third_label ? "external_turnover" : "",
+            turnover_action_type: String(rule.turnover_action_type || ""),
             status: "active",
             source: rule.code ? "system" : "custom",
             priority: Number(rule.priority) || 2,
@@ -5372,6 +5420,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             label: String(rule.label || ""),
             output_primary_label: String(rule.output_primary_label || ""),
             output_sub_label: String(rule.output_sub_label || ""),
+            output_third_label: String(rule.output_third_label || ""),
+            turnover_role: rule.turnover_action_type || rule.output_third_label ? "external_turnover" : "",
+            turnover_action_type: String(rule.turnover_action_type || ""),
             status: "archived",
             source: "custom",
             rules: rule.rules,
@@ -5396,6 +5447,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const categoryCode = url.searchParams.get("category_code");
       const categoryPrimaryLabel = url.searchParams.get("category_primary_label");
       const categorySubLabel = url.searchParams.get("category_sub_label");
+      const categoryThirdLabel = url.searchParams.get("category_third_label");
       const page = Number(url.searchParams.get("page") ?? "1");
       const pageSize = Number(url.searchParams.get("page_size") ?? "100");
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
@@ -5424,6 +5476,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         auto_category_path: ["自动识别", "工资"],
         auto_category_primary_label: "费用",
         auto_category_sub_label: "工资",
+        auto_category_third_label: null,
         auto_category_label_path: ["费用", "工资"],
         auto_category_source: "bank_transaction_auto_category_service",
         auto_category_reason: "摘要命中工资规则",
@@ -5433,6 +5486,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         effective_category_path: ["自动识别", "工资"],
         effective_category_primary_label: "费用",
         effective_category_sub_label: "工资",
+        effective_category_third_label: null,
         effective_category_label_path: ["费用", "工资"],
         effective_category_source: "auto",
         oa_relation_tag: "有oa",
@@ -5455,6 +5509,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         auto_category_path: ["自动识别", "手续费"],
         auto_category_primary_label: "费用",
         auto_category_sub_label: "手续费",
+        auto_category_third_label: null,
         auto_category_label_path: ["费用", "手续费"],
         auto_category_reason: "摘要命中手续费规则",
         effective_category_code: "fee",
@@ -5462,6 +5517,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         effective_category_path: ["自动识别", "手续费"],
         effective_category_primary_label: "费用",
         effective_category_sub_label: "手续费",
+        effective_category_third_label: null,
         effective_category_label_path: ["费用", "手续费"],
       };
       const internalTransferRow = {
@@ -5485,6 +5541,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         auto_category_path: ["自动识别", "内部往来款"],
         auto_category_primary_label: null,
         auto_category_sub_label: null,
+        auto_category_third_label: null,
         auto_category_label_path: ["内部往来款"],
         auto_category_reason: "内部往来配对",
         effective_category_code: "internal_transfer",
@@ -5492,6 +5549,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         effective_category_path: ["自动识别", "内部往来款"],
         effective_category_primary_label: null,
         effective_category_sub_label: null,
+        effective_category_third_label: null,
         effective_category_label_path: ["内部往来款"],
         internal_transfer_counterpart: {
           transaction_id: "bank-detail-internal-transfer-counterpart",
@@ -5521,6 +5579,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         auto_category_path: [],
         auto_category_primary_label: null,
         auto_category_sub_label: null,
+        auto_category_third_label: null,
         auto_category_label_path: [],
         auto_category_source: "",
         auto_category_reason: null,
@@ -5532,6 +5591,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             category_label: "手续费",
             category_primary_label: "费用",
             category_sub_label: "手续费",
+            category_third_label: null,
             category_label_path: ["费用", "手续费"],
             category_path: ["自动识别", "手续费"],
             rule_code: "fee",
@@ -5542,6 +5602,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             category_label: "工资",
             category_primary_label: "费用",
             category_sub_label: "工资",
+            category_third_label: null,
             category_label_path: ["费用", "工资"],
             category_path: ["自动识别", "工资"],
             rule_code: "salary",
@@ -5552,6 +5613,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             category_label: "待收款",
             category_primary_label: "质保金",
             category_sub_label: "待收款",
+            category_third_label: null,
             category_label_path: ["质保金", "待收款"],
             category_path: ["业务往来", "质保金", "待收款"],
             rule_code: "business_warranty_pending_collection",
@@ -5563,6 +5625,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         effective_category_path: [],
         effective_category_primary_label: null,
         effective_category_sub_label: null,
+        effective_category_third_label: null,
         effective_category_label_path: [],
         effective_category_source: "",
       };
@@ -5585,12 +5648,60 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           auto_category_path: [],
           auto_category_primary_label: null,
           auto_category_sub_label: null,
+          auto_category_third_label: null,
           auto_category_label_path: [],
           effective_category_code: null,
           effective_category_label: null,
           effective_category_path: [],
           effective_category_primary_label: null,
           effective_category_sub_label: null,
+          effective_category_third_label: null,
+          effective_category_label_path: [],
+          effective_category_source: "",
+        },
+        {
+          ...visibleRow,
+          id: "bank-detail-external-turnover-needs-confirmation",
+          trade_time: "2026-04-01 11:30:00",
+          counterparty_name: "外部候选供应商",
+          direction: "expense",
+          direction_label: "支",
+          summary: "借款支出",
+          purpose: "借款",
+          purpose_text: "借款",
+          summary_text: "借款支出",
+          note_text: "",
+          category_resolution_status: "needs_confirmation",
+          category_rule_version: "bank-auto-tag-rules:2",
+          manual_confirmed_category_code: null,
+          auto_category_code: null,
+          auto_category_label: null,
+          auto_category_path: [],
+          auto_category_primary_label: null,
+          auto_category_sub_label: null,
+          auto_category_third_label: null,
+          auto_category_label_path: [],
+          auto_candidate_category_codes: ["external_payment", "external_payment", "external_payment", "external_payment"],
+          auto_candidate_categories: ["个人往来", "公司往来", "银行往来", "业务往来"].map((thirdLabel) => ({
+            category_code: "external_payment",
+            category_label: "借出款",
+            category_primary_label: "外部往来款付款",
+            category_sub_label: "借出款",
+            category_third_label: thirdLabel,
+            category_label_path: ["外部往来款付款", "借出款", thirdLabel],
+            category_path: ["自动识别", "借出款"],
+            turnover_role: "external_turnover",
+            turnover_action_type: "pending_collection",
+            turnover_family: thirdLabel === "个人往来" ? "personal" : thirdLabel === "公司往来" ? "company" : thirdLabel === "银行往来" ? "bank" : "business",
+            rule_code: "external_payment",
+            reason: "命中外部往来款自动规则，需要确认往来对象类型。",
+          })),
+          effective_category_code: null,
+          effective_category_label: null,
+          effective_category_path: [],
+          effective_category_primary_label: null,
+          effective_category_sub_label: null,
+          effective_category_third_label: null,
           effective_category_label_path: [],
           effective_category_source: "",
         },
@@ -5604,7 +5715,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             : String(value ?? "").includes(keyword)
         )))
         : null;
-      const hasCategoryFilter = Boolean(categoryCode || categoryPrimaryLabel || categorySubLabel);
+      const hasCategoryFilter = Boolean(categoryCode || categoryPrimaryLabel || categorySubLabel || categoryThirdLabel);
       const categoryMatches = (row: typeof searchDataset[number]) => {
         if (categoryCode === "uncategorized" && row.effective_category_code) {
           return false;
@@ -5616,6 +5727,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           return false;
         }
         if (categorySubLabel && row.effective_category_sub_label !== categorySubLabel) {
+          return false;
+        }
+        if (categoryThirdLabel && row.effective_category_third_label !== categoryThirdLabel) {
           return false;
         }
         return true;

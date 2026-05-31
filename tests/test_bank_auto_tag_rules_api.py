@@ -281,6 +281,70 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(confirm_calls[0]["category_code"], "salary")
         self.assertEqual(confirm_calls[0]["candidate_category_codes"], ["fee", "salary"])
 
+    def test_confirmation_endpoint_allows_external_turnover_third_label_candidate(self) -> None:
+        app = build_application()
+        confirm_calls: list[dict[str, object]] = []
+
+        def confirm_stub(**kwargs: object) -> dict[str, object]:
+            confirm_calls.append(dict(kwargs))
+            return {"ok": True}
+
+        app._latest_bank_detail_auto_category_suggestion = lambda _transaction_id: {
+            "category_resolution_status": "needs_confirmation",
+            "auto_candidate_category_codes": ["external_turnover"],
+            "rule_version": "bank-auto-tag-rules:7",
+            "auto_candidate_categories": [
+                {
+                    "category_code": "external_turnover",
+                    "category_label": "借出款",
+                    "category_primary_label": "外部往来款付款",
+                    "category_sub_label": "借出款",
+                    "category_third_label": "个人往来",
+                    "category_label_path": ["外部往来款付款", "借出款", "个人往来"],
+                    "turnover_action_type": "pending_collection",
+                    "turnover_family": "personal",
+                },
+                {
+                    "category_code": "external_turnover",
+                    "category_label": "借出款",
+                    "category_primary_label": "外部往来款付款",
+                    "category_sub_label": "借出款",
+                    "category_third_label": "公司往来",
+                    "category_label_path": ["外部往来款付款", "借出款", "公司往来"],
+                    "turnover_action_type": "pending_collection",
+                    "turnover_family": "company",
+                },
+            ],
+        }
+        app._bank_transaction_category_service.confirm_auto_category = confirm_stub
+        app._bank_transaction_category_affected_months = lambda _transaction_ids: []
+        app._after_bank_category_confirmation_mutation = lambda **_kwargs: None
+        app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_detail_category_confirmation(
+                "txn-candidate",
+                json.dumps(
+                    {
+                        "category_code": "external_turnover",
+                        "category_third_label": "公司往来",
+                    },
+                    ensure_ascii=False,
+                ),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(confirm_calls[0]["transaction_id"], "txn-candidate")
+        self.assertEqual(confirm_calls[0]["category_code"], "external_turnover")
+        self.assertEqual(confirm_calls[0]["category_third_label"], "公司往来")
+        self.assertEqual(confirm_calls[0]["category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
+        self.assertEqual(confirm_calls[0]["turnover_action_type"], "pending_collection")
+        self.assertEqual(confirm_calls[0]["turnover_family"], "company")
+        self.assertEqual(confirm_calls[0]["candidate_category_codes"], ["external_turnover"])
+
     def test_confirmation_endpoint_rejects_non_auto_rule_candidate(self) -> None:
         app = build_application()
         confirm_calls: list[dict[str, object]] = []
@@ -629,11 +693,125 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             ]
         )
         suggestion = suggestions["txn-external-turnover-borrow-out"]
+        self.assertIsNone(suggestion["category_code"])
+        self.assertEqual(suggestion["category_resolution_status"], "needs_confirmation")
+        self.assertEqual(
+            {
+                candidate["category_third_label"]
+                for candidate in suggestion["auto_candidate_categories"]
+            },
+            {"个人往来", "公司往来", "银行往来", "业务往来"},
+        )
+        self.assertTrue(
+            all(
+                candidate["category_code"] == target["code"]
+                and candidate["category_primary_label"] == "外部往来款付款"
+                and candidate["category_sub_label"] == "借出款"
+                for candidate in suggestion["auto_candidate_categories"]
+            )
+        )
+        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+
+    def test_put_external_turnover_rule_persists_third_label_and_action_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            app = build_application(data_dir=data_dir)
+            app._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
+                app._default_bank_auto_tag_rules_file_source(),
+                actor_id="settings-owner",
+            )
+            current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+            target = next(
+                rule
+                for rule in current["active_rules"]
+                if rule["output_primary_label"] == "往来款付款" and rule["output_sub_label"] == "借出款"
+            )
+            active = []
+            for rule in current["active_rules"]:
+                next_rule = dict(rule)
+                if next_rule["code"] == target["code"]:
+                    next_rule["output_primary_label"] = "外部往来款付款"
+                    next_rule["output_third_label"] = "公司往来"
+                    next_rule["turnover_action_type"] = "pending_collection"
+                active.append(next_rule)
+
+            with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+                response = app.handle_request(
+                    "PUT",
+                    "/api/bank-details/auto-tag-rules",
+                    json.dumps(
+                        {
+                            "expected_version": current["version"],
+                            "active_rules": active,
+                            "archived_rules": current["archived_rules"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+
+            payload = json.loads(response.body)
+            reloaded_app = build_application(data_dir=data_dir)
+            reloaded = reloaded_app._app_settings_service.get_bank_auto_tag_rules_payload()
+
+        self.assertEqual(response.status_code, 200)
+        saved_target = next(rule for rule in payload["active_rules"] if rule["code"] == target["code"])
+        self.assertEqual(saved_target["output_primary_label"], "外部往来款付款")
+        self.assertEqual(saved_target["output_sub_label"], "借出款")
+        self.assertEqual(saved_target["output_third_label"], "公司往来")
+        self.assertEqual(saved_target["turnover_action_type"], "pending_collection")
+        self.assertEqual(saved_target["turnover_family"], "company")
+        reloaded_target = next(rule for rule in reloaded["active_rules"] if rule["code"] == target["code"])
+        self.assertEqual(reloaded_target["output_third_label"], "公司往来")
+        self.assertEqual(reloaded_target["turnover_action_type"], "pending_collection")
+
+        suggestions = reloaded_app._bank_transaction_auto_category_service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-external-turnover-borrow-out",
+                    "direction": "expense",
+                    "purpose": "借据号 贷款本息",
+                    "summary": "贷款扣款",
+                }
+            ]
+        )
+        suggestion = suggestions["txn-external-turnover-borrow-out"]
         self.assertEqual(suggestion["category_code"], target["code"])
-        self.assertEqual(suggestion["category_label"], "借出款")
         self.assertEqual(suggestion["category_primary_label"], "外部往来款付款")
         self.assertEqual(suggestion["category_sub_label"], "借出款")
-        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertEqual(suggestion["category_third_label"], "公司往来")
+        self.assertEqual(suggestion["category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
+        self.assertEqual(suggestion["turnover_action_type"], "pending_collection")
+
+    def test_put_rejects_non_external_rule_with_turnover_fields(self) -> None:
+        app = build_application()
+        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        active = []
+        for rule in current["active_rules"]:
+            next_rule = dict(rule)
+            if next_rule["code"] == "fee":
+                next_rule["output_third_label"] = "公司往来"
+                next_rule["turnover_action_type"] = "pending_collection"
+            active.append(next_rule)
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            response = app._handle_api_bank_details_auto_tag_rules_update(
+                json.dumps(
+                    {
+                        "expected_version": current["version"],
+                        "active_rules": active,
+                        "archived_rules": current["archived_rules"],
+                    },
+                    ensure_ascii=False,
+                ),
+                {},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_auto_tag_rule")
+        field_paths = {error["path"] for error in payload["field_errors"]}
+        self.assertTrue(any(path.endswith(".output_third_label") for path in field_paths))
+        self.assertTrue(any(path.endswith(".turnover_action_type") for path in field_paths))
 
     def test_put_rejects_false_success_when_settings_store_does_not_persist_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

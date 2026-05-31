@@ -12,6 +12,13 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
     default_bank_transaction_tag_dictionary_payload,
 )
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    EXTERNAL_TURNOVER_ROLE,
+    external_turnover_candidate_variants,
+    is_external_turnover_definition,
+    normalize_turnover_action_type,
+    turnover_family_for_third_label,
+)
 
 
 BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION = "2026-05-bank-auto-category-internal-transfer-first"
@@ -132,10 +139,23 @@ class BankTransactionAutoCategoryService:
                         reason=self._rule_reason(rule, match),
                         confidence="high",
                         evidence=match,
+                        definition=rule,
                     )
                 )
             if len(matched_suggestions) == 1:
-                return matched_suggestions[0]
+                suggestion = matched_suggestions[0]
+                if (
+                    str(suggestion.get("turnover_role") or "") == EXTERNAL_TURNOVER_ROLE
+                    and not suggestion.get("category_third_label")
+                ):
+                    candidates = external_turnover_candidate_variants(suggestion)
+                    if candidates:
+                        return self._confirmation_suggestion(
+                            transaction_id=transaction_id,
+                            candidates=candidates,
+                            reason="命中外部往来款自动规则，需要确认往来对象类型。",
+                        )
+                return suggestion
             if len(matched_suggestions) > 1:
                 return self._confirmation_suggestion(
                     transaction_id=transaction_id,
@@ -458,7 +478,9 @@ class BankTransactionAutoCategoryService:
         reason: str,
         confidence: str,
         evidence: dict[str, Any] | None = None,
+        definition: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        rule_definition = definition if isinstance(definition, dict) else {}
         payload = {
             "transaction_id": transaction_id,
             "category_code": category_code,
@@ -471,6 +493,11 @@ class BankTransactionAutoCategoryService:
             "confidence": confidence,
             "rule_version": self.current_rule_version(),
         }
+        if is_external_turnover_definition(rule_definition):
+            third_label = str(payload.get("category_third_label") or "")
+            payload["turnover_role"] = EXTERNAL_TURNOVER_ROLE
+            payload["turnover_action_type"] = normalize_turnover_action_type(rule_definition.get("turnover_action_type"))
+            payload["turnover_family"] = str(rule_definition.get("turnover_family") or "").strip() or turnover_family_for_third_label(third_label)
         if evidence is not None:
             evidence_payload = dict(evidence)
             evidence_payload["tag_code"] = category_code
@@ -499,8 +526,12 @@ class BankTransactionAutoCategoryService:
             "category_label": payload.get("category_label"),
             "category_primary_label": payload.get("category_primary_label"),
             "category_sub_label": payload.get("category_sub_label"),
+            "category_third_label": payload.get("category_third_label"),
             "category_label_path": list(payload.get("category_label_path") or []),
             "category_path": list(payload.get("category_path") or []),
+            "turnover_role": payload.get("turnover_role"),
+            "turnover_action_type": payload.get("turnover_action_type"),
+            "turnover_family": payload.get("turnover_family"),
             "source": payload.get("source"),
             "rule_code": payload.get("rule_code"),
             "reason": payload.get("reason"),
@@ -514,6 +545,7 @@ class BankTransactionAutoCategoryService:
         *,
         transaction_id: str,
         candidates: list[dict[str, Any]],
+        reason: str = "命中多个自动标签规则，需要用户确认。",
     ) -> dict[str, Any]:
         candidate_payloads = [self._candidate_payload(candidate) for candidate in candidates]
         return {
@@ -522,11 +554,12 @@ class BankTransactionAutoCategoryService:
             "category_label": None,
             "category_primary_label": None,
             "category_sub_label": None,
+            "category_third_label": None,
             "category_label_path": [],
             "category_path": [],
             "source": "auto",
             "rule_code": "",
-            "reason": "命中多个自动标签规则，需要用户确认。",
+            "reason": reason,
             "confidence": "needs_confirmation",
             "rule_version": self.current_rule_version(),
             "category_resolution_status": "needs_confirmation",
@@ -604,59 +637,46 @@ def resolve_effective_category(
     manual_category: dict[str, Any] | None,
     auto_category: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    def payload_from(source: dict[str, Any], *, effective_source: str) -> dict[str, Any]:
+        return {
+            "effective_category_code": source.get("category_code"),
+            "effective_category_label": source.get("category_label"),
+            "effective_category_primary_label": source.get("category_primary_label"),
+            "effective_category_sub_label": source.get("category_sub_label"),
+            "effective_category_third_label": source.get("category_third_label"),
+            "effective_category_label_path": list(source.get("category_label_path") or []),
+            "effective_category_path": list(source.get("category_path") or []),
+            "effective_category_source": effective_source,
+            "turnover_role": source.get("turnover_role"),
+            "turnover_action_type": source.get("turnover_action_type"),
+            "turnover_family": source.get("turnover_family"),
+        }
+
     manual = manual_category if isinstance(manual_category, dict) else {}
     manual_code = manual.get("category_code")
     manual_source = str(manual.get("source") or "").strip()
     auto = auto_category if isinstance(auto_category, dict) else {}
     auto_code = auto.get("category_code")
     if manual_code and manual_source == "auto_confirmation":
-        return {
-            "effective_category_code": manual_code,
-            "effective_category_label": manual.get("category_label"),
-            "effective_category_primary_label": manual.get("category_primary_label"),
-            "effective_category_sub_label": manual.get("category_sub_label"),
-            "effective_category_label_path": list(manual.get("category_label_path") or []),
-            "effective_category_path": list(manual.get("category_path") or []),
-            "effective_category_source": "manual_confirmation",
-        }
+        return payload_from(manual, effective_source="manual_confirmation")
     if manual_code and manual_source == "manual" and bool(manual.get("manual_assignment")) and not auto_code:
-        return {
-            "effective_category_code": manual_code,
-            "effective_category_label": manual.get("category_label"),
-            "effective_category_primary_label": manual.get("category_primary_label"),
-            "effective_category_sub_label": manual.get("category_sub_label"),
-            "effective_category_label_path": list(manual.get("category_label_path") or []),
-            "effective_category_path": list(manual.get("category_path") or []),
-            "effective_category_source": "manual",
-        }
+        return payload_from(manual, effective_source="manual")
     if manual_code in BANK_TRANSACTION_CATEGORY_DEFINITIONS and (
         manual_source == "turnover_ledger" or auto_code == "external_turnover"
     ):
-        return {
-            "effective_category_code": manual_code,
-            "effective_category_label": manual.get("category_label"),
-            "effective_category_primary_label": manual.get("category_primary_label"),
-            "effective_category_sub_label": manual.get("category_sub_label"),
-            "effective_category_label_path": list(manual.get("category_label_path") or []),
-            "effective_category_path": list(manual.get("category_path") or []),
-            "effective_category_source": manual_source or "manual",
-        }
+        return payload_from(manual, effective_source=manual_source or "manual")
     if auto_code:
-        return {
-            "effective_category_code": auto_code,
-            "effective_category_label": auto.get("category_label"),
-            "effective_category_primary_label": auto.get("category_primary_label"),
-            "effective_category_sub_label": auto.get("category_sub_label"),
-            "effective_category_label_path": list(auto.get("category_label_path") or []),
-            "effective_category_path": list(auto.get("category_path") or []),
-            "effective_category_source": "auto",
-        }
+        return payload_from(auto, effective_source="auto")
     return {
         "effective_category_code": None,
         "effective_category_label": None,
         "effective_category_primary_label": None,
         "effective_category_sub_label": None,
+        "effective_category_third_label": None,
         "effective_category_label_path": [],
         "effective_category_path": [],
         "effective_category_source": "",
+        "turnover_role": None,
+        "turnover_action_type": None,
+        "turnover_family": None,
     }

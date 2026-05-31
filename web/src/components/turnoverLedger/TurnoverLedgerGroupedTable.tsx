@@ -5,9 +5,7 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import IconButton from "@mui/material/IconButton";
-import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
-import Select, { type SelectChangeEvent } from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -23,7 +21,6 @@ import type {
   TurnoverLedgerGroupedRow,
   TurnoverRowTone,
 } from "../../features/turnoverLedger/types";
-import { SELECTABLE_CATEGORY_OPTIONS } from "../../features/bankDetails/categoryOptions";
 
 const ROW_TONE_BACKGROUND: Record<TurnoverRowTone, string> = {
   success: "rgba(46, 125, 50, 0.07)",
@@ -60,12 +57,6 @@ const FLOW_ROW_HOVER_BACKGROUND: Record<"income" | "expense" | "neutral", string
   expense: "#ffeddd",
   neutral: "#eceff8",
 };
-const TURNOVER_TAG_OPTIONS = SELECTABLE_CATEGORY_OPTIONS.filter((option) => (
-  option.code.startsWith("borrow_in_")
-  || option.code.startsWith("borrow_out_")
-  || option.code.startsWith("business_")
-));
-
 type RuntimeGroupedRow = TurnoverLedgerGroupedRow & {
   rowKind?: "summary" | "lot" | string;
   lotId?: string;
@@ -100,6 +91,14 @@ export function formatNullable(value: string | number | null | undefined) {
     return "-";
   }
   return String(value);
+}
+
+function categoryPathText(row: TurnoverLedgerGroupedRow) {
+  const path = row.categoryLabelPath.filter(Boolean);
+  if (path.length > 0) {
+    return path.join(" / ");
+  }
+  return formatNullable(row.categoryLabel);
 }
 
 function normalizedTone(tone: TurnoverRowTone | string | null | undefined): TurnoverRowTone {
@@ -336,51 +335,22 @@ function RowCells({
   row,
   rowKind,
   onEdit,
-  canMutateData,
-  tagChanges,
-  onTagChange,
 }: {
   row: TurnoverLedgerGroupedRow;
   rowKind: "summary" | "flow";
   onEdit: (row: TurnoverLedgerGroupedRow) => void;
-  canMutateData: boolean;
-  tagChanges: Record<string, string>;
-  onTagChange: (row: TurnoverLedgerGroupedRow, categoryCode: string) => void;
 }) {
   const isFlow = rowKind === "flow";
   const flowDirection = isFlow ? flowDirectionKey(row) : "neutral";
-  const editableBankRowId = row.sourceBankRowId || (row.bankRowIds.length === 1 ? row.bankRowIds[0] : "");
-  const selectedCategoryCode = tagChanges[editableBankRowId] ?? row.categoryCode ?? "";
-  const handleTagChange = (event: SelectChangeEvent<string>) => {
-    onTagChange(row, event.target.value);
-  };
   return (
     <>
       <TableCell>
-        {editableBankRowId ? (
-          <Select
-            size="small"
-            displayEmpty
-            value={selectedCategoryCode}
-            onChange={handleTagChange}
-            disabled={!canMutateData}
-            inputProps={{ "aria-label": `往来款子标签 ${editableBankRowId}` }}
-            sx={{ width: 210 }}
-          >
-            <MenuItem value="">
-              <em>未选择子标签</em>
-            </MenuItem>
-            {TURNOVER_TAG_OPTIONS.map((option) => (
-              <MenuItem key={option.code} value={option.code}>
-                {option.menuLabel}
-              </MenuItem>
-            ))}
-          </Select>
-        ) : (
-          <Typography variant="body2" color="text.secondary">
-            {formatNullable(row.categoryLabel)}
+        <Stack spacing={0.5} alignItems="flex-start">
+          <Typography variant="body2" fontWeight={800} sx={{ wordBreak: "break-word" }}>
+            {categoryPathText(row)}
           </Typography>
-        )}
+          {isFlow ? <Chip size="small" variant="outlined" label="银行明细标签" /> : null}
+        </Stack>
       </TableCell>
       <TableCell>
         <Stack spacing={0.75} alignItems="flex-start">
@@ -448,16 +418,10 @@ export default function TurnoverLedgerGroupedTable({
   groups,
   loading,
   onEdit,
-  canMutateData,
-  tagChanges,
-  onTagChange,
 }: {
   groups: TurnoverLedgerGroup[];
   loading: boolean;
   onEdit: (row: TurnoverLedgerGroupedRow) => void;
-  canMutateData: boolean;
-  tagChanges: Record<string, string>;
-  onTagChange: (row: TurnoverLedgerGroupedRow, categoryCode: string) => void;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const hasRows = groups.some((group) => resolveRows(group).summaryRow !== null);
@@ -482,7 +446,7 @@ export default function TurnoverLedgerGroupedTable({
             >
               对方户名
             </TableCell>
-            <TableCell sx={{ width: 230, fontWeight: 900 }}>往来款子标签</TableCell>
+            <TableCell sx={{ width: 230, fontWeight: 900 }}>银行明细标签</TableCell>
             <TableCell sx={{ width: 132, fontWeight: 900 }}>借款金额 / 借款日</TableCell>
             <TableCell sx={{ width: 132, fontWeight: 900 }}>还款金额 / 还款日</TableCell>
             <TableCell sx={{ width: 130, fontWeight: 900 }}>开户机构</TableCell>
@@ -565,9 +529,6 @@ export default function TurnoverLedgerGroupedTable({
                       row={summaryRow}
                       rowKind="summary"
                       onEdit={onEdit}
-                      canMutateData={canMutateData}
-                      tagChanges={tagChanges}
-                      onTagChange={onTagChange}
                     />
                   </TableRow>
                 );
@@ -590,9 +551,6 @@ export default function TurnoverLedgerGroupedTable({
                         row={row}
                         rowKind="flow"
                         onEdit={onEdit}
-                        canMutateData={canMutateData}
-                        tagChanges={tagChanges}
-                        onTagChange={onTagChange}
                       />
                     </TableRow>
                   );

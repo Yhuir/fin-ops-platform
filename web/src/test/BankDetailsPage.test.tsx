@@ -532,7 +532,7 @@ describe("Bank details page", () => {
     expect(within(primaryMenu).queryByRole("menuitem", { name: "银行往来款" })).not.toBeInTheDocument();
 
     await user.click(within(primaryMenu).getByRole("menuitem", { name: "费用" }));
-    const childMenu = await screen.findByRole("menu", { name: "费用可选子标签" });
+    const childMenu = await screen.findByRole("menu", { name: "费用可选标签" });
     expect(within(childMenu).getByRole("menuitem", { name: "手续费" })).toBeInTheDocument();
     expect(within(childMenu).getByRole("menuitem", { name: "工资" })).toBeInTheDocument();
 
@@ -580,7 +580,7 @@ describe("Bank details page", () => {
     expect(within(primaryMenu).getByRole("menuitem", { name: "薪资社保福利" })).toBeInTheDocument();
 
     await user.click(within(primaryMenu).getByRole("menuitem", { name: "薪资社保福利" }));
-    const childMenu = await screen.findByRole("menu", { name: "薪资社保福利可选子标签" });
+    const childMenu = await screen.findByRole("menu", { name: "薪资社保福利可选标签" });
     expect(within(childMenu).getByRole("menuitem", { name: "人员薪酬" })).toBeInTheDocument();
   });
 
@@ -592,16 +592,18 @@ describe("Bank details page", () => {
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "候选供应商");
     const table = await within(page).findByRole("table", { name: "交易流水" });
-    expect(await within(table).findByText("候选供应商")).toBeInTheDocument();
+    const counterpartyName = await within(table).findByText("候选供应商", { exact: true });
+    const row = counterpartyName.closest("tr");
+    expect(row).toBeInstanceOf(HTMLElement);
 
-    await user.click(within(table).getByRole("button", { name: "待确认" }));
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "待确认" }));
 
     const primaryMenu = await screen.findByRole("menu", { name: "待确认主标签" });
     expect(within(primaryMenu).getByRole("menuitem", { name: "费用" })).toBeInTheDocument();
     expect(within(primaryMenu).queryByRole("menuitem", { name: "质保金" })).not.toBeInTheDocument();
 
     await user.click(within(primaryMenu).getByRole("menuitem", { name: "费用" }));
-    const childMenu = await screen.findByRole("menu", { name: "费用候选子标签" });
+    const childMenu = await screen.findByRole("menu", { name: "费用候选标签" });
     expect(within(childMenu).getByRole("menuitem", { name: "手续费" })).toBeInTheDocument();
     expect(within(childMenu).getByRole("menuitem", { name: "工资" })).toBeInTheDocument();
     expect(within(childMenu).queryByRole("menuitem", { name: "待收款" })).not.toBeInTheDocument();
@@ -611,6 +613,32 @@ describe("Bank details page", () => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/bank-details/transactions/bank-detail-needs-confirmation/category-confirmation",
         expect.objectContaining({ body: JSON.stringify({ category_code: "salary" }) }),
+      );
+    });
+  });
+
+  test("external turnover confirmation submits the selected third-level label", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "外部候选");
+    const table = await within(page).findByRole("table", { name: "交易流水" });
+    expect(await within(table).findByText("外部候选供应商")).toBeInTheDocument();
+
+    await user.click(within(table).getByRole("button", { name: "待确认" }));
+    const primaryMenu = await screen.findByRole("menu", { name: "待确认主标签" });
+    await user.click(within(primaryMenu).getByRole("menuitem", { name: "外部往来款付款" }));
+    const childMenu = await screen.findByRole("menu", { name: "外部往来款付款候选标签" });
+    expect(within(childMenu).getByRole("menuitem", { name: "借出款 / 个人往来" })).toBeInTheDocument();
+    expect(within(childMenu).getByRole("menuitem", { name: "借出款 / 公司往来" })).toBeInTheDocument();
+
+    await user.click(within(childMenu).getByRole("menuitem", { name: "借出款 / 公司往来" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-details/transactions/bank-detail-external-turnover-needs-confirmation/category-confirmation",
+        expect.objectContaining({ body: JSON.stringify({ category_code: "external_payment", category_third_label: "公司往来" }) }),
       );
     });
   });

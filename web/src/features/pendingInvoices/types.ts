@@ -61,6 +61,10 @@ export type BankTransactionTagDefinition = {
   path: string[];
   outputPrimaryLabel: string;
   outputSubLabel: string;
+  outputThirdLabel?: string;
+  turnoverRole?: string;
+  turnoverActionType?: string;
+  turnoverFamily?: string;
   status: BankTransactionTagStatus;
   source: BankTransactionTagSource;
 };

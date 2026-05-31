@@ -64,6 +64,7 @@ def _row(
     category: str | None = None,
     category_primary_label: str | None = None,
     category_sub_label: str | None = None,
+    category_third_label: str | None = None,
     oa_tag: str = "无oa",
     invoice_tag: str = "无发票",
 ) -> dict[str, object]:
@@ -81,11 +82,14 @@ def _row(
         "auto_category_label": category,
         "auto_category_primary_label": category_primary_label,
         "auto_category_sub_label": category_sub_label,
+        "auto_category_third_label": category_third_label,
         "effective_category_label": category,
         "effective_category_primary_label": category_primary_label,
         "effective_category_sub_label": category_sub_label,
+        "effective_category_third_label": category_third_label,
         "category_primary_label": category_primary_label,
         "category_sub_label": category_sub_label,
+        "category_third_label": category_third_label,
         "oa_relation_tag": oa_tag,
         "invoice_relation_tag": invoice_tag,
         "purpose_text": purpose_text,
@@ -115,21 +119,22 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         sheet = workbook["全部流水"]
         self.assertEqual([cell.value for cell in sheet[1]], BANK_DETAIL_EXPORT_COLUMNS)
         self.assertEqual(sheet.freeze_panes, "A2")
-        self.assertEqual(sheet.auto_filter.ref, f"A1:Q{sheet.max_row}")
+        self.assertEqual(sheet.auto_filter.ref, f"A1:R{sheet.max_row}")
         self.assertEqual(sheet["A2"].value, "2026-04-16 11:09:14")
         self.assertIsInstance(sheet["G2"].value, (int, float))
         self.assertIsNone(sheet["F2"].value)
         self.assertEqual(sheet["I2"].value, "手续费")
         self.assertEqual(sheet["J2"].value, "费用")
         self.assertEqual(sheet["K2"].value, "手续费")
+        self.assertEqual(sheet["L2"].value, "-")
         self.assertEqual(sheet["I3"].value, "内部往来款")
-        self.assertEqual(sheet["L6"].value, "有oa")
-        self.assertEqual(sheet["M6"].value, "有发票")
-        self.assertEqual(sheet["N2"].value, "工行用途")
-        self.assertEqual(sheet["O4"].value, "交行摘要")
-        self.assertEqual(sheet["P5"].value, "建行备注")
-        self.assertEqual(sheet["P6"].value, "客户附言")
-        self.assertEqual(sheet["N8"].value, "平安交易用途")
+        self.assertEqual(sheet["M6"].value, "有oa")
+        self.assertEqual(sheet["N6"].value, "有发票")
+        self.assertEqual(sheet["O2"].value, "工行用途")
+        self.assertEqual(sheet["P4"].value, "交行摘要")
+        self.assertEqual(sheet["Q5"].value, "建行备注")
+        self.assertEqual(sheet["Q6"].value, "客户附言")
+        self.assertEqual(sheet["O8"].value, "平安交易用途")
 
     def test_export_forwards_category_label_filters_to_transaction_loader(self) -> None:
         loader = _PagedRowsLoader(
@@ -142,6 +147,7 @@ class BankDetailsExportServiceTests(unittest.TestCase):
                     category="手续费",
                     category_primary_label="费用",
                     category_sub_label="手续费",
+                    category_third_label="个人往来",
                 )
             ]
         )
@@ -154,10 +160,12 @@ class BankDetailsExportServiceTests(unittest.TestCase):
             keyword=None,
             category_primary_label="费用",
             category_sub_label="手续费",
+            category_third_label="个人往来",
         )
 
         self.assertEqual(loader.calls[0]["category_primary_label"], "费用")
         self.assertEqual(loader.calls[0]["category_sub_label"], "手续费")
+        self.assertEqual(loader.calls[0]["category_third_label"], "个人往来")
 
     def test_account_export_validates_account_metadata_and_allows_empty_filtered_result(self) -> None:
         loader = _PagedRowsLoader([])
@@ -214,9 +222,9 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         sheet = load_workbook(BytesIO(result.content))["全部流水"]
 
         self.assertEqual(sheet["D2"].value, "'=HYPERLINK(\"http://example.com\")")
-        self.assertEqual(sheet["N2"].value, "'+cmd")
-        self.assertEqual(sheet["O2"].value, "'@SUM(A1:A2)")
-        self.assertEqual(sheet["P2"].value, "'-1+2")
+        self.assertEqual(sheet["O2"].value, "'+cmd")
+        self.assertEqual(sheet["P2"].value, "'@SUM(A1:A2)")
+        self.assertEqual(sheet["Q2"].value, "'-1+2")
 
     def test_export_rebuilds_text_columns_from_bank_text_fields_or_legacy_fields(self) -> None:
         rows = [
@@ -246,12 +254,12 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         result = service.export(mode="all", date_from="2026-04-01", date_to="2026-05-18", keyword=None)
         sheet = load_workbook(BytesIO(result.content))["全部流水"]
 
-        self.assertEqual(sheet["N2"].value, "工行用途")
-        self.assertEqual(sheet["O2"].value, "工行摘要")
-        self.assertEqual(sheet["P2"].value, "工行附言")
-        self.assertIn(sheet["N3"].value, (None, ""))
-        self.assertEqual(sheet["O3"].value, "旧摘要")
-        self.assertEqual(sheet["P3"].value, "旧备注")
+        self.assertEqual(sheet["O2"].value, "工行用途")
+        self.assertEqual(sheet["P2"].value, "工行摘要")
+        self.assertEqual(sheet["Q2"].value, "工行附言")
+        self.assertIn(sheet["O3"].value, (None, ""))
+        self.assertEqual(sheet["P3"].value, "旧摘要")
+        self.assertEqual(sheet["Q3"].value, "旧备注")
 
     def test_export_maps_legacy_minsheng_text_to_note_only(self) -> None:
         rows = [
@@ -269,9 +277,9 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         result = service.export(mode="all", date_from="2026-04-01", date_to="2026-05-18", keyword=None)
         sheet = load_workbook(BytesIO(result.content))["全部流水"]
 
-        self.assertIn(sheet["N2"].value, (None, ""))
         self.assertIn(sheet["O2"].value, (None, ""))
-        self.assertEqual(sheet["P2"].value, "客户附言内容")
+        self.assertIn(sheet["P2"].value, (None, ""))
+        self.assertEqual(sheet["Q2"].value, "客户附言内容")
 
     def test_row_limit_is_enforced_before_collecting_all_pages(self) -> None:
         rows = [

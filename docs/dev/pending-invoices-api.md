@@ -302,9 +302,9 @@ PUT /api/pending-invoices/rules
 
 `GET /api/pending-invoices/rules` 返回：
 
-- `available_tags`：待找发票规则抽屉唯一可用标签全集，来源等同于 `/api/bank-details/auto-tag-rules` 的 `system_rule + active_rules`，每项至少包含 `code`、`label`、`status`、`output_primary_label`、`output_sub_label`。
+- `available_tags`：待找发票规则抽屉唯一可用标签全集，来源等同于 `/api/bank-details/auto-tag-rules` 的 `system_rule + active_rules`，每项至少包含 `code`、`label`、`status`、`output_primary_label`、`output_sub_label`、`output_third_label`。
 - `groups.requires_invoice`、`groups.bank_statement_as_invoice`、`groups.no_invoice_required` 三组，供前端展示。
-- 每组 `tags[*]` 至少包含 `code`、`label`、`status`、`output_primary_label`、`output_sub_label`。
+- 每组 `tags[*]` 至少包含 `code`、`label`、`status`、`output_primary_label`、`output_sub_label`、`output_third_label`。
 - `groups.requires_invoice.tag_codes` 等于 `available_tags` 中所有 `status=active` 标签 code 减去两个可编辑组 code 后的有序补集。
 - 兼容字段 `pending_invoice_tag_groups.groups.requires_invoice.tag_codes` 在响应中也镜像派生结果，但不作为可编辑持久化事实。
 - 兼容字段 `bank_transaction_tags` 可能包含历史流水分类字典或非规则 taxonomy，客户端不得用它替代 `available_tags` 渲染规则抽屉。

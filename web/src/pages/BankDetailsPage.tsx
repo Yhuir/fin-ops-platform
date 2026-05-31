@@ -102,13 +102,48 @@ type BankCategoryFilterRequestParams = {
   categoryCode: string | null;
   categoryPrimaryLabel: string | null;
   categorySubLabel: string | null;
+  categoryThirdLabel: string | null;
 };
+const EXTERNAL_TURNOVER_ROLE = "external_turnover";
+const EXTERNAL_TURNOVER_PRIMARY_LABELS = new Set(["外部往来款付款", "外部往来款收款", "往来款付款", "往来款收款"]);
+const EXTERNAL_TURNOVER_THIRD_LABELS = ["个人往来", "公司往来", "银行往来", "业务往来"];
+
+function isExternalTurnoverPrimaryLabel(value: string | null | undefined) {
+  return EXTERNAL_TURNOVER_PRIMARY_LABELS.has(String(value ?? "").trim());
+}
+
+function turnoverFamilyForThirdLabel(value: string | null | undefined) {
+  switch (String(value ?? "").trim()) {
+    case "个人往来":
+      return "personal";
+    case "公司往来":
+      return "company";
+    case "银行往来":
+      return "bank";
+    case "业务往来":
+      return "business";
+    default:
+      return "";
+  }
+}
+
+function inferTurnoverActionTypeFromRule(rule: BankAutoTagEditableRule) {
+  const primary = rule.outputPrimaryLabel.trim();
+  const sub = rule.outputSubLabel.trim();
+  if (primary === "外部往来款付款" || primary === "往来款付款") {
+    return /归还|还借款|还暂借款|偿还|还款/.test(sub) ? "repaid" : "pending_collection";
+  }
+  if (primary === "外部往来款收款" || primary === "往来款收款") {
+    return /收回|退|退款|返还/.test(sub) ? "collected" : "pending_repayment";
+  }
+  return "";
+}
 
 const ALL_CATEGORY_FILTER: BankCategoryFilter = { kind: "all" };
 const UNCATEGORIZED_CATEGORY_FILTER: BankCategoryFilter = { kind: "uncategorized" };
 
 function tagDefinitionDisplayLabel(tag: BankTransactionTagDefinition) {
-  const path = [tag.outputPrimaryLabel, tag.outputSubLabel]
+  const path = [tag.outputPrimaryLabel, tag.outputSubLabel, tag.outputThirdLabel ?? ""]
     .map((value) => value.trim())
     .filter(Boolean);
   if (path.length > 0) {
@@ -120,8 +155,9 @@ function tagDefinitionDisplayLabel(tag: BankTransactionTagDefinition) {
 function tagDefinitionDisplayParts(tag: BankTransactionTagDefinition) {
   const primaryLabel = tag.outputPrimaryLabel.trim();
   const subLabel = tag.outputSubLabel.trim();
+  const thirdLabel = (tag.outputThirdLabel ?? "").trim();
   if (primaryLabel && subLabel) {
-    return { primaryLabel, subLabel };
+    return { primaryLabel, subLabel: thirdLabel ? `${subLabel} / ${thirdLabel}` : subLabel };
   }
 
   const displayLabel = tagDefinitionDisplayLabel(tag);
@@ -205,6 +241,7 @@ function categoryFilterRequestParams(filter: BankCategoryFilter): BankCategoryFi
       categoryCode: "uncategorized",
       categoryPrimaryLabel: null,
       categorySubLabel: null,
+      categoryThirdLabel: null,
     };
   }
   if (filter.kind === "primary") {
@@ -212,6 +249,7 @@ function categoryFilterRequestParams(filter: BankCategoryFilter): BankCategoryFi
       categoryCode: null,
       categoryPrimaryLabel: filter.primaryLabel,
       categorySubLabel: null,
+      categoryThirdLabel: null,
     };
   }
   if (filter.kind === "tag") {
@@ -219,12 +257,14 @@ function categoryFilterRequestParams(filter: BankCategoryFilter): BankCategoryFi
       categoryCode: filter.code,
       categoryPrimaryLabel: null,
       categorySubLabel: null,
+      categoryThirdLabel: null,
     };
   }
   return {
     categoryCode: null,
     categoryPrimaryLabel: null,
     categorySubLabel: null,
+    categoryThirdLabel: null,
   };
 }
 
@@ -723,6 +763,10 @@ type ConfirmationChoice = {
   categoryCode: BankTransactionCategoryCode;
   primaryLabel: string;
   subLabel: string | null;
+  thirdLabel: string | null;
+  labelPath: string[];
+  turnoverActionType: string | null;
+  turnoverFamily: string | null;
 };
 
 type ConfirmationChoiceGroup = {
@@ -750,20 +794,27 @@ function confirmationChoiceFromCandidate(
   const subLabel = candidateLabelPart(candidate.categorySubLabel)
     || labelPath.slice(1).find(Boolean)
     || null;
+  const thirdLabel = candidateLabelPart(candidate.categoryThirdLabel)
+    || labelPath.slice(2).find(Boolean)
+    || null;
   return {
     categoryCode,
     primaryLabel,
     subLabel,
+    thirdLabel,
+    labelPath: labelPath.length ? labelPath : [primaryLabel, subLabel, thirdLabel].filter((value): value is string => Boolean(value)),
+    turnoverActionType: candidate.turnoverActionType,
+    turnoverFamily: candidate.turnoverFamily,
   };
 }
 
-function confirmationChoiceFromAutoTagRule(rule: BankAutoTagEditableRule): ConfirmationChoice | null {
+function confirmationChoicesFromAutoTagRule(rule: BankAutoTagEditableRule): ConfirmationChoice[] {
   if (rule.status !== "active") {
-    return null;
+    return [];
   }
   const categoryCode = candidateLabelPart(rule.code);
   if (!categoryCode) {
-    return null;
+    return [];
   }
   const primaryLabel = candidateLabelPart(rule.outputPrimaryLabel)
     || candidateLabelPart(rule.label)
@@ -771,24 +822,54 @@ function confirmationChoiceFromAutoTagRule(rule: BankAutoTagEditableRule): Confi
   const subLabel = candidateLabelPart(rule.outputSubLabel)
     || candidateLabelPart(rule.label)
     || primaryLabel;
-  return {
+  const actionType = rule.turnoverActionType || (isExternalTurnoverPrimaryLabel(primaryLabel) ? inferTurnoverActionTypeFromRule(rule) : "");
+  const baseChoice = {
     categoryCode,
     primaryLabel,
     subLabel,
+    turnoverActionType: actionType || null,
   };
+  if (isExternalTurnoverPrimaryLabel(primaryLabel) && !rule.outputThirdLabel) {
+    return EXTERNAL_TURNOVER_THIRD_LABELS.map((thirdLabel) => ({
+      ...baseChoice,
+      thirdLabel,
+      labelPath: [primaryLabel, subLabel, thirdLabel].filter(Boolean),
+      turnoverFamily: turnoverFamilyForThirdLabel(thirdLabel) || null,
+    }));
+  }
+  const thirdLabel = candidateLabelPart(rule.outputThirdLabel) || null;
+  return [{
+    ...baseChoice,
+    thirdLabel,
+    labelPath: [primaryLabel, subLabel, thirdLabel].filter((value): value is string => Boolean(value)),
+    turnoverFamily: rule.turnoverFamily || turnoverFamilyForThirdLabel(thirdLabel) || null,
+  }];
 }
 
-function buildActiveAutoRuleChoiceMap(
-  rules: BankAutoTagEditableRule[],
-): Map<BankTransactionCategoryCode, ConfirmationChoice> {
-  const choicesByCode = new Map<BankTransactionCategoryCode, ConfirmationChoice>();
+function choiceKey(choice: ConfirmationChoice) {
+  return `${choice.categoryCode}\u0000${choice.thirdLabel ?? ""}`;
+}
+
+function choiceDisplayLabel(choice: ConfirmationChoice) {
+  const path = [choice.subLabel, choice.thirdLabel].filter(Boolean);
+  return path.length ? path.join(" / ") : choice.primaryLabel;
+}
+
+function activeAutoRuleChoiceKeySet(rules: BankAutoTagEditableRule[]) {
+  const keys = new Set<string>();
   rules.forEach((rule) => {
-    const choice = confirmationChoiceFromAutoTagRule(rule);
-    if (choice && !choicesByCode.has(choice.categoryCode)) {
-      choicesByCode.set(choice.categoryCode, choice);
-    }
+    confirmationChoicesFromAutoTagRule(rule).forEach((choice) => {
+      keys.add(choiceKey(choice));
+      keys.add(`${choice.categoryCode}\u0000`);
+    });
   });
-  return choicesByCode;
+  return keys;
+}
+
+function buildAssignmentChoiceGroups(
+  activeRules: BankAutoTagEditableRule[],
+): ConfirmationChoiceGroup[] {
+  return buildConfirmationChoiceGroupsFromChoices(activeRules.flatMap(confirmationChoicesFromAutoTagRule));
 }
 
 function buildConfirmationChoiceGroupsFromChoices(
@@ -796,12 +877,12 @@ function buildConfirmationChoiceGroupsFromChoices(
 ): ConfirmationChoiceGroup[] {
   const groups: ConfirmationChoiceGroup[] = [];
   const groupsByKey = new Map<string, ConfirmationChoiceGroup>();
-  const seenCodes = new Set<string>();
+  const seenChoices = new Set<string>();
   choices.forEach((choice) => {
-    if (!choice || seenCodes.has(choice.categoryCode)) {
+    if (!choice || seenChoices.has(choiceKey(choice))) {
       return;
     }
-    seenCodes.add(choice.categoryCode);
+    seenChoices.add(choiceKey(choice));
     const key = choice.primaryLabel;
     let group = groupsByKey.get(key);
     if (!group) {
@@ -818,20 +899,16 @@ function buildConfirmationChoiceGroups(
   candidates: BankDetailTransaction["autoCandidateCategories"],
   activeRules: BankAutoTagEditableRule[],
 ): ConfirmationChoiceGroup[] {
-  const activeChoiceByCode = buildActiveAutoRuleChoiceMap(activeRules);
+  const activeChoiceKeys = activeAutoRuleChoiceKeySet(activeRules);
   return buildConfirmationChoiceGroupsFromChoices(candidates.map((candidate) => {
     const candidateChoice = confirmationChoiceFromCandidate(candidate);
     if (!candidateChoice) {
       return null;
     }
-    return activeChoiceByCode.get(candidateChoice.categoryCode) ?? null;
+    return activeChoiceKeys.has(choiceKey(candidateChoice)) || activeChoiceKeys.has(`${candidateChoice.categoryCode}\u0000`)
+      ? candidateChoice
+      : null;
   }));
-}
-
-function buildAssignmentChoiceGroups(
-  activeRules: BankAutoTagEditableRule[],
-): ConfirmationChoiceGroup[] {
-  return buildConfirmationChoiceGroupsFromChoices(activeRules.map(confirmationChoiceFromAutoTagRule));
 }
 
 function TypeCell({
@@ -846,8 +923,8 @@ function TypeCell({
   row: BankDetailTransaction;
   autoTagRules: BankAutoTagEditableRule[];
   confirming: boolean;
-  onConfirm: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
-  onAssign: (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => void;
+  onConfirm: (row: BankDetailTransaction, choice: ConfirmationChoice) => void;
+  onAssign: (row: BankDetailTransaction, choice: ConfirmationChoice) => void;
   onRevoke: (row: BankDetailTransaction) => void;
   onClearAssignment: (row: BankDetailTransaction) => void;
 }) {
@@ -867,7 +944,7 @@ function TypeCell({
   const isManualAssignment = assignmentGroups.length > 0;
   const selectionGroups = confirmationGroups.length > 0 ? confirmationGroups : assignmentGroups;
   const selectionLabel = confirmationGroups.length > 0 ? "待确认" : "待分类";
-  const childLabelSuffix = confirmationGroups.length > 0 ? "候选子标签" : "可选子标签";
+  const childLabelSuffix = confirmationGroups.length > 0 ? "候选标签" : "可选标签";
   const [selectedPrimaryKey, setSelectedPrimaryKey] = useState("");
   const selectedGroup = selectionGroups.find((group) => group.key === selectedPrimaryKey) ?? selectionGroups[0] ?? null;
 
@@ -961,20 +1038,20 @@ function TypeCell({
                     <ListItemButton
                       className="bank-category-confirmation-child-item"
                       component="button"
-                      key={choice.categoryCode}
+                      key={choiceKey(choice)}
                       onClick={() => {
                         closeConfirmationPanel();
                         if (isManualAssignment) {
-                          onAssign(row, choice.categoryCode);
+                          onAssign(row, choice);
                         } else {
-                          onConfirm(row, choice.categoryCode);
+                          onConfirm(row, choice);
                         }
                       }}
                       role="menuitem"
                     >
                       <ListItemText
                         disableTypography
-                        primary={<Typography component="span">{choice.subLabel || choice.primaryLabel}</Typography>}
+                        primary={<Typography component="span">{choiceDisplayLabel(choice)}</Typography>}
                       />
                     </ListItemButton>
                   ))}
@@ -1261,6 +1338,7 @@ export default function BankDetailsPage() {
       categoryCode: selectedCategoryRequestParams.categoryCode,
       categoryPrimaryLabel: selectedCategoryRequestParams.categoryPrimaryLabel,
       categorySubLabel: selectedCategoryRequestParams.categorySubLabel,
+      categoryThirdLabel: selectedCategoryRequestParams.categoryThirdLabel,
       page: paginationModel.page + 1,
       pageSize: paginationModel.pageSize,
       signal: controller.signal,
@@ -1278,6 +1356,7 @@ export default function BankDetailsPage() {
           selectedCategoryRequestParams.categoryCode
             || selectedCategoryRequestParams.categoryPrimaryLabel
             || selectedCategoryRequestParams.categorySubLabel
+            || selectedCategoryRequestParams.categoryThirdLabel
             ? current
             : payload.categoryCounts
         ));
@@ -1312,6 +1391,7 @@ export default function BankDetailsPage() {
     selectedCategoryRequestParams.categoryCode,
     selectedCategoryRequestParams.categoryPrimaryLabel,
     selectedCategoryRequestParams.categorySubLabel,
+    selectedCategoryRequestParams.categoryThirdLabel,
   ]);
 
   useEffect(() => {
@@ -1469,19 +1549,29 @@ export default function BankDetailsPage() {
     setSearchInput(value);
   };
 
-  const handleConfirmCategory = (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => {
+  const handleConfirmCategory = (row: BankDetailTransaction, choice: ConfirmationChoice) => {
     setCategoryMutationId(row.id);
     setError(null);
-    confirmBankDetailCategory(row.id, categoryCode)
+    confirmBankDetailCategory(row.id, choice.categoryCode, choice.thirdLabel)
       .then(() => setRefreshToken((current) => current + 1))
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签确认失败。"))
       .finally(() => setCategoryMutationId(null));
   };
 
-  const handleAssignCategory = (row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode) => {
+  const handleAssignCategory = (row: BankDetailTransaction, choice: ConfirmationChoice) => {
     setCategoryMutationId(row.id);
     setError(null);
-    assignBankDetailCategory(row.id, categoryCode)
+    const structuredSelection = choice.thirdLabel || choice.turnoverActionType
+      ? {
+        categoryPrimaryLabel: choice.primaryLabel,
+        categorySubLabel: choice.subLabel,
+        categoryThirdLabel: choice.thirdLabel,
+        categoryLabelPath: choice.labelPath,
+        turnoverActionType: choice.turnoverActionType,
+        turnoverFamily: choice.turnoverFamily,
+      }
+      : {};
+    assignBankDetailCategory(row.id, choice.categoryCode, structuredSelection)
       .then(() => setRefreshToken((current) => current + 1))
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签设置失败。"))
       .finally(() => setCategoryMutationId(null));
@@ -1554,6 +1644,7 @@ export default function BankDetailsPage() {
       categoryCode: selectedCategoryRequestParams.categoryCode,
       categoryPrimaryLabel: selectedCategoryRequestParams.categoryPrimaryLabel,
       categorySubLabel: selectedCategoryRequestParams.categorySubLabel,
+      categoryThirdLabel: selectedCategoryRequestParams.categoryThirdLabel,
     })
       .then(({ blob, fileName }) => {
         const objectUrl = window.URL.createObjectURL(blob);

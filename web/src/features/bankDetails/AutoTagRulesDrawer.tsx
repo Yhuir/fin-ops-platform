@@ -89,6 +89,68 @@ const GROUP_COLOR_CLASSES = [
   "bank-auto-tag-group-violet",
   "bank-auto-tag-group-rose",
 ];
+const EXTERNAL_TURNOVER_ROLE = "external_turnover";
+const EXTERNAL_TURNOVER_PRIMARY_LABELS = new Set(["外部往来款付款", "外部往来款收款", "往来款付款", "往来款收款"]);
+const FALLBACK_TURNOVER_THIRD_LABEL_OPTIONS = [
+  { value: "个人往来", label: "个人往来" },
+  { value: "公司往来", label: "公司往来" },
+  { value: "银行往来", label: "银行往来" },
+  { value: "业务往来", label: "业务往来" },
+];
+const FALLBACK_TURNOVER_ACTION_TYPE_OPTIONS = [
+  { value: "pending_collection", label: "待收款" },
+  { value: "collected", label: "已收款" },
+  { value: "pending_repayment", label: "待还款" },
+  { value: "repaid", label: "已还款" },
+];
+
+function isExternalTurnoverPrimaryLabel(value: string | null | undefined) {
+  return EXTERNAL_TURNOVER_PRIMARY_LABELS.has(String(value ?? "").trim());
+}
+
+function isExternalTurnoverRule(rule: Pick<DraftRule, "outputPrimaryLabel" | "outputThirdLabel" | "turnoverRole" | "turnoverActionType">) {
+  return (
+    isExternalTurnoverPrimaryLabel(rule.outputPrimaryLabel)
+    || rule.turnoverRole === EXTERNAL_TURNOVER_ROLE
+    || Boolean(rule.outputThirdLabel?.trim())
+    || Boolean(rule.turnoverActionType?.trim())
+  );
+}
+
+function inferTurnoverActionType(rule: Pick<DraftRule, "outputPrimaryLabel" | "outputSubLabel" | "direction">) {
+  const primary = rule.outputPrimaryLabel.trim();
+  const sub = rule.outputSubLabel.trim();
+  if (primary === "外部往来款付款" || primary === "往来款付款") {
+    return /归还|还借款|还暂借款|偿还|还款/.test(sub) ? "repaid" : "pending_collection";
+  }
+  if (primary === "外部往来款收款" || primary === "往来款收款") {
+    return /收回|退|退款|返还/.test(sub) ? "collected" : "pending_repayment";
+  }
+  if (rule.direction === "expense") {
+    return "pending_collection";
+  }
+  if (rule.direction === "income") {
+    return "pending_repayment";
+  }
+  return "";
+}
+
+function normalizeExternalFields(rule: DraftRule): DraftRule {
+  if (!isExternalTurnoverPrimaryLabel(rule.outputPrimaryLabel)) {
+    return {
+      ...rule,
+      outputThirdLabel: "",
+      turnoverRole: "",
+      turnoverActionType: "",
+      turnoverFamily: "",
+    };
+  }
+  return {
+    ...rule,
+    turnoverRole: EXTERNAL_TURNOVER_ROLE,
+    turnoverActionType: rule.turnoverActionType || inferTurnoverActionType(rule),
+  };
+}
 
 function cloneRule(rule: BankAutoTagEditableRule, index: number): DraftRule {
   const sortOrder = typeof rule.sortOrder === "number" ? rule.sortOrder : index + 1;
@@ -128,8 +190,11 @@ function valuesToLines(values: string[]) {
 }
 
 function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
+  const externalRule = isExternalTurnoverRule(rule);
+  const turnoverActionType = externalRule ? rule.turnoverActionType || inferTurnoverActionType(rule) : "";
   const outputPrimaryLabel = rule.outputPrimaryLabel.trim();
   const outputSubLabel = rule.outputSubLabel.trim();
+  const outputThirdLabel = externalRule ? String(rule.outputThirdLabel ?? "").trim() : "";
   const label = outputSubLabel || outputPrimaryLabel;
   return {
     ...(rule.code ? { code: rule.code } : {}),
@@ -138,6 +203,8 @@ function serializeRule(rule: DraftRule): SaveBankAutoTagRule {
     ...(typeof rule.sortOrder === "number" ? { sortOrder: rule.sortOrder } : {}),
     outputPrimaryLabel,
     outputSubLabel,
+    ...(outputThirdLabel ? { outputThirdLabel } : {}),
+    ...(turnoverActionType ? { turnoverActionType } : {}),
     direction: rule.direction,
     accountScope: { type: "any", values: [] },
     rules: {
@@ -178,11 +245,15 @@ function validateDraft(activeRules: DraftRule[]) {
     if (!Number.isInteger(rule.priority) || Number(rule.priority) < 2) {
       return `${outputPrimaryLabel} 的普通规则优先级必须是大于等于 2 的整数。`;
     }
-    const labelPathKey = `${outputPrimaryLabel}\u0000${outputSubLabel}`;
+    const externalRule = isExternalTurnoverRule(rule);
+    const labelPathKey = `${outputPrimaryLabel}\u0000${outputSubLabel}\u0000${externalRule ? rule.outputThirdLabel?.trim() ?? "" : ""}`;
     if (seenLabelPaths.has(labelPathKey)) {
-      return `${outputSubLabel ? `${outputPrimaryLabel} / ${outputSubLabel}` : outputPrimaryLabel} 的主标签名称和子标签名称组合不能重复。`;
+      return `${ruleDisplayLabel(rule)} 的标签组合不能重复。`;
     }
     seenLabelPaths.set(labelPathKey, index);
+    if (externalRule && !(rule.turnoverActionType || inferTurnoverActionType(rule))) {
+      return `${ruleDisplayLabel(rule)} 必须选择台账动作类型。`;
+    }
     if (rule.rules.matchFields.length === 0) {
       return `${outputPrimaryLabel} 至少选择一个匹配字段。`;
     }
@@ -193,11 +264,13 @@ function validateDraft(activeRules: DraftRule[]) {
   return "";
 }
 
-function ruleDisplayLabel(rule: Pick<DraftRule, "label" | "outputPrimaryLabel" | "outputSubLabel">) {
+function ruleDisplayLabel(rule: Pick<DraftRule, "label" | "outputPrimaryLabel" | "outputSubLabel" | "outputThirdLabel">) {
   const primary = rule.outputPrimaryLabel.trim();
   const sub = rule.outputSubLabel.trim();
-  if (primary && sub) {
-    return `${primary} / ${sub}`;
+  const third = rule.outputThirdLabel?.trim() ?? "";
+  const path = [primary, sub, third].filter(Boolean);
+  if (path.length > 0) {
+    return path.join(" / ");
   }
   return primary || rule.label.trim() || "未命名标签";
 }
@@ -251,6 +324,8 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
   const [version, setVersion] = useState(1);
   const [systemRule, setSystemRule] = useState<BankAutoTagSystemRule | null>(null);
   const [fieldOptions, setFieldOptions] = useState<BankAutoTagRulesResponse["fieldOptions"]>([]);
+  const [turnoverThirdLabelOptions, setTurnoverThirdLabelOptions] = useState<BankAutoTagRulesResponse["turnoverThirdLabelOptions"]>([]);
+  const [turnoverActionTypeOptions, setTurnoverActionTypeOptions] = useState<BankAutoTagRulesResponse["turnoverActionTypeOptions"]>([]);
   const [canSave, setCanSave] = useState(true);
   const [activeRules, setActiveRules] = useState<DraftRule[]>([]);
   const [archivedRules, setArchivedRules] = useState<DraftRule[]>([]);
@@ -279,6 +354,8 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         setVersion(payload.version);
         setSystemRule(payload.systemRule);
         setFieldOptions(payload.fieldOptions);
+        setTurnoverThirdLabelOptions(payload.turnoverThirdLabelOptions);
+        setTurnoverActionTypeOptions(payload.turnoverActionTypeOptions);
         setCanSave(payload.permissions.canSave);
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
@@ -310,6 +387,8 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
   const readonly = !canSave || saving || reapplying || loading;
   const reapplyDisabled = readonly || dirty;
   const visibleFieldOptions = fieldOptions.filter((option) => !HIDDEN_MATCH_FIELDS.has(option.value));
+  const visibleTurnoverThirdLabelOptions = turnoverThirdLabelOptions.length ? turnoverThirdLabelOptions : FALLBACK_TURNOVER_THIRD_LABEL_OPTIONS;
+  const visibleTurnoverActionTypeOptions = turnoverActionTypeOptions.length ? turnoverActionTypeOptions : FALLBACK_TURNOVER_ACTION_TYPE_OPTIONS;
   const activeRuleGroups = useMemo(() => groupRules(activeRules), [activeRules]);
 
   const requestClose = () => {
@@ -326,7 +405,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
   const updateGroupPrimaryLabel = (group: RuleGroup, value: string) => {
     const localIds = new Set(group.rules.map((rule) => rule.localId));
     setActiveRules((current) => current.map((rule) => (
-      localIds.has(rule.localId) ? { ...rule, outputPrimaryLabel: value } : rule
+      localIds.has(rule.localId) ? normalizeExternalFields({ ...rule, outputPrimaryLabel: value }) : rule
     )));
   };
 
@@ -405,6 +484,8 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         setVersion(payload.version);
         setSystemRule(payload.systemRule);
         setFieldOptions(payload.fieldOptions);
+        setTurnoverThirdLabelOptions(payload.turnoverThirdLabelOptions);
+        setTurnoverActionTypeOptions(payload.turnoverActionTypeOptions);
         setCanSave(payload.permissions.canSave);
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
@@ -433,6 +514,8 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
         setVersion(payload.version);
         setSystemRule(payload.systemRule);
         setFieldOptions(payload.fieldOptions);
+        setTurnoverThirdLabelOptions(payload.turnoverThirdLabelOptions);
+        setTurnoverActionTypeOptions(payload.turnoverActionTypeOptions);
         setCanSave(payload.permissions.canSave);
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
@@ -599,36 +682,82 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
                         </TableCell>
                       ) : null}
                       <TableCell>
-                        <TextField
-                          variant="standard"
-                          size="small"
-                          placeholder="子标签名称"
-                          value={rule.outputSubLabel}
-                          disabled={readonly}
-                          inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 子标签` }}
-                          onChange={(event) => updateActiveRule(rule.localId, (current) => ({
-                            ...current,
-                            outputSubLabel: event.target.value,
-                          }))}
-                        />
+                        <Stack spacing={0.75}>
+                          <TextField
+                            variant="standard"
+                            size="small"
+                            placeholder="子标签名称"
+                            value={rule.outputSubLabel}
+                            disabled={readonly}
+                            inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 子标签` }}
+                            onChange={(event) => updateActiveRule(rule.localId, (current) => normalizeExternalFields({
+                              ...current,
+                              outputSubLabel: event.target.value,
+                            }))}
+                          />
+                          {isExternalTurnoverRule(rule) ? (
+                            <Select
+                              variant="standard"
+                              size="small"
+                              displayEmpty
+                              value={rule.outputThirdLabel ?? ""}
+                              disabled={readonly}
+                              aria-label={`${ruleDisplayLabel(rule)} 子子标签`}
+                              inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 子子标签` }}
+                              onChange={(event) => updateActiveRule(rule.localId, (current) => ({
+                                ...current,
+                                outputThirdLabel: String(event.target.value || ""),
+                                turnoverRole: EXTERNAL_TURNOVER_ROLE,
+                              }))}
+                            >
+                              <MenuItem value="">
+                                <em>匹配后待确认</em>
+                              </MenuItem>
+                              {visibleTurnoverThirdLabelOptions.map((option) => (
+                                <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                              ))}
+                            </Select>
+                          ) : null}
+                        </Stack>
                       </TableCell>
                       <TableCell>
-                        <Select
-                          variant="standard"
-                          size="small"
-                          value={rule.direction}
-                          disabled={readonly}
-                          aria-label={`${ruleDisplayLabel(rule)} 流水类型`}
-                          inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 流水类型` }}
-                          onChange={(event) => updateActiveRule(rule.localId, (current) => ({
-                            ...current,
-                            direction: event.target.value as BankAutoTagDirection,
-                          }))}
-                        >
-                          {DIRECTION_OPTIONS.map((option) => (
-                            <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
-                          ))}
-                        </Select>
+                        <Stack spacing={0.75}>
+                          <Select
+                            variant="standard"
+                            size="small"
+                            value={rule.direction}
+                            disabled={readonly}
+                            aria-label={`${ruleDisplayLabel(rule)} 流水类型`}
+                            inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 流水类型` }}
+                            onChange={(event) => updateActiveRule(rule.localId, (current) => normalizeExternalFields({
+                              ...current,
+                              direction: event.target.value as BankAutoTagDirection,
+                            }))}
+                          >
+                            {DIRECTION_OPTIONS.map((option) => (
+                              <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                            ))}
+                          </Select>
+                          {isExternalTurnoverRule(rule) ? (
+                            <Select
+                              variant="standard"
+                              size="small"
+                              value={rule.turnoverActionType || inferTurnoverActionType(rule)}
+                              disabled={readonly}
+                              aria-label={`${ruleDisplayLabel(rule)} 台账动作类型`}
+                              inputProps={{ "aria-label": `${ruleDisplayLabel(rule)} 台账动作类型` }}
+                              onChange={(event) => updateActiveRule(rule.localId, (current) => ({
+                                ...current,
+                                turnoverRole: EXTERNAL_TURNOVER_ROLE,
+                                turnoverActionType: String(event.target.value || ""),
+                              }))}
+                            >
+                              {visibleTurnoverActionTypeOptions.map((option) => (
+                                <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                              ))}
+                            </Select>
+                          ) : null}
+                        </Stack>
                       </TableCell>
                       <TableCell>
                         <FormControl size="small" fullWidth disabled={readonly} variant="standard">
