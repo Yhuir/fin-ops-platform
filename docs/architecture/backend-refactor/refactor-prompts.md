@@ -10285,7 +10285,7 @@ Post-Flight:
 
 ### 执行结果
 
-状态：`implemented`，等待用户确认后才可标记 `verified`。
+状态：`verified`，用户已确认 PF-P036-MG 可落锁。
 
 PF-P035 已按 TDD 执行：
 
@@ -10772,11 +10772,12 @@ PF-P036-MG 已执行：
 
 未执行：
 
-- 未执行 `git push origin main`。
 - 未执行 Traffic Gate。
 - 未部署或访问生产。
 
 后续：
 
-- 用户确认 PF-P036-MG `verified` 后，才允许执行 `git push origin main`。
+- 用户已确认 PF-P036-MG `verified`，本轮允许执行 `git push origin main`。
 - push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
+- 建议下一条 prompt：`PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning`。
+- PF-P037 应只做 durable idempotency schema/repository 规划和风险拆解，不直接迁移更多 Workbench 写 API。

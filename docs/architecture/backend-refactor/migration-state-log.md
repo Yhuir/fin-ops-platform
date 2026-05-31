@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已执行并合入本地 `main`，等待用户确认是否可标记 `verified` |
-| 当前 active prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P036 - Workbench Cancel Link UoW Integration Slice` |
+| 当前阶段 | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` 已由用户确认 `verified`，本轮执行 `git push origin main` |
+| 当前 active prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P036-MG 已在功能分支和本地 `main` 双重复验通过；merge commit `7e311921`；未部署、未 Traffic Gate、未 push |
-| 下一条允许任务 | 等待用户确认 PF-P036-MG 是否可标记 `verified`；确认后才允许执行 `git push origin main` |
+| 最近验证 | PF-P036-MG 已在功能分支和本地 `main` 双重复验通过；merge commit `7e311921`；post-flight commit `ba157bc3`；未部署、未 Traffic Gate |
+| 下一条允许任务 | `git push origin main` 完成后，从最新 `main` 新建分支，生成并审查 `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning` |
 
 ## Prompt 执行日志
 
@@ -3832,7 +3832,7 @@ PF-P034-MG 已完成本地 merge gate、合入本地 `main`，已由用户确认
 
 ### PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -3867,7 +3867,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 执行结果
 
-- 状态：`implemented`，等待用户确认后才可标记 `verified`。
+- 状态：`verified`，用户已确认 PF-P036-MG 可落锁。
 - 功能分支验证：
   - `git status --short --branch`：Pass，位于 `codex/workbench-confirm-link-uow`。
   - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
@@ -3897,8 +3897,10 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，8 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_stale_write_contract -v`：Pass，3 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- 用户确认：
+  - 用户已确认 PF-P036-MG `verified`。
+  - 本轮允许执行 `git push origin main`。
 - 未执行：
-  - 未执行 `git push origin main`。
   - 未执行 Traffic Gate。
   - 未部署，未访问生产。
 - 剩余风险：
@@ -3906,9 +3908,9 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
   - actor/tenant 仍未接真实 auth context。
   - PF-P036-MG 只覆盖 pair relation `confirm-link` / `cancel-link` UoW，不代表 Workbench 写路径全部完成。
 - 下一条 Prompt 上下文：
-  - 等待用户确认 PF-P036-MG verified。
-  - 用户确认后才允许执行 `git push origin main`。
-  - push 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
+  - `git push origin main` 完成后，下一条 prompt 必须从最新 `main` 新建分支生成。
+  - 建议下一条 prompt 是 `PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning`。
+  - PF-P037 应只做 durable idempotency schema/repository 规划和风险拆解，不直接迁移更多 Workbench 写 API。
 
 ## 维护规则
 
