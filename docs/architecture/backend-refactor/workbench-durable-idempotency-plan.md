@@ -664,3 +664,28 @@ PF-P039 已完成 repository integration，但没有切换默认生产行为，�
 `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate`
 
 PF-P039-MG 应统一覆盖 PF-P038 + PF-P039 的完整 diff，执行范围检查、upstream sync、合入 `main` 和 `main` 复验。它不应执行 Traffic Gate，不应部署，不应默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+
+## 15. PF-P040 Planned Boundary
+
+PF-P039-MG 已由用户确认 `verified` 并已 push 到 `origin/main`。下一条 planned prompt：
+
+`PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests`
+
+PF-P040 的目标不是打开 durable idempotency，而是建立启用前门禁：
+
+- 新增 rollout readiness 文档，明确 feature flag 默认关闭、启用前 checklist、rollback plan 和 blocker。
+- 增加默认绿色 integration-style contract tests，继续使用 fake executor / contract-style 测试，不依赖真实 PostgreSQL 作为默认 CI。
+- 明确当前未关闭风险：
+  - 真实 actor/tenant 仍未接 auth context。
+  - expired `reserved` takeover 尚未实现。
+  - failed policy、cleanup/retention、生产观测指标尚未完成。
+  - 真实 PostgreSQL row lock / concurrent reserve semantics 尚未验证。
+- 对尚未实现的目标语义，必须用 `unittest.expectedFailure` 或文档 blocker 表达，不得让默认 CI 失败。
+
+PF-P040 不应：
+
+- 启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 修改部署、环境变量、网关、worker routing、auth/session 或前端。
+- 迁移更多 Workbench 写 API。
+- 修改 `0043_workbench_idempotency_records.sql`。
+- 执行 Merge Gate、Traffic Gate、部署、生产访问或 push。

@@ -11587,3 +11587,173 @@ Main 复验：
 - 已执行 `git push origin main`，远端已包含 PF-P039-MG 合入内容。
 - 本次 push 只推送 Git 远端主干；未部署、未访问生产、未执行 Traffic Gate，且未默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
 - 下一条 prompt 必须从最新 `main` 新建分支生成。
+
+## PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests。
+
+Role: 你是一位严格的 Python/PostgreSQL rollout readiness 工程师，负责在不启用 feature flag 的前提下，为 Workbench durable idempotency 建立启用前门禁、integration-style contract tests 和回滚清单。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/workbench-durable-idempotency-rollout-readiness`。
+- PF-P039-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。
+- PF-P038/PF-P039 已将以下能力合入 `main`：
+  - `app.workbench_idempotency_records` migration。
+  - `PostgresWorkbenchIdempotencyRepository`。
+  - `WorkbenchWriteUnitOfWork.run()` 的 transaction-bound idempotency seam。
+  - `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` disabled-by-default wiring。
+- 当前 durable idempotency 仍未默认启用，生产默认路径仍是 `InMemoryWorkbenchIdempotencyRepository`。
+- 当前未关闭风险：
+  - 真实 actor/tenant 仍未接 auth context，可能落到默认 `system/default`。
+  - `reserved` 记录的 expired takeover、cleanup、failed policy 和生产观测指标仍未实现。
+  - 尚未执行真实 PostgreSQL integration/concurrency test。
+  - 当前 repository 的 fake tests 证明了 method contract，但不等于可以直接打开 feature flag。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+   - `docs/architecture/backend-refactor/workbench-uow-integration-plan.md`
+   - `docs/architecture/backend-refactor/workbench-write-uow-boundary-design.md`
+   - `backend/src/fin_ops_platform/postgres/migrations/0043_workbench_idempotency_records.sql`
+   - `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+   - `backend/src/fin_ops_platform/services/workbench_uow.py`
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `tests/test_workbench_idempotency_contract.py`
+   - `tests/test_workbench_uow_contract.py`
+   - `tests/test_workbench_postgres_idempotency_repository.py`
+   - `tests/test_platform_runtime_boundary_guards.py`
+2. 必须用 CodeGraph 或源码确认：
+   - `Application._workbench_confirm_link_unit_of_work()` 和 `_workbench_cancel_link_unit_of_work()` 的 feature flag wiring。
+   - `WorkbenchWriteUnitOfWork.run()` 的 replay / reserve / handler / dirty-outbox / commit sequence。
+   - `PostgresWorkbenchIdempotencyRepository.reserve()` 是否存在 row locking、expired takeover、in-progress duplicate handling 的已实现能力或缺口。
+3. 必须确认：
+   - 当前 active prompt 是 PF-P040 planned。
+   - 当前分支是 `codex/workbench-durable-idempotency-rollout-readiness`。
+   - 当前分支来自最新 `main`。
+   - 工作区没有未提交变更或未跟踪临时文件。
+
+Goal:
+建立 durable idempotency 启用前的生产就绪门禁。PF-P040 的目标不是打开功能，而是明确“什么时候可以打开”、“打开前必须通过哪些测试/检查”、“发现问题如何回滚”。
+
+Allowed Scope:
+- 允许新增：
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+  - `tests/test_workbench_durable_idempotency_rollout.py` 或等价默认绿色 contract test 文件。
+- 允许修改：
+  - `tests/test_workbench_postgres_idempotency_repository.py`
+  - `tests/test_workbench_uow_contract.py`
+  - `tests/test_platform_runtime_boundary_guards.py`，仅限补充 rollout/feature-flag/default-off guard。
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
+- 如必须新增极小的非行为 helper 来提高测试可读性，必须先证明它不改变默认生产路径；否则停止并记录 blocker。
+
+Forbidden Scope:
+- 不启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不修改部署、环境变量、网关、worker routing、auth/session 或前端。
+- 不迁移更多 Workbench 写 API。
+- 不修改 `0043_workbench_idempotency_records.sql`；如果发现 schema 不足以支持 rollout readiness，停止并记录 blocker。
+- 不访问生产数据库，不依赖本地真实 PostgreSQL 作为默认 CI。
+- 不执行真实 Traffic Gate、部署、生产访问、merge、push。
+- 不新增 Go 后端，不恢复 `backend-go`。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Discovery / Audit Work:
+1. Rollout readiness matrix：
+   - default-off safety。
+   - opt-in feature flag path。
+   - migration apply readiness。
+   - repository transaction-bound behavior。
+   - committed replay behavior。
+   - same-key/different-fingerprint conflict behavior。
+   - reserved/in-progress duplicate behavior。
+   - expired reserved takeover policy。
+   - failed policy。
+   - cleanup/retention policy。
+   - actor/tenant auth context readiness。
+   - observability/metrics/logging readiness。
+   - rollback plan。
+2. 明确每一项状态：
+   - `ready`
+   - `blocked`
+   - `documented-risk`
+   - `future-test-needed`
+3. 明确哪些 blocker 必须在 feature flag 打开前解决，哪些可以作为 disabled-by-default 后续任务。
+
+Required Test Work:
+1. 新增默认绿色 tests，验证：
+   - 未设置 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 时，server 仍使用 `InMemoryWorkbenchIdempotencyRepository`。
+   - 显式设置 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY=1` 才会构造 `PostgresWorkbenchIdempotencyRepository`。
+   - durable repository reserve/commit 不打开自己的 transaction。
+   - committed replay 不执行 handler / dirty outbox。
+   - same key different fingerprint 走稳定 409 contract。
+   - payload sanitization 对 authorization/cookie/token/password/secret 类字段生效。
+2. 对当前尚未实现的目标能力，不得写默认失败测试；必须二选一：
+   - 用 `unittest.expectedFailure` 标记目标契约测试；或
+   - 在 rollout readiness 文档中记录为 blocker，并推迟到后续 prompt。
+3. 建议的 target/future contract：
+   - expired reserved takeover。
+   - in-progress duplicate same-key same-fingerprint handling。
+   -真实 PostgreSQL row lock / concurrent reserve semantics。
+   - actor/tenant 不再默认 `system/default` 的 auth context propagation。
+4. 默认 CI 必须绿色。
+
+Required Documentation:
+- 新增或更新 rollout readiness 文档，必须包含：
+  - feature flag 当前状态：默认关闭。
+  - 打开前 checklist。
+  - 回滚方式：关闭 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+  - migration apply / rollback 注意事项。
+  - actor/tenant 风险。
+  - expired reserved / cleanup / failed policy 风险。
+  - 必须补齐的观测指标。
+  - 下一步建议 prompt。
+- 更新 `workbench-durable-idempotency-plan.md`，追加 PF-P040 execution result / planned boundary。
+- 更新状态机和 prompt 库。
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`
+- 如果新增 rollout test：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`
+- `rg -n "FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY|PostgresWorkbenchIdempotencyRepository|rollout readiness|expired reserved|actor|tenant|rollback" docs/architecture/backend-refactor backend/src/fin_ops_platform tests`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P040 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录变更文件、验证结果、新增 tests、readiness matrix 状态和 blocker。
+  - 记录是否仍保持 feature flag 默认关闭。
+  - 记录下一条建议 prompt。
+- 更新 `refactor-prompts.md` 的 PF-P040 执行结果。
+- 不执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
+
+Stop Conditions:
+- 如果需要启用 feature flag 才能让测试通过，停止。
+- 如果需要修改 SQL migration 才能表达 readiness，停止并记录 schema blocker。
+- 如果 default CI 需要真实 PostgreSQL，改用 fake/contract tests 或停止。
+- 如果发现 durable idempotency 默认路径已经开启，停止并报告。
+- 如果需要迁移更多 Workbench 写 API，停止并生成单独 prompt。
+```
+
+### 审查结论
+
+- PF-P040 的边界正确：它不启用 durable idempotency，不部署，不迁移更多 API，只建立启用前门禁。
+- PF-P040 应优先把当前真实缺口机械化：actor/tenant auth context、expired reserved takeover、failed/cleanup policy、真实 PostgreSQL 并发语义和观测指标。
+- PF-P040 可以增加默认绿色 contract tests；对尚未实现的目标语义必须使用 `expectedFailure` 或文档 blocker，不能破坏默认 CI。
+- PF-P040 完成后不应直接 push 或执行 Traffic Gate；如果有代码/测试变更，应先经用户确认 `verified`，再生成对应 MG。

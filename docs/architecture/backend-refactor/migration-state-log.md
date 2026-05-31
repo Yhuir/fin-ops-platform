@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` 已由用户确认 `verified`，并已 push 到 `origin/main` |
-| 当前 active prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` (`verified`) |
+| 当前阶段 | 已从最新 `main` 新建分支，并生成/审查 `PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests` |
+| 当前 active prompt | `PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests` (`planned`) |
 | 最近 verified prompt | `PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
 | 最近验证 | PF-P039-MG 已在功能分支和本地 `main` 上完成验证；merge commit `8c9aa130`；用户已确认 `verified`；已 push `origin/main`；未执行 Traffic Gate、未部署 |
-| 下一条允许任务 | 从最新 `main` 新建分支，并生成/审查下一条 prompt；不得直接在 `main` 继续开发 |
+| 下一条允许任务 | 等待用户确认后执行 `PF-P040`；PF-P040 只允许做 durable idempotency rollout readiness、integration contract tests 和文档回写，不得启用 feature flag、不得部署、不得迁移更多 Workbench 写 API |
 
 ## Prompt 执行日志
 
@@ -4233,6 +4233,30 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - 下一条 prompt 必须从最新 `main` 新建分支生成。
 - 下一条建议 prompt 应继续围绕 durable idempotency 的 rollout readiness 或 Workbench 剩余写 API UoW 接入。
 - 不得在当前 `main` 或旧功能分支上直接继续开发。
+
+### PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests
+
+状态：`planned`
+
+#### 范围
+
+- 从最新 `main` 创建分支：`codex/workbench-durable-idempotency-rollout-readiness`。
+- 只处理 Workbench durable idempotency 启用前的 rollout readiness、integration-style contract tests 和文档化门禁。
+- 允许新增一份 rollout readiness 文档。
+- 允许新增或补充默认绿色的 fake/integration-style contract tests。
+- 不默认启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 不部署、不执行 Traffic Gate、不访问生产。
+- 不迁移更多 Workbench 写 API。
+
+#### 审查结论
+
+- PF-P040 是 PF-P039-MG 后合理的下一步：durable repository 和 UoW seam 已合入主干，但 feature flag 仍关闭。继续迁移更多写 API 前，应先明确启用前的门禁、回滚方式、真实 PostgreSQL integration 缺口、actor/tenant auth context 缺口和 reserved/failed/cleanup 策略。
+- PF-P040 不应直接打开 feature flag，也不应把 merge 等同于上线。
+- PF-P040 产物应让后续“是否可以在测试环境/生产环境启用 durable idempotency”有机械检查依据，而不是凭经验判断。
+
+#### 下一步
+
+- 等待用户确认后执行 PF-P040。
 
 ## 维护规则
 
