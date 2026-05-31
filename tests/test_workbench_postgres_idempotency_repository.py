@@ -217,6 +217,42 @@ class WorkbenchPostgresIdempotencyRepositoryTests(unittest.TestCase):
         self.assertEqual(_json_obj(params[1]), {"workbench:2026-05": 7})
         self.assertEqual(_json_obj(params[2]), ["event-1"])
 
+    def test_transaction_bound_mark_failed_updates_failed_record_with_sanitized_response(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+            PostgresWorkbenchIdempotencyRepository,
+        )
+
+        connection = _RecordingSqlExecutor()
+        transaction = _RecordingSqlExecutor(
+            rows=[
+                _record_row(
+                    status="failed",
+                    response_payload={"error": "previous_failure"},
+                    completed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                )
+            ]
+        )
+        repository = PostgresWorkbenchIdempotencyRepository(connection).for_transaction(transaction)
+
+        record = repository.mark_failed(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:idem-1",
+            request_fingerprint="fp:confirm:idem-1",
+            response_payload={"error": "boom", "authorization": "Bearer SECRET"},
+        )
+
+        self.assertFalse(connection.transaction_opened)
+        self.assertEqual(len(transaction.execute_calls), 1)
+        sql, params = transaction.execute_calls[0]
+        self.assertIn("update app.workbench_idempotency_records", sql)
+        self.assertIn("status = 'failed'", sql)
+        stored_response_payload = _json_obj(params[0])
+        self.assertNotIn("SECRET", repr(stored_response_payload))
+        self.assertNotIn("authorization", stored_response_payload)
+        self.assertEqual(record.status, "failed")
+
     def test_server_uses_in_memory_idempotency_repository_by_default(self) -> None:
         app = object.__new__(Application)
         app._state_store = _PostgresStateStore(_RecordingSqlExecutor())

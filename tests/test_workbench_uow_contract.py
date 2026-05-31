@@ -302,6 +302,31 @@ class _ExpiredReservedIdempotencyStore:
         return _ExpiredReservedTransactionBoundIdempotencyStore(self, transaction)
 
 
+class _ExistingFailedIdempotencyStore:
+    def __init__(self, *, request_fingerprint: str = "fp:confirm:failed") -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        record_class = getattr(module, "WorkbenchIdempotencyRecord")
+        self.record = record_class(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:failed",
+            request_fingerprint=request_fingerprint,
+            status="failed",
+            response_payload={"error": "previous_failure"},
+        )
+        self.bound_transactions: list[object] = []
+        self.reserve_calls: list[dict[str, object]] = []
+        self.commit_calls: list[dict[str, object]] = []
+
+    def get_committed_or_reserved(self, *args: object, **kwargs: object) -> object | None:
+        return self.record
+
+    def for_transaction(self, transaction: object) -> object:
+        self.bound_transactions.append(transaction)
+        raise AssertionError("failed idempotency records must not enter a transaction")
+
+
 class WorkbenchUoWContractTests(unittest.TestCase):
     def _transaction_bound_writer(self) -> Callable[..., object]:
         method = getattr(RuntimeQueueRepository, "enqueue_read_model_refresh_in_transaction", None)
@@ -805,6 +830,75 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(writer.calls, [])
         self.assertEqual(connection.commits, 0)
         self.assertEqual(connection.rollbacks, 0)
+
+    def test_existing_failed_same_fingerprint_returns_failed_without_handler_transaction_or_outbox(self) -> None:
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        idempotency = _ExistingFailedIdempotencyStore()
+        uow = self._new_uow(connection=connection, read_model_writer=writer, idempotency_store=idempotency)  # type: ignore[arg-type]
+        handler_calls = 0
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal handler_calls
+            handler_calls += 1
+            return {"case_id": "SHOULD-NOT-RUN", "affected_scope_keys": ["2026-05"]}
+
+        with self.assertRaisesRegex(Exception, "failed|idempotency") as raised:
+            self._run_uow(
+                uow,
+                _Command(
+                    action_name="confirm_link",
+                    scope_keys=["2026-05"],
+                    idempotency_key="confirm:failed",
+                    request_fingerprint="fp:confirm:failed",
+                    actor_id="finance-1",
+                    payload={"case_id": "CASE-FAILED", "row_ids": ["oa-1", "bank-1"]},
+                ),
+                handler,
+            )
+
+        payload = raised.exception.to_response_payload()
+        self.assertEqual(payload["error"], "idempotency_key_failed")
+        self.assertFalse(payload["retryable"])
+        self.assertEqual(handler_calls, 0)
+        self.assertEqual(idempotency.bound_transactions, [])
+        self.assertEqual(idempotency.reserve_calls, [])
+        self.assertEqual(idempotency.commit_calls, [])
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(connection.opened, 0)
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 0)
+
+    def test_existing_failed_different_fingerprint_still_conflicts_without_transaction(self) -> None:
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        idempotency = _ExistingFailedIdempotencyStore(request_fingerprint="fp:confirm:old")
+        uow = self._new_uow(connection=connection, read_model_writer=writer, idempotency_store=idempotency)  # type: ignore[arg-type]
+        handler_calls = 0
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal handler_calls
+            handler_calls += 1
+            return {"case_id": "SHOULD-NOT-RUN", "affected_scope_keys": ["2026-05"]}
+
+        with self.assertRaisesRegex(Exception, "idempotency|fingerprint|conflict"):
+            self._run_uow(
+                uow,
+                _Command(
+                    action_name="confirm_link",
+                    scope_keys=["2026-05"],
+                    idempotency_key="confirm:failed",
+                    request_fingerprint="fp:confirm:new",
+                    actor_id="finance-1",
+                    payload={"case_id": "CASE-NEW", "row_ids": ["oa-1", "bank-1"]},
+                ),
+                handler,
+            )
+
+        self.assertEqual(handler_calls, 0)
+        self.assertEqual(idempotency.bound_transactions, [])
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(connection.opened, 0)
 
     def test_outbox_payload_contains_source_version_for_each_dirty_scope(self) -> None:
         connection = _RecordingConnection(_RecordingTransaction(dirty_source_version=9))

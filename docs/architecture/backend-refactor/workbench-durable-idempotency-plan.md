@@ -956,3 +956,36 @@ PF-P044 不应：
 - 执行 Merge Gate、Traffic Gate、部署、生产访问或 push。
 
 PF-P044 完成后仍应留在 PF-P040 起的 cumulative MG 范围内。只有用户确认相关 prompt verified 后，才允许生成覆盖 PF-P040 起完整 diff 的 cumulative Merge Gate。
+
+## 23. PF-P044 Execution Result
+
+PF-P044 已实现 deterministic failed reservation policy，但没有打开 durable idempotency feature flag，也没有迁移更多 Workbench 写 API。
+
+已完成：
+
+- 新增 `WorkbenchIdempotencyFailed` primitive：
+  - HTTP 409 语义。
+  - `error="idempotency_key_failed"`。
+  - `retryable=false`。
+  - message 明确要求调用方使用新的 idempotency key 才能重试。
+- `WorkbenchWriteUnitOfWork.run()`：
+  - same-key same-fingerprint `failed` record 不再继续进入 transaction 或执行 handler。
+  - failed path 不写 facts、dirty scope、outbox、reserve 或 commit。
+  - same-key different-fingerprint `failed` record 继续走 `idempotency_key_conflict`。
+  - committed replay、active reserved in-progress、expired reserved takeover 均保持原语义。
+- `WorkbenchWriteUnitOfWork.replay_committed()` 也会识别 failed record，支持 cancel-link 在查 active relation 前返回稳定 failed response。
+- `InMemoryWorkbenchIdempotencyRepository.mark_failed()` 对 request payload 和 response payload 执行 sanitizer，避免 token、authorization、cookie、password、secret 类字段进入失败记录。
+- `PostgresWorkbenchIdempotencyRepository.mark_failed()` 的 fake executor contract test 锁定 sanitized payload 和 no nested transaction。
+- confirm-link / cancel-link Facade 捕获 failed primitive 并返回稳定 409 response，不落入 generic persistence unavailable 分支。
+
+仍未完成：
+
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未处理 cleanup/retention。
+- 未执行真实 PostgreSQL row-lock concurrency test。
+- 未新增 durable idempotency observability 指标。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。
+
+下一步建议：
+
+如果用户认为 PF-P040 到 PF-P044 已达到可合并切片，应生成 cumulative Merge Gate，覆盖 PF-P040 起的完整 diff。若继续拆 rollout blocker，下一条应优先处理 cleanup/retention、真实 PostgreSQL concurrency 或 observability 中的一个，不应顺手迁移更多 Workbench 写 API。

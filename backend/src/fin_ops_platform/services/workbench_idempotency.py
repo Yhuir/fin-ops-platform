@@ -130,6 +130,25 @@ class WorkbenchIdempotencyInProgress(RuntimeError):
         }
 
 
+class WorkbenchIdempotencyFailed(RuntimeError):
+    status_code = 409
+
+    def __init__(self, *, idempotency_key: str, action_name: str) -> None:
+        super().__init__("same idempotency key belongs to a failed Workbench request")
+        self.idempotency_key = idempotency_key
+        self.action_name = action_name
+
+    def to_response_payload(self) -> dict[str, Any]:
+        return {
+            "success": False,
+            "error": "idempotency_key_failed",
+            "idempotency_key": self.idempotency_key,
+            "action_name": self.action_name,
+            "retryable": False,
+            "message": "The same idempotency key belongs to a failed Workbench request. Use a new idempotency key to retry.",
+        }
+
+
 @dataclass(frozen=True)
 class WorkbenchIdempotencyReservation:
     record: WorkbenchIdempotencyRecord
@@ -252,8 +271,8 @@ class InMemoryWorkbenchIdempotencyRepository:
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
             status="failed",
-            request_payload=existing.request_payload if existing is not None else {},
-            response_payload=response_payload or {},
+            request_payload=_sanitize_payload(existing.request_payload) if existing is not None else {},
+            response_payload=_sanitize_payload(response_payload or {}),
             created_at=existing.created_at if existing is not None else _utcnow(),
             completed_at=_utcnow(),
             expires_at=existing.expires_at if existing is not None else None,

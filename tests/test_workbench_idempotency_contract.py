@@ -169,6 +169,23 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertEqual(payload["action_name"], "confirm_link")
         self.assertTrue(payload["retryable"])
 
+    def test_same_key_same_fingerprint_failed_maps_to_409_non_retryable_payload(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        failed_class = getattr(module, "WorkbenchIdempotencyFailed")
+
+        failed = failed_class(
+            idempotency_key="confirm:idem-1",
+            action_name="confirm_link",
+        )
+        payload = failed.to_response_payload()
+
+        self.assertEqual(getattr(failed, "status_code", None), 409)
+        self.assertEqual(payload["success"], False)
+        self.assertEqual(payload["error"], "idempotency_key_failed")
+        self.assertEqual(payload["idempotency_key"], "confirm:idem-1")
+        self.assertEqual(payload["action_name"], "confirm_link")
+        self.assertFalse(payload["retryable"])
+
     def test_reserved_expiration_helper_is_deterministic_for_fixed_now(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_idempotency")
         record_class = getattr(module, "WorkbenchIdempotencyRecord")
@@ -360,6 +377,33 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertEqual(second.record.request_fingerprint, "fp-old")
         self.assertEqual(second.record.request_payload, {"case_id": "CASE-OLD"})
 
+    def test_in_memory_idempotency_repository_mark_failed_sanitizes_failed_payload(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        repository_class = getattr(module, "InMemoryWorkbenchIdempotencyRepository")
+        repository = repository_class()
+        repository.reserve(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:failed",
+            request_fingerprint="fp-failed",
+            request_payload={"case_id": "CASE-FAILED", "authorization": "Bearer SECRET"},
+        )
+
+        failed = repository.mark_failed(
+            tenant_id="default",
+            actor_id="finance-1",
+            action_name="confirm_link",
+            idempotency_key="confirm:failed",
+            request_fingerprint="fp-failed",
+            response_payload={"error": "boom", "token": "SECRET"},
+        )
+
+        self.assertEqual(failed.status, "failed")
+        self.assertNotIn("SECRET", json.dumps(failed.to_storage_payload(), sort_keys=True))
+        self.assertNotIn("authorization", failed.request_payload)
+        self.assertNotIn("token", failed.response_payload)
+
     def test_uow_replays_committed_same_fingerprint_without_handler_or_outbox(self) -> None:
         stored_response = {
             "status": "committed",
@@ -463,6 +507,89 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertFalse(called)
         self.assertEqual(writer.calls, [])
         self.assertEqual([operation["op"] for operation in idempotency.operations], ["get"])
+
+    def test_uow_rejects_failed_same_fingerprint_without_handler_or_outbox(self) -> None:
+        stored_response = {
+            "status": "failed",
+            "request_fingerprint": "fp-confirm-failed",
+            "response_payload": {"error": "previous_failure"},
+        }
+        idempotency = _OperationRecordingIdempotencyStore(committed={"confirm:idem-failed": stored_response})
+        writer = _RecordingDirtyOutboxWriter()
+        connection = _RecordingConnection()
+        uow = self._new_uow(
+            connection=connection,
+            idempotency_store=idempotency,
+            read_model_writer=writer,
+        )
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"case_id": "SHOULD-NOT-RUN", "affected_scope_keys": ["2026-05"]}
+
+        with self.assertRaisesRegex(Exception, "failed|idempotency") as raised:
+            self._run_uow(
+                uow,
+                _Command(
+                    action_name="confirm_link",
+                    scope_keys=["2026-05"],
+                    idempotency_key="confirm:idem-failed",
+                    request_fingerprint="fp-confirm-failed",
+                    payload={"case_id": "CASE-IDEM", "row_ids": ["oa-1", "bank-1"]},
+                ),
+                handler,
+            )
+
+        payload = raised.exception.to_response_payload()
+        self.assertEqual(payload["error"], "idempotency_key_failed")
+        self.assertFalse(payload["retryable"])
+        self.assertFalse(called)
+        self.assertEqual(writer.calls, [])
+        self.assertEqual([operation["op"] for operation in idempotency.operations], ["get"])
+        self.assertEqual(connection.opened, 0)
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 0)
+
+    def test_uow_rejects_failed_different_fingerprint_as_conflict_without_handler_or_outbox(self) -> None:
+        stored_response = {
+            "status": "failed",
+            "request_fingerprint": "fp-confirm-old",
+            "response_payload": {"error": "previous_failure"},
+        }
+        idempotency = _OperationRecordingIdempotencyStore(committed={"confirm:idem-failed-conflict": stored_response})
+        writer = _RecordingDirtyOutboxWriter()
+        connection = _RecordingConnection()
+        uow = self._new_uow(
+            connection=connection,
+            idempotency_store=idempotency,
+            read_model_writer=writer,
+        )
+        called = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal called
+            called = True
+            return {"case_id": "SHOULD-NOT-RUN", "affected_scope_keys": ["2026-05"]}
+
+        with self.assertRaisesRegex(Exception, "idempotency|fingerprint|conflict"):
+            self._run_uow(
+                uow,
+                _Command(
+                    action_name="confirm_link",
+                    scope_keys=["2026-05"],
+                    idempotency_key="confirm:idem-failed-conflict",
+                    request_fingerprint="fp-confirm-new",
+                    payload={"case_id": "CASE-IDEM", "row_ids": ["oa-2", "bank-2"]},
+                ),
+                handler,
+            )
+
+        self.assertFalse(called)
+        self.assertEqual(writer.calls, [])
+        self.assertEqual([operation["op"] for operation in idempotency.operations], ["get"])
+        self.assertEqual(connection.opened, 0)
 
     def test_uow_reserves_and_commits_idempotency_record_inside_same_transaction_after_outbox(self) -> None:
         connection = _RecordingConnection()

@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.workbench_idempotency import (
     InMemoryWorkbenchIdempotencyRepository,
+    WorkbenchIdempotencyFailed,
     WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
     WorkbenchIdempotencyRecord,
@@ -51,6 +52,7 @@ class WorkbenchWriteUnitOfWork:
             if existing is not None:
                 existing_record = _idempotency_record(existing)
                 _raise_on_fingerprint_conflict(existing_record, idempotency)
+                _raise_if_idempotency_failed(existing_record, idempotency)
                 replayed = _replay_committed_idempotency_response(existing_record)
                 if replayed is not None:
                     return replayed
@@ -65,6 +67,7 @@ class WorkbenchWriteUnitOfWork:
                 if reserved is not None:
                     reserved_record = _idempotency_record(reserved)
                     _raise_on_fingerprint_conflict(reserved_record, idempotency)
+                    _raise_if_idempotency_failed(reserved_record, idempotency)
                     replayed = _replay_committed_idempotency_response(reserved_record)
                     if replayed is not None:
                         return replayed
@@ -118,6 +121,7 @@ class WorkbenchWriteUnitOfWork:
             return None
         existing_record = _idempotency_record(existing)
         _raise_on_fingerprint_conflict(existing_record, idempotency)
+        _raise_if_idempotency_failed(existing_record, idempotency)
         _raise_if_idempotency_in_progress(existing_record, idempotency)
         return _replay_committed_idempotency_response(existing_record)
 
@@ -329,6 +333,16 @@ def _raise_if_idempotency_in_progress(existing: Any, request: _IdempotencyReques
     if is_workbench_idempotency_reserved_expired(existing):
         return
     raise WorkbenchIdempotencyInProgress(
+        idempotency_key=request.idempotency_key,
+        action_name=request.action_name,
+    )
+
+
+def _raise_if_idempotency_failed(existing: Any, request: _IdempotencyRequest) -> None:
+    status = _record_value(existing, "status")
+    if status != "failed":
+        return
+    raise WorkbenchIdempotencyFailed(
         idempotency_key=request.idempotency_key,
         action_name=request.action_name,
     )

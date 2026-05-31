@@ -78,12 +78,11 @@ class WorkbenchDurableIdempotencyRolloutTests(unittest.TestCase):
         self.assertIsNotNone(enabled_uow)
         self.assertIsInstance(enabled_uow._idempotency_store, PostgresWorkbenchIdempotencyRepository)
 
-    def test_readiness_document_keeps_unimplemented_target_contracts_as_blockers(self) -> None:
+    def test_readiness_document_keeps_remaining_target_contracts_as_blockers(self) -> None:
         self.assertTrue(DOC_PATH.exists(), "PF-P040 must document blockers before durable idempotency can be enabled.")
 
         text = DOC_PATH.read_text(encoding="utf-8")
         for blocker in (
-            "failed reservation policy",
             "real PostgreSQL row-lock concurrency",
             "actor/tenant auth context",
         ):
@@ -91,6 +90,8 @@ class WorkbenchDurableIdempotencyRolloutTests(unittest.TestCase):
                 self.assertIn(blocker, text)
         self.assertIn("| reserved/in-progress duplicate policy | ready |", text)
         self.assertIn("| expired reserved takeover | ready |", text)
+        self.assertIn("| failed reservation policy | ready |", text)
+        self.assertIn("cleanup/retention", text)
         self.assertIn("Feature flag must remain off", text)
 
 

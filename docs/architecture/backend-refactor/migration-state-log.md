@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已生成并审查 `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`，等待执行 |
-| 当前 active prompt | `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy` (`planned`) |
+| 当前阶段 | 已执行 `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy`，等待用户确认 verified |
+| 当前 active prompt | `PF-P044 - Workbench Durable Idempotency Failed Reservation Policy` (`implemented`) |
 | 最近 verified prompt | `PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy` |
 | 当前分支 | `codex/workbench-durable-idempotency-rollout-readiness` |
-| 最近验证 | 用户已确认 PF-P043 `verified`；PF-P044 只生成/审查，未执行代码实现、Merge Gate、Traffic Gate、部署或 push |
-| 下一条允许任务 | 执行 PF-P044；PF-P044 完成后仍留在 PF-P040 起 cumulative MG 范围，未经用户确认不得标记 `verified` |
+| 最近验证 | PF-P044 已实现并通过目标验证；未执行 Merge Gate、Traffic Gate、部署或 push |
+| 下一条允许任务 | 等待用户确认 PF-P044 `verified`；随后可生成 PF-P044-MG / cumulative MG，或继续拆 cleanup/retention、真实 PostgreSQL concurrency、observability 中的一个 |
 
 ## Prompt 执行日志
 
@@ -4590,7 +4590,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P044 - Workbench Durable Idempotency Failed Reservation Policy
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -4610,6 +4610,18 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - PF-P044 的保守策略应是：same-fingerprint failed record 返回稳定 failed idempotency response，默认不自动重试；如果未来需要 retry，必须用新 idempotency key 或后续显式 retry policy。
 - PF-P044 不应混入 cleanup/retention、observability 或真实 PostgreSQL 并发 integration test；这些仍是独立 gate。
 
+#### 执行结果
+
+- 新增 `WorkbenchIdempotencyFailed`，稳定返回 `idempotency_key_failed`、HTTP 409 语义和 `retryable=false`。
+- `WorkbenchWriteUnitOfWork.run()` 对 same-key same-fingerprint `failed` record 直接返回 failed primitive，不执行 handler、不打开 transaction、不写 dirty scope/outbox/reserve/commit。
+- `WorkbenchWriteUnitOfWork.run()` 对 same-key different-fingerprint `failed` record 继续走 `idempotency_key_conflict`。
+- `WorkbenchWriteUnitOfWork.replay_committed()` 也识别 failed record，使 cancel-link 可在 active relation lookup 前返回稳定 failed response。
+- `InMemoryWorkbenchIdempotencyRepository.mark_failed()` 对 request / response payload 执行 sanitizer。
+- `PostgresWorkbenchIdempotencyRepository.mark_failed()` 继续使用 fake SQL contract，锁定 sanitized response payload 和 no nested transaction。
+- confirm-link / cancel-link Facade 捕获 failed primitive 并返回稳定 409 payload，不落入 generic persistence unavailable 分支。
+- `workbench-durable-idempotency-rollout-readiness.md` 中 `failed reservation policy` 已从 `blocked` 调整为 `ready`。
+- 本轮未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，未修改 migration，未迁移更多 Workbench 写 API。
+
 #### 验收标准
 
 - `refactor-prompts.md` 已包含完整 PF-P044 prompt，且 prompt 正文以 `/goal` 开头。
@@ -4620,23 +4632,40 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 变更文件
 
+- `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- `backend/src/fin_ops_platform/services/workbench_write_facade.py`
 - `docs/architecture/backend-refactor/migration-state-log.md`
 - `docs/architecture/backend-refactor/refactor-prompts.md`
 - `docs/architecture/backend-refactor/workbench-durable-idempotency-plan.md`
 - `docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md`
+- `tests/test_workbench_durable_idempotency_rollout.py`
+- `tests/test_workbench_idempotency_contract.py`
+- `tests/test_workbench_postgres_idempotency_repository.py`
+- `tests/test_workbench_uow_contract.py`
+- `tests/test_workbench_write_characterization.py`
 
 #### 验证
 
+- RED：新增 failed primitive / UoW / Facade 测试先失败，失败点集中在缺少 `WorkbenchIdempotencyFailed`、failed record 仍执行 handler、Facade 未映射 409。
+- `git status --short --branch`：Pass，变更范围仅限 PF-P044 允许文件。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪临时文件。
 - `git diff --check`：Pass。
 - `test ! -e backend-go`：Pass。
-- `git ls-files --others --exclude-standard`：Pass，无未跟踪临时文件。
-- 文档检索：Pass，PF-P044 prompt 已写入 `refactor-prompts.md`，正文以 `/goal` 开头；状态机、计划文档和 rollout readiness 均已记录 PF-P044 planned boundary。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_idempotency_contract -v`：Pass，18 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract -v`：Pass，22 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_postgres_idempotency_repository -v`：Pass，8 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v`：Pass，43 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_durable_idempotency_rollout -v`：Pass，3 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`：Pass，4 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v`：Pass，12 tests。
+- `rg -n "idempotency_key_failed|WorkbenchIdempotencyFailed|mark_failed|failed reservation|FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY" backend/src/fin_ops_platform/services tests docs/architecture/backend-refactor`：Pass。
 
 #### 下一步
 
-- 执行 PF-P044。
-- PF-P044 执行后状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+- 等待用户确认 PF-P044 `verified`。
 - PF-P044 完成后仍不触发 Traffic Gate；如用户认为 PF-P040 到 PF-P044 已达到可合并切片，可生成 cumulative MG 覆盖完整 diff。
+- 若继续拆 rollout blocker，下一条 prompt 应优先处理 cleanup/retention、真实 PostgreSQL concurrency 或 observability 中的一个。
 
 ## 维护规则
 

@@ -12582,3 +12582,45 @@ Stop Conditions:
 - 本 prompt 采用保守策略：same-fingerprint failed 返回稳定 `idempotency_key_failed`，默认不自动 retry；未来若业务需要 retry，应通过新 idempotency key 或单独 retry policy prompt 明确设计。
 - PF-P044 不应修改 schema；当前 schema 没有 `last_error` 字段，本轮只用现有 `response_payload` 表达失败 payload。
 - PF-P044 完成后仍应留在 PF-P040 起的 cumulative MG 范围内，不单独 push，不执行 Traffic Gate。
+
+### 执行结果
+
+状态：`implemented`
+
+PF-P044 已完成 Workbench durable idempotency 的 failed reservation policy，但未执行 Merge Gate、Traffic Gate、部署、merge 或 push。
+
+已完成：
+
+- 新增 `WorkbenchIdempotencyFailed` primitive，稳定返回：
+  - `success=false`
+  - `error="idempotency_key_failed"`
+  - `idempotency_key`
+  - `action_name`
+  - `retryable=false`
+  - HTTP 409 语义
+- `WorkbenchWriteUnitOfWork.run()`：
+  - same-key same-fingerprint `failed` record 不再进入 transaction。
+  - 不执行 handler。
+  - 不写 dirty scope、outbox、reserve 或 commit。
+  - same-key different-fingerprint `failed` record 继续触发 `idempotency_key_conflict`。
+  - committed replay、active reserved in-progress、expired reserved takeover 保持原语义。
+- `WorkbenchWriteUnitOfWork.replay_committed()` 同样识别 failed record，使 cancel-link 可在 active relation lookup 前稳定返回 failed response。
+- `InMemoryWorkbenchIdempotencyRepository.mark_failed()` 对 request payload 和 response payload 做 sanitizer。
+- `PostgresWorkbenchIdempotencyRepository.mark_failed()` 通过 fake executor contract 锁定 sanitized response payload 和 no nested transaction。
+- confirm-link / cancel-link Facade 捕获 failed primitive 并返回稳定 409 response。
+- rollout readiness matrix 中 `failed reservation policy` 已更新为 `ready`。
+
+仍未完成：
+
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未修改 PostgreSQL migration。
+- 未迁移更多 Workbench 写 API。
+- 未处理 cleanup/retention。
+- 未执行真实 PostgreSQL row-lock concurrency test。
+- 未新增 durable idempotency observability 指标。
+
+下一步：
+
+- 等待用户确认 PF-P044 `verified`。
+- 若用户认为 PF-P040 到 PF-P044 已达到可合并切片，生成 cumulative Merge Gate 覆盖 PF-P040 起完整 diff。
+- 若继续拆 rollout blocker，下一条 prompt 应聚焦 cleanup/retention、真实 PostgreSQL concurrency 或 observability 中的一个。

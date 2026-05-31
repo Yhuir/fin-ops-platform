@@ -26,7 +26,7 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 | payload sanitization | ready | repository 与 record tests 已覆盖 authorization、cookie、token、password、secret 类字段过滤。 | 新增 payload 字段时必须继续走 sanitizer。 |
 | reserved/in-progress duplicate policy | ready | PF-P042 新增 `WorkbenchIdempotencyInProgress` / `WorkbenchIdempotencyReservation`，UoW 对 same-key same-fingerprint `reserved` record 返回稳定 `idempotency_key_in_progress` 409 payload，不执行 handler、dirty scope、outbox 或 idempotency commit；repository contract 可区分 new/existing reservation。 | 继续保持 deterministic in-progress response；真实 PostgreSQL 并发锁验证仍由 `real PostgreSQL row-lock concurrency` gate 跟踪。 |
 | expired reserved takeover | ready | PF-P043 新增 deterministic expiration helper、takeover outcome 和 repository/UoW contract：active same-fingerprint `reserved` 继续返回 in-progress；expired same-fingerprint `reserved` 可在 transaction-bound reserve path 中被接管并继续执行 handler；different-fingerprint 即使过期也继续 conflict。 | 继续保持 same-fingerprint-only takeover；真实 PostgreSQL 并发锁验证仍由 `real PostgreSQL row-lock concurrency` gate 跟踪。 |
-| failed reservation policy | blocked | `failed` 状态存在，但 failed 是否允许同 fingerprint retry、如何返回历史失败、如何避免盲重放未定。 | 需要单独 contract 和 repository tests。 |
+| failed reservation policy | ready | PF-P044 新增 `WorkbenchIdempotencyFailed`；same-key same-fingerprint `failed` record 返回稳定 `idempotency_key_failed` 409 payload，`retryable=false`，不执行 handler、dirty scope、outbox 或 idempotency commit；different-fingerprint 继续 conflict。 | 继续保持保守策略：失败记录不是自动 retry 入口；调用方如需重试必须使用新的 idempotency key 或未来显式 retry policy。 |
 | cleanup/retention | blocked | 有 `expires_at` 字段，但没有 cleanup job、retention policy 实现和运维门禁。 | 需要 ops cleanup 策略、监控和测试；request path 不得隐式清理大量历史记录。 |
 | actor/tenant auth context | documented-risk | PF-P041 已让 confirm-link / cancel-link 的 UoW command 从请求局部 `OARequestSession` 显式接入 `actor_id`，并通过 helper 显式注入单租户 `tenant_id="default"`。当前系统仍未提供真实多租户来源，且只覆盖已迁移到 UoW 的 Workbench pair relation 写路径。 | 打开前仍需确认所有启用 durable idempotency 的 Workbench 写路径都显式传入 actor/tenant；如果未来引入多租户，必须替换默认 tenant helper。 |
 | real PostgreSQL row-lock concurrency | future-test-needed | 当前默认 CI 使用 fake/contract tests；没有真实 PostgreSQL 并发 reserve test。 | 打开前至少在可控环境跑真实 PostgreSQL concurrent reserve / committed replay test。 |
@@ -66,7 +66,6 @@ Feature flag must remain off，直到本文档中的 `blocked` 项被后续 prom
 
 打开 feature flag 前必须解决：
 
-- `failed reservation policy`
 - `real PostgreSQL row-lock concurrency`
 
 可以 disabled-by-default 合入但必须继续跟踪：
@@ -195,3 +194,29 @@ PF-P044 的保守策略是：失败记录是 request path 的稳定终态，不�
 - migration apply / rollback runbook
 
 PF-P044 完成后仍留在 PF-P040 起的 cumulative MG 范围内。只有用户确认相关 prompt verified 后，才允许生成覆盖 PF-P040 起完整 diff 的 cumulative Merge Gate。
+
+## 15. PF-P044 Execution Result
+
+PF-P044 已完成 failed reservation policy 的默认绿色 contract，但仍不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不迁移更多 Workbench 写 API，也不执行 Merge Gate、Traffic Gate、部署或 push。
+
+已完成：
+
+- 新增 `WorkbenchIdempotencyFailed`，稳定返回 `idempotency_key_failed`、HTTP 409 语义和 `retryable=false`。
+- `WorkbenchWriteUnitOfWork.run()`：
+  - same-key same-fingerprint `failed` record 直接返回 failed primitive。
+  - 不执行 handler。
+  - 不打开 transaction。
+  - 不写 dirty scope、outbox、reserve 或 commit。
+  - same-key different-fingerprint `failed` record 继续返回 `idempotency_key_conflict`。
+- `WorkbenchWriteUnitOfWork.replay_committed()` 对 failed record 同样返回 failed primitive，使 cancel-link 在 active relation lookup 前即可稳定返回 failed response。
+- `InMemoryWorkbenchIdempotencyRepository.mark_failed()` 对 request / response payload 做 sanitizer，避免 token、cookie、password、secret 类字段泄漏。
+- `PostgresWorkbenchIdempotencyRepository.mark_failed()` 的 fake SQL contract test 锁定 sanitized response payload 和 no nested transaction。
+- confirm-link / cancel-link Facade 捕获 failed primitive 并映射为稳定 409 payload。
+
+仍未完成：
+
+- 未启用 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`。
+- 未处理 cleanup/retention。
+- 未执行真实 PostgreSQL row-lock concurrency test。
+- 未新增 durable idempotency observability 指标。
+- 未执行 Merge Gate、Traffic Gate、部署或 push。

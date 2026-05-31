@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE
 from fin_ops_platform.services.workbench_idempotency import (
+    WorkbenchIdempotencyFailed,
     WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
 )
@@ -406,6 +407,8 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         except WorkbenchIdempotencyInProgress as exc:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyFailed as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         except WorkbenchWriteConflict as exc:
             conflict_payload = exc.to_response_payload()
             return WorkbenchWriteResult(HTTPStatus(exc.status_code), dict(conflict_payload["payload"]))
@@ -576,6 +579,8 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         except WorkbenchIdempotencyInProgress as exc:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyFailed as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         if result is None:
             return None
         return WorkbenchWriteResult(HTTPStatus.OK, self._cancel_link_response_payload(result))
@@ -649,6 +654,8 @@ class WorkbenchWriteFacade:
         except WorkbenchIdempotencyKeyConflict as exc:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         except WorkbenchIdempotencyInProgress as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyFailed as exc:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         except WorkbenchWriteConflict as exc:
             conflict_payload = exc.to_response_payload()
