@@ -1944,29 +1944,52 @@ class PostgresReadModelRepository:
         where_sql = " and ".join(clauses)
         rows = executor.fetch_all(
             f"""
-            with row_counts as (
-                select generation_id, scope_key, count(distinct row_id)::bigint as actual_row_count
-                from read_model.workbench_rows
-                group by generation_id, scope_key
+            with target_generations as (
+                select
+                    gen.scope_key,
+                    gen.generation_id,
+                    gen.row_count,
+                    gen.group_count,
+                    gen.summary_count,
+                    gen.build_metadata
+                from read_model.workbench_generations gen
+                where {where_sql}
+            ),
+            row_counts as (
+                select r.generation_id, r.scope_key, count(distinct r.row_id)::bigint as actual_row_count
+                from read_model.workbench_rows r
+                join target_generations
+                  on target_generations.generation_id = r.generation_id
+                 and target_generations.scope_key = r.scope_key
+                group by r.generation_id, r.scope_key
             ),
             group_counts as (
-                select generation_id, scope_key, count(*)::bigint as actual_group_count
-                from read_model.workbench_groups
-                group by generation_id, scope_key
+                select g.generation_id, g.scope_key, count(*)::bigint as actual_group_count
+                from read_model.workbench_groups g
+                join target_generations
+                  on target_generations.generation_id = g.generation_id
+                 and target_generations.scope_key = g.scope_key
+                group by g.generation_id, g.scope_key
             ),
             group_row_counts as (
                 select
-                    generation_id,
-                    scope_key,
-                    count(distinct row_id) filter (where coalesce(row_role, '') <> 'summary')::bigint
+                    gr.generation_id,
+                    gr.scope_key,
+                    count(distinct gr.row_id) filter (where coalesce(gr.row_role, '') <> 'summary')::bigint
                         as actual_group_row_count
-                from read_model.workbench_group_rows
-                group by generation_id, scope_key
+                from read_model.workbench_group_rows gr
+                join target_generations
+                  on target_generations.generation_id = gr.generation_id
+                 and target_generations.scope_key = gr.scope_key
+                group by gr.generation_id, gr.scope_key
             ),
             summary_counts as (
-                select generation_id, scope_key, count(*)::bigint as actual_summary_count
-                from read_model.workbench_summary
-                group by generation_id, scope_key
+                select s.generation_id, s.scope_key, count(*)::bigint as actual_summary_count
+                from read_model.workbench_summary s
+                join target_generations
+                  on target_generations.generation_id = s.generation_id
+                 and target_generations.scope_key = s.scope_key
+                group by s.generation_id, s.scope_key
             )
             select
                 gen.scope_key,
@@ -1979,7 +2002,7 @@ class PostgresReadModelRepository:
                 coalesce(group_counts.actual_group_count, 0)::bigint as actual_group_count,
                 coalesce(group_row_counts.actual_group_row_count, 0)::bigint as actual_group_row_count,
                 coalesce(summary_counts.actual_summary_count, 0)::bigint as actual_summary_count
-            from read_model.workbench_generations gen
+            from target_generations gen
             left join row_counts
               on row_counts.generation_id = gen.generation_id
              and row_counts.scope_key = gen.scope_key
@@ -1992,7 +2015,6 @@ class PostgresReadModelRepository:
             left join summary_counts
               on summary_counts.generation_id = gen.generation_id
              and summary_counts.scope_key = gen.scope_key
-            where {where_sql}
             order by gen.scope_key
             """,
             tuple(params),
@@ -3067,7 +3089,18 @@ class PostgresReadModelRepository:
             return "stale"
         return "fresh"
 
+    def get_workbench_groups_freshness_status(self, *, scope_key: str | None = None) -> dict[str, Any]:
+        return self._get_workbench_refresh_status(scope_key=scope_key, include_consistency=False)
+
     def get_workbench_refresh_status(self, *, scope_key: str | None = None) -> dict[str, Any]:
+        return self._get_workbench_refresh_status(scope_key=scope_key, include_consistency=True)
+
+    def _get_workbench_refresh_status(
+        self,
+        *,
+        scope_key: str | None = None,
+        include_consistency: bool,
+    ) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         scope_clause = ""
         params: list[Any] = []
@@ -3124,9 +3157,13 @@ class PostgresReadModelRepository:
         ]
         dirty_statuses = {scope["status"] for scope in dirty_scopes}
         generation_metadata = self._workbench_generation_metadata(self._connection, scope_key=normalized_scope_key)
-        consistency_failures = self._workbench_generation_consistency_failures(
-            self._connection,
-            scope_key=normalized_scope_key,
+        consistency_failures = (
+            self._workbench_generation_consistency_failures(
+                self._connection,
+                scope_key=normalized_scope_key,
+            )
+            if include_consistency
+            else []
         )
         groups_schema_status = self._workbench_groups_schema_status(scope_key=normalized_scope_key)
         read_model_status = "fresh"

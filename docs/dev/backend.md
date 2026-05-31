@@ -240,6 +240,32 @@ PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.tools.reconcile_workbench_read_model --scope-key 2026-05
 ```
 
+工作台旧 generation 清理必须在热路径修复发布稳定后执行，且先 dry-run：
+
+```bash
+FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
+PYTHONPATH=backend/src \
+python3 -m fin_ops_platform.tools.prune_workbench_generations \
+  --keep-recent-generations-per-scope 3 \
+  --keep-days 14 \
+  --limit 500 \
+  --dry-run
+```
+
+确认数据库备份或云快照后，离峰小批量执行：
+
+```bash
+FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
+PYTHONPATH=backend/src \
+python3 -m fin_ops_platform.tools.prune_workbench_generations \
+  --keep-recent-generations-per-scope 3 \
+  --keep-days 14 \
+  --limit 500 \
+  --execute
+```
+
+该工具只调用 `PostgresReadModelRepository.prune_workbench_generations()`，默认 dry-run，并且 repository 删除条件继续保护 `status='active'` generation。不要在 API 请求路径调用 generation retention。
+
 成本统计 read model 对账：
 
 ```bash

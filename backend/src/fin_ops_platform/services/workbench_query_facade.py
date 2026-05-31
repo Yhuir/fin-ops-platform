@@ -22,6 +22,7 @@ class WorkbenchQueryFacade:
         stale_reasons: Callable[..., list[str]],
         emit_status_metric: Callable[..., None],
         missing_read_model_error: Callable[[Exception], bool],
+        transient_read_model_error: Callable[[Exception], bool] | None = None,
         refresh_status_with_source_freshness: Callable[..., dict[str, object]] | None = None,
         normalize_refresh_status_payload: Callable[..., dict[str, object]] | None = None,
         groups_redis_version_key: Callable[[str], str] | None = None,
@@ -39,6 +40,7 @@ class WorkbenchQueryFacade:
         self._stale_reasons = stale_reasons
         self._emit_status_metric = emit_status_metric
         self._missing_read_model_error = missing_read_model_error
+        self._transient_read_model_error = transient_read_model_error or (lambda _error: False)
         self._refresh_status_with_source_freshness = refresh_status_with_source_freshness
         self._normalize_refresh_status_payload = normalize_refresh_status_payload
         self._groups_redis_version_key = groups_redis_version_key
@@ -171,7 +173,15 @@ class WorkbenchQueryFacade:
                     "message": "Workbench SQL groups repository is not configured.",
                 },
             )
-        refresh_status_payload = self._groups_refresh_status_payload(scope_key)
+        try:
+            refresh_status_payload = self._groups_refresh_status_payload(scope_key)
+        except Exception as error:
+            if self._transient_read_model_error(error):
+                return self._read_model_temporarily_unavailable_result(
+                    endpoint="/api/workbench/groups",
+                    scope_key=scope_key,
+                )
+            raise
         get_cached = getattr(self._redis_helper, "get_json", None)
         get_text = getattr(self._redis_helper, "get_text", None)
         set_text = getattr(self._redis_helper, "set_text", None)
@@ -210,7 +220,15 @@ class WorkbenchQueryFacade:
         if cached_result is not None:
             return cached_result
         if cache_key is None and callable(self._groups_cache_key):
-            cache_key = self._groups_cache_key(repository=self._repository, **cache_kwargs)
+            try:
+                cache_key = self._groups_cache_key(repository=self._repository, **cache_kwargs)
+            except Exception as error:
+                if self._transient_read_model_error(error):
+                    return self._read_model_temporarily_unavailable_result(
+                        endpoint="/api/workbench/groups",
+                        scope_key=scope_key,
+                    )
+                raise
         if cache_key and can_use_groups_redis_cache and callable(set_text) and callable(self._groups_cache_version_from_key):
             parsed_version = self._groups_cache_version_from_key(cache_key)
             if parsed_version and version_key:
@@ -241,6 +259,11 @@ class WorkbenchQueryFacade:
                         "scope_key": scope_key,
                         "message": "Workbench SQL groups read model table is not migrated.",
                     },
+                )
+            if self._transient_read_model_error(error):
+                return self._read_model_temporarily_unavailable_result(
+                    endpoint="/api/workbench/groups",
+                    scope_key=scope_key,
                 )
             raise
         if not isinstance(payload, dict):
@@ -363,7 +386,15 @@ class WorkbenchQueryFacade:
                     "message": "Workbench SQL refresh status repository is not configured.",
                 },
             )
-        payload = get_refresh_status(scope_key=scope_key)
+        try:
+            payload = get_refresh_status(scope_key=scope_key)
+        except Exception as error:
+            if self._transient_read_model_error(error):
+                return self._read_model_temporarily_unavailable_result(
+                    endpoint="/api/workbench/refresh-status",
+                    scope_key=scope_key,
+                )
+            raise
         if isinstance(payload, dict) and callable(self._refresh_status_with_source_freshness):
             payload = self._refresh_status_with_source_freshness(payload, scope_key=scope_key)
         return WorkbenchQueryResult(
@@ -372,7 +403,9 @@ class WorkbenchQueryFacade:
         )
 
     def _groups_refresh_status_payload(self, scope_key: str) -> dict[str, object] | None:
-        get_refresh_status = getattr(self._repository, "get_workbench_refresh_status", None)
+        get_refresh_status = getattr(self._repository, "get_workbench_groups_freshness_status", None)
+        if not callable(get_refresh_status):
+            get_refresh_status = getattr(self._repository, "get_workbench_refresh_status", None)
         if not callable(get_refresh_status):
             return None
         raw_refresh_status = get_refresh_status(scope_key=scope_key)
@@ -386,6 +419,29 @@ class WorkbenchQueryFacade:
         if str(refresh_status_payload.get("read_model_status") or "fresh") != "fresh":
             self._enqueue_refresh(scope_key, reason="api_groups_source_versions_stale")
         return refresh_status_payload
+
+    def _read_model_temporarily_unavailable_result(
+        self,
+        *,
+        endpoint: str,
+        scope_key: str,
+    ) -> WorkbenchQueryResult:
+        self._emit_status_metric(
+            endpoint=endpoint,
+            scope_key=scope_key,
+            read_model_status="refreshing",
+            reason="query_timeout",
+        )
+        return WorkbenchQueryResult(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": "read_model_temporarily_unavailable",
+                "read_model_status": "refreshing",
+                "retryable": True,
+                "scope_key": scope_key,
+                "message": "Workbench SQL read model query timed out; retry after refresh.",
+            },
+        )
 
     def _cached_groups_payload(
         self,
