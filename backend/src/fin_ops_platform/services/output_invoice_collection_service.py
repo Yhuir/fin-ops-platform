@@ -69,7 +69,7 @@ class OutputInvoiceCollectionError(ValueError):
 
 
 class OutputInvoiceCollectionStatusRuleService:
-    """Sheet6 status rules as a read-only phase-1 service boundary."""
+    """Sheet6 static status rules plus lifecycle manual override metadata."""
 
     def rules_payload(self) -> dict[str, Any]:
         return {
@@ -127,7 +127,7 @@ class OutputInvoiceCollectionStatusRuleService:
                     "description": "Sheet6 预留的手动状态：有销项发票、无收入流水，业务确认未来需要冲红。",
                     "recognitionMode": "手动标记",
                     "requiredFacts": ["销项发票", "无收入流水", "人工确认待冲红"],
-                    "workbenchRequirement": "第一阶段只读展示，不开放保存。",
+                    "workbenchRequirement": "可通过收款状态命令人工保存，并进入生命周期 facts 与审计链。",
                     "priority": 6,
                 },
                 {
@@ -142,7 +142,7 @@ class OutputInvoiceCollectionStatusRuleService:
             ],
             "futureWriteBoundary": {
                 "statusRuleEditing": "后续可替换为版本化规则表和审计日志，本阶段无保存入口。",
-                "manualStatus": "待冲红等人工状态后续由正式命令服务落库，本阶段不写入。",
+                "manualStatus": "待冲红等人工状态已由正式命令服务落库；规则编辑仍保持只读。",
             },
         }
 
@@ -347,6 +347,7 @@ class OutputInvoiceCollectionQueryService:
         filters: str | list[dict[str, Any]] | None = None,
         sort_field: str | None = "invoice_date",
         sort_direction: str | None = "desc",
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
         page_number = _parse_positive_int(page, "page")
         page_limit = _parse_positive_int(page_size, "page_size", maximum=200)
@@ -363,6 +364,7 @@ class OutputInvoiceCollectionQueryService:
             filters=parsed_filters,
             sort_field=normalized_sort_field,
             sort_direction=normalized_sort_direction,
+            tenant_id=tenant_id,
         )
 
         total = len(rows)
@@ -387,6 +389,7 @@ class OutputInvoiceCollectionQueryService:
         invoice_date_to: str | None = None,
         month: str | None = None,
         filters: str | list[dict[str, Any]] | None = None,
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
         parsed_filters = self._parse_filters(filters)
         context = self._query_context()
@@ -399,6 +402,7 @@ class OutputInvoiceCollectionQueryService:
             filters=parsed_filters,
             sort_field="invoice_date",
             sort_direction="desc",
+            tenant_id=tenant_id,
         )
         fields = []
         for field, config in FILTER_CONFIG.items():
@@ -435,9 +439,13 @@ class OutputInvoiceCollectionQueryService:
         invoice_date_to: str | None = None,
         month: str | None = None,
         filters: str | list[dict[str, Any]] | None = None,
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
         parsed_filters = self._parse_filters(filters)
-        typed_rows = [row for row in list(rows or []) if isinstance(row, dict)]
+        typed_rows = self.apply_lifecycle_overlays_to_rows(
+            [row for row in list(rows or []) if isinstance(row, dict)],
+            tenant_id=tenant_id,
+        )
         fields = []
         for field, config in FILTER_CONFIG.items():
             fields.append(
@@ -481,8 +489,9 @@ class OutputInvoiceCollectionQueryService:
         filters: list[dict[str, Any]],
         sort_field: str,
         sort_direction: str,
+        tenant_id: str = "default",
     ) -> list[dict[str, Any]]:
-        rows = self._build_rows(month=month, context=context)
+        rows = self._build_rows(month=month, context=context, tenant_id=tenant_id)
         rows = [
             row
             for row in rows
@@ -603,12 +612,12 @@ class OutputInvoiceCollectionQueryService:
     def status_rules(self) -> dict[str, Any]:
         return self._status_overlay_service.status_rules_payload(self._status_rule_service.rules_payload())
 
-    def receipt_preview(self, request: dict[str, Any] | None) -> dict[str, Any]:
+    def receipt_preview(self, request: dict[str, Any] | None, *, tenant_id: str = "default") -> dict[str, Any]:
         payload = dict(request or {})
         row_id = str(payload.get("rowId") or payload.get("row_id") or "").strip()
         invoice_id = str(payload.get("invoiceId") or payload.get("invoice_id") or "").strip()
         context = self._query_context()
-        row = self._row_by_id(row_id, context=context) if row_id else self._row_by_invoice_id(invoice_id, context=context)
+        row = self._row_by_id(row_id, context=context, tenant_id=tenant_id) if row_id else self._row_by_invoice_id(invoice_id, context=context, tenant_id=tenant_id)
         if row is None:
             raise OutputInvoiceCollectionError(
                 "row_not_found",
@@ -623,7 +632,7 @@ class OutputInvoiceCollectionQueryService:
             or None,
         )
 
-    def receipt_history(self, *, invoice_id: str) -> dict[str, Any]:
+    def receipt_history(self, *, invoice_id: str, tenant_id: str = "default") -> dict[str, Any]:
         context = self._query_context()
         group = self._invoice_group_for_invoice_id(invoice_id, context=context)
         if group is None:
@@ -636,7 +645,7 @@ class OutputInvoiceCollectionQueryService:
         list_receipts = getattr(repository, "list_receipts", None)
         if callable(list_receipts):
             identity_key = str(group.get("identity_key") or "")
-            receipts = list_receipts(invoice_id=invoice_id, invoice_identity_key=identity_key, tenant_id="default")
+            receipts = list_receipts(invoice_id=invoice_id, invoice_identity_key=identity_key, tenant_id=tenant_id)
             return {
                 "invoiceId": invoice_id,
                 "sourceAvailable": True,
@@ -664,18 +673,18 @@ class OutputInvoiceCollectionQueryService:
             for field, config in FILTER_CONFIG.items()
         ]
 
-    def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext) -> list[dict[str, Any]]:
+    def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext, tenant_id: str = "default") -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
         rows = [self._row_payload(group, groups, context=context) for group in groups]
-        return self._apply_lifecycle_overlays(rows)
+        return self.apply_lifecycle_overlays_to_rows(rows, tenant_id=tenant_id)
 
-    def row_by_id(self, row_id: str) -> dict[str, Any] | None:
+    def row_by_id(self, row_id: str, *, tenant_id: str = "default") -> dict[str, Any] | None:
         context = self._query_context()
         normalized_id = str(row_id or "").strip()
-        row = self._row_by_id(normalized_id, context=context)
+        row = self._row_by_id(normalized_id, context=context, tenant_id=tenant_id)
         if row is not None:
             return row
-        return self._row_by_invoice_id(normalized_id, context=context)
+        return self._row_by_invoice_id(normalized_id, context=context, tenant_id=tenant_id)
 
     def _invoice_groups(
         self,
@@ -710,9 +719,9 @@ class OutputInvoiceCollectionQueryService:
                 return group
         return None
 
-    def _row_by_id(self, row_id: str, *, context: InvoiceRelationQueryContext) -> dict[str, Any] | None:
+    def _row_by_id(self, row_id: str, *, context: InvoiceRelationQueryContext, tenant_id: str = "default") -> dict[str, Any] | None:
         normalized_id = str(row_id)
-        for row in self._build_rows(month=None, context=context):
+        for row in self._build_rows(month=None, context=context, tenant_id=tenant_id):
             if row["id"] == normalized_id:
                 return row
         return None
@@ -722,9 +731,10 @@ class OutputInvoiceCollectionQueryService:
         invoice_id: str,
         *,
         context: InvoiceRelationQueryContext,
+        tenant_id: str = "default",
     ) -> dict[str, Any] | None:
         normalized_id = str(invoice_id)
-        for row in self._build_rows(month=None, context=context):
+        for row in self._build_rows(month=None, context=context, tenant_id=tenant_id):
             if row["invoiceId"] == normalized_id:
                 return row
         return None
@@ -1021,7 +1031,7 @@ class OutputInvoiceCollectionQueryService:
             return {
                 "status": "blocked",
                 "label": "暂不出收据",
-                "reason": "红冲/退款类记录第一阶段不自动出收据。",
+                "reason": "红冲/退款类记录暂不自动出收据。",
                 "historyAvailable": False,
                 "sourceAvailable": False,
                 "previewAvailable": False,
@@ -1045,7 +1055,7 @@ class OutputInvoiceCollectionQueryService:
         return {
             "status": "pending",
             "label": "待出收据",
-            "reason": "可基于收入流水生成 Sheet7 预览；第一阶段不保存正式收据。",
+            "reason": "可基于收入流水生成 Sheet7 预览并创建正式收据。",
             "historyAvailable": False,
             "sourceAvailable": False,
             "previewAvailable": True,
@@ -1054,18 +1064,20 @@ class OutputInvoiceCollectionQueryService:
             "detailMode": "none",
         }
 
-    def _apply_lifecycle_overlays(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def apply_lifecycle_overlays_to_rows(self, rows: list[dict[str, Any]], *, tenant_id: str = "default") -> list[dict[str, Any]]:
         repository = self._lifecycle_repository
         overlay_loader = getattr(repository, "overlays_for_identity_keys", None)
         if not callable(overlay_loader) or not rows:
             return rows
-        overlays = overlay_loader(
-            [
-                str(row.get("invoiceIdentityKey") or "")
-                for row in rows
-                if str(row.get("invoiceIdentityKey") or "").strip()
-            ]
-        )
+        identity_keys = [
+            str(row.get("invoiceIdentityKey") or "")
+            for row in rows
+            if str(row.get("invoiceIdentityKey") or "").strip()
+        ]
+        try:
+            overlays = overlay_loader(identity_keys, tenant_id=tenant_id)
+        except TypeError:
+            overlays = overlay_loader(identity_keys)
         result: list[dict[str, Any]] = []
         for row in rows:
             identity_key = str(row.get("invoiceIdentityKey") or "")
@@ -1090,6 +1102,9 @@ class OutputInvoiceCollectionQueryService:
             )
             result.append(updated)
         return result
+
+    def summary_for_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        return self._summary(rows)
 
     @staticmethod
     def _overlay_red_relations(payload: dict[str, Any], manual_relations: list[dict[str, Any]]) -> dict[str, Any]:

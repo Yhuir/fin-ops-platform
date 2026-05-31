@@ -60,6 +60,8 @@ EXPECTED_MIGRATIONS = [
     "0045_output_invoice_collection_lifecycle.sql",
     "0046_input_invoice_usage_oa_reverse_batches.sql",
     "0047_oa_pending_payment_read_model.sql",
+    "0048_oa_pending_payment_bank_paid_total.sql",
+    "0049_oa_pending_payment_detail_lookup_indexes.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -167,7 +169,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 48)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 50)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -683,6 +685,9 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("alter table app.oa_applications", sql)
         self.assertIn("add column if not exists scope_month date", sql)
         self.assertIn("oa_applications_scope_month_row_idx", sql)
+        self.assertIn("oa_pending_payment_rows_oa_id_idx", sql)
+        self.assertIn("oa_pending_payment_rows_bank_transaction_id_idx", sql)
+        self.assertIn("oa_pending_payment_rows_invoice_id_idx", sql)
 
 
 if __name__ == "__main__":

@@ -18,8 +18,11 @@ import OutputInvoiceCollectionsTable from "../components/outputInvoiceCollection
 import RedInvoiceRelationDrawer from "../components/outputInvoiceCollections/RedInvoiceRelationDrawer";
 import ReceiptHistoryDrawer from "../components/outputInvoiceCollections/ReceiptHistoryDrawer";
 import ReceiptPreviewDrawer from "../components/outputInvoiceCollections/ReceiptPreviewDrawer";
+import ReceiptSettingsDrawer from "../components/outputInvoiceCollections/ReceiptSettingsDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import {
+  cancelOutputInvoiceCollectionReminder,
   fetchOutputInvoiceCollectionBankTransactionDetail,
   fetchOutputInvoiceCollectionFilterOptions,
   fetchOutputInvoiceCollectionInvoiceDetail,
@@ -27,12 +30,17 @@ import {
   fetchOutputInvoiceCollectionRowRelationDetail,
   fetchOutputInvoiceCollectionStatusRules,
   fetchOutputInvoiceReceiptHistory,
+  fetchOutputInvoiceReceiptSettings,
   createOutputInvoiceReceipt,
   confirmOutputInvoiceRedRelation,
   nextSortDirection,
   previewOutputInvoiceReceipt,
+  reissueOutputInvoiceReceipt,
+  revokeOutputInvoiceRedRelation,
   updateOutputInvoiceCollectionReminder,
   updateOutputInvoiceCollectionStatus,
+  updateOutputInvoiceReceiptSettings,
+  voidOutputInvoiceReceipt,
 } from "../features/outputInvoiceCollections/api";
 import type {
   OutputInvoiceCollectionDetailTarget,
@@ -42,6 +50,7 @@ import type {
   OutputInvoiceCollectionQuery,
   OutputInvoiceCollectionRow,
   OutputInvoiceCollectionSortDirection,
+  OutputInvoiceCollectionStatusRulesResponse,
   OutputInvoiceCollectionWorkflow,
 } from "../features/outputInvoiceCollections/types";
 
@@ -90,6 +99,9 @@ function isWorkflow(value: unknown): value is OutputInvoiceCollectionWorkflow {
   }
   const workflow = value as NonNullable<OutputInvoiceCollectionWorkflow>;
   if (workflow.kind === "statusRules") {
+    return true;
+  }
+  if (workflow.kind === "receiptSettings") {
     return true;
   }
   if (workflow.kind === "collectionStatus" || workflow.kind === "redRelation" || workflow.kind === "receiptPreview") {
@@ -167,6 +179,7 @@ function normalizeFilterValue(filter: {
 }
 
 export default function OutputInvoiceCollectionsPage() {
+  const { canAdminAccess } = useSessionPermissions();
   const querySession = usePageSessionState({
     pageKey: "output-invoice-collections",
     stateKey: "query",
@@ -193,6 +206,7 @@ export default function OutputInvoiceCollectionsPage() {
   });
   const [filterConfigs, setFilterConfigs] = useState<OutputInvoiceCollectionFilterFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OutputInvoiceCollectionFilterOption[]>>({});
+  const [statusRulesPayload, setStatusRulesPayload] = useState<OutputInvoiceCollectionStatusRulesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [readModelStatus, setReadModelStatus] = useState("");
@@ -236,8 +250,9 @@ export default function OutputInvoiceCollectionsPage() {
         filters: query.filters,
         signal,
       }),
+      fetchOutputInvoiceCollectionStatusRules(signal).catch(() => null),
     ])
-      .then(([payload, optionsPayload]) => {
+      .then(([payload, optionsPayload, rulesPayload]) => {
         if (requestId !== requestIdRef.current) {
           return;
         }
@@ -254,6 +269,9 @@ export default function OutputInvoiceCollectionsPage() {
         });
         setFilterConfigs(payload.filterConfig.length > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields));
         setFilterOptions(filterOptionsByField(optionsPayload.fields));
+        if (rulesPayload) {
+          setStatusRulesPayload(rulesPayload);
+        }
         setReadModelStatus(
           payload.readModelStatus === "refreshing" || optionsPayload.readModelStatus === "refreshing"
             ? "refreshing"
@@ -412,6 +430,26 @@ export default function OutputInvoiceCollectionsPage() {
   const redRelationRow = activeWorkflow?.kind === "redRelation"
     ? rows.find((row) => row.id === activeWorkflow.rowId) ?? null
     : null;
+  const manualStatusOptions = useMemo(() => {
+    const options = statusRulesPayload?.manualStatusOptions;
+    if (Array.isArray(options) && options.length > 0) {
+      return options.map((option) => ({ code: option.code, label: option.label }));
+    }
+    return (statusRulesPayload?.rules ?? [])
+      .filter((rule) => rule.id || rule.code)
+      .map((rule) => ({ code: rule.id || rule.code || "", label: rule.label }))
+      .filter((option) => option.code);
+  }, [statusRulesPayload]);
+  const quickCollectionStatusOptions = useMemo(() => {
+    const options = filterOptions.collection_status ?? [];
+    if (options.length > 0) {
+      return options.map((option) => ({ code: option.value, label: option.label }));
+    }
+    return (statusRulesPayload?.rules ?? [])
+      .filter((rule) => rule.id || rule.code)
+      .map((rule) => ({ code: rule.id || rule.code || "", label: rule.label }))
+      .filter((option) => option.code);
+  }, [filterOptions.collection_status, statusRulesPayload]);
 
   const applyQuickStatusFilter = useCallback((statusCode: string) => {
     setQuery((current) => {
@@ -436,6 +474,14 @@ export default function OutputInvoiceCollectionsPage() {
       >
         销项发票收款情况类型设置
       </Button>
+      {canAdminAccess ? (
+        <Button
+          variant="outlined"
+          onClick={() => handleOpenWorkflow({ kind: "receiptSettings" })}
+        >
+          收据编号设置
+        </Button>
+      ) : null}
       <Button
         startIcon={<RefreshOutlinedIcon />}
         variant="contained"
@@ -445,7 +491,7 @@ export default function OutputInvoiceCollectionsPage() {
         刷新
       </Button>
     </Stack>
-  ), [handleOpenWorkflow, loadRows, refreshing]);
+  ), [canAdminAccess, handleOpenWorkflow, loadRows, refreshing]);
 
   return (
     <>
@@ -490,10 +536,9 @@ export default function OutputInvoiceCollectionsPage() {
               sx={{ width: { xs: "100%", md: 170 } }}
             >
               <MenuItem value="">全部</MenuItem>
-              <MenuItem value="pending_collection">待收款</MenuItem>
-              <MenuItem value="partial_collected">已收部分款</MenuItem>
-              <MenuItem value="collected">已收款</MenuItem>
-              <MenuItem value="pending_red_invoice">待冲红</MenuItem>
+              {quickCollectionStatusOptions.map((option) => (
+                <MenuItem key={option.code} value={option.code}>{option.label}</MenuItem>
+              ))}
             </TextField>
           </Stack>
           <Stack direction={{ xs: "column", md: "row" }} spacing={1.25}>
@@ -552,6 +597,9 @@ export default function OutputInvoiceCollectionsPage() {
       open={query.activeWorkflow?.kind === "receiptHistory"}
       invoiceId={receiptHistoryInvoiceId}
       loadHistory={fetchOutputInvoiceReceiptHistory}
+      onVoidReceipt={(receiptId) => voidOutputInvoiceReceipt(receiptId, "页面作废").then(() => undefined)}
+      onReissueReceipt={(receiptId) => reissueOutputInvoiceReceipt(receiptId, "页面重开").then(() => undefined)}
+      onChanged={handleLifecycleChanged}
       onClose={handleCloseWorkflow}
     />
     <ReceiptPreviewDrawer
@@ -560,7 +608,7 @@ export default function OutputInvoiceCollectionsPage() {
       loadPreview={previewOutputInvoiceReceipt}
       createReceipt={(rowId, bankTransactionId) => createOutputInvoiceReceipt(rowId, {
         bankTransactionId,
-        idempotencyKey: `${rowId}:${bankTransactionId}:${Date.now()}`,
+        idempotencyKey: `receipt:${rowId}:${bankTransactionId}`,
       }).then(() => undefined)}
       onChanged={handleLifecycleChanged}
       onClose={handleCloseWorkflow}
@@ -568,14 +616,27 @@ export default function OutputInvoiceCollectionsPage() {
     <CollectionStatusReminderDrawer
       open={query.activeWorkflow?.kind === "collectionStatus"}
       row={collectionStatusRow}
+      statusOptions={manualStatusOptions}
       onSaveStatus={(rowId, payload) => updateOutputInvoiceCollectionStatus(rowId, payload).then(() => handleLifecycleChanged())}
       onSaveReminder={(rowId, payload) => updateOutputInvoiceCollectionReminder(rowId, payload).then(() => handleLifecycleChanged())}
+      onClearStatus={(rowId, expectedVersion) => updateOutputInvoiceCollectionStatus(rowId, {
+        statusCode: "",
+        expectedVersion,
+      }).then(() => handleLifecycleChanged())}
+      onCancelReminder={(rowId, reminderId) => cancelOutputInvoiceCollectionReminder(rowId, reminderId).then(() => handleLifecycleChanged())}
       onClose={handleCloseWorkflow}
     />
     <RedInvoiceRelationDrawer
       open={query.activeWorkflow?.kind === "redRelation"}
       row={redRelationRow}
       onConfirm={(rowId, payload) => confirmOutputInvoiceRedRelation(rowId, payload).then(() => handleLifecycleChanged())}
+      onRevoke={(relationId) => revokeOutputInvoiceRedRelation(relationId).then(() => handleLifecycleChanged())}
+      onClose={handleCloseWorkflow}
+    />
+    <ReceiptSettingsDrawer
+      open={query.activeWorkflow?.kind === "receiptSettings"}
+      loadSettings={() => fetchOutputInvoiceReceiptSettings()}
+      onSave={(payload) => updateOutputInvoiceReceiptSettings(payload).then(() => undefined)}
       onClose={handleCloseWorkflow}
     />
     </>

@@ -1,6 +1,7 @@
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
@@ -16,6 +17,9 @@ type ReceiptHistoryDrawerProps = {
   open: boolean;
   invoiceId: string | null;
   loadHistory: (invoiceId: string) => Promise<OutputInvoiceReceiptHistoryResponse>;
+  onVoidReceipt: (receiptId: string) => Promise<void>;
+  onReissueReceipt: (receiptId: string) => Promise<void>;
+  onChanged?: () => void;
   onClose: () => void;
 };
 
@@ -23,11 +27,15 @@ export default function ReceiptHistoryDrawer({
   open,
   invoiceId,
   loadHistory,
+  onVoidReceipt,
+  onReissueReceipt,
+  onChanged,
   onClose,
 }: ReceiptHistoryDrawerProps) {
   const [payload, setPayload] = useState<OutputInvoiceReceiptHistoryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submittingId, setSubmittingId] = useState("");
 
   useEffect(() => {
     if (!open || !invoiceId) {
@@ -59,6 +67,41 @@ export default function ReceiptHistoryDrawer({
       active = false;
     };
   }, [invoiceId, loadHistory, open]);
+
+  const reload = async () => {
+    if (!invoiceId) {
+      return;
+    }
+    setPayload(await loadHistory(invoiceId));
+  };
+
+  const handleVoid = async (receiptId: string) => {
+    setSubmittingId(receiptId);
+    setError(null);
+    try {
+      await onVoidReceipt(receiptId);
+      await reload();
+      onChanged?.();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "作废收据失败");
+    } finally {
+      setSubmittingId("");
+    }
+  };
+
+  const handleReissue = async (receiptId: string) => {
+    setSubmittingId(receiptId);
+    setError(null);
+    try {
+      await onReissueReceipt(receiptId);
+      await reload();
+      onChanged?.();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "重开收据失败");
+    } finally {
+      setSubmittingId("");
+    }
+  };
 
   return (
     <Drawer
@@ -97,11 +140,39 @@ export default function ReceiptHistoryDrawer({
             <Alert severity="info">暂无已出收据。</Alert>
           ) : null}
           {payload?.receipts.map((receipt) => (
-            <Paper key={receipt.receiptId || receipt.receiptNo} variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
-              <Typography variant="subtitle2" fontWeight={900}>{receipt.receiptNo || receipt.receiptId}</Typography>
+            <Paper key={receipt.id || receipt.receiptNo} variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
+              <Typography variant="subtitle2" fontWeight={900}>{receipt.receiptNo || receipt.id}</Typography>
               <Typography variant="body2" color="text.secondary">
-                {receipt.issuedAt || "日期为空"} / {receipt.amount || "金额为空"} / {receipt.status || "状态为空"}
+                {receipt.createdAt || "日期为空"} / {receipt.amount || "金额为空"} / {receipt.status || "状态为空"}
               </Typography>
+              {receipt.voidedAt || receipt.voidReason ? (
+                <Typography variant="caption" color="text.secondary">
+                  作废：{receipt.voidedAt || "时间为空"} {receipt.voidReason || ""}
+                </Typography>
+              ) : null}
+              <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 1 }}>
+                {receipt.status === "issued" && receipt.id ? (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="warning"
+                    disabled={submittingId === receipt.id}
+                    onClick={() => handleVoid(receipt.id || "")}
+                  >
+                    作废收据 {receipt.receiptNo || receipt.id}
+                  </Button>
+                ) : null}
+                {receipt.status === "voided" && receipt.id ? (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    disabled={submittingId === receipt.id}
+                    onClick={() => handleReissue(receipt.id || "")}
+                  >
+                    重开收据 {receipt.receiptNo || receipt.id}
+                  </Button>
+                ) : null}
+              </Stack>
             </Paper>
           ))}
         </Stack>

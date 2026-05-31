@@ -34,6 +34,7 @@
 | 字段 | 说明 |
 | --- | --- |
 | `version` | 免 OA 标签准入配置版本，用于保存时乐观锁。 |
+| `bank_auto_tag_rules_version` | 当前银行明细自动标签规则版本；前端可用它判断标签事实源是否已变化。 |
 | `selected_tag_codes` | 当前已保存、仍处于可用状态的标签 code 列表。首次为空数组，后续由用户保存决定。 |
 | `inactive_selected_tag_codes` | 历史配置中已停用或不可用的标签 code；不参与候选生成，保存后会被清理。 |
 | `active_tags` | 银行明细自动标签规则中的可用标签，供抽屉按主/子标签层级展示。 |
@@ -47,6 +48,8 @@
 | `path` | 标签路径，可用于审计或调试。 |
 | `status` | 当前只返回 `active`。 |
 | `output_primary_label` / `output_sub_label` | 免 OA 页面展示的主/子标签。`output_sub_label` 可为空，前端显示为“主标签本身”。 |
+
+免 OA 标签准入不返回第三层流水分类字段。外部往来流水的“个人往来 / 公司往来 / 银行往来 / 业务往来”只属于银行明细候选确认或人工补分类时选择的流水级分类，不作为免 OA 自动规则保存或展示。
 
 `PUT /api/no-oa-bank-batches/tag-selection`
 
@@ -78,6 +81,8 @@
 | `account_key` | 银行账户筛选。 |
 
 响应中的 `summary.categories[*]` 和 `batches[*]` 需要携带 `category_primary_label`、`category_sub_label`、`category_label_path`，供前端构造主/子标签三栏。候选批次只来自当前保存的免 OA 标签准入范围；已提交历史批次即使标签不再准入也继续返回。
+
+当接口命中 SQL read model 且发现 source version 陈旧时，响应会携带 `read_model_status="stale"` 与 `read_model_stale_reasons`，并返回当前可用数据。前端需要像银行明细页一样显示读模型刷新/陈旧状态并自动重试，直到后续响应恢复 `read_model_status="fresh"`。未返回 `read_model_status` 时按 `fresh` 处理。
 
 `POST /api/no-oa-bank-batches/submit-selection`
 

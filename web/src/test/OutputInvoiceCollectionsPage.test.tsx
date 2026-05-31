@@ -35,6 +35,21 @@ const rowsPayload = {
         reason: "存在收入流水，但收入流水合计小于发票价税合计。",
         collectedAmount: "5000.00",
         pendingAmount: "7345.67",
+        manualOverride: {
+          id: "override-001",
+          statusCode: "pending_red_invoice",
+          expectedCollectionDate: "2026-06-20",
+          note: "人工确认待冲红",
+          version: 2,
+        },
+        expectedCollectionDate: "2026-06-20",
+        reminder: {
+          id: "reminder-001",
+          remindAt: "2026-06-15T09:00:00+08:00",
+          channel: "oa",
+          note: "到期提醒",
+          status: "active",
+        },
       },
       bankTransactions: {
         primaryBankTransactionId: "bank-001",
@@ -66,17 +81,33 @@ const rowsPayload = {
         ],
       },
       redInvoiceRelation: {
-        relationCount: 0,
-        hasMultiple: false,
-        detailMode: "none",
-        summaries: [],
+        relationCount: 2,
+        hasMultiple: true,
+        detailMode: "list",
+        summaries: [
+          {
+            relatedInvoiceId: "out-red-auto",
+            invoiceNo: "AUTO-RED",
+            evidence: "同购方、同金额、正负方向相反。",
+            confidence: "auto_high",
+            source: "auto",
+          },
+          {
+            relationId: "relation-manual-001",
+            relatedInvoiceId: "out-red-manual",
+            invoiceNo: "MANUAL-RED",
+            evidence: "客户邮件确认红冲",
+            confidence: "manual_confirmed",
+            source: "manual",
+          },
+        ],
       },
       receipt: {
         status: "pending",
         label: "待出收据",
         reason: "可基于收入流水生成 Sheet7 预览；第一阶段不保存正式收据。",
         previewAvailable: true,
-        sourceAvailable: false,
+        sourceAvailable: true,
       },
     },
   ],
@@ -125,15 +156,46 @@ function installOutputInvoiceCollectionsFetch() {
             workbenchRequirement: "关联台能证明已收部分流水",
             priority: 4,
           },
+          {
+            id: "pending_red_invoice",
+            label: "待冲红",
+            description: "人工确认未来需要冲红",
+            recognitionMode: "手动标记",
+            requiredFacts: ["销项发票"],
+            workbenchRequirement: "人工确认",
+            priority: 6,
+          },
         ],
+        manualStatusOptions: [
+          { code: "pending_collection", label: "待收款", severity: "warning" },
+          { code: "pending_red_invoice", label: "待冲红", severity: "warning" },
+        ],
+        permissions: { can_save: true, can_admin: true },
       });
     }
     if (url.pathname === "/api/output-invoice-collections/receipts/history") {
       return jsonResponse({
         invoiceId: "out-001",
-        sourceAvailable: false,
-        receipts: [],
-        message: "第一阶段没有正式收据历史事实源，不能伪造历史收据。",
+        sourceAvailable: true,
+        sourceName: "formal_receipt_lifecycle",
+        receipts: [
+          {
+            id: "receipt-issued-001",
+            receiptNo: "SK2026050001",
+            amount: "5000.00",
+            createdAt: "2026-05-03T10:40:00+08:00",
+            status: "issued",
+          },
+          {
+            id: "receipt-voided-001",
+            receiptNo: "SK2026050000",
+            amount: "5000.00",
+            createdAt: "2026-05-02T10:40:00+08:00",
+            voidedAt: "2026-05-03T09:00:00+08:00",
+            voidReason: "信息有误",
+            status: "voided",
+          },
+        ],
       });
     }
     if (url.pathname === "/api/output-invoice-collections/receipt-preview") {
@@ -162,6 +224,23 @@ function installOutputInvoiceCollectionsFetch() {
     }
     if (url.pathname === "/api/output-invoice-collections/bank-transactions/bank-001/detail") {
       return jsonResponse({ id: "bank-001", counterpartyName: "云南客户科技有限公司", amount: "5000.00" });
+    }
+    if (url.pathname === "/api/output-invoice-collections/receipt-settings") {
+      if (init?.method === "PUT") {
+        return jsonResponse({ settings: { prefix: "SK", resetPeriod: "monthly", version: 2 } });
+      }
+      return jsonResponse({ settings: { prefix: "SK", resetPeriod: "monthly", version: 1 } });
+    }
+    if (
+      url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-status"
+      || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-reminder"
+      || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/receipts"
+      || url.pathname === "/api/output-invoice-collections/receipts/receipt-issued-001/void"
+      || url.pathname === "/api/output-invoice-collections/receipts/receipt-voided-001/reissue"
+      || url.pathname === "/api/output-invoice-collections/red-invoice-relations/relation-manual-001"
+      || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-reminder/reminder-001"
+    ) {
+      return jsonResponse({ ok: true });
     }
     return jsonResponse({});
   });
@@ -299,7 +378,7 @@ describe("Output invoice collections page", () => {
     await user.click(screen.getByRole("button", { name: "关闭销项发票收款情况类型设置" }));
     await user.click(within(page).getByRole("button", { name: "已出收据" }));
     expect(await screen.findByLabelText("已出收据历史")).toBeInTheDocument();
-    expect(await screen.findByText("第一阶段没有正式收据历史事实源，不能伪造历史收据。")).toBeInTheDocument();
+    expect(await screen.findByText("SK2026050001")).toBeInTheDocument();
     expect(screen.queryByText("模拟收据")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "关闭已出收据历史" }));
@@ -310,5 +389,71 @@ describe("Output invoice collections page", () => {
     expect(screen.queryByRole("button", { name: /生成正式收据|保存/ })).not.toBeInTheDocument();
 
     expect(rowsRequests(fetchMock).length).toBe(1);
+  });
+
+  test("closes lifecycle actions from drawers and exposes receipt settings only to admins", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installOutputInvoiceCollectionsFetch();
+    renderAuthenticatedAppAt("/output-invoice-collections", { session: { canAdminAccess: true } });
+
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    expect(await within(page).findByRole("button", { name: "收据编号设置" })).toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: "状态/提醒" }));
+    expect(await screen.findByLabelText("收款状态和提醒")).toBeInTheDocument();
+    expect(await screen.findByText("待冲红")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "撤销手动状态" }));
+    await user.click(screen.getByRole("button", { name: "取消提醒" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/rows/output-collection-row-001/collection-status"),
+        expect.objectContaining({ method: "PUT" }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/rows/output-collection-row-001/collection-reminder/reminder-001"),
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "关闭收款状态抽屉" }));
+    await user.click(within(page).getByRole("button", { name: "红蓝票" }));
+    expect(await screen.findByLabelText("红蓝票关系")).toBeInTheDocument();
+    expect(screen.getByText(/AUTO-RED/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "撤销人工关系 MANUAL-RED" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/red-invoice-relations/relation-manual-001"),
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "关闭红蓝票关系抽屉" }));
+    await user.click(within(page).getByRole("button", { name: "已出收据" }));
+    expect(await screen.findByLabelText("已出收据历史")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "作废收据 SK2026050001" }));
+    await user.click(await screen.findByRole("button", { name: "重开收据 SK2026050000" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/receipts/receipt-issued-001/void"),
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/receipts/receipt-voided-001/reissue"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "关闭已出收据历史" }));
+    await user.click(within(page).getByRole("button", { name: "收据编号设置" }));
+    expect(await screen.findByLabelText("收据编号设置")).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("编号前缀"));
+    await user.type(screen.getByLabelText("编号前缀"), "SK");
+    await user.click(screen.getByRole("button", { name: "保存收据编号设置" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/receipt-settings"),
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
   });
 });

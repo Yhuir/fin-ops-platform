@@ -385,7 +385,7 @@ GET /api/pending-invoices/export
 `read_model.pending_invoice_rows` 必须区分 fresh empty、missing scope 和 stale/dirty scope：
 
 - fresh empty：`200 OK`、`rows=[]`、`read_model_status=fresh`。
-- stale/dirty 但已有可用 SQL 行：`200 OK`，返回最近一次稳定行数据，`read_model_status=refreshing` 或 `stale`，由后台 worker 收敛新版本；读请求不得重复写 dirty scope/outbox。
+- stale/dirty 或 `source_versions` 过期但已有可用 SQL 行：`200 OK`，返回最近一次稳定行数据，`read_model_status=refreshing` 或 `stale`，由后台 worker 收敛新版本；读请求不得重复写 dirty scope/outbox。
 - missing 或 schema 不兼容：`202 Accepted`、`rows=[]`、`read_model_status=refreshing`，enqueue `pending_invoice.read_model.refresh`。
 - API 热路径不得因 read model miss/stale 同步扫描全量事实。
 

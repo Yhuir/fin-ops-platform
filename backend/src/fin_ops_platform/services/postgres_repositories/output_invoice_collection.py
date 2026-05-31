@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from http import HTTPStatus
 from typing import Any, Callable, TypeVar
+from uuid import uuid4
 
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import InMemoryOutputInvoiceCollectionLifecycleRepository
 from fin_ops_platform.services.output_invoice_collection_models import OutputInvoiceCollectionRowRef
+from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
 from fin_ops_platform.services.postgres_repositories.common import jsonb
 from fin_ops_platform.services.postgres_connection import PostgresConnection
 
@@ -22,7 +25,7 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
         with self._connection.transaction() as transaction:
             return callback(transaction)
 
-    def overlays_for_identity_keys(self, identity_keys: list[str]) -> dict[str, dict[str, Any]]:
+    def overlays_for_identity_keys(self, identity_keys: list[str], *, tenant_id: str = "default") -> dict[str, dict[str, Any]]:
         keys = [str(item).strip() for item in identity_keys if str(item).strip()]
         if not keys:
             return {}
@@ -31,43 +34,43 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
                 """
                 select *
                 from app.output_invoice_collection_status_overrides
-                where tenant_id = 'default'
+                where tenant_id = %s
                   and status = 'active'
                   and invoice_identity_key = any(%s)
                 """,
-                (keys,),
+                (tenant_id, keys),
             )
             reminders = transaction.fetch_all(
                 """
                 select distinct on (invoice_identity_key) *
                 from app.output_invoice_collection_reminders
-                where tenant_id = 'default'
+                where tenant_id = %s
                   and status = 'active'
                   and invoice_identity_key = any(%s)
                 order by invoice_identity_key, updated_at desc, created_at desc
                 """,
-                (keys,),
+                (tenant_id, keys),
             )
             red_relations = transaction.fetch_all(
                 """
                 select *
                 from app.output_invoice_collection_red_relations
-                where tenant_id = 'default'
+                where tenant_id = %s
                   and status = 'active'
                   and invoice_identity_key = any(%s)
                 order by updated_at desc, created_at desc
                 """,
-                (keys,),
+                (tenant_id, keys),
             )
             receipts = transaction.fetch_all(
                 """
                 select *
                 from app.output_invoice_receipts
-                where tenant_id = 'default'
+                where tenant_id = %s
                   and invoice_identity_key = any(%s)
                 order by created_at desc
                 """,
-                (keys,),
+                (tenant_id, keys),
             )
         result = {key: {"override": None, "reminder": None, "redRelations": [], "receipts": []} for key in keys}
         for row in overrides:
@@ -103,9 +106,6 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
         current_version = int((current or {}).get("version") or 0)
         expected_version = kwargs.get("expected_version")
         if expected_version is not None and int(expected_version) != current_version:
-            from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
-            from http import HTTPStatus
-
             raise OutputInvoiceCollectionError(
                 "version_conflict",
                 "收款状态已被其他用户修改，请刷新后重试。",
@@ -193,7 +193,9 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
                 jsonb({"row": row_ref.__dict__}),
             ),
         )
-        return _reminder_payload(row or {})
+        if row is None:
+            raise OutputInvoiceCollectionError("reminder_not_found", "提醒不存在或已取消。", status_code=HTTPStatus.NOT_FOUND)
+        return _reminder_payload(row)
 
     def cancel_reminder(self, *, reminder_id: str, actor_id: str, tenant_id: str, transaction: Any | None = None) -> dict[str, Any]:
         tx = transaction or self._connection
@@ -246,7 +248,9 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
                 jsonb({"row": row_ref.__dict__}),
             ),
         )
-        return _red_relation_payload(row or {})
+        if row is None:
+            raise OutputInvoiceCollectionError("relation_not_found", "红蓝票关系不存在或已撤销。", status_code=HTTPStatus.NOT_FOUND)
+        return _red_relation_payload(row)
 
     def revoke_red_relation(self, *, relation_id: str, actor_id: str, tenant_id: str, transaction: Any | None = None) -> dict[str, Any]:
         tx = transaction or self._connection
@@ -368,16 +372,36 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
                 voided_at = coalesce(voided_at, now()),
                 updated_by = %s,
                 updated_at = now()
-            where id = %s and tenant_id = %s
+            where id = %s and tenant_id = %s and status = 'issued'
             returning *
             """,
             (reason, actor_id, actor_id, receipt_id, tenant_id),
         )
+        if row is None:
+            current = tx.fetch_one(
+                "select status from app.output_invoice_receipts where id = %s and tenant_id = %s",
+                (receipt_id, tenant_id),
+            )
+            if current is None:
+                raise OutputInvoiceCollectionError("receipt_not_found", "收据不存在。", status_code=HTTPStatus.NOT_FOUND)
+            raise OutputInvoiceCollectionError("invalid_receipt_status", "只有已开具收据可以作废。", status_code=HTTPStatus.CONFLICT)
         self._append_receipt_event(tx, row_id=receipt_id, event_type="voided", actor_id=actor_id, tenant_id=tenant_id, payload={"reason": reason})
-        return _receipt_payload(row or {})
+        return _receipt_payload(row)
 
     def reissue_receipt(self, *, receipt_id: str, reason: str, actor_id: str, tenant_id: str, transaction: Any | None = None) -> dict[str, Any]:
-        old = self.void_receipt(receipt_id=receipt_id, reason=reason, actor_id=actor_id, tenant_id=tenant_id, transaction=transaction)
+        tx = transaction or self._connection
+        old_row = tx.fetch_one("select * from app.output_invoice_receipts where id = %s and tenant_id = %s", (receipt_id, tenant_id))
+        if old_row is None:
+            raise OutputInvoiceCollectionError("receipt_not_found", "收据不存在。", status_code=HTTPStatus.NOT_FOUND)
+        old = _receipt_payload(old_row)
+        if old.get("status") != "voided":
+            raise OutputInvoiceCollectionError("invalid_receipt_status", "只有已作废收据可以重开。", status_code=HTTPStatus.CONFLICT)
+        existing_reissue = tx.fetch_one(
+            "select id from app.output_invoice_receipts where tenant_id = %s and reissued_from_receipt_id = %s",
+            (tenant_id, receipt_id),
+        )
+        if existing_reissue is not None:
+            raise OutputInvoiceCollectionError("invalid_receipt_status", "该收据已重开，不能重复重开。", status_code=HTTPStatus.CONFLICT)
         row_ref = OutputInvoiceCollectionRowRef(
             row_id="",
             invoice_id=str(old.get("invoiceId") or ""),
@@ -389,22 +413,22 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
             total_with_tax=str(old.get("amount") or "0.00"),
         )
         receipt = self.create_receipt(
-            transaction=transaction,
+            transaction=tx,
             row_ref=row_ref,
             bank_summary={"bankTransactionId": old.get("bankTransactionId")},
             amount=str(old.get("amount") or "0.00"),
-            idempotency_key=f"reissue:{receipt_id}",
+            idempotency_key=f"reissue:{receipt_id}:{uuid4()}",
             payload=dict(old.get("payload") or {}),
             actor_id=actor_id,
             tenant_id=tenant_id,
         )
         if receipt:
-            (transaction or self._connection).execute(
+            tx.execute(
                 "update app.output_invoice_receipts set reissued_from_receipt_id = %s where id = %s",
                 (receipt_id, receipt["id"]),
             )
             receipt["reissuedFromReceiptId"] = receipt_id
-            self._append_receipt_event(transaction or self._connection, row_id=receipt["id"], event_type="reissued", actor_id=actor_id, tenant_id=tenant_id, payload={"reason": reason, "fromReceiptId": receipt_id})
+            self._append_receipt_event(tx, row_id=receipt["id"], event_type="reissued", actor_id=actor_id, tenant_id=tenant_id, payload={"reason": reason, "fromReceiptId": receipt_id})
         return receipt
 
     @staticmethod

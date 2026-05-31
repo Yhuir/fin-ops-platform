@@ -258,6 +258,74 @@ class AppSettingsServiceTests(unittest.TestCase):
         )
         self.assertEqual(audit["metadata"]["source"]["source_name"], "银行流水标签ui2.numbers")
 
+    def test_no_oa_tag_selection_tracks_bank_rule_labels_and_excludes_turnover_third_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    {
+                        **self._external_rule("external_rule_borrow_out"),
+                        "output_primary_label": "外部往来款付款",
+                        "output_sub_label": "借出款",
+                        "output_third_label": "公司往来",
+                        "category_third_label": "公司往来",
+                        "turnover_family": "company",
+                    },
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["费用", "手续费"],
+                        "source": "system",
+                        "status": "active",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "手续费",
+                        "direction": "any",
+                        "account_scope": {"type": "any", "values": []},
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "contains_any": ["手续费"],
+                            "contains_all": [],
+                            "exact_any": [],
+                            "regex_any": [],
+                            "none_of": [],
+                        },
+                    },
+                ],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+
+            initial_selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+            current_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()
+            renamed_rules = []
+            for rule in current_rules["active_rules"]:
+                next_rule = dict(rule)
+                if rule["code"] == "fee":
+                    next_rule["output_primary_label"] = "运营费用"
+                    next_rule["output_sub_label"] = "银行手续费"
+                    next_rule["label"] = "银行手续费"
+                renamed_rules.append(next_rule)
+            saved_rules = app._app_settings_service.update_bank_auto_tag_rules(
+                {
+                    "expected_version": current_rules["version"],
+                    "active_rules": renamed_rules,
+                    "archived_rules": current_rules["archived_rules"],
+                },
+                actor_id="settings-owner",
+            )
+            updated_selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+
+        self.assertEqual(initial_selection["bank_auto_tag_rules_version"], 1)
+        external_tag = next(tag for tag in initial_selection["active_tags"] if tag["code"] == "external_rule_borrow_out")
+        self.assertEqual(external_tag["output_primary_label"], "外部往来款付款")
+        self.assertEqual(external_tag["output_sub_label"], "借出款")
+        self.assertNotIn("output_third_label", external_tag)
+        self.assertNotIn("category_third_label", external_tag)
+        self.assertNotIn("turnover_family", external_tag)
+        self.assertEqual(updated_selection["bank_auto_tag_rules_version"], saved_rules["version"])
+        fee_tag = next(tag for tag in updated_selection["active_tags"] if tag["code"] == "fee")
+        self.assertEqual(fee_tag["output_primary_label"], "运营费用")
+        self.assertEqual(fee_tag["output_sub_label"], "银行手续费")
+
     def test_settings_payload_includes_bank_transaction_tags_and_pending_invoice_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

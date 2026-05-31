@@ -188,6 +188,37 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
+        output_invoice_collection_paths = {
+            APP_ROOT / "routes_output_invoice_collections.py",
+            SERVICES_ROOT / "output_invoice_collection_lifecycle_service.py",
+            SERVICES_ROOT / "output_invoice_collection_models.py",
+            SERVICES_ROOT / "output_invoice_collection_receipt_service.py",
+            SERVICES_ROOT / "output_invoice_collection_service.py",
+            SERVICES_ROOT / "output_invoice_collection_status_service.py",
+            SERVICES_ROOT / "invoice_usage_collection_read_model_refresh.py",
+            SERVICES_ROOT / "invoice_usage_collection_sql_projection.py",
+            SERVICES_ROOT / "postgres_repositories" / "output_invoice_collection.py",
+        }
+        forbidden_modules = {
+            "redis",
+            "pika",
+            "fin_ops_platform.services.runtime_redis",
+            "fin_ops_platform.services.rabbitmq_runtime",
+        }
+        violations: list[str] = []
+
+        for path in sorted(output_invoice_collection_paths):
+            if not path.exists():
+                violations.append(f"{_relative(path)} is missing")
+                continue
+            modules = _imported_modules(_parse(path))
+            imported_forbidden = sorted(module for module in forbidden_modules if module in modules)
+            if imported_forbidden:
+                violations.append(f"{_relative(path)} imports {imported_forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_oa_mongo_adapter_direct_use_is_allowlisted(self) -> None:
         allowed_paths = {
             "backend/src/fin_ops_platform/app/oa_attachment_audit.py",

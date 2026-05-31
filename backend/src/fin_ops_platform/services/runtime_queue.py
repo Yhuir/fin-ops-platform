@@ -5,25 +5,12 @@ import os
 from typing import Any, Iterable
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection
+from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
 
 
 PRIORITY_VALUES = {"low", "normal", "high", "urgent"}
 PUBLISH_STATUS_VALUES = {"unpublished", "publishing", "published", "failed"}
-DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES = (
-    "workbench.read_model.refresh",
-    "search.read_model.refresh",
-    "pending_invoice.read_model.refresh",
-    "bank_account_balance.read_model.refresh",
-    "bank_detail.read_model.refresh",
-    "input_invoice_usage.read_model.refresh",
-    "output_invoice_collection.read_model.refresh",
-    "oa_pending_payment.read_model.refresh",
-    "cost_statistics.read_model.refresh",
-    "tax_offset.read_model.refresh",
-    "oa.sync",
-    "file_object.gridfs_migration",
-    "import.process.requested",
-)
+DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES = rabbitmq_dispatch_event_types()
 
 
 @dataclass(frozen=True)

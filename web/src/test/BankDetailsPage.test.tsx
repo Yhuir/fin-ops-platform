@@ -376,36 +376,50 @@ describe("Bank details page", () => {
     const fetchMock = installMockApiFetch({
       bankDetailTransactionReadModelStatuses: ["refreshing", "refreshing", "fresh"],
     });
+    const autoTagRulesListener = vi.fn();
+    window.addEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
     renderBankDetailsPage();
 
-    const page = await screen.findByTestId("bank-details-page");
-    await within(page).findByText("云南溯源科技有限公司");
-    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+    try {
+      const page = await screen.findByTestId("bank-details-page");
+      await within(page).findByText("云南溯源科技有限公司");
+      const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
 
-    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
-    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "人员薪酬");
-    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+      await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+      const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+      await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "人员薪酬");
+      await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
-    await waitFor(() => {
-      expect(screen.getAllByText("规则已保存，银行明细正在刷新。").length).toBeGreaterThan(0);
-    });
-    await waitFor(() => {
-      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
-    });
-    await waitFor(() => {
-      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests + 2);
-      expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
-    }, { timeout: 4000 });
-    const saveCall = fetchMock.mock.calls.find(([input, init]) => (
-      new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
-      && init?.method === "PUT"
-    ));
-    expect(saveCall).toBeTruthy();
-    expect(JSON.parse(String(saveCall?.[1]?.body || "{}")).refresh_scope).toEqual({
-      date_from: "2026-01-01",
-      date_to: "2026-12-31",
-    });
+      await waitFor(() => {
+        expect(screen.getAllByText("规则已保存，银行明细正在刷新。").length).toBeGreaterThan(0);
+      });
+      await waitFor(() => {
+        expect(autoTagRulesListener).toHaveBeenCalled();
+        expect(autoTagRulesListener.mock.calls[0][0].detail).toEqual(expect.objectContaining({
+          version: 2,
+          source: "bank_details_auto_tag_rules",
+          action: "saved",
+        }));
+      });
+      await waitFor(() => {
+        expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
+      });
+      await waitFor(() => {
+        expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests + 2);
+        expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
+      }, { timeout: 4000 });
+      const saveCall = fetchMock.mock.calls.find(([input, init]) => (
+        new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
+        && init?.method === "PUT"
+      ));
+      expect(saveCall).toBeTruthy();
+      expect(JSON.parse(String(saveCall?.[1]?.body || "{}")).refresh_scope).toEqual({
+        date_from: "2026-01-01",
+        date_to: "2026-12-31",
+      });
+    } finally {
+      window.removeEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
+    }
   });
 
   test("reapplying automatic tag rules refreshes bank details without saving changes", async () => {

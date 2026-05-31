@@ -23,7 +23,7 @@ export type InputInvoiceUsageQuery = {
   filters: InputInvoiceUsageFilter[];
   sortField: string;
   sortDirection: InputInvoiceUsageSortDirection | "";
-  activeWorkflow: "oaReverse" | "paymentRules" | null;
+  activeWorkflow: "oaReverse" | "paymentRules" | "export" | null;
   detailTarget: InputInvoiceUsageDetailTarget | null;
 };
 
@@ -187,6 +187,9 @@ export type InputInvoiceUsageOaReversePreviewResponse = {
   previewId?: string;
   previewHash?: string;
   source?: string;
+  targetApplicantCode?: string;
+  targetApplicantName?: string;
+  targetApplicants?: InputInvoiceUsageOaReverseTargetApplicant[];
   invoiceCount: number;
   totalWithTax: string;
   groups: Array<{
@@ -194,6 +197,7 @@ export type InputInvoiceUsageOaReversePreviewResponse = {
     targetApplicantName: string;
     invoiceCount: number;
     totalWithTax: string;
+    invoiceRows?: InputInvoiceUsageOaReverseInvoice[];
     candidateInvoiceIds?: string[];
     candidateInvoices?: InputInvoiceUsageOaReverseInvoice[];
     rejectedInvoices?: Array<{
@@ -203,6 +207,7 @@ export type InputInvoiceUsageOaReversePreviewResponse = {
       reason: string;
     }>;
   }>;
+  invoiceRows?: InputInvoiceUsageOaReverseInvoice[];
   candidateInvoices?: InputInvoiceUsageOaReverseInvoice[];
   warnings?: string[];
   canCreateDraft?: boolean;
@@ -214,6 +219,11 @@ export type InputInvoiceUsageOaReversePreviewResponse = {
     canRevoke?: boolean;
     canManualStatus?: boolean;
   };
+};
+
+export type InputInvoiceUsageOaReverseTargetApplicant = {
+  code: string;
+  name: string;
 };
 
 export type InputInvoiceUsageOaReverseInvoice = {
@@ -238,10 +248,16 @@ export type InputInvoiceUsageOaReverseBatch = {
   batchId: string;
   version: number;
   status: string;
+  invoiceIds: string[];
   selectedInvoiceIds: string[];
   totalWithTax: string;
+  previewSummary?: {
+    invoiceCount: number;
+    totalWithTax: string;
+  };
   targetApplicantCode?: string | null;
   targetApplicantName?: string | null;
+  invoiceRows: InputInvoiceUsageOaReverseInvoice[];
   invoices: InputInvoiceUsageOaReverseInvoice[];
   rejectedInvoices: InputInvoiceUsageOaReverseRejectedInvoice[];
   oaDraftId?: string | null;
@@ -280,4 +296,19 @@ export type ManualInputInvoiceUsageOaReverseStatusRequest = InputInvoiceUsageOaR
   decision: "submitted" | "not_submitted";
   reason: string;
   candidateOaRowId?: string;
+};
+
+export type InputInvoiceUsageExportPreview = {
+  fileName: string;
+  rowCount: number;
+  scopeLabel: string;
+  columns: string[];
+  sampleRows: Array<Record<string, string>>;
+  readModelStatus?: string;
+  message?: string;
+};
+
+export type InputInvoiceUsageExportDownload = {
+  blob: Blob;
+  fileName: string;
 };

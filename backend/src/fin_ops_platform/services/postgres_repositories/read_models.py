@@ -1192,7 +1192,7 @@ class PostgresReadModelRepository:
             select
                 count(*) as count,
                 coalesce(sum(oa_amount), 0) as oa_amount_total,
-                coalesce(sum(bank_amount), 0) as bank_paid_total
+                coalesce(sum(coalesce(bank_paid_total, bank_amount)), 0) as bank_paid_total
             from read_model.oa_pending_payment_rows
             where {where_sql}
             """,
@@ -1268,7 +1268,7 @@ class PostgresReadModelRepository:
                     insert into read_model.oa_pending_payment_rows(
                         row_id, scope_key, scope_month, oa_id, oa_applicant, oa_application_type,
                         oa_project_name, oa_amount, payment_status, payment_status_label,
-                        bank_transaction_id, bank_trade_time, bank_amount, bank_name,
+                        bank_transaction_id, bank_trade_time, bank_amount, bank_paid_total, bank_name,
                         bank_counterparty_name, bank_summary, invoice_id, invoice_no,
                         invoice_date, seller_name, invoice_total_with_tax, searchable_text,
                         source_versions, payload, raw_payload
@@ -1277,7 +1277,7 @@ class PostgresReadModelRepository:
                         %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(oa_id)s, %(oa_applicant)s,
                         %(oa_application_type)s, %(oa_project_name)s, %(oa_amount)s, %(payment_status)s,
                         %(payment_status_label)s, %(bank_transaction_id)s, %(bank_trade_time)s::timestamptz,
-                        %(bank_amount)s, %(bank_name)s, %(bank_counterparty_name)s, %(bank_summary)s,
+                        %(bank_amount)s, %(bank_paid_total)s, %(bank_name)s, %(bank_counterparty_name)s, %(bank_summary)s,
                         %(invoice_id)s, %(invoice_no)s, %(invoice_date)s::date, %(seller_name)s,
                         %(invoice_total_with_tax)s, %(searchable_text)s, %(source_versions)s,
                         %(payload)s, %(raw_payload)s
@@ -1294,6 +1294,7 @@ class PostgresReadModelRepository:
                         bank_transaction_id = excluded.bank_transaction_id,
                         bank_trade_time = excluded.bank_trade_time,
                         bank_amount = excluded.bank_amount,
+                        bank_paid_total = excluded.bank_paid_total,
                         bank_name = excluded.bank_name,
                         bank_counterparty_name = excluded.bank_counterparty_name,
                         bank_summary = excluded.bank_summary,
@@ -1334,6 +1335,49 @@ class PostgresReadModelRepository:
             row_count=row_count,
             source_versions=source_versions,
         )
+
+    def get_oa_pending_payment_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        return self._get_oa_pending_payment_row("row_id = %s", (text(row_id),))
+
+    def get_oa_pending_payment_row_by_oa_id(self, oa_id: str) -> dict[str, Any] | None:
+        return self._get_oa_pending_payment_row("oa_id = %s", (text(oa_id),))
+
+    def get_oa_pending_payment_row_by_bank_transaction_id(self, bank_transaction_id: str) -> dict[str, Any] | None:
+        return self._get_oa_pending_payment_row("bank_transaction_id = %s", (text(bank_transaction_id),))
+
+    def get_oa_pending_payment_row_by_invoice_id(self, invoice_id: str) -> dict[str, Any] | None:
+        return self._get_oa_pending_payment_row("invoice_id = %s", (text(invoice_id),))
+
+    def _get_oa_pending_payment_row(self, predicate_sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            f"""
+            select scope_key, source_versions, payload, raw_payload
+            from read_model.oa_pending_payment_rows
+            where {predicate_sql}
+            order by generated_at desc, scope_key desc, row_id
+            limit 1
+            """,
+            params,
+        )
+        if isinstance(row, dict):
+            payload = _read_model_payload(row)
+            scope_key = text(row.get("scope_key")) or "all"
+            source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+            return {
+                "row": payload if isinstance(payload, dict) else None,
+                "refresh_status": self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key=scope_key),
+                "source_versions": source_versions,
+                "read_model_scope_key": scope_key,
+            }
+        scope_row = self._invoice_relation_scope_row(scope_table_name="read_model.oa_pending_payment_scopes", scope_key="all")
+        if not isinstance(scope_row, dict):
+            return None
+        return {
+            "row": None,
+            "refresh_status": self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key="all"),
+            "source_versions": scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {},
+            "read_model_scope_key": text(scope_row.get("scope_key")) or "all",
+        }
 
     def _list_invoice_relation_rows(
         self,
@@ -6204,6 +6248,7 @@ def _oa_pending_payment_read_model_record(row: dict[str, Any], scope_key: str) -
         "bank_transaction_id": text(bank.get("primaryBankTransactionId")),
         "bank_trade_time": trade_time or None,
         "bank_amount": decimal_text(bank.get("amount") or bank.get("debitAmount")),
+        "bank_paid_total": decimal_text(bank.get("paidTotal") or bank.get("amount") or bank.get("debitAmount")),
         "bank_name": text(bank.get("bankName")),
         "bank_counterparty_name": text(bank.get("counterpartyName")),
         "bank_summary": text(bank.get("summary")),

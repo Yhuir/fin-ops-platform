@@ -2,11 +2,13 @@ import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
 import IconButton from "@mui/material/IconButton";
+import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
@@ -23,6 +25,7 @@ import type {
   CreateInputInvoiceUsageOaReverseBatchRequest,
   InputInvoiceUsageOaReverseBatch,
   InputInvoiceUsageOaReverseInvoice,
+  InputInvoiceUsageOaReverseTargetApplicant,
   InputInvoiceUsageOaReverseVersionedRequest,
   ManualInputInvoiceUsageOaReverseStatusRequest,
   RevokeInputInvoiceUsageOaReverseDraftRequest,
@@ -31,6 +34,7 @@ import type {
 export type OaReversePreviewRequest = {
   sourceFilters: unknown[];
   selectedInvoiceIds: string[];
+  targetApplicantCode?: string | null;
 };
 
 export type OaReversePreviewGroup = {
@@ -38,6 +42,7 @@ export type OaReversePreviewGroup = {
   targetApplicantName: string;
   invoiceCount: number;
   totalWithTax: string;
+  invoiceRows?: InputInvoiceUsageOaReverseInvoice[];
   candidateInvoiceIds?: string[];
   candidateInvoices?: InputInvoiceUsageOaReverseInvoice[];
   rejectedInvoices?: OaReverseRejectedInvoice[];
@@ -54,9 +59,13 @@ export type OaReversePreviewPayload = {
   previewId?: string;
   previewHash?: string;
   source?: string;
+  targetApplicantCode?: string;
+  targetApplicantName?: string;
+  targetApplicants?: InputInvoiceUsageOaReverseTargetApplicant[];
   invoiceCount: number;
   totalWithTax: string;
   groups: OaReversePreviewGroup[];
+  invoiceRows?: InputInvoiceUsageOaReverseInvoice[];
   candidateInvoices?: InputInvoiceUsageOaReverseInvoice[];
   warnings?: string[];
   canCreateDraft?: boolean;
@@ -104,7 +113,12 @@ export default function OaReverseWorkspaceDrawer({
   const [feedback, setFeedback] = useState<string | null>(null);
   const [revokeReason, setRevokeReason] = useState("");
   const [manualReason, setManualReason] = useState("");
-  const request = useMemo(() => ({ sourceFilters, selectedInvoiceIds }), [sourceFilters, selectedInvoiceIds]);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
+  const [targetApplicantCode, setTargetApplicantCode] = useState<string | null>(null);
+  const request = useMemo(
+    () => ({ sourceFilters, selectedInvoiceIds, targetApplicantCode }),
+    [sourceFilters, selectedInvoiceIds, targetApplicantCode],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -116,6 +130,8 @@ export default function OaReverseWorkspaceDrawer({
       setFeedback(null);
       setRevokeReason("");
       setManualReason("");
+      setSelectedCandidateIds([]);
+      setTargetApplicantCode(null);
       return undefined;
     }
 
@@ -146,14 +162,21 @@ export default function OaReverseWorkspaceDrawer({
     };
   }, [loadPreview, open, request]);
 
-  const candidateInvoices = preview ? invoicesFromPreview(preview) : [];
+  const candidateInvoices = useMemo(() => (preview ? invoicesFromPreview(preview) : []), [preview]);
+  const candidateIdsKey = candidateInvoices.map((invoice) => invoice.invoiceId).join("\n");
+  useEffect(() => {
+    setSelectedCandidateIds(candidateInvoices.map((invoice) => invoice.invoiceId));
+  }, [candidateIdsKey]);
+  const selectedCandidateIdSet = useMemo(() => new Set(selectedCandidateIds), [selectedCandidateIds]);
+  const targetApplicants = preview?.targetApplicants ?? [];
+  const selectedTargetApplicantCode = targetApplicantCode ?? preview?.targetApplicantCode ?? "";
   const rejected = preview ? rejectedInvoices(preview) : [];
   const canCreateBatch = Boolean(
     preview
     && createBatch
     && preview.previewId
     && preview.canCreateDraft
-    && candidateInvoices.length > 0
+    && selectedCandidateIds.length > 0
     && (preview.permissions?.canCreateBatch ?? true),
   );
   const canCreateDraft = Boolean(batch && createDraft && (batch.canCreateDraft ?? true) && !batch.oaDraftUrl);
@@ -190,7 +213,7 @@ export default function OaReverseWorkspaceDrawer({
         previewId: preview.previewId ?? "",
         expectedPreviewHash: preview.previewHash,
         idempotencyKey: createIdempotencyKey("input-invoice-usage-oa-reverse-batch"),
-        selectedInvoiceIds: candidateInvoices.map((invoice) => invoice.invoiceId),
+        selectedInvoiceIds: selectedCandidateIds,
         targetApplicantCode: firstTargetApplicantCode(preview),
       }),
       "本地批次已创建。",
@@ -271,7 +294,7 @@ export default function OaReverseWorkspaceDrawer({
           <Box>
             <Typography component="h2" variant="h6" fontWeight={900}>以发票反提 OA</Typography>
             <Typography variant="caption" color="text.secondary">
-              只读预览，候选数、合计和拒绝原因均以后端返回为准
+              候选数、合计、拒绝原因和目标申请人均以后端返回为准
             </Typography>
           </Box>
           <IconButton aria-label="关闭以发票反提 OA 工作流" onClick={onClose}>
@@ -294,6 +317,21 @@ export default function OaReverseWorkspaceDrawer({
                 <SummaryMetric label="候选发票数" value={String(preview.invoiceCount)} />
                 <SummaryMetric label="候选价税合计" value={preview.totalWithTax} />
               </Box>
+              {targetApplicants.length > 0 ? (
+                <TextField
+                  select
+                  size="small"
+                  label="目标 OA 申请人"
+                  value={selectedTargetApplicantCode}
+                  onChange={(event) => setTargetApplicantCode(event.target.value)}
+                >
+                  {targetApplicants.map((applicant) => (
+                    <MenuItem key={applicant.code} value={applicant.code}>
+                      {applicant.name}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              ) : null}
               {preview.warnings && preview.warnings.length > 0 ? (
                 <Stack spacing={1}>
                   {preview.warnings.map((warning) => <Alert key={warning} severity="info">{warning}</Alert>)}
@@ -333,10 +371,18 @@ export default function OaReverseWorkspaceDrawer({
                 </Stack>
               </Section>
               <Section title="候选发票清单">
+                {candidateInvoices.length > 0 ? (
+                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                    <Button size="small" onClick={() => setSelectedCandidateIds(candidateInvoices.map((invoice) => invoice.invoiceId))}>全选候选</Button>
+                    <Button size="small" onClick={() => setSelectedCandidateIds([])}>清空选择</Button>
+                    <Chip size="small" variant="outlined" label={`已选 ${selectedCandidateIds.length} 张`} />
+                  </Stack>
+                ) : null}
                 <TableContainer component={Paper} variant="outlined">
                   <Table size="small" aria-label="反提 OA 候选发票清单">
                     <TableHead>
                       <TableRow>
+                        <TableCell padding="checkbox">选择</TableCell>
                         <TableCell>发票号码</TableCell>
                         <TableCell>销方</TableCell>
                         <TableCell>开票日期</TableCell>
@@ -347,6 +393,26 @@ export default function OaReverseWorkspaceDrawer({
                     <TableBody>
                       {candidateInvoices.map((invoice) => (
                         <TableRow key={invoice.invoiceId}>
+                          <TableCell padding="checkbox">
+                            <Checkbox
+                              size="small"
+                              checked={selectedCandidateIdSet.has(invoice.invoiceId)}
+                              inputProps={{ "aria-label": `选择候选发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}` }}
+                              onChange={(event) => {
+                                setSelectedCandidateIds((current) => {
+                                  const next = new Set(current);
+                                  if (event.target.checked) {
+                                    next.add(invoice.invoiceId);
+                                  } else {
+                                    next.delete(invoice.invoiceId);
+                                  }
+                                  return candidateInvoices
+                                    .map((candidate) => candidate.invoiceId)
+                                    .filter((invoiceId) => next.has(invoiceId));
+                                });
+                              }}
+                            />
+                          </TableCell>
                           <TableCell>{invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}</TableCell>
                           <TableCell>{invoice.sellerName || "-"}</TableCell>
                           <TableCell>{invoice.issueDate || "-"}</TableCell>
@@ -356,7 +422,7 @@ export default function OaReverseWorkspaceDrawer({
                       ))}
                       {candidateInvoices.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5}>当前预览未返回候选发票。</TableCell>
+                          <TableCell colSpan={6}>当前预览未返回候选发票。</TableCell>
                         </TableRow>
                       ) : null}
                     </TableBody>
@@ -473,7 +539,16 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
   for (const invoice of preview.candidateInvoices ?? []) {
     byId.set(invoice.invoiceId, invoice);
   }
+  for (const invoice of preview.invoiceRows ?? []) {
+    byId.set(invoice.invoiceId, invoice);
+  }
   for (const group of preview.groups) {
+    for (const invoice of group.invoiceRows ?? []) {
+      byId.set(invoice.invoiceId, {
+        ...invoice,
+        targetApplicantName: invoice.targetApplicantName || group.targetApplicantName,
+      });
+    }
     for (const invoice of group.candidateInvoices ?? []) {
       byId.set(invoice.invoiceId, {
         ...invoice,
@@ -503,10 +578,9 @@ function firstTargetApplicantCode(preview: OaReversePreviewPayload) {
 }
 
 function isManualFallbackStatus(status?: string | null, detectionStatus?: string | null) {
-  return [
-    status,
-    detectionStatus,
-  ].some((value) => value === "oa_detection_timeout" || value === "oa_detection_conflict" || value === "oa_detection_unavailable" || value === "oa_draft_failed");
+  const batchStatuses = new Set(["oa_detection_missing", "oa_detection_conflict", "oa_detection_unavailable"]);
+  const detectionStatuses = new Set(["missing", "conflict", "unavailable"]);
+  return batchStatuses.has(String(status || "")) || detectionStatuses.has(String(detectionStatus || ""));
 }
 
 function createIdempotencyKey(prefix: string) {

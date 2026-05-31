@@ -19,22 +19,22 @@ import type {
 type CollectionStatusReminderDrawerProps = {
   open: boolean;
   row: OutputInvoiceCollectionRow | null;
+  statusOptions: Array<{ code: string; label: string }>;
   onSaveStatus: (rowId: string, payload: OutputInvoiceCollectionStatusUpdateRequest) => Promise<void>;
   onSaveReminder: (rowId: string, payload: OutputInvoiceCollectionReminderUpdateRequest) => Promise<void>;
+  onClearStatus: (rowId: string, expectedVersion: number) => Promise<void>;
+  onCancelReminder: (rowId: string, reminderId: string) => Promise<void>;
   onClose: () => void;
 };
-
-const statusOptions = [
-  { code: "pending_collection", label: "待收款" },
-  { code: "pending_red_invoice", label: "待冲红" },
-  { code: "collected", label: "已收款" },
-];
 
 export default function CollectionStatusReminderDrawer({
   open,
   row,
+  statusOptions,
   onSaveStatus,
   onSaveReminder,
+  onClearStatus,
+  onCancelReminder,
   onClose,
 }: CollectionStatusReminderDrawerProps) {
   const [statusCode, setStatusCode] = useState("");
@@ -85,6 +85,36 @@ export default function CollectionStatusReminderDrawer({
     }
   };
 
+  const handleClearStatus = async () => {
+    if (!row) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onClearStatus(row.id, row.collectionStatus.manualOverride?.version ?? 0);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "撤销手动状态失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCancelReminder = async () => {
+    if (!row?.collectionStatus.reminder?.id) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onCancelReminder(row.id, row.collectionStatus.reminder.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "取消提醒失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Drawer
       anchor="right"
@@ -113,6 +143,11 @@ export default function CollectionStatusReminderDrawer({
               <MenuItem key={option.code} value={option.code}>{option.label}</MenuItem>
             ))}
           </TextField>
+          {row?.collectionStatus.manualOverride ? (
+            <Button variant="outlined" color="warning" onClick={handleClearStatus} disabled={submitting}>
+              撤销手动状态
+            </Button>
+          ) : null}
           <TextField
             label="预计收款日期"
             type="date"
@@ -132,6 +167,11 @@ export default function CollectionStatusReminderDrawer({
             InputLabelProps={{ shrink: true }}
           />
           <TextField label="提醒备注" size="small" multiline minRows={2} value={reminderNote} onChange={(event) => setReminderNote(event.target.value)} />
+          {row?.collectionStatus.reminder?.id ? (
+            <Button variant="outlined" color="warning" onClick={handleCancelReminder} disabled={submitting}>
+              取消提醒
+            </Button>
+          ) : null}
           <Stack direction="row" spacing={1} justifyContent="flex-end">
             <Button onClick={onClose} disabled={submitting}>取消</Button>
             <Button variant="contained" onClick={handleSubmit} disabled={submitting || !statusCode}>保存</Button>

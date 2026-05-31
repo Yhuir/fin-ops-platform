@@ -41,6 +41,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         empty_batches = _json(app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted"))
 
         self.assertEqual(selection_response.status_code, 200)
+        self.assertEqual(selection_payload["bank_auto_tag_rules_version"], 1)
         self.assertEqual(selection_payload["selected_tag_codes"], [])
         self.assertIn("fee", [tag["code"] for tag in selection_payload["active_tags"]])
         self.assertEqual(empty_batches["batches"], [])
@@ -57,15 +58,54 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(_json(save_response)["selected_tag_codes"], ["fee"])
         self.assertEqual([batch["batch_type"] for batch in enabled_batches["batches"]], ["fee"])
 
+    def test_new_auto_tag_rule_is_available_but_not_selected_by_default(self) -> None:
+        app = build_application()
+        initial_selection = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
+        current_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        fee_rule = next(rule for rule in current_rules["active_rules"] if rule["code"] == "fee")
+        new_rule = {
+            **fee_rule,
+            "code": "",
+            "label": "短信平台费",
+            "output_primary_label": "平台费用",
+            "output_sub_label": "短信平台费",
+            "rules": {
+                **fee_rule["rules"],
+                "contains_any": ["短信平台费"],
+                "contains": ["短信平台费"],
+            },
+        }
+
+        saved_rules = app._app_settings_service.update_bank_auto_tag_rules(
+            {
+                "expected_version": current_rules["version"],
+                "active_rules": [*current_rules["active_rules"], new_rule],
+                "archived_rules": current_rules["archived_rules"],
+            },
+            actor_id="settings-owner",
+        )
+        updated_selection = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
+        new_tag_codes = [
+            tag["code"]
+            for tag in updated_selection["active_tags"]
+            if tag["output_primary_label"] == "平台费用" and tag["output_sub_label"] == "短信平台费"
+        ]
+
+        self.assertEqual(updated_selection["bank_auto_tag_rules_version"], saved_rules["version"])
+        self.assertEqual(updated_selection["selected_tag_codes"], initial_selection["selected_tag_codes"])
+        self.assertEqual(len(new_tag_codes), 1)
+        self.assertNotIn(new_tag_codes[0], updated_selection["selected_tag_codes"])
+
     def test_archived_selected_tag_is_removed_by_auto_tag_rule_update(self) -> None:
         app = build_application()
         selection = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
-        app.handle_request(
+        save_response = app.handle_request(
             "PUT",
             "/api/no-oa-bank-batches/tag-selection",
             body=json.dumps({"expected_version": selection["version"], "selected_tag_codes": ["salary"]}),
             headers={"Content-Type": "application/json"},
         )
+        saved_selection = _json(save_response)
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()
         salary = next(rule for rule in current["active_rules"] if rule["code"] == "salary")
 
@@ -80,6 +120,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         updated = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
 
         self.assertEqual(updated["selected_tag_codes"], [])
+        self.assertEqual(updated["version"], saved_selection["version"] + 1)
+        self.assertEqual(updated["bank_auto_tag_rules_version"], current["version"] + 1)
         self.assertNotIn("salary", [tag["code"] for tag in updated["active_tags"]])
         self.assertEqual(updated["inactive_selected_tag_codes"], [])
         audit = app._audit_service.as_dicts()[-1]
@@ -205,6 +247,50 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["error"], "no_oa_bank_batch_selection_cross_bank")
+
+    def test_selected_row_submit_rejects_single_sided_internal_transfer_selection(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="internal-transfer-single-side.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-03",
+                    "trade_time": "2026-05-03 10:20:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "1000.00",
+                    "credit_amount": "",
+                    "summary": "内部往来支出",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "internal_transfer"}],
+            actor="tester",
+        )
+        version = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))["version"]
+        app.handle_request(
+            "PUT",
+            "/api/no-oa-bank-batches/tag-selection",
+            body=json.dumps({"expected_version": version, "selected_tag_codes": ["internal_transfer"]}),
+            headers={"Content-Type": "application/json"},
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/api/no-oa-bank-batches/submit-selection",
+            body=json.dumps({"transaction_ids": [row_id]}),
+            headers={"Content-Type": "application/json"},
+        )
+        payload = _json(response)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "no_oa_bank_batch_selection_internal_transfer_requires_pair")
 
 
 if __name__ == "__main__":

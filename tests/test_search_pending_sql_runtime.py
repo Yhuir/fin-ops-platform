@@ -591,7 +591,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_schema_stale")])
 
-    def test_pending_invoice_api_source_version_stale_enqueues_refresh_without_sync_scan(self) -> None:
+    def test_pending_invoice_api_source_version_stale_serves_existing_rows_and_enqueues_refresh(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
@@ -631,8 +631,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["rows"][0]["id"], "txn-stale-version")
         self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertIn("pending_invoice_tag_groups_version_mismatch", payload["read_model_stale_reasons"])
         self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
 
     def test_pending_invoice_all_direction_miss_enqueues_expense_and_income_refresh_without_sync_scan(self) -> None:

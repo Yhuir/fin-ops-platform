@@ -49,6 +49,7 @@ worker_env_example() {
     oa-sync) printf '%s\n' "fin-ops.worker.oa-sync.env.example" ;;
     workbench) printf '%s\n' "fin-ops.worker.workbench.env.example" ;;
     workbench-matching) printf '%s\n' "fin-ops.worker.workbench-matching.env.example" ;;
+    bank-account-balance) printf '%s\n' "fin-ops.worker.bank-account-balance.env.example" ;;
     bank-detail) printf '%s\n' "fin-ops.worker.bank-detail.env.example" ;;
     search-pending) printf '%s\n' "fin-ops.worker.search-pending.env.example" ;;
     invoice-usage-collection) printf '%s\n' "fin-ops.worker.invoice-usage-collection.env.example" ;;

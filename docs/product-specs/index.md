@@ -14,6 +14,7 @@
 - `bank-details.md`：银行明细、自动标签、银行原始字段展示和联动刷新。
 - `no-oa-bank-batches.md`：免 OA 流水批量处理。
 - `pending-invoices.md`：待找发票、支出流水发票获取状态、规则和右侧工作流。
+- `oa-pending-payments.md`：OA 待付款核对、支付状态、支出流水和进项发票关联核对。
 - `tax-offset-and-etc.md`：税金抵扣、已认证发票、ETC 票据导入和对账。
 - `cost-statistics.md`：成本统计、项目范围、下钻和导出。
 - `turnover-management.md`：往来款管理、关系确认、利息和关联台同步。

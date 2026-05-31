@@ -4,15 +4,14 @@ from typing import Any
 
 from fin_ops_platform.services.rabbitmq_runtime import rabbitmq_event_routes
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueSettings
+from fin_ops_platform.services.runtime_worker_registry import (
+    read_model_event_types,
+    registration_by_worker_kind,
+    worker_registrations,
+)
 
 
-READ_MODEL_EVENT_TYPES: dict[str, tuple[str, str]] = {
-    "workbench.read_model.refresh": ("workbench", "workbench"),
-    "search.read_model.refresh": ("search", "search"),
-    "pending_invoice.read_model.refresh": ("pending_invoice", "pending_invoice"),
-    "cost_statistics.read_model.refresh": ("cost_statistics", "cost_statistics"),
-    "tax_offset.read_model.refresh": ("tax_offset", "tax_offset"),
-}
+READ_MODEL_EVENT_TYPES: dict[str, tuple[str, str]] = read_model_event_types()
 
 EMPTY_PERCENTILES = {"p50": None, "p95": None, "p99": None}
 
@@ -165,6 +164,9 @@ class RuntimeMonitoringRepository:
         total_refresh_count = int((refresh_failure_row or {}).get("read_model_refresh_total") or 0)
         failed_refresh_count = int((refresh_failure_row or {}).get("failed_count") or 0)
         rabbitmq_metrics = self._rabbitmq_metrics()
+        worker_metrics = self.dashboard_worker_metrics()
+        missing_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "required_worker_missing")
+        stale_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "worker_heartbeat_stale")
         return {
             "queue_backlog": queue_backlog,
             "dirty_scopes": dirty_scopes,
@@ -172,6 +174,9 @@ class RuntimeMonitoringRepository:
             "max_pending_age_seconds": max_pending_age_seconds,
             "oldest_pending_event_age_seconds": max_pending_age_seconds,
             "worker_heartbeat_lag_seconds": (worker_lag_row or {}).get("max_worker_heartbeat_lag_seconds"),
+            "worker_metrics": worker_metrics,
+            "missing_required_worker_count": missing_required_worker_count,
+            "stale_required_worker_count": stale_required_worker_count,
             "read_model_refresh_duration_ms": {
                 "p50": (refresh_duration_row or {}).get("p50_ms"),
                 "p95": (refresh_duration_row or {}).get("p95_ms"),
@@ -566,16 +571,38 @@ class RuntimeMonitoringRepository:
             order by worker_kind, last_seen_at desc
             """
         )
-        return [
-            {
-                "worker_id": str(row.get("worker_id") or ""),
-                "worker_kind": str(row.get("worker_kind") or "unknown"),
-                "worker_status": str(row.get("status") or ""),
-                "heartbeat_lag_seconds": _optional_float(row.get("heartbeat_lag_seconds")),
-                "status": "available",
-            }
+        latest_by_kind: dict[str, dict[str, Any]] = {
+            str(row.get("worker_kind") or "unknown"): row
             for row in rows
-        ]
+        }
+        registrations_by_kind = registration_by_worker_kind()
+        worker_rows: list[dict[str, Any]] = []
+        emitted: set[str] = set()
+        for registration in worker_registrations(required_only=True):
+            row = latest_by_kind.get(registration.worker_kind)
+            emitted.add(registration.worker_kind)
+            if row is None:
+                worker_rows.append(
+                    {
+                        "worker_id": "",
+                        "worker_kind": registration.worker_kind,
+                        "worker_status": "missing",
+                        "heartbeat_lag_seconds": None,
+                        "required": True,
+                        "expected_event_types": list(registration.event_types),
+                        "expected_transport": "rabbitmq_or_postgres" if registration.rabbitmq_eligible else "postgres",
+                        "status": "missing",
+                        "warning_code": "required_worker_missing",
+                    }
+                )
+                continue
+            worker_rows.append(_worker_metric_row(row, registration=registration, required=True))
+        for worker_kind, row in latest_by_kind.items():
+            if worker_kind in emitted:
+                continue
+            registration = registrations_by_kind.get(worker_kind)
+            worker_rows.append(_worker_metric_row(row, registration=registration, required=False))
+        return worker_rows
 
 
 def _rabbitmq_dispatch_event_types() -> tuple[str, ...]:
@@ -601,3 +628,42 @@ def _optional_float(value: object) -> float | None:
         return round(float(value), 3)
     except (TypeError, ValueError):
         return None
+
+
+def _worker_metric_row(
+    row: dict[str, Any],
+    *,
+    registration: Any | None,
+    required: bool,
+) -> dict[str, Any]:
+    heartbeat_lag_seconds = _optional_float(row.get("heartbeat_lag_seconds"))
+    stale_after_seconds = (
+        int(registration.heartbeat_stale_after_seconds)
+        if registration is not None
+        else None
+    )
+    is_stale = (
+        required
+        and heartbeat_lag_seconds is not None
+        and stale_after_seconds is not None
+        and heartbeat_lag_seconds > stale_after_seconds
+    )
+    payload = {
+        "worker_id": str(row.get("worker_id") or ""),
+        "worker_kind": str(row.get("worker_kind") or "unknown"),
+        "worker_status": str(row.get("status") or ""),
+        "heartbeat_lag_seconds": heartbeat_lag_seconds,
+        "required": required,
+        "expected_event_types": list(registration.event_types) if registration is not None else [],
+        "expected_transport": (
+            "rabbitmq_or_postgres"
+            if registration is not None and registration.rabbitmq_eligible
+            else "postgres"
+            if registration is not None
+            else "unknown"
+        ),
+        "status": "stale" if is_stale else "available",
+    }
+    if is_stale:
+        payload["warning_code"] = "worker_heartbeat_stale"
+    return payload

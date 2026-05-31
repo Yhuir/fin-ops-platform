@@ -14,6 +14,7 @@ export type InputInvoiceUsageDetailTarget = {
   kind: "invoice" | "bank" | "oa" | "relationList";
   id: string;
   rowId?: string;
+  relationKind?: string;
 };
 
 export type InputInvoiceUsageDetailField = {
@@ -34,10 +35,10 @@ export type InputInvoiceUsageDetailPayload = {
   sections: InputInvoiceUsageDetailSection[];
 };
 
-type InputInvoiceUsageDetailDrawerProps = {
+type InputInvoiceUsageDetailDrawerProps<TTarget extends InputInvoiceUsageDetailTarget> = {
   open: boolean;
-  target: InputInvoiceUsageDetailTarget | null;
-  loadDetail: (target: InputInvoiceUsageDetailTarget) => Promise<InputInvoiceUsageDetailPayload>;
+  target: TTarget | null;
+  loadDetail: (target: TTarget) => Promise<InputInvoiceUsageDetailPayload>;
   variant?: "temporary" | "persistent";
   onClose: () => void;
 };
@@ -49,13 +50,13 @@ const fallbackTitles: Record<InputInvoiceUsageDetailTarget["kind"], string> = {
   relationList: "关联明细",
 };
 
-export default function InputInvoiceUsageDetailDrawer({
+export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoiceUsageDetailTarget>({
   open,
   target,
   loadDetail,
   variant = "temporary",
   onClose,
-}: InputInvoiceUsageDetailDrawerProps) {
+}: InputInvoiceUsageDetailDrawerProps<TTarget>) {
   const [detail, setDetail] = useState<InputInvoiceUsageDetailPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

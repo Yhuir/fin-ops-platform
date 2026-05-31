@@ -2,6 +2,7 @@ import type {
   NoOaBankBatch,
   NoOaBankBatchDetail,
   NoOaBankBatchDetailRow,
+  NoOaBankBatchReadModelStatus,
   NoOaBankBatchTagDefinition,
   NoOaBankBatchTagSelection,
   NoOaBankBatchMutationResult,
@@ -117,6 +118,8 @@ type ApiNoOaBankBatchTagDefinition = {
 
 type ApiNoOaBankBatchTagSelection = {
   version?: number | null;
+  bank_auto_tag_rules_version?: number | null;
+  bankAutoTagRulesVersion?: number | null;
   selected_tag_codes?: unknown[] | null;
   selectedTagCodes?: unknown[] | null;
   inactive_selected_tag_codes?: unknown[] | null;
@@ -128,6 +131,10 @@ type ApiNoOaBankBatchTagSelection = {
 type ApiNoOaBankBatchesResponse = {
   summary?: ApiNoOaBankBatchSummary;
   batches?: ApiNoOaBankBatch[];
+  read_model_status?: string | null;
+  readModelStatus?: string | null;
+  read_model_stale_reasons?: unknown[] | null;
+  readModelStaleReasons?: unknown[] | null;
 };
 
 type ApiNoOaBankBatchDetailRow = {
@@ -206,6 +213,12 @@ function stringList(value: string[] | undefined) {
 
 function unknownStringList(value: unknown) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function normalizeReadModelStatus(value: string | null | undefined): NoOaBankBatchReadModelStatus {
+  return value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing"
+    ? value
+    : "fresh";
 }
 
 function countMap(value: Record<string, unknown> | null | undefined): NoOaBankBatchCountMap {
@@ -309,6 +322,7 @@ function mapTagDefinition(tag: ApiNoOaBankBatchTagDefinition = {}): NoOaBankBatc
 function mapTagSelection(payload: ApiNoOaBankBatchTagSelection = {}): NoOaBankBatchTagSelection {
   return {
     version: numberValue(payload.version),
+    bankAutoTagRulesVersion: numberValue(payload.bank_auto_tag_rules_version ?? payload.bankAutoTagRulesVersion),
     selectedTagCodes: unknownStringList(payload.selected_tag_codes ?? payload.selectedTagCodes),
     inactiveSelectedTagCodes: unknownStringList(payload.inactive_selected_tag_codes ?? payload.inactiveSelectedTagCodes),
     activeTags: Array.isArray(payload.active_tags ?? payload.activeTags)
@@ -384,6 +398,8 @@ export async function fetchNoOaBankBatches({
   return {
     summary: mapSummary(payload.summary),
     batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch) : [],
+    readModelStatus: normalizeReadModelStatus(payload.read_model_status ?? payload.readModelStatus),
+    readModelStaleReasons: unknownStringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),
   };
 }
 

@@ -19,6 +19,7 @@ type RedInvoiceRelationDrawerProps = {
   open: boolean;
   row: OutputInvoiceCollectionRow | null;
   onConfirm: (rowId: string, payload: OutputInvoiceCollectionRedRelationRequest) => Promise<void>;
+  onRevoke: (relationId: string) => Promise<void>;
   onClose: () => void;
 };
 
@@ -26,6 +27,7 @@ export default function RedInvoiceRelationDrawer({
   open,
   row,
   onConfirm,
+  onRevoke,
   onClose,
 }: RedInvoiceRelationDrawerProps) {
   const [relatedInvoiceId, setRelatedInvoiceId] = useState("");
@@ -66,6 +68,18 @@ export default function RedInvoiceRelationDrawer({
     }
   };
 
+  const handleRevoke = async (relationId: string) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onRevoke(relationId);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "撤销失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Drawer
       anchor="right"
@@ -93,9 +107,22 @@ export default function RedInvoiceRelationDrawer({
             <Stack spacing={0.75}>
               <Typography variant="subtitle2" fontWeight={900}>已有依据</Typography>
               {row.redInvoice.summaries.map((item) => (
-                <Typography key={`${item.id}:${item.source}`} variant="body2" color="text.secondary">
-                  {item.invoiceNo || item.id} / {item.source || "auto"} / {item.evidence || item.reason}
-                </Typography>
+                <Stack key={`${item.id}:${item.source}`} direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                  <Typography variant="body2" color="text.secondary">
+                    {item.invoiceNo || item.id} / {item.source || "auto"} / {item.evidence || item.reason}
+                  </Typography>
+                  {item.source === "manual" && item.relationId ? (
+                    <Button
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      disabled={submitting}
+                      onClick={() => handleRevoke(item.relationId || "")}
+                    >
+                      撤销人工关系 {item.invoiceNo || item.id}
+                    </Button>
+                  ) : null}
+                </Stack>
               ))}
             </Stack>
           ) : null}

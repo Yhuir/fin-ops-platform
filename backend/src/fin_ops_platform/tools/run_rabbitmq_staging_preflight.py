@@ -11,6 +11,11 @@ import sys
 from typing import Any, Mapping, Sequence, TextIO
 from urllib.parse import ParseResult, urlparse, urlunparse
 
+from fin_ops_platform.services.runtime_worker_registry import (
+    rabbitmq_dispatch_event_types,
+    worker_registrations,
+)
+
 
 PASS = "pass"
 FAIL = "fail"
@@ -174,19 +179,7 @@ def run_checks(
         "--check",
         "--shadow-publish",
     ]
-    for event_type in (
-        "workbench.read_model.refresh",
-        "search.read_model.refresh",
-        "pending_invoice.read_model.refresh",
-        "bank_detail.read_model.refresh",
-        "input_invoice_usage.read_model.refresh",
-        "output_invoice_collection.read_model.refresh",
-        "cost_statistics.read_model.refresh",
-        "tax_offset.read_model.refresh",
-        "oa.sync",
-        "file_object.gridfs_migration",
-        "import.process.requested",
-    ):
+    for event_type in rabbitmq_dispatch_event_types():
         dispatcher_command.extend(["--event-type", event_type])
     checks.append(
         _run_command_check(
@@ -198,71 +191,17 @@ def run_checks(
         )
     )
     worker_checks = {
-        "rabbitmq.consumer_worker_check.workbench": [
-            "--enable-workbench-read-model-refresh",
-            "--event-type",
-            "workbench.read_model.refresh",
+        f"rabbitmq.consumer_worker_check.{registration.instance_name.replace('-', '_')}": [
+            *registration.handler_flags,
+            *[
+                item
+                for event_type in registration.event_types
+                for item in ("--event-type", event_type)
+            ],
             "--worker-kind",
-            "workbench-read-model",
-        ],
-        "rabbitmq.consumer_worker_check.search_pending": [
-            "--enable-search-read-model-refresh",
-            "--enable-pending-invoice-read-model-refresh",
-            "--event-type",
-            "search.read_model.refresh",
-            "--event-type",
-            "pending_invoice.read_model.refresh",
-            "--worker-kind",
-            "search-pending-read-model",
-        ],
-        "rabbitmq.consumer_worker_check.bank_detail": [
-            "--enable-bank-detail-read-model-refresh",
-            "--event-type",
-            "bank_detail.read_model.refresh",
-            "--worker-kind",
-            "bank-detail-read-model",
-        ],
-        "rabbitmq.consumer_worker_check.invoice_usage_collection": [
-            "--enable-input-invoice-usage-read-model-refresh",
-            "--enable-output-invoice-collection-read-model-refresh",
-            "--event-type",
-            "input_invoice_usage.read_model.refresh",
-            "--event-type",
-            "output_invoice_collection.read_model.refresh",
-            "--worker-kind",
-            "invoice-usage-collection-read-model",
-        ],
-        "rabbitmq.consumer_worker_check.cost_tax": [
-            "--enable-cost-statistics-read-model-refresh",
-            "--enable-tax-offset-read-model-refresh",
-            "--event-type",
-            "cost_statistics.read_model.refresh",
-            "--event-type",
-            "tax_offset.read_model.refresh",
-            "--worker-kind",
-            "cost-tax-read-model",
-        ],
-        "rabbitmq.consumer_worker_check.oa_sync": [
-            "--enable-oa-sync",
-            "--event-type",
-            "oa.sync",
-            "--worker-kind",
-            "oa-sync",
-        ],
-        "rabbitmq.consumer_worker_check.file_migration": [
-            "--enable-file-object-migration",
-            "--event-type",
-            "file_object.gridfs_migration",
-            "--worker-kind",
-            "file-object-migration",
-        ],
-        "rabbitmq.consumer_worker_check.import_job": [
-            "--enable-import-job-processing",
-            "--event-type",
-            "import.process.requested",
-            "--worker-kind",
-            "import-job",
-        ],
+            registration.worker_kind,
+        ]
+        for registration in worker_registrations(rabbitmq_eligible_only=True)
     }
     for name, worker_args in worker_checks.items():
         checks.append(

@@ -29,10 +29,18 @@ class OutputInvoiceCollectionApiRoutes:
         self._sql_rows_provider = sql_rows_provider
         self._sql_all_rows_provider = sql_all_rows_provider
 
-    def rows(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
+    def rows(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
+        tenant_id = _tenant_id(session)
         sql_payload = self._sql_rows_provider(query) if callable(self._sql_rows_provider) else None
         if isinstance(sql_payload, dict):
             status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+            if status_code == HTTPStatus.OK:
+                all_rows_payload = self._sql_all_rows_provider(query) if callable(self._sql_all_rows_provider) else None
+                sql_payload = self._overlay_rows_payload(
+                    sql_payload,
+                    tenant_id=tenant_id,
+                    summary_rows=list(all_rows_payload.get("rows") or []) if isinstance(all_rows_payload, dict) else None,
+                )
             return status_code, sql_payload
         payload = self._query_service.list_rows(
             page=query.get("page", [1])[0],
@@ -44,10 +52,12 @@ class OutputInvoiceCollectionApiRoutes:
             filters=query.get("filters", [None])[0],
             sort_field=query.get("sort_field", ["invoice_date"])[0],
             sort_direction=query.get("sort_direction", ["desc"])[0],
+            tenant_id=tenant_id,
         )
         return HTTPStatus.OK, payload
 
-    def filter_options(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
+    def filter_options(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
+        tenant_id = _tenant_id(session)
         sql_rows_payload = self._sql_all_rows_provider(query) if callable(self._sql_all_rows_provider) else None
         if _is_response_like(sql_rows_payload):
             return HTTPStatus.ACCEPTED, _response_like_payload(sql_rows_payload)
@@ -59,6 +69,7 @@ class OutputInvoiceCollectionApiRoutes:
                 invoice_date_to=query.get("invoice_date_to", [None])[0],
                 month=query.get("month", [None])[0],
                 filters=query.get("filters", [None])[0],
+                tenant_id=tenant_id,
             )
             payload["read_model_status"] = "fresh"
             payload["read_model_scope_key"] = sql_rows_payload.get("read_model_scope_key")
@@ -70,6 +81,7 @@ class OutputInvoiceCollectionApiRoutes:
             invoice_date_to=query.get("invoice_date_to", [None])[0],
             month=query.get("month", [None])[0],
             filters=query.get("filters", [None])[0],
+            tenant_id=tenant_id,
         )
 
     def status_rules(self, *, session: OARequestSession | None = None) -> dict[str, Any]:
@@ -89,14 +101,14 @@ class OutputInvoiceCollectionApiRoutes:
     def relation_details(self, row_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
         return self._query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
 
-    def receipt_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def receipt_preview(self, payload: dict[str, Any], *, session: OARequestSession | None = None) -> dict[str, Any]:
         row_id = str(payload.get("rowId") or payload.get("row_id") or "").strip()
         if row_id:
             return self._receipt_service.preview(row_id, payload)
-        return self._query_service.receipt_preview(payload)
+        return self._query_service.receipt_preview(payload, tenant_id=_tenant_id(session))
 
-    def receipt_history(self, query: dict[str, list[str]]) -> dict[str, Any]:
-        return self._query_service.receipt_history(invoice_id=query.get("invoice_id", [""])[0])
+    def receipt_history(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> dict[str, Any]:
+        return self._query_service.receipt_history(invoice_id=query.get("invoice_id", [""])[0], tenant_id=_tenant_id(session))
 
     def set_collection_status(
         self,
@@ -261,6 +273,26 @@ class OutputInvoiceCollectionApiRoutes:
             return
         if not getattr(session, "can_admin_access", False):
             raise OutputInvoiceCollectionError("admin_only", "当前账户没有维护收据编号设置权限。", status_code=HTTPStatus.FORBIDDEN)
+
+    def _overlay_rows_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        tenant_id: str,
+        summary_rows: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        rows = self._query_service.apply_lifecycle_overlays_to_rows(
+            [row for row in list(payload.get("rows") or []) if isinstance(row, dict)],
+            tenant_id=tenant_id,
+        )
+        result = dict(payload)
+        result["rows"] = rows
+        if summary_rows is not None:
+            typed_summary_rows = [row for row in summary_rows if isinstance(row, dict)]
+            result["summary"] = self._query_service.summary_for_rows(
+                self._query_service.apply_lifecycle_overlays_to_rows(typed_summary_rows, tenant_id=tenant_id)
+            )
+        return result
 
 
 def _is_response_like(value: Any) -> bool:

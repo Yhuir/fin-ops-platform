@@ -21,7 +21,7 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
     """Local/test lifecycle adapter. Production uses the PostgreSQL repository."""
 
     def __init__(self) -> None:
-        self._overrides: dict[str, dict[str, Any]] = {}
+        self._overrides: dict[tuple[str, str], dict[str, Any]] = {}
         self._reminders: dict[str, dict[str, Any]] = {}
         self._red_relations: dict[str, dict[str, Any]] = {}
         self._receipt_settings: dict[str, Any] = {
@@ -35,7 +35,7 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
         self._receipt_events: list[dict[str, Any]] = []
         self._receipt_idempotency: dict[tuple[str, str], str] = {}
 
-    def overlays_for_identity_keys(self, identity_keys: list[str]) -> dict[str, dict[str, Any]]:
+    def overlays_for_identity_keys(self, identity_keys: list[str], *, tenant_id: str = "default") -> dict[str, dict[str, Any]]:
         selected = {str(item) for item in identity_keys}
         result: dict[str, dict[str, Any]] = {}
         for identity_key in selected:
@@ -43,21 +43,24 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
                 deepcopy(receipt)
                 for receipt in self._receipts.values()
                 if receipt.get("invoiceIdentityKey") == identity_key and receipt.get("status") in {"issued", "voided", "reissued"}
+                and receipt.get("tenantId") == tenant_id
             ]
             receipts.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
             red_relations = [
                 deepcopy(relation)
                 for relation in self._red_relations.values()
                 if relation.get("invoiceIdentityKey") == identity_key and relation.get("status") == "active"
+                and relation.get("tenantId") == tenant_id
             ]
             reminders = [
                 deepcopy(reminder)
                 for reminder in self._reminders.values()
                 if reminder.get("invoiceIdentityKey") == identity_key and reminder.get("status") == "active"
+                and reminder.get("tenantId") == tenant_id
             ]
             reminders.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
             result[identity_key] = {
-                "override": deepcopy(self._overrides.get(identity_key)) if self._overrides.get(identity_key) else None,
+                "override": deepcopy(self._overrides.get((tenant_id, identity_key))) if self._overrides.get((tenant_id, identity_key)) else None,
                 "reminder": reminders[0] if reminders else None,
                 "redRelations": red_relations,
                 "receipts": receipts,
@@ -75,7 +78,8 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
         actor_id: str,
         tenant_id: str,
     ) -> dict[str, Any]:
-        current = self._overrides.get(row_ref.invoice_identity_key)
+        override_key = (tenant_id, row_ref.invoice_identity_key)
+        current = self._overrides.get(override_key)
         current_version = int((current or {}).get("version") or 0)
         if expected_version is not None and expected_version != current_version:
             raise OutputInvoiceCollectionError(
@@ -103,9 +107,9 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
             "createdAt": (current or {}).get("createdAt") or now,
         }
         if status == "active":
-            self._overrides[row_ref.invoice_identity_key] = override
+            self._overrides[override_key] = override
         else:
-            self._overrides.pop(row_ref.invoice_identity_key, None)
+            self._overrides.pop(override_key, None)
         return deepcopy(override)
 
     def upsert_reminder(
@@ -123,6 +127,7 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
                 reminder
                 for reminder in self._reminders.values()
                 if reminder.get("invoiceIdentityKey") == row_ref.invoice_identity_key and reminder.get("status") == "active"
+                and reminder.get("tenantId") == tenant_id
             ),
             None,
         )
@@ -191,6 +196,7 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
                 item.get("invoiceIdentityKey") == row_ref.invoice_identity_key
                 and item.get("relatedInvoiceIdentityKey") == related_invoice_identity_key
                 and item.get("status") == "active"
+                and item.get("tenantId") == tenant_id
             ):
                 item.update({**relation, "id": item["id"], "version": int(item.get("version") or 1) + 1})
                 return deepcopy(item)
@@ -290,8 +296,8 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
         receipt = self.get_receipt(receipt_id=receipt_id, tenant_id=tenant_id)
         if receipt is None:
             raise OutputInvoiceCollectionError("receipt_not_found", "收据不存在。", status_code=HTTPStatus.NOT_FOUND)
-        if receipt.get("status") == "voided":
-            return receipt
+        if receipt.get("status") != "issued":
+            raise OutputInvoiceCollectionError("invalid_receipt_status", "只有已开具收据可以作废。", status_code=HTTPStatus.CONFLICT)
         receipt.update(
             {
                 "status": "voided",
@@ -314,7 +320,17 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
         actor_id: str,
         tenant_id: str,
     ) -> dict[str, Any]:
-        old = self.void_receipt(receipt_id=receipt_id, reason=reason, actor_id=actor_id, tenant_id=tenant_id)
+        old = self.get_receipt(receipt_id=receipt_id, tenant_id=tenant_id)
+        if old is None:
+            raise OutputInvoiceCollectionError("receipt_not_found", "收据不存在。", status_code=HTTPStatus.NOT_FOUND)
+        if old.get("status") != "voided":
+            raise OutputInvoiceCollectionError("invalid_receipt_status", "只有已作废收据可以重开。", status_code=HTTPStatus.CONFLICT)
+        if any(
+            receipt.get("tenantId") == tenant_id
+            and receipt.get("reissuedFromReceiptId") == receipt_id
+            for receipt in self._receipts.values()
+        ):
+            raise OutputInvoiceCollectionError("invalid_receipt_status", "该收据已重开，不能重复重开。", status_code=HTTPStatus.CONFLICT)
         row_ref = OutputInvoiceCollectionRowRef(
             row_id="",
             invoice_id=str(old.get("invoiceId") or ""),
@@ -329,7 +345,7 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
             row_ref=row_ref,
             bank_summary={"bankTransactionId": old.get("bankTransactionId")},
             amount=str(old.get("amount") or "0.00"),
-            idempotency_key=f"reissue:{receipt_id}:{_now_iso()}",
+            idempotency_key=f"reissue:{receipt_id}:{uuid4()}",
             payload=dict(old.get("payload") or {}),
             actor_id=actor_id,
             tenant_id=tenant_id,

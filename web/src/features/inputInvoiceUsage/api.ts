@@ -1,7 +1,9 @@
-import { apiRequestJson } from "../apiClient";
+import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
   CreateInputInvoiceUsageOaReverseBatchRequest,
   InputInvoiceUsageDetailResponse,
+  InputInvoiceUsageExportDownload,
+  InputInvoiceUsageExportPreview,
   InputInvoiceUsageDetailTarget,
   InputInvoiceUsageFilter,
   InputInvoiceUsageFilterOptionsResponse,
@@ -91,6 +93,14 @@ function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest) {
     params.set("sort_field", request.sortField);
     params.set("sort_direction", request.sortDirection);
   }
+}
+
+function buildRowsQuery(request: FetchRowsRequest) {
+  const params = new URLSearchParams();
+  appendRowsQuery(params, request);
+  params.delete("page");
+  params.delete("page_size");
+  return params.toString();
 }
 
 function mapInvoice(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]["invoice"] {
@@ -472,6 +482,7 @@ function mapOaReverseInvoice(rawValue: unknown) {
   const raw = objectValue(rawValue);
   const invoiceId = stringValue(camelOrSnake(raw, "invoiceId", "invoice_id") ?? raw.id);
   const displayNo = stringValue(camelOrSnake(raw, "displayNo", "display_no") ?? camelOrSnake(raw, "invoiceNumber", "invoice_number") ?? camelOrSnake(raw, "invoiceNo", "invoice_no") ?? invoiceId);
+  const paymentStatus = objectValue(camelOrSnake(raw, "paymentStatus", "payment_status"));
   return {
     invoiceId,
     invoiceNumber: stringValue(camelOrSnake(raw, "invoiceNumber", "invoice_number") ?? camelOrSnake(raw, "invoiceNo", "invoice_no") ?? displayNo),
@@ -479,7 +490,7 @@ function mapOaReverseInvoice(rawValue: unknown) {
     sellerName: stringValue(camelOrSnake(raw, "sellerName", "seller_name")),
     issueDate: stringValue(camelOrSnake(raw, "issueDate", "issue_date") ?? camelOrSnake(raw, "invoiceDate", "invoice_date")),
     totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
-    paymentStatusLabel: stringValue(camelOrSnake(raw, "paymentStatusLabel", "payment_status_label") ?? camelOrSnake(raw, "statusLabel", "status_label") ?? raw.status),
+    paymentStatusLabel: stringValue(camelOrSnake(raw, "paymentStatusLabel", "payment_status_label") ?? camelOrSnake(raw, "statusLabel", "status_label") ?? paymentStatus.label ?? raw.status),
     targetApplicantName: stringValue(camelOrSnake(raw, "targetApplicantName", "target_applicant_name")),
   };
 }
@@ -496,16 +507,23 @@ function mapRejectedInvoice(rawValue: unknown) {
 
 function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaReversePreviewResponse {
   const raw = objectValue(unwrapData(payload));
-  const topLevelCandidates = arrayValue(camelOrSnake(raw, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice);
+  const topLevelRows = arrayValue(camelOrSnake(raw, "invoiceRows", "invoice_rows")).map(mapOaReverseInvoice);
+  const topLevelCandidates = topLevelRows.length > 0
+    ? topLevelRows
+    : arrayValue(camelOrSnake(raw, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice);
   const groups = arrayValue(raw.groups).map((item) => {
     const group = objectValue(item);
-    const groupCandidates = arrayValue(camelOrSnake(group, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice);
+    const groupRows = arrayValue(camelOrSnake(group, "invoiceRows", "invoice_rows")).map(mapOaReverseInvoice);
+    const groupCandidates = groupRows.length > 0
+      ? groupRows
+      : arrayValue(camelOrSnake(group, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice);
     const candidateIds = arrayValue(camelOrSnake(group, "candidateInvoiceIds", "candidate_invoice_ids")).map(stringValue);
     return {
       targetApplicantCode: stringValue(camelOrSnake(group, "targetApplicantCode", "target_applicant_code")) || null,
       targetApplicantName: stringValue(camelOrSnake(group, "targetApplicantName", "target_applicant_name")),
       invoiceCount: numberValue(camelOrSnake(group, "invoiceCount", "invoice_count"), groupCandidates.length || candidateIds.length),
       totalWithTax: stringValue(camelOrSnake(group, "totalWithTax", "total_with_tax")),
+      invoiceRows: groupCandidates,
       candidateInvoiceIds: candidateIds,
       candidateInvoices: groupCandidates,
       rejectedInvoices: arrayValue(camelOrSnake(group, "rejectedInvoices", "rejected_invoices")).map(mapRejectedInvoice),
@@ -515,9 +533,19 @@ function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaRever
     previewId: stringValue(camelOrSnake(raw, "previewId", "preview_id")),
     previewHash: stringValue(camelOrSnake(raw, "previewHash", "preview_hash") ?? camelOrSnake(raw, "expectedPreviewHash", "expected_preview_hash")),
     source: stringValue(raw.source),
+    targetApplicantCode: stringValue(camelOrSnake(raw, "targetApplicantCode", "target_applicant_code")),
+    targetApplicantName: stringValue(camelOrSnake(raw, "targetApplicantName", "target_applicant_name")),
+    targetApplicants: arrayValue(camelOrSnake(raw, "targetApplicants", "target_applicants")).map((item) => {
+      const applicant = objectValue(item);
+      return {
+        code: stringValue(applicant.code),
+        name: stringValue(applicant.name),
+      };
+    }).filter((applicant) => applicant.code && applicant.name),
     invoiceCount: numberValue(camelOrSnake(raw, "invoiceCount", "invoice_count"), topLevelCandidates.length),
     totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
     groups,
+    invoiceRows: topLevelCandidates,
     candidateInvoices: topLevelCandidates,
     warnings: arrayValue(raw.warnings).map(stringValue),
     canCreateDraft: booleanValue(camelOrSnake(raw, "canCreateDraft", "can_create_draft")),
@@ -534,15 +562,24 @@ function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaRever
 
 function mapOaReverseBatch(payload: unknown): InputInvoiceUsageOaReverseBatch {
   const raw = objectValue(unwrapData(payload));
+  const invoiceIds = arrayValue(camelOrSnake(raw, "invoiceIds", "invoice_ids") ?? camelOrSnake(raw, "selectedInvoiceIds", "selected_invoice_ids")).map(stringValue);
+  const invoiceRows = arrayValue(camelOrSnake(raw, "invoiceRows", "invoice_rows") ?? raw.invoices ?? camelOrSnake(raw, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice);
+  const previewSummary = objectValue(camelOrSnake(raw, "previewSummary", "preview_summary"));
   return {
     batchId: stringValue(camelOrSnake(raw, "batchId", "batch_id") ?? raw.id),
     version: numberValue(raw.version, 0),
     status: stringValue(raw.status),
-    selectedInvoiceIds: arrayValue(camelOrSnake(raw, "selectedInvoiceIds", "selected_invoice_ids")).map(stringValue),
-    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
+    invoiceIds,
+    selectedInvoiceIds: invoiceIds,
+    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax") ?? previewSummary.totalWithTax ?? previewSummary.total_with_tax),
+    previewSummary: Object.keys(previewSummary).length > 0 ? {
+      invoiceCount: numberValue(camelOrSnake(previewSummary, "invoiceCount", "invoice_count"), invoiceRows.length),
+      totalWithTax: stringValue(camelOrSnake(previewSummary, "totalWithTax", "total_with_tax")),
+    } : undefined,
     targetApplicantCode: stringValue(camelOrSnake(raw, "targetApplicantCode", "target_applicant_code")) || null,
     targetApplicantName: stringValue(camelOrSnake(raw, "targetApplicantName", "target_applicant_name")) || null,
-    invoices: arrayValue(raw.invoices ?? camelOrSnake(raw, "candidateInvoices", "candidate_invoices")).map(mapOaReverseInvoice),
+    invoiceRows,
+    invoices: invoiceRows,
     rejectedInvoices: arrayValue(camelOrSnake(raw, "rejectedInvoices", "rejected_invoices")).map(mapRejectedInvoice),
     oaDraftId: stringValue(camelOrSnake(raw, "oaDraftId", "oa_draft_id")) || null,
     oaDraftUrl: stringValue(camelOrSnake(raw, "oaDraftUrl", "oa_draft_url")) || null,
@@ -567,6 +604,69 @@ function mapOaReverseBatch(payload: unknown): InputInvoiceUsageOaReverseBatch {
   };
 }
 
+function objectStringMap(value: unknown): Record<string, string> {
+  const raw = objectValue(value);
+  return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, stringValue(item)]));
+}
+
+function parseContentDispositionFileName(contentDisposition: string | null) {
+  if (!contentDisposition) {
+    return null;
+  }
+  const encodedMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return encodedMatch[1];
+    }
+  }
+  const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+  const plainMatch = contentDisposition.match(/filename=([^;]+)/i);
+  return plainMatch?.[1]?.trim() ?? null;
+}
+
+async function requestExportBlob(url: string, init: RequestInit = {}): Promise<InputInvoiceUsageExportDownload> {
+  const response = await apiFetch(url, init);
+  const contentType = response.headers?.get?.("Content-Type") ?? "";
+  if (!response.ok || response.status === 202) {
+    const rawText = await response.text();
+    let message = rawText || "导出请求失败";
+    try {
+      const payload = JSON.parse(rawText) as { error?: { message?: string }; message?: string };
+      message = payload.error?.message ?? payload.message ?? message;
+    } catch {
+      // Keep raw text.
+    }
+    throw new Error(message);
+  }
+  if (contentType.toLowerCase().includes("json")) {
+    const rawText = await response.text();
+    let message = rawText || "导出接口返回了非 xlsx 响应。";
+    try {
+      const payload = JSON.parse(rawText) as { message?: string };
+      message = payload.message || "读模型正在刷新，请稍后再导出。";
+    } catch {
+      // Keep raw text.
+    }
+    throw new Error(message);
+  }
+  if (contentType.toLowerCase().includes("text/html")) {
+    const rawText = await response.text();
+    if (looksLikeHtmlResponse(rawText, contentType)) {
+      throw new Error(`接口返回了 HTML 页面：${url}。说明请求没有进入后端 API，请确认后端服务和代理路径已正常配置。`);
+    }
+    throw new Error(rawText || `接口 ${url} 返回的不是 xlsx 文件：${contentType}`);
+  }
+  return {
+    blob: await response.blob(),
+    fileName: parseContentDispositionFileName(response.headers?.get?.("Content-Disposition") ?? null) ?? "进项发票使用情况.xlsx",
+  };
+}
+
 export async function fetchInputInvoiceUsageRows(request: FetchRowsRequest): Promise<InputInvoiceUsageRowsResponse> {
   const params = new URLSearchParams();
   appendRowsQuery(params, request);
@@ -587,6 +687,30 @@ export async function fetchInputInvoiceUsageFilterOptions(
     signal: request.signal,
   });
   return mapFilterOptionsResponse(payload);
+}
+
+export async function fetchInputInvoiceUsageExportPreview(request: FetchRowsRequest): Promise<InputInvoiceUsageExportPreview> {
+  const payload = await apiRequestJson<unknown>(`/api/input-invoice-usage/export-preview?${buildRowsQuery(request)}`, {
+    method: "GET",
+    signal: request.signal,
+  });
+  const raw = objectValue(unwrapData(payload));
+  return {
+    fileName: stringValue(camelOrSnake(raw, "fileName", "file_name") ?? "进项发票使用情况.xlsx"),
+    rowCount: numberValue(camelOrSnake(raw, "rowCount", "row_count"), 0),
+    scopeLabel: stringValue(camelOrSnake(raw, "scopeLabel", "scope_label")),
+    columns: arrayValue(raw.columns).map(stringValue),
+    sampleRows: arrayValue(camelOrSnake(raw, "sampleRows", "sample_rows")).map(objectStringMap),
+    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
+    message: stringValue(raw.message),
+  };
+}
+
+export async function downloadInputInvoiceUsageExport(request: FetchRowsRequest): Promise<InputInvoiceUsageExportDownload> {
+  return requestExportBlob(`/api/input-invoice-usage/export?${buildRowsQuery(request)}`, {
+    method: "GET",
+    signal: request.signal,
+  });
 }
 
 export async function fetchInputInvoiceUsageInvoiceDetail(id: string, signal?: AbortSignal) {

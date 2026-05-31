@@ -115,7 +115,7 @@ OA 详情点击后展示 OA 系统中的原始支付申请信息，支付申请�
 列表热路径使用 `read_model.pending_invoice_rows`。首版不引入 Redis 作为正确性依赖，也不把 Redis 作为规则、标签、状态、分页或导出结果的事实源。
 
 - fresh scope 的空结果返回 `200 OK`、`rows=[]`、`read_model_status=fresh`。
-- stale/dirty scope 已有可用行时返回最近一次稳定结果，`read_model_status=refreshing` 或 `stale`，页面展示刷新提示但不阻塞用户读取。
+- stale/dirty scope 或 `source_versions` 过期但已有可用行时返回最近一次稳定结果，`read_model_status=refreshing` 或 `stale`，页面展示刷新提示但不阻塞用户读取。
 - missing scope 或 schema 不兼容时返回 `202 Accepted`、`read_model_status=refreshing`，并 enqueue `pending_invoice.read_model.refresh`。
 - 读请求不得因为已有 active dirty scope 而重复写 `job.read_model_dirty_scopes` 或 `job.outbox_events`。
 - API 热路径不得因为 read model miss/stale 同步扫描全量流水、发票、OA 和关系事实。

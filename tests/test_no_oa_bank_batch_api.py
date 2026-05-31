@@ -214,6 +214,51 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["category_label_path"], ["费用", "手续费"])
         self.assertEqual(payload["rows"][0]["category_source"], "auto")
 
+    def test_list_summary_and_submitted_batches_use_current_bank_auto_tag_labels_after_rename(self) -> None:
+        app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
+        draft_batch = self._list_batches(app)["batches"][0]
+        submit_response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{draft_batch['batch_id']}/submit",
+            body=json.dumps({"expected_version": draft_batch["version"]}),
+        )
+        self.assertEqual(submit_response.status_code, 200, submit_response.body)
+        submitted = json.loads(submit_response.body)["batch"]
+        current_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        renamed_rules = []
+        for rule in current_rules["active_rules"]:
+            next_rule = dict(rule)
+            if rule["code"] == "fee":
+                next_rule["output_primary_label"] = "运营费用"
+                next_rule["output_sub_label"] = "银行手续费"
+                next_rule["label"] = "银行手续费"
+            renamed_rules.append(next_rule)
+        app._app_settings_service.update_bank_auto_tag_rules(
+            {
+                "expected_version": current_rules["version"],
+                "active_rules": renamed_rules,
+                "archived_rules": current_rules["archived_rules"],
+            },
+            actor_id="settings-owner",
+        )
+
+        payload = self._list_batches(app, "?bucket=submitted")
+        batch = payload["batches"][0]
+        categories_by_code = {category["code"]: category for category in payload["summary"]["categories"]}
+        withdraw_response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{submitted['batch_id']}/withdraw",
+            body=json.dumps({"expected_version": batch["version"], "reason": "标签改名后撤回"}),
+        )
+
+        self.assertEqual(batch["batch_id"], submitted["batch_id"])
+        self.assertEqual(batch["category_primary_label"], "运营费用")
+        self.assertEqual(batch["category_sub_label"], "银行手续费")
+        self.assertEqual(batch["category_label_path"], ["运营费用", "银行手续费"])
+        self.assertEqual(categories_by_code["fee"]["primary_label"], "运营费用")
+        self.assertEqual(categories_by_code["fee"]["sub_label"], "银行手续费")
+        self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
+
     def test_bucket_filter_returns_unsubmitted_and_submitted_after_category_drift(self) -> None:
         app = self._app_with_transactions(
             [
@@ -285,6 +330,35 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][batch["batch_id"]]["status"], "submitted")
             pair_relations = app._state_store.load().get("workbench_pair_relations", {}).get("pair_relations", {})
             self.assertIn(payload["pair_relation"]["case_id"], pair_relations)
+
+    def test_submit_returns_error_and_rolls_back_when_no_oa_batch_persistence_fails(self) -> None:
+        class FailingNoOaBatchStore:
+            def save_workbench_pair_relations(self, *_args, **_kwargs) -> None:
+                return None
+
+            def save_workbench_read_models(self, *_args, **_kwargs) -> None:
+                return None
+
+            def save_no_oa_bank_batches(self, *_args, **_kwargs) -> None:
+                raise RuntimeError("no oa snapshot unavailable")
+
+        app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
+        batch = self._list_batches(app)["batches"][0]
+        before_snapshot = app._no_oa_bank_batch_service.snapshot()
+        before_relations = app._workbench_pair_relation_service.snapshot()
+        app._state_store = FailingNoOaBatchStore()
+
+        response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{batch['batch_id']}/submit",
+            body=json.dumps({"expected_version": batch["version"], "note": "确认免OA"}),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 500, response.body)
+        self.assertEqual(payload["error"], "no_oa_bank_batch_persistence_failed")
+        self.assertEqual(app._no_oa_bank_batch_service.snapshot(), before_snapshot)
+        self.assertEqual(app._workbench_pair_relation_service.snapshot(), before_relations)
 
     def test_withdraw_cancels_pair_relation_and_persists_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

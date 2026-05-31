@@ -1,3 +1,4 @@
+import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -9,12 +10,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
+import InputInvoiceUsageExportDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageExportDrawer";
 import InputInvoiceUsageTable from "../components/inputInvoiceUsage/InputInvoiceUsageTable";
 import OaReverseWorkspaceDrawer, { type OaReversePreviewRequest } from "../components/inputInvoiceUsage/OaReverseWorkspaceDrawer";
 import PaymentStatusRulesDrawer from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import {
+  downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
+  fetchInputInvoiceUsageExportPreview,
   fetchInputInvoiceUsageFilterOptions,
   fetchInputInvoiceUsageInvoiceDetail,
   fetchInputInvoiceUsageOaDetail,
@@ -77,7 +81,7 @@ function isDetailTarget(value: unknown): value is InputInvoiceUsageDetailTarget 
 }
 
 function isWorkflow(value: unknown): value is InputInvoiceUsageQuery["activeWorkflow"] {
-  return value === null || value === "oaReverse" || value === "paymentRules";
+  return value === null || value === "oaReverse" || value === "paymentRules" || value === "export";
 }
 
 function validateQuery(value: unknown): value is InputInvoiceUsageQuery {
@@ -357,8 +361,34 @@ export default function InputInvoiceUsagePage() {
       source: request.selectedInvoiceIds.length > 0 ? "explicitSelection" : "currentFilters",
       filters: isFilterArray(request.sourceFilters) ? request.sourceFilters : [],
       selectedInvoiceIds: request.selectedInvoiceIds,
+      targetApplicantCode: request.targetApplicantCode || undefined,
     })
   ), []);
+
+  const exportRequest = useMemo(() => ({
+    page: query.page,
+    pageSize: query.pageSize,
+    keyword: query.keyword,
+    invoiceDateFrom: query.invoiceDateFrom,
+    invoiceDateTo: query.invoiceDateTo,
+    month: query.month,
+    filters: query.filters,
+    sortField: query.sortField,
+    sortDirection: query.sortDirection,
+  }), [
+    query.filters,
+    query.invoiceDateFrom,
+    query.invoiceDateTo,
+    query.keyword,
+    query.month,
+    query.page,
+    query.pageSize,
+    query.sortDirection,
+    query.sortField,
+  ]);
+
+  const loadExportPreview = useCallback(() => fetchInputInvoiceUsageExportPreview(exportRequest), [exportRequest]);
+  const downloadExport = useCallback(() => downloadInputInvoiceUsageExport(exportRequest), [exportRequest]);
 
   const actions = useMemo(() => (
     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -375,6 +405,13 @@ export default function InputInvoiceUsagePage() {
         发票与支付状态规则设置
       </Button>
       <Button
+        startIcon={<FileDownloadOutlinedIcon />}
+        variant="outlined"
+        onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
+      >
+        筛选内容导出
+      </Button>
+      <Button
         startIcon={<RefreshOutlinedIcon />}
         variant="contained"
         disabled={refreshing}
@@ -387,88 +424,94 @@ export default function InputInvoiceUsagePage() {
 
   return (
     <>
-    <Box data-testid="input-invoice-usage-page" sx={{ minWidth: 0, overflowX: "hidden" }}>
-      <PageScaffold
-        title="进项发票使用情况"
-        description="以进项发票为主对象反查支付状态、OA 和银行流水。"
-        actions={actions}
-      >
-        <Stack spacing={2} sx={{ minWidth: 0, overflowX: "hidden" }}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-            <TextField
-              label="关键字"
-              size="small"
-              value={keywordDraft}
-              onChange={(event) => setKeywordDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleKeywordSubmit();
-                }
-              }}
-              sx={{ width: { xs: "100%", md: 320 } }}
-            />
-            <Button variant="outlined" onClick={handleKeywordSubmit}>
-              查询
-            </Button>
-          </Stack>
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          {readModelStatus === "refreshing" ? (
-            <Alert severity="info">进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。</Alert>
-          ) : null}
-          {loading ? (
-            <Stack spacing={1.25} aria-label="进项发票使用情况加载中">
-              <Skeleton variant="rounded" height={44} />
-              <Skeleton variant="rounded" height={96} />
-              <Skeleton variant="rounded" height={96} />
+      <Box data-testid="input-invoice-usage-page" sx={{ minWidth: 0, overflowX: "hidden" }}>
+        <PageScaffold
+          title="进项发票使用情况"
+          description="以进项发票为主对象反查支付状态、OA 和银行流水。"
+          actions={actions}
+        >
+          <Stack spacing={2} sx={{ minWidth: 0, overflowX: "hidden" }}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+              <TextField
+                label="关键字"
+                size="small"
+                value={keywordDraft}
+                onChange={(event) => setKeywordDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    handleKeywordSubmit();
+                  }
+                }}
+                sx={{ width: { xs: "100%", md: 320 } }}
+              />
+              <Button variant="outlined" onClick={handleKeywordSubmit}>
+                查询
+              </Button>
             </Stack>
-          ) : (
-            <InputInvoiceUsageTable
-              rows={rows}
-              page={query.page}
-              pageSize={query.pageSize}
-              total={total}
-              sortField={query.sortField}
-              sortDirection={query.sortDirection}
-              filters={query.filters}
-              filterConfigs={filterConfigs}
-              filterOptions={filterOptions}
-              expandedCells={expandedCells}
-              onToggleCellExpand={handleToggleCellExpand}
-              onOpenDetail={handleOpenDetail}
-              onFilterApply={handleFilterApply}
-              onFilterClear={handleFilterClear}
-              onSortChange={handleSortChange}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
-          )}
-        </Stack>
-      </PageScaffold>
-    </Box>
-    <InputInvoiceUsageDetailDrawer
-      open={Boolean(query.detailTarget)}
-      target={query.detailTarget}
-      loadDetail={loadDetail}
-      onClose={handleCloseDetail}
-    />
-    <OaReverseWorkspaceDrawer
-      open={query.activeWorkflow === "oaReverse"}
-      sourceFilters={query.filters}
-      selectedInvoiceIds={[]}
-      loadPreview={loadOaReversePreview}
-      createBatch={createInputInvoiceUsageOaReverseBatch}
-      createDraft={createInputInvoiceUsageOaReverseDraft}
-      refreshStatus={refreshInputInvoiceUsageOaReverseStatus}
-      revokeDraft={revokeInputInvoiceUsageOaReverseDraft}
-      manualStatus={manualInputInvoiceUsageOaReverseStatus}
-      onClose={handleCloseWorkflow}
-    />
-    <PaymentStatusRulesDrawer
-      open={query.activeWorkflow === "paymentRules"}
-      loadRules={fetchInputInvoiceUsagePaymentStatusRules}
-      saveRules={saveInputInvoiceUsagePaymentStatusRules}
-      onClose={handleCloseWorkflow}
-    />
+            {error ? <Alert severity="error">{error}</Alert> : null}
+            {readModelStatus === "refreshing" ? (
+              <Alert severity="info">进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。</Alert>
+            ) : null}
+            {loading ? (
+              <Stack spacing={1.25} aria-label="进项发票使用情况加载中">
+                <Skeleton variant="rounded" height={44} />
+                <Skeleton variant="rounded" height={96} />
+                <Skeleton variant="rounded" height={96} />
+              </Stack>
+            ) : (
+              <InputInvoiceUsageTable
+                rows={rows}
+                page={query.page}
+                pageSize={query.pageSize}
+                total={total}
+                sortField={query.sortField}
+                sortDirection={query.sortDirection}
+                filters={query.filters}
+                filterConfigs={filterConfigs}
+                filterOptions={filterOptions}
+                expandedCells={expandedCells}
+                onToggleCellExpand={handleToggleCellExpand}
+                onOpenDetail={handleOpenDetail}
+                onFilterApply={handleFilterApply}
+                onFilterClear={handleFilterClear}
+                onSortChange={handleSortChange}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+              />
+            )}
+          </Stack>
+        </PageScaffold>
+      </Box>
+      <InputInvoiceUsageDetailDrawer
+        open={Boolean(query.detailTarget)}
+        target={query.detailTarget}
+        loadDetail={loadDetail}
+        onClose={handleCloseDetail}
+      />
+      <OaReverseWorkspaceDrawer
+        open={query.activeWorkflow === "oaReverse"}
+        sourceFilters={query.filters}
+        selectedInvoiceIds={[]}
+        loadPreview={loadOaReversePreview}
+        createBatch={createInputInvoiceUsageOaReverseBatch}
+        createDraft={createInputInvoiceUsageOaReverseDraft}
+        refreshStatus={refreshInputInvoiceUsageOaReverseStatus}
+        revokeDraft={revokeInputInvoiceUsageOaReverseDraft}
+        manualStatus={manualInputInvoiceUsageOaReverseStatus}
+        onClose={handleCloseWorkflow}
+      />
+      <PaymentStatusRulesDrawer
+        open={query.activeWorkflow === "paymentRules"}
+        loadRules={fetchInputInvoiceUsagePaymentStatusRules}
+        saveRules={saveInputInvoiceUsagePaymentStatusRules}
+        onClose={handleCloseWorkflow}
+      />
+      <InputInvoiceUsageExportDrawer
+        open={query.activeWorkflow === "export"}
+        loadPreview={loadExportPreview}
+        downloadExport={downloadExport}
+        onClose={handleCloseWorkflow}
+      />
     </>
   );
 }

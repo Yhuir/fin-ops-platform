@@ -362,6 +362,29 @@ describe("no OA bank batch API", () => {
     expect(result.results).toEqual([{ batch_id: "batch-selected-fee", status: "submitted" }]);
   });
 
+  test("preserves no OA selection and persistence error codes", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: "no_oa_bank_batch_selection_internal_transfer_requires_pair",
+      message: "internal transfer selection requires a matched pair",
+    }), { status: 400, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitNoOaBankBatchSelection({ transactionIds: ["row-1"] })).rejects.toMatchObject({
+      code: "no_oa_bank_batch_selection_internal_transfer_requires_pair",
+      message: "internal transfer selection requires a matched pair",
+    });
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: "no_oa_bank_batch_persistence_failed",
+      message: "免OA流水批次保存失败，请稍后重试。",
+    }), { status: 500, headers: { "Content-Type": "application/json" } }));
+
+    await expect(submitNoOaBankBatch({ batchId: "batch-fee", expectedVersion: 1 })).rejects.toMatchObject({
+      code: "no_oa_bank_batch_persistence_failed",
+      message: "免OA流水批次保存失败，请稍后重试。",
+    });
+  });
+
   test("reports HTML responses as a backend routing problem", async () => {
     vi.stubGlobal(
       "fetch",

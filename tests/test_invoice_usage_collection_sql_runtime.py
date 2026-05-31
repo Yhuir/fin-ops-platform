@@ -13,6 +13,7 @@ from fin_ops_platform.services.invoice_usage_collection_read_model_refresh impor
 )
 from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     input_invoice_usage_source_versions,
+    oa_pending_payment_source_versions,
     output_invoice_collection_source_versions,
 )
 from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
@@ -46,11 +47,13 @@ class InvoiceReadModelConnection:
         *,
         input_rows: list[dict] | None = None,
         output_rows: list[dict] | None = None,
+        oa_rows: list[dict] | None = None,
         dirty: bool = False,
         scope_exists: bool = True,
     ) -> None:
         self.input_rows = list(input_rows or [])
         self.output_rows = list(output_rows or [])
+        self.oa_rows = list(oa_rows or [])
         self.dirty = dirty
         self.scope_exists = scope_exists
         self.fetch_all_calls: list[tuple[str, tuple]] = []
@@ -63,6 +66,8 @@ class InvoiceReadModelConnection:
             return self.input_rows
         if "from read_model.output_invoice_collection_rows" in normalized:
             return self.output_rows
+        if "from read_model.oa_pending_payment_rows" in normalized:
+            return self.oa_rows
         return []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
@@ -70,8 +75,12 @@ class InvoiceReadModelConnection:
         self.fetch_one_calls.append((normalized, params))
         if "from job.read_model_dirty_scopes" in normalized:
             return {"status": "pending", "updated_at": "2026-05-25T03:00:00+00:00"} if self.dirty else None
-        if "from read_model.input_invoice_usage_scopes" in normalized or "from read_model.output_invoice_collection_scopes" in normalized:
-            return {"scope_key": params[0]} if self.scope_exists else None
+        if (
+            "from read_model.input_invoice_usage_scopes" in normalized
+            or "from read_model.output_invoice_collection_scopes" in normalized
+            or "from read_model.oa_pending_payment_scopes" in normalized
+        ):
+            return {"scope_key": params[0] if params else "2026-05", "source_versions": oa_pending_payment_source_versions()} if self.scope_exists else None
         if "from read_model.input_invoice_usage_rows" in normalized:
             return {
                 "count": len(self.input_rows),
@@ -89,6 +98,19 @@ class InvoiceReadModelConnection:
                 "pending_collection_count": 0,
                 "partial_collection_count": 0,
                 "receipt_pending_count": 1,
+            }
+        if "from read_model.oa_pending_payment_rows" in normalized:
+            if "select scope_key, source_versions, payload, raw_payload" in normalized:
+                if not self.oa_rows:
+                    return None
+                row = dict(self.oa_rows[0])
+                row.setdefault("scope_key", "2026-05")
+                row.setdefault("source_versions", oa_pending_payment_source_versions())
+                return row
+            return {
+                "count": len(self.oa_rows),
+                "oa_amount_total": "100.00",
+                "bank_paid_total": "100.00",
             }
         return None
 
@@ -148,8 +170,10 @@ class RecordingInvoiceRelationReadRepository:
     def __init__(self) -> None:
         self.saved_input: dict[str, object] | None = None
         self.saved_output: dict[str, object] | None = None
+        self.saved_oa: dict[str, object] | None = None
         self.marked_input: dict[str, object] | None = None
         self.marked_output: dict[str, object] | None = None
+        self.marked_oa: dict[str, object] | None = None
 
     def save_input_invoice_usage_rows(
         self,
@@ -186,6 +210,32 @@ class RecordingInvoiceRelationReadRepository:
         source_versions: dict[str, object] | None = None,
     ) -> None:
         self.marked_output = {"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}
+
+    def save_oa_pending_payment_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, object]],
+        source_versions: dict[str, object] | None = None,
+    ) -> None:
+        self.saved_oa = {"scope_key": scope_key, "rows": rows, "source_versions": source_versions}
+
+    def mark_oa_pending_payment_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int,
+        source_versions: dict[str, object] | None = None,
+    ) -> None:
+        self.marked_oa = {"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}
+
+
+class WriteRecordingConnection:
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, object]] = []
+
+    def execute(self, sql: str, params: object = ()) -> None:
+        self.executed.append((" ".join(sql.lower().split()), params))
 
 
 class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
@@ -231,6 +281,102 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
         self.assertIn("collection_status", executed_sql)
         self.assertIn("buyer_name asc", executed_sql)
+
+    def test_oa_repository_uses_native_columns_for_filters_sort_and_bank_total_summary(self) -> None:
+        connection = InvoiceReadModelConnection(
+            oa_rows=[
+                {
+                    "payload": {
+                        "id": "oa_pending_payment_row_1",
+                        "oa": {"id": "oa-1", "applicantName": "张三", "amount": "100.00"},
+                        "paymentStatus": {"code": "paid", "label": "已支付"},
+                        "bankTransaction": {"paidTotal": "100.00"},
+                        "invoice": {},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_oa_pending_payment_rows(
+            month="2026-05",
+            filters='[{"field":"payment_status","operator":"in","values":["paid"]}]',
+            sort_field="bank_trade_time",
+            sort_direction="desc",
+            page=1,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["summary"]["bankPaidTotal"], "100.00")
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("payment_status", executed_sql)
+        self.assertIn("bank_trade_time desc", executed_sql)
+
+    def test_oa_repository_save_persists_source_versions_and_bank_total(self) -> None:
+        connection = WriteRecordingConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_oa_pending_payment_rows(
+            scope_key="2026-05",
+            rows=[
+                {
+                    "id": "oa_pending_payment_row_1",
+                    "oa": {"id": "oa-1", "applicantName": "张三", "amount": "100.00", "month": "2026-05"},
+                    "paymentStatus": {"code": "paid", "label": "已支付"},
+                    "bankTransaction": {
+                        "primaryBankTransactionId": "bank-1",
+                        "tradeTime": "2026-05-21 10:00:00",
+                        "amount": "40.00",
+                        "paidTotal": "100.00",
+                    },
+                    "invoice": {},
+                }
+            ],
+            source_versions=oa_pending_payment_source_versions(),
+        )
+
+        insert_calls = [(sql, params) for sql, params in connection.executed if "insert into read_model.oa_pending_payment_rows" in sql]
+        self.assertEqual(len(insert_calls), 1)
+        sql, params = insert_calls[0]
+        self.assertIn("bank_paid_total", sql)
+        self.assertEqual(params["bank_paid_total"], "100.00")
+        self.assertEqual(params["source_versions"].obj, oa_pending_payment_source_versions())
+
+    def test_oa_repository_detail_lookups_use_native_columns(self) -> None:
+        connection = InvoiceReadModelConnection(
+            oa_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "source_versions": oa_pending_payment_source_versions(),
+                    "payload": {
+                        "id": "oa_pending_payment_row_1",
+                        "oa": {"id": "oa-1", "applicantName": "张三", "amount": "100.00"},
+                        "paymentStatus": {"code": "paid", "label": "已支付"},
+                        "bankTransaction": {"primaryBankTransactionId": "bank-1", "paidTotal": "100.00"},
+                        "invoice": {"primaryInvoiceId": "inv-1"},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        oa_payload = repository.get_oa_pending_payment_row_by_oa_id("oa-1")
+        bank_payload = repository.get_oa_pending_payment_row_by_bank_transaction_id("bank-1")
+        invoice_payload = repository.get_oa_pending_payment_row_by_invoice_id("inv-1")
+        row_payload = repository.get_oa_pending_payment_row_by_row_id("oa_pending_payment_row_1")
+
+        self.assertEqual(oa_payload["row"]["oa"]["id"], "oa-1")
+        self.assertEqual(bank_payload["row"]["bankTransaction"]["primaryBankTransactionId"], "bank-1")
+        self.assertEqual(invoice_payload["row"]["invoice"]["primaryInvoiceId"], "inv-1")
+        self.assertEqual(row_payload["row"]["id"], "oa_pending_payment_row_1")
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_one_calls)
+        self.assertIn("oa_id = %s", executed_sql)
+        self.assertIn("bank_transaction_id = %s", executed_sql)
+        self.assertIn("invoice_id = %s", executed_sql)
+        self.assertIn("row_id = %s", executed_sql)
 
     def test_input_api_miss_enqueues_refresh_without_live_scan(self) -> None:
         queue = QueueRecorder()
@@ -338,17 +484,28 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._oa_projection_repository = EmptyOAProjectionRepository()
         builder._read_repository = read_repository
 
+        builder._oa_projection_repository = type(
+            "OaProjection",
+            (),
+            {"list_all_application_records": lambda _self: []},
+        )()
+
         input_result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05")
         output_result = builder.rebuild_output_invoice_collection_read_model_scope("2026-05")
+        oa_result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
 
         self.assertEqual(input_result["source_versions"], input_invoice_usage_source_versions())
         self.assertEqual(output_result["source_versions"], output_invoice_collection_source_versions())
+        self.assertEqual(oa_result["source_versions"], oa_pending_payment_source_versions())
         self.assertIsNotNone(read_repository.saved_input)
         self.assertIsNotNone(read_repository.saved_output)
+        self.assertIsNotNone(read_repository.saved_oa)
         self.assertEqual(read_repository.saved_input["source_versions"], input_invoice_usage_source_versions())
         self.assertEqual(read_repository.saved_output["source_versions"], output_invoice_collection_source_versions())
+        self.assertEqual(read_repository.saved_oa["source_versions"], oa_pending_payment_source_versions())
         self.assertEqual(input_result["row_count"], 1)
         self.assertEqual(output_result["row_count"], 1)
+        self.assertEqual(oa_result["row_count"], 0)
 
     def test_projection_builder_marks_empty_scopes_with_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
@@ -357,9 +514,11 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         builder.mark_input_invoice_usage_scope_empty("2026-05")
         builder.mark_output_invoice_collection_scope_empty("2026-05")
+        builder.mark_oa_pending_payment_scope_empty("2026-05")
 
         self.assertEqual(read_repository.marked_input["source_versions"], input_invoice_usage_source_versions())
         self.assertEqual(read_repository.marked_output["source_versions"], output_invoice_collection_source_versions())
+        self.assertEqual(read_repository.marked_oa["source_versions"], oa_pending_payment_source_versions())
 
     def test_refresh_handler_expands_all_scopes_and_completes_with_source_version(self) -> None:
         class FakeBuilder:
@@ -405,6 +564,38 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(queue.completed, [("tenant-a", "input_invoice_usage", "all", 7)])
+
+    def test_oa_refresh_handler_expands_all_scopes_and_completes_with_source_version(self) -> None:
+        class FakeBuilder:
+            def list_oa_pending_payment_scope_shards(self, scope_key: str) -> list[str]:
+                self.scope_key = scope_key
+                return ["2026-05"]
+
+            def rebuild_oa_pending_payment_read_model_scope(self, scope_key: str) -> dict[str, object]:
+                raise AssertionError(f"all scope should enqueue shards before rebuild: {scope_key}")
+
+        queue = QueueRecorder()
+        service = InvoiceUsageCollectionReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-oa",
+            tenant_id="tenant-a",
+            event_type="oa_pending_payment.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="oa_pending_payment",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all"},
+            attempts=1,
+            status="processing",
+            source_version=9,
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result, {"scope_key": "all", "enqueued_scope_keys": ["2026-05"], "row_count": 0})
+        self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "oa_pending_payment_month_shard")])
+        self.assertEqual(queue.completed, [("tenant-a", "oa_pending_payment", "all", 9)])
 
     def test_rabbitmq_event_types_include_invoice_usage_collection_read_models(self) -> None:
         self.assertIn("input_invoice_usage.read_model.refresh", SUPPORTED_EVENT_TYPES)

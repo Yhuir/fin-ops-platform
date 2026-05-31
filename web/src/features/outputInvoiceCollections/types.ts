@@ -19,6 +19,7 @@ export type OutputInvoiceCollectionWorkflow =
   | { kind: "redRelation"; rowId: string }
   | { kind: "receiptHistory"; invoiceId: string; rowId: string }
   | { kind: "receiptPreview"; rowId: string }
+  | { kind: "receiptSettings" }
   | null;
 
 export type OutputInvoiceCollectionQuery = {
@@ -111,6 +112,7 @@ export type OutputInvoiceCollectionRelationSummary<T> = {
 
 export type OutputInvoiceCollectionRedInvoiceSummary = {
   id: string;
+  relationId?: string;
   invoiceNo: string;
   invoiceDate: string;
   buyerName: string;
@@ -234,13 +236,27 @@ export type OutputInvoiceReceiptHistoryResponse = {
   sourceAvailable: boolean;
   sourceName?: string;
   receipts: Array<{
-    receiptId?: string;
+    id?: string;
     receiptNo?: string;
     amount?: string;
-    issuedAt?: string;
+    createdAt?: string;
+    voidedAt?: string;
+    voidReason?: string;
+    reissuedFromReceiptId?: string;
     status?: string;
   }>;
   message?: string;
+};
+
+export type OutputInvoiceReceiptSettingsResponse = {
+  settings: {
+    tenantId?: string;
+    prefix: string;
+    resetPeriod: "monthly" | "yearly" | "none" | string;
+    version?: number;
+    updatedBy?: string;
+    updatedAt?: string;
+  };
 };
 
 export type OutputInvoiceCollectionStatusUpdateRequest = {

@@ -1304,6 +1304,7 @@ class AppSettingsService:
         ]
         return {
             "version": int(payload.get("version") or 1),
+            "bank_auto_tag_rules_version": int(bank_transaction_tags.get("version") or 1),
             "selected_tag_codes": selected,
             "inactive_selected_tag_codes": inactive_selected,
             "active_tags": active_tags,

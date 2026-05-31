@@ -117,8 +117,33 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(service.oa_detail("oa-detail")["id"], "oa-detail")
         self.assertEqual(service.bank_transaction_detail("bank-detail")["id"], "bank-detail")
         self.assertEqual(service.invoice_detail("inv-detail")["id"], "inv-detail")
-        self.assertEqual(service.row_relation_details(row_id, kind="bank")["kind"], "bank")
-        self.assertEqual(service.row_relation_details(row_id, kind="invoice")["kind"], "invoice")
+        bank_relations = service.row_relation_details(row_id, kind="bank")
+        invoice_relations = service.row_relation_details(row_id, kind="invoice")
+        self.assertEqual(bank_relations["kind"], "bank")
+        self.assertEqual(invoice_relations["kind"], "invoice")
+        self.assertEqual(bank_relations["title"], "支出流水关联明细")
+        self.assertEqual(invoice_relations["title"], "发票关联明细")
+        self.assertTrue(bank_relations["sections"])
+        self.assertTrue(invoice_relations["sections"])
+
+    def test_multiple_bank_transactions_use_total_paid_amount_for_status_and_summary(self) -> None:
+        bank_a = self._bank("bank-split-a", "40.00")
+        bank_b = self._bank("bank-split-b", "60.00")
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-split-a", ["oa-split", bank_a.id], matched=False)
+        self._relation(pair_service, "case-split-b", ["oa-split", bank_b.id], matched=False)
+        service = self._service(
+            oa_records=[self._oa("oa-split", "刘一", "100.00")],
+            transactions=[bank_a, bank_b],
+            pair_service=pair_service,
+        )
+
+        payload = service.list_rows()
+        row = payload["rows"][0]
+
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertEqual(row["bankTransaction"]["paidTotal"], "100.00")
+        self.assertEqual(payload["summary"]["bankPaidTotal"], "100.00")
 
     def _service(
         self,

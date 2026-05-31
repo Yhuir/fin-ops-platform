@@ -58,6 +58,8 @@ export type OaPendingPaymentBankTransaction = {
   bookedDate: string;
   summary: string;
   remark: string;
+  amount?: string;
+  paidTotal?: string;
   relationCount: number;
   hasMultiple: boolean;
   detailMode?: "none" | "single" | "list";
@@ -98,12 +100,20 @@ export type OaPendingPaymentRowsResponse = {
   filterConfig: OaPendingPaymentFieldConfig[];
   readModelStatus?: string;
   read_model_status?: string;
+  read_model_stale_reasons?: string[];
+  read_model_scope_key?: string;
+  sourceVersions?: Record<string, unknown>;
+  source_versions?: Record<string, unknown>;
 };
 
 export type OaPendingPaymentFilterOptionsResponse = {
   fields: Array<OaPendingPaymentFieldConfig & { options?: OaPendingPaymentFilterOption[] }>;
   readModelStatus?: string;
   read_model_status?: string;
+  read_model_stale_reasons?: string[];
+  read_model_scope_key?: string;
+  sourceVersions?: Record<string, unknown>;
+  source_versions?: Record<string, unknown>;
 };
 
 export type OaPendingPaymentQuery = {

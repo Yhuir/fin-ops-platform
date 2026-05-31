@@ -24,6 +24,7 @@
 - `job.outbox_events` failed/dead_lettered 数量非零且持续增加。
 - `job.read_model_dirty_scopes` 长时间处于 pending、processing 或 failed。
 - `worker_heartbeat_lag_seconds` 持续超过 worker poll interval 与任务超时阈值。
+- `missing_required_worker_count > 0` 或 `stale_required_worker_count > 0`。required worker 清单来自 `runtime_worker_registry`；例如 `search-pending-read-model` 缺失会导致搜索/待找发票 read model 长时间 refreshing。
 - `read_model_refresh_duration_ms.p95/p99` 持续升高。
 - `/api/workbench/summary` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
 - `/api/workbench/refresh-status` 长时间返回 `refreshing`、`stale`、`failed` 或 `unavailable`。
@@ -57,6 +58,8 @@
 - `dirty_scopes`：dirty scope 按 status 聚合。
 - `oldest_pending_event_age_seconds`：最老 pending event age。
 - `worker_heartbeat_lag_seconds`：runtime worker heartbeat lag。
+- `worker_metrics`：按中心 registry 展示 required worker 的 heartbeat。没有 heartbeat 的 required worker 显示 `status=missing` / `warning_code=required_worker_missing`；超过该 worker SLO 的显示 `status=stale` / `warning_code=worker_heartbeat_stale`。
+- `missing_required_worker_count` / `stale_required_worker_count`：required worker 缺失或 stale 的数量。
 - `read_model_refresh_duration_ms`：read model refresh p50/p95/p99。
 - `read_model_refresh_failure_rate`：read model refresh failed/dead-lettered 比例。
 - `stale_dirty_scope_count` 和 `stale_dirty_scopes`：超时 dirty scope 摘要。

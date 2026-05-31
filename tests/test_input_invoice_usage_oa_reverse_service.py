@@ -70,6 +70,10 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(preview["invoiceCount"], 1)
         self.assertEqual(preview["totalWithTax"], "99.72")
         self.assertEqual(preview["targetApplicantName"], "陈秀云")
+        self.assertIn(
+            {"code": "zhou_jieying", "name": "周洁莹"},
+            preview["targetApplicants"],
+        )
         self.assertEqual(preview["invoiceRows"][0]["invoiceId"], "inv-available")
         self.assertEqual(preview["invoiceRows"][0]["sellerName"], "供应商")
         reason_codes = {item["reasonCode"] for item in preview["rejectedInvoices"]}

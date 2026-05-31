@@ -151,6 +151,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
                 f"/api/output-invoice-collections/rows/{row['id']}/collection-reminder",
                 body=json.dumps({"remindAt": "2026-06-15T09:00:00+08:00", "channel": "oa", "note": "提醒"}),
             )
+            reminder_id = json.loads(reminder_response.body)["reminder"]["id"]
             red_relation_response = app.handle_request(
                 "POST",
                 f"/api/output-invoice-collections/rows/{row['id']}/red-invoice-relations",
@@ -163,10 +164,40 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
                     }
                 ),
             )
+            relation_id = json.loads(red_relation_response.body)["relation"]["id"]
             receipt_response = app.handle_request(
                 "POST",
                 f"/api/output-invoice-collections/rows/{row['id']}/receipts",
                 body=json.dumps({"bankTransactionId": "bank-lifecycle", "idempotencyKey": "receipt-api-1"}),
+            )
+            receipt_id = json.loads(receipt_response.body)["receipt"]["id"]
+            reminder_delete_response = app.handle_request(
+                "DELETE",
+                f"/api/output-invoice-collections/rows/{row['id']}/collection-reminder/{reminder_id}",
+            )
+            red_relation_delete_response = app.handle_request(
+                "DELETE",
+                f"/api/output-invoice-collections/red-invoice-relations/{relation_id}",
+            )
+            void_response = app.handle_request(
+                "POST",
+                f"/api/output-invoice-collections/receipts/{receipt_id}/void",
+                body=json.dumps({"reason": "API 作废"}),
+            )
+            reissue_response = app.handle_request(
+                "POST",
+                f"/api/output-invoice-collections/receipts/{receipt_id}/reissue",
+                body=json.dumps({"reason": "API 重开"}),
+            )
+            duplicate_reissue_response = app.handle_request(
+                "POST",
+                f"/api/output-invoice-collections/receipts/{receipt_id}/reissue",
+                body=json.dumps({"reason": "API 重复重开"}),
+            )
+            missing_void_response = app.handle_request(
+                "POST",
+                "/api/output-invoice-collections/receipts/not-found/void",
+                body=json.dumps({"reason": "missing"}),
             )
             history_response = app.handle_request(
                 "GET",
@@ -178,12 +209,18 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(reminder_response.status_code, 200)
         self.assertEqual(red_relation_response.status_code, 200)
         self.assertEqual(receipt_response.status_code, 200)
+        self.assertEqual(reminder_delete_response.status_code, 200)
+        self.assertEqual(red_relation_delete_response.status_code, 200)
+        self.assertEqual(void_response.status_code, 200)
+        self.assertEqual(reissue_response.status_code, 200)
+        self.assertEqual(duplicate_reissue_response.status_code, 409)
+        self.assertEqual(missing_void_response.status_code, 404)
         self.assertEqual(refreshed_row["collectionStatus"]["code"], "pending_red_invoice")
-        self.assertEqual(refreshed_row["collectionStatus"]["reminder"]["channel"], "oa")
-        self.assertTrue(any(item["source"] == "manual" for item in refreshed_row["redInvoiceRelation"]["summaries"]))
+        self.assertIsNone(refreshed_row["collectionStatus"]["reminder"])
+        self.assertFalse(any(item["source"] == "manual" for item in refreshed_row["redInvoiceRelation"]["summaries"]))
         self.assertEqual(refreshed_row["receipt"]["status"], "issued")
         self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
-        self.assertEqual(json.loads(history_response.body)["receipts"][0]["status"], "issued")
+        self.assertEqual([item["status"] for item in json.loads(history_response.body)["receipts"]], ["issued", "voided"])
 
     @staticmethod
     def _install_service(

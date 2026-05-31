@@ -117,15 +117,18 @@ set +a
 
 长期 worker 建议拆分为：
 
+- `worker-oa-sync`：`--enable-oa-sync --worker-kind oa-sync --event-type oa.sync`
 - `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`
 - `worker-workbench-matching`：`--enable-workbench-matching --worker-kind workbench-matching`，消费 `job.workbench_matching_dirty_scopes`，生成 `read_model.workbench_reconciliation_decisions`。它不使用 `--event-type`，也不依赖 RabbitMQ 作为事实源。
-- `worker-search`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
-- `worker-pending-invoice`：`--enable-pending-invoice-read-model-refresh --worker-kind pending-invoice-read-model --event-type pending_invoice.read_model.refresh`。Legacy `expense:all` / `income:all` 事件只做 fan-out，实际 rebuild scope 必须是 `direction:filter:YYYY-MM`。
-- `worker-invoice-usage-collection`：`--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --worker-kind invoice-usage-collection-read-model --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh`。
-- `worker-cost-tax`：`--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --worker-kind runtime --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh`
-- `worker-oa-sync`：`--enable-oa-sync --worker-kind oa-sync --event-type oa.sync`
+- `worker-bank-detail`：`--enable-bank-detail-read-model-refresh --worker-kind bank-detail-read-model --event-type bank_detail.read_model.refresh`
+- `worker-search-pending`：`--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --worker-kind search-pending-read-model --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh`。Legacy `expense:all` / `income:all` 事件只做 fan-out，实际 rebuild scope 必须是 `direction:filter:YYYY-MM`。
+- `worker-invoice-usage-collection`：`--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --enable-oa-pending-payment-read-model-refresh --worker-kind invoice-usage-collection-read-model --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh --event-type oa_pending_payment.read_model.refresh`。
+- `worker-cost-tax`：`--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --worker-kind cost-tax-read-model --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh`
+- `worker-import`：`--enable-import-job-processing --worker-kind import-job --event-type import.process.requested`
 
 不要启动无 handler 的 `fin-ops-worker@oa-rabbitmq.service`。如果 systemd 中已存在该实例，应停止并 disable，改用 `fin-ops-worker@oa-sync-rabbitmq.service` 或等价命名，并确保 `FIN_OPS_WORKER_ARGS` 包含 `--enable-oa-sync --event-type oa.sync`。
+
+中心化 worker 事实源是 `fin_ops_platform.services.runtime_worker_registry`。新增 worker、RabbitMQ event type、env example 或部署脚本实例名时，必须先更新 registry，再让 `app.worker`、RabbitMQ dispatcher/consumer、`finops-ensure-runtime-workers.sh`、staging preflight 和 Dashboard 通过测试确认一致。
 
 每个长期 worker 都应设置 `--lock-timeout-seconds`、`--task-timeout-seconds`、`--statement-timeout-seconds` 和 `--max-attempts`。`lock_timeout` 释放 stale `processing` 事件，`task_timeout` 限制单个 handler 的 wall-clock 时间，`statement_timeout` 限制单条 PostgreSQL 语句，`max_attempts` 超限后进入 PostgreSQL `dead_lettered`，再由运维修复后手动 `requeue_event`。
 
@@ -165,6 +168,7 @@ PYTHONPATH=backend/src /opt/miniconda3/bin/python3 -m pytest \
   tests/test_runtime_state_policy.py \
   tests/test_runtime_queue.py \
   tests/test_runtime_worker.py \
+  tests/test_runtime_worker_registry.py \
   tests/test_runtime_monitoring.py \
   tests/test_runtime_infrastructure_postgres_integration.py \
   tests/test_postgres_migrations.py \
@@ -205,7 +209,7 @@ RabbitMQ 生产切换分四步，不能一次性把 worker 全量翻到 broker�
 1. 在 staging 配置 `FIN_OPS_TEST_DATABASE_URL` 和 `RABBITMQ_TEST_URL`，运行 RabbitMQ staging preflight。
 2. 确认生产 PostgreSQL migration 已应用到 RabbitMQ publish state 和 envelope view；缺少 `0016/0017/0018` 时不能启动生产 dispatcher。
 3. PostgreSQL polling worker 保持运行，执行 `python3 -m fin_ops_platform.app.rabbitmq_topology --apply` 创建 durable topology。该命令必须使用 topology/bootstrap 用户，不使用 dispatcher 或 worker 运行时账号。
-4. 启动 `python3 -m fin_ops_platform.app.rabbitmq_dispatcher --shadow-publish`，观察 `rabbitmq_publish_failed_backlog`、`rabbitmq_dispatcher_lag_seconds`、RabbitMQ DLQ 和 publisher confirm latency。完整 topology 覆盖 `workbench.read_model.refresh`、`search.read_model.refresh`、`pending_invoice.read_model.refresh`、`cost_statistics.read_model.refresh`、`tax_offset.read_model.refresh`、`oa.sync`、`file_object.gridfs_migration` 和 `import.process.requested`；生产灰度时用 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制实际发布范围。
+4. 启动 `python3 -m fin_ops_platform.app.rabbitmq_dispatcher --shadow-publish`，观察 `rabbitmq_publish_failed_backlog`、`rabbitmq_dispatcher_lag_seconds`、RabbitMQ DLQ 和 publisher confirm latency。完整 topology 来自 `runtime_worker_registry.rabbitmq_dispatch_event_types()`，覆盖 workbench、search/pending invoice、bank detail、bank account balance、invoice usage/collection、cost/tax、OA sync、file migration 和 import job；生产灰度时用 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制实际发布范围。
 5. 将一个 workbench worker 设置 `FIN_OPS_QUEUE_BACKEND=rabbitmq`，确认 RabbitMQ consumer 收到 envelope 后仍回 PostgreSQL claim/ack/fail。
 6. 稳定后增加 consumer 数量和 `RABBITMQ_PREFETCH`，保留 `FIN_OPS_QUEUE_BACKEND=postgres` 回滚配置。
 

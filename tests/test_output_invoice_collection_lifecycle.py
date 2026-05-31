@@ -10,6 +10,7 @@ from fin_ops_platform.services.output_invoice_collection_lifecycle_service impor
     InMemoryOutputInvoiceCollectionLifecycleRepository,
     OutputInvoiceCollectionLifecycleService,
 )
+from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
 from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
@@ -62,6 +63,57 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         self.assertEqual(refreshed_row["collectionStatus"]["expectedCollectionDate"], "2026-06-20")
         self.assertEqual(refreshed_row["collectionStatus"]["reminder"]["channel"], "oa")
         self.assertEqual(queue.refreshes, [("output_invoice_collection", "2026-05", "lifecycle_status_changed"), ("output_invoice_collection", "2026-05", "lifecycle_reminder_changed")])
+
+    def test_lifecycle_overlays_and_receipt_history_are_tenant_scoped(self) -> None:
+        repository = InMemoryOutputInvoiceCollectionLifecycleRepository()
+        invoice = self._invoice("out-tenant", "1101", "客户Tenant", total_with_tax="100.00")
+        bank = self._bank("bank-tenant", "100.00")
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-tenant",
+            row_ids=[invoice.id, bank.id],
+            row_types=["invoice", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            amount_check={"matched": True},
+        )
+        query = self._query_service([invoice], repository, transactions=[bank], pair_service=pair_service)
+        row = query.list_rows()["rows"][0]
+        lifecycle = OutputInvoiceCollectionLifecycleService(
+            repository=repository,
+            row_provider=lambda row_id: query.row_by_id(row_id, tenant_id="tenant-a"),
+            queue_repository=RecordingRefreshQueue(),
+        )
+        receipts = OutputInvoiceCollectionReceiptService(
+            repository=repository,
+            row_provider=lambda row_id: query.row_by_id(row_id, tenant_id="tenant-a"),
+            queue_repository=RecordingRefreshQueue(),
+        )
+
+        lifecycle.set_collection_status(
+            row["id"],
+            {"statusCode": "pending_red_invoice", "expectedVersion": 0},
+            actor_id="tester",
+            tenant_id="tenant-a",
+        )
+        receipts.create_receipt(
+            row["id"],
+            {"bankTransactionId": "bank-tenant", "idempotencyKey": "tenant-receipt-1"},
+            actor_id="tester",
+            tenant_id="tenant-a",
+        )
+
+        tenant_a_row = query.list_rows(tenant_id="tenant-a")["rows"][0]
+        tenant_b_row = query.list_rows(tenant_id="tenant-b")["rows"][0]
+        tenant_a_history = query.receipt_history(invoice_id="out-tenant", tenant_id="tenant-a")
+        tenant_b_history = query.receipt_history(invoice_id="out-tenant", tenant_id="tenant-b")
+
+        self.assertEqual(tenant_a_row["collectionStatus"]["code"], "pending_red_invoice")
+        self.assertEqual(tenant_a_row["receipt"]["status"], "issued")
+        self.assertEqual(tenant_b_row["collectionStatus"]["code"], "collected")
+        self.assertEqual(tenant_b_row["receipt"]["status"], "pending")
+        self.assertEqual(len(tenant_a_history["receipts"]), 1)
+        self.assertEqual(tenant_b_history["receipts"], [])
 
     def test_red_relation_overlay_adds_manual_evidence(self) -> None:
         repository = InMemoryOutputInvoiceCollectionLifecycleRepository()
@@ -135,8 +187,15 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         self.assertEqual(first["receipt"]["receiptNo"], replay["receipt"]["receiptNo"])
         self.assertEqual(voided["receipt"]["status"], "voided")
         self.assertEqual(reissued["receipt"]["status"], "issued")
+        self.assertNotEqual(reissued["receipt"]["id"], first["receipt"]["id"])
+        self.assertNotEqual(reissued["receipt"]["receiptNo"], first["receipt"]["receiptNo"])
+        self.assertEqual(reissued["receipt"]["reissuedFromReceiptId"], first["receipt"]["id"])
         self.assertTrue(history["sourceAvailable"])
         self.assertEqual([item["status"] for item in history["receipts"]], ["issued", "voided"])
+
+        with self.assertRaises(OutputInvoiceCollectionError) as duplicate_reissue:
+            receipts.reissue_receipt(first["receipt"]["id"], {"reason": "重复重开"}, actor_id="tester", tenant_id="default")
+        self.assertEqual(duplicate_reissue.exception.error_code, "invalid_receipt_status")
 
     @staticmethod
     def _query_service(

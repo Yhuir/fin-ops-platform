@@ -27,6 +27,11 @@ from fin_ops_platform.services.oa_adapter import (
     build_attachment_invoice_detail_fields,
     detect_etc_batch_metadata,
 )
+from fin_ops_platform.services.oa_attachment_invoice_cache import (
+    ATTACHMENT_EVIDENCE_CACHE_SCHEMA_VERSION,
+    ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+    attachment_invoice_cache_parser_version,
+)
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 
 
@@ -54,8 +59,6 @@ DEFAULT_OA_IMPORT_SETTINGS = {
     "statuses": [OA_IMPORT_STATUS_COMPLETED],
 }
 ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY = "_attachment_invoice_source_context"
-ATTACHMENT_EVIDENCE_CACHE_SCHEMA_VERSION = "2026-05-11-evidence-v1"
-ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION = ATTACHMENT_EVIDENCE_CACHE_SCHEMA_VERSION
 ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS = (
     "source_expense_row_index",
     "source_expense_item_id",
@@ -1777,7 +1780,7 @@ class MongoOAAdapter(OAAdapter):
 
     @staticmethod
     def _attachment_invoice_cache_parser_version() -> str:
-        return f"{OAAttachmentInvoiceService.PARSER_VERSION}:{ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION}"
+        return attachment_invoice_cache_parser_version()
 
     def _is_current_attachment_invoice_cache_entry(self, entry: object) -> bool:
         if not (

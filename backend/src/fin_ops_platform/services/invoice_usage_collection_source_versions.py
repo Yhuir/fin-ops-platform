@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fin_ops_platform.services.input_invoice_usage_service import SOURCE_VERSION as INPUT_INVOICE_USAGE_SOURCE_VERSION
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.output_invoice_collection_service import (
     SOURCE_VERSION as OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
 )
@@ -14,7 +14,7 @@ def input_invoice_usage_source_versions(payment_status_rules_version: int | str 
     return {
         "input_invoice_usage_source_version": INPUT_INVOICE_USAGE_SOURCE_VERSION,
         "input_invoice_usage_payment_rules_version": normalized_rules_version,
-        "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+        "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
     }
 
@@ -32,5 +32,8 @@ def output_invoice_collection_source_versions() -> dict[str, object]:
 def oa_pending_payment_source_versions() -> dict[str, object]:
     return {
         "oa_pending_payment_source_version": OA_PENDING_PAYMENT_SOURCE_VERSION,
+        "oa_pending_payment_workbench_relation_schema_version": 1,
+        "oa_pending_payment_bank_import_fact_schema_version": 1,
+        "oa_pending_payment_input_invoice_import_fact_schema_version": 1,
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
     }

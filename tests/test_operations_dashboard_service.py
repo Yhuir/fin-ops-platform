@@ -181,6 +181,30 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(queue_rows[0]["status"], "unknown")
         self.assertEqual(queue_rows[0]["warning_code"], "rabbitmq_metrics_unavailable")
 
+    def test_runtime_repository_reports_missing_and_stale_required_workers(self) -> None:
+        class WorkerConnection:
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.runtime_worker_heartbeats" in normalized:
+                    return [
+                        {
+                            "worker_id": "worker-search-1",
+                            "worker_kind": "search-pending-read-model",
+                            "status": "idle",
+                            "heartbeat_lag_seconds": 900.0,
+                        }
+                    ]
+                raise AssertionError(sql)
+
+        repository = RuntimeMonitoringRepository(WorkerConnection(), rabbitmq_metrics_provider=object())
+
+        worker_rows = {row["worker_kind"]: row for row in repository.dashboard_worker_metrics()}
+
+        self.assertEqual(worker_rows["search-pending-read-model"]["status"], "stale")
+        self.assertEqual(worker_rows["search-pending-read-model"]["warning_code"], "worker_heartbeat_stale")
+        self.assertEqual(worker_rows["workbench-read-model"]["status"], "missing")
+        self.assertEqual(worker_rows["workbench-read-model"]["warning_code"], "required_worker_missing")
+
     def test_runtime_repository_uses_recent_window_for_read_model_health_duration(self) -> None:
         class WindowedConnection:
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()):

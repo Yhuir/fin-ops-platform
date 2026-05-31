@@ -9,26 +9,13 @@ from urllib.parse import quote, urljoin
 from urllib.request import Request, urlopen
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueDataError, RuntimeQueueEvent, RuntimeQueueSettings
+from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerResult
 
 
 MAX_ENVELOPE_BYTES = 4096
 FORBIDDEN_ENVELOPE_KEYS = {"payload", "raw_payload", "snapshot", "large_snapshot", "business_fact"}
-SUPPORTED_EVENT_TYPES = (
-    "workbench.read_model.refresh",
-    "search.read_model.refresh",
-    "pending_invoice.read_model.refresh",
-    "bank_account_balance.read_model.refresh",
-    "bank_detail.read_model.refresh",
-    "input_invoice_usage.read_model.refresh",
-    "output_invoice_collection.read_model.refresh",
-    "oa_pending_payment.read_model.refresh",
-    "cost_statistics.read_model.refresh",
-    "tax_offset.read_model.refresh",
-    "oa.sync",
-    "file_object.gridfs_migration",
-    "import.process.requested",
-)
+SUPPORTED_EVENT_TYPES = rabbitmq_dispatch_event_types()
 
 
 @dataclass(frozen=True)

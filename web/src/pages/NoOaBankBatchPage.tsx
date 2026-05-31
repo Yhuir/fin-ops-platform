@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -40,6 +40,7 @@ import {
   fetchNoOaBankBatchTagSelection,
   fetchNoOaBankBatches,
   saveNoOaBankBatchTagSelection,
+  submitNoOaBankBatch,
   submitNoOaBankBatchSelection,
   withdrawNoOaBankBatch,
 } from "../features/noOaBankBatches/api";
@@ -47,6 +48,7 @@ import type {
   NoOaBankBatch,
   NoOaBankBatchDetail,
   NoOaBankBatchesResponse,
+  NoOaBankBatchReadModelStatus,
   NoOaBankBatchStatus,
   NoOaBankBatchStatusBucket,
   NoOaBankBatchDetailRow,
@@ -66,16 +68,20 @@ const EMPTY_BATCHES: NoOaBankBatchesResponse = {
     categories: [],
   },
   batches: [],
+  readModelStatus: "fresh",
+  readModelStaleReasons: [],
 };
 
 const EMPTY_TAG_SELECTION: NoOaBankBatchTagSelection = {
   version: 1,
+  bankAutoTagRulesVersion: 1,
   selectedTagCodes: [],
   inactiveSelectedTagCodes: [],
   activeTags: [],
 };
 
 const SELF_SUB_LABEL = "主标签本身";
+const NO_OA_READ_MODEL_REFRESH_RETRY_MS = 1000;
 
 const STATUS_META: Record<NoOaBankBatchStatus, { label: string; color: "default" | "primary" | "success" | "warning" | "error" }> = {
   draft: { label: "待提交", color: "warning" },
@@ -139,6 +145,20 @@ function canWithdraw(batch: NoOaBankBatch) {
   return batch.canWithdraw || batch.status === "submitted";
 }
 
+function canSelectBatchRows(batch: NoOaBankBatch, bucket: NoOaBankBatchStatusBucket) {
+  return bucket === "unsubmitted"
+    && batch.status === "draft"
+    && batch.canSubmit
+    && batch.batchType !== "internal_transfer";
+}
+
+function canSubmitInternalTransferBatch(batch: NoOaBankBatch, bucket: NoOaBankBatchStatusBucket) {
+  return bucket === "unsubmitted"
+    && batch.status === "draft"
+    && batch.canSubmit
+    && batch.batchType === "internal_transfer";
+}
+
 function statusBucketFor(batch: NoOaBankBatch): NoOaBankBatchStatusBucket {
   if (batch.statusBucket === "submitted" || batch.status === "submitted") {
     return "submitted";
@@ -147,6 +167,19 @@ function statusBucketFor(batch: NoOaBankBatch): NoOaBankBatchStatusBucket {
     return "withdrawn";
   }
   return "unsubmitted";
+}
+
+function readModelStatusMessage(status: NoOaBankBatchReadModelStatus) {
+  if (status === "schema_mismatch") {
+    return "免OA流水读模型版本正在升级，已显示当前可用数据。";
+  }
+  if (status === "stale") {
+    return "免OA流水读模型待刷新，已显示当前可用数据。";
+  }
+  if (status === "missing") {
+    return "免OA流水读模型正在初始化。";
+  }
+  return "免OA流水读模型正在刷新，已显示当前可用数据。";
 }
 
 function BatchStatusChip({ status }: { status: string }) {
@@ -217,6 +250,11 @@ export default function NoOaBankBatchPage() {
   const [withdrawTarget, setWithdrawTarget] = useState<NoOaBankBatch | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const batchRequestSeqRef = useRef(0);
+  const batchQueryKeyRef = useRef("");
+  const readModelStatus = payload.readModelStatus;
+  const readModelNeedsRefresh = readModelStatus !== "fresh";
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -234,6 +272,8 @@ export default function NoOaBankBatchPage() {
   }, []);
 
   const loadBatches = useCallback((signal?: AbortSignal) => {
+    const requestId = batchRequestSeqRef.current + 1;
+    batchRequestSeqRef.current = requestId;
     setLoading(true);
     setError(null);
     fetchNoOaBankBatches({
@@ -243,16 +283,26 @@ export default function NoOaBankBatchPage() {
       signal,
     })
       .then((nextPayload) => {
+        if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
+          return;
+        }
         setPayload(nextPayload);
         setSelectedTransactionIds(new Set());
         setSelectedAccountForSubmit(null);
       })
       .catch((caught: unknown) => {
+        if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
+          return;
+        }
         if (!isAbortLikeError(caught)) {
           setError(caught instanceof Error ? caught.message : "免OA流水批次加载失败");
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!signal?.aborted && requestId === batchRequestSeqRef.current) {
+          setLoading(false);
+        }
+      });
   }, [accountKey, bucket, month]);
 
   useEffect(() => {
@@ -263,10 +313,24 @@ export default function NoOaBankBatchPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setDetails({});
+    const batchQueryKey = JSON.stringify({ accountKey: accountKey.trim(), bucket, month });
+    if (batchQueryKeyRef.current !== batchQueryKey) {
+      batchQueryKeyRef.current = batchQueryKey;
+      setDetails({});
+    }
     loadBatches(controller.signal);
     return () => controller.abort();
-  }, [loadBatches]);
+  }, [accountKey, bucket, loadBatches, month, refreshToken]);
+
+  useEffect(() => {
+    if (!readModelNeedsRefresh || loading) {
+      return undefined;
+    }
+    const retryId = window.setTimeout(() => {
+      setRefreshToken((current) => current + 1);
+    }, NO_OA_READ_MODEL_REFRESH_RETRY_MS);
+    return () => window.clearTimeout(retryId);
+  }, [loading, readModelNeedsRefresh, refreshToken]);
 
   const tagNodesByCode = useMemo(() => {
     const nodes = new Map<string, NoOaTagNode>();
@@ -405,7 +469,18 @@ export default function NoOaBankBatchPage() {
       loadTagSelection();
       loadBatches();
     };
-    return subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
+    const unsubscribeCategoryUpdated = subscribeFinanceDomainEvent(
+      FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated,
+      handleCategoryUpdated,
+    );
+    const unsubscribeAutoTagRulesUpdated = subscribeFinanceDomainEvent(
+      FINANCE_DOMAIN_EVENTS.bankAutoTagRulesUpdated,
+      handleCategoryUpdated,
+    );
+    return () => {
+      unsubscribeCategoryUpdated();
+      unsubscribeAutoTagRulesUpdated();
+    };
   }, [loadBatches, loadTagSelection]);
 
   const handleMutationComplete = (message: string, result: { affectedMonths?: string[] }) => {
@@ -481,6 +556,25 @@ export default function NoOaBankBatchPage() {
     }
   };
 
+  const handleSubmitBatch = async (batch: NoOaBankBatch) => {
+    if (!canSubmitInternalTransferBatch(batch, bucket) || mutating) {
+      return;
+    }
+    setMutating(true);
+    try {
+      const result = await submitNoOaBankBatch({
+        batchId: batch.batchId,
+        expectedVersion: batch.version,
+        note: "",
+      });
+      handleMutationComplete("内部往来批次已提交", result);
+    } catch (caught) {
+      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "提交内部往来批次失败" });
+    } finally {
+      setMutating(false);
+    }
+  };
+
   const handleConfirmWithdraw = async () => {
     if (!withdrawTarget || !withdrawReason.trim() || mutating) {
       return;
@@ -547,7 +641,7 @@ export default function NoOaBankBatchPage() {
             onClick={() => {
               setDetails({});
               loadTagSelection();
-              loadBatches();
+              setRefreshToken((current) => current + 1);
             }}
             startIcon={<RefreshOutlinedIcon />}
             variant="outlined"
@@ -569,6 +663,7 @@ export default function NoOaBankBatchPage() {
           >
             <ToggleButton value="unsubmitted">未提交 {unsubmittedCount}</ToggleButton>
             <ToggleButton value="submitted">已提交 {payload.summary.submittedCount}</ToggleButton>
+            <ToggleButton value="withdrawn">历史 {payload.summary.withdrawnCount}</ToggleButton>
           </ToggleButtonGroup>
           <TextField InputLabelProps={{ shrink: true }} label="月份" onChange={(event) => setMonth(event.target.value)} size="small" type="month" value={month} />
           <TextField label="银行账户" onChange={(event) => setAccountKey(event.target.value)} placeholder="银行或账户尾号" size="small" value={accountKey} />
@@ -580,6 +675,10 @@ export default function NoOaBankBatchPage() {
           {selectedTransactionIds.size > 0 ? <Chip label={`已选 ${selectedTransactionIds.size} 条`} color="primary" /> : null}
         </Stack>
       </Paper>
+
+      {readModelNeedsRefresh && !error ? (
+        <StatePanel tone="loading" compact>{readModelStatusMessage(readModelStatus)}</StatePanel>
+      ) : null}
 
       {error ? <StatePanel tone="error" title={error} /> : null}
 
@@ -657,7 +756,7 @@ export default function NoOaBankBatchPage() {
               {selectedPrimaryLabel && selectedSubKey ? `${selectedPrimaryLabel} / ${selectedSubKey}` : "流水"}
             </Typography>
             <Typography color="text.secondary" variant="caption">
-              {bucket === "unsubmitted" ? "每次只能选择同一银行区域内的流水提交。" : "已提交批次保留撤回入口。"}
+              {bucket === "unsubmitted" ? "每次只能选择同一银行区域内的流水提交。" : bucket === "submitted" ? "已提交批次保留撤回入口。" : "已撤回批次只读展示。"}
             </Typography>
           </Stack>
           <Divider />
@@ -667,7 +766,9 @@ export default function NoOaBankBatchPage() {
             {!loading ? visibleBatches.map((batch) => {
               const detail = details[batch.batchId];
               const rows = detail?.rows ?? [];
-              const regionChecked = rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
+              const rowSelectionEnabled = canSelectBatchRows(batch, bucket);
+              const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
+              const regionChecked = rowSelectionEnabled && rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
               return (
                 <Box key={batch.batchId} sx={{ p: 1.5 }}>
                   <Stack spacing={1}>
@@ -679,13 +780,16 @@ export default function NoOaBankBatchPage() {
                         <BatchStatusChip status={batch.status} />
                       </Stack>
                       <Stack direction="row" spacing={1}>
-                        {bucket === "unsubmitted" ? (
+                        {rowSelectionEnabled ? (
                           <>
                             <Button disabled={rows.length === 0 || mutating} onClick={() => setRegionSelection(rows, true)} size="small">全选</Button>
                             <Button disabled={rows.length === 0 || mutating} onClick={() => setRegionSelection(rows, false)} size="small">清空</Button>
                           </>
                         ) : null}
-                        {canWithdraw(batch) ? (
+                        {internalTransferSubmitEnabled ? (
+                          <Button disabled={mutating} onClick={() => handleSubmitBatch(batch)} size="small" variant="contained">提交内部往来批次</Button>
+                        ) : null}
+                        {bucket === "submitted" && canWithdraw(batch) ? (
                           <Button disabled={mutating} onClick={() => setWithdrawTarget(batch)} size="small" variant="outlined">撤回批次</Button>
                         ) : null}
                       </Stack>
@@ -698,7 +802,7 @@ export default function NoOaBankBatchPage() {
                         <Table size="small" aria-label={`${accountLabel(batch)}流水`}>
                           <TableHead>
                             <TableRow>
-                              {bucket === "unsubmitted" ? (
+                              {rowSelectionEnabled ? (
                                 <TableCell padding="checkbox">
                                   <Checkbox
                                     checked={regionChecked}
@@ -717,7 +821,7 @@ export default function NoOaBankBatchPage() {
                           <TableBody>
                             {rows.map((row) => (
                               <TableRow key={row.transactionId}>
-                                {bucket === "unsubmitted" ? (
+                                {rowSelectionEnabled ? (
                                   <TableCell padding="checkbox">
                                     <Checkbox
                                       checked={selectedTransactionIds.has(row.transactionId)}

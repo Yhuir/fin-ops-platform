@@ -60,7 +60,7 @@ const columns: OaPendingPaymentColumn[] = [
   { id: "applicationType", label: "类型", width: 95 },
   { id: "projectName", label: "项目名称", width: 220 },
   { id: "oaAmount", label: "金额", width: 105, align: "right" },
-  { id: "oaDetail", label: "oa详请", width: 92 },
+  { id: "oaDetail", label: "OA详情", width: 92 },
   { id: "paymentStatus", label: "支付状态", width: 150 },
   { id: "bankName", label: "支出银行", width: 115 },
   { id: "accountName", label: "账户名称", width: 170 },
@@ -180,7 +180,7 @@ export default function OaPendingPaymentsTable({
                         startIcon={<OpenInNewOutlinedIcon fontSize="small" />}
                         onClick={() => onOpenDetail({ kind: "oa", id: row.oa.id })}
                       >
-                        详请
+                        详情
                       </Button>
                     </span>
                   </Tooltip>
@@ -193,7 +193,17 @@ export default function OaPendingPaymentsTable({
                     variant={row.paymentStatus.code === "paid" || row.paymentStatus.code === "merged_paid" ? "filled" : "outlined"}
                   />
                 </TableCell>
-                <ClipCell value={row.bankTransaction.bankName} />
+                <DetailCell
+                  value={row.bankTransaction.bankName}
+                  label={bankDetailLabel(row)}
+                  disabled={!bankDetailTarget(row)}
+                  onClick={() => {
+                    const target = bankDetailTarget(row);
+                    if (target) {
+                      onOpenDetail(target);
+                    }
+                  }}
+                />
                 <ClipCell value={row.bankTransaction.accountName} />
                 <ClipCell value={row.bankTransaction.tradeTime} />
                 <ClipCell value={row.bankTransaction.debitAmount} align="right" />
@@ -206,7 +216,17 @@ export default function OaPendingPaymentsTable({
                 <ClipCell value={row.bankTransaction.bookedDate} />
                 <ClipCell value={row.bankTransaction.summary} />
                 <ClipCell value={row.bankTransaction.remark} />
-                <ClipCell value={row.invoice.digitalInvoiceNo} />
+                <DetailCell
+                  value={row.invoice.digitalInvoiceNo}
+                  label={invoiceDetailLabel(row)}
+                  disabled={!invoiceDetailTarget(row)}
+                  onClick={() => {
+                    const target = invoiceDetailTarget(row);
+                    if (target) {
+                      onOpenDetail(target);
+                    }
+                  }}
+                />
                 <ClipCell value={row.invoice.sellerName} />
                 <ClipCell value={row.invoice.invoiceDate} />
                 <ClipCell value={row.invoice.totalWithTax} align="right" />
@@ -268,6 +288,80 @@ function ClipCell({ value, align }: { value: string | number | null | undefined;
       </Tooltip>
     </TableCell>
   );
+}
+
+function DetailCell({
+  value,
+  label,
+  disabled,
+  onClick,
+}: {
+  value: string | number | null | undefined;
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const text = value == null || value === "" ? "-" : String(value);
+  return (
+    <TableCell>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, minWidth: 0 }}>
+        <Tooltip title={text === "-" ? "" : text}>
+          <Typography component="span" variant="body2" noWrap sx={{ display: "block", minWidth: 0, flex: 1 }}>
+            {text}
+          </Typography>
+        </Tooltip>
+        <Tooltip title={label}>
+          <span>
+            <Button
+              aria-label={label}
+              disabled={disabled}
+              size="small"
+              onClick={onClick}
+              sx={{ minWidth: 32, px: 0.75 }}
+            >
+              详情
+            </Button>
+          </span>
+        </Tooltip>
+      </Box>
+    </TableCell>
+  );
+}
+
+function bankDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {
+  if (row.bankTransaction.detailMode === "single" && row.bankTransaction.primaryBankTransactionId) {
+    return { kind: "bank", id: row.bankTransaction.primaryBankTransactionId };
+  }
+  if (row.bankTransaction.detailMode === "list") {
+    return { kind: "relationList", id: row.id, rowId: row.id, relationKind: "bank" };
+  }
+  return null;
+}
+
+function invoiceDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {
+  if (row.invoice.detailMode === "single" && row.invoice.primaryInvoiceId) {
+    return { kind: "invoice", id: row.invoice.primaryInvoiceId };
+  }
+  if (row.invoice.detailMode === "list") {
+    return { kind: "relationList", id: row.id, rowId: row.id, relationKind: "invoice" };
+  }
+  return null;
+}
+
+function bankDetailLabel(row: OaPendingPaymentRow): string {
+  const applicant = row.oa.applicantName || "该OA";
+  if (row.bankTransaction.detailMode === "list") {
+    return `查看${applicant}关联流水 ${row.bankTransaction.relationCount} 条`;
+  }
+  return `查看流水 ${applicant} 详情`;
+}
+
+function invoiceDetailLabel(row: OaPendingPaymentRow): string {
+  const applicant = row.oa.applicantName || "该OA";
+  if (row.invoice.detailMode === "list") {
+    return `查看${applicant}关联发票 ${row.invoice.relationCount} 张`;
+  }
+  return `查看发票 ${applicant} 详情`;
 }
 
 function statusColor(severity: string | undefined) {

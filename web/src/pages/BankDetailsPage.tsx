@@ -48,6 +48,7 @@ import {
 } from "../features/bankDetails/api";
 import {
   FINANCE_DOMAIN_EVENTS,
+  emitFinanceDomainEvent,
   eventAffectedMonths,
   subscribeFinanceDomainEvent,
 } from "../features/domainEvents";
@@ -1759,6 +1760,12 @@ export default function BankDetailsPage() {
     window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, {
       detail: { version: payload.version, activeRules: payload.activeRules },
     }));
+    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankAutoTagRulesUpdated, {
+      version: payload.version,
+      activeRules: payload.activeRules,
+      source: "bank_details_auto_tag_rules",
+      action: payload.refreshReason === "reapplied" ? "reapplied" : "saved",
+    });
     if (typeof BroadcastChannel !== "undefined") {
       const channel = new BroadcastChannel(TAG_SYNC_EVENT);
       channel.postMessage({ version: payload.version, activeRules: payload.activeRules });

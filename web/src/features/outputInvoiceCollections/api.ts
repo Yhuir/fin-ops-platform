@@ -15,6 +15,7 @@ import type {
   OutputInvoiceReceiptHistoryResponse,
   OutputInvoiceReceiptPreviewRequest,
   OutputInvoiceReceiptPreviewResponse,
+  OutputInvoiceReceiptSettingsResponse,
 } from "./types";
 
 type FetchRowsRequest = Pick<
@@ -162,6 +163,7 @@ function mapRedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["
   }
   return {
     id,
+    relationId: stringValue(camelOrSnake(raw, "relationId", "relation_id")),
     invoiceNo,
     invoiceDate: stringValue(camelOrSnake(raw, "invoiceDate", "invoice_date")),
     buyerName: stringValue(camelOrSnake(raw, "buyerName", "buyer_name")),
@@ -452,10 +454,30 @@ export async function fetchOutputInvoiceCollectionStatusRules(signal?: AbortSign
 }
 
 export async function fetchOutputInvoiceReceiptHistory(invoiceId: string, signal?: AbortSignal) {
-  return apiRequestJson<OutputInvoiceReceiptHistoryResponse>(
+  const payload = await apiRequestJson<unknown>(
     `/api/output-invoice-collections/receipts/history?invoice_id=${encodeURIComponent(invoiceId)}`,
     { method: "GET", signal },
   );
+  const raw = objectValue(payload);
+  return {
+    invoiceId: stringValue(camelOrSnake(raw, "invoiceId", "invoice_id")),
+    sourceAvailable: booleanValue(camelOrSnake(raw, "sourceAvailable", "source_available")),
+    sourceName: stringValue(camelOrSnake(raw, "sourceName", "source_name")),
+    receipts: arrayValue(raw.receipts).map((item) => {
+      const receipt = objectValue(item);
+      return {
+        id: stringValue(receipt.id ?? camelOrSnake(receipt, "receiptId", "receipt_id")),
+        receiptNo: stringValue(camelOrSnake(receipt, "receiptNo", "receipt_no")),
+        amount: stringValue(receipt.amount),
+        createdAt: stringValue(camelOrSnake(receipt, "createdAt", "created_at") ?? camelOrSnake(receipt, "issuedAt", "issued_at")),
+        voidedAt: stringValue(camelOrSnake(receipt, "voidedAt", "voided_at")),
+        voidReason: stringValue(camelOrSnake(receipt, "voidReason", "void_reason")),
+        reissuedFromReceiptId: stringValue(camelOrSnake(receipt, "reissuedFromReceiptId", "reissued_from_receipt_id")),
+        status: stringValue(receipt.status),
+      };
+    }),
+    message: stringValue(raw.message),
+  };
 }
 
 export async function previewOutputInvoiceReceipt(
@@ -486,6 +508,13 @@ export async function updateOutputInvoiceCollectionReminder(rowId: string, reque
   });
 }
 
+export async function cancelOutputInvoiceCollectionReminder(rowId: string, reminderId: string) {
+  return apiRequestJson<unknown>(
+    `/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/collection-reminder/${encodeURIComponent(reminderId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export async function confirmOutputInvoiceRedRelation(rowId: string, request: OutputInvoiceCollectionRedRelationRequest) {
   return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/red-invoice-relations`, {
     method: "POST",
@@ -494,10 +523,48 @@ export async function confirmOutputInvoiceRedRelation(rowId: string, request: Ou
   });
 }
 
+export async function revokeOutputInvoiceRedRelation(relationId: string) {
+  return apiRequestJson<unknown>(
+    `/api/output-invoice-collections/red-invoice-relations/${encodeURIComponent(relationId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export async function createOutputInvoiceReceipt(rowId: string, request: OutputInvoiceReceiptCreateRequest) {
   return apiRequestJson<unknown>(`/api/output-invoice-collections/rows/${encodeURIComponent(rowId)}/receipts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": request.idempotencyKey },
+    body: JSON.stringify(request),
+  });
+}
+
+export async function voidOutputInvoiceReceipt(receiptId: string, reason = "") {
+  return apiRequestJson<unknown>(`/api/output-invoice-collections/receipts/${encodeURIComponent(receiptId)}/void`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function reissueOutputInvoiceReceipt(receiptId: string, reason = "") {
+  return apiRequestJson<unknown>(`/api/output-invoice-collections/receipts/${encodeURIComponent(receiptId)}/reissue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function fetchOutputInvoiceReceiptSettings(signal?: AbortSignal): Promise<OutputInvoiceReceiptSettingsResponse> {
+  return apiRequestJson<OutputInvoiceReceiptSettingsResponse>("/api/output-invoice-collections/receipt-settings", {
+    method: "GET",
+    signal,
+  });
+}
+
+export async function updateOutputInvoiceReceiptSettings(request: { prefix: string; resetPeriod: string }) {
+  return apiRequestJson<OutputInvoiceReceiptSettingsResponse>("/api/output-invoice-collections/receipt-settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
 }

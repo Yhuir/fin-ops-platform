@@ -19,6 +19,7 @@ export type NoOaBankBatchStatus =
 
 export type NoOaBankBatchStatusFilter = "all" | NoOaBankBatchStatus;
 export type NoOaBankBatchStatusBucket = "unsubmitted" | "submitted" | "withdrawn" | "all";
+export type NoOaBankBatchReadModelStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
 
 export type NoOaBankBatchCountMap = Record<string, number>;
 
@@ -87,6 +88,8 @@ export type NoOaBankBatchesRequest = {
 export type NoOaBankBatchesResponse = {
   summary: NoOaBankBatchSummary;
   batches: NoOaBankBatch[];
+  readModelStatus: NoOaBankBatchReadModelStatus;
+  readModelStaleReasons: string[];
 };
 
 export type NoOaBankBatchDirection = "income" | "expense" | string;
@@ -160,6 +163,7 @@ export type NoOaBankBatchTagDefinition = {
 
 export type NoOaBankBatchTagSelection = {
   version: number;
+  bankAutoTagRulesVersion: number;
   selectedTagCodes: string[];
   inactiveSelectedTagCodes: string[];
   activeTags: NoOaBankBatchTagDefinition[];

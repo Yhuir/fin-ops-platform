@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from urllib.parse import quote
+
+from openpyxl import load_workbook
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
@@ -133,6 +136,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertTrue(payload["canCreateDraft"])
         self.assertEqual(payload["nextAction"], "create_batch")
         self.assertEqual(payload["invoiceRows"][0]["invoiceId"], "inv-preview")
+        self.assertIn({"code": "chen_xiuyun", "name": "陈秀云"}, payload["targetApplicants"])
         self.assertEqual(len(payload["previewHash"]), 64)
         self.assertEqual(oa_projection.write_calls, [])
 
@@ -177,6 +181,55 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         failed_payload = json.loads(failed_response.body)
         self.assertEqual(failed_payload["status"], "oa_draft_failed")
         self.assertEqual(failed_payload["version"], 2)
+
+    def test_export_preview_and_download_use_current_input_invoice_usage_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(
+                app,
+                invoices=[
+                    self._invoice("inv-export-1", "4001", "导出供应商甲", total_with_tax="30.00"),
+                    self._invoice("inv-export-2", "4002", "导出供应商乙", total_with_tax="10.00"),
+                ],
+            )
+            filters = quote(json.dumps([{"field": "seller_name", "operator": "contains", "value": "甲"}]))
+
+            preview_response = app.handle_request(
+                "GET",
+                f"/api/input-invoice-usage/export-preview?filters={filters}&sort_field=total_with_tax&sort_direction=desc",
+            )
+            export_response = app.handle_request(
+                "GET",
+                f"/api/input-invoice-usage/export?filters={filters}&sort_field=total_with_tax&sort_direction=desc",
+            )
+
+        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_payload["row_count"], 1)
+        self.assertEqual(preview_payload["sample_rows"][0]["发票号码"], "4001")
+        self.assertEqual(export_response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            export_response.headers["Content-Type"],
+        )
+        workbook = load_workbook(BytesIO(export_response.body), data_only=True)
+        sheet = workbook["进项发票使用情况"]
+        self.assertEqual(sheet["D2"].value, "4001")
+        self.assertEqual(sheet["F2"].value, "导出供应商甲")
+
+    def test_export_returns_refreshing_when_sql_read_model_is_not_fresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(app, invoices=[])
+            app._input_invoice_usage_sql_read_repository = RefreshingInputInvoiceUsageReadRepository()
+
+            preview_response = app.handle_request("GET", "/api/input-invoice-usage/export-preview?month=2026-05")
+            export_response = app.handle_request("GET", "/api/input-invoice-usage/export?month=2026-05")
+
+        self.assertEqual(preview_response.status_code, 202)
+        self.assertEqual(json.loads(preview_response.body)["readModelStatus"], "refreshing")
+        self.assertEqual(export_response.status_code, 202)
+        self.assertEqual(json.loads(export_response.body)["readModelStatus"], "refreshing")
 
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -286,3 +339,12 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             relation_label="进行中",
             relation_tone="success",
         )
+
+
+class RefreshingInputInvoiceUsageReadRepository:
+    def list_input_invoice_usage_rows(self, **_kwargs: object) -> dict[str, object]:
+        return {
+            "rows": [],
+            "pagination": {"page": 1, "pageSize": 50, "total": 0},
+            "refresh_status": "stale",
+        }

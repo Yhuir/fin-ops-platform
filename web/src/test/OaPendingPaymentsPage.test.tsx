@@ -43,6 +43,7 @@ const rowsPayload = {
         remark: "红河卷烟厂2025-2028年度能源管理相关系统运维服务采购项目保证金",
         relationCount: 1,
         hasMultiple: false,
+        detailMode: "single",
       },
       invoice: {
         primaryInvoiceId: "inv-001",
@@ -52,6 +53,56 @@ const rowsPayload = {
         totalWithTax: "10000.00",
         relationCount: 1,
         hasMultiple: false,
+        detailMode: "single",
+      },
+    },
+    {
+      id: "oa-payment-row-002",
+      oa: {
+        id: "oa-002",
+        applicantName: "李四",
+        applicationType: "付款",
+        projectName: "多关联项目",
+        amount: "15000.00",
+        detailAvailable: true,
+      },
+      paymentStatus: {
+        code: "merged_paid",
+        label: "已支付（多条OA合并支付）",
+        reason: "多条OA共享同一支出流水且合计金额匹配",
+      },
+      bankTransaction: {
+        primaryBankTransactionId: "bank-002",
+        accountDetailNo: "multi-bank-main",
+        enterpriseSerialNo: "",
+        voucherKind: "电子转账凭证",
+        voucherNo: "multi-voucher",
+        bankName: "建设银行",
+        accountName: "云南溯源科技有限公司",
+        tradeTime: "20260106 09:50:25",
+        debitAmount: "15000.00",
+        creditAmount: "0.00",
+        balance: "129698.00",
+        currency: "人民币元",
+        counterpartyName: "多流水供应商",
+        counterpartyAccountNo: "2502124119024521402",
+        counterpartyBankName: "中国建设银行昆明支行",
+        bookedDate: "20260106",
+        summary: "多流水转账",
+        remark: "多流水备注",
+        relationCount: 2,
+        hasMultiple: true,
+        detailMode: "list",
+      },
+      invoice: {
+        primaryInvoiceId: "inv-002",
+        digitalInvoiceNo: "26532000000999999999",
+        sellerName: "多发票供应商",
+        invoiceDate: "2026-01-09",
+        totalWithTax: "15000.00",
+        relationCount: 2,
+        hasMultiple: true,
+        detailMode: "list",
       },
     },
   ],
@@ -75,12 +126,14 @@ const rowsPayload = {
   ],
 };
 
-function installOaPendingPaymentsFetch() {
+function installOaPendingPaymentsFetch(overrides?: { rowsPayload?: Record<string, unknown> }) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/oa-pending-payments/rows") {
-      return new Response(JSON.stringify(rowsPayload), {
-        status: 200,
+      const payload: Record<string, unknown> = overrides?.rowsPayload ?? rowsPayload;
+      const readModelStatus = payload.readModelStatus ?? payload.read_model_status;
+      return new Response(JSON.stringify(payload), {
+        status: readModelStatus === "refreshing" ? 202 : 200,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -115,6 +168,31 @@ function installOaPendingPaymentsFetch() {
         subtitle: "oa-001",
         detailAvailable: true,
         sections: [{ title: "OA信息", fields: [{ label: "申请人", value: "张三" }] }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.pathname === "/api/oa-pending-payments/bank-transactions/bank-001/detail") {
+      return new Response(JSON.stringify({
+        title: "支出流水详情",
+        subtitle: "bank-001",
+        detailAvailable: true,
+        sections: [{ title: "流水信息", fields: [{ label: "支出银行", value: "建设银行" }] }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.pathname === "/api/oa-pending-payments/invoices/inv-001/detail") {
+      return new Response(JSON.stringify({
+        title: "发票详情",
+        subtitle: "inv-001",
+        detailAvailable: true,
+        sections: [{ title: "发票情况", fields: [{ label: "销方名称", value: "云南恒昆机电设备有限公司" }] }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.pathname === "/api/oa-pending-payments/rows/oa-payment-row-002/relation-details") {
+      const kind = url.searchParams.get("kind");
+      return new Response(JSON.stringify({
+        title: kind === "invoice" ? "发票关联明细" : "支出流水关联明细",
+        subtitle: "李四",
+        detailAvailable: true,
+        sections: [{ title: kind === "invoice" ? "发票 1" : "流水 1", fields: [{ label: "数量", value: "2" }] }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/rules") {
@@ -198,7 +276,7 @@ describe("OA pending payments page", () => {
     });
   });
 
-  test("opens OA detail drawer and reuses pending invoice rules endpoint", async () => {
+  test("opens OA, bank, invoice, relation drawers and reuses pending invoice rules endpoint", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
 
@@ -207,6 +285,23 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     await user.click(within(page).getByRole("button", { name: "查看 OA 张三 详情" }));
     expect(await screen.findByRole("heading", { name: "OA详情" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看流水 张三 详情" }));
+    expect(await screen.findByRole("heading", { name: "支出流水详情" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看发票 张三 详情" }));
+    expect(await screen.findByRole("heading", { name: "发票详情" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看李四关联流水 2 条" }));
+    expect(await screen.findByRole("heading", { name: "支出流水关联明细" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看李四关联发票 2 张" }));
+    expect(await screen.findByRole("heading", { name: "发票关联明细" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
     await screen.findByText("待找发票规则设置");
@@ -214,5 +309,41 @@ describe("OA pending payments page", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/pending-invoices/rules" && url.searchParams.get("direction") === "expense";
     })).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/oa-pending-payments/bank-transactions/bank-001/detail";
+    })).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/oa-pending-payments/invoices/inv-001/detail";
+    })).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-row-002/relation-details" && url.searchParams.get("kind") === "bank";
+    })).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-row-002/relation-details" && url.searchParams.get("kind") === "invoice";
+    })).toBe(true);
+  });
+
+  test("shows read model refreshing status when rows are rebuilding", async () => {
+    installOaPendingPaymentsFetch({
+      rowsPayload: {
+        ...rowsPayload,
+        rows: [],
+        pagination: { page: 1, pageSize: 20, total: 0 },
+        summary: { rowCount: 0 },
+        readModelStatus: "refreshing",
+        read_model_status: "refreshing",
+        read_model_stale_reasons: ["oa_pending_payment_source_version_missing"],
+      },
+    });
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    expect(await within(page).findByText(/OA 待付款核对数据正在刷新/)).toBeInTheDocument();
+    expect(within(page).getByText(/oa_pending_payment_source_version_missing/)).toBeInTheDocument();
   });
 });

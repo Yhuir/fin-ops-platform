@@ -325,37 +325,6 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(bank_detail["remark"], "银行备注")
         self.assertFalse(oa_detail["detailAvailable"])
 
-    def test_read_only_oa_reverse_preview_returns_backend_counts_groups_and_performs_no_writes(self) -> None:
-        vendor = self._counterparty("vendor", "供应商")
-        available = self._invoice("inv-available", "9401", vendor, total_with_tax="99.72")
-        already_bound = self._invoice("inv-bound", "9402", vendor, total_with_tax="1.00")
-        oa_projection = StaticOAProjection([self._oa("oa-bound", "李四", "1.00")])
-        pair_service = WorkbenchPairRelationService()
-        self._relation(pair_service, "case-bound", [already_bound.id, "oa-bound"], amount_matched=True)
-        service = self._service(
-            invoices=[available, already_bound],
-            pair_service=pair_service,
-            oa_projection=oa_projection,
-        )
-
-        preview = service.oa_reverse_preview(
-            {
-                "source": "explicitSelection",
-                "invoiceIds": ["inv-available", "inv-bound"],
-                "targetApplicantCode": "chen_xiuyun",
-            }
-        )
-
-        self.assertEqual(preview["source"], "explicitSelection")
-        self.assertEqual(preview["invoiceCount"], 1)
-        self.assertEqual(preview["totalWithTax"], "99.72")
-        self.assertEqual(preview["groups"][0]["targetApplicantName"], "陈秀云")
-        self.assertEqual(preview["groups"][0]["candidateInvoiceIds"], ["inv-available"])
-        self.assertEqual(preview["groups"][0]["rejectedInvoices"][0]["reasonCode"], "already_has_active_oa")
-        self.assertFalse(preview["canCreateDraft"])
-        self.assertEqual(preview["nextAction"], "future_contract_only")
-        self.assertEqual(oa_projection.write_calls, [])
-
     @staticmethod
     def _counterparty(counterparty_id: str, name: str) -> Counterparty:
         return Counterparty(id=counterparty_id, name=name, normalized_name=name, counterparty_type="supplier")

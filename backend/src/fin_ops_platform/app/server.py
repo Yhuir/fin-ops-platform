@@ -42,6 +42,7 @@ from fin_ops_platform.app.bank_detail_category_api import (
     manual_assignment_selection,
 )
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
+from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
 from fin_ops_platform.app.routes_output_invoice_collections import OutputInvoiceCollectionApiRoutes
 from fin_ops_platform.app.routes_turnover_ledger import (
@@ -136,6 +137,10 @@ from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobRepos
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_export_service import (
+    InputInvoiceUsageExportError,
+    InputInvoiceUsageExportService,
+)
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InMemoryInputInvoiceUsageOaReverseBatchRepository,
     InputInvoiceUsageOaReverseInvalidTransitionError,
@@ -148,13 +153,15 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InputInvoiceUsageOaReverseVersionConflictError,
     NotConfiguredInputInvoiceUsageOaDraftClient,
     OAProjectionInputInvoiceUsageOaEvidenceProvider,
-    PostgresInputInvoiceUsageOaReverseBatchRepository,
     WorkbenchInputInvoiceUsageOaReverseRelationWriter,
 )
 from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
+)
+from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
+    PostgresInputInvoiceUsageOaReverseBatchRepository,
 )
 from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     input_invoice_usage_source_versions,
@@ -168,6 +175,12 @@ from fin_ops_platform.services.output_invoice_collection_service import (
 from fin_ops_platform.services.oa_pending_payment_service import (
     OaPendingPaymentError,
     OaPendingPaymentQueryService,
+)
+from fin_ops_platform.services.oa_pending_payment_read_model_details import (
+    oa_pending_payment_bank_detail_from_row,
+    oa_pending_payment_invoice_detail_from_row,
+    oa_pending_payment_oa_detail_from_row,
+    oa_pending_payment_relation_details_from_row,
 )
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import (
     InMemoryOutputInvoiceCollectionLifecycleRepository,
@@ -187,6 +200,10 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NO_OA_BANK_BATCH_RELATION_MODE,
     NoOaBankBatchService,
+)
+from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchApplicationService
+from fin_ops_platform.services.no_oa_bank_batch_tag_selection_service import (
+    NoOaBankBatchTagSelectionApplicationService,
 )
 from fin_ops_platform.services.no_oa_managed_rule_policy import (
     NO_OA_MANAGED_BATCH_TYPE_ORDER,
@@ -676,6 +693,15 @@ class Application:
             bank_transaction_category_service=self._bank_transaction_category_service,
             bank_transaction_auto_category_service=self._bank_transaction_auto_category_service,
             audit_service=self._audit_service,
+        )
+        self._no_oa_bank_batch_tag_selection_service = NoOaBankBatchTagSelectionApplicationService(
+            app_settings_service=self._app_settings_service,
+            refresh_no_oa_bank_batches=lambda: self._no_oa_bank_batch_application_service().refresh_batches(),
+            after_no_oa_bank_batch_mutation=lambda affected_months, **kwargs: self._no_oa_bank_batch_application_service().after_mutation(
+                affected_months,
+                changed_case_ids=list(kwargs.get("changed_case_ids") or []),
+                persist=bool(kwargs.get("persist")),
+            ),
         )
         if source_oa_adapter is not None:
             source_oa_adapter.set_import_settings_provider(self._app_settings_service.get_oa_import_settings)
@@ -1208,6 +1234,10 @@ class Application:
             return self._handle_api_input_invoice_usage_rows(query)
         if method == "GET" and route_path == "/api/input-invoice-usage/filter-options":
             return self._handle_api_input_invoice_usage_filter_options(query)
+        if method == "GET" and route_path == "/api/input-invoice-usage/export-preview":
+            return self._handle_api_input_invoice_usage_export_preview(query, headers)
+        if method == "GET" and route_path == "/api/input-invoice-usage/export":
+            return self._handle_api_input_invoice_usage_export(query, headers)
         if method == "GET" and route_path == "/api/input-invoice-usage/payment-status-rules":
             return self._handle_api_input_invoice_usage_payment_status_rules()
         if method == "PUT" and route_path == "/api/input-invoice-usage/payment-status-rules":
@@ -1230,31 +1260,31 @@ class Application:
             if len(oa_reverse_parts) == 2 and method == "POST" and oa_reverse_parts[1] == "manual-oa-status":
                 return self._handle_api_input_invoice_usage_oa_reverse_manual_status(oa_reverse_parts[0], body, headers)
         if method == "GET" and route_path == "/api/oa-pending-payments/rows":
-            return self._handle_api_oa_pending_payments_rows(query)
+            return self._handle_api_oa_pending_payments_rows(query, headers)
         if method == "GET" and route_path == "/api/oa-pending-payments/filter-options":
-            return self._handle_api_oa_pending_payments_filter_options(query)
+            return self._handle_api_oa_pending_payments_filter_options(query, headers)
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/oa/") and route_path.endswith("/detail"):
             oa_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_oa_pending_payments_oa_detail(oa_id)
+            return self._handle_api_oa_pending_payments_oa_detail(oa_id, headers)
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/bank-transactions/") and route_path.endswith("/detail"):
             bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_oa_pending_payments_bank_transaction_detail(bank_transaction_id)
+            return self._handle_api_oa_pending_payments_bank_transaction_detail(bank_transaction_id, headers)
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/invoices/") and route_path.endswith("/detail"):
             invoice_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_oa_pending_payments_invoice_detail(invoice_id)
+            return self._handle_api_oa_pending_payments_invoice_detail(invoice_id, headers)
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/rows/") and route_path.endswith("/relation-details"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_oa_pending_payments_relation_details(row_id, query)
+            return self._handle_api_oa_pending_payments_relation_details(row_id, query, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/rows":
-            return self._handle_api_output_invoice_collections_rows(query)
+            return self._handle_api_output_invoice_collections_rows(query, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/filter-options":
-            return self._handle_api_output_invoice_collections_filter_options(query)
+            return self._handle_api_output_invoice_collections_filter_options(query, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/status-rules":
             return self._handle_api_output_invoice_collections_status_rules(headers)
         if method == "POST" and route_path == "/api/output-invoice-collections/receipt-preview":
-            return self._handle_api_output_invoice_collections_receipt_preview(body)
+            return self._handle_api_output_invoice_collections_receipt_preview(body, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/receipts/history":
-            return self._handle_api_output_invoice_collections_receipt_history(query)
+            return self._handle_api_output_invoice_collections_receipt_history(query, headers)
         if route_path == "/api/output-invoice-collections/receipt-settings":
             if method == "GET":
                 return self._handle_api_output_invoice_collections_receipt_settings(headers)
@@ -1802,6 +1832,8 @@ class Application:
                 "/api/pending-invoices/export",
                 "/api/input-invoice-usage/rows",
                 "/api/input-invoice-usage/filter-options",
+                "/api/input-invoice-usage/export-preview",
+                "/api/input-invoice-usage/export",
                 "/api/input-invoice-usage/payment-status-rules",
                 "/api/input-invoice-usage/oa-reverse/preview",
                 "/api/input-invoice-usage/oa-reverse/batches",
@@ -7177,6 +7209,40 @@ class Application:
         self._input_invoice_usage_query_service = service
         return service
 
+    def _input_invoice_usage_export_service(self) -> InputInvoiceUsageExportService:
+        service = getattr(self, "_input_invoice_usage_export_service_instance", None)
+        if isinstance(service, InputInvoiceUsageExportService):
+            return service
+        service = InputInvoiceUsageExportService(row_page_loader=self._load_input_invoice_usage_export_page)
+        self._input_invoice_usage_export_service_instance = service
+        return service
+
+    def _load_input_invoice_usage_export_page(self, **kwargs: object) -> dict[str, object] | None:
+        query = self._input_invoice_usage_export_query_from_kwargs(kwargs)
+        sql_payload = self._get_input_invoice_usage_rows_from_sql_read_model(query)
+        if sql_payload is not None:
+            return sql_payload
+        return self._input_invoice_usage_service().list_rows(
+            page=kwargs.get("page") or 1,
+            page_size=kwargs.get("page_size") or 50,
+            keyword=kwargs.get("keyword"),
+            invoice_date_from=kwargs.get("invoice_date_from"),
+            invoice_date_to=kwargs.get("invoice_date_to"),
+            month=kwargs.get("month"),
+            filters=kwargs.get("filters"),
+            sort_field=kwargs.get("sort_field") or "invoice_date",
+            sort_direction=kwargs.get("sort_direction") or "desc",
+        )
+
+    @staticmethod
+    def _input_invoice_usage_export_query_from_kwargs(kwargs: dict[str, object]) -> dict[str, list[str]]:
+        query: dict[str, list[str]] = {}
+        for key in ("month", "keyword", "invoice_date_from", "invoice_date_to", "filters", "sort_field", "sort_direction", "page", "page_size"):
+            value = kwargs.get(key)
+            if value not in (None, ""):
+                query[key] = [str(value)]
+        return query
+
     def _input_invoice_usage_payment_rules_provider(self) -> AppSettingsInputInvoiceUsagePaymentRulesProvider:
         provider = getattr(self, "_input_invoice_usage_payment_rules_provider_instance", None)
         if isinstance(provider, AppSettingsInputInvoiceUsagePaymentRulesProvider):
@@ -7300,6 +7366,86 @@ class Application:
         except InputInvoiceUsageError as exc:
             return self._input_invoice_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_input_invoice_usage_export_preview(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Response:
+        _session, auth_error = self._resolve_fin_ops_read_session(
+            headers,
+            denied_message="当前账户没有访问进项发票使用情况页面权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._input_invoice_usage_export_service().export_preview(
+                **self._input_invoice_usage_export_query_kwargs(query)
+            )
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        except InputInvoiceUsageExportError as exc:
+            return self._input_invoice_usage_export_error_response(exc)
+        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+        return self._json_response(status, payload)
+
+    def _handle_api_input_invoice_usage_export(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_fin_ops_read_session(
+            headers,
+            denied_message="当前账户没有访问进项发票使用情况页面权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        try:
+            filename, content = self._input_invoice_usage_export_service().export(
+                **self._input_invoice_usage_export_query_kwargs(query)
+            )
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        except InputInvoiceUsageExportError as exc:
+            return self._input_invoice_usage_export_error_response(exc)
+        self._audit_service.record_action(
+            actor_id=str(session.identity.username or "input_invoice_usage_export") if session is not None else "input_invoice_usage_export",
+            action="input_invoice_usage_export_downloaded",
+            entity_type="input_invoice_usage_export",
+            entity_id=filename,
+            metadata={"query": {key: values[0] for key, values in query.items() if values}},
+        )
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": XLSX_MIME_TYPE,
+                "Content-Disposition": _build_content_disposition(filename),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            },
+        )
+
+    @staticmethod
+    def _input_invoice_usage_export_query_kwargs(query: dict[str, list[str]]) -> dict[str, object]:
+        return {
+            "month": query.get("month", [None])[0],
+            "keyword": query.get("keyword", [None])[0],
+            "invoice_date_from": query.get("invoice_date_from", [None])[0],
+            "invoice_date_to": query.get("invoice_date_to", [None])[0],
+            "filters": query.get("filters", [None])[0],
+            "sort_field": query.get("sort_field", ["invoice_date"])[0],
+            "sort_direction": query.get("sort_direction", ["desc"])[0],
+        }
+
+    def _input_invoice_usage_export_error_response(self, exc: InputInvoiceUsageExportError) -> Response:
+        if exc.refresh_payload is not None:
+            return self._json_response(HTTPStatus.ACCEPTED, exc.refresh_payload)
+        return self._json_response(
+            HTTPStatus.BAD_REQUEST,
+            {"error": {"code": exc.error_code, "message": str(exc), "details": {}}},
+        )
 
     def _handle_api_input_invoice_usage_invoice_detail(self, invoice_id: str) -> Response:
         try:
@@ -7617,47 +7763,175 @@ class Application:
         self._oa_pending_payment_api_routes = routes
         return routes
 
-    def _handle_api_oa_pending_payments_rows(self, query: dict[str, list[str]]) -> Response:
+    def _handle_api_oa_pending_payments_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
+            sql_payload = self._get_oa_pending_payment_rows_from_sql_read_model(query)
+            if isinstance(sql_payload, dict):
+                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status_code, sql_payload)
             status_code, payload = self._oa_pending_payment_routes().rows(query)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
         return self._json_response(status_code, payload)
 
-    def _handle_api_oa_pending_payments_filter_options(self, query: dict[str, list[str]]) -> Response:
+    def _handle_api_oa_pending_payments_filter_options(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
+            sql_payload = self._get_oa_pending_payment_all_rows_from_sql_read_model(query)
+            if hasattr(sql_payload, "status_code") and hasattr(sql_payload, "body"):
+                return sql_payload
+            if isinstance(sql_payload, dict):
+                payload = self._oa_pending_payment_service().filter_options_for_rows(
+                    rows=list(sql_payload.get("rows") or []),
+                    keyword=query.get("keyword", [None])[0],
+                    month=query.get("month", [None])[0],
+                    trade_date_from=query.get("trade_date_from", [None])[0],
+                    trade_date_to=query.get("trade_date_to", [None])[0],
+                    filters=query.get("filters", [None])[0],
+                )
+                payload["read_model_status"] = "fresh"
+                payload["readModelStatus"] = "fresh"
+                payload["read_model_scope_key"] = sql_payload.get("read_model_scope_key")
+                return self._json_response(HTTPStatus.OK, payload)
             status_code, payload = self._oa_pending_payment_routes().filter_options(query)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
         return self._json_response(status_code, payload)
 
-    def _handle_api_oa_pending_payments_oa_detail(self, oa_id: str) -> Response:
+    def _handle_api_oa_pending_payments_oa_detail(self, oa_id: str, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            payload = self._oa_pending_payment_routes().oa_detail(oa_id)
+            payload = self._get_oa_pending_payment_detail_from_sql_read_model(
+                lookup_method_name="get_oa_pending_payment_row_by_oa_id",
+                identifier=oa_id,
+                builder=lambda row: oa_pending_payment_oa_detail_from_row(row),
+                not_found_code="oa_not_found",
+                not_found_message=f"OA detail not found: {oa_id}",
+            )
+            if payload is None:
+                payload = self._oa_pending_payment_routes().oa_detail(oa_id)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
 
-    def _handle_api_oa_pending_payments_bank_transaction_detail(self, bank_transaction_id: str) -> Response:
+    def _handle_api_oa_pending_payments_bank_transaction_detail(self, bank_transaction_id: str, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            payload = self._oa_pending_payment_routes().bank_transaction_detail(bank_transaction_id)
+            payload = self._get_oa_pending_payment_detail_from_sql_read_model(
+                lookup_method_name="get_oa_pending_payment_row_by_bank_transaction_id",
+                identifier=bank_transaction_id,
+                builder=lambda row: oa_pending_payment_bank_detail_from_row(row, bank_transaction_id),
+                not_found_code="bank_transaction_not_found",
+                not_found_message=f"Bank transaction detail not found: {bank_transaction_id}",
+            )
+            if payload is None:
+                payload = self._oa_pending_payment_routes().bank_transaction_detail(bank_transaction_id)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
 
-    def _handle_api_oa_pending_payments_invoice_detail(self, invoice_id: str) -> Response:
+    def _handle_api_oa_pending_payments_invoice_detail(self, invoice_id: str, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            payload = self._oa_pending_payment_routes().invoice_detail(invoice_id)
+            payload = self._get_oa_pending_payment_detail_from_sql_read_model(
+                lookup_method_name="get_oa_pending_payment_row_by_invoice_id",
+                identifier=invoice_id,
+                builder=lambda row: oa_pending_payment_invoice_detail_from_row(row, invoice_id),
+                not_found_code="invoice_not_found",
+                not_found_message=f"Invoice detail not found: {invoice_id}",
+            )
+            if payload is None:
+                payload = self._oa_pending_payment_routes().invoice_detail(invoice_id)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
 
-    def _handle_api_oa_pending_payments_relation_details(self, row_id: str, query: dict[str, list[str]]) -> Response:
+    def _handle_api_oa_pending_payments_relation_details(
+        self,
+        row_id: str,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            payload = self._oa_pending_payment_routes().relation_details(row_id, query)
+            kind = query.get("kind", [""])[0]
+            payload = self._get_oa_pending_payment_detail_from_sql_read_model(
+                lookup_method_name="get_oa_pending_payment_row_by_row_id",
+                identifier=row_id,
+                builder=lambda row: oa_pending_payment_relation_details_from_row(row, kind=kind),
+                not_found_code="row_not_found",
+                not_found_message=f"OA pending payment row not found: {row_id}",
+            )
+            if payload is None:
+                payload = self._oa_pending_payment_routes().relation_details(row_id, query)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
+
+    def _get_oa_pending_payment_detail_from_sql_read_model(
+        self,
+        *,
+        lookup_method_name: str,
+        identifier: str,
+        builder: object,
+        not_found_code: str,
+        not_found_message: str,
+    ) -> dict[str, object] | None:
+        repository = getattr(self, "_oa_pending_payment_sql_read_repository", None)
+        lookup = getattr(repository, lookup_method_name, None)
+        if not callable(lookup):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_oa_pending_payment_read_model_refresh("all", reason="api_detail_sql_repository_unavailable")
+                return self._invoice_relation_refreshing_payload(scope_key="all")
+            return None
+        payload = lookup(identifier)
+        if not isinstance(payload, dict):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_oa_pending_payment_read_model_refresh("all", reason="api_detail_miss")
+                return self._invoice_relation_refreshing_payload(scope_key="all")
+            return None
+        scope_key = str(payload.get("read_model_scope_key") or "all")
+        refresh_status = str(payload.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_detail_stale")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
+        stale_reasons = source_version_mismatch_reasons(
+            expected=self._oa_pending_payment_expected_source_versions(),
+            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_detail_source_versions_stale")
+            return self._invoice_relation_refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
+        row = payload.get("row")
+        if not isinstance(row, dict):
+            raise OaPendingPaymentError(not_found_code, not_found_message, status_code=HTTPStatus.NOT_FOUND)
+        try:
+            detail_payload = builder(row) if callable(builder) else None
+        except ValueError as exc:
+            raise OaPendingPaymentError("invalid_relation_kind", str(exc)) from exc
+        if not isinstance(detail_payload, dict):
+            raise OaPendingPaymentError(not_found_code, not_found_message, status_code=HTTPStatus.NOT_FOUND)
+        detail_payload["read_model_status"] = "fresh"
+        detail_payload["readModelStatus"] = "fresh"
+        detail_payload["read_model_scope_key"] = scope_key
+        return detail_payload
+
+    @staticmethod
+    def _oa_pending_payment_sql_payload_status(payload: dict[str, object]) -> HTTPStatus:
+        return HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
 
     def _oa_pending_payment_error_response(self, exc: OaPendingPaymentError) -> Response:
         payload: dict[str, object] = {
@@ -7714,20 +7988,26 @@ class Application:
             sql_all_rows_provider=self._get_output_invoice_collection_all_rows_from_sql_read_model,
         )
 
-    def _handle_api_output_invoice_collections_rows(self, query: dict[str, list[str]]) -> Response:
+    def _handle_api_output_invoice_collections_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
             sql_payload = self._get_output_invoice_collection_rows_from_sql_read_model(query)
             if isinstance(sql_payload, dict):
                 status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
                 return self._json_response(status_code, sql_payload)
-            status_code, payload = self._output_invoice_collection_routes().rows(query)
+            status_code, payload = self._output_invoice_collection_routes().rows(query, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(status_code, payload)
 
-    def _handle_api_output_invoice_collections_filter_options(self, query: dict[str, list[str]]) -> Response:
+    def _handle_api_output_invoice_collections_filter_options(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            status_code, payload = self._output_invoice_collection_routes().filter_options(query)
+            status_code, payload = self._output_invoice_collection_routes().filter_options(query, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(status_code, payload)
@@ -7759,19 +8039,25 @@ class Application:
             return auth_error
         return self._json_response(HTTPStatus.OK, self._output_invoice_collection_routes().status_rules(session=session))
 
-    def _handle_api_output_invoice_collections_receipt_preview(self, body: str | bytes | None) -> Response:
+    def _handle_api_output_invoice_collections_receipt_preview(self, body: str | bytes | None, headers: dict[str, str] | None = None) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         try:
-            result = self._output_invoice_collection_routes().receipt_preview(payload)
+            result = self._output_invoice_collection_routes().receipt_preview(payload, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
-    def _handle_api_output_invoice_collections_receipt_history(self, query: dict[str, list[str]]) -> Response:
+    def _handle_api_output_invoice_collections_receipt_history(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            payload = self._output_invoice_collection_routes().receipt_history(query)
+            payload = self._output_invoice_collection_routes().receipt_history(query, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -7997,11 +8283,14 @@ class Application:
         )
 
     def _get_oa_pending_payment_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
+        scope_key = self._invoice_relation_scope_key_from_query(query)
         repository = getattr(self, "_oa_pending_payment_sql_read_repository", None)
         list_rows = getattr(repository, "list_oa_pending_payment_rows", None)
         if not callable(list_rows):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
+                return self._invoice_relation_refreshing_payload(scope_key=scope_key)
             return None
-        scope_key = self._invoice_relation_scope_key_from_query(query)
         try:
             payload = list_rows(
                 month=query.get("month", [None])[0],
@@ -8665,6 +8954,12 @@ class Application:
     ) -> tuple[OARequestSession | None, Response | None]:
         return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问销项发票收款情况页面权限。")
 
+    def _resolve_oa_pending_payment_read_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问 OA 待付款核对页面权限。")
+
     def _resolve_bank_details_read_session(
         self,
         headers: dict[str, str] | None,
@@ -8849,6 +9144,14 @@ class Application:
                 filter_name=normalized_filter,
                 reason="api_source_versions_stale",
             )
+            if list(payload.get("rows") or []):
+                result = self._pending_invoice_sql_payload_response(
+                    payload,
+                    read_model_status="refreshing",
+                    scope_key=scope_key,
+                )
+                result["read_model_stale_reasons"] = list(stale_reasons)
+                return result
             return self._pending_invoice_refreshing_payload(
                 direction=normalized_direction,
                 filter_name=normalized_filter,
@@ -12582,62 +12885,35 @@ class Application:
             },
         )
 
-    def _handle_api_no_oa_bank_batches(self, query: dict[str, list[str]]) -> Response:
-        filters = {
-            "month": query.get("month", [""])[0],
-            "type": query.get("type", [""])[0],
-            "status": query.get("status", [""])[0],
-            "bucket": query.get("bucket", [""])[0],
-            "account_key": query.get("account_key", [""])[0],
-        }
-        summary_filters = {
-            "month": filters["month"],
-            "account_key": filters["account_key"],
-        }
-        repository = getattr(self, "_workbench_sql_read_repository", None)
-        list_read_model_batches = getattr(repository, "list_no_oa_bank_batch_rows", None)
-        if callable(list_read_model_batches):
-            summary_read_model_batches = list_read_model_batches(summary_filters)
-            read_model_batches = list_read_model_batches(filters)
-            if summary_read_model_batches is not None and read_model_batches is not None:
-                stale_reasons = self._no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
-                if stale_reasons:
-                    self._refresh_no_oa_bank_batches()
-                    summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
-                    batches = self._no_oa_bank_batch_service.list_batches(filters)
-                    return self._json_response(
-                        HTTPStatus.OK,
-                        {
-                            "summary": self._no_oa_bank_batch_summary(summary_batches),
-                            "batches": self._resolve_no_oa_bank_batch_labels(batches),
-                            "read_model_status": "stale",
-                            "read_model_stale_reasons": stale_reasons,
-                        },
-                    )
-                return self._json_response(
-                    HTTPStatus.OK,
-                    {
-                        "summary": self._no_oa_bank_batch_summary(summary_read_model_batches),
-                        "batches": self._resolve_no_oa_bank_batch_labels(read_model_batches),
-                        "read_model_status": "fresh",
-                    },
-                )
-        self._refresh_no_oa_bank_batches()
-        summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
-        batches = self._no_oa_bank_batch_service.list_batches(filters)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "summary": self._no_oa_bank_batch_summary(summary_batches),
-                "batches": self._resolve_no_oa_bank_batch_labels(batches),
-            },
+    def _no_oa_bank_batch_application_service(self) -> NoOaBankBatchApplicationService:
+        return NoOaBankBatchApplicationService(
+            import_service=self._import_service,
+            effective_category_provider=self._bank_transaction_effective_category_provider,
+            no_oa_bank_batch_service=self._no_oa_bank_batch_service,
+            app_settings_service=self._app_settings_service,
+            bank_transaction_category_service=self._bank_transaction_category_service,
+            pair_relation_service=self._workbench_pair_relation_service,
+            workbench_read_model_service=self._workbench_read_model_service,
+            state_store=self._state_store,
+            tag_selection_service=self._no_oa_bank_batch_tag_selection_service,
+            workbench_sql_read_repository=getattr(self, "_workbench_sql_read_repository", None),
+            workbench_matching_source_versions_provider=self._workbench_matching_source_versions,
+            bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
+            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
+            expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
+            search_cache_clearer=self._search_service.clear_cache,
         )
 
+    def _no_oa_bank_batch_routes(self) -> NoOaBankBatchApiRoutes:
+        return NoOaBankBatchApiRoutes(self._no_oa_bank_batch_application_service())
+
+    def _handle_api_no_oa_bank_batches(self, query: dict[str, list[str]]) -> Response:
+        status_code, payload = self._no_oa_bank_batch_routes().list_batches(query)
+        return self._json_response(status_code, payload)
+
     def _handle_api_no_oa_bank_batch_tag_selection(self) -> Response:
-        return self._json_response(
-            HTTPStatus.OK,
-            self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload(),
-        )
+        status_code, payload = self._no_oa_bank_batch_routes().tag_selection()
+        return self._json_response(status_code, payload)
 
     def _handle_api_no_oa_bank_batch_tag_selection_update(
         self,
@@ -12650,52 +12926,12 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
-        try:
-            result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(
-                payload,
-                actor_id=actor,
-            )
-        except AppSettingsValidationError as exc:
-            status = (
-                HTTPStatus.CONFLICT
-                if exc.error_code == "no_oa_bank_batch_tag_selection_version_conflict"
-                else HTTPStatus.BAD_REQUEST
-            )
-            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
-        self._refresh_no_oa_bank_batches()
-        self._after_no_oa_bank_batch_mutation(
-            ["all"],
-            changed_case_ids=[],
-            persist=True,
-        )
-        return self._json_response(HTTPStatus.OK, result)
+        status_code, result = self._no_oa_bank_batch_routes().update_tag_selection(payload, session=session)
+        return self._json_response(status_code, result)
 
     def _handle_api_no_oa_bank_batch_detail(self, batch_id: str) -> Response:
-        bank_rows, categories_by_transaction_id = self._refresh_no_oa_bank_batches()
-        rows_by_id = {str(row.get("id")): row for row in bank_rows if str(row.get("id") or "").strip()}
-        try:
-            batch = self._no_oa_bank_batch_service.get_batch(batch_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "unknown_no_oa_bank_batch", "message": "免OA流水批次不存在。"},
-            )
-        row_ids = [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
-        rows = self._no_oa_bank_batch_detail_rows(row_ids, rows_by_id, categories_by_transaction_id)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
-                "rows": rows,
-                "tag_counts": batch.get("tag_counts") if isinstance(batch.get("tag_counts"), dict) else {},
-                "direction_counts": batch.get("direction_counts") if isinstance(batch.get("direction_counts"), dict) else {},
-                "categories_by_transaction_id": {
-                    row_id: categories_by_transaction_id.get(row_id, {})
-                    for row_id in row_ids
-                },
-            },
-        )
+        status_code, payload = self._no_oa_bank_batch_routes().detail(batch_id)
+        return self._json_response(status_code, payload)
 
     def _handle_api_no_oa_bank_batch_submit(
         self,
@@ -12709,22 +12945,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
-        try:
-            result = self._submit_no_oa_bank_batch(
-                batch_id,
-                actor=actor,
-                expected_version=self._optional_int(payload.get("expected_version")),
-                note=str(payload.get("note") or "").strip() or None,
-            )
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "unknown_no_oa_bank_batch", "message": "免OA流水批次不存在。"},
-            )
-        except ValueError as exc:
-            return self._no_oa_bank_batch_value_error_response(exc)
-        return self._json_response(HTTPStatus.OK, result)
+        status_code, result = self._no_oa_bank_batch_routes().submit_batch(batch_id, payload, session=session)
+        return self._json_response(status_code, result)
 
     def _handle_api_no_oa_bank_batch_withdraw(
         self,
@@ -12738,22 +12960,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
-        try:
-            result = self._withdraw_no_oa_bank_batch(
-                batch_id,
-                actor=actor,
-                expected_version=self._optional_int(payload.get("expected_version")),
-                reason=str(payload.get("reason") or payload.get("note") or "").strip() or None,
-            )
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "unknown_no_oa_bank_batch", "message": "免OA流水批次不存在。"},
-            )
-        except ValueError as exc:
-            return self._no_oa_bank_batch_value_error_response(exc)
-        return self._json_response(HTTPStatus.OK, result)
+        status_code, result = self._no_oa_bank_batch_routes().withdraw_batch(batch_id, payload, session=session)
+        return self._json_response(status_code, result)
 
     def _batch_accounting_service(self, *, use_sql_read_model: bool = False) -> BatchAccountingService:
         batch_workbench_loader = None
@@ -12983,62 +13191,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        raw_batches = payload.get("batches")
-        if not isinstance(raw_batches, list):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_no_oa_bank_batch_request", "message": "batches must be an array."},
-            )
-        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
-        results: list[dict[str, object]] = []
-        affected_months: set[str] = set()
-        changed_case_ids: list[str] = []
-        for item in raw_batches:
-            if not isinstance(item, dict):
-                results.append({"status": "failed", "error": "invalid_no_oa_bank_batch_request"})
-                continue
-            item_batch_id = str(item.get("batch_id") or "").strip()
-            if not item_batch_id:
-                results.append({"status": "failed", "error": "invalid_no_oa_bank_batch_request"})
-                continue
-            try:
-                result = self._submit_no_oa_bank_batch(
-                    item_batch_id,
-                    actor=actor,
-                    expected_version=self._optional_int(item.get("expected_version")),
-                    note=str(item.get("note") or payload.get("note") or "").strip() or None,
-                    persist=False,
-                )
-            except KeyError:
-                results.append({"batch_id": item_batch_id, "status": "failed", "error": "unknown_no_oa_bank_batch"})
-                continue
-            except ValueError as exc:
-                results.append({"batch_id": item_batch_id, "status": "failed", "error": self._no_oa_bank_batch_error_code(exc)})
-                continue
-            result_batch = dict(result.get("batch") or {})
-            result_relation = dict(result.get("pair_relation") or {})
-            results.append({"batch_id": item_batch_id, "status": "submitted", "batch": result_batch})
-            affected_months.update(str(month) for month in list(result.get("affected_months") or []) if str(month).strip())
-            changed_case_id = str(result_relation.get("case_id") or result_batch.get("relation_case_id") or "").strip()
-            if changed_case_id:
-                changed_case_ids.append(changed_case_id)
-
-        workbench_rebuild_queued = self._after_no_oa_bank_batch_mutation(
-            sorted(affected_months),
-            changed_case_ids=changed_case_ids,
-            persist=True,
-        )
-        submitted_count = sum(1 for result in results if result.get("status") == "submitted")
-        failed_count = sum(1 for result in results if result.get("status") == "failed")
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "summary": {"submitted": submitted_count, "failed": failed_count},
-                "results": results,
-                "affected_months": sorted(affected_months),
-                "workbench_rebuild_queued": workbench_rebuild_queued,
-            },
-        )
+        status_code, result = self._no_oa_bank_batch_routes().bulk_submit(payload, session=session)
+        return self._json_response(status_code, result)
 
     def _handle_api_no_oa_bank_batches_submit_selection(
         self,
@@ -13051,272 +13205,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        raw_transaction_ids = payload.get("transaction_ids")
-        if not isinstance(raw_transaction_ids, list):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_no_oa_bank_batch_request", "message": "transaction_ids must be an array."},
-            )
-        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
-        try:
-            result = self._submit_no_oa_bank_batch_selection(
-                row_ids=[str(row_id) for row_id in raw_transaction_ids],
-                actor=actor,
-                note=str(payload.get("note") or "").strip() or None,
-            )
-        except ValueError as exc:
-            return self._no_oa_bank_batch_value_error_response(exc)
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _submit_no_oa_bank_batch(
-        self,
-        batch_id: str,
-        *,
-        actor: str,
-        expected_version: int | None,
-        note: str | None,
-        persist: bool = True,
-    ) -> dict[str, object]:
-        self._refresh_no_oa_bank_batches()
-        batch = self._no_oa_bank_batch_service.submit_batch(
-            batch_id,
-            actor=actor,
-            expected_version=expected_version,
-            note=note,
-        )
-        relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
-        relation = self._pair_relation_snapshot_by_case_id(relation_case_id)
-        affected_months = self._no_oa_bank_batch_affected_months(batch)
-        workbench_rebuild_queued = self._after_no_oa_bank_batch_mutation(
-            affected_months,
-            changed_case_ids=[relation_case_id] if relation_case_id else [],
-            persist=persist,
-        )
-        return {
-            "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
-            "pair_relation": relation or {},
-            "affected_months": affected_months,
-            "workbench_rebuild_queued": workbench_rebuild_queued,
-            "results": [{"batch_id": batch.get("batch_id"), "status": "submitted"}],
-        }
-
-    def _submit_no_oa_bank_batch_selection(
-        self,
-        *,
-        row_ids: list[str],
-        actor: str,
-        note: str | None,
-    ) -> dict[str, object]:
-        bank_rows, categories_by_transaction_id = self._refresh_no_oa_bank_batches()
-        batch = self._no_oa_bank_batch_service.submit_selected_rows(
-            bank_rows=bank_rows,
-            categories_by_transaction_id=categories_by_transaction_id,
-            active_relations=self._workbench_pair_relation_service.list_active_relations(),
-            source_versions=self._no_oa_bank_batch_source_versions(),
-            eligible_batch_types=self._no_oa_bank_batch_selected_tag_codes(),
-            row_ids=row_ids,
-            actor=actor,
-            note=note,
-        )
-        relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
-        relation = self._pair_relation_snapshot_by_case_id(relation_case_id)
-        affected_months = self._no_oa_bank_batch_affected_months(batch)
-        workbench_rebuild_queued = self._after_no_oa_bank_batch_mutation(
-            affected_months,
-            changed_case_ids=[relation_case_id] if relation_case_id else [],
-            persist=True,
-        )
-        return {
-            "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
-            "pair_relation": relation or {},
-            "affected_months": affected_months,
-            "workbench_rebuild_queued": workbench_rebuild_queued,
-            "results": [{"batch_id": batch.get("batch_id"), "status": "submitted"}],
-        }
-
-    def _withdraw_no_oa_bank_batch(
-        self,
-        batch_id: str,
-        *,
-        actor: str,
-        expected_version: int | None,
-        reason: str | None,
-    ) -> dict[str, object]:
-        batch = self._no_oa_bank_batch_service.withdraw_batch(
-            batch_id,
-            actor=actor,
-            expected_version=expected_version,
-            reason=reason,
-        )
-        relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
-        relation = self._pair_relation_snapshot_by_case_id(relation_case_id)
-        affected_months = self._no_oa_bank_batch_affected_months(batch)
-        workbench_rebuild_queued = self._after_no_oa_bank_batch_mutation(
-            affected_months,
-            changed_case_ids=[relation_case_id] if relation_case_id else [],
-            persist=True,
-        )
-        return {
-            "batch": self._resolve_no_oa_bank_batch_labels([batch])[0],
-            "pair_relation": relation or {},
-            "affected_months": affected_months,
-            "workbench_rebuild_queued": workbench_rebuild_queued,
-            "results": [{"batch_id": batch.get("batch_id"), "status": "withdrawn"}],
-        }
-
-    def _refresh_no_oa_bank_batches(self) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
-        bank_rows = self._no_oa_bank_transaction_rows()
-        categories_by_transaction_id = self._bank_transaction_effective_category_provider.bulk_get_for_rows(bank_rows)
-        self._no_oa_bank_batch_service.build_batches(
-            bank_rows,
-            categories_by_transaction_id,
-            self._workbench_pair_relation_service.list_active_relations(),
-            self._no_oa_bank_batch_source_versions(),
-            eligible_batch_types=self._no_oa_bank_batch_selected_tag_codes(),
-        )
-        migration_result = self._no_oa_bank_batch_service.last_legacy_migration_result()
-        if migration_result.get("changed"):
-            self._after_no_oa_bank_batch_mutation(
-                [
-                    str(month)
-                    for month in list(migration_result.get("affected_months") or [])
-                    if str(month).strip()
-                ],
-                changed_case_ids=[
-                    str(case_id)
-                    for case_id in list(migration_result.get("changed_case_ids") or [])
-                    if str(case_id).strip()
-                ],
-                persist=True,
-            )
-        return bank_rows, categories_by_transaction_id
-
-    def _no_oa_bank_transaction_rows(self) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        for transaction in list(self._import_service.list_transactions(month="all")):
-            payload = self._serialize_value(transaction)
-            if not isinstance(payload, dict):
-                continue
-            transaction_id = str(payload.get("id") or "").strip()
-            if not transaction_id:
-                continue
-            row = dict(payload)
-            row["id"] = transaction_id
-            row["type"] = "bank"
-            row["bank_name"] = str(
-                row.get("bank_name")
-                or row.get("imported_bank_name")
-                or row.get("bank_short_name")
-                or row.get("account_bank")
-                or ""
-            ).strip()
-            account_no = str(row.get("account_no") or row.get("account_number") or "").strip()
-            account_last4 = str(row.get("account_last4") or row.get("imported_bank_last4") or "").strip()
-            if not account_last4:
-                digits = "".join(ch for ch in account_no if ch.isdigit())
-                account_last4 = digits[-4:] if digits else ""
-            row["account_last4"] = account_last4
-            row["account_key"] = str(row.get("account_key") or f"{row['bank_name']}:{account_last4}").strip(":")
-            row["counterparty_name"] = str(row.get("counterparty_name") or row.get("counterparty_name_raw") or "").strip()
-            amount = row.get("amount") or "0.00"
-            direction = str(row.get("txn_direction") or row.get("direction") or "").strip().lower()
-            if direction in {"outflow", "expense", "支", "出"}:
-                row["direction"] = "expense"
-                row["direction_label"] = "支"
-                row["debit_amount"] = row.get("debit_amount") or amount
-                row["credit_amount"] = row.get("credit_amount") or "0.00"
-            elif direction in {"inflow", "income", "收", "进"}:
-                row["direction"] = "income"
-                row["direction_label"] = "收"
-                row["debit_amount"] = row.get("debit_amount") or "0.00"
-                row["credit_amount"] = row.get("credit_amount") or amount
-            if "purpose" not in row:
-                row["purpose"] = row.get("usage") or row.get("use") or ""
-            rows.append(row)
-        categories_by_transaction_id = self._bank_transaction_effective_category_provider.bulk_get_for_rows(rows)
-        for row in rows:
-            transaction_id = str(row.get("id") or "").strip()
-            category = categories_by_transaction_id.get(transaction_id, {})
-            if category:
-                row["category_code"] = category.get("category_code")
-                row["category_label"] = category.get("category_label")
-                row["category_path"] = list(category.get("category_path") or [])
-                row["category_primary_label"] = category.get("category_primary_label") or category.get("effective_category_primary_label")
-                row["category_sub_label"] = category.get("category_sub_label") or category.get("effective_category_sub_label")
-                row["category_label_path"] = list(
-                    category.get("category_label_path") or category.get("effective_category_label_path") or []
-                )
-                row["category_source"] = category.get("category_source") or category.get("source")
-        return rows
-
-    @staticmethod
-    def _no_oa_bank_batch_detail_rows(
-        row_ids: list[str],
-        rows_by_id: dict[str, dict[str, object]],
-        categories_by_transaction_id: dict[str, dict[str, object]],
-    ) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        for row_id in row_ids:
-            source_row = rows_by_id.get(row_id)
-            if not isinstance(source_row, dict):
-                continue
-            row = dict(source_row)
-            category = categories_by_transaction_id.get(row_id, {})
-            if isinstance(category, dict):
-                row["category_code"] = row.get("category_code") or category.get("category_code")
-                row["category_label"] = row.get("category_label") or category.get("category_label")
-                row["category_primary_label"] = (
-                    row.get("category_primary_label")
-                    or category.get("category_primary_label")
-                    or category.get("effective_category_primary_label")
-                )
-                row["category_sub_label"] = (
-                    row.get("category_sub_label")
-                    or category.get("category_sub_label")
-                    or category.get("effective_category_sub_label")
-                )
-                row["category_label_path"] = list(
-                    row.get("category_label_path")
-                    or category.get("category_label_path")
-                    or category.get("effective_category_label_path")
-                    or []
-                )
-                row["category_source"] = row.get("category_source") or category.get("category_source") or category.get("source")
-            row.setdefault("category_code", "")
-            row.setdefault("category_label", "")
-            row.setdefault("category_primary_label", "")
-            row.setdefault("category_sub_label", "")
-            row.setdefault("category_label_path", [])
-            row.setdefault("category_source", "")
-            rows.append(row)
-        return rows
-
-    def _resolve_no_oa_bank_batch_labels(self, batches: list[dict[str, object]]) -> list[dict[str, object]]:
-        resolved: list[dict[str, object]] = []
-        for batch in list(batches or []):
-            if not isinstance(batch, dict):
-                continue
-            next_batch = dict(batch)
-            batch_type = str(next_batch.get("batch_type") or "").strip()
-            if batch_type:
-                definition = self._bank_transaction_tag_definition_current(batch_type)
-                label = self._bank_transaction_tag_label_from_definition(batch_type, definition)
-                next_batch["batch_label"] = label
-                next_batch["display_tags"] = ["免OA", label]
-                next_batch["category_primary_label"] = str(
-                    (definition or {}).get("output_primary_label") or label
-                )
-                next_batch["category_sub_label"] = str((definition or {}).get("output_sub_label") or "")
-                next_batch["category_label_path"] = [
-                    item
-                    for item in [
-                        str(next_batch.get("category_primary_label") or "").strip(),
-                        str(next_batch.get("category_sub_label") or "").strip(),
-                    ]
-                    if item
-                ]
-            resolved.append(next_batch)
-        return resolved
+        status_code, result = self._no_oa_bank_batch_routes().submit_selection(payload, session=session)
+        return self._json_response(status_code, result)
 
     def _bank_transaction_tag_definition_current(self, code: str) -> dict[str, object] | None:
         tag_code = str(code or "").strip()
@@ -13343,135 +13233,6 @@ class Application:
             self._bank_transaction_tag_definition_current(tag_code),
         )
 
-    def _no_oa_bank_batch_selected_tag_codes(self) -> list[str]:
-        payload = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
-        return [str(code) for code in list(payload.get("selected_tag_codes") or []) if str(code).strip()]
-
-    def _no_oa_bank_batch_summary(self, batches: list[dict[str, object]]) -> dict[str, object]:
-        counts: dict[str, int] = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
-        selected_or_existing_codes = [
-            *self._no_oa_bank_batch_selected_tag_codes(),
-            *[
-                str(batch.get("batch_type") or "").strip()
-                for batch in batches
-                if isinstance(batch, dict) and str(batch.get("batch_type") or "").strip()
-            ],
-        ]
-        category_counts: dict[str, dict[str, object]] = {}
-        for batch_type in selected_or_existing_codes:
-            if not batch_type or batch_type in category_counts:
-                continue
-            definition = self._bank_transaction_tag_definition_current(batch_type)
-            category_counts[batch_type] = {
-                "code": batch_type,
-                "label": self._bank_transaction_tag_label_from_definition(batch_type, definition),
-                "primary_label": str((definition or {}).get("output_primary_label") or ""),
-                "sub_label": str((definition or {}).get("output_sub_label") or ""),
-                "label_path": [
-                    item
-                    for item in [
-                        str((definition or {}).get("output_primary_label") or "").strip(),
-                        str((definition or {}).get("output_sub_label") or "").strip(),
-                    ]
-                    if item
-                ],
-                "total": 0,
-                "draft": 0,
-                "submitted": 0,
-                "withdrawn": 0,
-                "conflict": 0,
-                "stale": 0,
-                "total_amount": Decimal("0.00"),
-            }
-        total_amount = Decimal("0.00")
-        for batch in batches:
-            status = str(batch.get("status") or "").strip()
-            if status in counts:
-                counts[status] += 1
-            batch_type = str(batch.get("batch_type") or "").strip()
-            try:
-                amount = Decimal(str(batch.get("total_amount") or "0").replace(",", ""))
-            except Exception:
-                amount = Decimal("0.00")
-            total_amount += amount
-            if batch_type in category_counts:
-                category = category_counts[batch_type]
-                category["total"] = int(category["total"]) + 1
-                if status in counts:
-                    category[status] = int(category[status]) + 1
-                category["total_amount"] = category["total_amount"] + amount
-                continue
-        categories = []
-        for category in [dict(value) for value in category_counts.values()]:
-            category["total_amount"] = f"{category['total_amount']:.2f}"
-            categories.append(category)
-        return {
-            "total": len(batches),
-            **counts,
-            "draft_count": counts["draft"],
-            "submitted_count": counts["submitted"],
-            "withdrawn_count": counts["withdrawn"],
-            "conflict_count": counts["conflict"],
-            "stale_count": counts["stale"],
-            "total_amount": f"{total_amount:.2f}",
-            "categories": categories,
-        }
-
-    def _no_oa_bank_batch_affected_months(self, batch: dict[str, object]) -> list[str]:
-        months = {
-            str(batch.get("scope_month") or "").strip(),
-            *self._bank_transaction_category_affected_months(
-                [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
-            ),
-        }
-        return sorted(month for month in months if SEARCH_MONTH_RE.match(month))
-
-    def _after_no_oa_bank_batch_mutation(
-        self,
-        affected_months: list[str],
-        *,
-        changed_case_ids: list[str],
-        persist: bool,
-    ) -> bool:
-        normalized_months = [
-            str(month).strip()
-            for month in list(affected_months or [])
-            if SEARCH_MONTH_RE.match(str(month).strip())
-        ]
-        scope_keys = ["all", *normalized_months]
-        self._execute_derived_data_lifecycle_event(
-            "no_oa_bank_batch_changed",
-            months=normalized_months,
-            metadata={"source": "no_oa_bank_batch"},
-            schedule_cost_warmup=False,
-        )
-        if persist:
-            if changed_case_ids:
-                self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
-            self._persist_no_oa_bank_batches_best_effort(operation="no_oa_bank_batch_updated")
-            self._persist_workbench_read_models_best_effort(
-                snapshot=self._workbench_read_model_service.snapshot(),
-                changed_scope_keys=self._expand_workbench_read_model_scope_keys_for_base_scopes(scope_keys),
-                operation="no_oa_bank_batch_updated",
-            )
-        return bool(normalized_months)
-
-    def _persist_no_oa_bank_batches_best_effort(self, *, operation: str) -> None:
-        if self._state_store is None:
-            return
-        try:
-            self._state_store.save_no_oa_bank_batches(self._no_oa_bank_batch_service.snapshot())
-        except Exception as exc:
-            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
-
-    def _pair_relation_snapshot_by_case_id(self, case_id: str) -> dict[str, object] | None:
-        normalized_case_id = str(case_id or "").strip()
-        if not normalized_case_id:
-            return None
-        pair_relations = self._workbench_pair_relation_service.snapshot().get("pair_relations", {})
-        relation = pair_relations.get(normalized_case_id) if isinstance(pair_relations, dict) else None
-        return dict(relation) if isinstance(relation, dict) else None
-
     def _no_oa_bank_batch_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
         session = resolve_oa_request_session(
             headers,
@@ -13490,18 +13251,6 @@ class Application:
         if value in (None, ""):
             return None
         return int(value)
-
-    def _no_oa_bank_batch_value_error_response(self, exc: ValueError) -> Response:
-        error_code = self._no_oa_bank_batch_error_code(exc)
-        status = HTTPStatus.CONFLICT if error_code == "no_oa_bank_batch_version_conflict" else HTTPStatus.BAD_REQUEST
-        return self._json_response(status, {"error": error_code, "message": str(exc)})
-
-    @staticmethod
-    def _no_oa_bank_batch_error_code(exc: ValueError) -> str:
-        message = str(exc).strip()
-        if message == "no_oa_bank_batch_version_conflict":
-            return message
-        return message or "invalid_no_oa_bank_batch_request"
 
     def _handle_api_turnover_ledger(self, query: dict[str, list[str]]) -> Response:
         view = query.get("view", [None])[0]

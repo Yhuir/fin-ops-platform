@@ -305,14 +305,18 @@ class OaPendingPaymentQueryService:
         if row is None:
             raise OaPendingPaymentError("row_not_found", f"OA pending payment row not found: {row_id}", status_code=HTTPStatus.NOT_FOUND)
         relation_payload = row["bankTransaction"] if normalized_kind == "bank" else row["invoice"]
+        summaries = list(relation_payload.get("summaries") or [])
         return {
             "rowId": row["id"],
             "oaId": row["oa"]["id"],
             "kind": normalized_kind,
+            "title": "支出流水关联明细" if normalized_kind == "bank" else "发票关联明细",
+            "subtitle": row["oa"].get("applicantName") or row["oa"].get("projectName") or row["oa"]["id"],
             "detailAvailable": relation_payload.get("detailMode") != "none",
             "relationCount": relation_payload.get("relationCount", 0),
             "hasMultiple": relation_payload.get("hasMultiple", False),
-            "summaries": relation_payload.get("summaries", []),
+            "summaries": summaries,
+            "sections": _relation_detail_sections(normalized_kind, summaries),
             "relations": context.relation_summaries_for_row(row["oa"]["id"]),
         }
 
@@ -430,6 +434,7 @@ class OaPendingPaymentQueryService:
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
+        paid_total = sum((_decimal(summary.get("amount")) for summary in public_summaries), start=ZERO)
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
             "accountDetailNo": primary.get("accountDetailNo", ""),
@@ -450,6 +455,7 @@ class OaPendingPaymentQueryService:
             "summary": primary.get("summary", ""),
             "remark": primary.get("remark", ""),
             "amount": primary.get("amount", ""),
+            "paidTotal": _money(paid_total),
             "direction": primary.get("direction", ""),
             "relationCount": len(public_summaries),
             "hasMultiple": len(public_summaries) > 1,
@@ -738,7 +744,7 @@ class OaPendingPaymentQueryService:
         return {
             "rowCount": len(rows),
             "oaAmountTotal": _money(sum((_decimal(row["oa"].get("amount")) for row in rows), start=ZERO)),
-            "bankPaidTotal": _money(sum((_decimal(row["bankTransaction"].get("amount")) for row in rows), start=ZERO)),
+            "bankPaidTotal": _money(sum((_decimal(row["bankTransaction"].get("paidTotal")) for row in rows), start=ZERO)),
             "statusCounts": status_counts,
         }
 
@@ -820,6 +826,40 @@ def _sortable_time(value: str | None) -> float:
         return datetime.fromisoformat(text.replace(" ", "T")).timestamp()
     except ValueError:
         return 0
+
+
+def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str, Any]]:
+    typed_summaries = [summary for summary in summaries if isinstance(summary, dict)]
+    if not typed_summaries:
+        return [{"title": "关联明细", "fields": [{"label": "状态", "value": "暂无关联记录"}]}]
+    if kind == "bank":
+        return [
+            {
+                "title": f"支出流水 {index}",
+                "fields": [
+                    {"label": "支出银行", "value": summary.get("bankName")},
+                    {"label": "交易时间", "value": summary.get("tradeTime")},
+                    {"label": "金额", "value": summary.get("amount")},
+                    {"label": "对方户名", "value": summary.get("counterpartyName")},
+                    {"label": "账户明细编号-交易流水号", "value": summary.get("accountDetailNo")},
+                    {"label": "摘要", "value": summary.get("summary")},
+                    {"label": "备注", "value": summary.get("remark")},
+                ],
+            }
+            for index, summary in enumerate(typed_summaries, start=1)
+        ]
+    return [
+        {
+            "title": f"发票 {index}",
+            "fields": [
+                {"label": "数电发票号码", "value": summary.get("digitalInvoiceNo")},
+                {"label": "销方名称", "value": summary.get("sellerName")},
+                {"label": "开票日期", "value": summary.get("invoiceDate")},
+                {"label": "价税合计", "value": summary.get("totalWithTax")},
+            ],
+        }
+        for index, summary in enumerate(typed_summaries, start=1)
+    ]
 
 
 def _serialize_dataclass(value: Any) -> dict[str, Any]:

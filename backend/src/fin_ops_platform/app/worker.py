@@ -39,6 +39,7 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, Runt
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
+from fin_ops_platform.services.runtime_worker_registry import worker_registrations
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 from fin_ops_platform.services.state_store import default_data_dir
@@ -370,26 +371,18 @@ def _handle_import_fact_changed_event(event: Any) -> dict[str, Any]:
 
 
 def _infer_worker_kind(args: argparse.Namespace) -> str:
-    enabled = [
-        name
-        for name, enabled_flag in (
-            ("file-object-migration", args.enable_file_object_migration),
-            ("workbench-read-model", args.enable_workbench_read_model_refresh),
-            ("cost-statistics-read-model", args.enable_cost_statistics_read_model_refresh),
-            ("tax-offset-read-model", args.enable_tax_offset_read_model_refresh),
-            ("search-read-model", args.enable_search_read_model_refresh),
-            ("pending-invoice-read-model", args.enable_pending_invoice_read_model_refresh),
-            ("bank-detail-read-model", args.enable_bank_detail_read_model_refresh),
-            ("input-invoice-usage-read-model", args.enable_input_invoice_usage_read_model_refresh),
-            ("output-invoice-collection-read-model", args.enable_output_invoice_collection_read_model_refresh),
-            ("oa-pending-payment-read-model", args.enable_oa_pending_payment_read_model_refresh),
-            ("oa-sync", args.enable_oa_sync),
-            ("import-job", args.enable_import_job_processing),
-            ("workbench-matching", args.enable_workbench_matching),
-        )
-        if enabled_flag
-    ]
+    enabled = []
+    for registration in worker_registrations():
+        if not registration.handler_flags:
+            continue
+        attr_names = [_argparse_attr_name(flag) for flag in registration.handler_flags]
+        if any(bool(getattr(args, attr_name, False)) for attr_name in attr_names):
+            enabled.append(registration.worker_kind)
     return enabled[0] if len(enabled) == 1 else "runtime"
+
+
+def _argparse_attr_name(flag: str) -> str:
+    return flag.lstrip("-").replace("-", "_")
 
 
 def _build_oa_sync_source_adapter(
