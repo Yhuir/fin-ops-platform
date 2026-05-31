@@ -6,7 +6,7 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { PendingInvoiceRuleGroup, PendingInvoiceRuleTag, PendingInvoiceRulesPayload } from "../../features/pendingInvoices/types";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
@@ -15,6 +15,7 @@ type PendingInvoiceRulesDrawerProps = {
   open: boolean;
   loadRules: () => Promise<PendingInvoiceRulesPayload>;
   saveRules: (payload: PendingInvoiceRulesPayload) => Promise<PendingInvoiceRulesPayload>;
+  refreshToken?: number;
   onSaved: () => void;
   onClose: () => void;
 };
@@ -27,21 +28,35 @@ export default function PendingInvoiceRulesDrawer({
   open,
   loadRules,
   saveRules,
+  refreshToken = 0,
   onSaved,
   onClose,
 }: PendingInvoiceRulesDrawerProps) {
   const [payload, setPayload] = useState<PendingInvoiceRulesPayload | null>(null);
+  const [baselinePayload, setBaselinePayload] = useState<PendingInvoiceRulesPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
+  const payloadRef = useRef<PendingInvoiceRulesPayload | null>(null);
+  const baselinePayloadRef = useRef<PendingInvoiceRulesPayload | null>(null);
+  const lastHandledRefreshTokenRef = useRef(refreshToken);
   const requiresInvoiceGroup = payload ? derivedRequiresInvoiceGroup(payload) : null;
+
+  useEffect(() => {
+    payloadRef.current = payload;
+    baselinePayloadRef.current = baselinePayload;
+  }, [baselinePayload, payload]);
 
   useEffect(() => {
     if (!open) {
       setPayload(null);
+      setBaselinePayload(null);
       setLoading(false);
       setSaving(false);
       setError(null);
+      setRefreshNotice(null);
+      lastHandledRefreshTokenRef.current = refreshToken;
       return undefined;
     }
     let active = true;
@@ -51,6 +66,8 @@ export default function PendingInvoiceRulesDrawer({
       .then((nextPayload) => {
         if (active) {
           setPayload(nextPayload);
+          setBaselinePayload(nextPayload);
+          setRefreshNotice(null);
         }
       })
       .catch((reason: unknown) => {
@@ -68,6 +85,53 @@ export default function PendingInvoiceRulesDrawer({
     };
   }, [loadRules, open]);
 
+  useEffect(() => {
+    if (!open) {
+      lastHandledRefreshTokenRef.current = refreshToken;
+      return undefined;
+    }
+    if (refreshToken === lastHandledRefreshTokenRef.current) {
+      return undefined;
+    }
+    lastHandledRefreshTokenRef.current = refreshToken;
+    if (!payloadRef.current) {
+      return undefined;
+    }
+
+    let active = true;
+    setLoading(true);
+    setError(null);
+    loadRules()
+      .then((nextPayload) => {
+        if (!active) {
+          return;
+        }
+        const currentPayload = payloadRef.current;
+        const baseline = baselinePayloadRef.current;
+        if (currentPayload && hasUnsavedEditableSelections(currentPayload, baseline)) {
+          setPayload(mergeRefreshedRulesWithDraft(nextPayload, currentPayload, baseline));
+          setRefreshNotice("银行明细自动标签已更新，已刷新标签名称并保留未保存选择。");
+          return;
+        }
+        setPayload(nextPayload);
+        setBaselinePayload(nextPayload);
+        setRefreshNotice("银行明细自动标签已更新，规则标签已刷新。");
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : "规则加载失败");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadRules, open, refreshToken]);
+
   async function handleSave() {
     if (!payload || saving || !payload.permissions.canSave) {
       return;
@@ -75,7 +139,10 @@ export default function PendingInvoiceRulesDrawer({
     setSaving(true);
     setError(null);
     try {
-      setPayload(await saveRules(payload));
+      const savedPayload = await saveRules(payload);
+      setPayload(savedPayload);
+      setBaselinePayload(savedPayload);
+      setRefreshNotice(null);
       onSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "规则保存失败");
@@ -108,6 +175,7 @@ export default function PendingInvoiceRulesDrawer({
         </Stack>
       ) : null}
       {error ? <Alert severity="error">{error}</Alert> : null}
+      {refreshNotice ? <Alert severity="info">{refreshNotice}</Alert> : null}
       {payload && !payload.permissions.canSave ? <Alert severity="info">当前账号只能查看规则，不能保存。</Alert> : null}
       {payload && requiresInvoiceGroup ? (
         <Stack spacing={1}>
@@ -171,6 +239,87 @@ function updateRuleGroup(
         tags: nextOtherCodes.map((code) => tagsByCode.get(code) ?? fallbackRuleTag(code)),
       },
     },
+  };
+}
+
+function hasUnsavedEditableSelections(
+  payload: PendingInvoiceRulesPayload,
+  baseline: PendingInvoiceRulesPayload | null,
+) {
+  if (!baseline) {
+    return false;
+  }
+  return EDITABLE_GROUP_KEYS.some((key) => !sameTagCodes(payload.groups[key].tagCodes, baseline.groups[key].tagCodes));
+}
+
+function sameTagCodes(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((code, index) => code === right[index]);
+}
+
+function mergeRefreshedRulesWithDraft(
+  refreshed: PendingInvoiceRulesPayload,
+  draft: PendingInvoiceRulesPayload,
+  baseline: PendingInvoiceRulesPayload | null,
+): PendingInvoiceRulesPayload {
+  const tagsByCode = new Map(refreshed.availableTags.map((tag) => [tag.code, tag]));
+  const bankStatementDrafted = !sameTagCodes(
+    draft.groups.bankStatementAsInvoice.tagCodes,
+    baseline?.groups.bankStatementAsInvoice.tagCodes ?? [],
+  );
+  const noInvoiceDrafted = !sameTagCodes(
+    draft.groups.noInvoiceRequired.tagCodes,
+    baseline?.groups.noInvoiceRequired.tagCodes ?? [],
+  );
+  const bankStatementCodes = activeUniqueCodes(
+    bankStatementDrafted
+      ? draft.groups.bankStatementAsInvoice.tagCodes
+      : refreshed.groups.bankStatementAsInvoice.tagCodes,
+    tagsByCode,
+  );
+  const bankStatementCodeSet = new Set(bankStatementCodes);
+  const noInvoiceCodes = activeUniqueCodes(
+    (noInvoiceDrafted
+      ? draft.groups.noInvoiceRequired.tagCodes
+      : refreshed.groups.noInvoiceRequired.tagCodes
+    ).filter((code) => !bankStatementCodeSet.has(code)),
+    tagsByCode,
+  );
+  return {
+    ...refreshed,
+    groups: {
+      ...refreshed.groups,
+      bankStatementAsInvoice: groupWithCodes(refreshed.groups.bankStatementAsInvoice, bankStatementCodes, tagsByCode),
+      noInvoiceRequired: groupWithCodes(refreshed.groups.noInvoiceRequired, noInvoiceCodes, tagsByCode),
+    },
+  };
+}
+
+function activeUniqueCodes(codes: string[], tagsByCode: Map<string, PendingInvoiceRuleTag>) {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  codes.forEach((rawCode) => {
+    const code = rawCode.trim();
+    if (!code || seen.has(code) || !tagsByCode.has(code)) {
+      return;
+    }
+    seen.add(code);
+    result.push(code);
+  });
+  return result;
+}
+
+function groupWithCodes(
+  group: PendingInvoiceRuleGroup,
+  tagCodes: string[],
+  tagsByCode: Map<string, PendingInvoiceRuleTag>,
+): PendingInvoiceRuleGroup {
+  return {
+    ...group,
+    tagCodes,
+    tags: tagCodes.map((code) => tagsByCode.get(code) ?? fallbackRuleTag(code)),
   };
 }
 

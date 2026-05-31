@@ -112,6 +112,7 @@ export default function PendingInvoicesPage() {
   const [readModelStatus, setReadModelStatus] = useState("");
   const [filterAnchorEl, setFilterAnchorEl] = useState<HTMLElement | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
   const [dialogRow, setDialogRow] = useState<PendingInvoiceRow | null>(null);
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
 
@@ -138,8 +139,12 @@ export default function PendingInvoicesPage() {
         setReadModelStatus(payload.readModelStatus);
         const version = payload.tagDictionary?.version;
         if (typeof version === "number" && version > 0) {
+          const previousVersion = tagVersionRef.current;
           tagVersionRef.current = version;
           persistTagVersion(version);
+          if (previousVersion !== null && previousVersion !== version) {
+            setRulesTagRefreshToken((current) => current + 1);
+          }
         }
       })
       .catch((caught) => {
@@ -167,6 +172,7 @@ export default function PendingInvoicesPage() {
         tagVersionRef.current = version;
         persistTagVersion(version);
       }
+      setRulesTagRefreshToken((current) => current + 1);
       setRefreshToken((current) => current + 1);
     };
     window.addEventListener(TAG_SYNC_EVENT, handleTagUpdate);
@@ -184,6 +190,7 @@ export default function PendingInvoicesPage() {
       const persistedVersion = readPersistedTagVersion();
       if (persistedVersion !== null && persistedVersion !== tagVersionRef.current) {
         tagVersionRef.current = persistedVersion;
+        setRulesTagRefreshToken((current) => current + 1);
       }
       setRefreshToken((current) => current + 1);
     };
@@ -399,6 +406,7 @@ export default function PendingInvoicesPage() {
         open={activeDrawer === "rules"}
         loadRules={loadRules}
         saveRules={saveRules}
+        refreshToken={rulesTagRefreshToken}
         onSaved={() => setRefreshToken((current) => current + 1)}
         onClose={closeDrawer}
       />

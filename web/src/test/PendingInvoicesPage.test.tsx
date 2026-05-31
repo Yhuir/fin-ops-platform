@@ -144,7 +144,72 @@ function upgradedRows() {
   ];
 }
 
-function installPendingInvoiceFetch() {
+type PendingInvoiceRulesMockOptions = {
+  version?: number;
+  feePrimaryLabel?: string;
+  feeSubLabel?: string;
+};
+
+function pendingInvoiceRulesPayload({
+  version = 7,
+  feePrimaryLabel = "费用",
+  feeSubLabel = "手续费",
+}: PendingInvoiceRulesMockOptions = {}) {
+  const feeTag = {
+    code: "fee",
+    label: feeSubLabel,
+    status: "active",
+    output_primary_label: feePrimaryLabel,
+    output_sub_label: feeSubLabel,
+  };
+  const internalTransferTag = {
+    code: "internal_transfer",
+    label: "内部转账",
+    status: "active",
+    output_primary_label: "往来",
+    output_sub_label: "内部转账",
+  };
+  const salaryTag = {
+    code: "salary",
+    label: "工资",
+    status: "active",
+    output_primary_label: "薪酬",
+    output_sub_label: "工资",
+  };
+  const mealTag = {
+    code: "custom_meal",
+    label: "餐饮",
+    status: "active",
+    output_primary_label: "餐饮",
+    output_sub_label: "",
+  };
+  return {
+    version,
+    permissions: { can_save: true },
+    bank_transaction_tags: {
+      version,
+      tags: [feeTag, internalTransferTag, salaryTag, mealTag],
+    },
+    groups: {
+      requires_invoice: {
+        tag_codes: ["fee", "custom_meal"],
+        tags: [feeTag, mealTag],
+      },
+      bank_statement_as_invoice: {
+        tag_codes: ["internal_transfer"],
+        tags: [internalTransferTag],
+      },
+      no_invoice_required: {
+        tag_codes: ["salary"],
+        tags: [salaryTag],
+      },
+    },
+  };
+}
+
+function installPendingInvoiceFetch(options: {
+  rulesPayload?: () => ReturnType<typeof pendingInvoiceRulesPayload>;
+} = {}) {
   const baseFetch = installMockApiFetch();
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -173,36 +238,10 @@ function installPendingInvoiceFetch() {
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/rules" && method === "GET") {
-      return new Response(JSON.stringify({
-        version: 7,
-        permissions: { can_save: true },
-        bank_transaction_tags: {
-          version: 7,
-          tags: [
-            { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
-            { code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" },
-            { code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" },
-            { code: "custom_meal", label: "餐饮", status: "active", output_primary_label: "餐饮", output_sub_label: "" },
-          ],
-        },
-        groups: {
-          requires_invoice: {
-            tag_codes: ["fee", "custom_meal"],
-            tags: [
-              { code: "fee", label: "手续费", status: "active", output_primary_label: "费用", output_sub_label: "手续费" },
-              { code: "custom_meal", label: "餐饮", status: "active", output_primary_label: "餐饮", output_sub_label: "" },
-            ],
-          },
-          bank_statement_as_invoice: {
-            tag_codes: ["internal_transfer"],
-            tags: [{ code: "internal_transfer", label: "内部转账", status: "active", output_primary_label: "往来", output_sub_label: "内部转账" }],
-          },
-          no_invoice_required: {
-            tag_codes: ["salary"],
-            tags: [{ code: "salary", label: "工资", status: "active", output_primary_label: "薪酬", output_sub_label: "工资" }],
-          },
-        },
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify((options.rulesPayload ?? pendingInvoiceRulesPayload)()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     }
     if (url.pathname === "/api/pending-invoices/rules" && method === "PUT") {
       return new Response(JSON.stringify({
@@ -387,6 +426,13 @@ function pendingInvoiceRowsRequests(fetchMock: ReturnType<typeof installPendingI
     .filter((url) => url.pathname === "/api/pending-invoices/rows");
 }
 
+function pendingInvoiceRulesRequests(fetchMock: ReturnType<typeof installPendingInvoiceFetch>, method = "GET") {
+  return fetchMock.mock.calls.filter(([input, init]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/pending-invoices/rules" && (init?.method ?? "GET").toUpperCase() === method;
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -520,6 +566,73 @@ describe("Pending invoices page", () => {
     expect(bankStatementFee).not.toBeChecked();
     expect(within(noInvoiceBlock).getByRole("checkbox", { name: "手续费" })).not.toBeDisabled();
     expect(within(requiresInvoiceBlock).getByText("手续费")).toBeInTheDocument();
+  });
+
+  test("refreshes open rules drawer when bank detail auto tags update", async () => {
+    const user = userEvent.setup();
+    let rulesOptions: PendingInvoiceRulesMockOptions = {};
+    const fetchMock = installPendingInvoiceFetch({
+      rulesPayload: () => pendingInvoiceRulesPayload(rulesOptions),
+    });
+    renderAppAt("/pending-invoices");
+
+    const page = await screen.findByTestId("pending-invoices-page");
+    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+
+    const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
+    expect(within(bankStatementBlock).getByText("费用")).toBeInTheDocument();
+    expect(within(bankStatementBlock).getByRole("checkbox", { name: "手续费" })).toBeInTheDocument();
+    const initialRulesGets = pendingInvoiceRulesRequests(fetchMock).length;
+
+    rulesOptions = { version: 8, feePrimaryLabel: "费用改名验证", feeSubLabel: "手续费改名验证" };
+    act(() => {
+      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 8 } }));
+    });
+
+    await waitFor(() => {
+      expect(pendingInvoiceRulesRequests(fetchMock).length).toBeGreaterThan(initialRulesGets);
+    });
+    expect(await within(bankStatementBlock).findByText("费用改名验证")).toBeInTheDocument();
+    expect(within(bankStatementBlock).getByRole("checkbox", { name: "手续费改名验证" })).toBeInTheDocument();
+    expect(within(bankStatementBlock).queryByText("费用")).not.toBeInTheDocument();
+  });
+
+  test("preserves unsaved rule selections when refreshing renamed bank detail tags", async () => {
+    const user = userEvent.setup();
+    let rulesOptions: PendingInvoiceRulesMockOptions = {};
+    const fetchMock = installPendingInvoiceFetch({
+      rulesPayload: () => pendingInvoiceRulesPayload(rulesOptions),
+    });
+    renderAppAt("/pending-invoices");
+
+    const page = await screen.findByTestId("pending-invoices-page");
+    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+
+    const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
+    await user.click(within(bankStatementBlock).getByRole("checkbox", { name: "手续费" }));
+    expect(within(bankStatementBlock).getByRole("checkbox", { name: "手续费" })).toBeChecked();
+
+    rulesOptions = { version: 8, feePrimaryLabel: "费用改名验证", feeSubLabel: "手续费改名验证" };
+    act(() => {
+      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 8 } }));
+    });
+
+    const renamedFee = await within(bankStatementBlock).findByRole("checkbox", { name: "手续费改名验证" });
+    expect(renamedFee).toBeChecked();
+    expect(screen.getByText("银行明细自动标签已更新，已刷新标签名称并保留未保存选择。")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存规则" }));
+
+    await waitFor(() => {
+      expect(pendingInvoiceRulesRequests(fetchMock, "PUT").length).toBeGreaterThan(0);
+    });
+    const lastPut = pendingInvoiceRulesRequests(fetchMock, "PUT").at(-1);
+    expect(JSON.parse(String(lastPut?.[1]?.body ?? "{}"))).toMatchObject({
+      groups: {
+        bank_statement_as_invoice: { tag_codes: ["internal_transfer", "fee"] },
+        no_invoice_required: { tag_codes: ["salary"] },
+      },
+    });
   });
 
   test("opens invoice picker from status column, previews attach-existing, confirms, and refetches rows", async () => {
