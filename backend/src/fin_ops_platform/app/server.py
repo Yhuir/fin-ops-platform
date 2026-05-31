@@ -49,7 +49,11 @@ from fin_ops_platform.services.access_control_service import AccessControlServic
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder, request_database_timing
 from fin_ops_platform.services.app_health_alert_service import AppHealthAlertService
 from fin_ops_platform.services.app_health_service import AppHealthService
-from fin_ops_platform.services.app_settings_service import AppSettingsService, AppSettingsValidationError
+from fin_ops_platform.services.app_settings_service import (
+    AppSettingsService,
+    AppSettingsValidationError,
+    BankAutoTagRulesPersistenceError,
+)
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
@@ -10610,6 +10614,14 @@ class Application:
                     "references": list(exc.references),
                 },
             )
+        except BankAutoTagRulesPersistenceError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc),
+                },
+            )
         return self._json_response(HTTPStatus.OK, updated)
 
     def _handle_api_bank_details_auto_tag_rules_reapply(
@@ -10709,6 +10721,14 @@ class Application:
                     "message": str(exc),
                     "field_errors": list(getattr(exc, "field_errors", [])),
                     "references": list(getattr(exc, "references", [])),
+                },
+            )
+        except BankAutoTagRulesPersistenceError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc),
                 },
             )
         return self._json_response(HTTPStatus.OK, updated)

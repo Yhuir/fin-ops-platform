@@ -49,6 +49,12 @@ class AppSettingsValidationError(ValueError):
         self.error_code = error_code
 
 
+class BankAutoTagRulesPersistenceError(RuntimeError):
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
 class AppSettingsService:
     def __init__(
         self,
@@ -307,13 +313,9 @@ class AppSettingsService:
             "version": int(next_tags["version"]),
         }
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
-        try:
-            if self._state_store is not None:
-                self._state_store.save_app_settings(next_snapshot)
-        except Exception:
-            raise
-        self._snapshot = next_snapshot
-        self._configure_category_service(next_snapshot)
+        saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
+        self._snapshot = saved_snapshot
+        self._configure_category_service(saved_snapshot)
         event = {
             "actor_id": str(actor_id or "bank_auto_tag_rules").strip() or "bank_auto_tag_rules",
             "old_version": int(normalized["old_version"]),
@@ -360,10 +362,9 @@ class AppSettingsService:
             "version": int(next_tags["version"]),
         }
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
-        if self._state_store is not None:
-            self._state_store.save_app_settings(next_snapshot)
-        self._snapshot = next_snapshot
-        self._configure_category_service(next_snapshot)
+        saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
+        self._snapshot = saved_snapshot
+        self._configure_category_service(saved_snapshot)
         event = {
             "actor_id": str(actor_id or "bank_auto_tag_rules").strip() or "bank_auto_tag_rules",
             "old_version": int(normalized["old_version"]),
@@ -490,6 +491,35 @@ class AppSettingsService:
         self._snapshot = normalized_snapshot
         self._configure_category_service(normalized_snapshot)
         self._restore_manual_projects()
+
+    def _save_and_verify_bank_auto_tag_rules_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        normalized_snapshot = self._normalize_settings(
+            snapshot,
+            validate_pending_invoice_tag_groups=False,
+        )
+        if self._state_store is None:
+            return normalized_snapshot
+        try:
+            self._state_store.save_app_settings(normalized_snapshot)
+            persisted_snapshot = self._normalize_settings(
+                self._state_store.load_app_settings(),
+                validate_pending_invoice_tag_groups=False,
+            )
+        except Exception as exc:
+            raise BankAutoTagRulesPersistenceError(
+                "bank_auto_tag_rules_persistence_failed",
+                "自动标签规则保存失败：无法写入持久化设置源，请稍后重试。",
+            ) from exc
+
+        if (
+            persisted_snapshot["bank_transaction_tags"] != normalized_snapshot["bank_transaction_tags"]
+            or persisted_snapshot["pending_invoice_tag_groups"] != normalized_snapshot["pending_invoice_tag_groups"]
+        ):
+            raise BankAutoTagRulesPersistenceError(
+                "bank_auto_tag_rules_persistence_failed",
+                "自动标签规则保存失败：持久化设置源未返回刚写入的规则版本，请稍后重试。",
+            )
+        return normalized_snapshot
 
     def _restore_manual_projects(self) -> None:
         projects = [

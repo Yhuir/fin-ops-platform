@@ -570,6 +570,53 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(suggestion["category_code"], custom_rule["code"])
         self.assertEqual(suggestion["auto_category_evidence"]["condition_type"], "contains_all")
 
+    def test_put_rejects_false_success_when_settings_store_does_not_persist_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+            fee = next(rule for rule in current["active_rules"] if rule["code"] == "fee")
+            active = []
+            for rule in current["active_rules"]:
+                rules = dict(rule["rules"])
+                if rule["code"] == "fee":
+                    rules["contains_any"] = [*list(rules.get("contains_any") or []), "跨进程保存校验"]
+                active.append({**rule, "rules": rules})
+            lifecycle_calls: list[tuple[str, dict[str, object]]] = []
+
+            app._state_store.save_app_settings = lambda _snapshot: None
+
+            with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+                with patch.object(
+                    app,
+                    "_execute_derived_data_lifecycle_event",
+                    side_effect=lambda event, **kwargs: lifecycle_calls.append((event, kwargs)) or {"event": event},
+                ):
+                    response = app.handle_request(
+                        "PUT",
+                        "/api/bank-details/auto-tag-rules",
+                        json.dumps(
+                            {
+                                "expected_version": current["version"],
+                                "active_rules": active,
+                                "archived_rules": current["archived_rules"],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+
+            payload = json.loads(response.body)
+            reloaded = build_application(data_dir=Path(temp_dir))._app_settings_service.get_bank_auto_tag_rules_payload()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "bank_auto_tag_rules_persistence_failed")
+        self.assertEqual(reloaded["version"], current["version"])
+        self.assertEqual(
+            next(rule for rule in reloaded["active_rules"] if rule["code"] == "fee")["rules"],
+            fee["rules"],
+        )
+        self.assertEqual(lifecycle_calls, [])
+        self.assertEqual(app._audit_service.as_dicts(), [])
+
     def test_workbench_source_versions_include_bank_auto_tag_rules_version(self) -> None:
         app = build_application()
 
