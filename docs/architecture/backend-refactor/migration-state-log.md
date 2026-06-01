@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra write facade implementation |
+| 当前阶段 | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` planned |
 | 最近 verified prompt | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P056 新增 4 条 relation extra write facade target contract tests，默认 CI 绿色；未修改 `server.py` 或真实 API |
-| 下一条允许任务 | 生成并审查 `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation`；只实现最小 facade 并转绿 PF-P056 tests，不迁移真实 handler |
+| 下一条允许任务 | 执行 `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation`；只实现最小 facade 并转绿 PF-P056 tests，不迁移真实 handler |
 
 ## Prompt 执行日志
 
@@ -5669,6 +5669,31 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests，4 expected failures。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+
+### PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation
+
+状态：`planned`
+
+#### 范围
+
+- 新增最小 `TurnoverLedgerWriteFacade`，只覆盖 `update_relation_extra()`。
+- 将 PF-P056 的 4 条 relation extra facade target tests 从 `expectedFailure` 转为普通通过。
+- 不接入真实 `server.py` handler，不改变真实 API 行为。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P057。
+
+#### 验收标准
+
+- 生产代码只允许新增或最小修改 Turnover Ledger write facade 相关 service 文件。
+- `tests/test_turnover_ledger_uow_contract.py` 只允许移除 PF-P056 4 条 tests 的 `expectedFailure`，不得弱化断言。
+- `server.py`、runtime queue、worker、SQL migration、frontend、deployment 和生产配置无 diff。
 
 ## 维护规则
 

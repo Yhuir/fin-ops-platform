@@ -428,3 +428,18 @@ PF-P057 recommended implementation:
 - Implement `TurnoverLedgerWriteFacade.update_relation_extra()` against the existing `TurnoverLedgerWriteUnitOfWork`.
 - Remove the 4 PF-P056 `expectedFailure` decorators only when the facade implementation makes them pass as ordinary tests.
 - Do not wire the facade into `server.py` yet.
+
+## PF-P057 Relation Extra Write Facade Implementation Plan
+
+状态：`planned`
+
+PF-P057 should implement the smallest service-layer facade needed to turn the PF-P056 target tests green:
+
+- `TurnoverLedgerWriteFacade.__init__(uow=...)`;
+- `TurnoverLedgerWriteFacade.update_relation_extra(relation_id, payload, actor_id, tenant_id, scope_keys)`;
+- no `Application` injection;
+- no HTTP cookie/header/session parsing;
+- no `server.py` wiring;
+- no real API behavior change.
+
+The facade should treat relation extra write as a service command and rely on `TurnoverLedgerWriteUnitOfWork` for transaction scope and dirty/outbox enqueue.

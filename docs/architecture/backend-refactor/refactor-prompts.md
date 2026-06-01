@@ -15063,3 +15063,85 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests，4 expected failures。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
 - 下一步建议：生成并审查 `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation`。PF-P057 应只实现最小 `TurnoverLedgerWriteFacade` 并将 PF-P056 新增 tests 转为普通通过；仍不得迁移真实 handler。
+
+## PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation
+
+Role:
+你是一位精通 Python Clean Architecture、TDD、Unit of Work 和遗留系统渐进式重构的后端工程师。
+
+Context:
+PF-P056 已完成并验证。当前已有 4 条 relation extra write facade target contract tests，均使用 `unittest.expectedFailure`，因为 `TurnoverLedgerWriteFacade` 尚未存在。
+
+本轮目标是只实现最小 `TurnoverLedgerWriteFacade.update_relation_extra()`，让 PF-P056 的 4 条 tests 转为普通通过。不得迁移真实 handler，不得修改 `server.py`，不得改变真实 API 行为。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - tests/test_turnover_ledger_api.py 中 relation extra 相关测试
+2. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+3. 必须先运行 `tests.test_turnover_ledger_uow_contract`，确认 PF-P056 的 4 条 facade tests 当前是 expected failures。
+
+Task:
+最小实现 Turnover Ledger relation extra write facade。
+
+Required Implementation Work:
+1. 新增 `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`。
+2. 实现 `TurnoverLedgerWriteFacade`：
+   - constructor 只接收明确依赖，当前允许只接收 `uow`；
+   - constructor 不接受 `application`；
+   - 不 import `app.auth`；
+   - 不读取 HTTP cookie/header；
+   - 不构造 HTTP response object。
+3. 实现 `update_relation_extra()`：
+   - 输入为 service-layer 参数：`relation_id`、`payload`、`actor_id`、`tenant_id`、`scope_keys`；
+   - 创建 UoW command；
+   - 在 UoW handler 中通过 `context.extra_repository.save_extra(..., transaction=context.transaction)` 写 extra fact；
+   - 依赖 UoW 在同一 transaction 内 enqueue Turnover dirty/outbox；
+   - 返回普通 dict result，至少包含 `extra`。
+4. 更新 `tests/test_turnover_ledger_uow_contract.py`：
+   - 只移除 PF-P056 4 条 tests 的 `unittest.expectedFailure`；
+   - 不得删除、弱化或跳过这些 tests。
+5. 更新 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`，记录 PF-P057 实现结果和下一步建议。
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得接入真实 `PUT /api/turnover-ledger/relations/{id}/extra` handler。
+- 不得修改 runtime queue、worker、real repository、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得访问真实外部服务。
+- 不得迁移 confirm、withdraw、tag selection 或 bank-row-tags batch。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "class TurnoverLedgerWriteFacade|def update_relation_extra|expectedFailure|PF-P057" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P057 status = implemented / verified / blocked。
+   - 记录转绿测试和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P057 执行结果。
+3. 不生成 MG，除非状态机确认 relation extra facade tests + implementation 已达到可合并边界。
+```
+
+### 审查结论
+
+- PF-P057 是 PF-P056 后正确的 TDD GREEN 步骤。
+- Prompt 只允许新增最小 facade，并明确禁止真实 API migration、`server.py` diff 和外部服务访问。
+- Prompt 要求只移除 PF-P056 4 条 tests 的 `expectedFailure`，不得弱化测试断言。
