@@ -20,9 +20,11 @@ class TurnoverLedgerWriteFacade:
         *,
         uow: Any,
         row_provider: Callable[..., dict[str, object]] | None = None,
+        extra_normalizer: Callable[..., dict[str, object]] | None = None,
     ) -> None:
         self._uow = uow
         self._row_provider = row_provider
+        self._extra_normalizer = extra_normalizer or self._default_extra_normalizer
 
     def update_relation_extra(
         self,
@@ -33,9 +35,11 @@ class TurnoverLedgerWriteFacade:
         tenant_id: str,
         scope_keys: list[str] | None = None,
     ) -> dict[str, object]:
-        extra = dict(payload)
-        extra["relation_id"] = relation_id
-        extra["updated_by"] = actor_id
+        extra = self._extra_normalizer(
+            relation_id=relation_id,
+            payload=dict(payload),
+            actor_id=actor_id,
+        )
         command = TurnoverLedgerWriteCommand(
             action_name="relation_extra_update",
             scope_keys=list(scope_keys or ["all"]),
@@ -52,3 +56,15 @@ class TurnoverLedgerWriteFacade:
             return result
 
         return self._uow.run(command, handler)
+
+    @staticmethod
+    def _default_extra_normalizer(
+        *,
+        relation_id: str,
+        payload: dict[str, object],
+        actor_id: str,
+    ) -> dict[str, object]:
+        extra = dict(payload)
+        extra["relation_id"] = relation_id
+        extra["updated_by"] = actor_id
+        return extra

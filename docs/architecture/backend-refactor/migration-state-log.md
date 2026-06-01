@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` planned |
-| 最近 verified prompt | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` |
+| 当前阶段 | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步需补齐 relation extra pure normalizer adapter 后才能接 handler |
+| 最近 verified prompt | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P061 为 relation extra facade 增加 row provider contract；UoW contract 16 tests 通过，API 28 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract`；先锁定 relation extra normalization/validation，不接入真实 handler |
+| 最近验证 | PF-P062 为 relation extra facade 增加 `extra_normalizer` boundary；UoW contract 19 tests 通过，API 28 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`；不直接接 handler，除非 prompt 同时证明不会产生事务外内存副作用 |
 
 ## Prompt 执行日志
 
@@ -5885,7 +5885,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5903,7 +5903,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P062。
+- 生成并审查 `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`。
 
 #### 验收标准
 
@@ -5911,6 +5911,26 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - normalizer validation error 必须阻止 repository save 和 dirty/outbox enqueue。
 - UoW contract tests 必须通过。
 - 现有 28 条 Turnover API tests 必须通过。
+
+#### 执行结果
+
+- `TurnoverLedgerWriteFacade` 新增可选 `extra_normalizer` 细粒度依赖。
+- `update_relation_extra()` 现在保存 normalized extra，并将 normalized extra 传给 row provider。
+- 新增 contract tests 覆盖：
+  - raw payload 不会直接保存；
+  - row provider 收到 normalized extra；
+  - normalizer validation error 会阻止 transaction、repository save 和 dirty/outbox enqueue。
+- 未修改 `server.py`，未接入真实 handler。
+
+#### 验证
+
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，19 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+
+#### 下一条 Prompt 上下文
+
+PF-P062 只建立 facade normalization boundary。真实 handler wiring 前还缺一个 pure normalizer adapter：必须复用现有 `TurnoverLedgerExtraService` 的 validation/defaulting 规则，但不能调用会提前修改内存状态的 `upsert()` 作为 facade normalizer。PF-P063 应先建立该 pure normalizer adapter 或明确等价方案，然后再考虑 handler minimal wiring。
 
 ## 维护规则
 

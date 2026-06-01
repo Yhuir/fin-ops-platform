@@ -209,6 +209,28 @@ class _RecordingRelationExtraRowProvider:
         }
 
 
+class _RecordingRelationExtraNormalizer:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, *, relation_id: str, payload: dict[str, object], actor_id: str) -> dict[str, object]:
+        self.calls.append({"relation_id": relation_id, "payload": dict(payload), "actor_id": actor_id})
+        if self.fail:
+            raise ValueError("invalid normalized extra")
+        return {
+            "relation_id": relation_id,
+            "interest_rate_type": str(payload.get("interest_rate_type") or "none"),
+            "interest_rate_value": "0.000000",
+            "interest_paid_amount": "0.00",
+            "interest_paid_date": None,
+            "interest_payment_method": "",
+            "note": f"normalized:{payload.get('note', '')}",
+            "updated_at": "2026-06-02T00:00:00+00:00",
+            "updated_by": actor_id,
+        }
+
+
 class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def _uow_class(self) -> type:
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_uow")
@@ -471,6 +493,76 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(result["row"]["note"], "row provider note")
         forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
         self.assertTrue(forbidden_keys.isdisjoint(result))
+
+    def test_relation_extra_write_facade_saves_normalized_extra_not_raw_payload(self) -> None:
+        uow, deps = self._build_uow()
+        normalizer = _RecordingRelationExtraNormalizer()
+        facade = self._write_facade_class()(uow=uow, extra_normalizer=normalizer)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "raw note", "unknown": "must not leak"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(
+            normalizer.calls,
+            [
+                {
+                    "relation_id": "turnover_rel_1",
+                    "payload": {"note": "raw note", "unknown": "must not leak"},
+                    "actor_id": "finance-user",
+                }
+            ],
+        )
+        saved_extra = deps.extra_repository.extras[0]["extra"]
+        self.assertEqual(saved_extra["note"], "normalized:raw note")
+        self.assertEqual(saved_extra["updated_by"], "finance-user")
+        self.assertNotIn("unknown", saved_extra)
+        self.assertEqual(result["extra"], saved_extra)
+
+    def test_relation_extra_write_facade_row_provider_receives_normalized_extra(self) -> None:
+        uow, _deps = self._build_uow()
+        normalizer = _RecordingRelationExtraNormalizer()
+        row_provider = _RecordingRelationExtraRowProvider()
+        facade = self._write_facade_class()(
+            uow=uow,
+            extra_normalizer=normalizer,
+            row_provider=row_provider,
+        )
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "raw note"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(row_provider.calls[0]["extra"]["note"], "normalized:raw note")
+        self.assertEqual(result["row"]["note"], "normalized:raw note")
+
+    def test_relation_extra_write_facade_normalization_error_prevents_save_and_outbox(self) -> None:
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(
+            uow=uow,
+            extra_normalizer=_RecordingRelationExtraNormalizer(fail=True),
+        )
+
+        with self.assertRaisesRegex(ValueError, "invalid normalized extra"):
+            facade.update_relation_extra(
+                relation_id="turnover_rel_1",
+                payload={"note": "invalid"},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+            )
+
+        self.assertEqual(deps.connection.opened, 0)
+        self.assertEqual(deps.extra_repository.extras, [])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_relation_extra_repository_adapter_saves_single_extra_with_supplied_transaction(self) -> None:
         module = self._write_adapters_module()

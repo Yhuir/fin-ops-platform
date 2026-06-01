@@ -594,4 +594,29 @@ PF-P061 execution result:
 
 Next step:
 
-- `PF-P062 - Turnover Ledger Relation Extra Handler Minimal Wiring`, or cumulative MG if the current foundation should be merged before touching `server.py`.
+- `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract`, because direct handler wiring would currently save raw payload and bypass existing `TurnoverLedgerExtraService` validation/defaulting semantics.
+
+## PF-P062 Relation Extra Normalization Boundary Plan
+
+状态：`verified`
+
+PF-P062 corrected the handler-wiring plan before execution:
+
+- direct handler wiring was rejected because `TurnoverLedgerWriteFacade.update_relation_extra()` saved raw payload, while the legacy API normalizes/validates relation extra data before persistence;
+- `TurnoverLedgerWriteFacade` now accepts a narrow `extra_normalizer` callable;
+- facade saves the normalized extra, returns the normalized extra, and passes normalized data to the optional row provider;
+- normalization failures prevent UoW execution, repository save and dirty/outbox enqueue.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 19 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 28 tests.
+
+Remaining gap before handler wiring:
+
+- The production handler still needs a pure relation extra normalizer that reuses existing `TurnoverLedgerExtraService` validation/defaulting rules without mutating in-memory state before the PostgreSQL transaction succeeds.
+- Do not wire `server.py` by calling `TurnoverLedgerExtraService.upsert()` inside the facade normalizer; that would create non-transactional in-memory side effects before the UoW commits.
+
+Next step:
+
+- Generate and execute `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`, or fold that exact pure-normalizer work into the next handler wiring prompt before touching `server.py`.

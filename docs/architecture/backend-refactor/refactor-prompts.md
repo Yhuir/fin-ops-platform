@@ -15656,3 +15656,19 @@ Post-Flight:
 - PF-P062 原 handler wiring 草案被代码事实否决：当前 facade 仍会保存 raw payload，直接接 handler 会绕过现有 relation extra normalization/validation。
 - 修正后的 PF-P062 先建立 normalization boundary contract，不修改 `server.py`，避免把旧 API 契约破坏带入真实 handler。
 - Prompt 仍保持单一切片：只处理 relation extra normalization，不迁移其它 Turnover Ledger 写 API。
+
+### 执行结果
+
+- PF-P062 已执行并按自动工作流标记为 `verified`。
+- `TurnoverLedgerWriteFacade` 新增可选 `extra_normalizer` 细粒度依赖。
+- `update_relation_extra()` 现在保存 normalized extra，并将 normalized extra 传给 row provider。
+- 新增 contract tests 证明：
+  - raw payload 不会直接保存；
+  - row provider 收到 normalized extra；
+  - normalizer validation error 会阻止 transaction、repository save 和 dirty/outbox enqueue。
+- 未修改 `server.py`、真实 handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，19 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+- 下一步建议：生成并审查 `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`，因为真实 handler wiring 前必须复用现有 validation/defaulting 规则且不能引入事务外内存副作用。
