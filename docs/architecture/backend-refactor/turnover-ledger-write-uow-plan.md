@@ -1542,3 +1542,22 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 39 tests, 3 expectedFailure.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests.
+
+## PF-P085 Withdraw Relation Facade Skeleton
+
+状态：`planned`
+
+目标：
+
+- 最小实现 `TurnoverLedgerWriteFacade.withdraw_relation(...)`。
+- 将 PF-P084 的 3 条 withdraw relation target tests 从 `unittest.expectedFailure` 转为普通通过。
+- 不迁移真实 HTTP handler。
+
+边界：
+
+- 只使用现有 `TurnoverLedgerWriteUnitOfWork` 和 explicit refresh request。
+- 不修改 `server.py`、API tests、schema/migration 或 production SQL。
+
+下一步：
+
+- 执行 PF-P085。

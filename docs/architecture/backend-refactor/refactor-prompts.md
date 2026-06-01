@@ -18734,3 +18734,90 @@ Verification:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，39 tests。
 
 下一步建议：生成并审查 `PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton`，只实现 facade skeleton，不迁移真实 handler。
+
+## PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton
+
+```text
+/goal
+PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton
+
+Role:
+你是一位负责最小实现 service-layer facade 的 Python 后端工程师。你必须只实现 `TurnoverLedgerWriteFacade.withdraw_relation(...)` skeleton，让 PF-P084 的 facade-level target tests 转绿；不得迁移真实 HTTP handler。
+
+Context:
+PF-P084 已新增 3 条 `unittest.expectedFailure` target tests，锁定未来 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 必须使用细粒度 relation port、通过 UoW transaction 执行、dirty/outbox failure rollback，并 enqueue `turnover_ledger` / `all` / `turnover_relation_changed`。当前 facade 尚无 `withdraw_relation(...)`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_uow_contract.py 中 PF-P084 withdraw tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+4. 必须确认 PF-P084 已 verified。
+
+Task:
+实现 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 的最小 service-layer skeleton，并将 PF-P084 的 3 条 target tests 从 `unittest.expectedFailure` 转为普通通过。
+
+Required Implementation Work:
+1. 在 `TurnoverLedgerWriteFacade` 中新增 `withdraw_relation(...)`：
+   - 参数必须至少包含 `relation_id`、`actor_id`、`tenant_id`、`note`、`affected_months`；
+   - 规范化 `relation_id` 和 `affected_months`；
+   - 构造 `TurnoverLedgerWriteCommand(action_name="withdraw_relation", scope_keys=["all"], ...)`；
+   - 使用 explicit refresh request：`scope_type="turnover_ledger"`、`scope_keys=["all"]`、`reason="turnover_relation_changed"`；
+   - handler 必须调用 `context.relation_repository.withdraw_relation(relation_id=..., actor_id=..., note=..., transaction=context.transaction)`；
+   - 返回 service-layer payload，不引入 HTTP status/Response/header/cookie。
+2. 更新 `tests/test_turnover_ledger_uow_contract.py`：
+   - 移除 PF-P084 3 条 withdraw target tests 的 `unittest.expectedFailure`；
+   - 不得删除或弱化测试断言。
+3. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得修改 `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`。
+- 不得修改 `tests/test_turnover_ledger_api.py`。
+- 不得迁移 withdraw handler、confirm handler 或其它 Turnover 写路径。
+- 不得引入 PostgreSQL relation SQL 或 production repository guessing。
+- 不得修改 schema/migration。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- rg -n "def withdraw_relation|test_target_withdraw_relation|expectedFailure|PF-P085|turnover_relation_changed" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P085 status = implemented / verified / blocked。
+   - 记录 facade skeleton、expectedFailure 转绿、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P085 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 withdraw facade skeleton 状态。
+4. PF-P085 后不要生成 MG；下一步应生成 PF-P086 withdraw handler UoW wiring readiness。
+```
+
+### 审查结论
+
+- PF-P085 是 PF-P084 后的最小实现步骤：只实现 facade skeleton，不碰真实 handler。
+- Prompt 复用现有 `TurnoverLedgerWriteCommand.refresh_requests` 和 UoW，不引入新框架。
+- Prompt 明确禁止 server.py、API tests、schema 和 production SQL 变更。

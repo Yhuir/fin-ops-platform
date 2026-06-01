@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton` 已生成并审查 |
+| 当前 active prompt | `PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton` planned |
 | 最近 verified prompt | `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-withdraw-relation-p084` |
 | 最近验证 | PF-P084 新增 withdraw relation facade-level target contract tests；默认 CI 绿色，3 条 expectedFailure 保留未来 facade 目标 |
-| 下一条允许任务 | 生成并审查 `PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton` |
+| 下一条允许任务 | 执行 `PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton` |
 
 ## Prompt 执行日志
 
