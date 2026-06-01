@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton` 已生成并审查 |
+| 当前 active prompt | `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton` |
 | 最近 verified prompt | `PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
 | 当前分支 | `codex/turnover-ledger-remaining-write-rebaseline-p089` |
 | 最近验证 | PF-P088-MG 已在 main 上复验通过并已 push；`main...origin/main` 已对齐 |
-| 下一条允许任务 | 生成并审查 `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton`，只让 PF-P090 target tests 转绿，不迁移 handler |
+| 下一条允许任务 | 执行 PF-P091，只实现最小 adapters 让 PF-P090 target tests 转绿，不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -7174,6 +7174,37 @@ PF-P089 已 verified。扫描结论：五条 Turnover Ledger 写 path 都已有 
 #### 下一条 Prompt 上下文
 
 PF-P090 已 verified。新增 5 条 expectedFailure target contract tests，锁定 `TurnoverLedgerRelationRepositoryAdapter` 和 `TurnoverLedgerBankdetailPortAdapter` 的未来生产级接口；新增 1 条普通通过测试，证明 adapter exception 会让 UoW rollback。下一条应生成 `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton`，只实现最小 adapter skeleton 让这 5 条 target tests 转绿，不迁移 handler 的 PostgreSQL path。
+
+### PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 实现最小 `TurnoverLedgerRelationRepositoryAdapter` 和 `TurnoverLedgerBankdetailPortAdapter`。
+- 移除 PF-P090 5 条 target tests 的 `unittest.expectedFailure`，让它们转为普通通过。
+- 不迁移 handler，不修改 `server.py`，不接入 PostgreSQL path。
+
+#### 允许变更文件
+
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验收标准
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：必须通过，PF-P090 的 5 条 adapter target tests 不应再是 expectedFailure。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：通过。
+- `git status --short --branch`：当前分支不是 `main`。
+- `git ls-files --others --exclude-standard`：无未跟踪临时文件。
+- `git diff --check`：通过。
+- `rg -n "TurnoverLedgerRelationRepositoryAdapter|TurnoverLedgerBankdetailPortAdapter|PF-P091|expectedFailure" backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：通过。
+
+#### 下一条 Prompt 上下文
+
+PF-P091 还未执行。执行后如果 verified，下一条应做 PostgreSQL facade readiness 或 handler wiring planning；不得直接迁移 handler，除非先补 API-level production fallback/target tests。
 
 ## 维护规则
 

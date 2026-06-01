@@ -1904,3 +1904,25 @@ PF-P090 通过后，再进入 adapter skeleton / PostgreSQL facade wiring。
 Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 45 tests, 5 expectedFailure.
+
+## PF-P091 PostgreSQL Write Port Adapter Skeleton
+
+状态：`planned`
+
+目标：
+
+- 实现最小 `TurnoverLedgerRelationRepositoryAdapter`。
+- 实现最小 `TurnoverLedgerBankdetailPortAdapter`。
+- 移除 PF-P090 5 条 adapter target tests 的 `unittest.expectedFailure`，使其转为普通通过。
+
+边界：
+
+- 不修改 `server.py`。
+- 不迁移 PostgreSQL handler path。
+- 不新增 SQL migration。
+- 不访问真实外部服务。
+- 不执行 Traffic Gate。
+
+下一步：
+
+- PF-P091 verified 后，先进入 PostgreSQL facade readiness / API target tests；不得直接 wiring handler。
