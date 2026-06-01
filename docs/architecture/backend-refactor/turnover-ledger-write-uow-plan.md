@@ -1285,3 +1285,213 @@ Verification on main:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 33 tests.
+
+## PF-P079 Confirm Relation Facade Contract Tests
+
+状态：`verified`
+
+目标：
+
+- 只补 `POST /api/turnover-ledger/relations/confirm` 未来 facade/UoW contract tests。
+- 不修改 production code，不迁移 handler。
+- 若 `TurnoverLedgerWriteFacade.confirm_relation(...)` 尚未实现，用 `unittest.expectedFailure` 保留目标语义并保持默认 CI 绿色。
+
+边界：
+
+- 测试必须使用细粒度 relation port/repository fake，不得模拟整个 `Application`。
+- 目标 contract 先锁定 Turnover scope dirty/outbox；Workbench influence port 仍作为后续设计项。
+
+下一步：
+
+- 生成 PF-P080 confirm relation facade skeleton。
+
+执行结果：
+
+- 新增 3 条 future `TurnoverLedgerWriteFacade.confirm_relation(...)` target tests，当前为 `unittest.expectedFailure`。
+- 测试使用细粒度 `_RecordingConfirmRelationPort`，不模拟 `Application`。
+- 未修改 production code。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests, 3 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
+
+## PF-P080 Confirm Relation Facade Skeleton
+
+状态：`verified`
+
+目标：
+
+- 最小实现 `TurnoverLedgerWriteFacade.confirm_relation(...)`。
+- 将 PF-P079 的 3 条 confirm relation target tests 从 `unittest.expectedFailure` 转为普通通过。
+- 不迁移真实 HTTP handler。
+
+边界：
+
+- 只使用已有 `TurnoverLedgerWriteUnitOfWork` 和 `refresh_requests` 机制。
+- explicit refresh reason 必须是 `turnover_relation_changed`。
+- 不修改 `server.py`、schema/migration 或 API tests。
+
+下一步：
+
+- 生成 PF-P081 confirm relation handler UoW wiring readiness。
+
+执行结果：
+
+- `TurnoverLedgerWriteFacade.confirm_relation(...)` 已最小实现。
+- 使用细粒度 relation repository port 和现有 UoW。
+- explicit refresh reason 为 `turnover_relation_changed`。
+- PF-P079 的 3 条 target tests 已转为普通通过。
+- 未修改 `server.py`，未迁移真实 handler。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
+
+## PF-P081 Confirm Relation Handler UoW Wiring Readiness
+
+状态：`verified`
+
+目标：
+
+- 只审计 `POST /api/turnover-ledger/relations/confirm` 真实 handler 接入 UoW 的 readiness。
+- 不修改 production code，不新增测试，不迁移 handler。
+- 输出下一条 prompt 应该是 handler target tests、adapter skeleton 还是 handler wiring。
+
+下一步：
+
+- 生成 PF-P082 confirm relation handler UoW target tests，先锁定 local/dev/test rollback/no-clear 行为；不要直接 wiring。
+
+### Current Runtime Sequence
+
+当前 `POST /api/turnover-ledger/relations/confirm` 运行时序：
+
+1. `Application._handle_api_turnover_ledger_confirm` 解析 session、JSON body 和 `bank_row_ids`。
+2. Handler 调用 `TurnoverRelationService.rebuild_from_bank_rows(self._turnover_bank_transaction_rows())`，先基于当前银行流水和标签重建系统推导关系。
+3. Handler 调用 `TurnoverLedgerApiRoutes.confirm_relation(...)`。
+4. `TurnoverLedgerApiRoutes.confirm_relation(...)` 调用 `TurnoverRelationService.confirm_relation(...)`。
+5. `TurnoverRelationService.confirm_relation(...)` 在内存中写 relation facts，追加 `confirm_relation` audit，然后返回 relation payload。
+6. Handler 计算 `affected_months = _bank_transaction_category_affected_months(bank_row_ids)`。
+7. Handler 调用 `_after_turnover_relation_mutation(affected_months)`：
+   - `_persist_turnover_relations_best_effort("turnover_relation_mutation_pre_invalidation")`;
+   - `_invalidate_workbench_after_bank_transaction_categories(affected_months)`;
+   - `_persist_turnover_relations_best_effort("turnover_relation_mutation")`;
+   - `_clear_turnover_ledger_read_model_best_effort()`;
+   - `_enqueue_turnover_ledger_read_model_refreshes(["all"], reason="turnover_relation_changed")`。
+
+当前 facts/audit 在 `TurnoverRelationService` 内存中同步改变；local state store persistence 是 best-effort 且发生在 `_after_turnover_relation_mutation`，不是和 dirty/outbox 同一 transaction。Workbench invalidation、Turnover read model clear 和 refresh enqueue 也在 handler finalizer 中串联。
+
+### Existing Reusable Boundaries
+
+- `TurnoverLedgerWriteFacade.confirm_relation(...)` 已存在，可调用 `context.relation_repository.confirm_relation(..., transaction=...)`，并通过 explicit refresh request enqueue `turnover_ledger/all/turnover_relation_changed`。
+- relation extra 已有 local transaction shim 模式，可作为 confirm local/dev/test rollback 参考。
+- bank-row-tags 已有 local snapshot restore 模式，可复用到 confirm：queue/outbox failure 时恢复 `TurnoverRelationService.snapshot()` 并回写 local state store。
+- `TurnoverLedgerApiRoutes.confirm_relation(...)` 可以作为 local/dev/test relation port 的内部调用，因为它复用现有 `TurnoverRelationService` 规则并返回现有 response shape；但它不应直接作为长期 production repository 边界。
+- 当前未发现明确 transaction-bound PostgreSQL relation repository/adapter 可直接用于 confirm relation facts/audit；不得猜测 SQL。
+
+### Wiring Readiness Matrix
+
+| 边界 | Readiness | 结论 |
+| --- | --- | --- |
+| local/dev/test path | High | 可用 local transaction shim 包住 `TurnoverLedgerApiRoutes.confirm_relation(...)`，失败时恢复 relation snapshot 和 state store snapshot。 |
+| PostgreSQL production path | Low | 缺少明确 transaction-bound relation repository/adapter；下一步不得猜 SQL，production 应保留 legacy fallback。 |
+| Workbench influence port | Partial | `_invalidate_workbench_after_bank_transaction_categories` 仍是 handler finalizer 里的 cross-module side effect；下一步 local UoW wiring 可先不迁移 Workbench influence，保留 legacy fallback 或记录 blocker。 |
+| affected months calculation | High | Handler 已能从 `bank_row_ids` 调用 `_bank_transaction_category_affected_months(...)`，可在调用 facade 前传入。 |
+| legacy compatibility tests | Medium | 已有 confirm duplicate、permission/audit、persistence failure best-effort tests；但缺少 target rollback/no-clear API tests，应先补 PF-P082。 |
+
+### Decision
+
+下一条不应直接 handler wiring。应先生成 `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests`：
+
+- 只补 API-level target tests；
+- 保留当前 legacy persistence failure / duplicate submit behavior；
+- 用 `unittest.expectedFailure` 锁定 future local/dev/test UoW rollback 和 no direct read-model clear；
+- 不修改 production code。
+
+如果 PF-P082 通过，PF-P083 才能执行 local/dev/test confirm handler UoW wiring，并保留 PostgreSQL production legacy fallback。
+
+### Risks / Blockers
+
+- 允许直接调用 `TurnoverLedgerApiRoutes.confirm_relation(...)` 作为 local/dev/test temporary relation port；不允许把它定义为长期 production repository。
+- 不允许猜测 PostgreSQL relation SQL。真实 production UoW 需要后续 transaction-bound relation repository/adapter。
+- Workbench influence 本轮不应强行迁入 facade/UoW；否则会跨模块扩大 scope。PF-P083 如只做 local/dev/test wiring，应保留 production fallback，并明确 Workbench influence port 是后续 blocker。
+
+## PF-P082 Confirm Relation Handler UoW Target Tests
+
+状态：`verified`
+
+目标：
+
+- 只为 `POST /api/turnover-ledger/relations/confirm` 增加 API-level compatibility / target tests。
+- 保留 current legacy queue failure split-brain 事实。
+- 用 `unittest.expectedFailure` 锁定 future UoW rollback/no-direct-clear 行为。
+
+边界：
+
+- 不修改 production code。
+- 不迁移 handler。
+- 不进入 MG。
+
+下一步：
+
+- 生成 PF-P083 confirm relation local handler UoW wiring。
+
+执行结果：
+
+- 新增 current compatibility test，锁定 legacy queue failure 发生在 relation confirm/audit 和 Turnover read model clear 之后。
+- 新增 2 条 `unittest.expectedFailure` future target tests，分别锁定 future rollback 和 no-direct-clear 行为。
+- 未修改 production code，未迁移 handler。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
+
+## PF-P083 Confirm Relation Local Handler UoW Wiring
+
+状态：`verified`
+
+目标：
+
+- 只迁移 `POST /api/turnover-ledger/relations/confirm` 的 local/dev/test path 到 `TurnoverLedgerWriteFacade.confirm_relation(...)`。
+- 保留 PostgreSQL production legacy fallback，不猜测 relation SQL。
+- 将 PF-P082 的 2 条 target `expectedFailure` 转为普通通过。
+
+边界：
+
+- 不迁移 withdraw 或其它 Turnover 写路径。
+- 不迁移 Workbench influence port。
+- current compatibility test 必须通过显式 legacy fallback seam 继续覆盖 split-brain 基线。
+
+下一步：
+
+- 生成 PF-P083-MG，统一覆盖 PF-P079 到 PF-P083 的 confirm relation UoW slice。
+
+执行结果：
+
+- `POST /api/turnover-ledger/relations/confirm` 的 local/dev/test path 已接入 `TurnoverLedgerWriteFacade.confirm_relation(...)`。
+- 新增 confirm 专用 facade seam，测试可显式强制 legacy fallback 来保留当前 split-brain characterization。
+- 新增 local transaction shim，dirty/outbox failure 时恢复并保存上一版 relation snapshot；成功时保存最新 relation snapshot。
+- PostgreSQL production path 仍保留 legacy fallback；未猜测 relation SQL。
+- PF-P082 的 2 条 target `expectedFailure` 已转为普通通过。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py`: Pass.
+
+## PF-P083-MG Confirm Relation UoW Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖 PF-P079 到 PF-P083 的 confirm relation UoW slice 累计 diff。
+- 只执行 Merge Gate，不执行 Traffic Gate。
+- 合并前后运行 Turnover Ledger targeted tests 和 compileall。
+
+下一步：
+
+- 执行 PF-P083-MG。

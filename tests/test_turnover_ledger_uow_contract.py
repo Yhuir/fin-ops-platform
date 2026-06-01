@@ -131,6 +131,36 @@ class _RecordingBankdetailPort:
         return dict(self.result)
 
 
+class _RecordingConfirmRelationPort:
+    def __init__(self, *, result: dict[str, object] | None = None) -> None:
+        self.confirm_calls: list[dict[str, object]] = []
+        self.result = result or {
+            "relation": {
+                "relation_id": "turnover_rel_1",
+                "status": "confirmed",
+                "bank_row_ids": ["bank_txn_1", "bank_txn_2"],
+            }
+        }
+
+    def confirm_relation(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        note: str | None,
+        transaction: object,
+    ) -> dict[str, object]:
+        self.confirm_calls.append(
+            {
+                "bank_row_ids": list(bank_row_ids),
+                "actor_id": actor_id,
+                "note": note,
+                "transaction": transaction,
+            }
+        )
+        return dict(self.result)
+
+
 class _RecordingDirtyOutboxWriter:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
@@ -485,6 +515,73 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_target_confirm_relation_facade_uses_relation_port_and_returns_service_payload(self) -> None:
+        relation_port = _RecordingConfirmRelationPort()
+        uow, deps = self._build_uow(relation_repository=relation_port)  # type: ignore[arg-type]
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.confirm_relation(
+            bank_row_ids=["bank_txn_1", "bank_txn_2"],
+            actor_id="finance-user",
+            tenant_id="default",
+            note="manual confirm",
+            affected_months=["2026-02"],
+        )
+
+        self.assertEqual(result["relation"]["status"], "confirmed")
+        self.assertEqual(
+            relation_port.confirm_calls,
+            [
+                {
+                    "bank_row_ids": ["bank_txn_1", "bank_txn_2"],
+                    "actor_id": "finance-user",
+                    "note": "manual confirm",
+                    "transaction": deps.connection.transaction_obj,
+                }
+            ],
+        )
+        self.assertEqual(deps.connection.commits, 1)
+
+    def test_target_confirm_relation_facade_rolls_back_when_dirty_outbox_fails(self) -> None:
+        relation_port = _RecordingConfirmRelationPort()
+        uow, deps = self._build_uow(
+            relation_repository=relation_port,  # type: ignore[arg-type]
+            dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True),
+        )
+        facade = self._write_facade_class()(uow=uow)
+
+        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
+            facade.confirm_relation(
+                bank_row_ids=["bank_txn_1", "bank_txn_2"],
+                actor_id="finance-user",
+                tenant_id="default",
+                note="manual confirm",
+                affected_months=["2026-02"],
+            )
+
+        self.assertEqual(len(relation_port.confirm_calls), 1)
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_target_confirm_relation_facade_enqueues_turnover_refresh(self) -> None:
+        uow, deps = self._build_uow(
+            relation_repository=_RecordingConfirmRelationPort(),  # type: ignore[arg-type]
+        )
+        facade = self._write_facade_class()(uow=uow)
+
+        facade.confirm_relation(
+            bank_row_ids=["bank_txn_1", "bank_txn_2"],
+            actor_id="finance-user",
+            tenant_id="default",
+            note="manual confirm",
+            affected_months=["2026-02"],
+        )
+
+        self.assertEqual(
+            [(call["scope_type"], call["scope_keys"], call["reason"]) for call in deps.dirty_outbox_writer.calls],
+            [("turnover_ledger", ["all"], "turnover_relation_changed")],
+        )
 
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:
         uow, deps = self._build_uow(stale_precondition_port=_StalePreconditionPort(stale=True))

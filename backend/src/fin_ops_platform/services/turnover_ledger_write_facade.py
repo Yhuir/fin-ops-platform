@@ -122,6 +122,54 @@ class TurnoverLedgerWriteFacade:
 
         return self._uow.run(command, handler)
 
+    def confirm_relation(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        affected_months: list[str],
+    ) -> dict[str, object]:
+        normalized_bank_row_ids = [
+            str(row_id).strip()
+            for row_id in list(bank_row_ids or [])
+            if str(row_id).strip()
+        ]
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip()
+        ]
+        command = TurnoverLedgerWriteCommand(
+            action_name="confirm_relation",
+            scope_keys=["all"],
+            refresh_requests=[
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_keys": ["all"],
+                    "reason": "turnover_relation_changed",
+                }
+            ],
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            payload={
+                "bank_row_ids": list(normalized_bank_row_ids),
+                "affected_months": list(normalized_months),
+            },
+        )
+
+        def handler(context: Any) -> dict[str, object]:
+            result = context.relation_repository.confirm_relation(
+                bank_row_ids=list(normalized_bank_row_ids),
+                actor_id=actor_id,
+                note=note,
+                transaction=context.transaction,
+            )
+            return dict(result or {})
+
+        return self._uow.run(command, handler)
+
     def update_tag_selection(
         self,
         *,
