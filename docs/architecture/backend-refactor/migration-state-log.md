@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步可进入 relation extra handler minimal wiring 或 cumulative MG |
+| 当前阶段 | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` planned |
 | 最近 verified prompt | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P061 为 relation extra facade 增加 row provider contract；UoW contract 16 tests 通过，API 28 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P062 - Turnover Ledger Relation Extra Handler Minimal Wiring`，或如果判断当前切片已足够独立则生成 cumulative MG |
+| 下一条允许任务 | 执行 `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract`；先锁定 relation extra normalization/validation，不接入真实 handler |
 
 ## Prompt 执行日志
 
@@ -5882,6 +5882,35 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，16 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+
+### PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract
+
+状态：`planned`
+
+#### 范围
+
+- 先补齐 `TurnoverLedgerWriteFacade` 的 relation extra normalization boundary。
+- 确保 facade 保存的是 normalized extra，不是 raw payload。
+- 明确真实 handler wiring 被推迟，避免绕过现有 API validation/normalization。
+- 不迁移 confirm、withdraw、tag selection 或 bank-row-tags。
+- 不修改 `server.py`。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+- 原 handler wiring 草案已被代码事实修正：现有 `TurnoverLedgerExtraService.upsert()` 会做默认值合并、金额/日期校验和格式化，当前 facade 直接保存 raw payload，不能直接接入 handler。
+
+#### 下一步
+
+- 执行 PF-P062。
+
+#### 验收标准
+
+- `TurnoverLedgerWriteFacade` 可通过细粒度 normalizer 保存 normalized extra。
+- normalizer validation error 必须阻止 repository save 和 dirty/outbox enqueue。
+- UoW contract tests 必须通过。
+- 现有 28 条 Turnover API tests 必须通过。
 
 ## 维护规则
 

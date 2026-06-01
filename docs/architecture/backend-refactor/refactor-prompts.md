@@ -15555,3 +15555,104 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，16 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
 - 下一步建议：生成并审查 `PF-P062 - Turnover Ledger Relation Extra Handler Minimal Wiring`，或先生成 cumulative MG 合入当前 facade/adapter foundation。
+
+## PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract
+
+Role:
+你是一位精通 Python Clean Architecture、遗留写路径契约锁定、数据归一化边界和安全渐进迁移的后端工程师。
+
+Context:
+PF-P056 到 PF-P061 已建立 relation extra write facade、UoW contracts、repository adapter、dirty/outbox adapter 和 row provider contract。
+
+审查 PF-P062 handler wiring 草案时发现一个必须先处理的契约风险：
+- 现有 `TurnoverLedgerExtraService.upsert()` 会做默认值合并、金额/日期/文本校验、格式化和 `updated_at/updated_by` 生成；
+- 当前 `TurnoverLedgerWriteFacade.update_relation_extra()` 只是把 payload 原样加上 `relation_id/updated_by` 后保存；
+- 如果直接把真实 handler 接到 facade，会绕过现有 API 的 normalization/validation 契约。
+
+本轮只允许建立 relation extra normalization boundary contract，不接入真实 handler，不修改 `server.py`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 relation extra handler
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py 中 `InMemoryTurnoverLedgerExtraService`、`update_relation_extra` 和 `_row_extra_fields`
+   - tests/test_turnover_ledger_api.py relation extra tests
+   - tests/test_turnover_ledger_uow_contract.py relation extra facade/adapter tests
+2. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+先补齐 relation extra normalization boundary，使 facade 不再保存未归一化 payload。
+
+Required Implementation Work:
+1. 为 `TurnoverLedgerWriteFacade` 增加 narrow `extra_normalizer` 依赖：
+   - 必须是细粒度 callable/port，不得注入 `Application`；
+   - 输入必须至少包含 `relation_id`、`payload`、`actor_id`；
+   - 输出必须是当前 API 契约下的 normalized extra；
+   - 缺省时必须保持现有测试兼容行为。
+2. `update_relation_extra()` 在保存前必须使用 normalized extra：
+   - command payload 记录 normalized extra；
+   - `context.extra_repository.save_extra(...)` 保存 normalized extra；
+   - `row_provider` 使用 normalized extra；
+   - 不允许保存 raw payload。
+3. 新增或更新 contract tests：
+   - fake normalizer 能证明 payload 被校验/归一化后才保存；
+   - row provider 收到 normalized extra；
+   - normalizer 抛出的 validation error 会阻止 repository save、dirty/outbox enqueue；
+   - 缺省 normalizer 行为保持现有 16 条 UoW contract tests 兼容。
+4. 更新 `turnover-ledger-write-uow-plan.md`：
+   - 记录直接 handler wiring 被推迟的原因；
+   - 明确 PF-P063 前置条件：normalizer 必须可复用现有 `TurnoverLedgerExtraService` 规则，且不得在事务失败前产生不可回滚的内存状态副作用。
+5. 不得迁移 confirm、withdraw、tag selection、bank-row-tags。
+
+Required Test Work:
+1. 必须更新 `tests/test_turnover_ledger_uow_contract.py`。
+2. 必须保持 `tests/test_turnover_ledger_api.py` 全量通过，证明真实 legacy API 行为未变。
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得接入真实 handler。
+- 不得迁移其它 Turnover Ledger 写 API。
+- 不得修改 runtime queue、worker、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得访问真实外部服务。
+- 不得用 fake/no-op transaction 接入 production path。
+- 不得绕过或放宽现有 relation extra validation/normalization。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "extra_normalizer|normalized extra|PF-P062|TurnoverLedgerWriteFacade" backend/src/fin_ops_platform/services tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P062 status = implemented / verified / blocked。
+   - 记录 normalization boundary 和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P062 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 relation extra normalization boundary 状态和剩余风险。
+4. PF-P062 后不生成 MG；下一步应生成 `PF-P063 - Turnover Ledger Relation Extra Handler Minimal Wiring`，除非 normalization 仍存在 blocker。
+```
+
+### 审查结论
+
+- PF-P062 原 handler wiring 草案被代码事实否决：当前 facade 仍会保存 raw payload，直接接 handler 会绕过现有 relation extra normalization/validation。
+- 修正后的 PF-P062 先建立 normalization boundary contract，不修改 `server.py`，避免把旧 API 契约破坏带入真实 handler。
+- Prompt 仍保持单一切片：只处理 relation extra normalization，不迁移其它 Turnover Ledger 写 API。
