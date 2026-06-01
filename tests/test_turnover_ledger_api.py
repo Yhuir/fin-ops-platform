@@ -517,9 +517,30 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             {tag["code"] for tag in payload["active_tags"]},
             {"external_rule_borrow_out", "external_rule_repaid"},
         )
+        self.assertIsInstance(payload["version"], int)
+        self.assertIn("version", payload)
+        self.assertIn("selected_tag_codes", payload)
+        self.assertIn("active_tags", payload)
+        self.assertEqual(
+            {
+                "code": payload["active_tags"][0]["code"],
+                "label": payload["active_tags"][0]["label"],
+                "turnover_action_type": payload["active_tags"][0]["turnover_action_type"],
+            },
+            {
+                "code": "external_rule_borrow_out",
+                "label": "借出款",
+                "turnover_action_type": "pending_collection",
+            },
+        )
         self.assertEqual(set(payload["selected_tag_codes"]), {"external_rule_borrow_out", "external_rule_repaid"})
         self.assertEqual(save_response.status_code, 200)
+        self.assertIsInstance(saved_payload["version"], int)
         self.assertEqual(saved_payload["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(
+            {tag["code"] for tag in saved_payload["active_tags"]},
+            {"external_rule_borrow_out", "external_rule_repaid"},
+        )
         self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(conflict_response.status_code, 409)
@@ -614,6 +635,123 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
         self.assertEqual(restored_payload["selected_tag_codes"], ["external_rule_borrow_out"])
         self.assertGreater(restored_payload["version"], initial_payload["version"])
+
+    @unittest.expectedFailure
+    def test_target_turnover_ledger_tag_selection_queue_failure_rolls_back_settings_save(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            ApplicationStateStore(Path(temp_dir)).save_app_settings(
+                {
+                    "bank_transaction_tags": {
+                        "version": 1,
+                        "definitions": [
+                            {
+                                "code": "external_rule_borrow_out",
+                                "label": "借出款",
+                                "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                                "source": "custom",
+                                "status": "active",
+                                "output_primary_label": "外部往来款付款",
+                                "output_sub_label": "借出款",
+                                "turnover_role": "external_turnover",
+                                "turnover_action_type": "pending_collection",
+                                "direction": "any",
+                                "account_scope": {"type": "any", "values": []},
+                                "rules": {
+                                    "match_fields": ["all_text"],
+                                    "contains_any": ["借出"],
+                                    "contains_all": [],
+                                    "exact_any": [],
+                                    "regex_any": [],
+                                    "none_of": [],
+                                },
+                            }
+                        ],
+                    },
+                    "turnover_ledger_tag_selection": {
+                        "version": 1,
+                        "selected_tag_codes": ["external_rule_borrow_out"],
+                    },
+                }
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            queue = _FailingQueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "PUT",
+                    "/api/turnover-ledger/tag-selection",
+                    body=json.dumps(
+                        {
+                            "expected_version": initial_payload["version"],
+                            "selected_tag_codes": [],
+                        }
+                    ),
+                )
+            restored_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
+
+        self.assertEqual(restored_payload["selected_tag_codes"], initial_payload["selected_tag_codes"])
+        self.assertEqual(restored_payload["version"], initial_payload["version"])
+
+    @unittest.expectedFailure
+    def test_target_turnover_ledger_tag_selection_uow_path_does_not_clear_read_model_directly(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            ApplicationStateStore(Path(temp_dir)).save_app_settings(
+                {
+                    "bank_transaction_tags": {
+                        "version": 1,
+                        "definitions": [
+                            {
+                                "code": "external_rule_borrow_out",
+                                "label": "借出款",
+                                "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                                "source": "custom",
+                                "status": "active",
+                                "output_primary_label": "外部往来款付款",
+                                "output_sub_label": "借出款",
+                                "turnover_role": "external_turnover",
+                                "turnover_action_type": "pending_collection",
+                                "direction": "any",
+                                "account_scope": {"type": "any", "values": []},
+                                "rules": {
+                                    "match_fields": ["all_text"],
+                                    "contains_any": ["借出"],
+                                    "contains_all": [],
+                                    "exact_any": [],
+                                    "regex_any": [],
+                                    "none_of": [],
+                                },
+                            }
+                        ],
+                    },
+                    "turnover_ledger_tag_selection": {
+                        "version": 1,
+                        "selected_tag_codes": ["external_rule_borrow_out"],
+                    },
+                }
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
+
+            response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(
+                    {
+                        "expected_version": initial_payload["version"],
+                        "selected_tag_codes": [],
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
+        self.assertEqual(read_repository.clear_calls, 0)
 
     def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

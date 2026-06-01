@@ -987,7 +987,7 @@ Decision for now:
 
 ## PF-P071 Tag Selection UoW Compatibility and Target Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -997,4 +997,18 @@ Decision for now:
 
 下一步：
 
-- 执行 PF-P071。
+- `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`。
+- PF-P072 should create a service-layer facade using the pure normalizer and fake/UoW ports, without wiring `server.py`.
+
+执行结果：
+
+- Strengthened current tag selection API compatibility assertions for response shape and active tag fields.
+- Added 2 future handler target tests as explicit `unittest.expectedFailure`:
+  - future UoW queue/outbox failure rolls back settings save;
+  - future UoW success path does not call read model clear directly.
+- Strengthened fake UoW result assertions to remain service-layer payloads without HTTP coupling.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 27 tests.

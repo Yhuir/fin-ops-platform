@@ -16770,3 +16770,22 @@ Post-Flight:
 - PF-P071 是 PF-P070 后正确的测试锁定步骤：先把 current compatibility 和 target UoW 语义分开记录。
 - Prompt 允许未实现目标语义使用 `unittest.expectedFailure`，保持默认 CI 绿色，同时保留 future contract。
 - Prompt 明确禁止 production code 和 handler 迁移。
+
+### 执行结果
+
+- PF-P071 已执行并按自动工作流标记为 `verified`。
+- 补强 tag selection success response shape，明确 `version`、`selected_tag_codes` 和 `active_tags` 关键字段。
+- 新增 2 个 future handler target tests，并使用 `unittest.expectedFailure` 保持默认 CI 绿色：
+  - queue/outbox failure 后 settings save 应回滚；
+  - future UoW path 成功时不应直接调用 read model clear。
+- 补强 fake UoW tag selection result 的 HTTP 解耦断言。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P071 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，31 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，27 tests。
+
+下一步建议：生成并审查 `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`，只实现 service-layer facade，不迁移 handler。

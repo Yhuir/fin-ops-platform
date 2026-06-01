@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` planned |
-| 最近 verified prompt | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` |
+| 当前阶段 | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
-| 最近验证 | PF-P070 完成 tag selection UoW integration plan；文档验证通过 |
-| 下一条允许任务 | 执行 `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`；tests only，不迁移 handler |
+| 最近验证 | PF-P071 补强 tag selection compatibility/target tests；API 31 tests 通过（2 expectedFailure），UoW contract 27 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`；不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -6334,7 +6334,7 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 ### PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -6348,13 +6348,30 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 #### 下一步
 
-- 执行 PF-P071。
+- 生成并审查 `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`。
 
 #### 验收标准
 
 - 当前 API compatibility tests 继续绿色。
 - 未来 UoW target tests 明确区分普通通过和 `expectedFailure`。
 - 默认 test suite 绿色。
+
+#### 执行结果
+
+- 补强 tag selection success response shape 断言，覆盖 `version`、`selected_tag_codes` 和 `active_tags` 关键字段。
+- 保留 version conflict `409`、invalid tag `400` 和 no extra enqueue/clear side effect 的现有断言。
+- 新增 2 个 future handler target tests，并以 `unittest.expectedFailure` 保持默认 CI 绿色：
+  - queue/outbox failure 后 settings save 应回滚；
+  - future UoW path 成功时不应直接调用 read model clear。
+- 补强 fake UoW tag selection result 的 HTTP 解耦断言。
+
+#### Verification
+
+- `git status --short --branch`: Pass，仅 PF-P071 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，31 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，27 tests。
 
 ## 维护规则
 
