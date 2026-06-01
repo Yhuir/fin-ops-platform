@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests` |
 | 最近 verified prompt | `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` |
 | 当前分支 | `codex/turnover-ledger-repository-ownership-p094` |
 | 最近验证 | PF-P093-MG 已在 main 上复验通过；merge commit `e0056963`；`origin/main` 已与当前 `main` 对齐 |
-| 下一条允许任务 | 生成并审查 `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests` |
+| 下一条允许任务 | 执行 `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -7351,6 +7351,29 @@ PF-P093-MG 已 verified，main 已合入、复验并 push 到 `origin/main`。�
 #### 下一条 Prompt 上下文
 
 PF-P094 已 verified。下一条应生成 `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests`，只新增/调整 tests，锁定未来 `TurnoverLedgerRelationWritePort` 和 `TurnoverLedgerBankdetailWritePort` 的接口；不得直接抽离 production code。
+
+### PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只新增/调整 tests，锁定 future write ports：
+  - `TurnoverLedgerRelationWritePort`
+  - `TurnoverLedgerBankdetailWritePort`
+- 目标类尚未实现时使用 `unittest.expectedFailure` 保持默认 CI 绿色。
+- 不修改 production code，不抽离 `server.py` helper。
+
+#### 允许变更文件
+
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+PF-P095 planned。执行后若 target tests 已锁定，应生成最小 implementation prompt，把 future ports 实现到 service 层，再迁移 server.py helper。
 
 ## 维护规则
 

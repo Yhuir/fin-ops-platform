@@ -20028,3 +20028,83 @@ Verification:
 - `git ls-files --others --exclude-standard`: Pass。
 - `git diff --check`: Pass。
 - `rg -n "PF-P094|Repository Ownership|_postgres_turnover_ledger_relation_repository|_postgres_turnover_ledger_bankdetail_repository|Next Slice Decision" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`: Pass。
+
+## PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests
+
+```text
+/goal
+PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须只写 contract tests，锁定未来 Turnover Ledger PostgreSQL write ports 的 ownership 边界。不得修改 production code。
+
+Context:
+PF-P094 已 verified。当前 `server.py` 里仍有 `_postgres_turnover_ledger_relation_repository(...)` 和 `_postgres_turnover_ledger_bankdetail_repository(...)` 两个 repository-like helper。下一步要先用 tests 锁定要抽离成 service-level ports 的接口：
+- `TurnoverLedgerRelationWritePort`
+- `TurnoverLedgerBankdetailWritePort`
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - tests/test_turnover_ledger_uow_contract.py
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P094 已 verified。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Task:
+在 `tests/test_turnover_ledger_uow_contract.py` 中新增 future target contract tests：
+1. `TurnoverLedgerRelationWritePort`
+   - 不接收 `Application` god object；
+   - constructor 只接收细粒度依赖，例如 relation service / routes 或 operation callable、bank rows provider、persistence repository factory；
+   - `confirm_relation(...)` 必须用 supplied transaction 调用 persistence repository factory，并持久化 relation snapshot；
+   - `withdraw_relation(...)` 必须用 supplied transaction 调用 persistence repository factory，并持久化 relation snapshot；
+   - 不知道 HTTP response/cookie/header/auth。
+2. `TurnoverLedgerBankdetailWritePort`
+   - 不接收 `Application` god object；
+   - constructor 只接收 category service、relation service、bank rows provider、persistence repository factory 等细粒度依赖；
+   - `apply_turnover_category_updates(...)` 必须执行 category update + relation rebuild；
+   - 必须用 supplied transaction 持久化 category snapshot 和 relation snapshot；
+   - 不知道 HTTP response/cookie/header/auth。
+3. 当前 production classes 尚未实现时，新增 target tests 使用 `unittest.expectedFailure`，不得 skip。
+
+Allowed Files:
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得实现 `TurnoverLedgerRelationWritePort` 或 `TurnoverLedgerBankdetailWritePort`。
+- 不得修改 adapters/facade/UoW production code。
+- 不得新增 SQL migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "PF-P095|TurnoverLedgerRelationWritePort|TurnoverLedgerBankdetailWritePort|expectedFailure|Repository Ownership" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P095 status = implemented / verified / blocked。
+   - 记录新增 tests、expectedFailure 数量、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P095 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 write port ownership contract tests 状态。
+4. PF-P095 verified 后，下一条应实现最小 write port classes，让 PF-P095 target tests 转绿；不得同时迁移 `server.py` helper。
+```
+
+### 审查结论
+
+- PF-P095 是正确的测试锁定步骤：先定义 future ports 的接口，再执行抽离。
+- 使用 `unittest.expectedFailure` 合理，因为目标 classes 尚未实现；这不是 skip，而是默认 CI 隔离机制。

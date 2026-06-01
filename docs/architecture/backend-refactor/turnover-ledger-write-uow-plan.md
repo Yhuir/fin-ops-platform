@@ -2101,3 +2101,18 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
   - 不知道 HTTP response/cookie/header/auth；
   - relation port 可执行 confirm/withdraw 的 service orchestration；
   - bankdetail port 可执行 category update + relation rebuild，并持久化 category/relation snapshot。
+
+## PF-P095 PostgreSQL Write Port Ownership Contract Tests
+
+状态：`planned`
+
+目标：
+
+- 用 tests 锁定 future `TurnoverLedgerRelationWritePort` 和 `TurnoverLedgerBankdetailWritePort`。
+- 保持默认 CI 绿色；尚未实现的 target tests 使用 `unittest.expectedFailure`。
+
+边界：
+
+- 只修改 tests 和文档。
+- 不实现 classes。
+- 不迁移 `server.py` helper。
