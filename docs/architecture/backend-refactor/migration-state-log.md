@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` planned |
-| 最近 verified prompt | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` |
+| 当前阶段 | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra real handler integration planning/tests |
+| 最近 verified prompt | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P056 新增 4 条 relation extra write facade target contract tests，默认 CI 绿色；未修改 `server.py` 或真实 API |
-| 下一条允许任务 | 执行 `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation`；只实现最小 facade 并转绿 PF-P056 tests，不迁移真实 handler |
+| 最近验证 | PF-P057 新增最小 `TurnoverLedgerWriteFacade`，4 条 PF-P056 facade tests 已从 expectedFailure 转为普通通过；未修改 `server.py` 或真实 API |
+| 下一条允许任务 | 生成并审查 `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization`；先锁定真实 handler 接入 facade 前后的兼容范围，不直接扩大到 confirm/withdraw/tag selection/bank-row-tags |
 
 ## Prompt 执行日志
 
@@ -5672,7 +5672,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5687,13 +5687,31 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P057。
+- PF-P057 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization`。
 
 #### 验收标准
 
 - 生产代码只允许新增或最小修改 Turnover Ledger write facade 相关 service 文件。
 - `tests/test_turnover_ledger_uow_contract.py` 只允许移除 PF-P056 4 条 tests 的 `expectedFailure`，不得弱化断言。
 - `server.py`、runtime queue、worker、SQL migration、frontend、deployment 和生产配置无 diff。
+
+#### 执行结果
+
+- 新增 `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`。
+- 实现最小 `TurnoverLedgerWriteFacade.update_relation_extra()`：
+  - constructor 只接收 `uow`；
+  - 不接收 `Application`；
+  - 不读取 HTTP cookie/header；
+  - 不 import `app.auth`；
+  - 通过现有 `TurnoverLedgerWriteUnitOfWork` 写 extra fact 并 enqueue Turnover dirty/outbox。
+- `tests/test_turnover_ledger_uow_contract.py` 中 PF-P056 的 4 条 tests 已移除 `expectedFailure` 并转为普通通过。
+- 未修改 `server.py`、真实 handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
 
 ## 维护规则
 

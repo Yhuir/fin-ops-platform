@@ -15066,7 +15066,7 @@ Post-Flight:
 
 ## PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -15145,3 +15145,15 @@ Post-Flight:
 - PF-P057 是 PF-P056 后正确的 TDD GREEN 步骤。
 - Prompt 只允许新增最小 facade，并明确禁止真实 API migration、`server.py` diff 和外部服务访问。
 - Prompt 要求只移除 PF-P056 4 条 tests 的 `expectedFailure`，不得弱化测试断言。
+
+### 执行结果
+
+- PF-P057 已执行并按自动工作流标记为 `verified`。
+- 新增 `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`。
+- 实现最小 `TurnoverLedgerWriteFacade.update_relation_extra()`，通过已有 `TurnoverLedgerWriteUnitOfWork` 写 extra fact 并 enqueue Turnover dirty/outbox。
+- `tests/test_turnover_ledger_uow_contract.py` 中 PF-P056 4 条 facade tests 已从 `expectedFailure` 转为普通通过。
+- 未修改 `server.py`、真实 handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+- 下一步建议：生成并审查 `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization`。PF-P058 应先锁定真实 handler 接入 facade 前的兼容测试/边界，不扩大到 confirm、withdraw、tag selection 或 bank-row-tags。

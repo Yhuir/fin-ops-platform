@@ -431,7 +431,7 @@ PF-P057 recommended implementation:
 
 ## PF-P057 Relation Extra Write Facade Implementation Plan
 
-状态：`planned`
+状态：`verified`
 
 PF-P057 should implement the smallest service-layer facade needed to turn the PF-P056 target tests green:
 
@@ -443,3 +443,15 @@ PF-P057 should implement the smallest service-layer facade needed to turn the PF
 - no real API behavior change.
 
 The facade should treat relation extra write as a service command and rely on `TurnoverLedgerWriteUnitOfWork` for transaction scope and dirty/outbox enqueue.
+
+PF-P057 execution result:
+
+- Added `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`.
+- Implemented minimal `TurnoverLedgerWriteFacade.update_relation_extra()`.
+- Removed the 4 PF-P056 `expectedFailure` decorators; all facade contract tests now pass as ordinary tests.
+- Did not wire the facade into `server.py`.
+
+PF-P058 recommended direction:
+
+- Characterize the real `PUT /api/turnover-ledger/relations/{id}/extra` handler integration boundary before wiring.
+- Keep scope limited to relation extra; do not migrate confirm, withdraw, tag selection or bank-row-tags.
