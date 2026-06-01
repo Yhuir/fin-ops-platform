@@ -22,14 +22,8 @@ import type {
   TurnoverRowTone,
 } from "../../features/turnoverLedger/types";
 
-const ROW_TONE_BACKGROUND: Record<TurnoverRowTone, string> = {
-  success: "rgba(46, 125, 50, 0.07)",
-  warning: "rgba(237, 108, 2, 0.10)",
-  info: "rgba(2, 136, 209, 0.07)",
-  danger: "rgba(211, 47, 47, 0.08)",
-  error: "rgba(211, 47, 47, 0.08)",
-  muted: "rgba(97, 97, 97, 0.07)",
-};
+const SUMMARY_ROW_BACKGROUND = "#edf6ff";
+const SUMMARY_ROW_HOVER_BACKGROUND = "#e2f0ff";
 
 const AMOUNT_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
   income: "rgba(46, 125, 50, 0.14)",
@@ -39,14 +33,7 @@ const AMOUNT_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
 
 const LEFT_COLUMN_WIDTH = 220;
 const LEFT_HEADER_BACKGROUND = "#f5f7fa";
-const LEFT_CELL_BACKGROUND: Record<TurnoverRowTone, string> = {
-  success: "#eef7ee",
-  warning: "#fff4e5",
-  info: "#edf6fb",
-  danger: "#fdecec",
-  error: "#fdecec",
-  muted: "#f5f5f5",
-};
+const LEFT_CELL_BACKGROUND = "#eaf4ff";
 const FLOW_ROW_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
   income: "#eef8f0",
   expense: "#fff5eb",
@@ -405,7 +392,6 @@ function RowCells({
     <>
       <TableCell>
         <Stack spacing={0.75} alignItems="flex-start">
-          {isFlow ? <Chip size="small" label="流水" color="info" variant="outlined" sx={{ height: 22 }} /> : null}
           {isFlow && !hasBorrowAmount ? (
             <EmptyAmountBlock testId={`amount-empty-${row.relationId}-borrow`} />
           ) : (
@@ -434,7 +420,7 @@ function RowCells({
           />
         )}
       </TableCell>
-      <TableCell>{formatNullable(row.repaymentRemark)}</TableCell>
+      <TableCell>{formatNullable(isFlow ? row.repaymentRemark : "")}</TableCell>
       <TableCell>
         <Stack spacing={0.5}>
           <Typography variant="body2" fontWeight={800}>
@@ -534,8 +520,6 @@ export default function TurnoverLedgerGroupedTable({
                 }
                 const expanded = Boolean(expandedGroups[group.groupId]);
                 const visibleFlowRows = expanded ? flowRows : [];
-                const groupTone = normalizedTone(group.groupTone);
-                const summaryTone = normalizedTone(summaryRow.rowTone);
                 const rowSpan = 1 + visibleFlowRows.length;
                 const toggleGroup = () => {
                   setExpandedGroups((current) => ({
@@ -547,11 +531,11 @@ export default function TurnoverLedgerGroupedTable({
                   <TableRow
                     key={`${group.groupId}:summary:${summaryRow.relationId}`}
                     data-testid={`turnover-row-${summaryRow.relationId}`}
-                    className={`turnover-row-${summaryTone}`}
+                    className="turnover-summary-row"
                     hover
                     sx={{
-                      backgroundColor: ROW_TONE_BACKGROUND[summaryTone],
-                      "&:hover": { backgroundColor: ROW_TONE_BACKGROUND[summaryTone] },
+                      backgroundColor: SUMMARY_ROW_BACKGROUND,
+                      "&:hover": { backgroundColor: SUMMARY_ROW_HOVER_BACKGROUND },
                       "& td": { verticalAlign: "top" },
                     }}
                   >
@@ -565,7 +549,7 @@ export default function TurnoverLedgerGroupedTable({
                         zIndex: 4,
                         width: LEFT_COLUMN_WIDTH,
                         minWidth: LEFT_COLUMN_WIDTH,
-                        backgroundColor: LEFT_CELL_BACKGROUND[groupTone],
+                        backgroundColor: LEFT_CELL_BACKGROUND,
                         borderRight: "1px solid",
                         borderRightColor: "divider",
                       }}

@@ -915,9 +915,7 @@ class TurnoverLedgerService:
                 self._unique_texts(row.get("counterparty_bank_name") for row in relation_rows)
             ),
             "bank_account_labels": bank_account_labels,
-            "repayment_remark": " / ".join(
-                self._unique_texts(row.get("repayment_remark") for row in relation_rows)
-            ),
+            "repayment_remark": "",
             "interest_rate_type": interest_rate_type,
             "interest_rate_value": interest_rate_value,
             "interest_paid_amount": self._format_money(interest_paid_amount),

@@ -159,7 +159,7 @@ function groupedPayload(family: string) {
         repayment_date: "2026-03-04",
         repayment_direction: "expense",
         counterparty_bank_name: "建行通海支行",
-        repayment_remark: "个人暂借款",
+        repayment_remark: "总览不应展示的还款备注",
         interest_rate_type: "none",
         interest_rate_value: "0.000000",
         interest_paid_amount: "0.00",
@@ -184,7 +184,7 @@ function groupedPayload(family: string) {
           repayment_date: "2026-03-04",
           repayment_direction: "expense",
           counterparty_bank_name: "建行通海支行",
-          repayment_remark: "个人暂借款",
+          repayment_remark: "总览不应展示的还款备注",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
           interest_paid_amount: "0.00",
@@ -725,7 +725,7 @@ describe("Turnover ledger page", () => {
 
     expect(within(table).getByTestId("amount-income-rel-personal-1-borrow")).toHaveClass("turnover-amount-income");
     expect(within(table).getByTestId("amount-expense-rel-personal-1-repayment")).toHaveClass("turnover-amount-expense");
-    expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-row-warning");
+    expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-summary-row");
     expect(within(table).queryByText("2026-05-01")).not.toBeInTheDocument();
     expect(within(table).queryByText("2026-05-03")).not.toBeInTheDocument();
     expect(within(table).queryByText("待人工确认")).not.toBeInTheDocument();
@@ -779,7 +779,8 @@ describe("Turnover ledger page", () => {
 
     const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
     expect(flowRows).toHaveLength(3);
-    expect(within(table).getAllByText("流水")).toHaveLength(3);
+    expect(within(table).queryByText("流水")).not.toBeInTheDocument();
+    expect(within(table).queryByText("总览不应展示的还款备注")).not.toBeInTheDocument();
     expect(within(flowRows[0]).getByText("200,000.00")).toBeInTheDocument();
     expect(within(flowRows[0]).getByTestId("amount-empty-rel-jiaxiaohua-repayment")).toHaveTextContent("-");
     expect(within(flowRows[1]).getByText("100,000.00")).toBeInTheDocument();

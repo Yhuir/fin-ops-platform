@@ -622,6 +622,68 @@ describe("NoOaBankBatchPage", () => {
     });
   });
 
+  test("keeps visible transaction rows while stale read model polling runs in the background", async () => {
+    let listCallCount = 0;
+    const secondListStarted = vi.fn();
+    let resolveSecondList: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
+        return jsonResponse(tagSelectionPayload);
+      }
+      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+        listCallCount += 1;
+        if (listCallCount === 1) {
+          return jsonResponse({
+            ...listPayload,
+            batches: batchesForBucket(listPayload, url.searchParams.get("bucket")),
+            read_model_status: "stale",
+            read_model_stale_reasons: ["bank_auto_tag_rules_version_mismatch"],
+          });
+        }
+        secondListStarted();
+        return new Promise<Response>((resolve) => {
+          resolveSecondList = resolve;
+        });
+      }
+      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+        return jsonResponse(feeDetailPayload);
+      }
+      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-holiday") {
+        return jsonResponse({ batch: listPayload.batches[1], tag_counts: { holiday_bonus: 5 }, direction_counts: { expense: 5 }, rows: [] });
+      }
+      if (url.pathname === "/api/no-oa-bank-batches/batch-conflict-transfer") {
+        return jsonResponse({ batch: listPayload.batches[3], tag_counts: { internal_transfer: 3 }, direction_counts: { income: 1, expense: 2 }, rows: [] });
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const transactionRegion = screen.getByRole("region", { name: "流水" });
+    expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(secondListStarted).toHaveBeenCalled();
+    }, { timeout: 2500 });
+
+    expect(within(transactionRegion).queryByText("流水加载中")).not.toBeInTheDocument();
+    expect(within(transactionRegion).getByText("网银手续费")).toBeInTheDocument();
+
+    act(() => {
+      resolveSecondList?.(jsonResponse({
+        ...listPayload,
+        batches: batchesForBucket(listPayload, "unsubmitted"),
+        read_model_status: "fresh",
+        read_model_stale_reasons: [],
+      }));
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
+    });
+  });
+
   test("sidebar exposes the no OA bank batch entry", () => {
     const financeItems = sidebarGroups.find((group) => group.title === "财务业务")?.items ?? [];
 

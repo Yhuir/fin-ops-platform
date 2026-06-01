@@ -245,6 +245,7 @@ export default function NoOaBankBatchPage() {
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
   const [selectedAccountForSubmit, setSelectedAccountForSubmit] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [tagLoading, setTagLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -273,11 +274,16 @@ export default function NoOaBankBatchPage() {
       .finally(() => setTagLoading(false));
   }, []);
 
-  const loadBatches = useCallback((signal?: AbortSignal) => {
+  const loadBatches = useCallback((signal?: AbortSignal, options: { background?: boolean } = {}) => {
+    const background = options.background === true;
     const requestId = batchRequestSeqRef.current + 1;
     batchRequestSeqRef.current = requestId;
-    setLoading(true);
-    setError(null);
+    if (background) {
+      setBackgroundRefreshing(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
     fetchNoOaBankBatches({
       month,
       bucket,
@@ -296,13 +302,21 @@ export default function NoOaBankBatchPage() {
         if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
           return;
         }
-        if (!isAbortLikeError(caught)) {
+        if (!background && !isAbortLikeError(caught)) {
           setError(caught instanceof Error ? caught.message : "免OA流水批次加载失败");
         }
       })
       .finally(() => {
+        if (background && requestId !== batchRequestSeqRef.current) {
+          setBackgroundRefreshing(false);
+          return;
+        }
         if (!signal?.aborted && requestId === batchRequestSeqRef.current) {
-          setLoading(false);
+          if (background) {
+            setBackgroundRefreshing(false);
+          } else {
+            setLoading(false);
+          }
         }
       });
   }, [accountKey, bucket, month]);
@@ -327,14 +341,14 @@ export default function NoOaBankBatchPage() {
   }, [accountKey, bucket, loadBatches, month, refreshToken]);
 
   useEffect(() => {
-    if (!readModelNeedsRefresh || loading) {
+    if (!readModelNeedsRefresh || loading || backgroundRefreshing) {
       return undefined;
     }
     const retryId = window.setTimeout(() => {
-      setRefreshToken((current) => current + 1);
+      loadBatches(undefined, { background: true });
     }, NO_OA_READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
-  }, [loading, readModelNeedsRefresh, refreshToken]);
+  }, [backgroundRefreshing, loadBatches, loading, readModelNeedsRefresh]);
 
   const tagNodesByCode = useMemo(() => {
     const nodes = new Map<string, NoOaTagNode>();

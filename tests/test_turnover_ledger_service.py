@@ -766,6 +766,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(summary["borrow_amount"], "2000.00")
         self.assertEqual(summary["repayment_amount"], "500.00")
         self.assertEqual(summary["bank_account_labels"], ["建行 1001", "工行 2002"])
+        self.assertEqual(summary["repayment_remark"], "")
         flow_by_id = {row["source_bank_row_id"]: row for row in group["flow_rows"]}
         self.assertEqual(flow_by_id["txn-in-principal"]["borrow_amount"], "1200.00")
         self.assertEqual(flow_by_id["txn-in-principal"]["repayment_amount"], "0.00")
