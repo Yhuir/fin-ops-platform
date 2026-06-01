@@ -44,6 +44,38 @@ class _TurnoverReadModelRecorder:
         self.clear_calls += 1
 
 
+class _RelationExtraWriteFacadeRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def update_relation_extra(
+        self,
+        *,
+        relation_id: str,
+        payload: dict[str, object],
+        actor_id: str,
+        tenant_id: str,
+        scope_keys: list[str],
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "relation_id": relation_id,
+                "payload": dict(payload),
+                "actor_id": actor_id,
+                "tenant_id": tenant_id,
+                "scope_keys": list(scope_keys),
+            }
+        )
+        return {
+            "extra": {
+                "relation_id": relation_id,
+                "note": payload.get("note"),
+                "updated_by": actor_id,
+            },
+            "row": {"relation_id": relation_id, "note": payload.get("note")},
+        }
+
+
 class TurnoverLedgerApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -969,6 +1001,42 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(restored_payload["extra"]["note"], "queue failure happens after update")
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+
+    def test_relation_extra_facade_override_skips_legacy_best_effort_side_effects(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            facade = _RelationExtraWriteFacadeRecorder()
+            app._turnover_ledger_relation_extra_write_facade_override = facade  # type: ignore[attr-defined]
+
+            def unexpected_legacy_side_effect(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("legacy relation extra side effect should not run on facade path")
+
+            app._persist_turnover_ledger_extras_best_effort = unexpected_legacy_side_effect  # type: ignore[method-assign]
+            app._clear_turnover_ledger_read_model_best_effort = unexpected_legacy_side_effect  # type: ignore[method-assign]
+            app._enqueue_turnover_ledger_read_model_refreshes = unexpected_legacy_side_effect  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/relations/turnover_rel_facade/extra",
+                body=json.dumps({"note": "facade path"}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["extra"]["note"], "facade path")
+        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertEqual(
+            facade.calls,
+            [
+                {
+                    "relation_id": "turnover_rel_facade",
+                    "payload": {"note": "facade path"},
+                    "actor_id": "test_finops_user",
+                    "tenant_id": "default",
+                    "scope_keys": ["all"],
+                }
+            ],
+        )
 
     def test_relation_extra_fallback_persists_full_snapshot_when_dedicated_store_method_is_missing(self) -> None:
         class LegacyBootstrapRecorder:

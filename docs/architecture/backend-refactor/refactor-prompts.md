@@ -15878,3 +15878,19 @@ Post-Flight:
 - PF-P064 是当前 relation extra slice 的正确实现步：facade、adapter、row provider 和 pure normalizer 已齐备。
 - Prompt 明确保留非 PostgreSQL legacy path，避免本地/非生产 runtime 破坏。
 - Prompt 明确禁止 fake/no-op transaction 和其它写 API migration。
+
+### 执行结果
+
+- PF-P064 已执行并按自动工作流标记为 `verified`。
+- `server.py` 新增 relation extra facade helper 和 row provider helper。
+- `PUT /api/turnover-ledger/relations/{id}/extra` 在 helper 返回 facade 时走 `TurnoverLedgerWriteFacade`；否则保持 legacy path。
+- PostgreSQL runtime helper 需要真实 `state_store._connection` 和 transaction-bound queue repository；依赖不齐时返回 `None`。
+- 新增 API test 验证 facade override path 不执行 legacy best-effort persistence、read model clear 或非事务 enqueue。
+- 未迁移 confirm、withdraw、tag selection、bank-row-tags。
+- 验证：
+  - `git diff --check`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，无输出。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
+- 下一步建议：生成并审查 `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，覆盖 PF-P055 到 PF-P064 的完整 diff。

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` planned |
-| 最近 verified prompt | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` |
+| 当前阶段 | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步应生成 cumulative MG |
+| 最近 verified prompt | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P063 增加 pure normalizer adapter；UoW contract 22 tests、Extra service 10 tests、API 28 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`；只最小接入 relation extra handler |
+| 最近验证 | PF-P064 最小接入 relation extra handler；API 29 tests、UoW contract 22 tests、Extra service 10 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，覆盖 PF-P055 到 PF-P064 的完整 diff |
 
 ## Prompt 执行日志
 
@@ -5978,7 +5978,7 @@ PF-P063 已补齐 handler wiring 前的 pure normalizer。PF-P064 可以只做 `
 
 ### PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5993,12 +5993,32 @@ PF-P063 已补齐 handler wiring 前的 pure normalizer。PF-P064 可以只做 `
 
 #### 下一步
 
-- 执行 PF-P064。
+- 生成并审查 `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`。
 
 #### 验收标准
 
 - `server.py` diff 只限 relation extra handler wiring 和必要 helper/import。
 - 现有 28 条 Turnover API tests、UoW contract tests、Extra service tests 必须通过。
+
+#### 执行结果
+
+- `server.py` 新增 relation extra facade helper 和 row provider helper。
+- `PUT /api/turnover-ledger/relations/{id}/extra` 在 helper 返回 facade 时走 `TurnoverLedgerWriteFacade`；否则保持 legacy path。
+- PostgreSQL runtime helper 需要真实 `state_store._connection` 和 transaction-bound queue repository；依赖不齐时返回 `None`。
+- 新增 API test 验证 facade override path 不执行 legacy best-effort persistence、read model clear 或非事务 enqueue。
+- 未迁移 confirm、withdraw、tag selection、bank-row-tags。
+
+#### 验证
+
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：Pass，无输出。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
+
+#### 下一条 Prompt 上下文
+
+PF-P055 到 PF-P064 已形成可合并的 relation extra UoW integration slice。下一步生成 cumulative MG，必须检查完整 branch diff、untracked files、scope 白名单、文档状态，并在 main 上复验后再 push。
 
 ## 维护规则
 

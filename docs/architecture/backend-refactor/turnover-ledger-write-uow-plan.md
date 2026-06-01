@@ -643,3 +643,25 @@ Next step:
 - PF-P064 must only wire `PUT /api/turnover-ledger/relations/{id}/extra`.
 - PF-P064 must keep non-PostgreSQL / dependency-missing runtime on the legacy path.
 - PF-P064 must not migrate confirm, withdraw, tag selection or bank-row-tags.
+
+## PF-P064 Relation Extra Handler Minimal Wiring Plan
+
+状态：`verified`
+
+PF-P064 completed the first real Turnover Ledger write handler integration:
+
+- `server.py` now builds a relation-extra write facade only when PostgreSQL runtime and transaction-bound queue dependencies are present;
+- non-PostgreSQL and dependency-missing runtime keeps the legacy best-effort path;
+- the facade path uses `TurnoverLedgerWriteFacade`, `TurnoverLedgerWriteUnitOfWork`, `TurnoverLedgerExtraRepositoryAdapter`, `TurnoverLedgerDirtyOutboxWriter`, `TurnoverLedgerExtraNormalizerAdapter`, and a narrow row provider;
+- the handler still owns HTTP/session/body/error mapping;
+- no other Turnover Ledger write API was migrated.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 22 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`: Pass, 10 tests.
+
+Next step:
+
+- Generate cumulative MG `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`, covering PF-P055 through PF-P064.
