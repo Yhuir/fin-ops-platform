@@ -544,7 +544,7 @@ PF-P060 应只添加 fake/contract tests 和最小 adapter skeleton，验证：
 
 ## PF-P060 Relation Extra Adapter Contract Plan
 
-状态：`planned`
+状态：`verified`
 
 PF-P060 should add minimal adapter contracts and skeletons:
 
@@ -558,3 +558,16 @@ The adapter should reuse existing repository and runtime queue capabilities:
 
 - repository side should delegate to a transaction-bound repository factory, initially compatible with `PostgresWorkbenchRepository(transaction).save_turnover_ledger_extras(...)`;
 - dirty/outbox side should require `queue_repository.enqueue_read_model_refresh_in_transaction(...)` and must not fallback to non-transaction enqueue.
+
+PF-P060 execution result:
+
+- Added `TurnoverLedgerExtraRepositoryAdapter`.
+- Added `TurnoverLedgerDirtyOutboxWriter`.
+- Added passing contract tests for transaction-bound repository save and transaction-bound dirty/outbox enqueue.
+- `server.py` remains unchanged.
+
+Remaining gap before handler wiring:
+
+- The facade currently returns `{"extra": extra}`.
+- The real API response currently returns `{"extra": extra, "row": row, "turnover_ledger_invalidated": true}` after handler mapping.
+- PF-P061 should define a row provider / response composer boundary before `server.py` wiring.

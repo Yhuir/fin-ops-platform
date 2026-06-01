@@ -140,6 +140,62 @@ class _StalePreconditionPort:
             raise RuntimeError("turnover_write_conflict")
 
 
+class _RecordingTurnoverExtraSnapshotRepository:
+    def __init__(self) -> None:
+        self.saved_snapshots: list[dict[str, object]] = []
+
+    def save_turnover_ledger_extras(self, snapshot: dict[str, object]) -> None:
+        self.saved_snapshots.append(dict(snapshot))
+
+
+class _RecordingRepositoryFactory:
+    def __init__(self) -> None:
+        self.transactions: list[object] = []
+        self.repositories: list[_RecordingTurnoverExtraSnapshotRepository] = []
+
+    def __call__(self, transaction: object) -> _RecordingTurnoverExtraSnapshotRepository:
+        self.transactions.append(transaction)
+        repository = _RecordingTurnoverExtraSnapshotRepository()
+        self.repositories.append(repository)
+        return repository
+
+
+class _TransactionOnlyQueueRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def enqueue_read_model_refresh_in_transaction(
+        self,
+        *,
+        transaction: object,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        tenant_id: str,
+        priority: str,
+        trace_id: str | None,
+    ) -> dict[str, object]:
+        event = {
+            "transaction": transaction,
+            "scope_type": scope_type,
+            "scope_key": scope_key,
+            "reason": reason,
+            "tenant_id": tenant_id,
+            "priority": priority,
+            "trace_id": trace_id,
+        }
+        self.calls.append(event)
+        return event
+
+    def enqueue_read_model_refresh(self, **_kwargs: object) -> None:
+        raise AssertionError("non-transaction enqueue must not be used")
+
+
+class _NonTransactionalQueueRepository:
+    def enqueue_read_model_refresh(self, **_kwargs: object) -> None:
+        return None
+
+
 class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def _uow_class(self) -> type:
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_uow")
@@ -148,6 +204,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def _write_facade_class(self) -> type:
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_facade")
         return getattr(module, "TurnoverLedgerWriteFacade")
+
+    def _write_adapters_module(self) -> object:
+        return importlib.import_module("fin_ops_platform.services.turnover_ledger_write_adapters")
 
     def _build_uow(
         self,
@@ -367,3 +426,60 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertIsInstance(result, dict)
         forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
         self.assertTrue(forbidden_keys.isdisjoint(result))
+
+    def test_relation_extra_repository_adapter_saves_single_extra_with_supplied_transaction(self) -> None:
+        module = self._write_adapters_module()
+        adapter_class = getattr(module, "TurnoverLedgerExtraRepositoryAdapter")
+        factory = _RecordingRepositoryFactory()
+        transaction = _RecordingTransaction()
+        adapter = adapter_class(repository_factory=factory)
+
+        adapter.save_extra({"relation_id": "turnover_rel_1", "note": "adapter note"}, transaction=transaction)
+
+        self.assertEqual(factory.transactions, [transaction])
+        self.assertEqual(
+            factory.repositories[0].saved_snapshots,
+            [{"extras": {"turnover_rel_1": {"relation_id": "turnover_rel_1", "note": "adapter note"}}}],
+        )
+
+    def test_relation_extra_repository_adapter_rejects_application_god_object(self) -> None:
+        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerExtraRepositoryAdapter")
+
+        with self.assertRaises(TypeError):
+            adapter_class(application=object())
+
+    def test_turnover_dirty_outbox_writer_uses_transaction_bound_queue_for_each_scope(self) -> None:
+        module = self._write_adapters_module()
+        writer_class = getattr(module, "TurnoverLedgerDirtyOutboxWriter")
+        queue = _TransactionOnlyQueueRepository()
+        transaction = _RecordingTransaction()
+        writer = writer_class(queue_repository=queue, tenant_id="tenant-a", priority="high", trace_id="trace-1")
+
+        events = writer.enqueue_refresh(
+            transaction=transaction,
+            scope_type="turnover_ledger",
+            scope_keys=["all", "2026-05"],
+            reason="relation_extra_update",
+            payload={"ignored": "not part of queue primitive"},
+        )
+
+        self.assertEqual(events, queue.calls)
+        self.assertEqual([call["transaction"] for call in queue.calls], [transaction, transaction])
+        self.assertEqual([call["scope_key"] for call in queue.calls], ["all", "2026-05"])
+        self.assertEqual([call["scope_type"] for call in queue.calls], ["turnover_ledger", "turnover_ledger"])
+        self.assertEqual([call["reason"] for call in queue.calls], ["relation_extra_update", "relation_extra_update"])
+        self.assertEqual([call["tenant_id"] for call in queue.calls], ["tenant-a", "tenant-a"])
+        self.assertEqual([call["priority"] for call in queue.calls], ["high", "high"])
+        self.assertEqual([call["trace_id"] for call in queue.calls], ["trace-1", "trace-1"])
+
+    def test_turnover_dirty_outbox_writer_rejects_non_transactional_queue(self) -> None:
+        writer_class = getattr(self._write_adapters_module(), "TurnoverLedgerDirtyOutboxWriter")
+        writer = writer_class(queue_repository=_NonTransactionalQueueRepository())
+
+        with self.assertRaisesRegex(RuntimeError, "enqueue_read_model_refresh_in_transaction"):
+            writer.enqueue_refresh(
+                transaction=_RecordingTransaction(),
+                scope_type="turnover_ledger",
+                scope_keys=["all"],
+                reason="relation_extra_update",
+            )

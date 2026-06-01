@@ -15366,7 +15366,7 @@ Post-Flight:
 
 ## PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -15451,3 +15451,15 @@ Post-Flight:
 
 - PF-P060 是 PF-P059 后正确的工程步骤：先补 adapter contract/skeleton，再考虑真实 handler wiring。
 - Prompt 明确禁止 `server.py` diff、真实 handler 接入和 fake/no-op production transaction。
+
+### 执行结果
+
+- PF-P060 已执行并按自动工作流标记为 `verified`。
+- 新增 `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`。
+- 实现 `TurnoverLedgerExtraRepositoryAdapter` 和 `TurnoverLedgerDirtyOutboxWriter`。
+- 新增 adapter contract tests，全部普通通过。
+- 未修改 `server.py`、真实 handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，15 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+- 下一步建议：生成并审查 `PF-P061 - Turnover Ledger Relation Extra Row Provider and Handler Wiring Plan`。PF-P061 应处理当前还缺的 `row` response shape 边界；不得迁移 confirm、withdraw、tag selection 或 bank-row-tags。

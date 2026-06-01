@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` planned |
-| 最近 verified prompt | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` |
+| 当前阶段 | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra row provider / handler wiring readiness |
+| 最近 verified prompt | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P059 确认不能直接 wiring：缺少 Turnover-specific extra repository port、dirty/outbox writer adapter 和 row provider adapter；文档检查通过 |
-| 下一条允许任务 | 执行 `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`；补 adapter contracts/skeleton，不修改 `server.py` |
+| 最近验证 | PF-P060 新增 relation extra repository adapter 与 dirty/outbox writer adapter；UoW contract 15 tests 通过，API 28 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P061 - Turnover Ledger Relation Extra Row Provider and Handler Wiring Plan`；先补 row response shape 边界或 planning，不扩大到其他写 API |
 
 ## Prompt 执行日志
 
@@ -5802,7 +5802,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5817,13 +5817,32 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P060。
+- PF-P060 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P061 - Turnover Ledger Relation Extra Row Provider and Handler Wiring Plan`。
 
 #### 验收标准
 
 - adapter 使用 transaction-bound dependency，不调用非事务 queue enqueue。
 - repository adapter 不依赖 `Application`。
 - 默认 targeted tests 通过。
+
+#### 执行结果
+
+- 新增 `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`。
+- 实现：
+  - `TurnoverLedgerExtraRepositoryAdapter`；
+  - `TurnoverLedgerDirtyOutboxWriter`。
+- 在 `tests/test_turnover_ledger_uow_contract.py` 新增 adapter contract tests，验证：
+  - repository adapter 使用传入 transaction；
+  - repository adapter 拒绝 `Application` god object；
+  - dirty/outbox writer 逐个 scope 调用 `enqueue_read_model_refresh_in_transaction(...)`；
+  - dirty/outbox writer 拒绝只有非事务 enqueue 的 queue repository。
+- 未修改 `server.py`、真实 handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，15 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
 
 ## 维护规则
 
