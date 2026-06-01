@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` 已生成并审查 |
-| 当前 active prompt | `PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
-| 最近 verified prompt | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` 已验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
 | 当前分支 | `codex/turnover-ledger-remaining-write-rebaseline-p089` |
 | 最近验证 | PF-P088-MG 已在 main 上复验通过并已 push；`main...origin/main` 已对齐 |
-| 下一条允许任务 | 执行 PF-P089，只做 Turnover Ledger 剩余写路径 discovery/planning 和文档回写，不修改业务代码 |
+| 下一条允许任务 | 生成并审查 `PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -7118,7 +7118,7 @@ PF-P088-MG 通过并 push `origin/main` 后，必须从最新 main 新建下一�
 
 ### PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7136,14 +7136,14 @@ PF-P088-MG 通过并 push `origin/main` 后，必须从最新 main 新建下一�
 
 #### 验收标准
 
-- `git status --short --branch`：当前分支不是 `main`。
-- `git ls-files --others --exclude-standard`：无未跟踪临时文件。
-- `git diff --check`：通过。
-- `rg -n "PF-P089|Remaining Write Path Rebaseline|Route Matrix|UoW Status Matrix|Next Slice Decision|main...origin/main" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：通过。
+- `git status --short --branch`：Pass，当前分支不是 `main`，仅三份允许文档变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪临时文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P089|Remaining Write Path Rebaseline|Route Matrix|UoW Status Matrix|Remaining Gap Analysis|Next Slice Decision|main...origin/main|Turnover Ledger PostgreSQL Write Port Contract Tests" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
 
 #### 下一条 Prompt 上下文
 
-PF-P089 还未执行。执行 PF-P089 后，必须根据代码事实决定下一条 prompt：若仍有 Turnover Ledger 写路径未纳入 UoW，则生成对应 characterization/contract tests；若 Turnover Ledger 写路径已完成，则生成模块收口或下一个模块选择 prompt。
+PF-P089 已 verified。扫描结论：五条 Turnover Ledger 写 path 都已有 facade seam；tag selection 和 relation extra 已具备 PostgreSQL adapter path；bank-row-tags、confirm relation、withdraw relation 在 `storage_backend == "postgres"` 时仍 fallback，因为缺少 transaction-aware Bankdetail port adapter 和 relation repository adapter。下一条最小 prompt 应为 `PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests`，只写 contract tests，不实现 adapters，不迁移 handler。
 
 ## 维护规则
 

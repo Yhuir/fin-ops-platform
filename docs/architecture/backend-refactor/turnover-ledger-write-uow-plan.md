@@ -1783,7 +1783,7 @@ Verification on main:
 
 ## PF-P089 Remaining Write Path Rebaseline / Next Slice Selection
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1806,3 +1806,62 @@ Verification on main:
 - 是否还有 handler 直接 clear read model。
 - 是否还有 stale write、durable idempotency 或 transaction rollback tests 缺口。
 - 下一条最小 Micro-JIT prompt 是 characterization/contract tests、facade/UoW extraction、还是 cumulative MG。
+
+### Route Matrix
+
+| Path / Method | Handler | 分类 | 当前 Owner | 说明 |
+| --- | --- | --- | --- | --- |
+| `GET /api/turnover-ledger` | `_handle_api_turnover_ledger` | read-only | `TurnoverLedgerReadFacade.list_ledger` | PF-P046 到 PF-P050 已抽出 read facade。 |
+| `GET /api/turnover-ledger/export-preview` | `_handle_api_turnover_ledger_export_preview` | read/export preview | `TurnoverLedgerReadFacade.export_preview` | 只读导出预览。 |
+| `GET /api/turnover-ledger/export` | `_handle_api_turnover_ledger_export` | read/export | `TurnoverLedgerReadFacade.export` | 只读 XLSX 响应组装仍在 handler 边界。 |
+| `GET /api/turnover-ledger/tag-selection` | `_handle_api_turnover_ledger_tag_selection` | read/settings | `AppSettingsService` | 读取设置，不属于 write UoW。 |
+| `PUT /api/turnover-ledger/tag-selection` | `_handle_api_turnover_ledger_tag_selection_update` | write | `TurnoverLedgerWriteFacade.update_tag_selection` | Facade 可用时走 UoW；fallback path 保留 direct clear/enqueue。 |
+| `POST /api/turnover-ledger/bank-row-tags/batch` | `_handle_api_turnover_ledger_bank_row_tags_batch` | write / cross-module | `TurnoverLedgerWriteFacade.update_bank_row_tags_batch` | local/dev/test path 已走 UoW；PostgreSQL storage backend 仍 fallback。 |
+| `GET /api/turnover-ledger/relations/{id}` | `_handle_api_turnover_ledger_relation` | read-only | `TurnoverLedgerReadFacade.get_relation` | 只读 relation detail。 |
+| `GET /api/turnover-ledger/relations/{id}/extra` | `_handle_api_turnover_ledger_relation_extra` | read-only | `TurnoverLedgerReadFacade.get_relation_extra` | 只读 relation extra。 |
+| `PUT /api/turnover-ledger/relations/{id}/extra` | `_handle_api_turnover_ledger_relation_extra_update` | write | `TurnoverLedgerWriteFacade.update_relation_extra` | Facade 可用时走 UoW；PostgreSQL path 已有 extra repository adapter。 |
+| `POST /api/turnover-ledger/relations/confirm` | `_handle_api_turnover_ledger_confirm` | write | `TurnoverLedgerWriteFacade.confirm_relation` | local/dev/test path 已走 UoW；PostgreSQL storage backend 仍 fallback。 |
+| `POST /api/turnover-ledger/relations/{id}/withdraw` | `_handle_api_turnover_ledger_withdraw` | write | `TurnoverLedgerWriteFacade.withdraw_relation` | local/dev/test path 已走 UoW；PostgreSQL storage backend 仍 fallback。 |
+
+### UoW Status Matrix
+
+| Write path | UoW status | Evidence | Remaining production gap |
+| --- | --- | --- | --- |
+| Tag selection PUT | 已接入 facade/UoW，包含 PostgreSQL adapter path | `server.py` `_turnover_ledger_tag_selection_write_facade()` builds `TurnoverLedgerTagSelectionSettingsAdapter` and `TurnoverLedgerDirtyOutboxWriter`; tests cover rollback/no direct clear. | 仍需后续评估 stale/idempotency 是否要进入 settings command expected_versions；不是下一条最小 blocker。 |
+| Bank row tags batch | local/dev/test 已接入 facade/UoW | `server.py` `_turnover_ledger_bank_row_tags_write_facade()` returns UoW for non-Postgres; `TurnoverLedgerWriteFacade.update_bank_row_tags_batch`; contract tests cover bankdetail/workbench/turnover refreshes. | PostgreSQL storage backend returns `None`；缺少 transaction-aware Bankdetail port adapter。 |
+| Relation extra PUT | 已接入 facade/UoW，包含 PostgreSQL adapter path | `_turnover_ledger_relation_extra_write_facade()` uses `TurnoverLedgerExtraRepositoryAdapter` for Postgres; tests cover rollback/no direct clear/normalizer adapter. | 生产 path 已有 adapter，但仍可后续补 source version/stale contract；非当前最大 gap。 |
+| Confirm relation | local/dev/test 已接入 facade/UoW | `_turnover_ledger_confirm_write_facade()` local UoW；`TurnoverLedgerWriteFacade.confirm_relation`; API tests cover rollback/no direct clear. | PostgreSQL storage backend returns `None`；缺少 transaction-aware relation repository adapter。 |
+| Withdraw relation | local/dev/test 已接入 facade/UoW | `_turnover_ledger_withdraw_write_facade()` local UoW；`TurnoverLedgerWriteFacade.withdraw_relation`; API tests cover rollback/no direct clear. | PostgreSQL storage backend returns `None`；缺少 transaction-aware relation repository adapter。 |
+
+### Remaining Gap Analysis
+
+- `server.py` 的五条 Turnover Ledger 写 handler 都已经具备 facade seam，并在 facade 可用时不再直接 clear read model。
+- legacy fallback 仍存在，并且 fallback path 仍会调用 direct read-model clear / non-transactional enqueue；这是兼容路径，不应在没有 production port contract 的情况下直接删除。
+- `services/turnover_ledger_write_adapters.py` 目前只有 `TurnoverLedgerExtraRepositoryAdapter`、`TurnoverLedgerTagSelectionSettingsAdapter`、`TurnoverLedgerDirtyOutboxWriter` 和 `TurnoverLedgerExtraNormalizerAdapter`。
+- 尚缺两个关键 production ports：
+  - `TurnoverLedgerRelationRepositoryAdapter`：用于 PostgreSQL confirm/withdraw relation facts/audit 写入，并接受外层 transaction。
+  - `TurnoverLedgerBankdetailPortAdapter`：用于 PostgreSQL bank-row-tags batch 写入 Bankdetail category facts/audit、relation rebuild influence，并接受外层 transaction。
+- 因为 relation/bankdetail production adapters 不存在，`_turnover_ledger_bank_row_tags_write_facade()`、`_turnover_ledger_confirm_write_facade()` 和 `_turnover_ledger_withdraw_write_facade()` 在 `storage_backend == "postgres"` 时仍返回 `None`。
+- 下一步不能直接迁移 handler 的 PostgreSQL path；必须先用 contract tests 固化 adapter 期望，避免猜测 repository SQL 或跨模块事务边界。
+
+### Next Slice Decision
+
+下一条最小 prompt：
+
+`PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests`
+
+边界：
+
+- 只新增/调整 contract tests，锁定 relation repository adapter 和 Bankdetail port adapter 的生产级接口。
+- 不实现 adapters。
+- 不修改 handler，不改变 production path，不删除 fallback。
+- 不访问真实 PostgreSQL 或外部服务；使用 fake repository factory / fake transaction。
+- 测试应覆盖：
+  - relation adapter 使用 supplied transaction；
+  - relation adapter 不接收 `Application` god object；
+  - confirm/withdraw relation adapter 复用现有 relation service/repository 语义或明确 repository contract，不散落 SQL；
+  - bankdetail port adapter 使用 supplied transaction；
+  - bankdetail port adapter 不知道 HTTP response/cookie/header；
+  - adapter failure 必须让 UoW rollback，而不是 best-effort success。
+
+PF-P090 通过后，再进入 adapter skeleton / PostgreSQL facade wiring。

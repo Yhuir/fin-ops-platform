@@ -19411,3 +19411,15 @@ Post-Flight:
 - PF-P089 是 PF-P088-MG push 后的正确恢复步骤：先校准剩余 Turnover Ledger 写路径，而不是盲目继续迁移。
 - 本轮只允许三份文档变更，禁止修改业务代码和测试。
 - PF-P089 要求用代码事实决定下一条最小 prompt，符合 Micro-JIT 工作流。
+
+### 执行结果
+
+- PF-P089 已执行，尚待 verification。
+- 已确认 `main` 与 `origin/main` 在 PF-P088-MG 后实际已经对齐，修正状态机顶部 stale push 记录。
+- 已输出 Turnover Ledger route matrix 和 UoW status matrix。
+- 扫描结论：
+  - `GET /api/turnover-ledger*`、relation detail、extra GET、export/export-preview 均为 read-only/read-export path，由 `TurnoverLedgerReadFacade` 或 settings read 边界负责。
+  - 五条 write path 都已有 `TurnoverLedgerWriteFacade` 方法和 handler seam：tag selection、bank-row-tags batch、relation extra、confirm relation、withdraw relation。
+  - tag selection 与 relation extra 已具备 PostgreSQL adapter path。
+  - bank-row-tags batch、confirm relation、withdraw relation 在 `storage_backend == "postgres"` 时仍 fallback，因为缺少 transaction-aware Bankdetail port adapter 与 relation repository adapter。
+- 下一条最小 prompt 选择为 `PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests`：先写 production write port contract tests，不实现 adapters，不迁移 handler，不访问真实 PostgreSQL。
