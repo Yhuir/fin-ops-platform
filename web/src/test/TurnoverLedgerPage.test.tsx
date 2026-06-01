@@ -716,8 +716,13 @@ describe("Turnover ledger page", () => {
     expect(groupCell).toHaveAttribute("rowspan", "1");
     expect(within(groupCell).getByText("张三")).toBeInTheDocument();
     expect(within(groupCell).getByText("个人往来")).toBeInTheDocument();
-    expect(within(groupCell).getByText("待还款合计：800.00")).toBeInTheDocument();
-    expect(within(table).getByText("待收款合计：2,000.00")).toBeInTheDocument();
+    expect(within(groupCell).queryByText("待还款合计：800.00")).not.toBeInTheDocument();
+    expect(within(groupCell).getByText("待还款合计：")).toBeInTheDocument();
+    expect(within(groupCell).getByText("800.00")).toBeInTheDocument();
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+    expect(within(companyGroupCell).queryByText("待收款合计：2,000.00")).not.toBeInTheDocument();
+    expect(within(companyGroupCell).getByText("待收款合计：")).toBeInTheDocument();
+    expect(within(companyGroupCell).getByText("2,000.00")).toBeInTheDocument();
     expect(within(groupCell).queryByRole("button", { name: "展开 张三 批次明细" })).not.toBeInTheDocument();
     expect(within(groupCell).queryByRole("button", { name: "展开 张三 流水明细" })).not.toBeInTheDocument();
     expect(within(table).queryByText("招商银行批次账户")).not.toBeInTheDocument();

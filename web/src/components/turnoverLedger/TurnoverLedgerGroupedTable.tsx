@@ -4,6 +4,7 @@ import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
+import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
@@ -19,11 +20,9 @@ import type {
   TurnoverLedgerDirection,
   TurnoverLedgerGroup,
   TurnoverLedgerGroupedRow,
-  TurnoverRowTone,
 } from "../../features/turnoverLedger/types";
 
-const SUMMARY_ROW_BACKGROUND = "#edf6ff";
-const SUMMARY_ROW_HOVER_BACKGROUND = "#e2f0ff";
+const SUMMARY_ROW_BACKGROUND = "#d8e8f8";
 
 const AMOUNT_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
   income: "rgba(46, 125, 50, 0.14)",
@@ -31,18 +30,12 @@ const AMOUNT_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
   neutral: "rgba(117, 117, 117, 0.10)",
 };
 
-const LEFT_COLUMN_WIDTH = 220;
+const LEFT_COLUMN_WIDTH = 176;
 const LEFT_HEADER_BACKGROUND = "#f5f7fa";
-const LEFT_CELL_BACKGROUND = "#eaf4ff";
 const FLOW_ROW_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
   income: "#eef8f0",
   expense: "#fff5eb",
   neutral: "#f3f5fb",
-};
-const FLOW_ROW_HOVER_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
-  income: "#e4f3e7",
-  expense: "#ffeddd",
-  neutral: "#eceff8",
 };
 type RuntimeGroupedRow = TurnoverLedgerGroupedRow & {
   rowKind?: "summary" | "lot" | string;
@@ -103,13 +96,6 @@ function categoryChipLabels(row: TurnoverLedgerGroupedRow) {
   }
   const fallback = categoryPathText(row);
   return fallback === "-" ? [] : [fallback];
-}
-
-function normalizedTone(tone: TurnoverRowTone | string | null | undefined): TurnoverRowTone {
-  if (tone === "success" || tone === "warning" || tone === "info" || tone === "danger" || tone === "error" || tone === "muted") {
-    return tone;
-  }
-  return "muted";
 }
 
 function directionKey(direction: TurnoverLedgerDirection | null | undefined): "income" | "expense" | "neutral" {
@@ -196,9 +182,14 @@ function BalanceLine({
   color: string;
 }) {
   return (
-    <Typography variant="body2" fontWeight={800} sx={{ color }}>
-      {label}：{formatMoney(amount)}
-    </Typography>
+    <Stack spacing={0.15} sx={{ color }}>
+      <Typography variant="caption" fontWeight={800} sx={{ lineHeight: 1.2 }}>
+        {label}：
+      </Typography>
+      <Typography variant="body2" fontWeight={900} sx={{ lineHeight: 1.25 }}>
+        {formatMoney(amount)}
+      </Typography>
+    </Stack>
   );
 }
 
@@ -207,19 +198,17 @@ function BalanceLines({ group }: { group: TurnoverLedgerGroup }) {
   const repaymentAmount = compatibleGroup.pendingRepaymentAmount;
   const collectionAmount = compatibleGroup.pendingCollectionAmount;
   const closedAmount = compatibleGroup.closedAmount;
+  const lines: Array<{ label: string; amount: string; color: string }> = [];
 
   if (group.pendingDirection === "mixed") {
     if (isFilledAmount(repaymentAmount) || isFilledAmount(collectionAmount)) {
-      return (
-        <>
-          {isFilledAmount(repaymentAmount) ? (
-            <BalanceLine label="待还款合计" amount={repaymentAmount} color="warning.dark" />
-          ) : null}
-          {isFilledAmount(collectionAmount) ? (
-            <BalanceLine label="待收款合计" amount={collectionAmount} color="success.dark" />
-          ) : null}
-        </>
-      );
+      if (isFilledAmount(repaymentAmount)) {
+        lines.push({ label: "待还款合计", amount: repaymentAmount, color: "warning.dark" });
+      }
+      if (isFilledAmount(collectionAmount)) {
+        lines.push({ label: "待收款合计", amount: collectionAmount, color: "success.dark" });
+      }
+      return <BalanceLineStack lines={lines} />;
     }
     return <BalanceLine label="混合余额合计" amount={group.pendingAmount} color="warning.dark" />;
   }
@@ -231,6 +220,16 @@ function BalanceLines({ group }: { group: TurnoverLedgerGroup }) {
     return <BalanceLine label="待还款合计" amount={repaymentAmount ?? group.pendingAmount} color="warning.dark" />;
   }
   return <BalanceLine label="已闭合合计" amount={closedAmount ?? group.pendingAmount} color="text.secondary" />;
+}
+
+function BalanceLineStack({ lines }: { lines: Array<{ label: string; amount: string; color: string }> }) {
+  return (
+    <Stack spacing={0.6} divider={<Divider flexItem sx={{ borderColor: "rgba(25, 88, 145, 0.22)" }} />}>
+      {lines.map((line) => (
+        <BalanceLine key={line.label} label={line.label} amount={line.amount} color={line.color} />
+      ))}
+    </Stack>
+  );
 }
 
 function AmountBlock({
@@ -532,10 +531,8 @@ export default function TurnoverLedgerGroupedTable({
                     key={`${group.groupId}:summary:${summaryRow.relationId}`}
                     data-testid={`turnover-row-${summaryRow.relationId}`}
                     className="turnover-summary-row"
-                    hover
                     sx={{
                       backgroundColor: SUMMARY_ROW_BACKGROUND,
-                      "&:hover": { backgroundColor: SUMMARY_ROW_HOVER_BACKGROUND },
                       "& td": { verticalAlign: "top" },
                     }}
                   >
@@ -549,7 +546,7 @@ export default function TurnoverLedgerGroupedTable({
                         zIndex: 4,
                         width: LEFT_COLUMN_WIDTH,
                         minWidth: LEFT_COLUMN_WIDTH,
-                        backgroundColor: LEFT_CELL_BACKGROUND,
+                        backgroundColor: SUMMARY_ROW_BACKGROUND,
                         borderRight: "1px solid",
                         borderRightColor: "divider",
                       }}
@@ -576,10 +573,8 @@ export default function TurnoverLedgerGroupedTable({
                       key={`${group.groupId}:flow:${rowId}`}
                       data-testid={`turnover-flow-row-${row.relationId}-${index}`}
                       className={`turnover-row-${rowTone} turnover-flow-row`}
-                      hover
                       sx={{
                         backgroundColor: FLOW_ROW_BACKGROUND[rowTone],
-                        "&:hover": { backgroundColor: FLOW_ROW_HOVER_BACKGROUND[rowTone] },
                         "& td": { verticalAlign: "top" },
                       }}
                     >
