@@ -16016,3 +16016,101 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
 - 未执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
 - 下一步：push origin/main；push 后从最新 main 新建下一条 `codex/` 分支。
+
+## PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning
+
+Role:
+你是一位精通 Python Clean Architecture、Settings 持久化边界、事务发件箱和遗留写路径拆分的后端架构师。
+
+Context:
+PF-P064-MG 已将 relation extra UoW integration slice 合入 main。Turnover Ledger 下一条低风险写路径候选是 `PUT /api/turnover-ledger/tag-selection`，但该接口跨 AppSettings save/audit 和 Turnover read model refresh。直接实现 UoW 前必须先发现 settings transaction seam。
+
+本轮只做 discovery/planning 和文档回写，不修改业务代码。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_tag_selection_update`
+   - backend/src/fin_ops_platform/services/app_settings_service.py 中 `get_turnover_ledger_tag_selection_payload` / `update_turnover_ledger_tag_selection`
+   - backend/src/fin_ops_platform/services/postgres_repositories 或 state store 中 AppSettings 相关持久化入口
+   - tests/test_turnover_ledger_api.py tag selection tests
+   - tests/test_turnover_ledger_uow_contract.py tag selection target contract
+2. 必须使用 CodeGraph 或结构化调用链梳理确认 tag selection handler -> settings service -> persistence/audit -> read model refresh 的调用链。
+3. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+输出 Turnover Ledger tag selection 写路径的 UoW readiness plan。
+
+Required Discovery Output:
+1. 当前运行时调用链：
+   - HTTP handler；
+   - auth/session；
+   - payload/version validation；
+   - AppSettingsService update；
+   - settings persistence；
+   - audit；
+   - read model clear / queue enqueue；
+   - current queue failure behavior。
+2. 事务断点：
+   - settings fact/audit 是否已在同一 transaction；
+   - dirty/outbox enqueue 是否在同一 transaction；
+   - 当前是否仍存在 save-before-queue failure。
+3. 可复用封装：
+   - 已有 AppSettingsService / repository / state store 方法；
+   - 是否存在 transaction-bound settings repository；
+   - 是否可复用 TurnoverLedgerWriteUnitOfWork 的 settings_port；
+   - 是否需要新增 `TurnoverLedgerTagSelectionSettingsPort` 或 adapter。
+4. 测试覆盖：
+   - 现有 API characterization tests；
+   - UoW target contract tests；
+   - 缺失的 tests。
+5. 下一步 Micro-JIT prompt：
+   - 推荐 PF-P066 是 characterization tests、contract tests 还是 settings port skeleton；
+   - 明确 forbidden scope。
+
+Allowed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得迁移 handler。
+- 不得实现 settings port/UoW。
+- 不得触碰 bank-row-tags、confirm、withdraw 或其它模块。
+- 不得执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n \"turnover_ledger_tag_selection|tag_selection|PF-P065|settings port|settings_port\" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P065 status = implemented / verified / blocked。
+   - 记录 tag selection readiness 和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P065 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 增加 tag selection settings port discovery 结果。
+4. PF-P065 后不要生成 MG；下一步按 discovery 结果生成 PF-P066。
+```
+
+### 审查结论
+
+- PF-P065 选 tag selection 作为 relation extra 后的下一写路径是合理的：它比 bank-row-tags 跨模块风险低，但仍需要先处理 Settings 事务边界。
+- Prompt 明确只做 discovery/planning，不修改 production code 或 tests。
+- Prompt 保持单一切片，不触碰 confirm、withdraw、bank-row-tags。

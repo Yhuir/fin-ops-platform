@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 已合入 main 并验证 |
-| 当前 active prompt | 无 active prompt；下一步必须从最新 main 新建分支 |
+| 当前阶段 | `PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning` planned |
 | 最近 verified prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
 | 最近验证 | PF-P064-MG 已在 main 复验：API 29 tests、UoW contract 22 tests、Extra service 10 tests 通过 |
-| 下一条允许任务 | push origin/main；push 后从最新 main 新建下一条 codex/ 分支并生成 Turnover Ledger 下一写路径 prompt |
+| 下一条允许任务 | 执行 `PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning`；只做 discovery/planning 和文档回写 |
 
 ## Prompt 执行日志
 
@@ -6070,6 +6070,31 @@ PF-P055 到 PF-P064 已形成可合并的 relation extra UoW integration slice�
 #### 下一条 Prompt 上下文
 
 Relation extra UoW integration slice 已合入 main。push 后必须从最新 main 新建下一条 `codex/` 分支。Turnover Ledger 写路径剩余候选包括 tag selection、bank-row-tags、confirm/withdraw 关系写路径的 UoW 收敛；下一条 prompt 应基于 `turnover-ledger-write-uow-plan.md` 选择下一个最小写路径切片。
+
+### PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning
+
+状态：`planned`
+
+#### 范围
+
+- 只盘点 `PUT /api/turnover-ledger/tag-selection` 写路径。
+- 聚焦 AppSettings save/audit 与 Turnover dirty/outbox 同事务所需的 settings port / repository seam。
+- 不修改业务代码，不迁移 handler，不实现 UoW。
+- 不触碰 bank-row-tags、confirm、withdraw 或其它模块。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P065。
+
+#### 验收标准
+
+- 文档明确 tag selection 当前调用链、事务断点、现有测试覆盖和下一步 characterization/contract test prompt。
+- 不产生 production code diff。
 
 ## 维护规则
 
