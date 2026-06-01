@@ -18146,3 +18146,22 @@ Post-Flight:
 - PF-P080 是 PF-P079 后的最小实现步骤：只补 facade skeleton，不碰真实 handler。
 - Prompt 明确使用已有 `refresh_requests` 机制，不为 confirm 单独扩展 UoW 框架。
 - Prompt 保持后续真实 API wiring 的门槛：只有 facade tests 转绿，不代表 handler 已迁移。
+
+### 执行结果
+
+- PF-P080 已执行并按自动工作流标记为 `verified`。
+- 新增 `TurnoverLedgerWriteFacade.confirm_relation(...)`。
+- facade 使用现有 UoW、细粒度 `relation_repository.confirm_relation(...)` 和 explicit refresh request `turnover_ledger` / `all` / `turnover_relation_changed`。
+- PF-P079 的 3 条 expectedFailure 已移除并转为普通通过。
+- 未修改 `server.py`，未迁移真实 confirm handler。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P080 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，36 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，36 tests。
+- `rg -n "def confirm_relation|test_target_confirm_relation|expectedFailure|PF-P080|turnover_relation_changed" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness`，先确认真实 handler 接入边界，再决定是否进入 handler wiring。

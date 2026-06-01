@@ -1318,7 +1318,7 @@ Verification:
 
 ## PF-P080 Confirm Relation Facade Skeleton
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1334,4 +1334,17 @@ Verification:
 
 下一步：
 
-- 执行 PF-P080。
+- 生成 PF-P081 confirm relation handler UoW wiring readiness。
+
+执行结果：
+
+- `TurnoverLedgerWriteFacade.confirm_relation(...)` 已最小实现。
+- 使用细粒度 relation repository port 和现有 UoW。
+- explicit refresh reason 为 `turnover_relation_changed`。
+- PF-P079 的 3 条 target tests 已转为普通通过。
+- 未修改 `server.py`，未迁移真实 handler。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` 已生成并审查 |
-| 当前 active prompt | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` planned |
-| 最近 verified prompt | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` |
+| 当前阶段 | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` |
 | 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
-| 最近验证 | PF-P079 增加 3 条 confirm relation facade target tests；UoW contract 36 tests 通过（3 expectedFailure），API 36 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` |
+| 最近验证 | PF-P080 实现 confirm relation facade skeleton；UoW contract 36 tests 通过，API 36 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` |
 
 ## Prompt 执行日志
 
@@ -6680,6 +6680,44 @@ PF-P076、PF-P077、PF-P078 构成 bank-row-tags UoW slice。下一步应生成�
 #### 下一条 Prompt 上下文
 
 PF-P079 已锁定 confirm relation facade target contract。下一步应生成并执行 `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton`，只实现 `TurnoverLedgerWriteFacade.confirm_relation(...)` 的最小 service-layer skeleton，让 PF-P079 的 3 条 expectedFailure 转为普通通过；仍不得迁移真实 `server.py` handler。
+
+### PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton
+
+状态：`verified`
+
+#### 范围
+
+- 只实现 `TurnoverLedgerWriteFacade.confirm_relation(...)` 的最小 service-layer skeleton。
+- 将 PF-P079 的 3 条 confirm relation target tests 从 `unittest.expectedFailure` 转为普通通过。
+- 不修改 `server.py`，不迁移真实 confirm handler。
+
+#### 执行摘要
+
+- `TurnoverLedgerWriteFacade.confirm_relation(...)` 现在接收 `bank_row_ids`、`actor_id`、`tenant_id`、`note`、`affected_months`。
+- facade 通过现有 `TurnoverLedgerWriteUnitOfWork` 调用 `context.relation_repository.confirm_relation(..., transaction=context.transaction)`。
+- confirm facade 使用 explicit refresh request：`turnover_ledger` / `all` / `turnover_relation_changed`。
+- PF-P079 的 3 条 target tests 已转为普通通过。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅 PF-P080 允许文件变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，36 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，36 tests。
+- `rg -n "def confirm_relation|test_target_confirm_relation|expectedFailure|PF-P080|turnover_relation_changed" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P079/PF-P080 完成了 confirm relation facade-level skeleton。下一步应生成 `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness`，先审计真实 handler 接入所需的 local transaction shim、relation repository/port、affected months、legacy fallback test 和 Workbench influence blocker；不得在没有 readiness 结论前直接迁移 handler。
 
 ## 维护规则
 
