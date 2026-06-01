@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` 已 verified，且已推送 `origin/main` |
-| 当前 active prompt | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` (`verified`) |
+| 当前阶段 | 已生成并审查 `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`，等待用户确认是否执行 |
+| 当前 active prompt | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` (`planned`) |
 | 最近 verified prompt | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | 用户已确认 PF-P050-MG `verified`；本地 `main` 已完成 merge 和 main 复验；`git push origin main` 已通过，`main` 与 `origin/main` 将在本状态收口提交推送后保持对齐；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 从最新 `main` 新建分支，生成并审查下一条 prompt |
+| 当前分支 | `codex/turnover-ledger-write-uow-p051` |
+| 最近验证 | `main` 与 `origin/main` 已对齐到 `d7979b97`；已从最新 `main` 新建 PF-P051 分支；已用 CodeGraph 确认 Turnover Ledger 写路径入口、mutation finalizer、read model clear/enqueue 关系；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
+| 下一条允许任务 | 等待用户确认后执行 PF-P051；PF-P051 只能做 Turnover Ledger 写路径 discovery/planning 和文档回写 |
 
 ## Prompt 执行日志
 
@@ -5356,6 +5356,38 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
 - `rg -n "PF-P046|PF-P047|PF-P048|PF-P049|PF-P050|PF-P050-MG|Turnover Ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`：Pass。
+
+### PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Turnover Ledger 写路径 discovery/planning 和文档回写。
+- 基于 PF-P046 到 PF-P050 已合入的 read-side facade 基线，盘点 mutation path、side effects、事务边界和未来 UoW 包裹范围。
+- 不修改生产代码，不实现 UoW，不迁移 handler，不改 repository 行为，不改 worker/runtime queue，不改 SQL migration，不改 frontend，不执行 Traffic Gate。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+- prompt 要求执行前读取状态机、prompt 库、Turnover discovery、架构计划和相关代码/测试。
+- prompt 要求使用 CodeGraph 梳理静态调用链和动态运行时序。
+
+#### 生成时已确认的 CodeGraph 事实
+
+- `_handle_api_turnover_ledger_confirm` 调用 `_turnover_mutation_session`、`TurnoverLedgerApiRoutes.confirm_relation`、`_bank_transaction_category_affected_months` 和 `_after_turnover_relation_mutation`。
+- `_handle_api_turnover_ledger_withdraw` 调用 `_turnover_mutation_session`、`TurnoverLedgerApiRoutes.get_relation`、`TurnoverLedgerApiRoutes.withdraw_relation`、`_bank_transaction_category_affected_months` 和 `_after_turnover_relation_mutation`。
+- `_handle_api_turnover_ledger_bank_row_tags_batch` 调用 `_turnover_mutation_session`、`BankTransactionCategoryService.apply_turnover_updates`、`save_bank_transaction_categories`、`TurnoverLedgerApiRoutes.snapshot`、`TurnoverRelationService.rebuild_from_bank_rows` 和 `_after_turnover_relation_mutation`。
+- `_handle_api_turnover_ledger_relation_extra_update` 调用 `TurnoverLedgerApiRoutes.update_relation_extra`、`_persist_turnover_ledger_extras_best_effort`、`_clear_turnover_ledger_read_model_best_effort` 和 `_enqueue_turnover_ledger_read_model_refreshes`。
+- `_handle_api_turnover_ledger_tag_selection_update` 调用 `AppSettingsService.update_turnover_ledger_tag_selection`、`_clear_turnover_ledger_read_model_best_effort` 和 `_enqueue_turnover_ledger_read_model_refreshes`。
+- `_after_turnover_relation_mutation` 调用 `_persist_turnover_relations_best_effort`、`_invalidate_workbench_after_bank_transaction_categories`、`_clear_turnover_ledger_read_model_best_effort` 和 `_enqueue_turnover_ledger_read_model_refreshes`。
+
+#### 下一步
+
+- 等待用户确认是否执行 PF-P051。
+- 执行 PF-P051 后只能到 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
+- PF-P051 如果发现写路径 UoW 前置测试缺口，下一条 prompt 应优先是 characterization / contract tests，而不是直接实现 UoW。
 
 ## 维护规则
 
