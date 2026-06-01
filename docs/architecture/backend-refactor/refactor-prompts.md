@@ -20694,3 +20694,94 @@ Post-Flight:
 ### 下一条 Prompt 上下文
 
 下一条应生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton`，只实现最小 expected_versions/stale guard skeleton，让 PF-P099 的 2 条 expectedFailure target tests 转为普通通过；不得处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
+
+## PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton
+
+```text
+/goal
+PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须实现最小 withdraw relation expected_versions/stale guard skeleton，让 PF-P099 的 2 条 target tests 转为普通通过，同时严格禁止扩大范围。
+
+Context:
+PF-P099 已 verified，新增 2 条 expectedFailure target tests：
+- API 层 duplicate withdraw 应被拒绝，不得二次 mutation/audit/refresh。
+- Facade/UoW 层 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 应支持 expected_versions，并让 UoW stale precondition 在 repository handler 前执行。
+
+现有事实：
+- `TurnoverRelationService.withdraw_relation(...)` 会递增 relation `version`。
+- `TurnoverLedgerWriteUnitOfWork` 已支持 command.expected_versions 和 stale_precondition_port。
+- `server.py` withdraw handler 已读取 relation detail，可看到当前 relation status/version。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P099 已 verified。
+4. 必须先运行 targeted tests，确认 PF-P099 的 2 条 expectedFailure 存在。
+
+Task:
+1. 更新 `TurnoverLedgerWriteFacade.withdraw_relation(...)`：
+   - 增加可选 `expected_versions: dict[str, object] | None = None` 参数；
+   - 将 normalized expected_versions 写入 `TurnoverLedgerWriteCommand.expected_versions`；
+   - 不改变现有 response payload shape。
+2. 更新 `server.py` withdraw handler 的最小 duplicate guard：
+   - 如果当前 relation status 已是 `withdrawn`，返回 conflict/error response；
+   - 不得执行 facade、relation mutation、audit、dirty/outbox refresh；
+   - 不能改变 `source != "manual"` guard。
+3. 在调用 facade withdraw 时，从当前 relation version 构造最小 expected_versions：
+   - key 建议为 `relation:{relation_id}`；
+   - value 使用当前 relation `version`。
+4. 移除 PF-P099 两条 target tests 的 `unittest.expectedFailure`，让它们转为普通通过。
+
+Allowed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 SQL migration。
+- 不得处理 relation extra stale write。
+- 不得清理 fallback path。
+- 不得抽离 local transaction shim。
+- 不得修改 unrelated Turnover Ledger read/query/export code。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- rg -n "PF-P100|expected_versions|relation_already_withdrawn|test_target_withdraw_duplicate|test_target_withdraw_relation_facade_passes_expected_versions|expectedFailure" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P100 status = implemented / verified / blocked。
+   - 记录 expectedFailure 转绿、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P100 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 withdraw expected_versions skeleton 状态和剩余 gap。
+4. PF-P100 verified 后，评估是否生成 cumulative MG 覆盖 PF-P098 到 PF-P100；不得直接进入 relation extra stale write。
+```
+
+### 审查结论
+
+- PF-P100 是 PF-P099 后的最小实现步骤：只处理 withdraw duplicate/stale skeleton。
+- prompt 明确不处理 relation extra、fallback cleanup 或 local transaction shim，避免 scope creep。

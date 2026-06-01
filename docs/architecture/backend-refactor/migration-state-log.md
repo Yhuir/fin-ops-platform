@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` 已执行并验证通过 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton` |
 | 最近 verified prompt | `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p098` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests，1 expected failure；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests，1 expected failure |
-| 下一条允许任务 | 生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton` |
+| 下一条允许任务 | 执行 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton` |
 
 ## Prompt 执行日志
 
@@ -7621,6 +7621,37 @@ PF-P098 已 verified。下一条应生成并审查 `PF-P099 - Turnover Ledger Wi
 #### 下一条 Prompt 上下文
 
 PF-P099 已 verified。下一条应生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton`，只实现最小 expected_versions/stale guard skeleton，让 PF-P099 的 2 条 expectedFailure target tests 转为普通通过；不得处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
+
+### PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 为 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 增加 optional expected_versions 支持。
+- 在 withdraw handler 中拒绝已 withdrawn relation 的 duplicate submit。
+- 将 PF-P099 的 2 条 expectedFailure target tests 转为普通通过。
+
+#### 允许变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 禁止范围
+
+- 不得处理 relation extra stale write。
+- 不得清理 fallback path。
+- 不得抽离 local transaction shim。
+- 不得修改 SQL migration、部署配置或生产配置。
+
+#### 下一条 Prompt 上下文
+
+PF-P100 planned。执行后若 target tests 转绿，应评估是否生成 cumulative MG 覆盖 PF-P098 到 PF-P100。
 
 ## 维护规则
 

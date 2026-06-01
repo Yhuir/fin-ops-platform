@@ -2371,3 +2371,20 @@ PF-P099 建议边界：
 
 - 生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton`。
 - PF-P100 只让 PF-P099 的 2 条 target tests 转为普通通过；不得扩大到 relation extra stale write 或 fallback cleanup。
+
+## PF-P100 Withdraw Relation Expected Versions Skeleton
+
+状态：`planned`
+
+目标：
+
+- 为 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 增加 optional expected_versions 参数。
+- withdraw handler 对已 withdrawn relation 返回 conflict/error，避免 duplicate submit 二次 mutation/audit/refresh。
+- 将 PF-P099 的 2 条 target tests 转为普通通过。
+
+边界：
+
+- 不处理 relation extra stale write。
+- 不清理 fallback path。
+- 不抽离 local transaction shim。
+- 不新增 SQL migration。
