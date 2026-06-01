@@ -610,10 +610,31 @@ PF-P050-MG has been executed, merged into local `main`, confirmed by the user as
 
 ## Next Prompt
 
-After `origin/main` is pushed, create a new branch from the latest `main`, then generate and review:
+`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` has been generated and reviewed on branch `codex/turnover-ledger-write-uow-p051`.
 
-`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
+PF-P051 has been executed as a planning-only slice. The output is:
 
-PF-P051 should only do write-path discovery/planning and document updates. It must not modify production code, implement UoW, migrate write handlers, change repository behavior, touch frontend, deploy, or execute Traffic Gate work.
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
 
-Status: verified.
+PF-P051 documented write-path runtime sequence, UoW readiness, transaction side effects, repository ownership and test gaps without modifying production code.
+
+PF-P051 covered:
+
+- confirm relation;
+- withdraw relation;
+- relation extra PUT;
+- tag selection PUT;
+- bank-row-tags batch;
+- `_after_turnover_relation_mutation`;
+- relation/extras persistence best-effort fallback;
+- read model clear/enqueue side effects;
+- Bankdetail and Workbench influence;
+- future UoW facts/audit/dirty scope/outbox boundary.
+
+Next recommendation:
+
+`PF-P052 - Turnover Ledger Write Path Characterization Tests`
+
+PF-P052 should remain test-only and lock current duplicate/stale/failure behavior before any UoW implementation.
+
+Status: verified. The automatic workflow marked PF-P051 verified after scope and documentation verification passed with no production code, test, SQL, worker, frontend, deployment or production configuration changes.

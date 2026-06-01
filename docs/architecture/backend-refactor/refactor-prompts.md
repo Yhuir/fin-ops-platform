@@ -9446,7 +9446,7 @@ Main 上复验：
 
 ## PF-P032 - Workbench Ignore Row Stale Guard Migration
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -9609,7 +9609,7 @@ PF-P032 已由用户确认 `verified`。PF-P032-MG 不单独执行，明确延�
 
 ## PF-P033 - Workbench Cash Special Stale Guard Migration
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -9783,7 +9783,7 @@ PF-P033 已由用户确认 `verified`。PF-P032-MG 和 PF-P033-MG 均不单独�
 
 ## PF-P034 - Workbench Withdraw Submit Stale Guard Migration
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -10120,7 +10120,7 @@ Post-Flight:
 
 ## PF-P035 - Workbench Confirm Link UoW Integration Slice
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -10334,7 +10334,7 @@ PF-P035 已按 TDD 执行：
 
 ## PF-P036 - Workbench Cancel Link UoW Integration Slice
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -14152,7 +14152,7 @@ Stop Conditions:
 - 已确认无 untracked files，未夹带 `.pkl`、`.sqlite`、`__pycache__` 或测试输出。
 - 已确认合并前 `main` 与 `origin/main` 0/0 对齐。
 - 已将 `codex/turnover-ledger-discovery-p046` 合入本地 `main`，merge commit：`abd55c00`。
-- `git push origin main` 已通过，`main` 与 `origin/main` 将在本状态收口提交推送后保持对齐。
+- `git push origin main` 已通过，`main` 与 `origin/main` 已对齐到 `d7979b97`。
 - 合并前和 main 上复验均通过：
   - `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
@@ -14163,3 +14163,667 @@ Stop Conditions:
   - `rg -n "PF-P046|PF-P047|PF-P048|PF-P049|PF-P050|PF-P050-MG|Turnover Ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`：Pass。
 - 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
 - 下一步建议：从最新 `main` 新建分支，生成并审查下一条 prompt。
+
+## PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning
+
+状态：`verified`
+
+### Prompt
+
+```text
+/goal
+PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning
+
+Role: 你是一位严格的 Python 后端架构师，熟悉遗留系统写路径重构、Unit of Work、Transactional Outbox、Read Model freshness、低耦合边界、CodeGraph 调用链分析和生产级测试策略。你的任务是只对 Turnover Ledger 写路径做 discovery/planning，不修改生产代码。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go 后端，不全量重写。
+- `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` 已 verified，并已 push 到 `origin/main`。
+- 当前必须从最新 `main` 新建分支执行，本轮分支应为 `codex/turnover-ledger-write-uow-p051` 或同等 `codex/` 分支。
+- PF-P046 到 PF-P050 已完成 Turnover Ledger read-side discovery、characterization tests、read facade extraction、handler cleanup 和 cumulative Merge Gate。
+- 当前已知风险：Turnover Ledger mutation side effects 还没有显式 Unit of Work；relation snapshot persistence、read model clear、refresh enqueue、Bankdetail/Workbench influence 和 legacy fallback 仍分散在 `server.py` 与服务层。
+
+Pre-Flight:
+1. 必须先读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/target-architecture.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/runtime-call-chain.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+2. 必须确认：
+   - 当前分支不是 `main`。
+   - 当前分支基于最新 `main`。
+   - PF-P050-MG 已 `verified`。
+   - 本轮不执行 Traffic Gate、不部署、不访问生产、不修改生产配置。
+3. 必须使用 CodeGraph 或等价结构化分析工具梳理写路径静态调用链。至少覆盖：
+   - `_handle_api_turnover_ledger_confirm`
+   - `_handle_api_turnover_ledger_withdraw`
+   - `_handle_api_turnover_ledger_relation_extra_update`
+   - `_handle_api_turnover_ledger_tag_selection_update`
+   - `_handle_api_turnover_ledger_bank_row_tags_batch`
+   - `_after_turnover_relation_mutation`
+   - `_persist_turnover_relations_best_effort`
+   - `_persist_turnover_ledger_extras_best_effort`
+   - `_clear_turnover_ledger_read_model_best_effort`
+   - `_enqueue_turnover_ledger_read_model_refreshes`
+4. 必须读取或通过 CodeGraph 覆盖以下文件：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
+   - `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`
+   - `backend/src/fin_ops_platform/services/turnover_relation_service.py`
+   - `backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py`
+   - `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`
+   - `backend/src/fin_ops_platform/services/turnover_ledger_source_versions.py`
+   - `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh.py`
+   - `backend/src/fin_ops_platform/services/turnover_ledger_sql_projection.py`
+   - `backend/src/fin_ops_platform/services/bank_transaction_category_service.py`
+   - `backend/src/fin_ops_platform/services/app_settings_service.py`
+   - `backend/src/fin_ops_platform/services/runtime_queue.py`
+   - `backend/src/fin_ops_platform/services/state_store_protocol.py`
+   - `backend/src/fin_ops_platform/services/postgres_state_store.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+   - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
+   - `tests/test_turnover_ledger_api.py`
+   - `tests/test_turnover_relation_service.py`
+   - `tests/test_turnover_ledger_extra_service.py`
+   - `tests/test_turnover_ledger_source_versions.py`
+   - `tests/test_turnover_ledger_read_model_refresh.py`
+   - `tests/test_turnover_workbench_integration.py`
+   - `tests/test_workbench_turnover_grouping.py`
+   - `tests/test_no_oa_bank_batch_tag_selection_api.py`
+
+Gate Scope:
+- 这是 Turnover Ledger write-path discovery/planning，不是实现 prompt，不是 Merge Gate，不是 Traffic Gate。
+- 允许：
+  - 新增或更新 Turnover Ledger write-path / UoW planning 文档。
+  - 更新 `migration-state-log.md` 和 `refactor-prompts.md`。
+  - 输出写路径 API matrix、runtime sequence、side-effect matrix、UoW readiness assessment、test gap matrix 和下一条 prompt 建议。
+- 禁止：
+  - 修改任何 production Python 业务代码。
+  - 修改 tests 来“顺手补测试”。
+  - 实现 UoW、stale write guard、durable idempotency、repository adapter、outbox writer 或 transaction manager。
+  - 迁移 confirm、withdraw、extra PUT、tag selection PUT、bank-row-tags batch 或任何写 handler。
+  - 修改 SQL migration、worker、runtime queue、frontend、deployment、Nginx、Vite、environment variables 或 production config。
+  - 执行 Traffic Gate、访问 staging/prod、部署或切流。
+
+Required Discovery Output:
+1. Write API Matrix
+   - 列出所有 Turnover Ledger 写接口：
+     - HTTP method/path；
+     - handler；
+     - service/usecase；
+     - repository/state store；
+     - actor/auth source；
+     - request payload；
+     - response payload；
+     - facts 写入；
+     - audit 写入；
+     - dirty scope / outbox / read model refresh；
+     - Bankdetail / Workbench influence；
+     - 当前测试覆盖；
+     - 风险等级。
+
+2. Runtime Sequence / Dynamic Call Chain
+   - 输出 Mermaid sequence diagram，至少覆盖：
+     - confirm relation；
+     - withdraw relation；
+     - relation extra PUT；
+     - tag selection PUT；
+     - bank-row-tags batch；
+     - `_after_turnover_relation_mutation` 后置 side effects。
+   - 必须明确同步调用、best-effort 调用、read model invalidation、runtime queue enqueue 的顺序。
+   - 必须标注哪些步骤当前不在同一 PostgreSQL transaction 中。
+
+3. UoW Readiness Assessment
+   - 明确未来 `TurnoverLedgerWriteUnitOfWork` 需要包住哪些操作：
+     - Turnover relation facts；
+     - Turnover relation audit；
+     - Turnover relation extras；
+     - tag selection / settings mutation；
+     - Bankdetail category facts；
+     - Workbench invalidation influence；
+     - Turnover read model clear / dirty scope；
+     - outbox / runtime queue enqueue；
+     - source_version increment / expected versions。
+   - 明确哪些操作现在只能 best-effort，哪些已有 repository 方法，哪些还依赖 legacy snapshot/state store。
+   - 不要设计最终代码接口，只给边界和 blocker。
+
+4. Transaction / Outbox / Dirty Scope Audit
+   - 判断每个写 API 是否满足 facts、audit、dirty scope、outbox 同事务底线。
+   - 如果不满足，指出当前分裂点和潜在故障场景：
+     - facts 成功但 refresh enqueue 失败；
+     - audit 成功但 facts 未落；
+     - read model clear 成功但 outbox 未写；
+     - bank detail category 更新成功但 Turnover relation rebuild 失败；
+     - best-effort legacy snapshot fallback 导致新旧状态不一致。
+
+5. Idempotency / Stale Write / Conflict Baseline
+   - 对 confirm、withdraw、extra PUT、tag selection PUT、bank-row-tags batch 审计：
+     - 重复提交当前行为；
+     - 基于旧 read model 的提交当前行为；
+     - 是否有 expected version / optimistic lock；
+     - 是否返回 409/400/200；
+     - 是否可能 blind overwrite。
+   - 本轮只记录事实和测试缺口，不修复。
+
+6. Repository Ownership and Coupling Audit
+   - 明确 Turnover 写路径当前是否依赖：
+     - `Application` god object；
+     - `server.py` helper；
+     - `state_store_protocol.py`；
+     - `postgres_repositories/workbench.py`；
+     - `BankTransactionCategoryService`；
+     - `AppSettingsService`；
+     - runtime queue；
+     - legacy full snapshot fallback。
+   - 给出未来 ownership 建议：
+     - 哪些应归 Turnover repository；
+     - 哪些应通过 Bankdetail port；
+     - 哪些应通过 Platform runtime/outbox port；
+     - 哪些仍需保留在 HTTP boundary。
+
+7. Test Gap Matrix
+   - 列出已有测试覆盖和缺口。
+   - 必须区分：
+     - characterization tests；
+     - contract tests；
+     - target expectedFailure tests；
+     - integration tests；
+     - guard tests。
+   - 如果下一步需要先补测试，建议下一条 prompt 为 characterization/contract tests，不要直接实现。
+
+8. Next Slice Recommendation
+   - 给出下一条 prompt 名称和边界。
+   - 默认优先级：
+     1. 如果测试缺口明显：`PF-P052 - Turnover Ledger Write Path Characterization Tests`。
+     2. 如果测试已经足够：`PF-P052 - Turnover Ledger Write UoW Contract Tests`。
+   - 不得建议直接大规模迁移所有写 API。
+
+Expected Documentation Changes:
+- 必须新增或更新：
+  - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+- 如内容过长，可以新增：
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 必须更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+
+Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P051|Turnover Ledger Write Path|UoW|_after_turnover_relation_mutation|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor`
+- 本轮不要求运行 Python test suite，因为不得修改业务代码或 tests；如你为了验证文档引用运行只读命令，必须记录。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P051 status must be `implemented` or `blocked`；未经用户确认不得标记 `verified`。
+  - 记录 CodeGraph/文件扫描范围、输出文档、关键发现、风险、下一条 prompt 建议。
+- 更新 `refactor-prompts.md` with PF-P051 execution result。
+- 更新 Turnover Ledger 专项文档，明确下一步是否进入 tests 或 contract。
+- 最终回复必须说明：
+  - 只做 discovery/planning；
+  - 未修改 production code；
+  - 未执行 Traffic Gate、部署或生产访问；
+  - 下一步建议 prompt。
+
+Stop Conditions:
+- 当前分支是 `main`，停止。
+- PF-P050-MG 未 verified 或 main 未推送，停止。
+- 发现需要修改 production code 才能继续，停止并报告，不要修改。
+- 发现需要访问生产、staging 或真实外部服务，停止。
+- 发现文档事实源和代码事实冲突，优先记录冲突，不猜测。
+- 任一 verification command 失败，停止并报告失败命令与输出。
+```
+
+### 审查结论
+
+- PF-P051 是 PF-P050-MG 后合理的下一条 prompt：Turnover Ledger read-side 已合入，风险登记表中剩余最高风险集中在 mutation side effects、legacy fallback、Bankdetail influence 和 repository ownership。
+- PF-P051 保持 discovery/planning 边界，不修改生产代码，不补测试，不实现 UoW，符合 Micro-JIT 工作流。
+- Prompt 已把 CodeGraph 发现转化为必检入口：confirm、withdraw、extra PUT、tag selection PUT、bank-row-tags batch 和 `_after_turnover_relation_mutation`。
+- Prompt 明确下一步优先进入 characterization/contract tests，而不是直接大规模迁移写 API。
+
+### 执行结果
+
+- PF-P051 已执行，状态为 `verified`。根据自动工作流授权，已在验证满足 scope、无 unrelated changes、无 untracked 临时文件、文档回写完成后落锁。
+- 新增 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`。
+- 更新 `migration-state-log.md` 和 `turnover-ledger-discovery.md`。
+- 已完成 Turnover Ledger 写路径 API matrix、runtime sequence、UoW readiness assessment、transaction/outbox/dirty scope audit、idempotency/stale baseline、repository ownership audit 和 test gap matrix。
+- 关键发现：
+  - tag selection PUT、bank-row-tags batch、relation extra PUT、confirm、withdraw 都仍由 `server.py` 编排写路径 side effects。
+  - `_after_turnover_relation_mutation` 当前将 relation snapshot persistence、Workbench invalidation、read model clear 和 refresh enqueue 串在 handler 后置流程中。
+  - Runtime queue 已有 `enqueue_read_model_refresh_in_transaction()`，但当前 Turnover 写路径未将 facts/audit/dirty scope/outbox 放入同一个外层 transaction。
+  - `bank-row-tags/batch` 是 Turnover API 但写 Bankdetail facts，未来必须通过显式 Bankdetail port 和 UoW 边界处理。
+  - relation extra PUT 仍存在 legacy full snapshot fallback。
+- 未修改 production code、tests、SQL migration、worker、runtime queue、frontend、deployment 或 production config。
+- 未执行 Traffic Gate、部署、staging/prod 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
+- 验证：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，仅本轮新增计划文档。
+  - `git diff --check`：Pass。
+  - `rg -n "PF-P051|Turnover Ledger Write Path|UoW|_after_turnover_relation_mutation|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor`：Pass。
+- 下一步建议：生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests`。PF-P052 应只补测试，锁定 duplicate/stale/failure 当前行为，不直接实现 UoW。
+
+## PF-P052 - Turnover Ledger Write Path Characterization Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P052 - Turnover Ledger Write Path Characterization Tests
+
+Role:
+你是一位精通 Python 遗留系统重构、unittest 特征测试、事务边界和 Clean Architecture 的后端架构师。
+
+Context:
+我们正在继续 Python-first 后端架构重构。PF-P051 已 verified，已经完成 Turnover Ledger 写路径 discovery/planning，并确认当前写路径 side effects 仍分散在 server.py、state store、service、read model clear 和 runtime queue enqueue 中。
+
+本轮只允许补 characterization tests，用测试锁定当前行为，为后续 Turnover Ledger UoW / facade / repository ownership 重构建立安全网。
+
+Pre-Flight:
+1. 必须先读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-discovery.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - docs/architecture/backend-refactor/module-refactor-plan.md
+   - docs/architecture/backend-refactor/ai-execution-rules.md
+2. 必须读取现有测试与代码事实：
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_relation_service.py
+   - tests/test_turnover_ledger_extra_service.py
+   - backend/src/fin_ops_platform/app/server.py 中 Turnover 写 handler 和 helper
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py
+   - backend/src/fin_ops_platform/services/turnover_relation_service.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py
+   - backend/src/fin_ops_platform/services/runtime_queue.py
+3. 必须使用 CodeGraph 或源码阅读确认以下入口仍是当前写路径事实：
+   - _handle_api_turnover_ledger_confirm
+   - _handle_api_turnover_ledger_withdraw
+   - _handle_api_turnover_ledger_relation_extra_update
+   - _handle_api_turnover_ledger_tag_selection_update
+   - _handle_api_turnover_ledger_bank_row_tags_batch
+   - _after_turnover_relation_mutation
+
+Required Test Work:
+1. 在现有 Turnover Ledger 测试文件中补 characterization tests，优先复用 tests/test_turnover_ledger_api.py 的 helper，不新建平行测试框架。
+2. 锁定 confirm relation 当前行为：
+   - successful confirm 后，relation audit、read model clear、refresh enqueue 的当前 observable 行为必须有断言。
+   - duplicate confirm / stale-ish confirm 当前返回码、payload、audit/side effect 行为必须被明确断言。
+   - 不得引入新的 expected_version 或 UoW 语义。
+3. 锁定 withdraw relation 当前行为：
+   - successful withdraw 后，relation audit、read model clear、refresh enqueue 的当前 observable 行为必须有断言。
+   - duplicate withdraw 或 already-withdrawn relation 的当前返回码、payload、audit/side effect 行为必须被明确断言。
+   - system-generated relation reject 现有测试不能被削弱。
+4. 锁定 relation extra PUT 当前行为：
+   - success 后 extra payload、persistence、read model clear、refresh enqueue 的当前行为必须保留。
+   - persistence helper 失败或 legacy fallback 行为如可通过本地 fake 注入，应锁定当前 best-effort / swallow / response 行为；如果不能低风险注入，必须在文档中说明缺口和下一步。
+5. 锁定 tag selection PUT 当前行为：
+   - existing version conflict 已有测试不得削弱。
+   - refresh enqueue failure / read model clear failure 如可通过本地 fake 注入，应锁定当前 response 和 saved settings 行为；如果不能低风险注入，必须在文档中说明缺口。
+6. 锁定 bank-row-tags batch 当前行为：
+   - success 后 Bankdetail category facts、Turnover invalidation flag、read model clear、refresh enqueue 的当前行为必须有断言。
+   - invalid target reject 已有测试不得削弱。
+   - category save failure 或 refresh enqueue failure 如可通过本地 fake 注入，应锁定当前 response 和 side effects；如果不能低风险注入，必须在文档中说明缺口。
+7. 新测试必须隔离状态：
+   - 使用 TemporaryDirectory 或现有隔离 helper。
+   - 不访问真实 Redis/RabbitMQ/OA/Mongo/MySQL/PostgreSQL 外部服务。
+   - 不产生测试状态污染，不留下 pickle/sqlite/export 临时文件。
+
+Strict Constraints:
+- 本轮不得修改 production code，除非发现测试无法表达当前行为且必须先暴露一个纯测试 seam；这种情况必须停止并报告，不得自行改。
+- 不得实现 TurnoverLedgerWriteUnitOfWork。
+- 不得迁移 server.py handler。
+- 不得改 repository、runtime queue、worker、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得删除现有测试、放宽断言、改掉 characterization 期望来让测试通过。
+- 不得把当前缺陷“修好”；本轮只记录现状，真正语义修复放到后续 UoW/refactor prompt。
+- 只允许精准 git add，不允许 git add . 或 git add -A。
+
+Verification:
+必须至少执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- 如果修改了 service-level tests，也必须运行对应 targeted test，例如：
+  - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_relation_service -v
+  - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v
+
+Post-Flight:
+1. 更新 docs/architecture/backend-refactor/migration-state-log.md：
+   - PF-P052 status = implemented 或 blocked。
+   - 记录新增/修改测试、覆盖的写路径、验证命令和结果。
+   - 如果验证全部通过且满足自动 verified 条件，可标记 verified。
+2. 更新 docs/architecture/backend-refactor/refactor-prompts.md：
+   - 记录 PF-P052 执行结果和验证结果。
+3. 更新 docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md：
+   - 在 test gap matrix / next slice recommendation 中记录哪些 gap 已被 tests 锁定，哪些仍需后续 prompt。
+4. 不执行 Traffic Gate，不部署，不访问生产，不访问真实外部服务。
+```
+
+### 审查结论
+
+- PF-P052 是 PF-P051 后的正确下一步：PF-P051 只完成写路径事实盘点，直接实现 UoW 会缺少 API-level 行为基线。
+- PF-P052 明确限定 test-only，不允许修改 production code 或提前修复 stale/idempotency/transaction 语义。
+- 测试范围覆盖当前最高风险写入口：confirm、withdraw、relation extra PUT、tag selection PUT 和 bank-row-tags batch。
+- Prompt 明确要求若失败注入无法低风险表达，只记录缺口并停止对应实现，不通过生产代码改动扩大范围。
+
+### 执行结果
+
+- PF-P052 已执行并按自动工作流标记为 `verified`。
+- 仅修改 `tests/test_turnover_ledger_api.py` 以及 backend-refactor 文档。
+- 新增 6 个 API-level characterization tests：
+  - `test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save`
+  - `test_turnover_bank_row_tag_batch_queue_failure_happens_after_category_save`
+  - `test_relation_extra_persistence_failure_is_best_effort_success_and_refreshes`
+  - `test_confirm_duplicate_submit_rejects_after_first_success_without_second_refresh`
+  - `test_confirm_relation_persistence_failure_is_best_effort_success_and_still_enqueues_refresh`
+  - `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues`
+- 关键已锁定事实：
+  - tag selection 队列失败发生在 settings save 和 read model clear 之后。
+  - bank-row-tags batch 队列失败发生在 Bankdetail category facts 保存之后，且派生刷新链会先尝试 Bankdetail/Workbench 等 scope，再到 Turnover refresh。
+  - relation extra persistence failure 当前为 best-effort success。
+  - relation snapshot persistence failure 当前为 best-effort success。
+  - duplicate confirm 当前返回 `relation_row_conflict`。
+  - duplicate withdraw 当前仍返回 200，并重复写 withdraw audit / Turnover refresh。
+- 未修改 production code、SQL migration、worker、runtime queue、frontend、deployment、生产配置或 feature flag。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+- 下一步建议：生成并审查 `PF-P053 - Turnover Ledger Write UoW Contract Tests`。PF-P053 应先定义目标契约测试，不迁移真实 Turnover Ledger 写 API。
+
+## PF-P053 - Turnover Ledger Write UoW Contract Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P053 - Turnover Ledger Write UoW Contract Tests
+
+Role:
+你是一位精通 Python unittest、契约测试、事务性 Outbox、CQRS Read Model freshness 和 Clean Architecture 的后端架构师。
+
+Context:
+PF-P051 已完成 Turnover Ledger 写路径 UoW 边界 discovery/planning。
+PF-P052 已完成 API-level characterization tests，锁定当前 duplicate/failure side effects：
+- tag selection PUT 队列失败发生在 settings save 和 read model clear 之后；
+- bank-row-tags batch 队列失败发生在 Bankdetail facts 保存和派生刷新尝试之后；
+- relation extra persistence failure 当前 best-effort success；
+- relation snapshot persistence failure 当前 best-effort success；
+- duplicate confirm 当前返回 relation_row_conflict；
+- duplicate withdraw 当前仍成功、重复 audit、重复 refresh。
+
+本轮只允许新增目标契约测试，用来描述未来 TurnoverLedgerWriteUnitOfWork 的目标语义。不得实现 UoW，不得迁移真实 API。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-discovery.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - docs/architecture/backend-refactor/ai-execution-rules.md
+2. 必须读取现有 Turnover Ledger tests：
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_relation_service.py
+3. 必须读取 Workbench UoW contract/expectedFailure 先例：
+   - tests/test_workbench_uow_contract.py
+   - docs/architecture/backend-refactor/workbench-write-uow-plan.md（如果存在）
+4. 执行前必须确认当前分支不是 main，且没有 unrelated dirty changes。
+
+Required Test Work:
+1. 新增 `tests/test_turnover_ledger_uow_contract.py`。
+2. 该测试文件必须是目标契约测试，不访问真实外部服务，不访问真实 PostgreSQL/Redis/RabbitMQ/OA/Mongo/MySQL。
+3. 测试必须能在默认 CI 中通过。如果目标 UoW 尚未实现，必须用 `unittest.expectedFailure` 或等价机制标记目标测试，保留 future contract 和 unexpected success 信号。
+4. 必须至少覆盖以下目标契约：
+   - confirm relation 在一个 UoW 中提交 relation facts、relation audit、dirty scope 和 outbox；outbox/dirty failure 必须回滚 relation facts/audit。
+   - withdraw relation 在一个 UoW 中提交 relation facts、relation audit、dirty scope 和 outbox；重复 withdraw 或 stale expected version 目标语义必须是 conflict，而不是当前重复成功。
+   - relation extra PUT 在一个 UoW 中提交 extra facts、dirty scope 和 outbox；extra persistence failure 或 outbox failure 不得返回 best-effort success。
+   - tag selection PUT 在一个 UoW 或明确 settings port transaction 中提交 settings facts/audit、dirty scope 和 outbox；queue failure 不得留下已保存 settings。
+   - bank-row-tags batch 必须通过显式 Bankdetail port 参与 UoW 或发出明确的 transaction-bound downstream event；queue/outbox failure 不得留下 Bankdetail category facts 与 Turnover refresh 分裂。
+   - UoW dependencies 必须是 granular ports，不得依赖 Application god object，不得读 HTTP cookie/header，不得 import app.auth。
+5. 测试命名必须清楚表达目标语义和当前 expectedFailure 原因。
+6. 如果已有 Workbench expectedFailure helper 可复用，优先复用现有模式；不要发明大型测试框架。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得新增真实 `TurnoverLedgerWriteUnitOfWork` 实现。
+- 不得迁移 server.py handler。
+- 不得修改 repository/runtime queue/worker/SQL migration/frontend/deployment/production config。
+- 不得访问真实外部服务。
+- 不得删除或放宽 PF-P052 characterization tests。
+- 不得把 expectedFailure 目标测试写成空测试；每个测试必须包含具体 import/调用/断言目标。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+
+Post-Flight:
+1. 更新 docs/architecture/backend-refactor/migration-state-log.md：
+   - PF-P053 status = implemented/verified/blocked。
+   - 记录新增 contract tests、expectedFailure 数量、验证命令和结果。
+2. 更新 docs/architecture/backend-refactor/refactor-prompts.md：
+   - 记录 PF-P053 执行结果。
+3. 更新 docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md：
+   - 记录哪些目标契约已固化，下一步是否进入 minimal UoW skeleton。
+4. 不执行 Traffic Gate，不部署，不访问生产。
+```
+
+### 审查结论
+
+- PF-P053 是 PF-P052 后的正确下一步：API 当前行为已锁定，下一步应定义目标 UoW 语义，而不是直接改 handler。
+- Prompt 明确 contract-test-only，允许 expectedFailure 承载尚未实现的目标语义，避免默认 CI 红。
+- Prompt 覆盖了 Turnover 写路径的核心一致性目标：facts/audit/dirty/outbox 同事务、duplicate/stale conflict、best-effort failure 收敛、Bankdetail port 边界和 granular dependency rule。
+
+### 执行结果
+
+- PF-P053 已执行并按自动工作流标记为 `verified`。
+- 新增 `tests/test_turnover_ledger_uow_contract.py`。
+- 新增 7 个 `unittest.expectedFailure` target contract tests：
+  - `test_confirm_relation_commits_relation_audit_dirty_scope_and_outbox_in_one_transaction`
+  - `test_confirm_relation_outbox_failure_rolls_back_relation_fact_and_audit`
+  - `test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs`
+  - `test_relation_extra_outbox_failure_does_not_return_best_effort_success`
+  - `test_tag_selection_outbox_failure_rolls_back_settings_save_and_audit`
+  - `test_bank_row_tags_batch_uses_explicit_bankdetail_port_and_rolls_back_on_outbox_failure`
+  - `test_uow_constructor_requires_granular_ports_not_application_god_object`
+- 默认 CI 绿色；expectedFailure 保留 future contract 和 unexpected success 信号。
+- 未实现 `TurnoverLedgerWriteUnitOfWork`，未修改 production code、repository、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 expected failures。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+- 下一步建议：生成并审查 `PF-P054 - Turnover Ledger Minimal UoW Skeleton`。PF-P054 只应建立最小 skeleton 和 fake-port contract wiring，不迁移真实 Turnover Ledger 写 API。
+
+## PF-P054 - Turnover Ledger Minimal UoW Skeleton
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P054 - Turnover Ledger Minimal UoW Skeleton
+
+Role:
+你是一位精通 Python Clean Architecture、Unit of Work、事务边界和测试驱动重构的后端架构师。
+
+Context:
+PF-P053 已新增 `tests/test_turnover_ledger_uow_contract.py`，包含 7 个 expectedFailure 目标契约测试。当前目标是只建立最小 `TurnoverLedgerWriteUnitOfWork.run(command, handler)` skeleton，让 fake/in-memory contract tests 转为普通通过。不得迁移真实 Turnover Ledger 写 API。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - tests/test_turnover_ledger_uow_contract.py
+   - tests/test_turnover_ledger_api.py
+2. 必须先运行：
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+   记录当前 7 expected failures。
+3. 必须确认当前分支不是 main，且没有 unrelated dirty changes。
+
+Required Implementation Work:
+1. 新增最小 production module：
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+2. 实现最小 class：
+   - `TurnoverLedgerWriteUnitOfWork`
+   - constructor 只接收 granular dependencies：
+     - `connection`
+     - `relation_repository`
+     - `extra_repository`
+     - `settings_port`
+     - `bankdetail_port`
+     - `dirty_outbox_writer`
+     - `stale_precondition_port`
+   - 不得接收 `application` 或 `app` god object。
+3. 实现 `run(command, handler)`：
+   - 打开 `connection.transaction()`。
+   - 构造 context，至少暴露 `transaction`、各 granular ports、`command`。
+   - 在 handler 前调用 `stale_precondition_port.assert_current(expected_versions=..., transaction=...)`，如果 command 有 expected_versions。
+   - 调用 handler(context) 获取 result。
+   - 调用 `dirty_outbox_writer.enqueue_refresh(transaction=..., scope_type="turnover_ledger", scope_keys=command.scope_keys, reason=command.action_name, payload=...)`。
+   - dirty/outbox writer 抛错时必须让 transaction context rollback，并向调用方传播异常。
+4. 更新 `tests/test_turnover_ledger_uow_contract.py`：
+   - 移除已由 skeleton 转绿的 `unittest.expectedFailure`。
+   - 不得删除测试，不得弱化断言。
+5. 保持真实 API 行为不变。
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得接入真实 Turnover Ledger confirm/withdraw/extra/tag-selection/bank-row-tags API。
+- 不得修改真实 repository、runtime queue、worker、SQL migration、frontend、deployment、生产配置或 feature flag。
+- 不得访问真实外部服务。
+- 不得引入 Application god object。
+- 不得删除 PF-P052 characterization tests。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P054 status = implemented/verified/blocked。
+   - 记录转绿的 contract tests、验证命令和结果。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P054 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 minimal skeleton 能力和仍未接入真实 API 的边界。
+4. 不执行 MG，除非状态机判断当前 Turnover write UoW skeleton slice 达到可合并边界。
+```
+
+### 审查结论
+
+- PF-P054 是 PF-P053 后的正确下一步：先让 fake-port contract tests 转绿，建立 UoW 机制骨架。
+- Prompt 明确禁止真实 API migration，避免把 skeleton 与 handler 重构混在一起。
+- Prompt 明确 constructor granular dependency 和 Application god object 禁止线。
+
+### 执行结果
+
+- PF-P054 已执行并按自动工作流标记为 `verified`。
+- 新增 `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`。
+- 实现最小 `TurnoverLedgerWriteUnitOfWork` skeleton：
+  - constructor 接收 granular dependencies；
+  - `run(command, handler)` 打开 transaction；
+  - handler 前执行 stale precondition；
+  - handler context 暴露 transaction 和 Turnover/Extra/Settings/Bankdetail granular ports；
+  - handler 成功后调用 transaction-bound dirty/outbox writer；
+  - dirty/outbox failure 传播并触发 transaction rollback。
+- `tests/test_turnover_ledger_uow_contract.py` 中 7 个 PF-P053 expectedFailure tests 已转为普通通过。
+- 未迁移真实 Turnover Ledger 写 API，未修改 `server.py`、真实 repository、runtime queue、worker、SQL migration、frontend、deployment、生产配置或 feature flag。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+- 下一步建议：生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`，统一覆盖 PF-P051 到 PF-P054 的完整 diff。
+
+## PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate
+
+Role:
+你是一位负责合入主干前门禁的资深后端工程师。
+
+Context:
+当前分支为 `codex/turnover-ledger-write-uow-p051`，本 Merge Gate 统一覆盖 PF-P051 到 PF-P054：
+- PF-P051：Turnover Ledger 写路径 discovery/planning。
+- PF-P052：Turnover Ledger 写路径 characterization tests。
+- PF-P053：Turnover Ledger UoW contract tests。
+- PF-P054：Turnover Ledger minimal write UoW skeleton。
+
+Gate Scope:
+- 这是 Merge Gate，只验证和合入 main。
+- 不执行 Traffic Gate。
+- 不部署，不访问生产/staging，不修改 Nginx、生产配置、feature flag 或真实外部服务。
+- 不迁移真实 Turnover Ledger 写 API。
+
+Required Checks:
+1. 分支和工作区：
+   - git status --short --branch
+   - git ls-files --others --exclude-standard
+   - git diff --check
+2. Scope 检查：
+   - 确认 diff 只包含：
+     - docs/architecture/backend-refactor/migration-state-log.md
+     - docs/architecture/backend-refactor/refactor-prompts.md
+     - docs/architecture/backend-refactor/turnover-ledger-discovery.md
+     - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+     - tests/test_turnover_ledger_api.py
+     - tests/test_turnover_ledger_uow_contract.py
+     - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - 如果出现 production code diff，必须确认只限 `turnover_ledger_write_uow.py` minimal skeleton。
+   - 禁止 `server.py`、real repository、runtime queue、worker、SQL migration、frontend、deployment、Nginx 或生产配置 diff。
+3. Verification：
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_relation_service -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v
+4. Commit / merge safety：
+   - 严禁 `git add .` 或 `git add -A`。
+   - 如有 untracked 临时文件，停止。
+   - 合入 main 前必须先确认当前分支包含最新 main；如需要同步 main 且产生冲突，停止。
+   - merge 到 main 后必须在 main 上重跑上述 Verification。
+   - 如果 main 上验证失败，停止，不得 push origin/main。
+5. Push：
+   - main 上验证通过后，才允许 `git push origin main`。
+   - push 只代表 Git 远端主干，不代表部署或切流。
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P054-MG status = verified / blocked。
+   - 记录 merge commit、main verification 和 push 结果。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P054-MG 执行结果。
+3. 如果 push 成功，从最新 main 新建下一条 `codex/` 分支后再生成下一 prompt。
+```
+
+### 审查结论
+
+- PF-P054-MG 是当前分支的正确合并边界：PF-P051 到 PF-P054 共同形成 Turnover Ledger write UoW foundation。
+- Gate 明确禁止 Traffic Gate 和真实 API migration，只允许合入文档、测试和最小 UoW skeleton。
+- Gate 要求 main 合入后复验，失败则停止且不得 push。
