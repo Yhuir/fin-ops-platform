@@ -861,7 +861,7 @@ Verification:
 
 ## PF-P070 Tag Selection UoW Integration Planning
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -876,4 +876,111 @@ Verification:
 
 下一步：
 
-- 执行 PF-P070。
+- `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`。
+- PF-P071 should add tests first. It must not migrate the handler.
+
+### Current Legacy Runtime Sequence
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Handler as "server.py PUT /api/turnover-ledger/tag-selection"
+    participant Auth as "_turnover_mutation_session"
+    participant Settings as "AppSettingsService"
+    participant Store as "state_store / app.app_settings"
+    participant Audit as "in-memory AuditTrailService"
+    participant ReadModel as "Turnover read model"
+    participant Queue as "runtime queue"
+
+    Client->>Handler: "PUT payload + headers"
+    Handler->>Auth: "validate mutation session"
+    Handler->>Handler: "parse JSON body"
+    Handler->>Settings: "update_turnover_ledger_tag_selection(payload, actor_id)"
+    Settings->>Settings: "refresh snapshot + validate expected_version + selected tag codes"
+    Settings->>Store: "save_app_settings(next_snapshot)"
+    Settings->>Settings: "mutate in-memory snapshot + configure category service"
+    Settings->>Audit: "record in-memory audit"
+    Settings-->>Handler: "public response payload"
+    Handler->>ReadModel: "clear best-effort"
+    Handler->>Queue: "enqueue read model refresh"
+    Handler-->>Client: "200 response"
+```
+
+Current facts:
+
+- Version conflict is raised by `AppSettingsService` as `turnover_ledger_tag_selection_version_conflict` and mapped by the handler to `409`.
+- Invalid tag code is mapped to `400`.
+- Queue failure currently happens after settings save. `test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save` locks that split-brain behavior.
+- The handler directly performs read model clear/enqueue after service returns.
+
+### Target UoW Runtime Sequence
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Handler as "server.py handler"
+    participant Facade as "Turnover tag selection facade/service"
+    participant Settings as "AppSettingsService pure normalizer"
+    participant UoW as "TurnoverLedgerWriteUnitOfWork"
+    participant SettingsPort as "TurnoverLedgerTagSelectionSettingsAdapter"
+    participant DB as "app.app_settings transaction writer"
+    participant Outbox as "Turnover dirty/outbox writer"
+
+    Client->>Handler: "PUT payload + headers"
+    Handler->>Handler: "auth + JSON mapping only"
+    Handler->>Facade: "update_tag_selection(payload, actor_id, tenant_id)"
+    Facade->>Settings: "normalize_turnover_ledger_tag_selection_update"
+    Settings-->>Facade: "next_snapshot + public_payload + audit_event"
+    Facade->>UoW: "run(command, handler)"
+    UoW->>SettingsPort: "save next_snapshot using transaction"
+    SettingsPort->>DB: "upsert app.app_settings using supplied transaction"
+    UoW->>Outbox: "enqueue turnover_ledger read model refresh using same transaction"
+    UoW-->>Facade: "public payload"
+    Facade-->>Handler: "service-layer result"
+    Handler-->>Client: "HTTP response"
+```
+
+Target facts:
+
+- Handler remains HTTP-only: session/auth, JSON parsing, mapping validation errors to status codes, JSON response.
+- The facade/service owns pure normalization and UoW command construction.
+- Settings fact and dirty/outbox must be in the same transaction.
+- Read model clear should be removed or reduced to a documented compatibility no-op once dirty/outbox is authoritative.
+- Response payload should remain compatible with current `GET/PUT` tests.
+
+### Required Compatibility / Target Tests Before Migration
+
+PF-P071 should add or strengthen tests before any handler migration:
+
+1. Current success response shape remains stable.
+2. Version conflict still maps to `409` with `turnover_ledger_tag_selection_version_conflict`.
+3. Invalid tag code still maps to `400` and causes no enqueue/clear side effect.
+4. Target queue/outbox failure semantics are explicit:
+   - current characterization: settings save already happened when queue fails;
+   - target contract: once UoW path is used, outbox failure must roll back settings fact.
+5. Target path must not call `_clear_turnover_ledger_read_model_best_effort` separately if dirty/outbox succeeds.
+6. Source-version/freshness impact must be documented as Turnover read model refresh reason `turnover_ledger_tag_selection_changed` with scope `all`.
+
+### Durable Audit Strategy
+
+Decision for now:
+
+- Do not block tag selection UoW migration on durable audit persistence.
+- Keep audit metadata in the pure normalizer and settings port command/result.
+- Record the gap explicitly: real audit is still in-memory in the legacy service path, and real `PostgresOpsTaxEtcRepository` does not yet persist this audit event in the same transaction.
+- A later Platform / Audit prompt should introduce a durable audit port if product requirements require durable settings audit.
+
+### Recommended Prompt Sequence
+
+1. `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`
+   - Tests only.
+   - Lock current compatibility and future rollback/no-clear target semantics.
+2. `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`
+   - Service/facade only.
+   - Use pure normalizer, UoW, settings adapter, dirty/outbox writer at fake-port level.
+   - Do not wire server handler yet.
+3. `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`
+   - Minimal `server.py` wiring.
+   - Preserve response/error contract.
+   - Remove direct post-save clear/enqueue only when target tests prove dirty/outbox path.
+4. `PF-P073-MG` or cumulative MG if PF-P071 to PF-P073 complete the tag selection slice.

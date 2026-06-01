@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` planned |
-| 最近 verified prompt | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` |
+| 当前阶段 | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
-| 最近验证 | PF-P069 增加 transaction-bound app settings writer；UoW contract 27 tests 通过，API 29 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`；只做规划和文档回写，不改生产逻辑 |
+| 最近验证 | PF-P070 完成 tag selection UoW integration plan；文档验证通过 |
+| 下一条允许任务 | 生成并审查 `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`；tests only，不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -6292,7 +6292,7 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 ### PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -6306,13 +6306,27 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 #### 下一步
 
-- 执行 PF-P070。
+- 生成并审查 `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`。
 
 #### 验收标准
 
 - 输出 tag selection UoW integration sequence。
 - 明确下一条实现/测试 prompt。
 - 明确 durable audit 处理策略和当前不可伪装完成的范围。
+
+#### 执行结果
+
+- 已记录 current legacy runtime sequence：handler auth/JSON -> settings save/in-memory audit -> read model clear -> queue enqueue。
+- 已记录 target UoW runtime sequence：handler HTTP mapping -> facade pure normalize -> UoW settings port -> dirty/outbox same transaction。
+- 已明确 PF-P071 必须先补 compatibility/target tests，不得直接迁移 handler。
+- durable audit persistence 明确保留为后续 Platform / Audit 缺口。
+
+#### Verification
+
+- `git status --short --branch`: Pass，仅 PF-P070 文档文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "PF-P070|tag selection UoW integration|durable audit|PF-P071" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`: Pass。
 
 ## 维护规则
 

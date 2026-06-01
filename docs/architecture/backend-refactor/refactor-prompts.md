@@ -16664,3 +16664,19 @@ Post-Flight:
 - PF-P070 不直接迁移 handler 是合理的：tag selection 会改变当前 queue failure split-brain 语义，必须先明确目标测试。
 - Prompt 明确 durable audit 不能伪装完成，避免把 settings fact 与 audit 一致性混为一谈。
 - Prompt 明确下一步优先测试锁定，而不是直接改生产 handler。
+
+### 执行结果
+
+- PF-P070 已执行并按自动工作流标记为 `verified`。
+- 已在 `turnover-ledger-write-uow-plan.md` 记录 current legacy runtime sequence 和 target UoW runtime sequence。
+- 已明确 PF-P071 必须先补 compatibility/target tests，不得直接迁移 handler。
+- 已明确 durable audit persistence 仍是后续 Platform / Audit 缺口，本 slice 不把 audit 一致性伪装为已完成。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P070 文档文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "PF-P070|tag selection UoW integration|durable audit|PF-P071" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`: Pass。
+
+下一步建议：生成并审查 `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`，只补测试，不迁移 handler。
