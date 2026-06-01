@@ -20108,3 +20108,26 @@ Post-Flight:
 
 - PF-P095 是正确的测试锁定步骤：先定义 future ports 的接口，再执行抽离。
 - 使用 `unittest.expectedFailure` 合理，因为目标 classes 尚未实现；这不是 skip，而是默认 CI 隔离机制。
+
+### 执行结果
+
+- 状态：`verified`。
+- 在 `tests/test_turnover_ledger_uow_contract.py` 中新增 4 条 future target contract tests：
+  - `TurnoverLedgerRelationWritePort` 拒绝 `Application` god object。
+  - `TurnoverLedgerRelationWritePort` 使用 supplied transaction 执行 confirm/withdraw 并持久化 relation snapshot。
+  - `TurnoverLedgerBankdetailWritePort` 拒绝 `Application` god object。
+  - `TurnoverLedgerBankdetailWritePort` 使用 supplied transaction 执行 category update、relation rebuild，并持久化 category/relation snapshot。
+- 4 条新增 tests 使用 `unittest.expectedFailure` 保持默认 CI 绿色；未使用 skip。
+- 本轮未修改 production code，未迁移 `server.py` helper。
+
+### 验证结果
+
+- `git status --short --branch`：Pass，仅有 PF-P095 范围内文件改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests，4 expected failures。
+- `rg -n "PF-P095|TurnoverLedgerRelationWritePort|TurnoverLedgerBankdetailWritePort|expectedFailure|Repository Ownership" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton`。PF-P096 只实现最小 `TurnoverLedgerRelationWritePort` 和 `TurnoverLedgerBankdetailWritePort` classes，让 PF-P095 的 4 条 expectedFailure tests 转为普通通过；不得迁移 `server.py` helper，不得修改 API handler，不得新增 SQL migration。

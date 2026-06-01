@@ -2104,7 +2104,7 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
 
 ## PF-P095 PostgreSQL Write Port Ownership Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2116,3 +2116,32 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
 - 只修改 tests 和文档。
 - 不实现 classes。
 - 不迁移 `server.py` helper。
+
+执行结果：
+
+- 新增 4 条 future target contract tests，覆盖 `TurnoverLedgerRelationWritePort` 与 `TurnoverLedgerBankdetailWritePort`。
+- 新增 tests 均使用 `unittest.expectedFailure`，因为目标 classes 尚未实现；这是默认 CI 隔离，不是 skip。
+- relation write port 契约锁定：
+  - 拒绝 `Application` god object；
+  - constructor 只接收细粒度依赖；
+  - confirm/withdraw 必须使用 supplied transaction 调用 persistence repository factory；
+  - 必须持久化 relation snapshot；
+  - 结果不暴露 HTTP response/cookie/header/auth。
+- bankdetail write port 契约锁定：
+  - 拒绝 `Application` god object；
+  - constructor 只接收 category service、relation service、bank rows provider、persistence repository factory 等细粒度依赖；
+  - category update 后必须 rebuild relation；
+  - 必须使用 supplied transaction 持久化 category snapshot 和 relation snapshot；
+  - 结果不暴露 HTTP response/cookie/header/auth。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests，4 expected failures。
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton`。
+- PF-P096 只实现最小 write port classes 并让 PF-P095 的 4 条 expectedFailure tests 转为普通通过。
+- PF-P096 不迁移 `server.py` helper，不修改 API handler，不新增 SQL migration。

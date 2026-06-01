@@ -368,6 +368,81 @@ class _RecordingBankdetailRepositoryFactory:
         return repository
 
 
+class _RecordingTurnoverPersistenceRepository:
+    def __init__(self) -> None:
+        self.saved_relations: list[dict[str, object]] = []
+        self.saved_categories: list[dict[str, object]] = []
+
+    def save_turnover_relations(self, snapshot: dict[str, object]) -> None:
+        self.saved_relations.append(dict(snapshot))
+
+    def save_bank_transaction_categories(self, snapshot: dict[str, object]) -> None:
+        self.saved_categories.append(dict(snapshot))
+
+
+class _RecordingTurnoverPersistenceRepositoryFactory:
+    def __init__(self) -> None:
+        self.transactions: list[object] = []
+        self.repositories: list[_RecordingTurnoverPersistenceRepository] = []
+
+    def __call__(self, transaction: object) -> _RecordingTurnoverPersistenceRepository:
+        self.transactions.append(transaction)
+        repository = _RecordingTurnoverPersistenceRepository()
+        self.repositories.append(repository)
+        return repository
+
+
+class _RecordingTurnoverRelationService:
+    def __init__(self) -> None:
+        self.rebuilds: list[list[dict[str, object]]] = []
+        self._snapshot = {"relations": {"turnover_rel_1": {"status": "confirmed"}}, "audit_log": []}
+
+    def rebuild_from_bank_rows(self, rows: list[dict[str, object]]) -> None:
+        self.rebuilds.append([dict(row) for row in rows])
+
+    def snapshot(self) -> dict[str, object]:
+        return dict(self._snapshot)
+
+
+class _RecordingTurnoverRoutes:
+    def __init__(self) -> None:
+        self.confirm_calls: list[dict[str, object]] = []
+        self.withdraw_calls: list[dict[str, object]] = []
+
+    def confirm_relation(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor: str,
+        note: str | None,
+    ) -> dict[str, object]:
+        self.confirm_calls.append({"bank_row_ids": list(bank_row_ids), "actor": actor, "note": note})
+        return {"relation": {"relation_id": "turnover_rel_1", "status": "confirmed"}}
+
+    def withdraw_relation(
+        self,
+        *,
+        relation_id: str,
+        actor: str,
+        note: str | None,
+    ) -> dict[str, object]:
+        self.withdraw_calls.append({"relation_id": relation_id, "actor": actor, "note": note})
+        return {"relation": {"relation_id": relation_id, "status": "withdrawn"}}
+
+
+class _RecordingBankTransactionCategoryService:
+    def __init__(self) -> None:
+        self.updates: list[dict[str, object]] = []
+        self._snapshot = {"categories": {"bank_txn_1": {"category_code": "borrow_in"}}, "audit_log": []}
+
+    def apply_turnover_updates(self, updates: list[dict[str, object]], *, actor: str) -> dict[str, object]:
+        self.updates.append({"updates": [dict(update) for update in updates], "actor": actor})
+        return {"updated_categories": [dict(update) for update in updates]}
+
+    def snapshot(self) -> dict[str, object]:
+        return dict(self._snapshot)
+
+
 class _FailingTurnoverRelationPort:
     def confirm_relation(
         self,
@@ -1374,6 +1449,91 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             [{"updates": updates, "actor_id": "finance-user"}],
         )
         self.assertEqual(result["updated_categories"][0]["transaction_id"], "bank_txn_1")
+        self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(result))
+
+    @unittest.expectedFailure
+    def test_target_relation_write_port_rejects_application_god_object(self) -> None:
+        # PF-P095 Repository Ownership: future relation write port must receive granular dependencies.
+        port_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationWritePort")
+
+        with self.assertRaises(TypeError):
+            port_class(application=object())
+
+    @unittest.expectedFailure
+    def test_target_relation_write_port_confirms_and_withdraws_with_supplied_transaction(self) -> None:
+        # PF-P095 Repository Ownership: service orchestration should leave server.py.
+        port_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationWritePort")
+        relation_service = _RecordingTurnoverRelationService()
+        routes = _RecordingTurnoverRoutes()
+        persistence_factory = _RecordingTurnoverPersistenceRepositoryFactory()
+        transaction = _RecordingTransaction()
+        port = port_class(
+            relation_service=relation_service,
+            routes=routes,
+            bank_rows_provider=lambda: [{"id": "bank_txn_1"}, {"id": "bank_txn_2"}],
+            persistence_repository_factory=persistence_factory,
+        )
+
+        confirm_result = port.confirm_relation(
+            bank_row_ids=["bank_txn_1", "bank_txn_2"],
+            actor_id="finance-user",
+            note="confirm through port",
+            transaction=transaction,
+        )
+        withdraw_result = port.withdraw_relation(
+            relation_id="turnover_rel_1",
+            actor_id="finance-user",
+            note="withdraw through port",
+            transaction=transaction,
+        )
+
+        self.assertEqual(persistence_factory.transactions, [transaction, transaction])
+        self.assertEqual(len(persistence_factory.repositories[0].saved_relations), 1)
+        self.assertEqual(len(persistence_factory.repositories[1].saved_relations), 1)
+        self.assertEqual(relation_service.rebuilds, [[{"id": "bank_txn_1"}, {"id": "bank_txn_2"}]])
+        self.assertEqual(routes.confirm_calls[0]["actor"], "finance-user")
+        self.assertEqual(routes.withdraw_calls[0]["relation_id"], "turnover_rel_1")
+        self.assertEqual(confirm_result["relation"]["status"], "confirmed")
+        self.assertEqual(withdraw_result["relation"]["status"], "withdrawn")
+        self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(confirm_result))
+        self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(withdraw_result))
+
+    @unittest.expectedFailure
+    def test_target_bankdetail_write_port_rejects_application_god_object(self) -> None:
+        # PF-P095 Repository Ownership: future bankdetail write port must receive granular dependencies.
+        port_class = getattr(self._write_adapters_module(), "TurnoverLedgerBankdetailWritePort")
+
+        with self.assertRaises(TypeError):
+            port_class(application=object())
+
+    @unittest.expectedFailure
+    def test_target_bankdetail_write_port_updates_category_rebuilds_relations_and_persists(self) -> None:
+        # PF-P095 Repository Ownership: cross-module write orchestration should be an explicit port.
+        port_class = getattr(self._write_adapters_module(), "TurnoverLedgerBankdetailWritePort")
+        category_service = _RecordingBankTransactionCategoryService()
+        relation_service = _RecordingTurnoverRelationService()
+        persistence_factory = _RecordingTurnoverPersistenceRepositoryFactory()
+        transaction = _RecordingTransaction()
+        port = port_class(
+            category_service=category_service,
+            relation_service=relation_service,
+            bank_rows_provider=lambda: [{"id": "bank_txn_1"}],
+            persistence_repository_factory=persistence_factory,
+        )
+        updates = [{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}]
+
+        result = port.apply_turnover_category_updates(
+            updates,
+            actor_id="finance-user",
+            transaction=transaction,
+        )
+
+        self.assertEqual(persistence_factory.transactions, [transaction])
+        self.assertEqual(category_service.updates, [{"updates": updates, "actor": "finance-user"}])
+        self.assertEqual(relation_service.rebuilds, [[{"id": "bank_txn_1"}]])
+        self.assertEqual(len(persistence_factory.repositories[0].saved_categories), 1)
+        self.assertEqual(len(persistence_factory.repositories[0].saved_relations), 1)
+        self.assertEqual(result["updated_categories"], updates)
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(result))
 
     def test_adapter_raised_exception_rolls_back_turnover_uow(self) -> None:
