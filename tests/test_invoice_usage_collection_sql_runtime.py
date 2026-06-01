@@ -17,9 +17,11 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     output_invoice_collection_source_versions,
 )
 from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
+from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.rabbitmq_runtime import SUPPORTED_EVENT_TYPES
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueEvent
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 class QueueRecorder:
@@ -41,6 +43,20 @@ class QueueRecorder:
         self.completed.append((tenant_id, scope_type, scope_key, int(source_version) if source_version is not None else None))
 
 
+class EmptyTransactionConnection:
+    def transaction(self) -> "EmptyTransactionConnection":
+        return self
+
+    def __enter__(self) -> "EmptyTransactionConnection":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def fetch_all(self, *_args: object, **_kwargs: object) -> list[dict]:
+        return []
+
+
 class InvoiceReadModelConnection:
     def __init__(
         self,
@@ -48,12 +64,14 @@ class InvoiceReadModelConnection:
         input_rows: list[dict] | None = None,
         output_rows: list[dict] | None = None,
         oa_rows: list[dict] | None = None,
+        oa_scope_rows: list[dict] | None = None,
         dirty: bool = False,
         scope_exists: bool = True,
     ) -> None:
         self.input_rows = list(input_rows or [])
         self.output_rows = list(output_rows or [])
         self.oa_rows = list(oa_rows or [])
+        self.oa_scope_rows = list(oa_scope_rows or [])
         self.dirty = dirty
         self.scope_exists = scope_exists
         self.fetch_all_calls: list[tuple[str, tuple]] = []
@@ -68,6 +86,8 @@ class InvoiceReadModelConnection:
             return self.output_rows
         if "from read_model.oa_pending_payment_rows" in normalized:
             return self.oa_rows
+        if "from read_model.oa_pending_payment_scopes" in normalized:
+            return self.oa_scope_rows
         return []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
@@ -314,6 +334,41 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("payment_status", executed_sql)
         self.assertIn("bank_trade_time desc", executed_sql)
 
+    def test_oa_repository_all_scope_aggregates_monthly_scope_source_versions(self) -> None:
+        source_versions = oa_pending_payment_source_versions()
+        connection = InvoiceReadModelConnection(
+            oa_rows=[
+                {
+                    "payload": {
+                        "id": "oa_pending_payment_row_1",
+                        "oa": {"id": "oa-1", "applicantName": "张三", "amount": "100.00"},
+                        "paymentStatus": {"code": "paid", "label": "已支付"},
+                        "bankTransaction": {"paidTotal": "100.00"},
+                        "invoice": {},
+                    },
+                    "raw_payload": {},
+                }
+            ],
+            oa_scope_rows=[
+                {"scope_key": "2026-05", "source_versions": source_versions, "cache_status": "fresh"},
+                {"scope_key": "2026-04", "source_versions": source_versions, "cache_status": "fresh"},
+            ],
+            scope_exists=False,
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_oa_pending_payment_rows(month=None, page=1, page_size=50)
+
+        self.assertEqual(payload["read_model_scope_key"], "all")
+        self.assertEqual(payload["source_versions"], source_versions)
+        self.assertEqual(payload["pagination"]["total"], 1)
+        executed_scope_fetches = [
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "from read_model.oa_pending_payment_scopes" in sql
+        ]
+        self.assertTrue(executed_scope_fetches)
+
     def test_oa_repository_save_persists_source_versions_and_bank_total(self) -> None:
         connection = WriteRecordingConnection()
         repository = PostgresReadModelRepository(connection)
@@ -440,6 +495,8 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         queue = QueueRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._import_service = ImportNormalizationService()
+        app._workbench_pair_relation_service = WorkbenchPairRelationService()
         app._output_invoice_collection_sql_read_repository = type(
             "OutputRepo",
             (),
@@ -473,7 +530,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
     def test_projection_builder_persists_invoice_relation_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
-        builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=EmptyTransactionConnection())
         builder._core_repository = ProjectionCoreRepository(
             invoices=[
                 self._invoice("input-invoice-1", InvoiceType.INPUT),

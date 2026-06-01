@@ -8,13 +8,16 @@ import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableHead from "@mui/material/TableHead";
+import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
+import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
   AttachExistingInvoicePreview,
   AttachExistingInvoiceResult,
+  FetchPendingInvoiceCandidatesRequest,
   PendingInvoiceCandidate,
   PendingInvoiceCandidatesResponse,
 } from "../../features/pendingInvoices/types";
@@ -23,7 +26,7 @@ import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 type PendingInvoiceInvoicePickerDrawerProps = {
   open: boolean;
   transactionId: string | null;
-  loadCandidates: (transactionId: string) => Promise<PendingInvoiceCandidatesResponse>;
+  loadCandidates: (request: FetchPendingInvoiceCandidatesRequest) => Promise<PendingInvoiceCandidatesResponse>;
   previewAttach: (transactionId: string, invoiceId: string, requestId: string) => Promise<AttachExistingInvoicePreview>;
   confirmAttach: (transactionId: string, invoiceId: string, previewId: string, requestId: string) => Promise<AttachExistingInvoiceResult>;
   onConfirmed: (result: AttachExistingInvoiceResult) => void;
@@ -46,6 +49,15 @@ function invoiceNumber(candidate: PendingInvoiceCandidate) {
   return candidate.digitalInvoiceNo || candidate.invoiceNo || candidate.invoiceId || "-";
 }
 
+function candidateStatusLabel(status: PendingInvoiceCandidate["candidateStatus"]) {
+  const labels: Record<string, string> = {
+    available: "可关联",
+    already_related: "已关联本流水",
+    conflict: "存在冲突",
+  };
+  return labels[status] ?? status;
+}
+
 export default function PendingInvoiceInvoicePickerDrawer({
   open,
   transactionId,
@@ -61,7 +73,53 @@ export default function PendingInvoiceInvoicePickerDrawer({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [keyword, setKeyword] = useState("");
+  const [sellerName, setSellerName] = useState("");
+  const [issueDateFrom, setIssueDateFrom] = useState("");
+  const [issueDateTo, setIssueDateTo] = useState("");
+  const [amountMin, setAmountMin] = useState("");
+  const [amountMax, setAmountMax] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const confirmRequestId = useMemo(() => createRequestId("attach-confirm"), [preview?.previewId]);
+
+  const reloadCandidates = useCallback((guard: { active: boolean } = { active: true }) => {
+    if (!transactionId) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setPayload(null);
+    setPreview(null);
+    loadCandidates({
+      transactionId,
+      keyword,
+      sellerName,
+      issueDateFrom,
+      issueDateTo,
+      amountMin,
+      amountMax,
+      sortField: "amount_difference_abs",
+      sortDirection: "asc",
+      page,
+      pageSize,
+    })
+      .then((nextPayload) => {
+        if (guard.active) {
+          setPayload(nextPayload);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (guard.active) {
+          setError(reason instanceof Error ? reason.message : "候选发票加载失败");
+        }
+      })
+      .finally(() => {
+        if (guard.active) {
+          setLoading(false);
+        }
+      });
+  }, [amountMax, amountMin, issueDateFrom, issueDateTo, keyword, loadCandidates, page, pageSize, sellerName, transactionId]);
 
   useEffect(() => {
     if (!open || !transactionId) {
@@ -71,33 +129,15 @@ export default function PendingInvoiceInvoicePickerDrawer({
       setLoading(false);
       setBusy(false);
       setError(null);
+      setPage(1);
       return undefined;
     }
-    let active = true;
-    setLoading(true);
-    setError(null);
-    setPayload(null);
-    setPreview(null);
-    loadCandidates(transactionId)
-      .then((nextPayload) => {
-        if (active) {
-          setPayload(nextPayload);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : "候选发票加载失败");
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
+    const guard = { active: true };
+    reloadCandidates(guard);
     return () => {
-      active = false;
+      guard.active = false;
     };
-  }, [loadCandidates, open, transactionId]);
+  }, [open, reloadCandidates, transactionId]);
 
   async function handlePreview(candidate: PendingInvoiceCandidate) {
     if (!transactionId || busy) {
@@ -163,6 +203,17 @@ export default function PendingInvoiceInvoicePickerDrawer({
           </Stack>
         </Alert>
       ) : null}
+      <Paper variant="outlined" sx={{ borderRadius: 1, p: 1.5 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1} useFlexGap flexWrap="wrap">
+          <TextField size="small" label="关键词" value={keyword} onChange={(event) => { setKeyword(event.target.value); setPage(1); }} />
+          <TextField size="small" label="销方" value={sellerName} onChange={(event) => { setSellerName(event.target.value); setPage(1); }} />
+          <TextField size="small" label="开票开始" type="date" value={issueDateFrom} onChange={(event) => { setIssueDateFrom(event.target.value); setPage(1); }} InputLabelProps={{ shrink: true }} />
+          <TextField size="small" label="开票结束" type="date" value={issueDateTo} onChange={(event) => { setIssueDateTo(event.target.value); setPage(1); }} InputLabelProps={{ shrink: true }} />
+          <TextField size="small" label="最小金额" value={amountMin} onChange={(event) => { setAmountMin(event.target.value); setPage(1); }} inputProps={{ inputMode: "decimal" }} />
+          <TextField size="small" label="最大金额" value={amountMax} onChange={(event) => { setAmountMax(event.target.value); setPage(1); }} inputProps={{ inputMode: "decimal" }} />
+          <Button variant="outlined" onClick={() => reloadCandidates()} disabled={loading || busy}>搜索</Button>
+        </Stack>
+      </Paper>
       <Paper variant="outlined" sx={{ borderRadius: 1 }}>
         <Table size="small" aria-label="发票候选">
           <TableHead>
@@ -194,7 +245,15 @@ export default function PendingInvoiceInvoicePickerDrawer({
                 <TableCell align="right">{formatMoney(candidate.totalWithTax)}</TableCell>
                 <TableCell align="right">{formatMoney(candidate.remainingAmount)}</TableCell>
                 <TableCell>
-                  <Chip size="small" label={candidate.candidateStatus} color={candidate.candidateStatus === "available" ? "success" : "default"} variant="outlined" />
+                  <Stack spacing={0.25} alignItems="flex-start">
+                    <Chip
+                      size="small"
+                      label={candidateStatusLabel(candidate.candidateStatus)}
+                      color={candidate.candidateStatus === "available" ? "success" : candidate.candidateStatus === "conflict" ? "warning" : "default"}
+                      variant="outlined"
+                    />
+                    {candidate.conflictReason ? <Typography variant="caption" color="text.secondary">{candidate.conflictReason}</Typography> : null}
+                  </Stack>
                 </TableCell>
                 <TableCell align="right">
                   <Button
@@ -211,6 +270,20 @@ export default function PendingInvoiceInvoicePickerDrawer({
             ))}
           </TableBody>
         </Table>
+        <TablePagination
+          component="div"
+          count={payload?.pagination.total ?? 0}
+          page={Math.max(0, (payload?.pagination.page ?? page) - 1)}
+          rowsPerPage={payload?.pagination.pageSize ?? pageSize}
+          rowsPerPageOptions={[10, 20, 50]}
+          labelRowsPerPage="每页发票"
+          labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
+          onPageChange={(_event, nextPage) => setPage(nextPage + 1)}
+          onRowsPerPageChange={(event) => {
+            setPageSize(Number(event.target.value));
+            setPage(1);
+          }}
+        />
       </Paper>
     </PendingInvoiceDrawerFrame>
   );

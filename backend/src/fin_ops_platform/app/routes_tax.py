@@ -6,6 +6,7 @@ from time import monotonic
 from typing import Any, Callable
 
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
+from fin_ops_platform.services.tax_offset_plan_service import TaxOffsetPlanConflictError
 
 
 class TaxApiRoutes:
@@ -15,6 +16,7 @@ class TaxApiRoutes:
         *,
         query_service: Any | None = None,
         certified_import_job_service: Any | None = None,
+        plan_service: Any | None = None,
         json_response: Callable[[HTTPStatus, dict[str, Any]], Any] | None = None,
         month_metric_emitter: Callable[..., None] | None = None,
         calculate_metric_emitter: Callable[..., None] | None = None,
@@ -24,6 +26,7 @@ class TaxApiRoutes:
         self._tax_offset_service = tax_offset_service
         self._query_service = query_service
         self._certified_import_job_service = certified_import_job_service
+        self._plan_service = plan_service
         self._json_response = json_response
         self._month_metric_emitter = month_metric_emitter
         self._calculate_metric_emitter = calculate_metric_emitter
@@ -111,6 +114,18 @@ class TaxApiRoutes:
             )
         return self._respond(HTTPStatus(status_code), result)
 
+    def handle_save_plan(self, *, actor_id: str, payload: dict[str, object]) -> Any:
+        try:
+            result = self._require_plan_service().save_plan(actor_id=actor_id, payload=payload)
+        except TaxOffsetPlanConflictError as exc:
+            return self._respond(HTTPStatus.CONFLICT, exc.payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._respond(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_tax_offset_plan_request", "message": str(exc)},
+            )
+        return self._respond(HTTPStatus.OK, result)
+
     def handle_import_job(self, import_job_id: str) -> Any:
         try:
             import_job = self._require_import_job_service().get_confirm_job_payload(import_job_id)
@@ -146,6 +161,11 @@ class TaxApiRoutes:
         if self._certified_import_job_service is None:
             raise RuntimeError("Tax certified import job service is not configured.")
         return self._certified_import_job_service
+
+    def _require_plan_service(self) -> Any:
+        if self._plan_service is None:
+            raise RuntimeError("Tax offset plan service is not configured.")
+        return self._plan_service
 
     def _respond(self, status: HTTPStatus, payload: dict[str, Any]) -> Any:
         if self._json_response is None:

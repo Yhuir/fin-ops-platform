@@ -49,6 +49,14 @@ class NoOaBankBatchReadModelRefreshService:
         if scope_type != NO_OA_BANK_BATCH_SCOPE_TYPE or not scope_key:
             raise ValueError("No-OA bank batch refresh requires scope_type='no_oa_bank_batch' and scope_key.")
 
+        if not self._event_source_version_is_current(event, scope_key=scope_key):
+            return {
+                "scope_key": scope_key,
+                "skipped": True,
+                "skip_reason": "stale_source_version",
+                "source_version": event.source_version or event.payload.get("source_version"),
+            }
+
         bank_rows, _categories = self._application_service.refresh_batches()
         snapshot = self._no_oa_bank_batch_service.snapshot()
         self._state_store.save_no_oa_bank_batches(snapshot)
@@ -69,3 +77,16 @@ class NoOaBankBatchReadModelRefreshService:
                 scope_key=scope_key,
                 source_version=event.source_version or event.payload.get("source_version"),
             )
+
+    def _event_source_version_is_current(self, event: RuntimeQueueEvent, *, scope_key: str) -> bool:
+        is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
+        if not callable(is_current):
+            return True
+        return bool(
+            is_current(
+                tenant_id=event.tenant_id,
+                scope_type=NO_OA_BANK_BATCH_SCOPE_TYPE,
+                scope_key=scope_key,
+                source_version=event.source_version or event.payload.get("source_version"),
+            )
+        )

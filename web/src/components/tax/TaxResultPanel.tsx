@@ -1,3 +1,4 @@
+import Button from "@mui/material/Button";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
@@ -8,6 +9,10 @@ type TaxResultPanelProps = {
   certifiedCount: number;
   resultLabel: string;
   resultAmount: string;
+  canSave?: boolean;
+  isSaving?: boolean;
+  saveDisabled?: boolean;
+  onSave?: () => void;
 };
 
 export default function TaxResultPanel({
@@ -16,6 +21,10 @@ export default function TaxResultPanel({
   certifiedCount,
   resultLabel,
   resultAmount,
+  canSave = false,
+  isSaving = false,
+  saveDisabled = false,
+  onSave,
 }: TaxResultPanelProps) {
   return (
     <Paper className="tax-result-panel" component="section" variant="outlined">
@@ -35,6 +44,17 @@ export default function TaxResultPanel({
         <Typography component="strong" variant="h5" fontWeight={900}>
           {resultAmount}
         </Typography>
+        {canSave ? (
+          <Button
+            type="button"
+            variant="contained"
+            size="small"
+            onClick={onSave}
+            disabled={saveDisabled || isSaving}
+          >
+            {isSaving ? "保存中" : "保存计划"}
+          </Button>
+        ) : null}
       </Stack>
     </Paper>
   );

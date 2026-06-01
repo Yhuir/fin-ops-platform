@@ -40,11 +40,17 @@ export type TaxMonthData = {
   readModelScopeKey?: string;
   readModelGeneratedAt?: string | null;
   readModelStaleReasons?: string[];
+  sourceVersions?: Record<string, unknown>;
 };
 
 export type TaxCertifiedImportPreviewRow = {
   id: string;
   month: string;
+  rowStatus: "recognized" | "invalid" | string;
+  matchStatus: "matched_plan" | "outside_plan" | "unknown" | string;
+  matchedPlanId: string | null;
+  dedupeStatus: "new" | "duplicate" | "not_applicable" | string;
+  errorMessage: string | null;
   digitalInvoiceNo: string | null;
   invoiceCode: string | null;
   invoiceNo: string | null;
@@ -119,3 +125,17 @@ export type TaxCertifiedImportQueuedResult = {
 export type TaxCertifiedImportConfirmResult =
   | TaxCertifiedImportConfirmedResult
   | TaxCertifiedImportQueuedResult;
+
+export type TaxOffsetPlanSaveResult = {
+  status: "saved";
+  plan: {
+    id: string;
+    month: string;
+    selectedOutputIds: string[];
+    selectedInputIds: string[];
+    summary: TaxSummary;
+    readModelScopeKey?: string;
+    sourceVersions?: Record<string, unknown>;
+    updatedAt?: string;
+  };
+};

@@ -131,6 +131,67 @@ class PendingProjectionConnection:
         return None
 
 
+class PendingProjectionOaBankConnection:
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized:
+            return [
+                {
+                    "transaction_id": "txn-oa-bank",
+                    "counterparty_name_raw": "云南供应商",
+                    "trade_time": "2026-05-20 10:00:00",
+                    "txn_date": "2026-05-20",
+                    "amount": "118.00",
+                    "balance": "1000.00",
+                    "currency": "CNY",
+                    "summary": "转账",
+                    "remark": "服务费",
+                    "bank_serial_no": "SERIAL-1",
+                    "account_name": "云南溯源科技有限公司",
+                    "account_no": "622200001234",
+                    "bank_name": "招商银行",
+                    "bank_short_name": "招行",
+                    "counterparty_account_no": "622200009999",
+                    "counterparty_bank_name": "招商银行昆明分行",
+                    "category_payload": {"category_code": "service_fee", "category_label": "服务费"},
+                    "invoices": [],
+                    "paid_total": "0.00",
+                    "oa_summaries": [
+                        {
+                            "id": "oa-pay-2048",
+                            "applicant": "杨丽萍",
+                            "application_type": "支付申请",
+                            "project_name": "大理项目",
+                            "status": "已完成",
+                            "form_no": "2048",
+                            "detail_available": True,
+                            "relation_case_id": "case-oa-bank",
+                        }
+                    ],
+                    "oa_applicant": "杨丽萍",
+                    "oa_project_name": "大理项目",
+                    "relation_case_ids": ["case-oa-bank"],
+                }
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "pending_invoice_tag_groups": {
+                        "groups": {
+                            "requires_invoice": {"tag_codes": ["service_fee"]},
+                            "bank_statement_as_invoice": {"tag_codes": []},
+                            "no_invoice_required": {"tag_codes": []},
+                        }
+                    }
+                }
+            }
+        return None
+
+
 class PendingComplementProjectionConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -803,6 +864,19 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("oa", payload)
         self.assertEqual(payload["bank_transaction"]["account_last4"], "1234")
 
+    def test_pending_invoice_sql_projection_preserves_real_bank_and_oa_identity(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingProjectionOaBankConnection())
+
+        rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+
+        payload = rows[0]["payload"]
+        self.assertEqual(payload["bank_transaction"]["bank_name"], "招商银行")
+        self.assertEqual(payload["bank_transaction"]["account_name"], "云南溯源科技有限公司")
+        self.assertEqual(payload["bank_transaction"]["counterparty_account_no"], "622200009999")
+        self.assertEqual(payload["oa"]["primary"]["id"], "oa-pay-2048")
+        self.assertEqual(payload["oa"]["primary"]["relation_case_id"], "case-oa-bank")
+        self.assertTrue(payload["oa"]["primary"]["detail_available"])
+
     def test_pending_invoice_sql_projection_uses_active_complement_for_requires_invoice_filter(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingComplementProjectionConnection())
 
@@ -829,6 +903,18 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(by_id["txn-pending"]["invoice_acquisition_status"]["primary_action"], "mark_income_status")
         self.assertFalse(any(payload["can_create_invoice"] for payload in by_id.values()))
         self.assertEqual(by_id["txn-cash"]["bank_transaction"]["effective_tag_label_path"], ["收入", "现金销售"])
+
+    def test_pending_invoice_sql_projection_filters_income_rule_groups(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingIncomeProjectionConnection())
+
+        requires_rows = builder._pending_invoice_rows(direction="income", filter_name="requires_invoice", month="2026-05")
+        no_invoice_rows = builder._pending_invoice_rows(direction="income", filter_name="no_invoice_required", month="2026-05")
+        cash_rows = builder._pending_invoice_rows(direction="income", filter_name="cash_income", month="2026-05")
+
+        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-output", "txn-manual", "txn-pending"])
+        self.assertEqual(requires_rows[0]["payload"]["invoice_acquisition_status"]["code"], "income_invoiced")
+        self.assertEqual([row["payload"]["id"] for row in no_invoice_rows], ["txn-no-invoice"])
+        self.assertEqual([row["payload"]["id"] for row in cash_rows], ["txn-cash"])
 
     def test_refresh_handler_rebuilds_search_and_pending_scopes(self) -> None:
         class FakeBuilder:
@@ -883,6 +969,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             queue.completed,
             [("tenant-a", "search", "2026-05"), ("tenant-a", "pending_invoice", "expense:all")],
         )
+
+    def test_refresh_handler_rejects_application_fallback_dependency(self) -> None:
+        with self.assertRaisesRegex(ValueError, "projection_builder is required"):
+            SearchPendingReadModelRefreshService(application=object(), queue_repository=QueueRecorder())
 
     def test_refresh_handler_expands_search_all_into_month_shards(self) -> None:
         class FakeBuilder:

@@ -126,9 +126,19 @@ const rowsPayload = {
   ],
 };
 
-function installOaPendingPaymentsFetch(overrides?: { rowsPayload?: Record<string, unknown> }) {
+function installOaPendingPaymentsFetch(overrides?: {
+  rowsPayload?: Record<string, unknown>;
+  detailPayloads?: Record<string, { status: number; payload: Record<string, unknown> }>;
+}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    const detailPayload = overrides?.detailPayloads?.[url.pathname];
+    if (detailPayload) {
+      return new Response(JSON.stringify(detailPayload.payload), {
+        status: detailPayload.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/api/oa-pending-payments/rows") {
       const payload: Record<string, unknown> = overrides?.rowsPayload ?? rowsPayload;
       const readModelStatus = payload.readModelStatus ?? payload.read_model_status;
@@ -345,5 +355,44 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText(/OA 待付款核对数据正在刷新/)).toBeInTheDocument();
     expect(within(page).getByText(/oa_pending_payment_source_version_missing/)).toBeInTheDocument();
+  });
+
+  test("shows neutral unavailable detail state while detail read model is refreshing", async () => {
+    installOaPendingPaymentsFetch({
+      rowsPayload: {
+        ...rowsPayload,
+        rows: [
+          {
+            ...(rowsPayload.rows[0] as Record<string, unknown>),
+            oa: {
+              ...(rowsPayload.rows[0].oa as Record<string, unknown>),
+              id: "oa-refresh",
+            },
+          },
+        ],
+      },
+      detailPayloads: {
+        "/api/oa-pending-payments/oa/oa-refresh/detail": {
+          status: 202,
+          payload: {
+            title: "OA详情",
+            detailAvailable: false,
+            unavailableReason: "详情数据正在刷新，请稍后重试。",
+            sections: [],
+            read_model_status: "refreshing",
+          },
+        },
+      },
+    });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await user.click(within(page).getByRole("button", { name: "查看 OA 张三 详情" }));
+
+    expect(await screen.findByRole("heading", { name: "OA详情" })).toBeInTheDocument();
+    expect(await screen.findByText("详情暂不可用")).toBeInTheDocument();
+    expect(screen.getByText("详情数据正在刷新，请稍后重试。")).toBeInTheDocument();
   });
 });

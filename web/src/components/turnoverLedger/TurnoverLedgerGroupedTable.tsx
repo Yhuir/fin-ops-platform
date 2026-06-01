@@ -485,8 +485,8 @@ export default function TurnoverLedgerGroupedTable({
             >
               对方户名
             </TableCell>
-            <TableCell sx={{ width: 150, fontWeight: 900 }}>借款金额 / 借款日</TableCell>
-            <TableCell sx={{ width: 150, fontWeight: 900 }}>还款金额 / 还款日</TableCell>
+            <TableCell sx={{ width: 150, fontWeight: 900 }}>收入</TableCell>
+            <TableCell sx={{ width: 150, fontWeight: 900 }}>支出</TableCell>
             <TableCell sx={{ width: 118, fontWeight: 900 }}>还款备注</TableCell>
             <TableCell sx={{ width: 122, fontWeight: 900 }}>利息额 / 年息或月息</TableCell>
             <TableCell sx={{ width: 76, fontWeight: 900 }}>借款天数</TableCell>
@@ -512,7 +512,7 @@ export default function TurnoverLedgerGroupedTable({
             </TableRow>
           ) : null}
           {!loading
-            ? groups.flatMap((group) => {
+            ? groups.flatMap((group, groupIndex) => {
                 const { summaryRow, flowRows } = resolveRows(group);
                 if (!summaryRow) {
                   return [];
@@ -530,10 +530,14 @@ export default function TurnoverLedgerGroupedTable({
                   <TableRow
                     key={`${group.groupId}:summary:${summaryRow.relationId}`}
                     data-testid={`turnover-row-${summaryRow.relationId}`}
-                    className="turnover-summary-row"
+                    className="turnover-summary-row turnover-group-start-row"
                     sx={{
                       backgroundColor: SUMMARY_ROW_BACKGROUND,
-                      "& td": { verticalAlign: "top" },
+                      "& > td": {
+                        verticalAlign: "top",
+                        borderTop: groupIndex === 0 ? "1px solid" : "3px solid",
+                        borderTopColor: groupIndex === 0 ? "divider" : "#9fb3c8",
+                      },
                     }}
                   >
                     <TableCell

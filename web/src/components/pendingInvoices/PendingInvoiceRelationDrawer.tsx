@@ -78,7 +78,7 @@ export default function PendingInvoiceRelationDrawer({
       subtitle={detail?.transactionSummary.counterpartyName ?? transactionId ?? undefined}
       closeLabel="关闭关系明细抽屉"
       onClose={onClose}
-      footer={transactionId ? (
+      footer={transactionId && detail?.availableActions.includes("attach_existing_invoice") ? (
         <Button variant="contained" onClick={() => onOpenInvoicePicker(transactionId)}>
           选择已有发票
         </Button>

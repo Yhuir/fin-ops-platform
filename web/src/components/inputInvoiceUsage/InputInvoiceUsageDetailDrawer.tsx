@@ -105,7 +105,7 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
       onClose={onClose}
       transitionDuration={{ enter: 180, exit: 140 }}
       PaperProps={{
-        "aria-label": "进项发票使用情况详情",
+        "aria-label": "详情",
         sx: { width: { xs: "100%", sm: 720 }, maxWidth: "100vw" },
       }}
     >
@@ -134,11 +134,11 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
           {error ? <Alert severity="error">{error}</Alert> : null}
           {detail?.detailAvailable === false ? (
             <Alert severity="info">
-              <Typography variant="subtitle2" fontWeight={900}>OA详情不可用</Typography>
-              <Typography variant="body2">{detail.unavailableReason ?? "后端未返回可展示的完整 OA 详情。"}</Typography>
+              <Typography variant="subtitle2" fontWeight={900}>详情暂不可用</Typography>
+              <Typography variant="body2">{detail.unavailableReason ?? "后端未返回可展示的完整详情。"}</Typography>
             </Alert>
           ) : null}
-          {detail?.sections.map((section) => (
+          {(detail?.sections ?? []).map((section) => (
             <Paper key={section.title} variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
               <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1.25 }}>
                 {section.title}
@@ -157,7 +157,7 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
               </Box>
             </Paper>
           ))}
-          {!loading && !error && detail && detail.sections.length === 0 && detail.detailAvailable !== false ? (
+          {!loading && !error && detail && (detail.sections ?? []).length === 0 && detail.detailAvailable !== false ? (
             <Alert severity="info">暂无更多详情。</Alert>
           ) : null}
         </Stack>

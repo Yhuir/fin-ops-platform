@@ -209,6 +209,7 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
       return {
         id: stringValue(row.id),
         invoiceId: stringValue(camelOrSnake(row, "invoiceId", "invoice_id")),
+        invoiceIdentityKey: stringValue(camelOrSnake(row, "invoiceIdentityKey", "invoice_identity_key")),
         invoice: {
           ...mapInvoice(row.invoice),
           id: stringValue(camelOrSnake(row, "invoiceId", "invoice_id") ?? objectValue(row.invoice).id),

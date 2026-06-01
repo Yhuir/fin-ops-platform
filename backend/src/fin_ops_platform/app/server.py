@@ -180,12 +180,7 @@ from fin_ops_platform.services.oa_pending_payment_service import (
     OaPendingPaymentError,
     OaPendingPaymentQueryService,
 )
-from fin_ops_platform.services.oa_pending_payment_read_model_details import (
-    oa_pending_payment_bank_detail_from_row,
-    oa_pending_payment_invoice_detail_from_row,
-    oa_pending_payment_oa_detail_from_row,
-    oa_pending_payment_relation_details_from_row,
-)
+from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import (
     InMemoryOutputInvoiceCollectionLifecycleRepository,
     OutputInvoiceCollectionLifecycleService,
@@ -226,17 +221,20 @@ from fin_ops_platform.services.operations_dashboard import OperationsDashboardSe
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
 from fin_ops_platform.services.oa_sync_service import OASyncService
 from fin_ops_platform.services.pending_invoice_service import (
+    InMemoryPendingInvoiceCommandRepository,
     PendingInvoiceApplicationService,
     PendingInvoiceError,
     PendingInvoiceQueryService,
-    latest_income_status_override_from_commands,
 )
 from fin_ops_platform.services.pending_invoice_lifecycle_service import PendingInvoiceLifecycleService
 from fin_ops_platform.services.pending_invoice_read_model_service import (
     PendingInvoiceReadModelService,
     pending_invoice_source_versions,
 )
-from fin_ops_platform.services.pending_invoice_rules_application_service import PendingInvoiceRulesApplicationService
+from fin_ops_platform.services.pending_invoice_rules_application_service import (
+    AppSettingsPendingInvoiceRulesGateway,
+    PendingInvoiceRulesApplicationService,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
@@ -256,7 +254,9 @@ from fin_ops_platform.services.settings_data_reset_service import (
 from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap, RuntimeRepositoryContext
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
+from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
+from fin_ops_platform.services.tax_offset_plan_service import InMemoryTaxOffsetPlanRepository, TaxOffsetPlanService
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
 from fin_ops_platform.services.tax_offset_read_model_service import (
     TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
@@ -782,6 +782,7 @@ class Application:
             if isinstance(persisted_state.get("pending_invoice_commands"), dict)
             else {}
         )
+        self._pending_invoice_command_repository = InMemoryPendingInvoiceCommandRepository(self._pending_invoice_commands)
         self._pending_invoice_query_service = PendingInvoiceQueryService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
@@ -789,10 +790,7 @@ class Application:
             app_settings_provider=self._app_settings_service.get_pending_invoice_settings_payload,
             effective_category_provider=self._bank_transaction_effective_category_provider,
             oa_projection=oa_adapter,
-            income_status_override_provider=lambda transaction_id: latest_income_status_override_from_commands(
-                self._pending_invoice_commands,
-                transaction_id,
-            ),
+            income_status_override_provider=self._pending_invoice_command_repository.latest_income_status_override,
         )
         self._pending_invoice_lifecycle_service = PendingInvoiceLifecycleService(
             audit_service=self._audit_service,
@@ -828,7 +826,7 @@ class Application:
         self._pending_invoice_application_service = PendingInvoiceApplicationService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
-            command_store=self._pending_invoice_commands,
+            command_repository=self._pending_invoice_command_repository,
             audit_recorder=self._pending_invoice_lifecycle_service.record_manual_invoice_audit,
             finalizer=self._pending_invoice_lifecycle_service.finalize_manual_invoice,
             row_provider=lambda transaction_id, direction: self._pending_invoice_query_service.row_for_transaction(
@@ -983,10 +981,20 @@ class Application:
         self._tax_certified_import_job_service = TaxCertifiedImportJobService(
             import_job_repository_provider=self._get_import_job_repository,
         )
+        self._tax_certified_import_application_service = TaxCertifiedImportApplicationService(
+            certified_import_service=getattr(self, "_tax_certified_import_service", None),
+            tax_offset_service=tax_offset_service,
+        )
+        tax_offset_plan_repository = self._tax_offset_plan_repository()
+        self._tax_offset_plan_service = TaxOffsetPlanService(
+            query_service=self._tax_offset_query_service,
+            plan_repository=tax_offset_plan_repository,
+        )
         self._tax_api_routes = TaxApiRoutes(
             tax_offset_service,
             query_service=self._tax_offset_query_service,
             certified_import_job_service=self._tax_certified_import_job_service,
+            plan_service=self._tax_offset_plan_service,
             json_response=self._json_response,
             month_metric_emitter=self._emit_tax_offset_month_metric,
             calculate_metric_emitter=self._emit_tax_offset_calculate_metric,
@@ -1005,9 +1013,24 @@ class Application:
             id(getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None))
             if getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None) is not None
             else None,
+            id(getattr(self, "_tax_certified_import_service", None))
+            if getattr(self, "_tax_certified_import_service", None) is not None
+            else None,
+            id(getattr(getattr(self, "_state_store", None), "save_tax_offset_plan", None)),
             id(self.__dict__.get("_import_job_repository")),
             id(getattr(self, "_import_job_repository_override", None)),
         )
+
+    def _tax_offset_plan_repository(self) -> object:
+        state_store = getattr(self, "_state_store", None)
+        save_plan = getattr(state_store, "save_tax_offset_plan", None)
+        if callable(save_plan):
+            return state_store
+        repository = getattr(self, "_in_memory_tax_offset_plan_repository", None)
+        if repository is None:
+            repository = InMemoryTaxOffsetPlanRepository()
+            self._in_memory_tax_offset_plan_repository = repository
+        return repository
 
     def _ensure_tax_offset_application_services(self) -> None:
         if (
@@ -1400,7 +1423,7 @@ class Application:
             return self._handle_api_pending_invoice_export(query, headers)
         if method == "GET" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/relation-detail"):
             transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_pending_invoice_relation_detail(transaction_id, headers)
+            return self._handle_api_pending_invoice_relation_detail(transaction_id, query, headers)
         if method == "POST" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/attach-existing-invoice/preview"):
             transaction_id = unquote(route_path.rsplit("/", 3)[-3])
             return self._handle_api_pending_invoice_attach_existing_preview(transaction_id, body, headers)
@@ -1508,13 +1531,13 @@ class Application:
             return self._handle_api_output_invoice_collections_receipt_create(row_id, body, headers)
         if method == "GET" and route_path.startswith("/api/output-invoice-collections/invoices/") and route_path.endswith("/detail"):
             invoice_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_output_invoice_collections_invoice_detail(invoice_id)
+            return self._handle_api_output_invoice_collections_invoice_detail(invoice_id, headers)
         if method == "GET" and route_path.startswith("/api/output-invoice-collections/bank-transactions/") and route_path.endswith("/detail"):
             bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_output_invoice_collections_bank_transaction_detail(bank_transaction_id)
+            return self._handle_api_output_invoice_collections_bank_transaction_detail(bank_transaction_id, headers)
         if method == "GET" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/relation-details"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._handle_api_output_invoice_collections_relation_details(row_id, query)
+            return self._handle_api_output_invoice_collections_relation_details(row_id, query, headers)
         if method == "GET" and route_path.startswith("/api/input-invoice-usage/invoices/") and route_path.endswith("/detail"):
             invoice_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_input_invoice_usage_invoice_detail(invoice_id)
@@ -1763,22 +1786,24 @@ class Application:
             return self._handle_api_workbench_unignore_row(body)
         if method == "GET" and route_path == "/api/tax-offset":
             month = query.get("month", [None])[0]
-            return self._handle_api_tax_offset(month)
+            return self._handle_api_tax_offset(month, headers)
         if method == "GET" and route_path == "/api/tax-offset/summary":
             month = query.get("month", [None])[0]
-            return self._handle_api_tax_offset_summary(month)
+            return self._handle_api_tax_offset_summary(month, headers)
         if method == "POST" and route_path == "/api/tax-offset/certified-import/preview":
             return self._handle_api_tax_certified_import_preview(body, headers)
         if method == "POST" and route_path == "/api/tax-offset/certified-import/confirm":
-            return self._handle_api_tax_certified_import_confirm(body)
+            return self._handle_api_tax_certified_import_confirm(body, headers)
         if method == "GET" and route_path.startswith("/api/tax-offset/certified-import/jobs/"):
             import_job_id = unquote(route_path.removeprefix("/api/tax-offset/certified-import/jobs/")).strip()
-            return self._handle_api_tax_certified_import_job(import_job_id)
+            return self._handle_api_tax_certified_import_job(import_job_id, headers)
         if method == "GET" and route_path == "/api/tax-offset/certified-imports":
             month = query.get("month", [None])[0]
-            return self._handle_api_tax_certified_imports(month)
+            return self._handle_api_tax_certified_imports(month, headers)
         if method == "POST" and route_path == "/api/tax-offset/calculate":
-            return self._handle_api_tax_offset_calculate(body)
+            return self._handle_api_tax_offset_calculate(body, headers)
+        if method == "POST" and route_path == "/api/tax-offset/plans":
+            return self._handle_api_tax_offset_plan_save(body, headers)
         if method == "GET" and route_path == "/api/cost-statistics":
             month = query.get("month", [None])[0]
             project_scope = query.get("project_scope", [None])[0]
@@ -2099,6 +2124,7 @@ class Application:
                 "/api/tax-offset/certified-import/jobs/{import_job_id}",
                 "/api/tax-offset/certified-imports",
                 "/api/tax-offset/calculate",
+                "/api/tax-offset/plans",
                 "/api/cost-statistics",
                 "/api/cost-statistics/explorer",
                 "/api/cost-statistics/export-preview",
@@ -7848,21 +7874,31 @@ class Application:
             return routes
         routes = OaPendingPaymentApiRoutes(
             self._oa_pending_payment_service(),
-            sql_rows_provider=self._get_oa_pending_payment_rows_from_sql_read_model,
-            sql_all_rows_provider=self._get_oa_pending_payment_all_rows_from_sql_read_model,
+            read_model_service=self._oa_pending_payment_read_model_service(),
         )
         self._oa_pending_payment_api_routes = routes
         return routes
+
+    def _oa_pending_payment_read_model_service(self) -> OaPendingPaymentReadModelService | None:
+        if not self._requires_sql_read_model_runtime():
+            return None
+        service = getattr(self, "_oa_pending_payment_read_model_service", None)
+        if isinstance(service, OaPendingPaymentReadModelService):
+            return service
+        service = OaPendingPaymentReadModelService(
+            repository=getattr(self, "_oa_pending_payment_sql_read_repository", None),
+            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            query_service=self._oa_pending_payment_service(),
+            source_versions_provider=self._oa_pending_payment_expected_source_versions,
+        )
+        self._oa_pending_payment_read_model_service = service
+        return service
 
     def _handle_api_oa_pending_payments_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
         _session, auth_error = self._resolve_oa_pending_payment_read_session(headers)
         if auth_error is not None:
             return auth_error
         try:
-            sql_payload = self._get_oa_pending_payment_rows_from_sql_read_model(query)
-            if isinstance(sql_payload, dict):
-                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status_code, sql_payload)
             status_code, payload = self._oa_pending_payment_routes().rows(query)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
@@ -7873,22 +7909,6 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            sql_payload = self._get_oa_pending_payment_all_rows_from_sql_read_model(query)
-            if hasattr(sql_payload, "status_code") and hasattr(sql_payload, "body"):
-                return sql_payload
-            if isinstance(sql_payload, dict):
-                payload = self._oa_pending_payment_service().filter_options_for_rows(
-                    rows=list(sql_payload.get("rows") or []),
-                    keyword=query.get("keyword", [None])[0],
-                    month=query.get("month", [None])[0],
-                    trade_date_from=query.get("trade_date_from", [None])[0],
-                    trade_date_to=query.get("trade_date_to", [None])[0],
-                    filters=query.get("filters", [None])[0],
-                )
-                payload["read_model_status"] = "fresh"
-                payload["readModelStatus"] = "fresh"
-                payload["read_model_scope_key"] = sql_payload.get("read_model_scope_key")
-                return self._json_response(HTTPStatus.OK, payload)
             status_code, payload = self._oa_pending_payment_routes().filter_options(query)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
@@ -7899,15 +7919,7 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._get_oa_pending_payment_detail_from_sql_read_model(
-                lookup_method_name="get_oa_pending_payment_row_by_oa_id",
-                identifier=oa_id,
-                builder=lambda row: oa_pending_payment_oa_detail_from_row(row),
-                not_found_code="oa_not_found",
-                not_found_message=f"OA detail not found: {oa_id}",
-            )
-            if payload is None:
-                payload = self._oa_pending_payment_routes().oa_detail(oa_id)
+            payload = self._oa_pending_payment_routes().oa_detail(oa_id)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
         return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
@@ -7917,15 +7929,7 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._get_oa_pending_payment_detail_from_sql_read_model(
-                lookup_method_name="get_oa_pending_payment_row_by_bank_transaction_id",
-                identifier=bank_transaction_id,
-                builder=lambda row: oa_pending_payment_bank_detail_from_row(row, bank_transaction_id),
-                not_found_code="bank_transaction_not_found",
-                not_found_message=f"Bank transaction detail not found: {bank_transaction_id}",
-            )
-            if payload is None:
-                payload = self._oa_pending_payment_routes().bank_transaction_detail(bank_transaction_id)
+            payload = self._oa_pending_payment_routes().bank_transaction_detail(bank_transaction_id)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
         return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
@@ -7935,15 +7939,7 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._get_oa_pending_payment_detail_from_sql_read_model(
-                lookup_method_name="get_oa_pending_payment_row_by_invoice_id",
-                identifier=invoice_id,
-                builder=lambda row: oa_pending_payment_invoice_detail_from_row(row, invoice_id),
-                not_found_code="invoice_not_found",
-                not_found_message=f"Invoice detail not found: {invoice_id}",
-            )
-            if payload is None:
-                payload = self._oa_pending_payment_routes().invoice_detail(invoice_id)
+            payload = self._oa_pending_payment_routes().invoice_detail(invoice_id)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
         return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
@@ -7958,67 +7954,10 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            kind = query.get("kind", [""])[0]
-            payload = self._get_oa_pending_payment_detail_from_sql_read_model(
-                lookup_method_name="get_oa_pending_payment_row_by_row_id",
-                identifier=row_id,
-                builder=lambda row: oa_pending_payment_relation_details_from_row(row, kind=kind),
-                not_found_code="row_not_found",
-                not_found_message=f"OA pending payment row not found: {row_id}",
-            )
-            if payload is None:
-                payload = self._oa_pending_payment_routes().relation_details(row_id, query)
+            payload = self._oa_pending_payment_routes().relation_details(row_id, query)
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
         return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
-
-    def _get_oa_pending_payment_detail_from_sql_read_model(
-        self,
-        *,
-        lookup_method_name: str,
-        identifier: str,
-        builder: object,
-        not_found_code: str,
-        not_found_message: str,
-    ) -> dict[str, object] | None:
-        repository = getattr(self, "_oa_pending_payment_sql_read_repository", None)
-        lookup = getattr(repository, lookup_method_name, None)
-        if not callable(lookup):
-            if self._requires_sql_read_model_runtime():
-                self._enqueue_oa_pending_payment_read_model_refresh("all", reason="api_detail_sql_repository_unavailable")
-                return self._invoice_relation_refreshing_payload(scope_key="all")
-            return None
-        payload = lookup(identifier)
-        if not isinstance(payload, dict):
-            if self._requires_sql_read_model_runtime():
-                self._enqueue_oa_pending_payment_read_model_refresh("all", reason="api_detail_miss")
-                return self._invoice_relation_refreshing_payload(scope_key="all")
-            return None
-        scope_key = str(payload.get("read_model_scope_key") or "all")
-        refresh_status = str(payload.get("refresh_status") or "fresh")
-        if refresh_status != "fresh":
-            self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_detail_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
-        stale_reasons = source_version_mismatch_reasons(
-            expected=self._oa_pending_payment_expected_source_versions(),
-            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_detail_source_versions_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
-        row = payload.get("row")
-        if not isinstance(row, dict):
-            raise OaPendingPaymentError(not_found_code, not_found_message, status_code=HTTPStatus.NOT_FOUND)
-        try:
-            detail_payload = builder(row) if callable(builder) else None
-        except ValueError as exc:
-            raise OaPendingPaymentError("invalid_relation_kind", str(exc)) from exc
-        if not isinstance(detail_payload, dict):
-            raise OaPendingPaymentError(not_found_code, not_found_message, status_code=HTTPStatus.NOT_FOUND)
-        detail_payload["read_model_status"] = "fresh"
-        detail_payload["readModelStatus"] = "fresh"
-        detail_payload["read_model_scope_key"] = scope_key
-        return detail_payload
 
     @staticmethod
     def _oa_pending_payment_sql_payload_status(payload: dict[str, object]) -> HTTPStatus:
@@ -8084,10 +8023,6 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            sql_payload = self._get_output_invoice_collection_rows_from_sql_read_model(query)
-            if isinstance(sql_payload, dict):
-                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status_code, sql_payload)
             status_code, payload = self._output_invoice_collection_routes().rows(query, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
@@ -8103,23 +8038,37 @@ class Application:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(status_code, payload)
 
-    def _handle_api_output_invoice_collections_invoice_detail(self, invoice_id: str) -> Response:
+    def _handle_api_output_invoice_collections_invoice_detail(self, invoice_id: str, headers: dict[str, str] | None = None) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            payload = self._output_invoice_collection_routes().invoice_detail(invoice_id)
+            payload = self._output_invoice_collection_routes().invoice_detail(invoice_id, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_output_invoice_collections_bank_transaction_detail(self, bank_transaction_id: str) -> Response:
+    def _handle_api_output_invoice_collections_bank_transaction_detail(self, bank_transaction_id: str, headers: dict[str, str] | None = None) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            payload = self._output_invoice_collection_routes().bank_transaction_detail(bank_transaction_id)
+            payload = self._output_invoice_collection_routes().bank_transaction_detail(bank_transaction_id, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_output_invoice_collections_relation_details(self, row_id: str, query: dict[str, list[str]]) -> Response:
+    def _handle_api_output_invoice_collections_relation_details(
+        self,
+        row_id: str,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        session, auth_error = self._resolve_output_invoice_collection_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
-            payload = self._output_invoice_collection_routes().relation_details(row_id, query)
+            payload = self._output_invoice_collection_routes().relation_details(row_id, query, session=session)
         except OutputInvoiceCollectionError as exc:
             return self._output_invoice_collection_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -8363,67 +8312,6 @@ class Application:
             query,
             row_getter=self._get_output_invoice_collection_rows_from_sql_read_model,
         )
-
-    def _get_oa_pending_payment_all_rows_from_sql_read_model(
-        self,
-        query: dict[str, list[str]],
-    ) -> dict[str, object] | Response | None:
-        return self._get_invoice_relation_all_rows_from_sql_read_model(
-            query,
-            row_getter=self._get_oa_pending_payment_rows_from_sql_read_model,
-        )
-
-    def _get_oa_pending_payment_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
-        scope_key = self._invoice_relation_scope_key_from_query(query)
-        repository = getattr(self, "_oa_pending_payment_sql_read_repository", None)
-        list_rows = getattr(repository, "list_oa_pending_payment_rows", None)
-        if not callable(list_rows):
-            if self._requires_sql_read_model_runtime():
-                self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
-                return self._invoice_relation_refreshing_payload(scope_key=scope_key)
-            return None
-        try:
-            payload = list_rows(
-                month=query.get("month", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                trade_date_from=query.get("trade_date_from", [None])[0],
-                trade_date_to=query.get("trade_date_to", [None])[0],
-                filters=query.get("filters", [None])[0],
-                sort_field=query.get("sort_field", ["bank_trade_time"])[0],
-                sort_direction=query.get("sort_direction", ["desc"])[0],
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-            )
-        except ValueError as exc:
-            raise OaPendingPaymentError("invalid_oa_pending_payment_query", str(exc)) from exc
-        if not isinstance(payload, dict):
-            self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_miss")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
-        refresh_status = str(payload.get("refresh_status") or "fresh")
-        if refresh_status != "fresh":
-            self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key)
-        stale_reasons = source_version_mismatch_reasons(
-            expected=self._oa_pending_payment_expected_source_versions(),
-            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason="api_source_versions_stale")
-            return self._invoice_relation_refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
-        result = dict(payload)
-        parsed_filters = self._oa_pending_payment_service()._parse_filters(query.get("filters", [None])[0])
-        sort_field, sort_direction = self._oa_pending_payment_service()._parse_sort(
-            query.get("sort_field", ["bank_trade_time"])[0],
-            query.get("sort_direction", ["desc"])[0],
-        )
-        result["filterConfig"] = self._oa_pending_payment_service()._filter_config()
-        result["appliedFilters"] = {"filters": parsed_filters}
-        result["sort"] = {"field": sort_field, "direction": sort_direction}
-        result["read_model_status"] = "fresh"
-        result["readModelStatus"] = "fresh"
-        result["read_model_scope_key"] = scope_key
-        result.pop("refresh_status", None)
-        return result
 
     def _get_invoice_relation_all_rows_from_sql_read_model(
         self,
@@ -8692,7 +8580,7 @@ class Application:
             ),
         )
         rules_service = PendingInvoiceRulesApplicationService(
-            app_settings_service=settings_service,
+            settings_gateway=AppSettingsPendingInvoiceRulesGateway(settings_service),
             persist_callback=self._persist_state if getattr(self, "_state_store", None) is not None else None,
             invalidate_read_model_scopes=read_model_service.invalidate_base_scopes,
             after_bank_transaction_tag_settings_saved=getattr(self, "_finalize_bank_transaction_tag_settings_update", None),
@@ -8737,12 +8625,17 @@ class Application:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_pending_invoice_relation_detail(self, transaction_id: str, headers: dict[str, str] | None = None) -> Response:
+    def _handle_api_pending_invoice_relation_detail(
+        self,
+        transaction_id: str,
+        query: dict[str, list[str]] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
         _session, auth_error = self._resolve_pending_invoice_read_session(headers)
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._pending_invoice_routes().relation_detail(transaction_id)
+            payload = self._pending_invoice_routes().relation_detail(transaction_id, query or {})
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -8947,6 +8840,26 @@ class Application:
         headers: dict[str, str] | None,
     ) -> tuple[OARequestSession | None, Response | None]:
         return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问 OA 待付款核对页面权限。")
+
+    def _resolve_tax_offset_read_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问税金抵扣页面权限。")
+
+    def _resolve_tax_offset_mutation_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        session, auth_error = self._resolve_tax_offset_read_session(headers)
+        if auth_error is not None:
+            return None, auth_error
+        if session is not None and not session.can_mutate_data:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有导入或保存税金抵扣数据权限。"},
+            )
+        return session, None
 
     def _resolve_bank_details_read_session(
         self,
@@ -10581,10 +10494,16 @@ class Application:
             return freshness_error
         return self._handle_workbench_unignore_row_payload(payload)
 
-    def _handle_api_tax_offset(self, month: str | None) -> Response:
+    def _handle_api_tax_offset(self, month: str | None, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_tax_offset_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         return self._tax_offset_routes().handle_month(month)
 
-    def _handle_api_tax_offset_summary(self, month: str | None) -> Response:
+    def _handle_api_tax_offset_summary(self, month: str | None, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_tax_offset_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         return self._tax_offset_routes().handle_summary(month)
 
     def _get_or_build_tax_offset_month_payload(self, month: str) -> tuple[dict[str, object], bool]:
@@ -10621,8 +10540,7 @@ class Application:
             flush=True,
         )
 
-    @staticmethod
-    def _tax_offset_summary_payload(payload: dict[str, object], *, scope_key: str) -> dict[str, object]:
+    def _tax_offset_summary_payload(self, payload: dict[str, object], *, scope_key: str) -> dict[str, object]:
         return self._tax_offset_runtime().summary_payload(payload, scope_key=scope_key)
 
     @staticmethod
@@ -10635,9 +10553,46 @@ class Application:
     def _tax_offset_source_versions(self) -> dict[str, object]:
         return {
             "tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            "invoice_fact_source_version": self._tax_offset_invoice_fact_source_version(),
+            "tax_certified_import_source_version": self._tax_offset_certified_import_source_version(),
             "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
             "oa_projection_sync_version": self._current_oa_projection_sync_version(),
         }
+
+    def _tax_offset_invoice_fact_source_version(self) -> str:
+        sql_version = self._tax_offset_sql_table_source_version("app.invoices", "status <> 'deleted'")
+        if sql_version is not None:
+            return sql_version
+        import_service = getattr(self, "_import_service", None)
+        return (
+            f"batches:{getattr(import_service, '_batch_counter', 0)}|"
+            f"rows:{getattr(import_service, '_row_counter', 0)}|"
+            f"invoices:{getattr(import_service, '_invoice_counter', 0)}"
+        )
+
+    def _tax_offset_certified_import_source_version(self) -> str:
+        sql_version = self._tax_offset_sql_table_source_version("app.tax_certified_import_records", "status <> 'deleted'")
+        if sql_version is not None:
+            return sql_version
+        source_version = getattr(getattr(self, "_tax_certified_import_service", None), "source_version", None)
+        if callable(source_version):
+            return str(source_version())
+        return "unavailable"
+
+    def _tax_offset_sql_table_source_version(self, table_name: str, where_sql: str) -> str | None:
+        connection = getattr(getattr(self, "_state_store", None), "_connection", None)
+        fetch_one = getattr(connection, "fetch_one", None)
+        if not callable(fetch_one):
+            return None
+        try:
+            row = fetch_one(
+                f"select count(*) as row_count, max(updated_at)::text as max_updated_at from {table_name} where {where_sql}"
+            )
+        except Exception:
+            return "unavailable"
+        if not isinstance(row, dict):
+            return "rows:0|max_updated_at:"
+        return f"rows:{row.get('row_count') or 0}|max_updated_at:{row.get('max_updated_at') or ''}"
 
     def _tax_offset_redis_cache_key(
         self,
@@ -12419,10 +12374,13 @@ class Application:
         body: str | bytes | None,
         headers: dict[str, str] | None,
     ) -> Response:
+        session, auth_error = self._resolve_tax_offset_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
         fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
             return error
-        imported_by = (fields.get("imported_by") or ["system"])[0]
+        imported_by = actor_id_for_session(session) if session is not None else (fields.get("imported_by") or ["system"])[0]
         if not files:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -12431,41 +12389,23 @@ class Application:
                     "message": "至少上传一个已认证发票文件。",
                 },
             )
-        session = self._tax_certified_import_service.preview_files(
+        payload = self._tax_certified_import_application_service.preview_payload(
             imported_by=imported_by,
-            uploads=[UploadedCertifiedImportFile(file_name=file.file_name, content=file.content) for file in files],
+            uploads=[
+                UploadedCertifiedImportFile(file_name=file.file_name, content=file.content)
+                for file in files
+            ],
         )
-        preview_files = []
-        total_matched_plan_count = 0
-        total_outside_plan_count = 0
-        for preview_file in session.files:
-            preview_counts = self._tax_offset_service.summarize_certified_preview_rows(
-                preview_file.month,
-                preview_file.rows,
-            )
-            total_matched_plan_count += preview_counts["matched_plan_count"]
-            total_outside_plan_count += preview_counts["outside_plan_count"]
-            preview_files.append(
-                {
-                    **asdict(preview_file),
-                    **preview_counts,
-                }
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "session": session,
-                "files": preview_files,
-                "summary": {
-                    "recognized_count": sum(file["recognized_count"] for file in preview_files),
-                    "invalid_count": sum(file["invalid_count"] for file in preview_files),
-                    "matched_plan_count": total_matched_plan_count,
-                    "outside_plan_count": total_outside_plan_count,
-                },
-            },
-        )
+        return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_tax_certified_import_confirm(self, body: str | bytes | None) -> Response:
+    def _handle_api_tax_certified_import_confirm(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        session, auth_error = self._resolve_tax_offset_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -12485,7 +12425,7 @@ class Application:
                     import_session_id=session_id,
                     idempotency_key=f"tax_certified_import.confirm:{session_id}",
                     payload={"session_id": session_id},
-                    created_by=str(payload.get("actor_id") or payload.get("imported_by") or "tax_certified_api"),
+                    created_by=actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or payload.get("imported_by") or "tax_certified_api"),
                     reason="tax_certified_import_confirm",
                 )
             except RuntimeError as exc:
@@ -12513,10 +12453,24 @@ class Application:
     def _execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
         return self._import_processing_service.execute_tax_certified_import_confirm(session_id)
 
-    def _handle_api_tax_certified_import_job(self, import_job_id: str) -> Response:
+    def _handle_api_tax_certified_import_job(
+        self,
+        import_job_id: str,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        _session, auth_error = self._resolve_tax_offset_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         return self._tax_offset_routes().handle_import_job(import_job_id)
 
-    def _handle_api_tax_certified_imports(self, month: str | None) -> Response:
+    def _handle_api_tax_certified_imports(
+        self,
+        month: str | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        _session, auth_error = self._resolve_tax_offset_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         if month is None or not month.strip():
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -12526,20 +12480,34 @@ class Application:
                 },
             )
         current_month = month.strip()
-        records = self._tax_certified_import_service.list_records_for_month(current_month)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "month": current_month,
-                "records": records,
-            },
-        )
+        return self._json_response(HTTPStatus.OK, self._tax_certified_import_application_service.records_payload(current_month))
 
-    def _handle_api_tax_offset_calculate(self, body: str | bytes | None) -> Response:
+    def _handle_api_tax_offset_calculate(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        _session, auth_error = self._resolve_tax_offset_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         return self._tax_offset_routes().handle_calculate(payload)
+
+    def _handle_api_tax_offset_plan_save(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        session, auth_error = self._resolve_tax_offset_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor_id = actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "tax_offset_api")
+        return self._tax_offset_routes().handle_save_plan(actor_id=actor_id, payload=payload)
 
     def _handle_workbench(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")

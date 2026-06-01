@@ -91,15 +91,18 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(rules_response.status_code, 200)
         self.assertIn("pending_invoice_tag_groups", rules_payload)
 
-    def test_income_endpoint_rejects_expense_only_filter(self) -> None:
+    def test_income_endpoint_accepts_rule_group_filter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            self._create_bank_transaction(app, counterparty_name="Customer API Income", credit=True)
+            self._install_pending_invoice_sql_read_model(app)
 
             response = app.handle_request("GET", "/api/pending-invoices/rows?direction=income&filter=requires_invoice")
 
         payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_filter_for_income")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["direction"], "income")
+        self.assertEqual(payload["filter"], "requires_invoice")
 
     def test_read_model_miss_returns_refreshing_without_sync_scan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -133,21 +136,29 @@ class PendingInvoiceApiTests(unittest.TestCase):
             filter_options_response = app.handle_request("GET", "/api/pending-invoices/filter-options?direction=expense")
             export_preview_response = app.handle_request("GET", "/api/pending-invoices/export-preview?direction=expense")
             export_response = app.handle_request("GET", "/api/pending-invoices/export?direction=expense")
+            income_response = app.handle_request("GET", "/api/pending-invoices/rows?direction=income&filter=cash_income")
 
         rows_payload = json.loads(rows_response.body)
         filter_options_payload = json.loads(filter_options_response.body)
         export_preview_payload = json.loads(export_preview_response.body)
         export_payload = json.loads(export_response.body)
+        income_payload = json.loads(income_response.body)
         self.assertEqual(rows_response.status_code, 202)
         self.assertEqual(filter_options_response.status_code, 202)
         self.assertEqual(export_preview_response.status_code, 202)
         self.assertEqual(export_response.status_code, 202)
+        self.assertEqual(income_response.status_code, 202)
         self.assertEqual(rows_payload["read_model_status"], "refreshing")
         self.assertEqual(filter_options_payload["read_model_status"], "refreshing")
         self.assertEqual(export_preview_payload["read_model_status"], "refreshing")
         self.assertEqual(export_payload["read_model_status"], "refreshing")
+        self.assertEqual(income_payload["read_model_status"], "refreshing")
         self.assertIn(
             {"scope_type": "pending_invoice", "scope_key": "expense:all", "reason": "api_miss"},
+            queue_repository.enqueued,
+        )
+        self.assertIn(
+            {"scope_type": "pending_invoice", "scope_key": "income:cash_income", "reason": "api_miss"},
             queue_repository.enqueued,
         )
 

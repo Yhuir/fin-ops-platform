@@ -62,6 +62,7 @@ EXPECTED_MIGRATIONS = [
     "0047_oa_pending_payment_read_model.sql",
     "0048_oa_pending_payment_bank_paid_total.sql",
     "0049_oa_pending_payment_detail_lookup_indexes.sql",
+    "0050_tax_offset_plans.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -103,6 +104,7 @@ EXPECTED_TABLES = [
     "app.tax_certified_import_sessions",
     "app.tax_certified_import_batches",
     "app.tax_certified_import_records",
+    "app.tax_offset_plans",
     "app.etc_invoices",
     "app.etc_import_sessions",
     "app.etc_import_batches",
@@ -169,7 +171,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 50)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 51)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 

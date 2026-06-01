@@ -333,20 +333,28 @@ class NoOaBankBatchApiTests(unittest.TestCase):
 
     def test_submit_returns_error_and_rolls_back_when_no_oa_batch_persistence_fails(self) -> None:
         class FailingNoOaBatchStore:
+            def __init__(self) -> None:
+                self.atomic_calls = 0
+
+            def save_no_oa_bank_batch_mutation(self, **_kwargs) -> None:
+                self.atomic_calls += 1
+                raise RuntimeError("no oa mutation unavailable")
+
             def save_workbench_pair_relations(self, *_args, **_kwargs) -> None:
-                return None
+                raise AssertionError("no-OA mutations must use the atomic persistence boundary")
 
             def save_workbench_read_models(self, *_args, **_kwargs) -> None:
-                return None
+                raise AssertionError("no-OA mutations must use the atomic persistence boundary")
 
             def save_no_oa_bank_batches(self, *_args, **_kwargs) -> None:
-                raise RuntimeError("no oa snapshot unavailable")
+                raise AssertionError("no-OA mutations must use the atomic persistence boundary")
 
         app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
         batch = self._list_batches(app)["batches"][0]
         before_snapshot = app._no_oa_bank_batch_service.snapshot()
         before_relations = app._workbench_pair_relation_service.snapshot()
-        app._state_store = FailingNoOaBatchStore()
+        failing_store = FailingNoOaBatchStore()
+        app._state_store = failing_store
 
         response = app.handle_request(
             "POST",
@@ -357,6 +365,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 500, response.body)
         self.assertEqual(payload["error"], "no_oa_bank_batch_persistence_failed")
+        self.assertEqual(failing_store.atomic_calls, 1)
         self.assertEqual(app._no_oa_bank_batch_service.snapshot(), before_snapshot)
         self.assertEqual(app._workbench_pair_relation_service.snapshot(), before_relations)
 

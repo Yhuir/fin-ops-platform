@@ -187,6 +187,7 @@ class ApplicationStateStore:
         self._oa_sync_state_path = root / "oa_sync_state.pkl"
         self._manual_oa_imports_path = root / "manual_oa_imports.json"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
+        self._tax_offset_plans_path = root / "tax_offset_plans.pkl"
         self._etc_state_path = root / "etc" / "etc_state.pkl"
         self._etc_invoice_file_root = root / "etc" / "invoice_attachments"
         self._etc_reconciliation_state_path = root / "etc_reconciliation" / "tasks.pkl"
@@ -714,6 +715,35 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         with self._tax_certified_imports_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
+
+    def save_tax_offset_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        normalized_plan = plan if isinstance(plan, dict) else {}
+        current_payload = self._load_tax_offset_plans()
+        plans = dict(current_payload.get("plans") if isinstance(current_payload.get("plans"), dict) else {})
+        idempotency_index = {
+            str(existing.get("idempotency_key")): str(existing_plan_id)
+            for existing_plan_id, existing in plans.items()
+            if isinstance(existing, dict) and existing.get("idempotency_key")
+        }
+        idempotency_key = str(normalized_plan.get("idempotency_key") or "").strip()
+        if idempotency_key and idempotency_key in idempotency_index:
+            return dict(plans[idempotency_index[idempotency_key]])
+        plan_id = str(normalized_plan.get("id") or "").strip()
+        if not plan_id:
+            raise ValueError("tax offset plan id is required.")
+        plans[plan_id] = normalized_plan
+        with self._tax_offset_plans_path.open("wb") as handle:
+            pickle.dump({"plans": plans}, handle)
+        return dict(normalized_plan)
+
+    def _load_tax_offset_plans(self) -> dict[str, Any]:
+        if not self._tax_offset_plans_path.exists():
+            return {}
+        with self._tax_offset_plans_path.open("rb") as handle:
+            loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
+        return loaded if isinstance(loaded, dict) else {}
 
     def load_etc_state(self) -> dict[str, Any]:
         if self._mongo_database is not None:

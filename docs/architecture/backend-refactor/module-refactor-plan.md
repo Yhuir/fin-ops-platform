@@ -248,6 +248,7 @@
 
 - `/api/pending-invoices/*`
 - `/api/input-invoice-usage/*`
+- `/api/oa-pending-payments/*`
 - `/api/output-invoice-collections/*`
 - 发票候选、进项使用、销项收款、发票附件缓存。
 
@@ -255,6 +256,7 @@
 
 - `services/pending_invoice_service.py`
 - `services/input_invoice_usage_service.py`
+- `services/oa_pending_payment_*`
 - `services/output_invoice_collection_service.py`
 - `services/invoice_usage_collection_*`
 - `services/oa_attachment_invoice_service.py`

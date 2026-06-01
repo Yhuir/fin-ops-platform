@@ -1240,8 +1240,8 @@ class AppSettingsService:
             version = int(DEFAULT_NO_OA_BANK_BATCH_TAG_SELECTION["version"])
         definitions_by_code = {
             str(definition.get("code") or "").strip(): definition
-            for definition in list(bank_transaction_tags.get("definitions") or [])
-            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+            for definition in AppSettingsService._no_oa_bank_batch_auto_rule_tags(bank_transaction_tags)
+            if str(definition.get("code") or "").strip()
         }
         selected_tag_codes: list[str] = []
         seen: set[str] = set()
@@ -1277,20 +1277,7 @@ class AppSettingsService:
         *,
         bank_transaction_tags: dict[str, Any],
     ) -> dict[str, Any]:
-        active_tags = [
-            {
-                "code": str(definition.get("code") or ""),
-                "label": str(definition.get("label") or definition.get("code") or ""),
-                "path": list(definition.get("path") or []),
-                "source": str(definition.get("source") or ""),
-                "status": str(definition.get("status") or "active"),
-                "output_primary_label": str(
-                    definition.get("output_primary_label") or definition.get("label") or definition.get("code") or ""
-                ),
-                "output_sub_label": str(definition.get("output_sub_label") or ""),
-            }
-            for definition in AppSettingsService._active_bank_transaction_tag_definitions(bank_transaction_tags)
-        ]
+        active_tags = AppSettingsService._no_oa_bank_batch_auto_rule_tags(bank_transaction_tags)
         active_codes = {tag["code"] for tag in active_tags}
         selected = [
             str(tag_code)
@@ -1309,6 +1296,62 @@ class AppSettingsService:
             "inactive_selected_tag_codes": inactive_selected,
             "active_tags": active_tags,
         }
+
+    @staticmethod
+    def _no_oa_bank_batch_auto_rule_tags(bank_transaction_tags: dict[str, Any]) -> list[dict[str, Any]]:
+        auto_rules_payload = BankTransactionCategoryService.auto_tag_rules_payload(
+            bank_transaction_tags,
+            can_save=False,
+        )
+        active_rules = [
+            rule
+            for rule in list(auto_rules_payload.get("active_rules") or [])
+            if isinstance(rule, dict) and str(rule.get("code") or "").strip()
+        ]
+        system_rule = auto_rules_payload.get("system_rule") if isinstance(auto_rules_payload.get("system_rule"), dict) else {}
+        definitions_by_code = {
+            str(definition.get("code") or "").strip(): definition
+            for definition in AppSettingsService._active_bank_transaction_tag_definitions(bank_transaction_tags)
+            if str(definition.get("code") or "").strip()
+        }
+
+        ordered_rules: list[dict[str, Any]] = []
+        system_code = str(system_rule.get("code") or "internal_transfer").strip()
+        if system_code:
+            system_definition = definitions_by_code.get(system_code, {})
+            ordered_rules.append({
+                "code": system_code,
+                "label": str(system_rule.get("label") or system_definition.get("label") or system_code),
+                "path": list(system_definition.get("path") or []),
+                "source": str(system_rule.get("source") or system_definition.get("source") or "system"),
+                "status": str(system_rule.get("status") or system_definition.get("status") or "active"),
+                "output_primary_label": str(
+                    system_definition.get("output_primary_label")
+                    or system_rule.get("label")
+                    or system_definition.get("label")
+                    or system_code
+                ),
+                "output_sub_label": str(system_definition.get("output_sub_label") or ""),
+            })
+        ordered_rules.extend(active_rules)
+
+        active_tags: list[dict[str, Any]] = []
+        seen_codes: set[str] = set()
+        for rule in ordered_rules:
+            code = str(rule.get("code") or "").strip()
+            if not code or code in seen_codes:
+                continue
+            seen_codes.add(code)
+            active_tags.append({
+                "code": code,
+                "label": str(rule.get("label") or rule.get("output_sub_label") or rule.get("output_primary_label") or code),
+                "path": list(rule.get("path") or definitions_by_code.get(code, {}).get("path") or []),
+                "source": str(rule.get("source") or definitions_by_code.get(code, {}).get("source") or "custom"),
+                "status": str(rule.get("status") or "active"),
+                "output_primary_label": str(rule.get("output_primary_label") or rule.get("label") or code),
+                "output_sub_label": str(rule.get("output_sub_label") or ""),
+            })
+        return active_tags
 
     @staticmethod
     def _normalize_turnover_ledger_tag_selection(

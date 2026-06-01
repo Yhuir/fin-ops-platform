@@ -954,6 +954,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["counterparty_name"], "贾小花")
         self.assertEqual(group["row_span"], 4)
         self.assertEqual(group["rows"][0], group["summary_row"])
+        self.assertEqual(group["closed_amount"], "300000.00")
         summary = group["summary_row"]
         self.assertEqual(summary["row_kind"], "summary")
         self.assertEqual(summary["display_level"], "group_summary")
@@ -1034,6 +1035,20 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(second_lot["repayment_date"], "2026-03-04")
         self.assertEqual(second_lot["loan_days"], 60)
         self.assertEqual(second_lot["accrued_interest"], "1972.60")
+
+    def test_grouped_ledger_summary_uses_actual_flow_outflow_when_repayment_exceeds_principal(self) -> None:
+        ledger_service = self._lot_grouped_service(
+            repayment_amount="360000.00",
+            today=date(2026, 4, 5),
+        )
+
+        payload = ledger_service.list_grouped_ledger(family="personal")
+
+        group = payload["groups"][0]
+        summary = group["summary_row"]
+        self.assertEqual(summary["borrow_amount"], "300000.00")
+        self.assertEqual(summary["repayment_amount"], "360000.00")
+        self.assertEqual(summary["balance_amount"], "0.00")
 
 
 if __name__ == "__main__":

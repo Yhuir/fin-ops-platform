@@ -88,20 +88,29 @@ class NoOaBankBatchApplicationService:
         if callable(list_read_model_batches):
             summary_read_model_batches = list_read_model_batches(summary_filters)
             read_model_batches = list_read_model_batches(filters)
+            if summary_read_model_batches is None or read_model_batches is None:
+                refresh_reason = "api_no_oa_read_model_missing"
+                refresh_enqueued = self.enqueue_background_refresh(["all"], reason=refresh_reason)
+                return {
+                    "summary": self.summary([]),
+                    "batches": [],
+                    "read_model_status": "missing",
+                    "read_model_stale_reasons": [],
+                    "refresh_enqueued": refresh_enqueued,
+                    "refresh_reason": refresh_reason,
+                }
             if summary_read_model_batches is not None and read_model_batches is not None:
                 stale_reasons = self.no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
                 if stale_reasons:
-                    refresh_enqueued = self.enqueue_background_refresh(["all"], reason="api_no_oa_source_versions_stale")
-                    self.refresh_batches()
-                    current_summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
-                    current_batches = self._no_oa_bank_batch_service.list_batches(filters)
+                    refresh_reason = "api_no_oa_source_versions_stale"
+                    refresh_enqueued = self.enqueue_background_refresh(["all"], reason=refresh_reason)
                     return {
-                        "summary": self.summary(current_summary_batches),
-                        "batches": self.resolve_labels(current_batches),
+                        "summary": self.summary(summary_read_model_batches),
+                        "batches": self.resolve_labels(read_model_batches),
                         "read_model_status": "stale",
                         "read_model_stale_reasons": stale_reasons,
                         "refresh_enqueued": refresh_enqueued,
-                        "refresh_reason": "api_no_oa_source_versions_stale",
+                        "refresh_reason": refresh_reason,
                     }
                 return {
                     "summary": self.summary(summary_read_model_batches),
@@ -130,10 +139,11 @@ class NoOaBankBatchApplicationService:
         return result
 
     def detail_payload(self, batch_id: str) -> dict[str, object]:
-        bank_rows, categories_by_transaction_id = self.refresh_batches()
-        rows_by_id = {str(row.get("id")): row for row in bank_rows if str(row.get("id") or "").strip()}
         batch = self._no_oa_bank_batch_service.get_batch(batch_id)
         row_ids = [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
+        bank_rows = self.no_oa_bank_transaction_rows_by_ids(row_ids)
+        categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
+        rows_by_id = {str(row.get("id")): row for row in bank_rows if str(row.get("id") or "").strip()}
         return {
             "batch": self.resolve_labels([batch])[0],
             "rows": self.detail_rows(row_ids, rows_by_id, categories_by_transaction_id),
@@ -258,42 +268,9 @@ class NoOaBankBatchApplicationService:
             payload = self._serialize_value(transaction)
             if not isinstance(payload, dict):
                 continue
-            transaction_id = str(payload.get("id") or "").strip()
-            if not transaction_id:
-                continue
-            row = dict(payload)
-            row["id"] = transaction_id
-            row["type"] = "bank"
-            row["bank_name"] = str(
-                row.get("bank_name")
-                or row.get("imported_bank_name")
-                or row.get("bank_short_name")
-                or row.get("account_bank")
-                or ""
-            ).strip()
-            account_no = str(row.get("account_no") or row.get("account_number") or "").strip()
-            account_last4 = str(row.get("account_last4") or row.get("imported_bank_last4") or "").strip()
-            if not account_last4:
-                digits = "".join(ch for ch in account_no if ch.isdigit())
-                account_last4 = digits[-4:] if digits else ""
-            row["account_last4"] = account_last4
-            row["account_key"] = str(row.get("account_key") or f"{row['bank_name']}:{account_last4}").strip(":")
-            row["counterparty_name"] = str(row.get("counterparty_name") or row.get("counterparty_name_raw") or "").strip()
-            amount = row.get("amount") or "0.00"
-            direction = str(row.get("txn_direction") or row.get("direction") or "").strip().lower()
-            if direction in {"outflow", "expense", "支", "出"}:
-                row["direction"] = "expense"
-                row["direction_label"] = "支"
-                row["debit_amount"] = row.get("debit_amount") or amount
-                row["credit_amount"] = row.get("credit_amount") or "0.00"
-            elif direction in {"inflow", "income", "收", "进"}:
-                row["direction"] = "income"
-                row["direction_label"] = "收"
-                row["debit_amount"] = row.get("debit_amount") or "0.00"
-                row["credit_amount"] = row.get("credit_amount") or amount
-            if "purpose" not in row:
-                row["purpose"] = row.get("usage") or row.get("use") or ""
-            rows.append(row)
+            row = self.normalize_no_oa_bank_transaction_payload(payload)
+            if row is not None:
+                rows.append(row)
         categories_by_transaction_id = self.effective_categories_for_rows(rows)
         for row in rows:
             transaction_id = str(row.get("id") or "").strip()
@@ -309,6 +286,67 @@ class NoOaBankBatchApplicationService:
                 )
                 row["category_source"] = category.get("category_source") or category.get("source")
         return rows
+
+    def no_oa_bank_transaction_rows_by_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        get_transaction = getattr(self._import_service, "get_transaction", None)
+        normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
+        if not callable(get_transaction):
+            rows_by_id = {
+                str(row.get("id") or "").strip(): row
+                for row in self.no_oa_bank_transaction_rows()
+                if str(row.get("id") or "").strip()
+            }
+            return [rows_by_id[row_id] for row_id in normalized_row_ids if row_id in rows_by_id]
+
+        rows: list[dict[str, object]] = []
+        for row_id in normalized_row_ids:
+            transaction = get_transaction(row_id)
+            payload = self._serialize_value(transaction)
+            if not isinstance(payload, dict):
+                continue
+            row = self.normalize_no_oa_bank_transaction_payload(payload)
+            if row is not None:
+                rows.append(row)
+        return rows
+
+    @staticmethod
+    def normalize_no_oa_bank_transaction_payload(payload: dict[str, object]) -> dict[str, object] | None:
+        transaction_id = str(payload.get("id") or "").strip()
+        if not transaction_id:
+            return None
+        row = dict(payload)
+        row["id"] = transaction_id
+        row["type"] = "bank"
+        row["bank_name"] = str(
+            row.get("bank_name")
+            or row.get("imported_bank_name")
+            or row.get("bank_short_name")
+            or row.get("account_bank")
+            or ""
+        ).strip()
+        account_no = str(row.get("account_no") or row.get("account_number") or "").strip()
+        account_last4 = str(row.get("account_last4") or row.get("imported_bank_last4") or "").strip()
+        if not account_last4:
+            digits = "".join(ch for ch in account_no if ch.isdigit())
+            account_last4 = digits[-4:] if digits else ""
+        row["account_last4"] = account_last4
+        row["account_key"] = str(row.get("account_key") or f"{row['bank_name']}:{account_last4}").strip(":")
+        row["counterparty_name"] = str(row.get("counterparty_name") or row.get("counterparty_name_raw") or "").strip()
+        amount = row.get("amount") or "0.00"
+        direction = str(row.get("txn_direction") or row.get("direction") or "").strip().lower()
+        if direction in {"outflow", "expense", "支", "出"}:
+            row["direction"] = "expense"
+            row["direction_label"] = "支"
+            row["debit_amount"] = row.get("debit_amount") or amount
+            row["credit_amount"] = row.get("credit_amount") or "0.00"
+        elif direction in {"inflow", "income", "收", "进"}:
+            row["direction"] = "income"
+            row["direction_label"] = "收"
+            row["debit_amount"] = row.get("debit_amount") or "0.00"
+            row["credit_amount"] = row.get("credit_amount") or amount
+        if "purpose" not in row:
+            row["purpose"] = row.get("usage") or row.get("use") or ""
+        return row
 
     def effective_categories_for_rows(self, rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
         categories_by_transaction_id = {
@@ -518,16 +556,28 @@ class NoOaBankBatchApplicationService:
             return
         try:
             self._search_cache_clearer()
-            if changed_case_ids:
-                self._state_store.save_workbench_pair_relations(
-                    self._pair_relation_service.snapshot_case_ids(changed_case_ids),
+            save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
+            if callable(save_mutation):
+                save_mutation(
+                    pair_relation_snapshot=self._pair_relation_service.snapshot_case_ids(changed_case_ids)
+                    if changed_case_ids
+                    else self._pair_relation_service.snapshot(),
+                    no_oa_bank_batch_snapshot=self._no_oa_bank_batch_service.snapshot(),
+                    workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
                     changed_case_ids=changed_case_ids,
+                    changed_scope_keys=changed_scope_keys,
                 )
-            self._state_store.save_no_oa_bank_batches(self._no_oa_bank_batch_service.snapshot())
-            self._state_store.save_workbench_read_models(
-                self._workbench_read_model_service.snapshot(),
-                changed_scope_keys=changed_scope_keys,
-            )
+            else:
+                if changed_case_ids:
+                    self._state_store.save_workbench_pair_relations(
+                        self._pair_relation_service.snapshot_case_ids(changed_case_ids),
+                        changed_case_ids=changed_case_ids,
+                    )
+                self._state_store.save_no_oa_bank_batches(self._no_oa_bank_batch_service.snapshot())
+                self._state_store.save_workbench_read_models(
+                    self._workbench_read_model_service.snapshot(),
+                    changed_scope_keys=changed_scope_keys,
+                )
         except Exception as exc:
             raise NoOaBankBatchPersistenceError(str(exc)) from exc
 

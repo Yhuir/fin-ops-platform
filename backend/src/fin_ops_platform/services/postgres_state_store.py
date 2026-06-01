@@ -20,6 +20,7 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresReadModelRepository,
     PostgresWorkbenchRepository,
 )
+from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
 from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_bank_transaction_categories,
     normalize_no_oa_bank_batches,
@@ -274,6 +275,9 @@ class PostgresStateStore:
         self._ops_tax_etc_repository.save_tax_certified_imports(snapshot)
         self._save_snapshot("tax_certified_imports", snapshot)
 
+    def save_tax_offset_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        return self._ops_tax_etc_repository.save_tax_offset_plan(plan)
+
     def load_etc_state(self) -> dict[str, Any]:
         snapshot = self._ops_tax_etc_repository.load_etc_state()
         if snapshot:
@@ -525,6 +529,32 @@ class PostgresStateStore:
     def save_workbench_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         self._read_model_repository.save_workbench_read_models(snapshot, changed_scope_keys=changed_scope_keys)
         self._save_snapshot("workbench_read_models", snapshot)
+
+    def save_no_oa_bank_batch_mutation(
+        self,
+        *,
+        pair_relation_snapshot: dict[str, Any],
+        no_oa_bank_batch_snapshot: dict[str, Any],
+        workbench_read_model_snapshot: dict[str, Any],
+        changed_case_ids: set[str] | list[str] | tuple[str, ...],
+        changed_scope_keys: set[str] | list[str] | tuple[str, ...],
+    ) -> None:
+        normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
+        normalized_scope_keys = {str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()}
+
+        def write(_connection: Any) -> None:
+            if normalized_case_ids:
+                self.save_workbench_pair_relations(
+                    pair_relation_snapshot,
+                    changed_case_ids=normalized_case_ids,
+                )
+            self.save_no_oa_bank_batches(no_oa_bank_batch_snapshot)
+            self.save_workbench_read_models(
+                workbench_read_model_snapshot,
+                changed_scope_keys=normalized_scope_keys,
+            )
+
+        run_in_transaction(self._connection, write)
 
     def load_workbench_candidate_matches(self) -> dict[str, Any]:
         snapshot = self._read_model_repository.load_workbench_candidate_matches()

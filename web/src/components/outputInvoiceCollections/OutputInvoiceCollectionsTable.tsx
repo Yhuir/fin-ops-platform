@@ -51,6 +51,7 @@ type OutputInvoiceCollectionsTableProps = {
 
 const defaultFilterConfigs: Record<string, OutputInvoiceCollectionFilterFieldConfig> = {
   invoice_no: { field: "invoice_no", label: "发票号码", mode: "text", sortable: true, operators: ["contains", "equals"] },
+  invoice_date: { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
   buyer_name: { field: "buyer_name", label: "购方", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
   total_with_tax: { field: "total_with_tax", label: "价税合计", mode: "money", sortable: true, operators: ["between", "equals"] },
   tax_amount: { field: "tax_amount", label: "税额/税率", mode: "money", sortable: true, operators: ["between", "equals"] },
@@ -135,6 +136,7 @@ function HeaderCell({
   filterConfigs,
   filterOptions,
   currentFilter,
+  extraFilters = [],
   onFilterApply,
   onFilterClear,
   onSortChange,
@@ -146,6 +148,7 @@ function HeaderCell({
   filterConfigs: OutputInvoiceCollectionFilterFieldConfig[];
   filterOptions: Record<string, OutputInvoiceCollectionFilterOption[]>;
   currentFilter?: OutputInvoiceCollectionFilter | null;
+  extraFilters?: Array<{ field: string; label: string; currentFilter?: OutputInvoiceCollectionFilter | null }>;
   onFilterApply: (filter: OutputInvoiceCollectionFilterValue) => void;
   onFilterClear: (field: string) => void;
   onSortChange: (field: string, direction?: OutputInvoiceCollectionSortDirection) => void;
@@ -165,7 +168,7 @@ function HeaderCell({
       >
         {field && fieldConfig ? (
           <OutputInvoiceCollectionFilterMenu
-            fieldConfig={{ field: fieldConfig.field, label, mode: fieldConfig.mode, sortable: fieldConfig.sortable }}
+            fieldConfig={{ field: fieldConfig.field, label, mode: fieldConfig.mode, sortable: fieldConfig.sortable, operators: fieldConfig.operators }}
             currentFilter={currentFilter as OutputInvoiceCollectionFilterValue | null}
             options={filterOptions[field] ?? []}
             onApply={onFilterApply}
@@ -185,6 +188,26 @@ function HeaderCell({
             </IconButton>
           </Tooltip>
         ) : null}
+        {extraFilters.map((extraFilter) => {
+          const extraFieldConfig = filterConfigs.find((config) => config.field === extraFilter.field) ?? defaultFilterConfigs[extraFilter.field];
+          return extraFieldConfig ? (
+            <OutputInvoiceCollectionFilterMenu
+              key={extraFilter.field}
+              fieldConfig={{
+                field: extraFieldConfig.field,
+                label: extraFilter.label,
+                mode: extraFieldConfig.mode,
+                sortable: extraFieldConfig.sortable,
+                operators: extraFieldConfig.operators,
+              }}
+              currentFilter={extraFilter.currentFilter as OutputInvoiceCollectionFilterValue | null}
+              options={filterOptions[extraFilter.field] ?? []}
+              onApply={onFilterApply}
+              onClear={onFilterClear}
+              onSort={(direction) => onSortChange(extraFilter.field, direction)}
+            />
+          ) : null;
+        })}
       </Stack>
     </TableCell>
   );
@@ -258,7 +281,17 @@ export default function OutputInvoiceCollectionsTable({
               </TableCell>
             </TableRow>
             <TableRow aria-label={activeSortLabel || undefined}>
-              <HeaderCell label="发票号码" field="invoice_no" filterConfigs={filterConfigs} filterOptions={filterOptions} currentFilter={filters.find((filter) => filter.field === "invoice_no")} onFilterApply={onFilterApply} onFilterClear={onFilterClear} onSortChange={onSortChange} />
+              <HeaderCell
+                label="发票号码"
+                field="invoice_no"
+                extraFilters={[{ field: "invoice_date", label: "开票日期", currentFilter: filters.find((filter) => filter.field === "invoice_date") }]}
+                filterConfigs={filterConfigs}
+                filterOptions={filterOptions}
+                currentFilter={filters.find((filter) => filter.field === "invoice_no")}
+                onFilterApply={onFilterApply}
+                onFilterClear={onFilterClear}
+                onSortChange={onSortChange}
+              />
               <HeaderCell label="购方" field="buyer_name" sx={smallSeparatorSx} filterConfigs={filterConfigs} filterOptions={filterOptions} currentFilter={filters.find((filter) => filter.field === "buyer_name")} onFilterApply={onFilterApply} onFilterClear={onFilterClear} onSortChange={onSortChange} />
               <HeaderCell label="价税合计" field="total_with_tax" align="right" sx={smallSeparatorSx} filterConfigs={filterConfigs} filterOptions={filterOptions} currentFilter={filters.find((filter) => filter.field === "total_with_tax")} onFilterApply={onFilterApply} onFilterClear={onFilterClear} onSortChange={onSortChange} />
               <HeaderCell label="税额/税率" field="tax_amount" align="right" sx={smallSeparatorSx} filterConfigs={filterConfigs} filterOptions={filterOptions} currentFilter={filters.find((filter) => filter.field === "tax_amount")} onFilterApply={onFilterApply} onFilterClear={onFilterClear} onSortChange={onSortChange} />

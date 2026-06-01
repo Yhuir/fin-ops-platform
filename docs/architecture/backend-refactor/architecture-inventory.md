@@ -76,6 +76,7 @@
 | `/api/no-oa-bank-batches*` | GET/POST | `app/server.py` | Bankdetail | `docs/product-specs/no-oa-bank-batches.md` | 免 OA 批次 |
 | `/api/pending-invoices/*` | GET/POST | `app/server.py` | Invoices | `docs/product-specs/pending-invoices.md`、`docs/dev/pending-invoices-api.md` | 待找发票 |
 | `/api/input-invoice-usage/*` | GET/POST | `app/server.py` | Invoices | invoice usage tests | 进项使用 |
+| `/api/oa-pending-payments/*` | GET | `app/routes_oa_pending_payments.py`、`app/server.py` | Invoices | `docs/product-specs/oa-pending-payments.md`、`docs/dev/oa-pending-payments-api.md` | OA 待付款核对 |
 | `/api/output-invoice-collections/*` | GET/POST | `app/server.py` | Invoices | output invoice tests | 销项收款 |
 | `/imports/*` | GET/POST | `app/server.py` | Imports | `docs/product-specs/imports.md` | 导入文件与任务 |
 | `/api/search` | GET | `app/server.py:_handle_api_search` | Search / Pending Query | `tests/test_search_api.py` | 统一搜索 |
@@ -122,7 +123,7 @@
 | `backend/src/fin_ops_platform/services/turnover_*.py` | Turnover Ledger | Bankdetail、Workbench | Turnover read/write/export |
 | `backend/src/fin_ops_platform/services/batch_accounting_service.py` | Batch Accounting | Workbench | Batch submit/withdraw/list |
 | `backend/src/fin_ops_platform/services/bank_*`、`no_oa_bank_*` | Bankdetail | Workbench、Turnover | 银行流水、标签、账户余额、免 OA 批次 |
-| `backend/src/fin_ops_platform/services/pending_invoice_*`、`input_invoice_*`、`output_invoice_*`、`invoice_*`、`oa_attachment_invoice_*` | Invoices | Search、Workbench | 发票、附件、使用/收款 |
+| `backend/src/fin_ops_platform/services/pending_invoice_*`、`input_invoice_*`、`oa_pending_payment_*`、`output_invoice_*`、`invoice_*`、`oa_attachment_invoice_*` | Invoices | Search、Workbench | 发票、附件、使用/收款、OA 待付款核对 |
 | `backend/src/fin_ops_platform/services/import*`、`object_storage.py` | Imports | Bankdetail、Invoices、Tax / Cost / ETC | 导入文件、任务、对象存储 |
 | `backend/src/fin_ops_platform/services/tax_*`、`cost_*`、`etc_*`、`project_costing.py` | Tax / Cost / ETC | Imports、Search | 税金、成本、ETC |
 | `backend/src/fin_ops_platform/services/search_*` | Search / Pending Query | Invoices、Bankdetail、Workbench | 搜索和 pending projection |

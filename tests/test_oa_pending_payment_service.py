@@ -145,6 +145,36 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["bankTransaction"]["paidTotal"], "100.00")
         self.assertEqual(payload["summary"]["bankPaidTotal"], "100.00")
 
+    def test_only_outflow_bank_relations_count_as_payment_evidence(self) -> None:
+        income_bank = self._bank("bank-income", "100.00", direction=TransactionDirection.INFLOW)
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-income", ["oa-income", income_bank.id], matched=True)
+        service = self._service(
+            oa_records=[self._oa("oa-income", "吴十", "100.00")],
+            transactions=[income_bank],
+            pair_service=pair_service,
+        )
+
+        row = service.list_rows()["rows"][0]
+
+        self.assertEqual(row["paymentStatus"]["code"], "pending_review")
+        self.assertIn("证据不完整", row["paymentStatus"]["reason"])
+        self.assertEqual(row["bankTransaction"]["relationCount"], 0)
+
+    def test_missing_related_bank_fact_is_pending_review_not_unpaid(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-missing-bank", ["oa-missing-bank", "bank-missing"], matched=False)
+        service = self._service(
+            oa_records=[self._oa("oa-missing-bank", "郑十一", "100.00")],
+            transactions=[],
+            pair_service=pair_service,
+        )
+
+        row = service.list_rows()["rows"][0]
+
+        self.assertEqual(row["paymentStatus"]["code"], "pending_review")
+        self.assertIn("关联流水事实缺失", row["paymentStatus"]["reason"])
+
     def _service(
         self,
         *,
@@ -189,14 +219,15 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _bank(bank_id: str, amount: str) -> BankTransaction:
+    def _bank(bank_id: str, amount: str, *, direction: TransactionDirection = TransactionDirection.OUTFLOW) -> BankTransaction:
+        signed_amount = -Decimal(amount) if direction == TransactionDirection.OUTFLOW else Decimal(amount)
         return BankTransaction(
             id=bank_id,
             account_no="622200001234",
-            txn_direction=TransactionDirection.OUTFLOW,
+            txn_direction=direction,
             counterparty_name_raw="测试供应商",
             amount=Decimal(amount),
-            signed_amount=-Decimal(amount),
+            signed_amount=signed_amount,
             txn_date="2026-05-21",
             trade_time="2026-05-21 10:00:00",
             account_name="云南溯源科技有限公司",

@@ -17,7 +17,8 @@ import { useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { calculateTaxOffset, fetchTaxOffsetMonth } from "../features/tax/api";
+import { ApiClientError } from "../features/apiClient";
+import { calculateTaxOffset, fetchTaxOffsetMonth, saveTaxOffsetPlan } from "../features/tax/api";
 import { FINANCE_DOMAIN_EVENTS, subscribeFinanceDomainEvent } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
@@ -92,8 +93,10 @@ export default function TaxOffsetPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
+  const [planFeedback, setPlanFeedback] = useState<string | null>(null);
   const outputTableWrapRef = useRef<HTMLDivElement | null>(null);
   const inputTableWrapRef = useRef<HTMLDivElement | null>(null);
   const taxLayoutScrollbarRef = useRef<HTMLDivElement | null>(null);
@@ -180,6 +183,7 @@ export default function TaxOffsetPage() {
   useEffect(() => {
     const controller = new AbortController();
     setImportFeedback(null);
+    setPlanFeedback(null);
     void loadMonthData("reset", controller.signal);
     return () => controller.abort();
   }, [loadMonthData]);
@@ -334,31 +338,74 @@ export default function TaxOffsetPage() {
   const selectableInputIds = getSelectableInputIds(monthData);
   const hasVisibleMonthData = Boolean(monthData);
   const headerStatusMessage = importFeedback
+    ?? planFeedback
     ?? (isCalculating
       ? "正在根据计划勾选项重新试算税金抵扣结果..."
+      : isSavingPlan
+        ? "正在保存本月税金抵扣计划..."
       : isRefreshing
         ? "正在同步最新已认证结果与计划状态..."
         : hasVisibleMonthData && isLoading
           ? `正在加载 ${currentMonth} 的税金抵扣计划与已认证结果...`
           : null);
+  const readModelMetadata = monthData
+    ? [
+      monthData.readModelGeneratedAt ? `生成时间：${monthData.readModelGeneratedAt}` : null,
+      monthData.readModelScopeKey ? `范围：${monthData.readModelScopeKey}` : null,
+      ...(monthData.readModelStaleReasons ?? []).map((reason) => `过期原因：${reason}`),
+    ].filter((item): item is string => Boolean(item))
+    : [];
 
   const handleCertifiedImportComplete = useCallback(
     async (result: TaxCertifiedImportConfirmedResult) => {
       setIsCertifiedImportModalOpen(false);
       await loadMonthData("refresh");
       setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，并已刷新当前税金抵扣页面。`);
+      setPlanFeedback(null);
     },
     [loadMonthData],
   );
 
+  const handleSavePlan = useCallback(async () => {
+    if (!monthData || !summary || isSavingPlan) {
+      return;
+    }
+    setIsSavingPlan(true);
+    setLoadError(null);
+    setImportFeedback(null);
+    setPlanFeedback(null);
+    try {
+      await saveTaxOffsetPlan({
+        month: currentMonth,
+        selectedOutputIds: monthData.defaultSelectedOutputIds,
+        selectedInputIds,
+        expectedReadModelScopeKey: monthData.readModelScopeKey,
+        expectedSourceVersions: monthData.sourceVersions,
+        idempotencyKey: `tax-offset-plan:${currentMonth}:${monthData.readModelScopeKey ?? "scope"}:${selectedInputIds.join(",")}`,
+      });
+      setPlanFeedback("已保存本月税金抵扣计划。");
+      await loadMonthData("refresh");
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 409) {
+        setLoadError(error.message || "税金抵扣数据已变化，请刷新后重新保存。");
+      } else {
+        setLoadError("税金抵扣计划保存失败，请稍后重试。");
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsSavingPlan(false);
+      }
+    }
+  }, [currentMonth, isSavingPlan, loadMonthData, monthData, selectedInputIds, summary]);
+
   return (
     <PageScaffold
       title="税金抵扣计划与试算"
-      description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算与展示，不承担真实税务业务动作。"
+      description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算、导入核对与读模型状态展示。"
       actions={(
         <Stack direction="row" alignItems="center" justifyContent="flex-end" flexWrap="wrap" gap={1}>
           {headerStatusMessage ? (
-            <Alert className={importFeedback ? "page-note page-note-success" : "page-note page-note-info"} severity={importFeedback ? "success" : "info"}>
+            <Alert className={importFeedback || planFeedback ? "page-note page-note-success" : "page-note page-note-info"} severity={importFeedback || planFeedback ? "success" : "info"}>
               {headerStatusMessage}
             </Alert>
           ) : null}
@@ -378,6 +425,11 @@ export default function TaxOffsetPage() {
       {isReadModelRefreshing ? (
         <StatePanel tone="loading">税金抵扣读模型正在刷新，页面会自动重试。</StatePanel>
       ) : null}
+      {readModelMetadata.length > 0 ? (
+        <Alert className="page-note page-note-info" severity={isReadModelRefreshing ? "warning" : "info"}>
+          {readModelMetadata.join("；")}
+        </Alert>
+      ) : null}
       {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
 
       {summary ? <TaxSummaryCards summary={summary} /> : null}
@@ -389,6 +441,10 @@ export default function TaxOffsetPage() {
           selectedPlanInputCount={selectedInputIds.length}
           resultAmount={summary.resultAmount}
           resultLabel={summary.resultLabel}
+          canSave={canMutateData}
+          isSaving={isSavingPlan}
+          saveDisabled={isReadModelRefreshing || isCalculating || isLoading || isRefreshing}
+          onSave={handleSavePlan}
         />
       ) : null}
       {!loadError && monthData ? (

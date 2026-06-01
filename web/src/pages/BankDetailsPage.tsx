@@ -861,6 +861,13 @@ function choiceSubLabel(choice: ConfirmationChoice) {
   return choice.subLabel || choice.primaryLabel;
 }
 
+function choiceDisplayLabel(choice: ConfirmationChoice) {
+  const labelPath = choice.labelPath.length
+    ? choice.labelPath
+    : [choice.primaryLabel, choice.subLabel, choice.thirdLabel].filter((value): value is string => Boolean(value));
+  return labelPath.join(" / ") || choice.categoryCode;
+}
+
 function buildChoiceSubGroups(group: ConfirmationChoiceGroup | null): ConfirmationChoiceSubGroup[] {
   if (!group) {
     return [];
@@ -952,12 +959,13 @@ function TypeCell({
   row: BankDetailTransaction;
   autoTagRules: BankAutoTagEditableRule[];
   confirming: boolean;
-  onConfirm: (row: BankDetailTransaction, choice: ConfirmationChoice) => void;
-  onAssign: (row: BankDetailTransaction, choice: ConfirmationChoice) => void;
+  onConfirm: (row: BankDetailTransaction, choice: ConfirmationChoice) => Promise<void>;
+  onAssign: (row: BankDetailTransaction, choice: ConfirmationChoice) => Promise<void>;
   onRevoke: (row: BankDetailTransaction) => void;
   onClearAssignment: (row: BankDetailTransaction) => void;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [stagedChoice, setStagedChoice] = useState<ConfirmationChoice | null>(null);
   const confirmationGroups = useMemo(
     () => (row.categoryResolutionStatus === "needs_confirmation"
       ? buildConfirmationChoiceGroups(row.autoCandidateCategories, autoTagRules)
@@ -973,6 +981,7 @@ function TypeCell({
   const isManualAssignment = assignmentGroups.length > 0;
   const selectionGroups = confirmationGroups.length > 0 ? confirmationGroups : assignmentGroups;
   const selectionLabel = confirmationGroups.length > 0 ? "待确认" : "待分类";
+  const triggerLabel = stagedChoice ? choiceDisplayLabel(stagedChoice) : selectionLabel;
   const childLabelSuffix = confirmationGroups.length > 0 ? "候选标签" : "可选标签";
   const thirdLabelSuffix = confirmationGroups.length > 0 ? "候选业务类型" : "可选业务类型";
   const [selectedPrimaryKey, setSelectedPrimaryKey] = useState("");
@@ -990,6 +999,7 @@ function TypeCell({
     }
     if (!selectionGroups.some((group) => group.key === selectedPrimaryKey)) {
       setSelectedPrimaryKey(selectionGroups[0].key);
+      setStagedChoice(null);
     }
   }, [selectionGroups, selectedPrimaryKey]);
 
@@ -1002,17 +1012,37 @@ function TypeCell({
     }
     if (!selectedSubGroups.some((group) => group.key === selectedSubKey)) {
       setSelectedSubKey(selectedSubGroups[0].key);
+      setStagedChoice(null);
     }
   }, [selectedSubGroups, selectedSubKey]);
 
-  const closeConfirmationPanel = () => setAnchorEl(null);
-  const commitChoice = (choice: ConfirmationChoice) => {
-    closeConfirmationPanel();
-    if (isManualAssignment) {
-      onAssign(row, choice);
-    } else {
-      onConfirm(row, choice);
+  useEffect(() => {
+    setStagedChoice(null);
+  }, [row.id, row.categoryResolutionStatus, row.effectiveCategoryCode]);
+
+  const closeConfirmationPanel = () => {
+    if (confirming) {
+      return;
     }
+    setAnchorEl(null);
+    setStagedChoice(null);
+  };
+  const stageChoice = (choice: ConfirmationChoice) => {
+    if (confirming) {
+      return;
+    }
+    setStagedChoice(choice);
+  };
+  const saveStagedChoice = () => {
+    if (!stagedChoice || confirming) {
+      return;
+    }
+    const choice = stagedChoice;
+    setAnchorEl(null);
+    const request = isManualAssignment ? onAssign(row, choice) : onConfirm(row, choice);
+    request
+      .then(() => setStagedChoice(null))
+      .catch(() => setStagedChoice(null));
   };
 
   if (selectionGroups.length > 0) {
@@ -1022,13 +1052,18 @@ function TypeCell({
           aria-controls={anchorEl ? `bank-category-confirmation-${row.id}` : undefined}
           aria-expanded={anchorEl ? "true" : undefined}
           aria-haspopup="menu"
+          className="bank-category-confirmation-trigger"
           size="small"
           variant="outlined"
           color={isManualAssignment ? "info" : "warning"}
-          onClick={(event) => setAnchorEl(event.currentTarget)}
-          disabled={confirming}
+          onClick={(event) => {
+            if (!confirming) {
+              setAnchorEl(event.currentTarget);
+            }
+          }}
+          aria-disabled={confirming ? "true" : undefined}
         >
-          {selectionLabel}
+          {triggerLabel}
         </Button>
         <Popper
           anchorEl={anchorEl}
@@ -1075,6 +1110,7 @@ function TypeCell({
                       onClick={() => {
                         setSelectedPrimaryKey(group.key);
                         setSelectedSubKey("");
+                        setStagedChoice(null);
                       }}
                       role="menuitem"
                       selected={group.key === selectedGroup?.key}
@@ -1102,11 +1138,11 @@ function TypeCell({
                         }
                         const choice = subGroup.choices[0];
                         if (choice) {
-                          commitChoice(choice);
+                          stageChoice(choice);
                         }
                       }}
                       role="menuitem"
-                      selected={subGroup.key === selectedSubGroup?.key}
+                      selected={subGroup.key === selectedSubGroup?.key || subGroup.choices.some((choice) => stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) : false)}
                     >
                       <ListItemText
                         disableTypography
@@ -1129,8 +1165,9 @@ function TypeCell({
                           className="bank-category-confirmation-third-item"
                           component="button"
                           key={choiceKey(choice)}
-                          onClick={() => commitChoice(choice)}
+                          onClick={() => stageChoice(choice)}
                           role="menuitem"
+                          selected={stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) : false}
                         >
                           <ListItemText
                             disableTypography
@@ -1141,6 +1178,19 @@ function TypeCell({
                     </MenuList>
                   </>
                 ) : null}
+              </Box>
+              <Box className="bank-category-confirmation-footer">
+                <Button size="small" variant="outlined" onClick={closeConfirmationPanel}>
+                  取消
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={saveStagedChoice}
+                  disabled={!stagedChoice || confirming}
+                >
+                  {confirming ? "保存中" : "保存"}
+                </Button>
               </Box>
             </Paper>
           </ClickAwayListener>
@@ -1688,7 +1738,7 @@ export default function BankDetailsPage() {
   const handleConfirmCategory = (row: BankDetailTransaction, choice: ConfirmationChoice) => {
     setCategoryMutationId(row.id);
     setError(null);
-    confirmBankDetailCategory(row.id, choice.categoryCode, choice.thirdLabel)
+    return confirmBankDetailCategory(row.id, choice.categoryCode, choice.thirdLabel)
       .then(() => {
         applyOptimisticCategoryChoice(row, choice);
         emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
@@ -1697,7 +1747,10 @@ export default function BankDetailsPage() {
         });
         setRefreshToken((current) => current + 1);
       })
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签确认失败。"))
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : "银行明细标签确认失败。");
+        throw caught;
+      })
       .finally(() => setCategoryMutationId(null));
   };
 
@@ -1714,7 +1767,7 @@ export default function BankDetailsPage() {
         turnoverFamily: choice.turnoverFamily,
       }
       : {};
-    assignBankDetailCategory(row.id, choice.categoryCode, structuredSelection)
+    return assignBankDetailCategory(row.id, choice.categoryCode, structuredSelection)
       .then(() => {
         applyOptimisticCategoryChoice(row, choice);
         emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
@@ -1723,7 +1776,10 @@ export default function BankDetailsPage() {
         });
         setRefreshToken((current) => current + 1);
       })
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签设置失败。"))
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : "银行明细标签设置失败。");
+        throw caught;
+      })
       .finally(() => setCategoryMutationId(null));
   };
 

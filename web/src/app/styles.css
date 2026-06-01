@@ -7885,7 +7885,22 @@ body.column-layout-dragging {
   padding-top: 4px;
 }
 
+.bank-category-confirmation-trigger.MuiButton-root {
+  max-width: 118px;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.bank-category-confirmation-trigger.MuiButton-root[aria-disabled="true"] {
+  opacity: 1;
+  cursor: default;
+}
+
 .bank-category-confirmation-panel {
+  display: flex;
+  flex-direction: column;
   width: min(580px, calc(100vw - 40px));
   max-height: min(320px, calc(100vh - 160px));
   overflow: hidden;
@@ -7896,10 +7911,12 @@ body.column-layout-dragging {
 }
 
 .bank-category-confirmation-columns {
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: minmax(118px, 0.9fr) auto minmax(150px, 1.1fr);
-  max-height: inherit;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .bank-category-confirmation-columns--three-level {
@@ -7909,7 +7926,6 @@ body.column-layout-dragging {
 .bank-category-confirmation-primary-list,
 .bank-category-confirmation-child-list,
 .bank-category-confirmation-third-list {
-  max-height: inherit;
   overflow: auto;
   padding: 5px;
 }
@@ -7929,9 +7945,20 @@ body.column-layout-dragging {
 }
 
 .bank-category-confirmation-primary-item.Mui-selected,
-.bank-category-confirmation-child-item.Mui-selected {
+.bank-category-confirmation-child-item.Mui-selected,
+.bank-category-confirmation-third-item.Mui-selected {
   background: var(--bank-selected);
   color: var(--bank-blue);
+}
+
+.bank-category-confirmation-footer {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 8px 10px;
+  border-top: 1px solid var(--bank-border-subtle);
+  background: #ffffff;
 }
 
 .bank-category-confirmation-primary-item .MuiTypography-root,

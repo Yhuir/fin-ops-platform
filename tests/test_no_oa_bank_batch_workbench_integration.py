@@ -68,8 +68,110 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["read_model_status"], "stale")
         self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
-        self.assertNotEqual(payload["batches"][0]["batch_id"], "stale_sql_batch")
-        self.assertEqual(payload["batches"][0]["source_versions"], app._no_oa_bank_batch_source_versions())
+        self.assertEqual(payload["batches"][0]["batch_id"], "stale_sql_batch")
+
+    def test_no_oa_bank_batches_missing_sql_read_model_does_not_refresh_in_get_path(self) -> None:
+        class MissingNoOaReadRepository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_no_oa_bank_batch_rows(self, filters: dict[str, object]) -> None:
+                self.calls.append(dict(filters))
+                return None
+
+        class QueueRepository:
+            def __init__(self) -> None:
+                self.enqueued: list[dict[str, object]] = []
+
+            def enqueue_read_model_refresh(self, **kwargs):
+                self.enqueued.append(dict(kwargs))
+                return {"event_id": "queued"}
+
+        app = build_application()
+        app._workbench_sql_read_repository = MissingNoOaReadRepository()
+        app._runtime_repositories = type(
+            "RuntimeRepositories",
+            (),
+            {"queue_repository": QueueRepository()},
+        )()
+        original_build_batches = app._no_oa_bank_batch_service.build_batches
+
+        def fail_if_refreshed(*_args, **_kwargs):
+            raise AssertionError("GET /api/no-oa-bank-batches must not rebuild no-OA batches synchronously")
+
+        app._no_oa_bank_batch_service.build_batches = fail_if_refreshed
+        try:
+            response = app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted")
+        finally:
+            app._no_oa_bank_batch_service.build_batches = original_build_batches
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["read_model_status"], "missing")
+        self.assertEqual(payload["batches"], [])
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(
+            app._runtime_repositories.queue_repository.enqueued,
+            [
+                {
+                    "scope_type": "no_oa_bank_batch",
+                    "scope_key": "all",
+                    "reason": "api_no_oa_read_model_missing",
+                }
+            ],
+        )
+
+    def test_no_oa_bank_batch_detail_does_not_refresh_all_batches(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="fee.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-28",
+                    "trade_time": "2026-02-28 17:08:00",
+                    "pay_receive_time": "2026-02-28 17:08:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "9.00",
+                    "credit_amount": "",
+                    "summary": "手续费",
+                    "remark": "手续费",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "fee"}],
+            actor="tester",
+        )
+        bank_rows = app._no_oa_bank_batch_application_service().no_oa_bank_transaction_rows()
+        app._no_oa_bank_batch_service.build_batches(
+            bank_rows,
+            {row_id: {"category_code": "fee", "source": "auto"}},
+            [],
+            app._no_oa_bank_batch_source_versions(),
+            eligible_batch_types=["fee"],
+        )
+        batch_id = app._no_oa_bank_batch_service.list_batches()[0]["batch_id"]
+        original_build_batches = app._no_oa_bank_batch_service.build_batches
+
+        def fail_if_refreshed(*_args, **_kwargs):
+            raise AssertionError("GET /api/no-oa-bank-batches/{batch_id} must not rebuild all batches synchronously")
+
+        app._no_oa_bank_batch_service.build_batches = fail_if_refreshed
+        try:
+            response = app.handle_request("GET", f"/api/no-oa-bank-batches/{batch_id}")
+        finally:
+            app._no_oa_bank_batch_service.build_batches = original_build_batches
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["batch"]["batch_id"], batch_id)
+        self.assertEqual(payload["rows"][0]["id"], row_id)
 
     def test_salary_auto_candidate_does_not_create_active_relation_before_batch_submit(self) -> None:
         app = build_application()

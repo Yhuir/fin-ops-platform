@@ -188,22 +188,27 @@ class TaxOffsetService:
         }
 
     def summarize_certified_preview_rows(self, month: str, rows: list[Any]) -> dict[str, int]:
+        preview_matches = self.classify_certified_preview_rows(month, rows)
+        return {
+            "matched_plan_count": sum(1 for item in preview_matches if item["match_status"] == "matched_plan"),
+            "outside_plan_count": sum(1 for item in preview_matches if item["match_status"] == "outside_plan"),
+        }
+
+    def classify_certified_preview_rows(self, month: str, rows: list[Any]) -> list[dict[str, str | None]]:
         month_data = self._resolve_month_data(month)
         input_plan_items = [dict(item) for item in month_data["input_plan_items"]]
-        matched_plan_count = 0
-        outside_plan_count = 0
-
+        classifications: list[dict[str, str | None]] = []
         for row in rows:
             certified_item = self._normalize_certified_item(row)
-            if self._match_certified_to_plan(certified_item, input_plan_items) is None:
-                outside_plan_count += 1
-            else:
-                matched_plan_count += 1
-
-        return {
-            "matched_plan_count": matched_plan_count,
-            "outside_plan_count": outside_plan_count,
-        }
+            matched_plan_item = self._match_certified_to_plan(certified_item, input_plan_items)
+            classifications.append(
+                {
+                    "unique_key": str(certified_item.get("unique_key") or certified_item.get("id") or ""),
+                    "match_status": "outside_plan" if matched_plan_item is None else "matched_plan",
+                    "matched_plan_id": None if matched_plan_item is None else str(matched_plan_item.get("id") or ""),
+                }
+            )
+        return classifications
 
     def _resolve_month_data(self, month: str) -> dict[str, Any]:
         if month not in self._month_data_cache:

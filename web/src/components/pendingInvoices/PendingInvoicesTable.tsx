@@ -41,6 +41,7 @@ type PendingInvoicesTableProps = {
   onOpenExport: () => void;
   onMarkIncomeStatus: (row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => void;
   direction: PendingInvoiceDirection;
+  actionsDisabled?: boolean;
 };
 
 const GROUP_BORDER = "2px solid";
@@ -130,67 +131,70 @@ function ActionButtons({
   onOpenManualInvoice,
   onOpenRules,
   onMarkIncomeStatus,
-}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onOpenRules" | "onMarkIncomeStatus"> & { row: PendingInvoiceRow }) {
+  actionsDisabled = false,
+}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onOpenRules" | "onMarkIncomeStatus" | "actionsDisabled"> & { row: PendingInvoiceRow }) {
   const action = row.invoiceAcquisitionStatus.primaryAction;
   const prefix = row.bankTransaction.counterpartyName;
+  const available = new Set(row.availableActions);
+  const canAttach = available.has("attach_existing_invoice");
+  const canManual = available.has("manual_invoice");
+  const canMarkIncome = available.has("mark_income_status");
+  const canViewRelation = available.has("view_relation");
+  const canViewRules = available.has("view_rules");
 
-  if (action === "mark_income_status") {
+  if (action === "mark_income_status" && canMarkIncome) {
     return (
       <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-        <Button size="small" variant="outlined" onClick={() => onMarkIncomeStatus(row, "income_no_invoice_required")} aria-label={`${prefix} 标记无需开票`}>
+        <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onMarkIncomeStatus(row, "income_no_invoice_required")} aria-label={`${prefix} 标记无需开票`}>
           无需开票
         </Button>
-        <Button size="small" variant="outlined" onClick={() => onMarkIncomeStatus(row, "cash_income")} aria-label={`${prefix} 标记现金收入`}>
+        <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onMarkIncomeStatus(row, "cash_income")} aria-label={`${prefix} 标记现金收入`}>
           现金收入
         </Button>
       </Stack>
     );
   }
-  if (action === "attach_or_create_invoice") {
+  if (action === "attach_or_create_invoice" && (canAttach || canManual)) {
     return (
       <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-        <Button size="small" variant="contained" onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`}>
+        {canAttach ? <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`}>
           选择发票
-        </Button>
-        <Button size="small" variant="outlined" onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`}>
+        </Button> : null}
+        {canManual ? <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`}>
           补票
-        </Button>
+        </Button> : null}
       </Stack>
     );
   }
-  if (shouldOpenRelation(action)) {
+  if (shouldOpenRelation(action) && canViewRelation) {
     return (
       <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${prefix} 查看支付明细`}>
         查看支付明细
       </Button>
     );
   }
-  if (shouldOpenRules(action)) {
+  if (shouldOpenRules(action) && canViewRules) {
     return (
-      <Button size="small" variant="outlined" onClick={onOpenRules} aria-label={`${prefix} 查看规则依据`}>
-        查看规则依据
+      <Button size="small" variant="outlined" onClick={onOpenRules} aria-label={`${prefix} 打开规则设置`}>
+        规则设置
       </Button>
     );
   }
-  if (shouldOpenInvoicePicker(action)) {
+  if (shouldOpenInvoicePicker(action) && canAttach) {
     return (
-      <Button size="small" variant="contained" onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`}>
+      <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`}>
         选择发票
       </Button>
     );
   }
-  if (shouldOpenManualInvoice(action)) {
+  if (shouldOpenManualInvoice(action) && canManual) {
     return (
-      <Button size="small" variant="outlined" onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`}>
+      <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`}>
         补票
       </Button>
     );
   }
-  return (
-    <Button size="small" variant="text" onClick={() => onOpenRelation(row)} aria-label={`${prefix} 查看关系`}>
-      查看关系
-    </Button>
-  );
+  return <Typography variant="caption" color="text.secondary">无可用操作</Typography>;
 }
 
 export default function PendingInvoicesTable({
@@ -205,6 +209,7 @@ export default function PendingInvoicesTable({
   onOpenExport,
   onMarkIncomeStatus,
   direction,
+  actionsDisabled = false,
 }: PendingInvoicesTableProps) {
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
   const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
@@ -213,7 +218,7 @@ export default function PendingInvoicesTable({
       <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between" sx={{ px: 1.5, py: 1 }}>
         <Stack direction="row" spacing={1}>
           {direction !== "all" ? <Button size="small" variant="outlined" onClick={onOpenRules}>待找发票规则设置</Button> : null}
-          <Button size="small" variant="contained" onClick={onOpenExport}>筛选内容导出</Button>
+          <Button size="small" variant="contained" disabled={actionsDisabled} onClick={onOpenExport}>筛选内容导出</Button>
         </Stack>
       </Stack>
       <Box
@@ -289,6 +294,7 @@ export default function PendingInvoicesTable({
               onOpenObjectDetail,
               onOpenRules,
               onMarkIncomeStatus,
+              actionsDisabled,
             }))}
           </TableBody>
         </Table>
@@ -346,6 +352,7 @@ function renderRow({
   onOpenObjectDetail,
   onOpenRules,
   onMarkIncomeStatus,
+  actionsDisabled = false,
 }: Omit<PendingInvoicesTableProps, "rows" | "onSortChange" | "onOpenExport" | "direction"> & { row: PendingInvoiceRow }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
@@ -422,6 +429,7 @@ function renderRow({
             onOpenManualInvoice={onOpenManualInvoice}
             onOpenRules={onOpenRules}
             onMarkIncomeStatus={onMarkIncomeStatus}
+            actionsDisabled={actionsDisabled}
           />
         </Stack>
       </TableCell>

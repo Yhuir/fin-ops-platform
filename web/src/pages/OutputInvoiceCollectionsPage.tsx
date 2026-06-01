@@ -472,7 +472,7 @@ export default function OutputInvoiceCollectionsPage() {
         variant="outlined"
         onClick={() => handleOpenWorkflow({ kind: "statusRules" })}
       >
-        销项发票收款情况类型设置
+        收款状态规则
       </Button>
       {canAdminAccess ? (
         <Button
@@ -597,8 +597,8 @@ export default function OutputInvoiceCollectionsPage() {
       open={query.activeWorkflow?.kind === "receiptHistory"}
       invoiceId={receiptHistoryInvoiceId}
       loadHistory={fetchOutputInvoiceReceiptHistory}
-      onVoidReceipt={(receiptId) => voidOutputInvoiceReceipt(receiptId, "页面作废").then(() => undefined)}
-      onReissueReceipt={(receiptId) => reissueOutputInvoiceReceipt(receiptId, "页面重开").then(() => undefined)}
+      onVoidReceipt={(receiptId, reason) => voidOutputInvoiceReceipt(receiptId, reason).then(() => undefined)}
+      onReissueReceipt={(receiptId, reason) => reissueOutputInvoiceReceipt(receiptId, reason).then(() => undefined)}
       onChanged={handleLifecycleChanged}
       onClose={handleCloseWorkflow}
     />
@@ -629,6 +629,7 @@ export default function OutputInvoiceCollectionsPage() {
     <RedInvoiceRelationDrawer
       open={query.activeWorkflow?.kind === "redRelation"}
       row={redRelationRow}
+      candidateRows={rows}
       onConfirm={(rowId, payload) => confirmOutputInvoiceRedRelation(rowId, payload).then(() => handleLifecycleChanged())}
       onRevoke={(relationId) => revokeOutputInvoiceRedRelation(relationId).then(() => handleLifecycleChanged())}
       onClose={handleCloseWorkflow}

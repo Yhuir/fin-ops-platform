@@ -8,6 +8,7 @@ import unittest
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
 
@@ -69,6 +70,214 @@ def tax_offset_payload(month: str = "2026-05", *, output_count: int = 1, input_c
 
 
 class TaxOffsetApiTests(unittest.TestCase):
+    def _configure_tax_user(
+        self,
+        app,
+        *,
+        username: str,
+        readonly: bool = False,
+        allowed: bool = True,
+    ) -> None:
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[username] if allowed else [],
+            readonly_export_usernames=[username] if readonly else [],
+            admin_usernames=[],
+        )
+        app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+            user_id=f"{username}-id",
+            username=username,
+            nickname=username,
+            display_name=username,
+            roles=["finance"],
+            permissions=[],
+        )
+
+    def test_tax_offset_read_endpoint_requires_fin_ops_access_when_auth_is_configured(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_tax_user(app, username="BLOCKED001", allowed=False)
+
+            response = app.handle_request(
+                "GET",
+                "/api/tax-offset?month=2026-01",
+                headers={"Authorization": "Bearer blocked-user"},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(payload["error"], {"forbidden", "permission_denied"})
+
+    def test_tax_certified_import_preview_requires_write_permission(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_tax_user(app, username="READONLY001", readonly=True)
+            preview_body, preview_headers = build_multipart_payload(
+                imported_by="spoofed-user",
+                files=[CERTIFIED_JAN],
+            )
+            preview_headers["Authorization"] = "Bearer readonly-user"
+
+            response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/preview",
+                body=preview_body,
+                headers=preview_headers,
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "permission_denied")
+
+    def test_certified_import_preview_returns_row_level_statuses(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            preview_body, preview_headers = build_multipart_payload(
+                imported_by="user_finance_01",
+                files=[CERTIFIED_JAN],
+            )
+
+            response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/preview",
+                body=preview_body,
+                headers=preview_headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        rows = payload["files"][0]["rows"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["row_status"], "recognized")
+        self.assertEqual(rows[0]["match_status"], "outside_plan")
+        self.assertEqual(rows[0]["dedupe_status"], "new")
+        self.assertIsNone(rows[0]["error_message"])
+        self.assertEqual(rows[-1]["row_status"], "invalid")
+        self.assertIn("未勾选", rows[-1]["error_message"])
+
+    def test_tax_certified_confirm_is_idempotent_for_same_session(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            preview_body, preview_headers = build_multipart_payload(
+                imported_by="user_finance_01",
+                files=[CERTIFIED_JAN],
+            )
+            preview_response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/preview",
+                body=preview_body,
+                headers=preview_headers,
+            )
+            preview_payload = json.loads(preview_response.body)
+
+            first_response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/confirm",
+                json.dumps({"session_id": preview_payload["session"]["id"]}),
+            )
+            second_response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/confirm",
+                json.dumps({"session_id": preview_payload["session"]["id"]}),
+            )
+
+        first_payload = json.loads(first_response.body)
+        second_payload = json.loads(second_response.body)
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(first_payload["batch"]["id"], second_payload["batch"]["id"])
+        self.assertEqual(second_payload["batch"]["persisted_record_count"], 2)
+
+    def test_tax_offset_summary_payload_helper_uses_runtime_service(self) -> None:
+        app = build_application()
+
+        payload = app._tax_offset_summary_payload(tax_offset_payload("2026-05"), scope_key="2026-05")
+
+        self.assertEqual(payload["month"], "2026-05")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+
+    def test_tax_offset_plan_save_requires_write_permission(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_tax_user(app, username="READONLY001", readonly=True)
+
+            response = app.handle_request(
+                "POST",
+                "/api/tax-offset/plans",
+                json.dumps(
+                    {
+                        "month": "2026-05",
+                        "selected_output_ids": ["output-0"],
+                        "selected_input_ids": ["input-0"],
+                    }
+                ),
+                headers={"Authorization": "Bearer readonly-user"},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "permission_denied")
+
+    def test_tax_offset_plan_save_persists_calculated_result_idempotently(self) -> None:
+        app = build_application()
+        month_payload = tax_offset_payload("2026-05")
+        month_payload["read_model_status"] = "fresh"
+        month_payload["read_model_scope_key"] = "2026-05"
+        month_payload["source_versions"] = {
+            "tax_offset_read_model_schema_version": 1,
+            "invoice_fact_source_version": "rows:1|max_updated_at:2026-05-01T00:00:00+00:00",
+        }
+        app._tax_offset_read_model_service.upsert_read_model("2026-05", month_payload, source_versions=month_payload["source_versions"])
+
+        request_payload = {
+            "month": "2026-05",
+            "selected_output_ids": ["output-0"],
+            "selected_input_ids": ["input-0"],
+            "expected_read_model_scope_key": "2026-05",
+            "expected_source_versions": month_payload["source_versions"],
+            "idempotency_key": "tax-plan-save-2026-05",
+        }
+        first_response = app.handle_request("POST", "/api/tax-offset/plans", json.dumps(request_payload))
+        second_response = app.handle_request("POST", "/api/tax-offset/plans", json.dumps(request_payload))
+
+        first_payload = json.loads(first_response.body)
+        second_payload = json.loads(second_response.body)
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(first_payload["plan"]["id"], second_payload["plan"]["id"])
+        self.assertEqual(first_payload["plan"]["month"], "2026-05")
+        self.assertEqual(first_payload["plan"]["selected_input_ids"], ["input-0"])
+        self.assertEqual(first_payload["plan"]["summary"]["result_amount"], "0.00")
+        self.assertEqual(first_payload["plan"]["read_model_scope_key"], "2026-05")
+
+    def test_tax_offset_plan_save_rejects_stale_source_versions(self) -> None:
+        app = build_application()
+        month_payload = tax_offset_payload("2026-05")
+        month_payload["read_model_status"] = "fresh"
+        month_payload["read_model_scope_key"] = "2026-05"
+        month_payload["source_versions"] = {"invoice_fact_source_version": "current"}
+        app._tax_offset_read_model_service.upsert_read_model("2026-05", month_payload, source_versions=month_payload["source_versions"])
+
+        response = app.handle_request(
+            "POST",
+            "/api/tax-offset/plans",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "selected_output_ids": ["output-0"],
+                    "selected_input_ids": ["input-0"],
+                    "expected_read_model_scope_key": "2026-05",
+                    "expected_source_versions": {"invoice_fact_source_version": "old"},
+                    "idempotency_key": "tax-plan-stale-2026-05",
+                }
+            ),
+        )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(payload["error"], "tax_offset_read_model_version_conflict")
+
     def test_tax_offset_cache_hit_does_not_rebuild_month_payload(self) -> None:
         app = build_application()
         cached_payload = tax_offset_payload("2026-05", output_count=2, input_count=3, certified_count=1)

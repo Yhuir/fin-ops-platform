@@ -147,6 +147,7 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "已认证发票导入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存计划" })).not.toBeInTheDocument();
   });
 
   test("previews and confirms certified invoice import inside the page modal, then refreshes plan and summary", async () => {
@@ -181,6 +182,12 @@ describe("Tax offset workbench", () => {
     expect(within(modal).getAllByText(/匹配计划\s*1\s*条/).length).toBeGreaterThan(0);
     expect(within(modal).getAllByText(/未进入计划\s*1\s*条/).length).toBeGreaterThan(0);
     expect(within(modal).getByText(/无效记录\s*0\s*条/)).toBeInTheDocument();
+    const previewRowTable = within(modal).getByRole("table", { name: /行级预览结果/ });
+    expect(within(previewRowTable).getByText("11203490")).toBeInTheDocument();
+    expect(within(previewRowTable).getByText("11203999")).toBeInTheDocument();
+    expect(within(previewRowTable).getByText("匹配计划")).toBeInTheDocument();
+    expect(within(previewRowTable).getByText("未进入计划")).toBeInTheDocument();
+    expect(within(previewRowTable).getAllByText("新记录").length).toBeGreaterThan(0);
 
     await user.click(within(modal).getByRole("button", { name: "确认导入" }));
 
@@ -287,6 +294,37 @@ describe("Tax offset workbench", () => {
         }),
       }),
     );
+  });
+
+  test("saves the current tax offset plan with read model versions", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /11203491/ }));
+    expect(await within(getStatCard("计划进项税额")).findByText("12,480.00")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存计划" }));
+
+    expect(await screen.findByText("已保存本月税金抵扣计划。")).toBeInTheDocument();
+    const saveCall = fetchMock.mock.calls.find(([input]) => input === "/api/tax-offset/plans");
+    expect(saveCall).toBeDefined();
+    expect(saveCall?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({
+      month: "2026-03",
+      selected_output_ids: ["to-202603-001"],
+      selected_input_ids: ["ti-202603-001"],
+      expected_read_model_scope_key: "2026-03",
+      expected_source_versions: {
+        tax_offset_read_model_schema_version: "mock-tax-offset-v1",
+        invoice_fact_source_version: "mock-invoice-facts:2026-03",
+        tax_certified_import_source_version: "mock-certified:2026-03",
+      },
+      idempotency_key: "tax-offset-plan:2026-03:2026-03:ti-202603-001",
+    });
   });
 
   test("does not trigger duplicate calculate on first load when server summary already matches default selection", async () => {
@@ -906,6 +944,8 @@ describe("Tax offset workbench", () => {
           month: "2026-03",
           read_model_status: "refreshing",
           read_model_scope_key: "2026-03",
+          read_model_generated_at: "2026-06-01T09:30:00+08:00",
+          read_model_stale_reasons: ["tax_certified_import_source_version"],
           summary: {
             output_tax: "0.00",
             certified_input_tax: "0.00",
@@ -932,6 +972,8 @@ describe("Tax offset workbench", () => {
     render(<App />);
 
     expect(await screen.findByText("税金抵扣读模型正在刷新，页面会自动重试。")).toBeInTheDocument();
+    expect(screen.getByText(/生成时间：2026-06-01T09:30:00\+08:00/)).toBeInTheDocument();
+    expect(screen.getByText(/过期原因：tax_certified_import_source_version/)).toBeInTheDocument();
     expect(screen.queryByText("当前月份没有可用于计划与试算的发票数据。")).not.toBeInTheDocument();
   });
 

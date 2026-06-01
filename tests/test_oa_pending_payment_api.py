@@ -13,6 +13,7 @@ from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.invoice_usage_collection_source_versions import oa_pending_payment_source_versions
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
@@ -110,7 +111,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._oa_pending_payment_sql_read_repository = None
-        app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(ExplodingOaPendingPaymentService())
+        app._oa_pending_payment_api_routes = _read_model_routes(repository=None, queue=queue)
 
         response = app._handle_api_oa_pending_payments_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
@@ -139,7 +140,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 }
             },
         )()
-        app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(ExplodingOaPendingPaymentService())
+        app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
 
         response = app._handle_api_oa_pending_payments_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
@@ -161,7 +162,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             (),
             {"list_oa_pending_payment_rows": lambda *_args, **_kwargs: None},
         )()
-        app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(ExplodingOaPendingPaymentService())
+        app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
 
         response = app._handle_api_oa_pending_payments_filter_options({"month": ["2026-05"]})
         payload = json.loads(response.body)
@@ -169,6 +170,41 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "api_miss")])
+
+    def test_production_all_scope_fresh_rows_do_not_require_all_scope_row_or_enqueue_refresh(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._oa_pending_payment_sql_read_repository = type(
+            "OaRepo",
+            (),
+            {
+                "list_oa_pending_payment_rows": lambda *_args, **_kwargs: {
+                    "rows": [_read_model_row()],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 1},
+                    "summary": {"rowCount": 1},
+                    "refresh_status": "fresh",
+                    "source_versions": oa_pending_payment_source_versions(),
+                    "read_model_scope_key": "all",
+                }
+            },
+        )()
+        app._oa_pending_payment_api_routes = _read_model_routes(
+            repository=app._oa_pending_payment_sql_read_repository,
+            queue=queue,
+            query_service=_empty_query_service(),
+        )
+
+        response = app._handle_api_oa_pending_payments_rows({"page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_scope_key"], "all")
+        self.assertEqual(payload["rows"][0]["id"], "oa-payment-row-api")
+        self.assertEqual(queue.refreshes, [])
 
     def test_read_endpoints_require_fin_ops_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -212,7 +248,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=_read_model_row())
-        app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(ExplodingOaPendingPaymentService())
+        app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
 
         oa_response = app._handle_api_oa_pending_payments_oa_detail("oa-api")
         bank_response = app._handle_api_oa_pending_payments_bank_transaction_detail("bank-api")
@@ -239,19 +275,22 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=_read_model_row(), refresh_status="stale")
-        app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(ExplodingOaPendingPaymentService())
+        app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
 
         stale_response = app._handle_api_oa_pending_payments_oa_detail("oa-api")
         stale_payload = json.loads(stale_response.body)
 
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=None, has_scope=False)
+        app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
         missing_scope_response = app._handle_api_oa_pending_payments_oa_detail("oa-api")
         missing_scope_payload = json.loads(missing_scope_response.body)
 
         self.assertEqual(stale_response.status_code, 202)
         self.assertEqual(stale_payload["read_model_status"], "refreshing")
+        self.assertEqual(stale_payload["sections"], [])
         self.assertEqual(missing_scope_response.status_code, 202)
         self.assertEqual(missing_scope_payload["read_model_status"], "refreshing")
+        self.assertEqual(missing_scope_payload["sections"], [])
         self.assertEqual(
             queue.refreshes,
             [
@@ -266,11 +305,18 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=None, has_scope=True)
-        app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(ExplodingOaPendingPaymentService())
+        app._oa_pending_payment_api_routes = _read_model_routes(
+            repository=app._oa_pending_payment_sql_read_repository,
+            queue=app._runtime_repositories.queue_repository,
+        )
 
         missing_response = app._handle_api_oa_pending_payments_oa_detail("missing-oa")
 
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=_read_model_row())
+        app._oa_pending_payment_api_routes = _read_model_routes(
+            repository=app._oa_pending_payment_sql_read_repository,
+            queue=app._runtime_repositories.queue_repository,
+        )
         invalid_kind_response = app._handle_api_oa_pending_payments_relation_details(
             "oa-payment-row-api",
             {"kind": ["bad"]},
@@ -336,6 +382,32 @@ class ExplodingOaPendingPaymentService:
 
     def row_relation_details(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         raise AssertionError("OA pending payment production relation detail must not live scan")
+
+
+def _read_model_routes(
+    *,
+    repository: object | None,
+    queue: QueueRecorder,
+    query_service: object | None = None,
+) -> OaPendingPaymentApiRoutes:
+    query_service = query_service or ExplodingOaPendingPaymentService()
+    return OaPendingPaymentApiRoutes(
+        query_service,  # type: ignore[arg-type]
+        read_model_service=OaPendingPaymentReadModelService(
+            repository=repository,
+            queue_repository=queue,
+            query_service=query_service,  # type: ignore[arg-type]
+            source_versions_provider=oa_pending_payment_source_versions,
+        ),
+    )
+
+
+def _empty_query_service() -> OaPendingPaymentQueryService:
+    return OaPendingPaymentQueryService(
+        import_service=ImportNormalizationService(),
+        pair_relation_service=WorkbenchPairRelationService(),
+        oa_projection=StaticOAProjection([]),
+    )
 
 
 class OaDetailRepository:

@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.pending_invoice_service import (
     EXPENSE_FILTERS,
+    INCOME_FILTERS,
     VALID_FILTERS,
     PendingInvoiceError,
 )
@@ -267,6 +268,9 @@ class PendingInvoiceReadModelService:
             "expense:bank_statement_as_invoice",
             "expense:no_invoice_required",
             "income:all",
+            "income:requires_invoice",
+            "income:no_invoice_required",
+            "income:cash_income",
         ]
         return [
             scope_key
@@ -325,10 +329,16 @@ class PendingInvoiceReadModelService:
                 "All pending invoice rows only support filter=all.",
                 status_code=HTTPStatus.BAD_REQUEST,
             )
-        if direction == "income" and filter_name in EXPENSE_FILTERS:
+        if direction == "income" and filter_name not in {"all", *INCOME_FILTERS}:
             raise PendingInvoiceError(
                 "invalid_filter_for_income",
-                "Income pending invoice rows do not support expense invoice tag filters.",
+                "Income pending invoice rows support all, requires_invoice, no_invoice_required or cash_income filters.",
+                status_code=HTTPStatus.BAD_REQUEST,
+            )
+        if direction == "expense" and filter_name not in {"all", *EXPENSE_FILTERS}:
+            raise PendingInvoiceError(
+                "invalid_filter_for_expense",
+                "Expense pending invoice rows support all, requires_invoice, bank_statement_as_invoice or no_invoice_required filters.",
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 

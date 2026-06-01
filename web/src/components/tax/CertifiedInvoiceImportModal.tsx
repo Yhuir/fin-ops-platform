@@ -9,8 +9,13 @@ import DialogTitle from "@mui/material/DialogTitle";
 import LinearProgress from "@mui/material/LinearProgress";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import FileDropzone from "../common/FileDropzone";
 import { useSession } from "../../contexts/SessionContext";
@@ -22,6 +27,7 @@ import {
 } from "../../features/tax/api";
 import type {
   TaxCertifiedImportConfirmedResult,
+  TaxCertifiedImportPreviewRow,
   TaxCertifiedImportPreviewResult,
 } from "../../features/tax/types";
 
@@ -36,12 +42,36 @@ function isExcelFile(file: File) {
   return normalizedName.endsWith(".xls") || normalizedName.endsWith(".xlsx");
 }
 
+function rowStatusLabel(row: TaxCertifiedImportPreviewRow) {
+  if (row.rowStatus === "invalid") {
+    return "无效";
+  }
+  if (row.matchStatus === "matched_plan") {
+    return "匹配计划";
+  }
+  if (row.matchStatus === "outside_plan") {
+    return "未进入计划";
+  }
+  return "待确认";
+}
+
+function dedupeStatusLabel(row: TaxCertifiedImportPreviewRow) {
+  if (row.dedupeStatus === "duplicate") {
+    return "重复";
+  }
+  if (row.dedupeStatus === "new") {
+    return "新记录";
+  }
+  return "--";
+}
+
 export default function CertifiedInvoiceImportModal({
   currentMonth,
   onClose,
   onImported,
 }: CertifiedInvoiceImportModalProps) {
   const session = useSession();
+  const isMountedRef = useRef(true);
   const canMutateData =
     session.status === "authenticated" ? session.session.canMutateData : false;
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -57,6 +87,12 @@ export default function CertifiedInvoiceImportModal({
     session.status === "authenticated" || session.status === "forbidden"
       ? session.session.user.username || session.session.user.displayName || "system"
       : "system";
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const fileHint = useMemo(() => {
     if (selectedFiles.length === 0) {
@@ -129,6 +165,9 @@ export default function CertifiedInvoiceImportModal({
             if (!confirmedResult) {
               throw new Error("Tax certified import job succeeded without a batch result.");
             }
+            if (!isMountedRef.current) {
+              return;
+            }
             await onImported(confirmedResult);
             return;
           }
@@ -138,11 +177,20 @@ export default function CertifiedInvoiceImportModal({
           await new Promise((resolve) => {
             window.setTimeout(resolve, 1000);
           });
+          if (!isMountedRef.current) {
+            return;
+          }
         }
         throw new Error("Tax certified import job polling timed out.");
       }
+      if (!isMountedRef.current) {
+        return;
+      }
       await onImported(result);
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       setErrorMessage(error instanceof Error && error.message
         ? error.message
         : "已认证发票导入失败，请稍后重试。");
@@ -252,6 +300,41 @@ export default function CertifiedInvoiceImportModal({
                         <Typography component="span">未进入计划 {file.outsidePlanCount} 条</Typography>
                         <Typography component="span">无效 {file.invalidCount} 条</Typography>
                       </Stack>
+                      {file.rows.length > 0 ? (
+                        <Table className="certified-import-preview-row-table" size="small" aria-label={`${file.fileName} 行级预览结果`}>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>行号</TableCell>
+                              <TableCell>发票号码</TableCell>
+                              <TableCell>销方</TableCell>
+                              <TableCell>税额</TableCell>
+                              <TableCell>状态</TableCell>
+                              <TableCell>重复</TableCell>
+                              <TableCell>原因</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {file.rows.map((row) => (
+                              <TableRow key={`${file.id}-${row.sourceRowNumber}-${row.id}`}>
+                                <TableCell>{row.sourceRowNumber}</TableCell>
+                                <TableCell>{row.digitalInvoiceNo || row.invoiceNo || "--"}</TableCell>
+                                <TableCell>{row.sellerName || "--"}</TableCell>
+                                <TableCell>{row.deductibleTaxAmount || row.taxAmount || "--"}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    color={row.rowStatus === "invalid" ? "error" : row.matchStatus === "matched_plan" ? "success" : "default"}
+                                    label={rowStatusLabel(row)}
+                                    size="small"
+                                    variant={row.matchStatus === "outside_plan" ? "outlined" : "filled"}
+                                  />
+                                </TableCell>
+                                <TableCell>{dedupeStatusLabel(row)}</TableCell>
+                                <TableCell>{row.errorMessage || "--"}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      ) : null}
                     </Paper>
                   ))}
                 </Stack>

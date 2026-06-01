@@ -322,13 +322,25 @@ class TaxOffsetSqlProjectionBuilder:
             "entry_count": sum(len(payload.get(key) or []) for key in ("output_items", "input_plan_items", "certified_items")),
         }
 
-    @staticmethod
-    def _source_versions() -> dict[str, Any]:
+    def _source_versions(self) -> dict[str, Any]:
         return {
             "tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            "invoice_fact_source_version": self._table_source_version("app.invoices", "status <> 'deleted'"),
+            "tax_certified_import_source_version": self._table_source_version("app.tax_certified_import_records", "status <> 'deleted'"),
             "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
+
+    def _table_source_version(self, table_name: str, where_sql: str) -> str:
+        try:
+            row = self._connection.fetch_one(
+                f"select count(*) as row_count, max(updated_at)::text as max_updated_at from {table_name} where {where_sql}"
+            )
+        except Exception:
+            return "unavailable"
+        if not isinstance(row, dict):
+            return "rows:0|max_updated_at:"
+        return f"rows:{row.get('row_count') or 0}|max_updated_at:{row.get('max_updated_at') or ''}"
 
     def _build_tax_payload(self, month: str) -> dict[str, Any]:
         month_data = {

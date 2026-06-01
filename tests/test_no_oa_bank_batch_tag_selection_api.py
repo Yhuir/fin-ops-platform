@@ -19,6 +19,51 @@ class _ReadModelQueue:
 
 
 class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
+    def test_tag_selection_active_tags_are_bank_auto_rule_tags_only(self) -> None:
+        app = build_application()
+        auto_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        selection = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
+
+        expected_codes = [
+            auto_rules["system_rule"]["code"],
+            *[rule["code"] for rule in auto_rules["active_rules"]],
+        ]
+
+        self.assertEqual(selection["bank_auto_tag_rules_version"], auto_rules["version"])
+        self.assertEqual([tag["code"] for tag in selection["active_tags"]], expected_codes)
+
+    def test_tag_selection_reflects_bank_auto_rule_label_changes_immediately(self) -> None:
+        app = build_application()
+        current_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        next_active_rules = []
+        for rule in current_rules["active_rules"]:
+            if rule["code"] == "fee":
+                next_active_rules.append({
+                    **rule,
+                    "label": "银行手续费规则",
+                    "output_primary_label": "银行费用",
+                    "output_sub_label": "手续费自动规则",
+                })
+            else:
+                next_active_rules.append(rule)
+
+        saved_rules = app._app_settings_service.update_bank_auto_tag_rules(
+            {
+                "expected_version": current_rules["version"],
+                "active_rules": next_active_rules,
+                "archived_rules": current_rules["archived_rules"],
+            },
+            actor_id="settings-owner",
+        )
+        updated_selection = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
+        saved_fee_rule = next(rule for rule in saved_rules["active_rules"] if rule["code"] == "fee")
+        fee_tag = next(tag for tag in updated_selection["active_tags"] if tag["code"] == "fee")
+
+        self.assertEqual(updated_selection["bank_auto_tag_rules_version"], saved_rules["version"])
+        self.assertEqual(fee_tag["label"], saved_fee_rule["label"])
+        self.assertEqual(fee_tag["output_primary_label"], saved_fee_rule["output_primary_label"])
+        self.assertEqual(fee_tag["output_sub_label"], saved_fee_rule["output_sub_label"])
+
     def test_tag_selection_starts_empty_and_controls_unsubmitted_candidates(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(

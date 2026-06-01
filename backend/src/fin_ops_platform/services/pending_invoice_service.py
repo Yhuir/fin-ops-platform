@@ -19,6 +19,10 @@ from fin_ops_platform.services.pending_invoice_rules import (
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
 )
+from fin_ops_platform.services.pending_invoice_status import (
+    pending_invoice_available_actions,
+    pending_invoice_status_payload,
+)
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
@@ -27,7 +31,8 @@ ATTACH_EXISTING_INVOICE_RELATION_MODE = "pending_invoice_attach_existing_invoice
 MANUAL_INVOICE_SOURCE_NAME = "pending_invoice_manual_entry"
 MANUAL_INVOICE_SOURCE_TYPE = "manual_invoice_import"
 EXPENSE_FILTERS = {"requires_invoice", "bank_statement_as_invoice", "no_invoice_required"}
-VALID_FILTERS = {"all", *EXPENSE_FILTERS}
+INCOME_FILTERS = {"requires_invoice", "no_invoice_required", "cash_income"}
+VALID_FILTERS = {"all", *EXPENSE_FILTERS, *INCOME_FILTERS}
 PENDING_INVOICE_FILTER_FIELDS: dict[str, set[str]] = {
     "trade_date": {"between"},
     "bank_name": {"in", "contains"},
@@ -86,6 +91,27 @@ def latest_income_status_override_from_commands(
     return deepcopy(latest) if latest is not None else None
 
 
+class InMemoryPendingInvoiceCommandRepository:
+    def __init__(self, commands: dict[str, dict[str, Any]] | None = None) -> None:
+        self._commands = commands if commands is not None else {}
+
+    def get(self, request_id: str) -> dict[str, Any] | None:
+        command = self._commands.get(str(request_id or "").strip())
+        return command if isinstance(command, dict) else None
+
+    def save(self, command: dict[str, Any]) -> None:
+        request_id = str(command.get("request_id") or "").strip()
+        if not request_id:
+            raise PendingInvoiceError("invalid_command", "pending invoice command request_id is required.")
+        self._commands[request_id] = command
+
+    def snapshot(self) -> dict[str, Any]:
+        return deepcopy(self._commands)
+
+    def latest_income_status_override(self, transaction_id: str) -> dict[str, Any] | None:
+        return latest_income_status_override_from_commands(self._commands, transaction_id)
+
+
 class PendingInvoiceError(ValueError):
     def __init__(
         self,
@@ -140,10 +166,22 @@ class PendingInvoiceQueryService:
     ) -> dict[str, Any]:
         normalized_direction = self._normalize_direction(direction)
         normalized_filter = self._normalize_filter(filter)
-        if normalized_direction in {"income", "all"} and normalized_filter in EXPENSE_FILTERS:
+        if normalized_direction == "all" and normalized_filter != "all":
+            raise PendingInvoiceError(
+                "invalid_filter_for_all",
+                "All pending invoice rows only support filter=all.",
+                status_code=HTTPStatus.BAD_REQUEST,
+            )
+        if normalized_direction == "income" and normalized_filter not in {"all", *INCOME_FILTERS}:
             raise PendingInvoiceError(
                 "invalid_filter_for_income",
-                "Income/all pending invoice rows do not support expense invoice tag filters.",
+                "Income pending invoice rows support all, requires_invoice, no_invoice_required or cash_income filters.",
+                status_code=HTTPStatus.BAD_REQUEST,
+            )
+        if normalized_direction == "expense" and normalized_filter not in {"all", *EXPENSE_FILTERS}:
+            raise PendingInvoiceError(
+                "invalid_filter_for_expense",
+                "Expense pending invoice rows support all, requires_invoice, bank_statement_as_invoice or no_invoice_required filters.",
                 status_code=HTTPStatus.BAD_REQUEST,
             )
         page_number = max(_optional_int(page, default=1), 1)
@@ -340,9 +378,9 @@ class PendingInvoiceQueryService:
         category: dict[str, Any],
         tag_groups: dict[str, set[str]],
     ) -> bool:
-        if direction in {"income", "all"} or filter_name == "all":
+        if direction == "all" or filter_name == "all":
             return True
-        group = self._group_for_category(category.get("category_code"), tag_groups, direction="expense")
+        group = self._group_for_category(category.get("category_code"), tag_groups, direction=direction)
         return group == filter_name
 
     def _bank_account_mappings_by_last4(self) -> dict[str, dict[str, str]]:
@@ -410,7 +448,7 @@ class PendingInvoiceQueryService:
         )
         payment_summary = self._payment_summary_for_relations(invoice_relations)
         oa_payload = self._oa_payload_from_relations(relations)
-        status_payload = self._status_payload(
+        status_payload = pending_invoice_status_payload(
             direction=direction,
             group=group,
             has_invoices=bool(invoices),
@@ -418,6 +456,7 @@ class PendingInvoiceQueryService:
             matched_rule=self._matched_rule_payload(group=group, category=category),
             status_override=status_override,
         )
+        available_actions = pending_invoice_available_actions(status_payload, can_create_invoice=can_create_invoice)
         input_invoices = {
             "primary": invoices[0] if invoices else None,
             "relation_count": len(invoices),
@@ -473,6 +512,7 @@ class PendingInvoiceQueryService:
             "invoices": invoices,
             "oa_applicant": self._oa_applicant_from_relations(relations),
             "can_create_invoice": can_create_invoice,
+            "available_actions": available_actions,
             "relation_case_ids": [str(relation.get("case_id")) for relation, _ in invoice_relations],
         }
 
@@ -527,108 +567,14 @@ class PendingInvoiceQueryService:
         matched_rule: dict[str, Any] | None,
         status_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if direction == "income":
-            if has_invoices:
-                return {
-                    "code": "income_invoiced",
-                    "label": "已开票",
-                    "reason": "收入流水已关联销项发票。",
-                    "severity": "success",
-                    "primary_action": "view_relation",
-                    "matched_rule": matched_rule,
-                }
-            if isinstance(status_override, dict):
-                status_code = str(status_override.get("status_code") or "").strip()
-                if status_code == "income_no_invoice_required":
-                    return {
-                        "code": "income_no_invoice_required",
-                        "label": "无需开票",
-                        "reason": "收入流水已人工标记为无需开票。",
-                        "severity": "default",
-                        "primary_action": "none",
-                        "matched_rule": matched_rule,
-                    }
-                if status_code == "cash_income":
-                    return {
-                        "code": "cash_income",
-                        "label": "现金收入",
-                        "reason": "收入流水已人工标记为现金收入。",
-                        "severity": "info",
-                        "primary_action": "none",
-                        "matched_rule": matched_rule,
-                    }
-            if group == PENDING_INVOICE_NO_INVOICE_GROUP:
-                return {
-                    "code": "income_no_invoice_required",
-                    "label": "无需开票",
-                    "reason": "收入流水分类命中无需开票规则。",
-                    "severity": "default",
-                    "primary_action": "view_rules",
-                    "matched_rule": matched_rule,
-                }
-            if group == PENDING_INVOICE_CASH_INCOME_GROUP:
-                return {
-                    "code": "cash_income",
-                    "label": "现金收入",
-                    "reason": "收入流水分类命中现金收入规则。",
-                    "severity": "info",
-                    "primary_action": "view_rules",
-                    "matched_rule": matched_rule,
-                }
-            return {
-                "code": "income_pending_invoice",
-                "label": "未开票",
-                "reason": "收入流水未关联销项发票，也未命中无需开票或现金收入规则。",
-                "severity": "error",
-                "primary_action": "mark_income_status",
-                "matched_rule": matched_rule,
-            }
-        invoice_total = _decimal_from_text(payment_summary.get("invoice_total"))
-        paid_total = _decimal_from_text(payment_summary.get("paid_total"))
-        if has_invoices and invoice_total > paid_total:
-            return {
-                "code": "invoice_not_fully_paid",
-                "label": "未支付完已开票",
-                "reason": "已有关联进项发票，但关联支付流水合计小于发票价税合计。",
-                "severity": "warning",
-                "primary_action": "view_relation",
-                "matched_rule": matched_rule,
-            }
-        if has_invoices:
-            return {
-                "code": "paid_invoiced",
-                "label": "已支付已开票",
-                "reason": "支出流水已关联进项发票。",
-                "severity": "success",
-                "primary_action": "view_relation",
-                "matched_rule": matched_rule,
-            }
-        if group == "no_invoice_required":
-            return {
-                "code": "no_invoice_required",
-                "label": "无需开票",
-                "reason": "流水分类命中无需开票规则。",
-                "severity": "default",
-                "primary_action": "view_rules",
-                "matched_rule": matched_rule,
-            }
-        if group == "bank_statement_as_invoice":
-            return {
-                "code": "bank_statement_as_invoice",
-                "label": "流水代替发票",
-                "reason": "流水分类命中流水代替发票规则。",
-                "severity": "info",
-                "primary_action": "view_rules",
-                "matched_rule": matched_rule,
-            }
-        return {
-            "code": "paid_pending_invoice",
-            "label": "已支付待开票",
-            "reason": "支出流水未关联进项发票，也未命中免票或流水替票规则。",
-            "severity": "error",
-            "primary_action": "attach_or_create_invoice",
-            "matched_rule": matched_rule,
-        }
+        return pending_invoice_status_payload(
+            direction=direction,
+            group=group,
+            has_invoices=has_invoices,
+            payment_summary=payment_summary,
+            matched_rule=matched_rule,
+            status_override=status_override,
+        )
 
     def _income_status_override(self, transaction_id: str) -> dict[str, Any] | None:
         if self._income_status_override_provider is None:
@@ -1006,8 +952,11 @@ class PendingInvoiceQueryService:
             {"field": "project_name", "label": "项目", "operators": ["contains", "in"]},
         ]
 
-    def relation_detail(self, *, transaction_id: str) -> dict[str, Any]:
-        row = self.row_for_transaction(transaction_id, direction="expense")
+    def relation_detail(self, *, transaction_id: str, direction: str = "expense") -> dict[str, Any]:
+        normalized_direction = self._normalize_direction(direction)
+        if normalized_direction == "all":
+            normalized_direction = self.direction_for_transaction(self._get_transaction(transaction_id))
+        row = self.row_for_transaction(transaction_id, direction=normalized_direction)
         payment_summary = (
             row.get("input_invoices", {}).get("payment_summary")
             if isinstance(row.get("input_invoices"), dict)
@@ -1027,7 +976,11 @@ class PendingInvoiceQueryService:
             "invoice_total": payment_summary.get("invoice_total", "0.00") if isinstance(payment_summary, dict) else "0.00",
             "remaining_amount": payment_summary.get("remaining_amount", "0.00") if isinstance(payment_summary, dict) else "0.00",
             "difference_amount": payment_summary.get("difference_amount", "0.00") if isinstance(payment_summary, dict) else "0.00",
-            "available_actions": ["attach_existing_invoice", "manual_invoice"],
+            "available_actions": [
+                action
+                for action in list(row.get("available_actions") or [])
+                if action in {"attach_existing_invoice", "manual_invoice"}
+            ],
             "relation_case_ids": list(row.get("relation_case_ids") or []),
         }
 
@@ -1406,6 +1359,7 @@ class PendingInvoiceApplicationService:
         import_service: ImportNormalizationService,
         pair_relation_service: WorkbenchPairRelationService,
         command_store: dict[str, dict[str, Any]] | None = None,
+        command_repository: Any | None = None,
         audit_recorder: Callable[[dict[str, Any]], None] | None = None,
         finalizer: Callable[[dict[str, Any]], None] | None = None,
         row_provider: Callable[[str, str], dict[str, Any]] | None = None,
@@ -1413,7 +1367,7 @@ class PendingInvoiceApplicationService:
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
-        self._command_store = command_store if command_store is not None else {}
+        self._command_repository = command_repository or InMemoryPendingInvoiceCommandRepository(command_store)
         self._audit_recorder = audit_recorder
         self._finalizer = finalizer
         self._row_provider = row_provider
@@ -1421,11 +1375,25 @@ class PendingInvoiceApplicationService:
         self._previews: dict[str, dict[str, Any]] = {}
 
     def snapshot(self) -> dict[str, Any]:
-        return deepcopy(self._command_store)
+        snapshot = getattr(self._command_repository, "snapshot", None)
+        return dict(snapshot() or {}) if callable(snapshot) else {}
 
     @property
     def command_store(self) -> dict[str, dict[str, Any]]:
-        return self._command_store
+        return self.snapshot()
+
+    def _get_command(self, request_id: str) -> dict[str, Any] | None:
+        get = getattr(self._command_repository, "get", None)
+        if not callable(get):
+            return None
+        command = get(request_id)
+        return command if isinstance(command, dict) else None
+
+    def _save_command(self, command: dict[str, Any]) -> None:
+        save = getattr(self._command_repository, "save", None)
+        if not callable(save):
+            raise PendingInvoiceError("pending_invoice_command_repository_unavailable", "Pending invoice command repository is not configured.")
+        save(command)
 
     def preview_manual_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
         transaction = self._get_transaction(str(payload.get("bank_transaction_id") or ""))
@@ -1564,7 +1532,7 @@ class PendingInvoiceApplicationService:
                 details={"invoice_id": invoice_id, "conflicts": preview["conflicts"]},
             )
         request_key = str(preview["request_key"])
-        command = self._command_store.get(request_id)
+        command = self._get_command(request_id)
         if isinstance(command, dict) and command.get("status") == "completed":
             return deepcopy(command["result"])
         if not isinstance(command, dict):
@@ -1577,7 +1545,7 @@ class PendingInvoiceApplicationService:
                 "created_at": _now(),
                 "updated_at": _now(),
             }
-            self._command_store[request_id] = command
+            self._save_command(command)
         elif command.get("request_key") != request_key:
             raise PendingInvoiceError(
                 "invalid_attach_existing_invoice_payload",
@@ -1657,7 +1625,7 @@ class PendingInvoiceApplicationService:
         direction = "expense" if preview["target_invoice_type"] == "input" else "income"
         transaction_id = str(payload.get("bank_transaction_id") or "").strip()
         affected_months = list(preview["relation_impact"]["affected_months"])
-        command = self._command_store.get(request_id)
+        command = self._get_command(request_id)
         if isinstance(command, dict) and command.get("status") == "completed":
             return deepcopy(command["result"])
         if not isinstance(command, dict):
@@ -1669,7 +1637,7 @@ class PendingInvoiceApplicationService:
                 "created_at": _now(),
                 "updated_at": _now(),
             }
-            self._command_store[request_id] = command
+            self._save_command(command)
         elif command.get("request_key") != request_key:
             raise PendingInvoiceError("invalid_invoice_payload", "request_id was already used for another invoice payload.")
 
@@ -1777,7 +1745,7 @@ class PendingInvoiceApplicationService:
                 status_code=HTTPStatus.CONFLICT,
             )
         request_key = f"pending_invoice_income_status:{transaction.id}:{status_code}"
-        command = self._command_store.get(request_id)
+        command = self._get_command(request_id)
         if isinstance(command, dict) and command.get("status") == "completed":
             return deepcopy(command["result"])
         if not isinstance(command, dict):
@@ -1790,7 +1758,7 @@ class PendingInvoiceApplicationService:
                 "created_at": _now(),
                 "updated_at": _now(),
             }
-            self._command_store[request_id] = command
+            self._save_command(command)
         elif command.get("request_key") != request_key:
             raise PendingInvoiceError(
                 "invalid_income_status_override_payload",
@@ -1805,7 +1773,6 @@ class PendingInvoiceApplicationService:
             "updated_at": _now(),
         }
         command["income_status_override"] = override
-        self._mark_command(command, "completed")
         result = {
             "status": "completed",
             "request_id": request_id,
@@ -1818,6 +1785,7 @@ class PendingInvoiceApplicationService:
         if self._row_provider is not None:
             result["row"] = self._row_provider(transaction.id, "income")
         command["result"] = deepcopy(result)
+        self._mark_command(command, "completed")
         self._record_income_status_override_audit(
             actor_id=actor_id,
             transaction_id=transaction.id,
@@ -1840,7 +1808,8 @@ class PendingInvoiceApplicationService:
         return result
 
     def latest_income_status_override(self, transaction_id: str) -> dict[str, Any] | None:
-        return latest_income_status_override_from_commands(self._command_store, transaction_id)
+        latest = getattr(self._command_repository, "latest_income_status_override", None)
+        return latest(transaction_id) if callable(latest) else latest_income_status_override_from_commands(self.snapshot(), transaction_id)
 
     def batch_type_for_direction(self, direction: str) -> BatchType:
         return BatchType.INPUT_INVOICE if direction == "expense" else BatchType.OUTPUT_INVOICE
@@ -2168,8 +2137,7 @@ class PendingInvoiceApplicationService:
         if self._fault_injector is not None:
             self._fault_injector(phase, command)
 
-    @staticmethod
-    def _mark_command(command: dict[str, Any], status: str, *, error_code: str | None = None) -> None:
+    def _mark_command(self, command: dict[str, Any], status: str, *, error_code: str | None = None) -> None:
         if status not in COMMAND_STATUSES:
             raise ValueError(f"unsupported pending invoice command status: {status}")
         command["status"] = status
@@ -2179,6 +2147,7 @@ class PendingInvoiceApplicationService:
             history.append(status)
         if error_code:
             command["error_code"] = error_code
+        self._save_command(command)
 
     @staticmethod
     def _last_successful_status(command: dict[str, Any]) -> str:

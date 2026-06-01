@@ -11,6 +11,10 @@ from fin_ops_platform.services.pending_invoice_rules import (
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
 )
+from fin_ops_platform.services.pending_invoice_status import (
+    pending_invoice_available_actions,
+    pending_invoice_status_payload,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -18,7 +22,9 @@ from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PRO
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-PENDING_INVOICE_FILTERS = {"all", "requires_invoice", "bank_statement_as_invoice", "no_invoice_required"}
+EXPENSE_PENDING_INVOICE_FILTERS = {"all", "requires_invoice", "bank_statement_as_invoice", "no_invoice_required"}
+INCOME_PENDING_INVOICE_FILTERS = {"all", "requires_invoice", "no_invoice_required", "cash_income"}
+PENDING_INVOICE_FILTERS = EXPENSE_PENDING_INVOICE_FILTERS | INCOME_PENDING_INVOICE_FILTERS
 
 
 class SearchPendingSqlProjectionBuilder:
@@ -57,7 +63,7 @@ class SearchPendingSqlProjectionBuilder:
         normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
         if normalized_direction not in {"expense", "income"}:
             raise ValueError("pending invoice direction must be expense or income.")
-        if normalized_filter not in PENDING_INVOICE_FILTERS:
+        if normalized_filter not in _pending_invoice_filters_for_direction(normalized_direction):
             raise ValueError("pending invoice filter must be all or a supported filter group.")
         if month is None:
             raise ValueError("pending invoice SQL projection scope_key must include a month shard YYYY-MM.")
@@ -74,7 +80,7 @@ class SearchPendingSqlProjectionBuilder:
         normalized_direction, normalized_filter, _month = _parse_pending_invoice_scope_key(scope_key)
         if normalized_direction not in {"expense", "income"}:
             raise ValueError("pending invoice direction must be expense or income.")
-        if normalized_filter not in PENDING_INVOICE_FILTERS:
+        if normalized_filter not in _pending_invoice_filters_for_direction(normalized_direction):
             raise ValueError("pending invoice filter must be all or a supported filter group.")
         mark_scope = getattr(self._read_model_repository, "mark_pending_invoice_scope", None)
         if not callable(mark_scope):
@@ -91,7 +97,7 @@ class SearchPendingSqlProjectionBuilder:
         normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
         if normalized_direction not in {"expense", "income"}:
             return []
-        if normalized_filter not in PENDING_INVOICE_FILTERS:
+        if normalized_filter not in _pending_invoice_filters_for_direction(normalized_direction):
             return []
         if month is not None:
             return [f"{normalized_direction}:{normalized_filter}:{month}"]
@@ -198,6 +204,28 @@ class SearchPendingSqlProjectionBuilder:
                 t.bank_serial_no,
                 t.account_name,
                 t.account_no,
+                coalesce(
+                    t.raw_payload->'normalized_payload'->>'imported_bank_name',
+                    t.raw_payload->'normalized_payload'->>'bank_name',
+                    t.raw_payload->>'imported_bank_name',
+                    t.raw_payload->>'bank_name',
+                    ''
+                ) as bank_name,
+                coalesce(
+                    t.raw_payload->'normalized_payload'->>'bank_short_name',
+                    t.raw_payload->>'bank_short_name',
+                    ''
+                ) as bank_short_name,
+                coalesce(
+                    t.raw_payload->'normalized_payload'->>'counterparty_account_no',
+                    t.raw_payload->>'counterparty_account_no',
+                    ''
+                ) as counterparty_account_no,
+                coalesce(
+                    t.raw_payload->'normalized_payload'->>'counterparty_bank_name',
+                    t.raw_payload->>'counterparty_bank_name',
+                    ''
+                ) as counterparty_bank_name,
                 t.txn_direction,
                 t.txn_month,
                 c.raw_payload as category_payload,
@@ -205,6 +233,7 @@ class SearchPendingSqlProjectionBuilder:
                 coalesce(pay.paid_total, 0)::text as paid_total,
                 coalesce(rel.oa_applicant, '') as oa_applicant,
                 coalesce(rel.oa_project_name, '') as oa_project_name,
+                coalesce(rel.oa_summaries, '[]'::jsonb) as oa_summaries,
                 iso.income_status_override,
                 coalesce(rel.case_ids, array[]::text[]) as relation_case_ids
             from app.bank_transactions t
@@ -257,19 +286,49 @@ class SearchPendingSqlProjectionBuilder:
             left join lateral (
                 select
                     array_agg(distinct pr.case_id) as case_ids,
+                    jsonb_agg(
+                        distinct jsonb_build_object(
+                            'id', coalesce(oa_app.row_id, oa_link.oa_id),
+                            'applicant', coalesce(oa_app.applicant, relation_meta.oa_applicant, ''),
+                            'application_type', coalesce(oa_app.form_type, ''),
+                            'project_name', coalesce(oa_app.project_name, relation_meta.oa_project_name, ''),
+                            'status', coalesce(oa_app.status, ''),
+                            'form_no', coalesce(oa_app.form_id, ''),
+                            'detail_available', oa_app.row_id is not null,
+                            'relation_case_id', pr.case_id
+                        )
+                    ) filter (where oa_link.oa_id is not null) as oa_summaries,
                     max(coalesce(
-                        pr.raw_payload->'normalized_payload'->'special_metadata'->>'oa_applicant',
-                        pr.raw_payload->'normalized_payload'->'special_metadata'->>'applicant',
-                        pr.raw_payload->'normalized_payload'->'evidence'->>'oa_applicant',
-                        pr.raw_payload->'normalized_payload'->'evidence'->>'applicant'
+                        oa_app.applicant,
+                        relation_meta.oa_applicant
                     )) as oa_applicant,
                     max(coalesce(
-                        pr.raw_payload->'normalized_payload'->'special_metadata'->>'oa_project_name',
-                        pr.raw_payload->'normalized_payload'->'special_metadata'->>'project_name',
-                        pr.raw_payload->'normalized_payload'->'evidence'->>'oa_project_name',
-                        pr.raw_payload->'normalized_payload'->'evidence'->>'project_name'
+                        oa_app.project_name,
+                        relation_meta.oa_project_name
                     )) as oa_project_name
                 from app.workbench_pair_relations pr
+                left join lateral (
+                    select
+                        coalesce(
+                            pr.raw_payload->'normalized_payload'->'special_metadata'->>'oa_applicant',
+                            pr.raw_payload->'normalized_payload'->'special_metadata'->>'applicant',
+                            pr.raw_payload->'normalized_payload'->'evidence'->>'oa_applicant',
+                            pr.raw_payload->'normalized_payload'->'evidence'->>'applicant'
+                        ) as oa_applicant,
+                        coalesce(
+                            pr.raw_payload->'normalized_payload'->'special_metadata'->>'oa_project_name',
+                            pr.raw_payload->'normalized_payload'->'special_metadata'->>'project_name',
+                            pr.raw_payload->'normalized_payload'->'evidence'->>'oa_project_name',
+                            pr.raw_payload->'normalized_payload'->'evidence'->>'project_name'
+                        ) as oa_project_name
+                ) relation_meta on true
+                left join lateral (
+                    select row_id as oa_id
+                    from unnest(pr.row_ids, pr.row_types) as relation_rows(row_id, row_type)
+                    where row_type = 'oa'
+                ) oa_link on true
+                left join app.oa_applications oa_app
+                  on oa_app.row_id = oa_link.oa_id
                 where pr.status = 'active'
                   and coalesce(t.legacy_mongo_id, t.id::text) = any(pr.row_ids)
             ) rel on true
@@ -295,7 +354,7 @@ class SearchPendingSqlProjectionBuilder:
             category = category if isinstance(category, dict) else {}
             category_code = str(category.get("category_code") or category.get("category") or "").strip()
             filter_group = _filter_group_for_category(category_code, tag_groups, direction=direction) or "all"
-            if direction == "expense" and filter_name != "all" and filter_group != filter_name:
+            if filter_name != "all" and filter_group != filter_name:
                 continue
             invoices = row.get("invoices") if isinstance(row.get("invoices"), list) else []
             payment_summary = _payment_summary_from_invoices(invoices, paid_total=row.get("paid_total"))
@@ -304,14 +363,17 @@ class SearchPendingSqlProjectionBuilder:
             relation_case_ids = list(row.get("relation_case_ids") or [])
             oa_applicant = str(row.get("oa_applicant") or "").strip()
             oa_project_name = str(row.get("oa_project_name") or "").strip()
-            oa_summaries = [
-                {
-                    "id": relation_case_ids[0] if relation_case_ids else transaction_id,
-                    "applicant": oa_applicant,
-                    "project_name": oa_project_name,
-                }
-            ] if oa_applicant or oa_project_name or relation_case_ids else []
-            status_payload = _pending_invoice_status_payload(
+            oa_summaries = row.get("oa_summaries") if isinstance(row.get("oa_summaries"), list) else []
+            if not oa_summaries and (oa_applicant or oa_project_name):
+                oa_summaries = [
+                    {
+                        "id": "",
+                        "applicant": oa_applicant,
+                        "project_name": oa_project_name,
+                        "detail_available": False,
+                    }
+                ]
+            status_payload = pending_invoice_status_payload(
                 direction=direction,
                 group=filter_group if filter_group != "all" else None,
                 has_invoices=bool(invoices),
@@ -324,11 +386,12 @@ class SearchPendingSqlProjectionBuilder:
                 ),
                 status_override=row.get("income_status_override") if isinstance(row.get("income_status_override"), dict) else None,
             )
+            available_actions = pending_invoice_available_actions(status_payload, can_create_invoice=can_create_invoice)
             bank_transaction = {
                 "id": transaction_id,
                 "counterparty_name": row.get("counterparty_name_raw"),
-                "counterparty_account_no": "",
-                "counterparty_bank_name": "",
+                "counterparty_account_no": row.get("counterparty_account_no") or "",
+                "counterparty_bank_name": row.get("counterparty_bank_name") or "",
                 "trade_time": _date_text(row.get("trade_time") or row.get("txn_date")),
                 "booked_date": _date_text(row.get("txn_date")),
                 "trade_date": _date_text(row.get("txn_date") or row.get("trade_time"))[:10],
@@ -337,7 +400,8 @@ class SearchPendingSqlProjectionBuilder:
                 "credit_amount": str(row.get("amount") or "") if direction == "income" else "0.00",
                 "balance": str(row.get("balance") or ""),
                 "currency": row.get("currency") or "CNY",
-                "bank_name": row.get("account_name") or "",
+                "bank_name": row.get("bank_name") or "",
+                "bank_short_name": row.get("bank_short_name") or row.get("bank_name") or "",
                 "account_name": row.get("account_name") or "",
                 "account_last4": str(row.get("account_no") or "")[-4:],
                 "summary": row.get("summary") or "",
@@ -374,6 +438,7 @@ class SearchPendingSqlProjectionBuilder:
                 "invoices": invoices,
                 "oa_applicant": oa_applicant or "—",
                 "can_create_invoice": can_create_invoice,
+                "available_actions": available_actions,
                 "relation_case_ids": relation_case_ids,
                 "filter_group": filter_group,
             }
@@ -427,6 +492,10 @@ def _parse_pending_invoice_scope_key(scope_key: str) -> tuple[str, str, str | No
     month = parts[2] if len(parts) > 2 and parts[2] else ""
     normalized_month = month[:7] if MONTH_RE.match(month[:7]) else None
     return direction, filter_name, normalized_month
+
+
+def _pending_invoice_filters_for_direction(direction: str) -> set[str]:
+    return INCOME_PENDING_INVOICE_FILTERS if direction == "income" else EXPENSE_PENDING_INVOICE_FILTERS
 
 
 def _settings_payload(connection: Any) -> dict[str, Any]:
@@ -509,119 +578,6 @@ def _matched_rule_payload(
         "tag_primary_label": category_payload.get("category_primary_label"),
         "tag_sub_label": category_payload.get("category_sub_label"),
         "tag_label_path": list(category_payload.get("category_label_path") or []),
-    }
-
-
-def _pending_invoice_status_payload(
-    *,
-    direction: str,
-    group: str | None,
-    has_invoices: bool,
-    payment_summary: dict[str, object],
-    matched_rule: dict[str, object] | None,
-    status_override: dict[str, object] | None = None,
-) -> dict[str, object]:
-    if direction == "income":
-        if has_invoices:
-            return {
-                "code": "income_invoiced",
-                "label": "已开票",
-                "reason": "收入流水已关联销项发票。",
-                "severity": "success",
-                "primary_action": "view_relation",
-                "matched_rule": matched_rule,
-            }
-        if isinstance(status_override, dict):
-            status_code = str(status_override.get("status_code") or "").strip()
-            if status_code == "income_no_invoice_required":
-                return {
-                    "code": "income_no_invoice_required",
-                    "label": "无需开票",
-                    "reason": "收入流水已人工标记为无需开票。",
-                    "severity": "default",
-                    "primary_action": "none",
-                    "matched_rule": matched_rule,
-                }
-            if status_code == "cash_income":
-                return {
-                    "code": "cash_income",
-                    "label": "现金收入",
-                    "reason": "收入流水已人工标记为现金收入。",
-                    "severity": "info",
-                    "primary_action": "none",
-                    "matched_rule": matched_rule,
-                }
-        if group == "no_invoice_required":
-            return {
-                "code": "income_no_invoice_required",
-                "label": "无需开票",
-                "reason": "收入流水分类命中无需开票规则。",
-                "severity": "default",
-                "primary_action": "view_rules",
-                "matched_rule": matched_rule,
-            }
-        if group == "cash_income":
-            return {
-                "code": "cash_income",
-                "label": "现金收入",
-                "reason": "收入流水分类命中现金收入规则。",
-                "severity": "info",
-                "primary_action": "view_rules",
-                "matched_rule": matched_rule,
-            }
-        return {
-            "code": "income_pending_invoice",
-            "label": "未开票",
-            "reason": "收入流水未关联销项发票，也未命中无需开票或现金收入规则。",
-            "severity": "error",
-            "primary_action": "mark_income_status",
-            "matched_rule": matched_rule,
-        }
-    invoice_total = _decimal_from_text(payment_summary.get("invoice_total"))
-    paid_total = _decimal_from_text(payment_summary.get("paid_total"))
-    if has_invoices and invoice_total > paid_total:
-        return {
-            "code": "invoice_not_fully_paid",
-            "label": "未支付完已开票",
-            "reason": "已有关联进项发票，但关联支付流水合计小于发票价税合计。",
-            "severity": "warning",
-            "primary_action": "view_relation",
-            "matched_rule": matched_rule,
-        }
-    if has_invoices:
-        return {
-            "code": "paid_invoiced",
-            "label": "已支付已开票",
-            "reason": "支出流水已关联进项发票。",
-            "severity": "success",
-            "primary_action": "view_relation",
-            "matched_rule": matched_rule,
-        }
-    if group == "no_invoice_required":
-        return {
-            "code": "no_invoice_required",
-            "label": "无需开票",
-            "reason": "流水分类命中无需开票规则。",
-            "severity": "default",
-            "primary_action": "view_rules",
-            "matched_rule": matched_rule,
-        }
-    if group == "bank_statement_as_invoice":
-        return {
-            "code": "bank_statement_as_invoice",
-            "label": "流水代替发票",
-            "reason": "流水分类命中流水代替发票规则。",
-            "severity": "info",
-            "primary_action": "view_rules",
-            "matched_rule": matched_rule,
-        }
-    return {
-        "code": "paid_pending_invoice",
-        "label": "已支付待开票",
-        "reason": "支出流水未关联进项发票，也未命中免票或流水替票规则。",
-        "severity": "error",
-        "primary_action": "attach_or_create_invoice",
-        "matched_rule": matched_rule,
     }
 
 

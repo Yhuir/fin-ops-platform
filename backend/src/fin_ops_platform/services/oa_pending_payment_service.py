@@ -422,13 +422,21 @@ class OaPendingPaymentQueryService:
     ) -> dict[str, Any]:
         summaries = []
         seen: set[str] = set()
+        missing_bank_relation_count = 0
+        non_outflow_relation_count = 0
         oa_amount = _parse_decimal(record.amount) or ZERO
         for relation in relations:
             for row_id, row_type in InvoiceRelationQueryContext.typed_relation_rows(relation):
                 if row_type != "bank":
                     continue
                 bank = bank_by_id.get(row_id)
-                if bank is not None and bank.id not in seen:
+                if bank is None:
+                    missing_bank_relation_count += 1
+                    continue
+                if _bank_direction(bank) != "outflow":
+                    non_outflow_relation_count += 1
+                    continue
+                if bank.id not in seen:
                     seen.add(bank.id)
                     summaries.append(self._bank_summary(bank, oa_amount, relation))
         summaries.sort(key=lambda item: item["_sort"])
@@ -461,6 +469,8 @@ class OaPendingPaymentQueryService:
             "hasMultiple": len(public_summaries) > 1,
             "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
             "summaries": public_summaries,
+            "missingBankRelationCount": missing_bank_relation_count,
+            "nonOutflowBankRelationCount": non_outflow_relation_count,
         }
 
     @staticmethod
@@ -554,6 +564,10 @@ class OaPendingPaymentQueryService:
         bank_ids = [str(summary.get("bankTransactionId") or "") for summary in list(bank_payload.get("summaries") or [])]
         bank_ids = [bank_id for bank_id in bank_ids if bank_id]
         if not bank_ids:
+            if int(bank_payload.get("missingBankRelationCount") or 0) > 0:
+                return _status("pending_review", "待核对", "关联流水事实缺失或证据不完整")
+            if int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0:
+                return _status("pending_review", "待核对", "关联流水不是支出流水，证据不完整")
             return _status("unpaid", "未支付", "未关联支出流水")
         if self._is_merged_payment(record.id, bank_ids, relations, bank_by_id=bank_by_id, oa_by_id=oa_by_id):
             return _status("merged_paid", "已支付（多条OA合并支付）", "多条OA共享同一支出流水且合计金额匹配")

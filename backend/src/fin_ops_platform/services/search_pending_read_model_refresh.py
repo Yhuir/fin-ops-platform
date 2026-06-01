@@ -13,7 +13,11 @@ class SearchPendingReadModelRefreshService:
         application: Any | None = None,
         queue_repository: Any | None = None,
     ) -> None:
-        self._projection_builder = projection_builder if projection_builder is not None else application
+        if projection_builder is None:
+            raise ValueError("projection_builder is required for search/pending read model refresh.")
+        if application is not None:
+            raise ValueError("SearchPendingReadModelRefreshService does not accept Application fallback dependencies.")
+        self._projection_builder = projection_builder
         self._queue_repository = queue_repository
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
@@ -38,7 +42,7 @@ class SearchPendingReadModelRefreshService:
         else:
             raise ValueError(f"Unsupported search/pending read model event type: {event.event_type}")
         if not callable(rebuild):
-            raise RuntimeError(f"Application does not expose rebuild method for {scope_type}.")
+            raise RuntimeError(f"Projection builder does not expose rebuild method for {scope_type}.")
         result = rebuild(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)

@@ -92,13 +92,19 @@ class OutputInvoiceCollectionApiRoutes:
         }
         return payload
 
-    def invoice_detail(self, invoice_id: str) -> dict[str, Any]:
+    def invoice_detail(self, invoice_id: str, *, session: OARequestSession | None = None) -> dict[str, Any]:
         return self._query_service.invoice_detail(invoice_id)
 
-    def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
+    def bank_transaction_detail(self, bank_transaction_id: str, *, session: OARequestSession | None = None) -> dict[str, Any]:
         return self._query_service.bank_transaction_detail(bank_transaction_id)
 
-    def relation_details(self, row_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
+    def relation_details(
+        self,
+        row_id: str,
+        query: dict[str, list[str]],
+        *,
+        session: OARequestSession | None = None,
+    ) -> dict[str, Any]:
         return self._query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
 
     def receipt_preview(self, payload: dict[str, Any], *, session: OARequestSession | None = None) -> dict[str, Any]:

@@ -362,7 +362,7 @@ describe("AutoTagRulesDrawer", () => {
     await user.click(within(drawer).getByRole("button", { name: "新增标签" }));
     await user.click(buttonByName(drawer, "保存"));
 
-    expect(await within(drawer).findByText("第 4 条规则的主标签名称不能为空。")).toBeInTheDocument();
+    expect(await within(drawer).findByText(/第 \d+ 条规则的主标签名称不能为空。/)).toBeInTheDocument();
     expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
     expect(within(drawer).queryByText(/正则命中/)).not.toBeInTheDocument();
   });

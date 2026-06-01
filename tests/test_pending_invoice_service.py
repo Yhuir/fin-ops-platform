@@ -9,6 +9,7 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.pending_invoice_service import (
+    InMemoryPendingInvoiceCommandRepository,
     PendingInvoiceApplicationService,
     PendingInvoiceError,
     PendingInvoiceQueryService,
@@ -201,6 +202,53 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(detail_payload["oa_print_layout"]["approvals"][1]["signature"], "刘涵静")
         self.assertIn(["oa-pay-2048"], oa_projection.requested_row_ids)
 
+    def test_income_relation_detail_uses_income_direction_and_output_invoices(self) -> None:
+        customer = self._counterparty("cp_customer", "Customer A")
+        txn = self._bank_transaction("txn_income", TransactionDirection.INFLOW, "Customer A", "118.00")
+        output_invoice = self._invoice(
+            "out_income_1",
+            InvoiceType.OUTPUT,
+            "OUT-001",
+            customer,
+            buyer_name="Customer A",
+            total_with_tax="118.00",
+        )
+        ignored_input_invoice = self._invoice(
+            "in_ignored",
+            InvoiceType.INPUT,
+            "IN-IGNORED",
+            customer,
+            seller_name="Vendor Ignored",
+            total_with_tax="118.00",
+        )
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case_income_output",
+            row_ids=[txn.id, output_invoice.id],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+        )
+        pair_service.create_active_relation(
+            case_id="case_income_input_ignored",
+            row_ids=[txn.id, ignored_input_invoice.id],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+        )
+        service = self._query_service(
+            transactions=[txn],
+            invoices=[output_invoice, ignored_input_invoice],
+            pair_service=pair_service,
+        )
+
+        detail = service.relation_detail(transaction_id=txn.id, direction="income")
+
+        self.assertEqual(detail["transaction_summary"]["id"], txn.id)
+        self.assertEqual([invoice["id"] for invoice in detail["related_invoices"]], ["out_income_1"])
+        self.assertEqual(detail["relation_case_ids"], ["case_income_output"])
+        self.assertEqual(detail["available_actions"], [])
+
     def test_income_rows_use_output_invoices_and_missing_relation_has_dash_applicant(self) -> None:
         customer = self._counterparty("cp_customer", "Customer A")
         txn = self._bank_transaction("txn_income", TransactionDirection.INFLOW, "Customer A", "220.00")
@@ -331,6 +379,50 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(statuses[cash_txn.id], "cash_income")
         self.assertEqual(statuses[override_txn.id], "income_no_invoice_required")
         self.assertEqual(statuses[pending_txn.id], "income_pending_invoice")
+
+    def test_income_filters_use_pending_output_invoice_rule_groups(self) -> None:
+        customer = self._counterparty("cp_income_filter", "Customer Filter")
+        invoiced_txn = self._bank_transaction("txn_income_requires_invoiced", TransactionDirection.INFLOW, "Customer Invoiced", "100.00")
+        pending_txn = self._bank_transaction("txn_income_requires_pending", TransactionDirection.INFLOW, "Customer Pending", "110.00")
+        no_invoice_txn = self._bank_transaction("txn_income_no_invoice_filter", TransactionDirection.INFLOW, "Customer No", "120.00")
+        cash_txn = self._bank_transaction("txn_income_cash_filter", TransactionDirection.INFLOW, "Customer Cash", "130.00")
+        output_invoice = self._invoice("inv_income_filter", InvoiceType.OUTPUT, "OUT-FILTER", customer, buyer_name="Customer Invoiced")
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case_income_filter",
+            row_ids=[invoiced_txn.id, output_invoice.id],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+        )
+        category_service = BankTransactionCategoryService(
+            categories={
+                invoiced_txn.id: {"category_code": "bonus", "version": 1},
+                pending_txn.id: {"category_code": "bonus", "version": 1},
+                no_invoice_txn.id: {"category_code": "internal_transfer", "version": 1},
+                cash_txn.id: {"category_code": "fee", "version": 1},
+            }
+        )
+        service = self._query_service(
+            transactions=[invoiced_txn, pending_txn, no_invoice_txn, cash_txn],
+            invoices=[output_invoice],
+            pair_service=pair_service,
+            category_service=category_service,
+            income_tag_groups={
+                "requires_invoice": ["bonus"],
+                "no_invoice_required": ["internal_transfer"],
+                "cash_income": ["fee"],
+            },
+        )
+
+        requires_payload = service.list_rows(direction="income", filter="requires_invoice", page_size=10)
+        no_invoice_payload = service.list_rows(direction="income", filter="no_invoice_required", page_size=10)
+        cash_payload = service.list_rows(direction="income", filter="cash_income", page_size=10)
+
+        self.assertEqual([row["id"] for row in requires_payload["rows"]], [invoiced_txn.id, pending_txn.id])
+        self.assertEqual(requires_payload["rows"][0]["invoice_acquisition_status"]["code"], "income_invoiced")
+        self.assertEqual([row["id"] for row in no_invoice_payload["rows"]], [no_invoice_txn.id])
+        self.assertEqual([row["id"] for row in cash_payload["rows"]], [cash_txn.id])
 
     def test_requires_invoice_filter_uses_active_tag_complement(self) -> None:
         fee_txn = self._bank_transaction("txn_fee", TransactionDirection.OUTFLOW, "Fee Vendor", "10.00")
@@ -650,7 +742,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         service = self._query_service(transactions=[])
 
         with self.assertRaises(PendingInvoiceError) as context:
-            service.list_rows(direction="income", filter="requires_invoice")
+            service.list_rows(direction="income", filter="bank_statement_as_invoice")
 
         self.assertEqual(context.exception.error_code, "invalid_filter_for_income")
 
@@ -743,7 +835,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             "pending_output_invoice_tag_groups": {
                 "version": 1,
                 "groups": {
-                    "requires_invoice": {"tag_codes": []},
+                    "requires_invoice": {"tag_codes": list((income_tag_groups or {}).get("requires_invoice") or [])},
                     "no_invoice_required": {"tag_codes": list((income_tag_groups or {}).get("no_invoice_required") or [])},
                     "cash_income": {"tag_codes": list((income_tag_groups or {}).get("cash_income") or [])},
                 },
@@ -781,7 +873,7 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
             pair_relation_service=self.pair_service,
-            command_store=self.command_store,
+            command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
         )

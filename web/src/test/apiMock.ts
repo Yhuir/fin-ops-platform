@@ -3374,7 +3374,17 @@ function resolveMockCertifiedPreview(fileName: string) {
     : fileName.includes("2026年2月")
       ? "2026-02"
       : "2026-03";
-  const rows = buildMockCertifiedPreviewRows(month);
+  const rows = buildMockCertifiedPreviewRows(month).map((row, index) => {
+    const matchedPlan = month === "2026-03" && index === 0;
+    return {
+      ...row,
+      row_status: "recognized",
+      match_status: matchedPlan ? "matched_plan" : "outside_plan",
+      matched_plan_id: matchedPlan ? "ti-202603-001" : null,
+      dedupe_status: "new",
+      error_message: null,
+    };
+  });
   const matchedPlanCount = month === "2026-03" ? 1 : 0;
   const outsidePlanCount = rows.length - matchedPlanCount;
   return {
@@ -4876,7 +4886,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.taxErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "tax failed" } };
       }
-      return { body: taxOffsetStateStore.get(month) };
+      const payload = taxOffsetStateStore.get(month) as Record<string, unknown>;
+      payload.read_model_status = payload.read_model_status ?? "fresh";
+      payload.read_model_scope_key = payload.read_model_scope_key ?? month;
+      payload.source_versions = payload.source_versions ?? {
+        tax_offset_read_model_schema_version: "mock-tax-offset-v1",
+        invoice_fact_source_version: `mock-invoice-facts:${month}`,
+        tax_certified_import_source_version: `mock-certified:${month}`,
+      };
+      return { body: payload };
     },
     "/api/tax-offset/certified-import/preview": ({ formData }) => {
       const files = formData ? formData.getAll("files").filter((item): item is File => item instanceof File) : [];
@@ -5049,6 +5067,30 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ? (jsonBody.selected_input_ids as string[])
         : [];
       return { body: calculateTaxPayload(month, selectedOutputIds, selectedInputIds, taxOffsetStateStore.get(month)) };
+    },
+    "/api/tax-offset/plans": ({ jsonBody }) => {
+      const month = String(jsonBody?.month ?? "");
+      const selectedOutputIds = Array.isArray(jsonBody?.selected_output_ids)
+        ? (jsonBody.selected_output_ids as string[])
+        : [];
+      const selectedInputIds = Array.isArray(jsonBody?.selected_input_ids)
+        ? (jsonBody.selected_input_ids as string[])
+        : [];
+      return {
+        body: {
+          status: "saved",
+          plan: {
+            id: "tax-offset-plan-0001",
+            month,
+            selected_output_ids: selectedOutputIds,
+            selected_input_ids: selectedInputIds,
+            summary: calculateTaxPayload(month, selectedOutputIds, selectedInputIds, taxOffsetStateStore.get(month)).summary,
+            read_model_scope_key: String(jsonBody?.expected_read_model_scope_key ?? month),
+            source_versions: jsonBody?.expected_source_versions ?? {},
+            updated_at: "2026-06-01T10:00:00+08:00",
+          },
+        },
+      };
     },
     "/api/etc/invoices": ({ url }) => ({
       body: etcInvoiceStore.list({

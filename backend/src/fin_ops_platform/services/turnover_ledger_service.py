@@ -803,17 +803,15 @@ class TurnoverLedgerService:
             balance_amount = item.get("balance_amount")
             if not isinstance(balance_amount, Decimal):
                 balance_amount = self._money(balance_amount)
-            if balance_amount <= ZERO:
-                continue
             business_type = str(item.get("business_type") or "")
-            if business_type == "borrow_in":
-                group["_pending_repayment"] += balance_amount
-                group["_repaid"] += self._money((item.get("legacy") or {}).get("settled_amount") if isinstance(item.get("legacy"), dict) else None)
-            elif business_type in {"borrow_out", "business_receivable"}:
-                group["_pending_collection"] += balance_amount
-                group["_collected"] += self._money((item.get("legacy") or {}).get("settled_amount") if isinstance(item.get("legacy"), dict) else None)
             legacy = item.get("legacy") if isinstance(item.get("legacy"), dict) else {}
-            if balance_amount == ZERO and legacy.get("status") in {"deterministic", "confirmed"}:
+            if business_type == "borrow_in":
+                group["_pending_repayment"] += max(balance_amount, ZERO)
+                group["_repaid"] += self._money(legacy.get("settled_amount"))
+            elif business_type in {"borrow_out", "business_receivable"}:
+                group["_pending_collection"] += max(balance_amount, ZERO)
+                group["_collected"] += self._money(legacy.get("settled_amount"))
+            if balance_amount <= ZERO and legacy.get("status") in {"deterministic", "confirmed"}:
                 group["_closed"] += self._money(legacy.get("principal_amount"))
 
         groups: list[dict[str, Any]] = []
@@ -868,7 +866,8 @@ class TurnoverLedgerService:
     ) -> dict[str, Any]:
         relation_rows = [dict(item.get("row") or {}) for item in items]
         relation_ids = self._unique_texts(row.get("relation_id") for row in relation_rows)
-        amount_rows = allocation_lots or relation_rows
+        flow_amount_rows = [dict(row) for row in list(flow_rows or []) if isinstance(row, dict)]
+        amount_rows = flow_amount_rows or allocation_lots or relation_rows
         balance_rows = allocation_lots or relation_rows
         borrow_amount = sum((self._money(row.get("borrow_amount")) for row in amount_rows), ZERO)
         repayment_amount = sum((self._money(row.get("repayment_amount")) for row in amount_rows), ZERO)

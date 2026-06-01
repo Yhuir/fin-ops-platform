@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -295,13 +295,13 @@ describe("NoOaBankBatchPage", () => {
 
     const primaryRegion = screen.getByRole("region", { name: "主标签" });
     await waitFor(() => {
-      expect(within(primaryRegion).getByRole("button", { name: "费用 1 批 2 条" })).toHaveAttribute("aria-pressed", "true");
+      expect(within(primaryRegion).getByRole("button", { name: "费用 1批 · 2条" })).toHaveAttribute("aria-pressed", "true");
     });
-    expect(within(primaryRegion).getByRole("button", { name: "福利 1 批 5 条" })).toBeInTheDocument();
+    expect(within(primaryRegion).getByRole("button", { name: "福利 1批 · 5条" })).toBeInTheDocument();
 
     const subRegion = screen.getByRole("region", { name: "子标签" });
     await waitFor(() => {
-      expect(within(subRegion).getByRole("button", { name: "手续费 1 批 2 条" })).toHaveAttribute("aria-pressed", "true");
+      expect(within(subRegion).getByRole("button", { name: "手续费 1批 · 2条" })).toHaveAttribute("aria-pressed", "true");
     });
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
@@ -310,6 +310,57 @@ describe("NoOaBankBatchPage", () => {
     expect(within(transactionRegion).getByRole("checkbox", { name: "建设银行8106全选" })).toBeInTheDocument();
     expect(within(transactionRegion).getByRole("checkbox", { name: "选择流水 bank-row-001" })).toBeInTheDocument();
     expect(within(transactionRegion).getByText("自动")).toBeInTheDocument();
+  });
+
+  test("shows batch blocking reasons and audit metadata", async () => {
+    installFetchMock();
+    renderPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "往来 2批 · 5条" }));
+
+    expect(await screen.findByText("存在多解")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "已提交 1" }));
+    expect(await screen.findByText(/提交人：finance-user/)).toBeInTheDocument();
+    expect(screen.getByText(/版本：2/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "历史 1" }));
+    expect(await screen.findByText(/撤回人：finance-user/)).toBeInTheDocument();
+    expect(screen.getByText(/版本：3/)).toBeInTheDocument();
+  });
+
+  test("clears hidden selected rows when changing label scope", async () => {
+    installFetchMock();
+    renderPage();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    expect(screen.getByText("已选 1 条")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "福利 1批 · 5条" }));
+
+    expect(screen.queryByText("已选 1 条")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "提交批次" })).toBeDisabled();
+  });
+
+  test("main and child label rails support keyboard activation", async () => {
+    installFetchMock();
+    renderPage();
+
+    const salaryMain = await screen.findByRole("button", { name: "人工成本 暂无" });
+    act(() => {
+      salaryMain.focus();
+      fireEvent.keyDown(salaryMain, { key: "Enter" });
+    });
+
+    const salaryChild = screen.getByRole("button", { name: "工资 暂无" });
+    act(() => {
+      salaryChild.focus();
+      fireEvent.keyDown(salaryChild, { key: " " });
+    });
+
+    expect(salaryChild).toHaveAttribute("aria-pressed", "true");
   });
 
   test("saves drawer tag selection with main and child tag toggles", async () => {
@@ -341,6 +392,68 @@ describe("NoOaBankBatchPage", () => {
       );
     });
     expect(await screen.findByText("免OA流水标签范围已保存")).toBeInTheDocument();
+  });
+
+  test("opening tag drawer refetches the latest no OA tag selection", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    renderPage();
+
+    await screen.findByText("网银手续费");
+    const callsBeforeOpen = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/no-oa-bank-batches/tag-selection";
+    }).length;
+
+    await user.click(screen.getByRole("button", { name: "免OA流水标签管理" }));
+
+    await waitFor(() => {
+      const callsAfterOpen = fetchMock.mock.calls.filter(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/no-oa-bank-batches/tag-selection";
+      }).length;
+      expect(callsAfterOpen).toBeGreaterThan(callsBeforeOpen);
+    });
+  });
+
+  test("updates open tag drawer labels after bank auto tag rules change", async () => {
+    const user = userEvent.setup();
+    let currentSelection = tagSelectionPayload;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/no-oa-bank-batches/tag-selection" && (!init?.method || init.method === "GET")) {
+        return jsonResponse(currentSelection);
+      }
+      if (url.pathname === "/api/no-oa-bank-batches") {
+        return jsonResponse({ ...listPayload, batches: batchesForBucket(listPayload, url.searchParams.get("bucket")) });
+      }
+      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+        return jsonResponse(feeDetailPayload);
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "免OA流水标签管理" }));
+    const drawer = screen.getByRole("dialog", { name: "免OA流水标签管理" });
+    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费" })).toBeInTheDocument();
+
+    currentSelection = {
+      ...tagSelectionPayload,
+      bank_auto_tag_rules_version: 8,
+      active_tags: tagSelectionPayload.active_tags.map((tag) => (
+        tag.code === "fee"
+          ? { ...tag, label: "银行手续费规则", output_primary_label: "银行费用", output_sub_label: "手续费自动规则" }
+          : tag
+      )),
+    };
+    act(() => {
+      window.dispatchEvent(new CustomEvent("bankAutoTagRulesUpdated", { detail: { version: 8 } }));
+    });
+
+    expect(await within(drawer).findByRole("checkbox", { name: "银行费用 / 手续费自动规则" })).toBeInTheDocument();
+    expect(within(drawer).queryByRole("checkbox", { name: "费用 / 手续费" })).not.toBeInTheDocument();
   });
 
   test("drawer shows only bank auto rule main and child labels for external turnover tags", async () => {
@@ -456,8 +569,8 @@ describe("NoOaBankBatchPage", () => {
     try {
       renderPage();
       await user.click(await screen.findByRole("button", { name: "已提交 1" }));
-      await user.click(await screen.findByRole("button", { name: "人工成本 1 批 8 条" }));
-      await user.click(await screen.findByRole("button", { name: "工资 1 批 8 条" }));
+      await user.click(await screen.findByRole("button", { name: "人工成本 1批 · 8条" }));
+      await user.click(await screen.findByRole("button", { name: "工资 1批 · 8条" }));
       await user.click(await screen.findByRole("button", { name: "撤回批次" }));
       await user.type(screen.getByLabelText("撤回原因"), "金额复核");
       await user.click(screen.getByRole("button", { name: "确认撤回" }));
@@ -483,10 +596,10 @@ describe("NoOaBankBatchPage", () => {
     renderPage();
 
     await user.click(await screen.findByRole("button", { name: "历史 1" }));
-    await user.click(await screen.findByRole("button", { name: "费用 1 批 1 条" }));
-    await user.click(await screen.findByRole("button", { name: "手续费 1 批 1 条" }));
+    await user.click(await screen.findByRole("button", { name: "费用 1批 · 1条" }));
+    await user.click(await screen.findByRole("button", { name: "手续费 1批 · 1条" }));
 
-    expect(await screen.findByText("合计 18.00")).toBeInTheDocument();
+    expect(await screen.findByText("1 条 · 合计 18.00")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "提交批次" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "撤回批次" })).not.toBeInTheDocument();
   });
@@ -499,8 +612,8 @@ describe("NoOaBankBatchPage", () => {
 
     try {
       renderPage();
-      await user.click(await screen.findByRole("button", { name: "往来 2 批 5 条" }));
-      await user.click(await screen.findByRole("button", { name: "内部往来款 2 批 5 条" }));
+      await user.click(await screen.findByRole("button", { name: "往来 2批 · 5条" }));
+      await user.click(await screen.findByRole("button", { name: "内部往来款 2批 · 5条" }));
       await user.click(await screen.findByRole("button", { name: "提交内部往来批次" }));
 
       await waitFor(() => {

@@ -143,6 +143,7 @@ type ApiPendingInvoiceRow = {
   invoices?: ApiInvoiceSummary[] | null;
   oa_applicant?: string | null;
   can_create_invoice?: boolean | null;
+  available_actions?: unknown[] | null;
   relation_case_ids?: unknown[] | null;
 };
 
@@ -477,7 +478,11 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
   const inputSummaries = (row.input_invoices?.summaries ?? []).map(mapInvoice).filter(hasInvoiceIdentity);
   const primaryInvoice = mapInvoice(row.input_invoices?.primary ?? legacyInvoices[0] ?? null);
   const invoices = inputSummaries.length > 0 ? inputSummaries : legacyInvoices;
-  const statusCode = stringValue(row.invoice_acquisition_status?.code, legacyInvoices.length > 0 ? "paid_invoiced" : "pending");
+  const statusCode = stringValue(row.invoice_acquisition_status?.code);
+  const primaryAction = stringValue(row.invoice_acquisition_status?.primary_action);
+  if (!statusCode || !primaryAction) {
+    throw new Error(`pending invoice row ${id || "(missing id)"} missing invoice_acquisition_status.code or primary_action`);
+  }
   const matchedRule = row.invoice_acquisition_status?.matched_rule;
   const oaPrimary = row.oa?.primary ? mapOa(row.oa.primary) : (
     row.oa_applicant ? { id: "", applicant: row.oa_applicant, applicationType: "", projectName: "", status: "" } : null
@@ -490,7 +495,7 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
       label: stringValue(row.invoice_acquisition_status?.label, statusLabel(statusCode)),
       reason: stringValue(row.invoice_acquisition_status?.reason),
       severity: stringValue(row.invoice_acquisition_status?.severity, "default") as PendingInvoiceRow["invoiceAcquisitionStatus"]["severity"],
-      primaryAction: stringValue(row.invoice_acquisition_status?.primary_action, row.can_create_invoice ? "manual_invoice" : "none") as PendingInvoiceRow["invoiceAcquisitionStatus"]["primaryAction"],
+      primaryAction: primaryAction as PendingInvoiceRow["invoiceAcquisitionStatus"]["primaryAction"],
       matchedRule: matchedRule ? {
         source: stringValue(matchedRule.source),
         group: stringValue(matchedRule.group) as NonNullable<PendingInvoiceRow["invoiceAcquisitionStatus"]["matchedRule"]>["group"],
@@ -522,7 +527,8 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
     },
     invoices,
     oaApplicant: oaPrimary?.applicant || null,
-    canCreateInvoice: row.can_create_invoice === true || ["attach_or_create_invoice", "manual_invoice"].includes(stringValue(row.invoice_acquisition_status?.primary_action)),
+    canCreateInvoice: row.can_create_invoice === true,
+    availableActions: stringList(row.available_actions),
     relationCaseIds: stringList(row.relation_case_ids),
   };
 }
@@ -557,7 +563,7 @@ function mapRowsResponse(payload: ApiPendingInvoiceRowsResponse, request: FetchP
 
 function appendRowsQuery(params: URLSearchParams, request: FetchPendingInvoiceRowsRequest, includePagination: boolean) {
   params.set("direction", request.direction);
-  if (request.direction === "expense" && request.filter) {
+  if (request.direction !== "all" && request.filter) {
     params.set("filter", request.filter);
   }
   if (request.dateFrom) {
@@ -760,9 +766,11 @@ function mapRelationDetail(payload: ApiRelationDetail): PendingInvoiceRelationDe
   };
 }
 
-export async function fetchPendingInvoiceRelationDetail(transactionId: string, signal?: AbortSignal): Promise<PendingInvoiceRelationDetail> {
+export async function fetchPendingInvoiceRelationDetail(transactionId: string, direction: PendingInvoiceDirection = "expense", signal?: AbortSignal): Promise<PendingInvoiceRelationDetail> {
+  const params = new URLSearchParams();
+  params.set("direction", direction);
   const payload = await requestJson<ApiRelationDetail>(
-    `/api/pending-invoices/rows/${encodeURIComponent(transactionId)}/relation-detail`,
+    `/api/pending-invoices/rows/${encodeURIComponent(transactionId)}/relation-detail?${params.toString()}`,
     { method: "GET", signal },
   );
   return mapRelationDetail(payload);

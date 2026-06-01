@@ -699,8 +699,10 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     expect(within(table).getByRole("columnheader", { name: "对方户名" })).toHaveClass("turnover-sticky-left-header");
     expect(within(table).queryByRole("columnheader", { name: "银行明细标签" })).not.toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: "借款金额 / 借款日" })).toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: "还款金额 / 还款日" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "收入" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "支出" })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "借款金额 / 借款日" })).not.toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "还款金额 / 还款日" })).not.toBeInTheDocument();
     expect(within(table).queryByRole("columnheader", { name: "开户机构" })).not.toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "还款备注" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "利息额 / 年息或月息" })).toBeInTheDocument();
@@ -712,6 +714,7 @@ describe("Turnover ledger page", () => {
     expect(within(table).queryByRole("columnheader", { name: "对方户名 / 大类 / 余额" })).not.toBeInTheDocument();
 
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:zhangsan");
+    expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-group-start-row");
     expect(groupCell).toHaveClass("turnover-sticky-left-cell");
     expect(groupCell).toHaveAttribute("rowspan", "1");
     expect(within(groupCell).getByText("张三")).toBeInTheDocument();

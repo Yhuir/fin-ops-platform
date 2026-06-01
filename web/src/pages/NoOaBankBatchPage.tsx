@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -13,6 +14,8 @@ import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import IconButton from "@mui/material/IconButton";
+import List from "@mui/material/List";
+import ListItemButton from "@mui/material/ListItemButton";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
@@ -81,6 +84,7 @@ const EMPTY_TAG_SELECTION: NoOaBankBatchTagSelection = {
 };
 
 const SELF_SUB_LABEL = "主标签本身";
+const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const NO_OA_READ_MODEL_REFRESH_RETRY_MS = 1000;
 
 const STATUS_META: Record<NoOaBankBatchStatus, { label: string; color: "default" | "primary" | "success" | "warning" | "error" }> = {
@@ -229,6 +233,133 @@ function tagDisplayLabel(node: NoOaTagNode) {
   return node.subLabel ? `${node.primaryLabel} / ${node.subLabel}` : node.primaryLabel;
 }
 
+function handleButtonKeyDown(event: KeyboardEvent<HTMLElement>, action: () => void) {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+  event.preventDefault();
+  action();
+}
+
+function formatCountMeta(batchCount: number, rowCount: number) {
+  if (batchCount === 0 && rowCount === 0) {
+    return "暂无";
+  }
+  return `${batchCount}批 · ${rowCount}条`;
+}
+
+function bucketWorkHint(bucket: NoOaBankBatchStatusBucket) {
+  if (bucket === "submitted") {
+    return "已提交批次保留撤回入口。";
+  }
+  if (bucket === "withdrawn") {
+    return "已撤回批次只读展示。";
+  }
+  return "每次只能选择同一银行区域内的流水提交。";
+}
+
+type LabelRailGroup = {
+  key: string;
+  label: string;
+  batchCount: number;
+  rowCount: number;
+};
+
+type LabelRailProps = {
+  title: string;
+  subtitle: string;
+  ariaLabel: string;
+  emptyTitle: string;
+  groups: LabelRailGroup[];
+  selectedKey: string;
+  onSelect: (key: string) => void;
+};
+
+function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey, onSelect }: LabelRailProps) {
+  return (
+    <Paper
+      aria-label={ariaLabel}
+      role="region"
+      variant="outlined"
+      sx={{
+        borderRadius: 1,
+        overflow: "hidden",
+        bgcolor: "background.paper",
+      }}
+    >
+      <Stack spacing={0.25} sx={{ px: 1.5, py: 1.25 }}>
+        <Typography fontWeight={900}>{title}</Typography>
+        <Typography color="text.secondary" variant="caption">{subtitle}</Typography>
+      </Stack>
+      <Divider />
+      {groups.length === 0 ? (
+        <Box sx={{ p: 1.25 }}>
+          <StatePanel compact tone="empty" title={emptyTitle} />
+        </Box>
+      ) : (
+        <List disablePadding dense>
+          {groups.map((group) => {
+            const selected = selectedKey === group.key;
+            const countMeta = formatCountMeta(group.batchCount, group.rowCount);
+            return (
+              <ListItemButton
+                aria-label={`${group.label} ${countMeta}`}
+                aria-pressed={selected}
+                component="button"
+                divider
+                key={group.key}
+                onClick={() => onSelect(group.key)}
+                onKeyDown={(event) => handleButtonKeyDown(event, () => onSelect(group.key))}
+                selected={selected}
+                sx={{
+                  width: "100%",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 1.25,
+                  px: 1.5,
+                  py: 1.25,
+                  color: "text.primary",
+                  textAlign: "left",
+                  transition: "background-color 150ms ease, color 150ms ease",
+                  "&.Mui-selected": {
+                    bgcolor: "rgba(23, 105, 170, 0.1)",
+                    color: "primary.dark",
+                  },
+                  "&.Mui-selected:hover": {
+                    bgcolor: "rgba(23, 105, 170, 0.14)",
+                  },
+                  "&:focus-visible": {
+                    outline: "2px solid",
+                    outlineColor: "primary.main",
+                    outlineOffset: -2,
+                  },
+                }}
+                type="button"
+              >
+                <Typography
+                  component="span"
+                  fontWeight={selected ? 900 : 800}
+                  sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
+                >
+                  {group.label}
+                </Typography>
+                <Typography
+                  color={group.batchCount === 0 && group.rowCount === 0 ? "text.disabled" : "text.secondary"}
+                  component="span"
+                  variant="caption"
+                  sx={{ flex: "0 0 auto", fontWeight: selected ? 800 : 700 }}
+                >
+                  {countMeta}
+                </Typography>
+              </ListItemButton>
+            );
+          })}
+        </List>
+      )}
+    </Paper>
+  );
+}
+
 export default function NoOaBankBatchPage() {
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
@@ -256,6 +387,7 @@ export default function NoOaBankBatchPage() {
   const batchRequestSeqRef = useRef(0);
   const detailRequestSeqRef = useRef(0);
   const batchQueryKeyRef = useRef("");
+  const manualLabelSelectionRef = useRef(false);
   const readModelStatus = payload.readModelStatus;
   const readModelNeedsRefresh = readModelStatus !== "fresh";
 
@@ -272,6 +404,11 @@ export default function NoOaBankBatchPage() {
         }
       })
       .finally(() => setTagLoading(false));
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedTransactionIds(new Set());
+    setSelectedAccountForSubmit(null);
   }, []);
 
   const loadBatches = useCallback((signal?: AbortSignal, options: { background?: boolean } = {}) => {
@@ -295,8 +432,7 @@ export default function NoOaBankBatchPage() {
           return;
         }
         setPayload(nextPayload);
-        setSelectedTransactionIds(new Set());
-        setSelectedAccountForSubmit(null);
+        clearSelection();
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
@@ -319,7 +455,7 @@ export default function NoOaBankBatchPage() {
           }
         }
       });
-  }, [accountKey, bucket, month]);
+  }, [accountKey, bucket, clearSelection, month]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -419,10 +555,19 @@ export default function NoOaBankBatchPage() {
       setSelectedSubKey("");
       return;
     }
-    if (!primaryGroups.some((group) => group.primaryLabel === selectedPrimaryLabel)) {
-      setSelectedPrimaryLabel(primaryGroups[0].primaryLabel);
+    const selectedGroup = primaryGroups.find((group) => group.primaryLabel === selectedPrimaryLabel);
+    const preferredGroup = primaryGroups.find((group) => group.batchCount > 0);
+    if (!selectedGroup) {
+      const nextGroup = preferredGroup ?? (!loading ? primaryGroups[0] : null);
+      if (nextGroup) {
+        setSelectedPrimaryLabel(nextGroup.primaryLabel);
+      }
+      return;
     }
-  }, [primaryGroups, selectedPrimaryLabel]);
+    if (!manualLabelSelectionRef.current && preferredGroup && selectedGroup.batchCount === 0) {
+      setSelectedPrimaryLabel(preferredGroup.primaryLabel);
+    }
+  }, [loading, primaryGroups, selectedPrimaryLabel]);
 
   const subGroups = useMemo(() => {
     const groups = new Map<string, { key: string; label: string; codes: string[]; batchCount: number; rowCount: number }>();
@@ -456,10 +601,19 @@ export default function NoOaBankBatchPage() {
       setSelectedSubKey("");
       return;
     }
-    if (!subGroups.some((group) => group.key === selectedSubKey)) {
-      setSelectedSubKey(subGroups[0].key);
+    const selectedGroup = subGroups.find((group) => group.key === selectedSubKey);
+    const preferredGroup = subGroups.find((group) => group.batchCount > 0);
+    if (!selectedGroup) {
+      const nextGroup = preferredGroup ?? (!loading ? subGroups[0] : null);
+      if (nextGroup) {
+        setSelectedSubKey(nextGroup.key);
+      }
+      return;
     }
-  }, [selectedSubKey, subGroups]);
+    if (!manualLabelSelectionRef.current && preferredGroup && selectedGroup.batchCount === 0) {
+      setSelectedSubKey(preferredGroup.key);
+    }
+  }, [loading, selectedSubKey, subGroups]);
 
   const selectedSubGroup = subGroups.find((group) => group.key === selectedSubKey) ?? null;
   const visibleBatches = useMemo(() => {
@@ -517,9 +671,21 @@ export default function NoOaBankBatchPage() {
       FINANCE_DOMAIN_EVENTS.bankAutoTagRulesUpdated,
       handleCategoryUpdated,
     );
+    window.addEventListener(TAG_SYNC_EVENT, handleCategoryUpdated);
+
+    let channel: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      channel = new BroadcastChannel(TAG_SYNC_EVENT);
+      channel.onmessage = () => {
+        handleCategoryUpdated();
+      };
+    }
+
     return () => {
       unsubscribeCategoryUpdated();
       unsubscribeAutoTagRulesUpdated();
+      window.removeEventListener(TAG_SYNC_EVENT, handleCategoryUpdated);
+      channel?.close();
     };
   }, [loadBatches, loadTagSelection]);
 
@@ -527,8 +693,7 @@ export default function NoOaBankBatchPage() {
     emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
       ...mutationEventDetail(result),
     });
-    setSelectedTransactionIds(new Set());
-    setSelectedAccountForSubmit(null);
+    clearSelection();
     setDetails({});
     setDetailErrors({});
     setSnackbar({ severity: "success", message });
@@ -675,7 +840,14 @@ export default function NoOaBankBatchPage() {
       description="按月份、主子标签和银行账户确认免 OA 银行流水批次。"
       actions={(
         <Stack direction="row" spacing={1}>
-          <Button disabled={tagLoading} onClick={() => setTagDrawerOpen(true)} variant="outlined">
+          <Button
+            disabled={tagLoading}
+            onClick={() => {
+              loadTagSelection();
+              setTagDrawerOpen(true);
+            }}
+            variant="outlined"
+          >
             免OA流水标签管理
           </Button>
           <Button
@@ -693,13 +865,38 @@ export default function NoOaBankBatchPage() {
         </Stack>
       )}
     >
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
-        <Stack alignItems={{ xs: "stretch", lg: "center" }} direction={{ xs: "column", lg: "row" }} spacing={1.5}>
+      <Box
+        aria-label="批次筛选"
+        role="region"
+        sx={{
+          px: 0.5,
+          py: 0.25,
+        }}
+      >
+        <Stack
+          alignItems={{ xs: "stretch", lg: "center" }}
+          direction={{ xs: "column", lg: "row" }}
+          spacing={1.25}
+          sx={{
+            flexWrap: { lg: "wrap" },
+          }}
+          useFlexGap
+        >
           <ToggleButtonGroup
             aria-label="批次状态"
             color="primary"
             exclusive
-            onChange={(_event, nextBucket: NoOaBankBatchStatusBucket | null) => nextBucket && setBucket(nextBucket)}
+            onChange={(_event, nextBucket: NoOaBankBatchStatusBucket | null) => {
+              if (!nextBucket) {
+                return;
+              }
+              clearSelection();
+              manualLabelSelectionRef.current = false;
+              setSelectedPrimaryLabel("");
+              setSelectedSubKey("");
+              setSelectedBatchId("");
+              setBucket(nextBucket);
+            }}
             size="small"
             value={bucket}
           >
@@ -708,15 +905,19 @@ export default function NoOaBankBatchPage() {
             <ToggleButton value="withdrawn">历史 {payload.summary.withdrawnCount}</ToggleButton>
           </ToggleButtonGroup>
           <TextField InputLabelProps={{ shrink: true }} label="月份" onChange={(event) => setMonth(event.target.value)} size="small" type="month" value={month} />
-          <TextField label="银行账户" onChange={(event) => setAccountKey(event.target.value)} placeholder="银行或账户尾号" size="small" value={accountKey} />
+          <TextField label="银行账户" onChange={(event) => setAccountKey(event.target.value)} placeholder="精确账户键，如 建设银行:8106" size="small" value={accountKey} />
           {bucket === "unsubmitted" ? (
             <Button disabled={selectedTransactionIds.size === 0 || mutating} onClick={handleSubmitSelected} variant="contained">
               提交批次
             </Button>
           ) : null}
-          {selectedTransactionIds.size > 0 ? <Chip label={`已选 ${selectedTransactionIds.size} 条`} color="primary" /> : null}
+          {selectedTransactionIds.size > 0 ? (
+            <Typography color="primary.dark" fontWeight={800} variant="body2">
+              已选 {selectedTransactionIds.size} 条
+            </Typography>
+          ) : null}
         </Stack>
-      </Paper>
+      </Box>
 
       {readModelNeedsRefresh && !error ? (
         <StatePanel tone="loading" compact>{readModelStatusMessage(readModelStatus)}</StatePanel>
@@ -732,74 +933,65 @@ export default function NoOaBankBatchPage() {
           alignItems: "start",
         }}
       >
-        <Paper aria-label="主标签" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack spacing={0.5} sx={{ px: 2, py: 1.5 }}>
-            <Typography fontWeight={900}>主标签</Typography>
-            <Typography color="text.secondary" variant="caption">来自银行明细自动标签</Typography>
-          </Stack>
-          <Divider />
-          <Stack divider={<Divider flexItem />}>
-            {primaryGroups.length === 0 ? <StatePanel compact tone="empty" title="请先在标签管理中选择免OA标签" /> : null}
-            {primaryGroups.map((group) => {
-              const selected = selectedPrimaryLabel === group.primaryLabel;
-              return (
-                <Box
-                  aria-label={`${group.primaryLabel} ${group.batchCount} 批 ${group.rowCount} 条`}
-                  aria-pressed={selected}
-                  key={group.primaryLabel}
-                  onClick={() => setSelectedPrimaryLabel(group.primaryLabel)}
-                  role="button"
-                  sx={{ bgcolor: selected ? "action.selected" : "background.paper", borderLeft: selected ? 4 : 0, borderColor: "primary.main", cursor: "pointer", px: 2, py: 1.5 }}
-                  tabIndex={0}
-                >
-                  <Stack spacing={0.75}>
-                    <Typography fontWeight={900}>{group.primaryLabel}</Typography>
-                    <Chip label={`${group.batchCount} 批 / ${group.rowCount} 条`} size="small" variant={selected ? "filled" : "outlined"} />
-                  </Stack>
-                </Box>
-              );
-            })}
-          </Stack>
-        </Paper>
+        <LabelRail
+          ariaLabel="主标签"
+          emptyTitle="请先在标签管理中选择免OA标签"
+          groups={primaryGroups.map((group) => ({
+            key: group.primaryLabel,
+            label: group.primaryLabel,
+            batchCount: group.batchCount,
+            rowCount: group.rowCount,
+          }))}
+          onSelect={(primaryLabel) => {
+            clearSelection();
+            manualLabelSelectionRef.current = true;
+            setSelectedPrimaryLabel(primaryLabel);
+          }}
+          selectedKey={selectedPrimaryLabel}
+          subtitle="来自银行明细自动标签"
+          title="主标签"
+        />
 
-        <Paper aria-label="子标签" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack spacing={0.5} sx={{ px: 2, py: 1.5 }}>
-            <Typography fontWeight={900}>子标签</Typography>
-            <Typography color="text.secondary" variant="caption">{selectedPrimaryLabel || "请选择主标签"}</Typography>
-          </Stack>
-          <Divider />
-          <Stack divider={<Divider flexItem />}>
-            {subGroups.length === 0 ? <StatePanel compact tone="empty" title="暂无子标签" /> : null}
-            {subGroups.map((group) => {
-              const selected = selectedSubKey === group.key;
-              return (
-                <Box
-                  aria-label={`${group.label} ${group.batchCount} 批 ${group.rowCount} 条`}
-                  aria-pressed={selected}
-                  key={group.key}
-                  onClick={() => setSelectedSubKey(group.key)}
-                  role="button"
-                  sx={{ bgcolor: selected ? "action.selected" : "background.paper", borderLeft: selected ? 4 : 0, borderColor: "primary.main", cursor: "pointer", px: 2, py: 1.5 }}
-                  tabIndex={0}
-                >
-                  <Stack spacing={0.75}>
-                    <Typography fontWeight={900}>{group.label}</Typography>
-                    <Chip label={`${group.batchCount} 批 / ${group.rowCount} 条`} size="small" variant={selected ? "filled" : "outlined"} />
-                  </Stack>
-                </Box>
-              );
-            })}
-          </Stack>
-        </Paper>
+        <LabelRail
+          ariaLabel="子标签"
+          emptyTitle="暂无子标签"
+          groups={subGroups.map((group) => ({
+            key: group.key,
+            label: group.label,
+            batchCount: group.batchCount,
+            rowCount: group.rowCount,
+          }))}
+          onSelect={(subKey) => {
+            clearSelection();
+            manualLabelSelectionRef.current = true;
+            setSelectedSubKey(subKey);
+          }}
+          selectedKey={selectedSubKey}
+          subtitle={selectedPrimaryLabel || "请选择主标签"}
+          title="子标签"
+        />
 
         <Paper aria-label="流水" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack spacing={0.5} sx={{ px: 2, py: 1.5 }}>
-            <Typography fontWeight={900}>
-              {selectedPrimaryLabel && selectedSubKey ? `${selectedPrimaryLabel} / ${selectedSubKey}` : "流水"}
-            </Typography>
-            <Typography color="text.secondary" variant="caption">
-              {bucket === "unsubmitted" ? "每次只能选择同一银行区域内的流水提交。" : bucket === "submitted" ? "已提交批次保留撤回入口。" : "已撤回批次只读展示。"}
-            </Typography>
+          <Stack
+            alignItems={{ xs: "stretch", md: "flex-start" }}
+            direction={{ xs: "column", md: "row" }}
+            justifyContent="space-between"
+            spacing={1}
+            sx={{ px: 1.5, py: 1.25 }}
+          >
+            <Stack spacing={0.25}>
+              <Typography fontWeight={900}>
+                {selectedPrimaryLabel && selectedSubKey ? `${selectedPrimaryLabel} / ${selectedSubKey}` : "流水"}
+              </Typography>
+              <Typography color="text.secondary" variant="caption">
+                {bucketWorkHint(bucket)}
+              </Typography>
+            </Stack>
+            {selectedAccountForSubmit ? (
+              <Typography color="text.secondary" variant="caption" sx={{ fontWeight: 800 }}>
+                当前选择账户：{selectedAccountForSubmit}
+              </Typography>
+            ) : null}
           </Stack>
           <Divider />
           <Stack divider={<Divider flexItem />} sx={{ maxHeight: { lg: "68vh" }, overflow: "auto" }}>
@@ -812,19 +1004,50 @@ export default function NoOaBankBatchPage() {
               const rowSelectionEnabled = canSelectBatchRows(batch, bucket);
               const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
               const regionChecked = rowSelectionEnabled && rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
+              const blockingReason = batch.blockedReason || batch.conflictReason;
+              const auditItems = [
+                batch.version !== null && batch.version !== undefined ? `版本：${batch.version}` : "",
+                batch.submittedBy ? `提交人：${batch.submittedBy}` : "",
+                batch.submittedAt ? `提交时间：${batch.submittedAt}` : "",
+                batch.withdrawnBy ? `撤回人：${batch.withdrawnBy}` : "",
+                batch.withdrawnAt ? `撤回时间：${batch.withdrawnAt}` : "",
+              ].filter(Boolean);
               return (
-                <Box key={batch.batchId} sx={{ p: 1.5 }}>
+                <Box
+                  component="section"
+                  key={batch.batchId}
+                  sx={{
+                    px: 1.5,
+                    py: 1.25,
+                    bgcolor: selected ? "rgba(23, 105, 170, 0.04)" : "background.paper",
+                  }}
+                >
                   <Stack spacing={1}>
-                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-                        <Typography fontWeight={900}>{accountLabel(batch)}</Typography>
-                        <Chip label={`${batch.rowCount} 条`} size="small" />
-                        <Chip label={`合计 ${formatMoney(batch.totalAmount)}`} size="small" variant="outlined" />
-                        <BatchStatusChip status={batch.status} />
+                    <Stack
+                      alignItems={{ xs: "stretch", md: "center" }}
+                      direction={{ xs: "column", md: "row" }}
+                      justifyContent="space-between"
+                      spacing={1}
+                    >
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                          <Typography fontWeight={900}>{accountLabel(batch)}</Typography>
+                          <BatchStatusChip status={batch.status} />
+                        </Stack>
+                        <Typography color="text.secondary" variant="body2">
+                          {batch.rowCount} 条 · 合计 {formatMoney(batch.totalAmount)}
+                        </Typography>
                       </Stack>
-                      <Stack direction="row" spacing={1}>
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                         {!selected ? (
-                          <Button aria-label={`查看${accountLabel(batch)}流水`} onClick={() => setSelectedBatchId(batch.batchId)} size="small" variant="outlined">查看流水</Button>
+                          <Button
+                            aria-label={`查看${accountLabel(batch)}流水`}
+                            onClick={() => setSelectedBatchId(batch.batchId)}
+                            size="small"
+                            variant="outlined"
+                          >
+                            查看流水
+                          </Button>
                         ) : null}
                         {selected && rowSelectionEnabled ? (
                           <>
@@ -840,9 +1063,18 @@ export default function NoOaBankBatchPage() {
                         ) : null}
                       </Stack>
                     </Stack>
+                    {blockingReason ? (
+                      <Alert severity={batch.status === "conflict" ? "error" : "warning"} sx={{ py: 0 }}>
+                        {blockingReason}
+                      </Alert>
+                    ) : null}
+                    {auditItems.length > 0 ? (
+                      <Typography color="text.secondary" variant="caption">
+                        {auditItems.join(" · ")}
+                      </Typography>
+                    ) : null}
                     {selected && detailErrors[batch.batchId] ? <Alert severity="error">{detailErrors[batch.batchId]}</Alert> : null}
                     {selected && !detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
-                    {!selected ? <StatePanel compact tone="empty" title="选择后加载流水明细" /> : null}
                     {selected && detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
                     {selected && rows.length > 0 ? (
                       <TableContainer>

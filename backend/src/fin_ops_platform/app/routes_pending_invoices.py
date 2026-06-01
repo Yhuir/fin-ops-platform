@@ -70,8 +70,12 @@ class PendingInvoiceApiRoutes:
             page_size=query.get("page_size", [50])[0],
         )
 
-    def relation_detail(self, transaction_id: str) -> dict[str, Any]:
-        return self._query_service.relation_detail(transaction_id=transaction_id)
+    def relation_detail(self, transaction_id: str, query: dict[str, list[str]] | None = None) -> dict[str, Any]:
+        request_query = query or {}
+        return self._query_service.relation_detail(
+            transaction_id=transaction_id,
+            direction=request_query.get("direction", ["expense"])[0],
+        )
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
         return self._query_service.bank_transaction_detail(bank_transaction_id)

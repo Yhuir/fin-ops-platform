@@ -142,6 +142,7 @@ export type OutputInvoiceCollectionReceiptSummary = {
 export type OutputInvoiceCollectionRow = {
   id: string;
   invoiceId: string;
+  invoiceIdentityKey?: string;
   invoice: OutputInvoiceCollectionInvoiceSummary;
   collectionStatus: OutputInvoiceCollectionStatus;
   bank: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionBankSummary>;

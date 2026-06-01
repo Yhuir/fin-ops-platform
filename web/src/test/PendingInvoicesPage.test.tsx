@@ -47,6 +47,8 @@ function upgradedRows() {
         detail_available: true,
         summaries: [],
       },
+      can_create_invoice: true,
+      available_actions: ["attach_existing_invoice", "manual_invoice"],
     },
     {
       id: "txn-invoice-not-paid",
@@ -108,6 +110,8 @@ function upgradedRows() {
           { id: "oa-002", applicant: "王五", application_type: "报销", project_name: "建设项目二期", status: "已完成" },
         ],
       },
+      can_create_invoice: false,
+      available_actions: ["view_relation"],
     },
     {
       id: "txn-no-required",
@@ -140,6 +144,8 @@ function upgradedRows() {
       },
       input_invoices: { primary: null, relation_count: 0, has_multiple: false, summaries: [], payment_summary: null },
       oa: { primary: null, relation_count: 0, has_multiple: false, detail_available: false, summaries: [] },
+      can_create_invoice: false,
+      available_actions: ["view_rules"],
     },
   ];
 }
@@ -216,8 +222,9 @@ function installPendingInvoiceFetch(options: {
     const method = (init?.method ?? "GET").toUpperCase();
     if (url.pathname === "/api/pending-invoices/rows") {
       const rows = upgradedRows();
+      const direction = url.searchParams.get("direction") ?? "expense";
       return new Response(JSON.stringify({
-        direction: "expense",
+        direction,
         filter: url.searchParams.get("filter") ?? "all",
         rows,
         pagination: { page: Number(url.searchParams.get("page") ?? 1), page_size: 50, total: rows.length },
@@ -229,8 +236,8 @@ function installPendingInvoiceFetch(options: {
             bank_transaction_rows: 431,
             expense_rows: 356,
             income_rows: 75,
-            current_direction_rows: 356,
-            excluded_direction_rows: 75,
+            current_direction_rows: direction === "income" ? 75 : 356,
+            excluded_direction_rows: direction === "income" ? 356 : 75,
           },
         },
         read_model_status: "fresh",
@@ -487,6 +494,39 @@ describe("Pending invoices page", () => {
     expect(request.searchParams.get("sort_direction")).toBe("desc");
   });
 
+  test("shows income rule-group filters and requests selected income scopes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installPendingInvoiceFetch();
+    renderAppAt("/pending-invoices");
+
+    const page = await screen.findByTestId("pending-invoices-page");
+    await user.click(await within(page).findByRole("button", { name: /收入流水 75/ }));
+    await waitFor(() => {
+      const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
+      expect(latest?.searchParams.get("direction")).toBe("income");
+    });
+
+    await user.click(within(page).getByRole("button", { name: "全部" }));
+    expect(await screen.findByRole("menuitem", { name: "待开发票" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "无需开票" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "现金收入" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("menuitem", { name: "待开发票" }));
+    await waitFor(() => {
+      const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
+      expect(latest?.searchParams.get("direction")).toBe("income");
+      expect(latest?.searchParams.get("filter")).toBe("requires_invoice");
+    });
+
+    await user.click(within(page).getByRole("button", { name: "待开发票" }));
+    await user.click(await screen.findByRole("menuitem", { name: "现金收入" }));
+    await waitFor(() => {
+      const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
+      expect(latest?.searchParams.get("direction")).toBe("income");
+      expect(latest?.searchParams.get("filter")).toBe("cash_income");
+    });
+  });
+
   test("opens relation, object detail, rules, and export drawers with loading callbacks", async () => {
     const user = userEvent.setup();
     const fetchMock = installPendingInvoiceFetch();
@@ -647,6 +687,15 @@ describe("Pending invoices page", () => {
 
     expect(await screen.findByRole("heading", { name: "选择已有进项发票" })).toBeInTheDocument();
     expect(await screen.findByText("DIG-CAND-001")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("销方"), "云南开票供应商");
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await waitFor(() => {
+      const candidateRequests = fetchMock.mock.calls
+        .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+        .filter((url) => url.pathname === "/api/pending-invoices/invoice-candidates");
+      expect(candidateRequests.at(-1)?.searchParams.get("seller_name")).toBe("云南开票供应商");
+      expect(candidateRequests.at(-1)?.searchParams.get("page_size")).toBe("20");
+    });
     await user.click(screen.getByRole("button", { name: /预览关联 DIG-CAND-001/ }));
     expect(await screen.findByText(/pending_invoice_attach_existing/)).toBeInTheDocument();
     expect(screen.getByText("关联后待付 0.00")).toBeInTheDocument();

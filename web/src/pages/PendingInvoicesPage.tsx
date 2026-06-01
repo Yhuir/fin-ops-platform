@@ -50,12 +50,25 @@ const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
 type RelationTarget = { transactionId: string } | null;
 
-const FILTER_LABELS: Record<PendingInvoiceFilter, string> = {
+const EXPENSE_FILTER_LABELS: Record<PendingInvoiceFilter, string> = {
   all: "全部",
   requires_invoice: "需要开票",
   bank_statement_as_invoice: "流水代替发票",
   no_invoice_required: "无需开票",
+  cash_income: "现金收入",
 };
+
+const INCOME_FILTER_LABELS: Record<PendingInvoiceFilter, string> = {
+  all: "全部",
+  requires_invoice: "待开发票",
+  bank_statement_as_invoice: "流水代替发票",
+  no_invoice_required: "无需开票",
+  cash_income: "现金收入",
+};
+
+function filterLabel(direction: PendingInvoiceDirection, filter: PendingInvoiceFilter) {
+  return (direction === "income" ? INCOME_FILTER_LABELS : EXPENSE_FILTER_LABELS)[filter];
+}
 
 function isAbortLikeError(caught: unknown) {
   if (caught instanceof DOMException && caught.name === "AbortError") {
@@ -207,6 +220,11 @@ export default function PendingInvoicesPage() {
     "requires_invoice",
     "bank_statement_as_invoice",
     "no_invoice_required",
+  ] : direction === "income" ? [
+    "all",
+    "requires_invoice",
+    "no_invoice_required",
+    "cash_income",
   ] : ["all"]
   ), [direction]);
 
@@ -214,6 +232,7 @@ export default function PendingInvoicesPage() {
     sortField,
     sortDirection,
   }), [sortDirection, sortField]);
+  const actionsDisabled = Boolean(readModelStatus && readModelStatus !== "fresh");
 
   const handleSortChange = useCallback((field: PendingInvoiceSortField) => {
     setPage(1);
@@ -290,17 +309,11 @@ export default function PendingInvoicesPage() {
     closeDrawer();
   }
 
-  const loadRelation = useCallback((transactionId: string) => fetchPendingInvoiceRelationDetail(transactionId), []);
+  const loadRelation = useCallback((transactionId: string) => fetchPendingInvoiceRelationDetail(transactionId, direction), [direction]);
   const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => fetchPendingInvoiceObjectDetail(target), []);
   const loadRules = useCallback(() => fetchPendingInvoiceRules(direction), [direction]);
   const saveRules = useCallback((payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload, direction), [direction]);
-  const loadCandidates = useCallback((transactionId: string) => fetchPendingInvoiceCandidates({
-    transactionId,
-    sortField: "amount_difference_abs",
-    sortDirection: "asc",
-    page: 1,
-    pageSize: 20,
-  }), []);
+  const loadCandidates = useCallback(fetchPendingInvoiceCandidates, []);
   const loadExportPreview = useCallback(() => fetchPendingInvoiceExportPreview(query), [query]);
   const handleDownloadExport = useCallback(() => downloadPendingInvoiceExport(query), [query]);
 
@@ -349,7 +362,7 @@ export default function PendingInvoicesPage() {
                   ))}
                 </Stack>
               ) : null}
-              {direction === "expense" ? (
+              {direction !== "all" ? (
                 <>
                   <Button
                     variant="outlined"
@@ -357,7 +370,7 @@ export default function PendingInvoicesPage() {
                     aria-haspopup="menu"
                     onClick={(event) => setFilterAnchorEl(event.currentTarget)}
                   >
-                    {FILTER_LABELS[filter]}
+                    {filterLabel(direction, filter)}
                   </Button>
                   <Menu anchorEl={filterAnchorEl} open={filterOpen} onClose={() => setFilterAnchorEl(null)}>
                     {filterOptions.map((option) => (
@@ -370,7 +383,7 @@ export default function PendingInvoicesPage() {
                           setFilterAnchorEl(null);
                         }}
                       >
-                        {FILTER_LABELS[option]}
+                        {filterLabel(direction, option)}
                       </MenuItem>
                     ))}
                   </Menu>
@@ -398,6 +411,9 @@ export default function PendingInvoicesPage() {
         {error ? <Typography color="error">{error}</Typography> : null}
         {loading ? <Typography color="text.secondary">正在加载待找发票。</Typography> : null}
         {readModelStatus === "refreshing" ? <Typography color="text.secondary">待找发票数据正在刷新。</Typography> : null}
+        {readModelStatus && !["fresh", "refreshing"].includes(readModelStatus) ? (
+          <Typography color="warning.main">待找发票读模型状态：{readModelStatus}，写入和导出操作已暂停。</Typography>
+        ) : null}
         <PendingInvoicesTable
           rows={rows}
           config={tableConfig}
@@ -410,6 +426,7 @@ export default function PendingInvoicesPage() {
           onOpenExport={() => setActiveDrawer("export")}
           onMarkIncomeStatus={handleMarkIncomeStatus}
           direction={direction}
+          actionsDisabled={actionsDisabled}
         />
         <TablePagination
           component="div"

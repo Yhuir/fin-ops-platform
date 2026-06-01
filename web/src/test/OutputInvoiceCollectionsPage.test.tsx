@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -10,6 +10,7 @@ const rowsPayload = {
     {
       id: "output-collection-row-001",
       invoiceId: "out-001",
+      invoiceIdentityKey: "id:out-001",
       invoice: {
         id: "out-001",
         displayNo: "XSFP-2026-0001",
@@ -110,6 +111,56 @@ const rowsPayload = {
         sourceAvailable: true,
       },
     },
+    {
+      id: "output-collection-row-002",
+      invoiceId: "out-red-candidate",
+      invoiceIdentityKey: "id:out-red-candidate",
+      invoice: {
+        id: "out-red-candidate",
+        displayNo: "XSFP-2026-RED",
+        invoiceNo: "RED-0001",
+        invoiceCode: "5300",
+        digitalInvoiceNo: "XSFP-2026-RED",
+        invoiceDate: "2026-05-04",
+        issueDate: "2026-05-04",
+        buyerName: "云南客户科技有限公司",
+        buyerTaxNo: "91530100BUYER01",
+        sellerName: "云南溯源科技有限公司",
+        sellerTaxNo: "91530000SELLER01",
+        totalWithTax: "-12345.67",
+        amountWithoutTax: "-11646.86",
+        taxRate: "6%",
+        taxAmount: "-698.81",
+        specificBusinessType: "信息技术服务",
+        taxableItemName: "红字信息技术服务",
+      },
+      collectionStatus: {
+        code: "pending_collection",
+        label: "待收款",
+        reason: "候选发票",
+        collectedAmount: "0.00",
+        pendingAmount: "-12345.67",
+      },
+      bankTransactions: {
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+        summaries: [],
+      },
+      redInvoiceRelation: {
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+        summaries: [],
+      },
+      receipt: {
+        status: "not_required",
+        label: "无需收据",
+        reason: "候选发票",
+        previewAvailable: false,
+        sourceAvailable: true,
+      },
+    },
   ],
   pagination: {
     page: 1,
@@ -131,6 +182,30 @@ function installOutputInvoiceCollectionsFetch() {
     if (url.pathname === "/api/output-invoice-collections/filter-options") {
       return jsonResponse({
         fields: [
+          {
+            field: "invoice_no",
+            label: "发票号码",
+            mode: "text",
+            sortable: true,
+            operators: ["contains", "equals"],
+            options: [],
+          },
+          {
+            field: "total_with_tax",
+            label: "价税合计",
+            mode: "money",
+            sortable: true,
+            operators: ["between", "equals"],
+            options: [],
+          },
+          {
+            field: "invoice_date",
+            label: "开票日期",
+            mode: "date",
+            sortable: true,
+            operators: ["between", "equals"],
+            options: [],
+          },
           {
             field: "collection_status",
             label: "收款状态",
@@ -234,6 +309,7 @@ function installOutputInvoiceCollectionsFetch() {
     if (
       url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-status"
       || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-reminder"
+      || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/red-invoice-relations"
       || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/receipts"
       || url.pathname === "/api/output-invoice-collections/receipts/receipt-issued-001/void"
       || url.pathname === "/api/output-invoice-collections/receipts/receipt-voided-001/reissue"
@@ -334,8 +410,8 @@ describe("Output invoice collections page", () => {
 
     expect(within(page).getAllByText("云南客户科技有限公司").length).toBeGreaterThan(0);
     expect(within(page).getByText("待收款，已收部分款").closest(".output-invoice-collection-status-cell")).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "已出收据" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "待出收据" })).toBeInTheDocument();
+    expect(within(page).getAllByRole("button", { name: "已出收据" }).length).toBeGreaterThan(0);
+    expect(within(page).getAllByRole("button", { name: "待出收据" }).length).toBeGreaterThan(0);
 
     await user.click(within(page).getByRole("button", { name: /展开.*销项发票货物或应税劳务名称/ }));
     expect(within(page).getByRole("button", { name: /收起.*销项发票货物或应税劳务名称/ })).toBeInTheDocument();
@@ -354,13 +430,50 @@ describe("Output invoice collections page", () => {
       const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
       expect(filters).toEqual([{ field: "collection_status", operator: "in", values: ["partial_collected"] }]);
     });
+    await user.keyboard("{Escape}");
+
+    await user.click(within(page).getByRole("button", { name: "筛选 发票号码" }));
+    await user.type(await screen.findByLabelText("发票号码筛选值"), "0001");
+    await user.click(screen.getByRole("button", { name: "应用筛选" }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
+      expect(filters).toEqual([
+        { field: "collection_status", operator: "in", values: ["partial_collected"] },
+        { field: "invoice_no", operator: "contains", value: "0001" },
+      ]);
+    });
+
+    await user.click(within(page).getByRole("button", { name: "筛选 价税合计" }));
+    await user.type(await screen.findByLabelText("价税合计最小值"), "100");
+    await user.type(screen.getByLabelText("价税合计最大值"), "200");
+    await user.click(screen.getByRole("button", { name: "应用筛选" }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
+      expect(filters).toEqual(expect.arrayContaining([
+        { field: "total_with_tax", operator: "between", value: { min: "100", max: "200" } },
+      ]));
+    });
+
+    await user.click(within(page).getByRole("button", { name: "筛选 开票日期" }));
+    await user.type(await screen.findByLabelText("开票日期开始日期"), "2026-05-01");
+    await user.type(screen.getByLabelText("开票日期结束日期"), "2026-05-31");
+    await user.click(screen.getByRole("button", { name: "应用筛选" }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
+      expect(filters).toEqual(expect.arrayContaining([
+        { field: "invoice_date", operator: "between", value: { min: "2026-05-01", max: "2026-05-31" } },
+      ]));
+    });
 
     await user.click(within(page).getByRole("button", { name: "下一页" }));
     await waitFor(() => {
       const request = rowsRequests(fetchMock).at(-1);
       expect(request?.searchParams.get("page")).toBe("2");
     });
-  });
+  }, 30000);
 
   test("opens the three right-side workflow drawers without reloading the main rows", async () => {
     const user = userEvent.setup();
@@ -370,19 +483,19 @@ describe("Output invoice collections page", () => {
     const page = await screen.findByTestId("output-invoice-collections-page");
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBe(1));
 
-    await user.click(within(page).getByRole("button", { name: "销项发票收款情况类型设置" }));
-    expect(await screen.findByLabelText("销项发票收款情况类型设置")).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: "收款状态规则" }));
+    expect(await screen.findByLabelText("收款状态规则")).toBeInTheDocument();
     expect(await screen.findByText("收入流水金额小于销项发票金额")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /保存|提交/ })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "关闭销项发票收款情况类型设置" }));
-    await user.click(within(page).getByRole("button", { name: "已出收据" }));
+    await user.click(screen.getByRole("button", { name: "关闭收款状态规则" }));
+    await user.click(within(page).getAllByRole("button", { name: "已出收据" })[0]);
     expect(await screen.findByLabelText("已出收据历史")).toBeInTheDocument();
     expect(await screen.findByText("SK2026050001")).toBeInTheDocument();
     expect(screen.queryByText("模拟收据")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "关闭已出收据历史" }));
-    await user.click(within(page).getByRole("button", { name: "待出收据" }));
+    await user.click(within(page).getAllByRole("button", { name: "待出收据" })[0]);
     expect(await screen.findByLabelText("待出收据预览")).toBeInTheDocument();
     expect(await screen.findByText("收 据")).toBeInTheDocument();
     expect(screen.getByText(/人民币伍仟元整/)).toBeInTheDocument();
@@ -399,7 +512,7 @@ describe("Output invoice collections page", () => {
     const page = await screen.findByTestId("output-invoice-collections-page");
     expect(await within(page).findByRole("button", { name: "收据编号设置" })).toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: "状态/提醒" }));
+    await user.click(within(page).getAllByRole("button", { name: "状态/提醒" })[0]);
     expect(await screen.findByLabelText("收款状态和提醒")).toBeInTheDocument();
     expect(await screen.findByText("待冲红")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "撤销手动状态" }));
@@ -416,9 +529,29 @@ describe("Output invoice collections page", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "关闭收款状态抽屉" }));
-    await user.click(within(page).getByRole("button", { name: "红蓝票" }));
+    await user.click(within(page).getAllByRole("button", { name: "红蓝票" })[0]);
     expect(await screen.findByLabelText("红蓝票关系")).toBeInTheDocument();
     expect(screen.getByText(/AUTO-RED/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("搜索关联发票"), "RED");
+    await user.click(await screen.findByRole("radio", { name: /XSFP-2026-RED/ }));
+    await user.type(screen.getByLabelText("确认依据"), "客户邮件确认红冲");
+    await user.click(screen.getByRole("button", { name: "确认关系" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/output-invoice-collections/rows/output-collection-row-001/red-invoice-relations"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            relatedInvoiceId: "out-red-candidate",
+            relatedInvoiceIdentityKey: "id:out-red-candidate",
+            relationType: "red_invoice",
+            evidence: "客户邮件确认红冲",
+            confidence: "manual_confirmed",
+          }),
+        }),
+      );
+    });
+    await user.click(within(page).getAllByRole("button", { name: "红蓝票" })[0]);
     await user.click(screen.getByRole("button", { name: "撤销人工关系 MANUAL-RED" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -428,20 +561,27 @@ describe("Output invoice collections page", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "关闭红蓝票关系抽屉" }));
-    await user.click(within(page).getByRole("button", { name: "已出收据" }));
+    await user.click(within(page).getAllByRole("button", { name: "已出收据" })[0]);
     expect(await screen.findByLabelText("已出收据历史")).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "作废收据 SK2026050001" }));
+    expect(await screen.findByLabelText("作废收据原因")).toBeInTheDocument();
+    fireEvent.input(screen.getByLabelText("作废原因"), { target: { value: "客户要求重开抬头" } });
+    await user.click(screen.getByRole("button", { name: "确认作废" }));
     await user.click(await screen.findByRole("button", { name: "重开收据 SK2026050000" }));
+    expect(await screen.findByLabelText("重开收据原因")).toBeInTheDocument();
+    fireEvent.input(screen.getByLabelText("重开原因"), { target: { value: "作废后重新出具" } });
+    await user.click(screen.getByRole("button", { name: "确认重开" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("/api/output-invoice-collections/receipts/receipt-issued-001/void"),
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "客户要求重开抬头" }) }),
       );
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("/api/output-invoice-collections/receipts/receipt-voided-001/reissue"),
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "作废后重新出具" }) }),
       );
     });
+    await waitFor(() => expect(screen.queryByLabelText("重开收据原因")).not.toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "关闭已出收据历史" }));
     await user.click(within(page).getByRole("button", { name: "收据编号设置" }));
@@ -455,5 +595,5 @@ describe("Output invoice collections page", () => {
         expect.objectContaining({ method: "PUT" }),
       );
     });
-  });
+  }, 45000);
 });

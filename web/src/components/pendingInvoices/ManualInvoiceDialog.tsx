@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
@@ -73,11 +73,17 @@ export default function ManualInvoiceDialog({
   onConfirmed,
 }: ManualInvoiceDialogProps) {
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [requestId] = useState(createRequestId);
+  const [requestId, setRequestId] = useState(createRequestId);
   const [preview, setPreview] = useState<ManualPendingInvoicePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const targetLabel = direction === "expense" ? "进项发票" : "销项发票";
+
+  useEffect(() => {
+    if (open) {
+      setRequestId(createRequestId());
+    }
+  }, [open, row?.id]);
 
   const canPreview = useMemo(() => {
     const hasInvoiceNumber = form.invoiceNo.trim() || form.digitalInvoiceNo.trim();
@@ -134,6 +140,7 @@ export default function ManualInvoiceDialog({
       onConfirmed(result);
       setForm(emptyForm);
       setPreview(null);
+      setRequestId(createRequestId());
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "写入失败。");
     } finally {
@@ -148,6 +155,7 @@ export default function ManualInvoiceDialog({
     setForm(emptyForm);
     setPreview(null);
     setError(null);
+    setRequestId(createRequestId());
     onClose();
   }
 

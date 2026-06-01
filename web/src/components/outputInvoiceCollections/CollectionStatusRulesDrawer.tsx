@@ -72,17 +72,17 @@ export default function CollectionStatusRulesDrawer({
       onClose={onClose}
       transitionDuration={{ enter: 180, exit: 140 }}
       PaperProps={{
-        "aria-label": open ? "销项发票收款情况类型设置" : undefined,
+        "aria-label": open ? "收款状态规则" : undefined,
         sx: { width: { xs: "100%", sm: "min(900px, 58vw)" }, maxWidth: "100vw" },
       }}
     >
       <Stack sx={{ height: "100%" }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
           <Box>
-            <Typography component="h2" variant="h6" fontWeight={900}>销项发票收款情况类型设置</Typography>
+            <Typography component="h2" variant="h6" fontWeight={900}>收款状态规则</Typography>
             <Typography variant="caption" color="text.secondary">Sheet6 静态规则，只读展示</Typography>
           </Box>
-          <IconButton aria-label="关闭销项发票收款情况类型设置" onClick={onClose}>
+          <IconButton aria-label="关闭收款状态规则" onClick={onClose}>
             <CloseOutlinedIcon />
           </IconButton>
         </Stack>

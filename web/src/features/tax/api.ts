@@ -8,6 +8,7 @@ import type {
   TaxCertifiedInvoiceRecord,
   TaxInvoiceRecord,
   TaxMonthData,
+  TaxOffsetPlanSaveResult,
   TaxSummary,
 } from "./types";
 import { apiRequestJson } from "../apiClient";
@@ -75,6 +76,7 @@ type ApiTaxMonthPayload = {
   read_model_scope_key?: string;
   read_model_generated_at?: string | null;
   read_model_stale_reasons?: string[];
+  source_versions?: Record<string, unknown>;
 };
 
 type ApiTaxCalculatePayload = {
@@ -85,6 +87,11 @@ type ApiTaxCalculatePayload = {
 type ApiTaxCertifiedImportPreviewRow = {
   id: string;
   month: string;
+  row_status?: string | null;
+  match_status?: string | null;
+  matched_plan_id?: string | null;
+  dedupe_status?: string | null;
+  error_message?: string | null;
   digital_invoice_no?: string | null;
   invoice_code?: string | null;
   invoice_no?: string | null;
@@ -161,6 +168,20 @@ type ApiTaxCertifiedImportConfirmPayload = {
 
 type ApiTaxCertifiedImportJobPayload = {
   import_job: ApiTaxCertifiedImportJob;
+};
+
+type ApiTaxOffsetPlanSavePayload = {
+  status: "saved";
+  plan: {
+    id: string;
+    month: string;
+    selected_output_ids: string[];
+    selected_input_ids: string[];
+    summary: ApiTaxSummary;
+    read_model_scope_key?: string;
+    source_versions?: Record<string, unknown>;
+    updated_at?: string;
+  };
 };
 
 function parseMoney(value: string) {
@@ -247,6 +268,11 @@ function mapPreviewRow(row: ApiTaxCertifiedImportPreviewRow): TaxCertifiedImport
   return {
     id: row.id,
     month: row.month,
+    rowStatus: row.row_status ?? "recognized",
+    matchStatus: row.match_status ?? "unknown",
+    matchedPlanId: row.matched_plan_id ?? null,
+    dedupeStatus: row.dedupe_status ?? "not_applicable",
+    errorMessage: row.error_message ?? null,
     digitalInvoiceNo: row.digital_invoice_no ?? null,
     invoiceCode: row.invoice_code ?? null,
     invoiceNo: row.invoice_no ?? null,
@@ -288,6 +314,22 @@ function mapCertifiedImportBatch(batch: ApiTaxCertifiedImportBatch): TaxCertifie
   };
 }
 
+function isApiTaxCertifiedImportBatch(value: unknown): value is ApiTaxCertifiedImportBatch {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<ApiTaxCertifiedImportBatch>;
+  return (
+    typeof candidate.id === "string"
+    && typeof candidate.session_id === "string"
+    && typeof candidate.imported_by === "string"
+    && typeof candidate.file_count === "number"
+    && Array.isArray(candidate.months)
+    && candidate.months.every((item) => typeof item === "string")
+    && typeof candidate.persisted_record_count === "number"
+  );
+}
+
 function mapImportJob(job: ApiTaxCertifiedImportJob): TaxCertifiedImportJob {
   return {
     importJobId: job.import_job_id,
@@ -307,7 +349,8 @@ function mapImportJob(job: ApiTaxCertifiedImportJob): TaxCertifiedImportJob {
 }
 
 export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): Promise<TaxMonthData> {
-  const payload = await requestJson<ApiTaxMonthPayload>(`/api/tax-offset?month=${month}`, {
+  const params = new URLSearchParams({ month });
+  const payload = await requestJson<ApiTaxMonthPayload>(`/api/tax-offset?${params.toString()}`, {
     method: "GET",
     signal,
   });
@@ -330,6 +373,7 @@ export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): 
     readModelScopeKey: payload.read_model_scope_key,
     readModelGeneratedAt: payload.read_model_generated_at,
     readModelStaleReasons: payload.read_model_stale_reasons ?? [],
+    sourceVersions: payload.source_versions ?? {},
   };
 }
 
@@ -349,6 +393,41 @@ export async function calculateTaxOffset(params: {
   });
 
   return mapSummary(payload.summary);
+}
+
+export async function saveTaxOffsetPlan(params: {
+  month: string;
+  selectedOutputIds: string[];
+  selectedInputIds: string[];
+  expectedReadModelScopeKey?: string;
+  expectedSourceVersions?: Record<string, unknown>;
+  idempotencyKey: string;
+}): Promise<TaxOffsetPlanSaveResult> {
+  const payload = await requestJson<ApiTaxOffsetPlanSavePayload>("/api/tax-offset/plans", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      month: params.month,
+      selected_output_ids: params.selectedOutputIds,
+      selected_input_ids: params.selectedInputIds,
+      expected_read_model_scope_key: params.expectedReadModelScopeKey,
+      expected_source_versions: params.expectedSourceVersions ?? {},
+      idempotency_key: params.idempotencyKey,
+    }),
+  });
+  return {
+    status: payload.status,
+    plan: {
+      id: payload.plan.id,
+      month: payload.plan.month,
+      selectedOutputIds: payload.plan.selected_output_ids,
+      selectedInputIds: payload.plan.selected_input_ids,
+      summary: mapSummary(payload.plan.summary),
+      readModelScopeKey: payload.plan.read_model_scope_key,
+      sourceVersions: payload.plan.source_versions,
+      updatedAt: payload.plan.updated_at,
+    },
+  };
 }
 
 export async function previewTaxCertifiedImport(params: {
@@ -414,26 +493,8 @@ export async function fetchTaxCertifiedImportJob(importJobId: string): Promise<T
 
 export function taxCertifiedImportConfirmedFromJob(job: TaxCertifiedImportJob): TaxCertifiedImportConfirmedResult | null {
   const batch = job.resultPayload?.batch;
-  if (!batch || typeof batch !== "object") {
+  if (!isApiTaxCertifiedImportBatch(batch)) {
     return null;
   }
-  const candidate = batch as Partial<ApiTaxCertifiedImportBatch>;
-  if (
-    typeof candidate.id !== "string"
-    || typeof candidate.session_id !== "string"
-    || typeof candidate.imported_by !== "string"
-    || typeof candidate.file_count !== "number"
-    || !Array.isArray(candidate.months)
-    || typeof candidate.persisted_record_count !== "number"
-  ) {
-    return null;
-  }
-  return mapCertifiedImportBatch({
-    id: candidate.id,
-    session_id: candidate.session_id,
-    imported_by: candidate.imported_by,
-    file_count: candidate.file_count,
-    months: candidate.months.filter((item): item is string => typeof item === "string"),
-    persisted_record_count: candidate.persisted_record_count,
-  });
+  return mapCertifiedImportBatch(batch);
 }

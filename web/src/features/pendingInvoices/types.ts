@@ -4,7 +4,8 @@ export type PendingInvoiceFilter =
   | "all"
   | "requires_invoice"
   | "bank_statement_as_invoice"
-  | "no_invoice_required";
+  | "no_invoice_required"
+  | "cash_income";
 
 export type PendingInvoiceReadModelStatus = "fresh" | "refreshing" | "stale" | (string & {});
 
@@ -227,6 +228,7 @@ export type PendingInvoiceRow = {
   invoices: PendingInvoiceSummary[];
   oaApplicant: string | null;
   canCreateInvoice: boolean;
+  availableActions: string[];
   relationCaseIds: string[];
 };
 

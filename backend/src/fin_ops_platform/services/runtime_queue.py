@@ -1046,6 +1046,33 @@ class RuntimeQueueRepository:
             )
         return row is not None
 
+    def read_model_refresh_is_current(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_key: str,
+        source_version: int | str | None,
+    ) -> bool:
+        if source_version is None:
+            return True
+        row = self._connection.fetch_one(
+            """
+            select source_version
+            from job.read_model_dirty_scopes
+            where tenant_id = %s
+              and scope_type = %s
+              and scope_key = %s
+            limit 1
+            """,
+            (tenant_id, scope_type, scope_key),
+        )
+        if row is None:
+            return True
+        current_source_version = _optional_int(row.get("source_version"))
+        event_source_version = _optional_int(source_version)
+        return current_source_version is None or event_source_version is None or current_source_version <= event_source_version
+
     def record_worker_heartbeat(
         self,
         worker_id: str,

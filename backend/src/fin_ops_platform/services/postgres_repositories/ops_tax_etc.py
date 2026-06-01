@@ -406,9 +406,13 @@ class PostgresOpsTaxEtcRepository:
                     insert into app.tax_certified_import_records(
                         legacy_mongo_id, certified_unique_key, invoice_no, invoice_code, digital_invoice_no,
                         seller_name, seller_tax_no, invoice_date, scope_month, amount, tax_amount,
-                        matched_plan_id, status, raw_payload
+                        batch_id, matched_plan_id, status, raw_payload
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s)
+                    values (
+                        %s, %s, %s, %s, %s, %s, %s, %s::date, %s::date, %s, %s,
+                        (select id from app.tax_certified_import_batches where batch_id = %s limit 1),
+                        %s, %s, %s
+                    )
                     on conflict (certified_unique_key) do update set
                         invoice_no = excluded.invoice_no,
                         invoice_code = excluded.invoice_code,
@@ -419,6 +423,7 @@ class PostgresOpsTaxEtcRepository:
                         scope_month = excluded.scope_month,
                         amount = excluded.amount,
                         tax_amount = excluded.tax_amount,
+                        batch_id = excluded.batch_id,
                         matched_plan_id = excluded.matched_plan_id,
                         status = excluded.status,
                         raw_payload = excluded.raw_payload
@@ -435,6 +440,7 @@ class PostgresOpsTaxEtcRepository:
                         month_start(payload.get("month") or payload.get("scope_month")),
                         decimal_text(payload.get("amount")),
                         decimal_text(payload.get("tax_amount")) or "0",
+                        text(payload.get("batch_id")),
                         text(payload.get("matched_plan_id")),
                         text(payload.get("status") or payload.get("selection_status") or "active"),
                         jsonb({"normalized_payload": payload}),
@@ -442,6 +448,71 @@ class PostgresOpsTaxEtcRepository:
                 )
 
         run_in_transaction(self._connection, write)
+
+    def save_tax_offset_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+        normalized = serialize_value(plan)
+        if not isinstance(normalized, dict):
+            raise ValueError("tax offset plan payload must be a dictionary.")
+        plan_id = text(normalized.get("id"))
+        if not plan_id:
+            raise ValueError("tax offset plan id is required.")
+        idempotency_key = text(normalized.get("idempotency_key"))
+        if idempotency_key:
+            existing = self._connection.fetch_one(
+                """
+                select raw_payload
+                from app.tax_offset_plans
+                where idempotency_key = %s
+                limit 1
+                """,
+                (idempotency_key,),
+            )
+            existing_payload = row_payload(existing, "raw_payload")
+            if isinstance(existing_payload, dict):
+                return dict(existing_payload)
+        self._connection.execute(
+            """
+            insert into app.tax_offset_plans(
+                plan_id, scope_month, status, selected_output_ids, selected_input_ids,
+                calculation_summary, source_versions, read_model_scope_key,
+                created_by, idempotency_key, audit_trace, raw_payload, created_at, updated_at
+            )
+            values (
+                %s, %s::date, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s, %s,
+                coalesce(%s::timestamptz, now()), coalesce(%s::timestamptz, now())
+            )
+            on conflict (plan_id) do update set
+                status = excluded.status,
+                selected_output_ids = excluded.selected_output_ids,
+                selected_input_ids = excluded.selected_input_ids,
+                calculation_summary = excluded.calculation_summary,
+                source_versions = excluded.source_versions,
+                read_model_scope_key = excluded.read_model_scope_key,
+                created_by = excluded.created_by,
+                audit_trace = excluded.audit_trace,
+                raw_payload = excluded.raw_payload,
+                updated_at = excluded.updated_at
+            """,
+            (
+                plan_id,
+                month_start(normalized.get("month")),
+                text(normalized.get("status") or "saved"),
+                text_list(normalized.get("selected_output_ids")),
+                text_list(normalized.get("selected_input_ids")),
+                jsonb(normalized.get("summary") if isinstance(normalized.get("summary"), dict) else {}),
+                jsonb(normalized.get("source_versions") if isinstance(normalized.get("source_versions"), dict) else {}),
+                text(normalized.get("read_model_scope_key")),
+                text(normalized.get("actor_id")),
+                idempotency_key,
+                jsonb(normalized.get("audit") if isinstance(normalized.get("audit"), dict) else {}),
+                jsonb(normalized),
+                text(normalized.get("created_at")),
+                text(normalized.get("updated_at")),
+            ),
+        )
+        return normalized
 
     def load_etc_state(self) -> dict[str, Any]:
         current_state_filter = "coalesce(legacy_mongo_id, '') !~ '^current_state:'"

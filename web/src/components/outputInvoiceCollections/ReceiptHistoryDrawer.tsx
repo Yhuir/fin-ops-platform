@@ -4,10 +4,15 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
 import Drawer from "@mui/material/Drawer";
 import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
@@ -17,8 +22,8 @@ type ReceiptHistoryDrawerProps = {
   open: boolean;
   invoiceId: string | null;
   loadHistory: (invoiceId: string) => Promise<OutputInvoiceReceiptHistoryResponse>;
-  onVoidReceipt: (receiptId: string) => Promise<void>;
-  onReissueReceipt: (receiptId: string) => Promise<void>;
+  onVoidReceipt: (receiptId: string, reason: string) => Promise<void>;
+  onReissueReceipt: (receiptId: string, reason: string) => Promise<void>;
   onChanged?: () => void;
   onClose: () => void;
 };
@@ -36,12 +41,20 @@ export default function ReceiptHistoryDrawer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittingId, setSubmittingId] = useState("");
+  const [pendingAction, setPendingAction] = useState<{
+    kind: "void" | "reissue";
+    receiptId: string;
+    receiptNo: string;
+  } | null>(null);
+  const [reason, setReason] = useState("");
 
   useEffect(() => {
     if (!open || !invoiceId) {
       setPayload(null);
       setLoading(false);
       setError(null);
+      setPendingAction(null);
+      setReason("");
       return undefined;
     }
     let active = true;
@@ -75,11 +88,11 @@ export default function ReceiptHistoryDrawer({
     setPayload(await loadHistory(invoiceId));
   };
 
-  const handleVoid = async (receiptId: string) => {
+  const handleVoid = async (receiptId: string, actionReason: string) => {
     setSubmittingId(receiptId);
     setError(null);
     try {
-      await onVoidReceipt(receiptId);
+      await onVoidReceipt(receiptId, actionReason);
       await reload();
       onChanged?.();
     } catch (reason) {
@@ -89,11 +102,11 @@ export default function ReceiptHistoryDrawer({
     }
   };
 
-  const handleReissue = async (receiptId: string) => {
+  const handleReissue = async (receiptId: string, actionReason: string) => {
     setSubmittingId(receiptId);
     setError(null);
     try {
-      await onReissueReceipt(receiptId);
+      await onReissueReceipt(receiptId, actionReason);
       await reload();
       onChanged?.();
     } catch (reason) {
@@ -101,6 +114,38 @@ export default function ReceiptHistoryDrawer({
     } finally {
       setSubmittingId("");
     }
+  };
+
+  const openActionDialog = (kind: "void" | "reissue", receiptId: string, receiptNo: string) => {
+    setPendingAction({ kind, receiptId, receiptNo });
+    setReason("");
+    setError(null);
+  };
+
+  const closeActionDialog = () => {
+    if (submittingId) {
+      return;
+    }
+    setPendingAction(null);
+    setReason("");
+  };
+
+  const handleConfirmAction = async () => {
+    if (!pendingAction) {
+      return;
+    }
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) {
+      setError("请填写收据处理原因");
+      return;
+    }
+    if (pendingAction.kind === "void") {
+      await handleVoid(pendingAction.receiptId, trimmedReason);
+    } else {
+      await handleReissue(pendingAction.receiptId, trimmedReason);
+    }
+    setPendingAction(null);
+    setReason("");
   };
 
   return (
@@ -157,7 +202,7 @@ export default function ReceiptHistoryDrawer({
                     variant="outlined"
                     color="warning"
                     disabled={submittingId === receipt.id}
-                    onClick={() => handleVoid(receipt.id || "")}
+                    onClick={() => openActionDialog("void", receipt.id || "", receipt.receiptNo || receipt.id || "")}
                   >
                     作废收据 {receipt.receiptNo || receipt.id}
                   </Button>
@@ -167,7 +212,7 @@ export default function ReceiptHistoryDrawer({
                     size="small"
                     variant="contained"
                     disabled={submittingId === receipt.id}
-                    onClick={() => handleReissue(receipt.id || "")}
+                    onClick={() => openActionDialog("reissue", receipt.id || "", receipt.receiptNo || receipt.id || "")}
                   >
                     重开收据 {receipt.receiptNo || receipt.id}
                   </Button>
@@ -177,6 +222,40 @@ export default function ReceiptHistoryDrawer({
           ))}
         </Stack>
       </Stack>
+      <Dialog
+        open={Boolean(pendingAction)}
+        onClose={closeActionDialog}
+        PaperProps={{
+          "aria-label": pendingAction?.kind === "void" ? "作废收据原因" : "重开收据原因",
+        }}
+      >
+        <DialogTitle>{pendingAction?.kind === "void" ? "作废收据" : "重开收据"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ pt: 1, minWidth: { xs: 280, sm: 420 } }}>
+            <Typography variant="body2" color="text.secondary">
+              {pendingAction?.receiptNo || ""}
+            </Typography>
+            <TextField
+              autoFocus
+              label={pendingAction?.kind === "void" ? "作废原因" : "重开原因"}
+              size="small"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeActionDialog} disabled={Boolean(submittingId)}>取消</Button>
+          <Button
+            variant="contained"
+            color={pendingAction?.kind === "void" ? "warning" : "primary"}
+            disabled={Boolean(submittingId) || !reason.trim()}
+            onClick={handleConfirmAction}
+          >
+            {pendingAction?.kind === "void" ? "确认作废" : "确认重开"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Drawer>
   );
 }

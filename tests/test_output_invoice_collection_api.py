@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from decimal import Decimal
+from http import HTTPStatus
 import json
 from pathlib import Path
 import tempfile
@@ -11,6 +13,7 @@ from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_usage_collection_source_versions import output_invoice_collection_source_versions
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
@@ -92,6 +95,32 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertTrue(json.loads(preview_response.body)["canPreview"])
         self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
         self.assertEqual(json.loads(history_response.body)["receipts"], [])
+
+    def test_detail_routes_require_output_collection_read_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            invoice = self._invoice("out-auth-detail", "2101", "权限客户")
+            bank = self._bank("bank-auth-detail", "100.00", TransactionDirection.INFLOW)
+            self._install_service(app, invoices=[invoice], transactions=[bank])
+            row = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"][0]
+
+            def deny_read_session(headers: dict[str, str] | None = None) -> tuple[None, object]:
+                return None, app._json_response(
+                    HTTPStatus.UNAUTHORIZED,
+                    {"error": {"code": "oa_session_required", "message": "需要登录 OA。"}},
+                )
+
+            app._resolve_output_invoice_collection_read_session = deny_read_session
+            invoice_response = app.handle_request("GET", "/api/output-invoice-collections/invoices/out-auth-detail/detail")
+            bank_response = app.handle_request("GET", "/api/output-invoice-collections/bank-transactions/bank-auth-detail/detail")
+            relation_response = app.handle_request(
+                "GET",
+                f"/api/output-invoice-collections/rows/{row['id']}/relation-details?kind=bank",
+            )
+
+        self.assertEqual(invoice_response.status_code, 401)
+        self.assertEqual(bank_response.status_code, 401)
+        self.assertEqual(relation_response.status_code, 401)
 
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -222,6 +251,59 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
         self.assertEqual([item["status"] for item in json.loads(history_response.body)["receipts"]], ["issued", "voided"])
 
+    def test_sql_fresh_rows_route_applies_lifecycle_overlay_before_response(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            invoice = self._invoice("out-sql-overlay", "4001", "SQL 覆盖客户", total_with_tax="100.00")
+            red_invoice = self._invoice("out-sql-red", "4002", "SQL 覆盖客户", total_with_tax="-100.00")
+            self._install_service(app, invoices=[invoice, red_invoice])
+            live_rows = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"]
+            row = next(item for item in live_rows if item["invoiceId"] == "out-sql-overlay")
+            stale_sql_row = deepcopy(row)
+            stale_sql_row["invoiceIdentityKey"] = f"id:{row['invoiceId']}"
+
+            status_response = app.handle_request(
+                "PUT",
+                f"/api/output-invoice-collections/rows/{row['id']}/collection-status",
+                body=json.dumps(
+                    {
+                        "statusCode": "pending_red_invoice",
+                        "expectedCollectionDate": "2026-06-20",
+                        "note": "SQL fresh 路径也必须展示人工状态",
+                        "expectedVersion": 0,
+                    }
+                ),
+            )
+            relation_response = app.handle_request(
+                "POST",
+                f"/api/output-invoice-collections/rows/{row['id']}/red-invoice-relations",
+                body=json.dumps(
+                    {
+                        "relatedInvoiceIdentityKey": "id:out-sql-red",
+                        "relatedInvoiceId": "out-sql-red",
+                        "relationType": "red_invoice",
+                        "evidence": "SQL overlay 验证",
+                    }
+                ),
+            )
+            app._output_invoice_collection_sql_read_repository = _FreshOutputInvoiceCollectionSqlRepository([stale_sql_row])
+
+            response = app.handle_request("GET", "/api/output-invoice-collections/rows?month=2026-05")
+
+        payload = json.loads(response.body)
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(relation_response.status_code, 200)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["readModelStatus"], "fresh")
+        self.assertEqual(payload["rows"][0]["collectionStatus"]["manualOverride"]["note"], "SQL fresh 路径也必须展示人工状态")
+        red_relation_summaries = payload["rows"][0]["redInvoiceRelation"]["summaries"]
+        self.assertTrue(
+            any(
+                item.get("source") == "manual" and item.get("relatedInvoiceId") == "out-sql-red"
+                for item in red_relation_summaries
+            )
+        )
+
     @staticmethod
     def _install_service(
         app: object,
@@ -286,3 +368,28 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
             imported_bank_last4="1234",
             summary="服务费",
         )
+
+
+class _FreshOutputInvoiceCollectionSqlRepository:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self._rows = rows
+
+    def list_output_invoice_collection_rows(self, **kwargs: object) -> dict[str, object]:
+        page = int(kwargs.get("page") or 1)
+        page_size = int(kwargs.get("page_size") or 50)
+        return {
+            "rows": deepcopy(self._rows),
+            "pagination": {"page": page, "pageSize": page_size, "total": len(self._rows)},
+            "summary": {
+                "invoiceCount": len(self._rows),
+                "totalWithTax": "100.00",
+                "collectedAmount": "0.00",
+                "pendingAmount": "100.00",
+                "pendingCollectionCount": 1,
+                "partialCollectionCount": 0,
+                "receiptPendingCount": 0,
+            },
+            "filterConfig": [],
+            "read_model_status": "fresh",
+            "source_versions": output_invoice_collection_source_versions(),
+        }

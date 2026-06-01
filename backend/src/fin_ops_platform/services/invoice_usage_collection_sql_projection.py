@@ -22,6 +22,9 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresReadModelRepository,
     PostgresWorkbenchRepository,
 )
+from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
+    build_output_invoice_collection_lifecycle_repository,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
@@ -166,6 +169,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return OutputInvoiceCollectionQueryService(
             import_service=self._import_service(),
             pair_relation_service=self._pair_relation_service(),
+            lifecycle_repository=build_output_invoice_collection_lifecycle_repository(self._connection),
         )
 
     def _oa_pending_payment_service(self) -> OaPendingPaymentQueryService:

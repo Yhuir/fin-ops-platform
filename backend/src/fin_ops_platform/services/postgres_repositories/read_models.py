@@ -1216,6 +1216,7 @@ class PostgresReadModelRepository:
                 "summary": {"rowCount": 0, "oaAmountTotal": "0.00", "bankPaidTotal": "0.00"},
                 "refresh_status": refresh_status,
                 "source_versions": source_versions,
+                "read_model_scope_key": scope_key,
             }
         order_sql = _invoice_relation_order_sql(
             sort_field=sort_field,
@@ -1243,6 +1244,7 @@ class PostgresReadModelRepository:
             },
             "refresh_status": refresh_status,
             "source_versions": source_versions,
+            "read_model_scope_key": scope_key,
         }
 
     def save_oa_pending_payment_rows(
@@ -1629,10 +1631,31 @@ class PostgresReadModelRepository:
 
     def _invoice_relation_scope_row(self, *, scope_table_name: str, scope_key: str) -> dict[str, Any] | None:
         if scope_key == "all":
-            row = self._connection.fetch_one(
-                f"select scope_key, source_versions from {scope_table_name} order by generated_at desc limit 1"
+            rows = self._connection.fetch_all(
+                f"""
+                select scope_key, source_versions, cache_status
+                from {scope_table_name}
+                where scope_key <> 'all'
+                order by generated_at desc, scope_key desc
+                """
             )
-            return dict(row) if isinstance(row, dict) else None
+            if not rows:
+                row = self._connection.fetch_one(
+                    f"select scope_key, source_versions, cache_status from {scope_table_name} where scope_key = 'all' limit 1"
+                )
+                return dict(row) if isinstance(row, dict) else None
+            source_versions: dict[str, Any] | None = None
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if text(row.get("cache_status")) not in {"", "fresh"}:
+                    return {"scope_key": "all", "source_versions": {}}
+                row_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+                if source_versions is None:
+                    source_versions = dict(row_versions)
+                elif row_versions != source_versions:
+                    return {"scope_key": "all", "source_versions": {}}
+            return {"scope_key": "all", "source_versions": source_versions or {}}
         row = self._connection.fetch_one(
             f"select scope_key, source_versions from {scope_table_name} where scope_key = %s limit 1",
             (scope_key,),

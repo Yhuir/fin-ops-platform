@@ -23,7 +23,7 @@ function api() {
     fetchPendingInvoiceFilterOptions: (request: FetchPendingInvoiceRowsRequest) => Promise<unknown>;
     fetchPendingInvoiceRules: () => Promise<PendingInvoiceRulesPayload>;
     savePendingInvoiceRules: (payload: PendingInvoiceRulesPayload) => Promise<PendingInvoiceRulesPayload>;
-    fetchPendingInvoiceRelationDetail: (transactionId: string) => Promise<unknown>;
+    fetchPendingInvoiceRelationDetail: (transactionId: string, direction?: string) => Promise<unknown>;
     fetchPendingInvoiceObjectDetail: (target: PendingInvoiceObjectDetailTarget) => Promise<unknown>;
     fetchPendingInvoiceCandidates: (request: FetchPendingInvoiceCandidatesRequest) => Promise<unknown>;
     previewAttachExistingInvoice: (request: AttachExistingInvoicePreviewRequest) => Promise<unknown>;
@@ -34,6 +34,15 @@ function api() {
 }
 
 describe("pending invoices and tag settings API mapping", () => {
+  test("does not infer pending invoice status or primary action when backend contract is missing", () => {
+    expect(() => pendingInvoicesApi.mapPendingInvoiceRow({
+      id: "txn_legacy",
+      bank_transaction: { id: "txn_legacy", counterparty_name: "旧数据供应商" },
+      invoices: [{ id: "inv_legacy", invoice_no: "INV-LEGACY" }],
+      can_create_invoice: true,
+    } as Parameters<typeof pendingInvoicesApi.mapPendingInvoiceRow>[0])).toThrow(/invoice_acquisition_status/);
+  });
+
   test("maps upgraded four-zone pending invoice rows and sends filters/sort query", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       direction: "expense",
@@ -116,6 +125,8 @@ describe("pending invoices and tag settings API mapping", () => {
               { id: "oa_002", applicant: "李四", application_type: "报销", project_name: "维护项目二期", status: "已完成" },
             ],
           },
+          can_create_invoice: false,
+          available_actions: ["view_relation"],
         },
       ],
       pagination: { page: 2, page_size: 25, total: 51 },
@@ -512,7 +523,12 @@ describe("pending invoices and tag settings API mapping", () => {
         affected_transaction_ids: ["txn_001"],
         affected_invoice_ids: ["inv_002"],
         affected_months: ["2026-05"],
-        row: { id: "txn_001", bank_transaction: { id: "txn_001" }, invoice_acquisition_status: { code: "paid_invoiced", label: "已支付已开票" } },
+        row: {
+          id: "txn_001",
+          bank_transaction: { id: "txn_001" },
+          invoice_acquisition_status: { code: "paid_invoiced", label: "已支付已开票", primary_action: "view_relation" },
+          available_actions: ["view_relation"],
+        },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
