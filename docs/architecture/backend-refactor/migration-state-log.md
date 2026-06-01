@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton` 已执行并验证通过 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring` |
 | 最近 verified prompt | `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton` |
 | 当前分支 | `codex/turnover-ledger-repository-ownership-p094` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests |
-| 下一条允许任务 | 生成并审查 `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring` |
+| 下一条允许任务 | 执行 `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring` |
 
 ## Prompt 执行日志
 
@@ -7439,6 +7439,38 @@ PF-P095 已 verified。下一步应生成并审查 `PF-P096 - Turnover Ledger Po
 #### 下一条 Prompt 上下文
 
 PF-P096 已 verified。下一步应生成并审查 `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring`，将 `server.py` PostgreSQL nested helper 的 orchestration 替换为 new ports。PF-P097 应只做 composition wiring，不改变 API response contract，不新增 SQL migration，不扩大到 unrelated Turnover Ledger paths。
+
+### PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring
+
+状态：`planned`
+
+#### 范围
+
+- 将 `server.py` PostgreSQL storage backend composition 接入 PF-P096 的：
+  - `TurnoverLedgerRelationWritePort`
+  - `TurnoverLedgerBankdetailWritePort`
+- 替换 `_postgres_turnover_ledger_relation_repository(...)` 与 `_postgres_turnover_ledger_bankdetail_repository(...)` 中仍承担的 service orchestration。
+- 保持 local/dev/test fallback path 不变。
+
+#### 允许变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 禁止范围
+
+- 不得修改 API response contract。
+- 不得修改 SQL migration、部署配置或生产配置。
+- 不得迁移 unrelated Turnover Ledger paths 或其它业务模块。
+
+#### 下一条 Prompt 上下文
+
+PF-P097 planned。执行后若 server composition 已接入 new write ports 且 tests 通过，应评估生成 cumulative MG：`PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate`，覆盖 PF-P094 到 PF-P097 的完整 diff。
 
 ## 维护规则
 

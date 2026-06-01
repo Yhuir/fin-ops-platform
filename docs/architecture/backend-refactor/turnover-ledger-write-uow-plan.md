@@ -2187,3 +2187,24 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
 
 - 生成并审查 `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring`。
 - PF-P097 只替换 `server.py` PostgreSQL nested helper 的 orchestration 到 new ports，不改变 API response contract，不新增 SQL migration。
+
+## PF-P097 PostgreSQL Write Port Server Composition Wiring
+
+状态：`planned`
+
+目标：
+
+- 在 PostgreSQL storage backend path 中使用 PF-P096 的 service-level write ports。
+- 让 `server.py` 只做 composition：提供 services、routes/provider 和 transaction-bound persistence repository factory。
+- 移除 `_postgres_turnover_ledger_relation_repository(...)` 与 `_postgres_turnover_ledger_bankdetail_repository(...)` 中的 nested service orchestration。
+
+边界：
+
+- 保留 local/dev/test fallback path。
+- 保持 API response contract 不变。
+- 不新增 SQL migration。
+- 不改 Turnover Ledger read/query code。
+
+Merge 边界：
+
+- 若 PF-P097 verified，当前分支已覆盖 repository ownership discovery、contract tests、skeleton 和 server composition wiring，应生成 cumulative MG 覆盖 PF-P094 到 PF-P097。
