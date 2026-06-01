@@ -203,6 +203,21 @@
 - confirm/withdraw 必须保持事务、audit、dirty scope、derived lifecycle event 的一致性。
 - 当前仍存在 `legacy_turnover_ledger_extras_fallback_persist` 这类 legacy fallback 线索，`PF-P001` 必须明确是否仍在生产路径触发，并制定移除顺序。
 
+`PF-P046` 后的模块切片建议：
+
+1. Characterization tests：锁定 SQL read model freshness、grouped breakdown、legacy fallback、relation write side effects、extra persist、bank-row-tags batch、export payload 和 Workbench/Bankdetail influence。
+2. Query / route boundary：在测试保护下薄化 `server.py` 和 `routes_turnover_ledger.py`，保留 HTTP mapping 和 grouped compatibility，不移动业务规则到新大泥球。
+3. Write orchestration boundary：设计 Turnover write service/UoW，只接收明确依赖，不接收 `Application` 或完整 state store；目标是把 relation facts、audit、dirty scope/outbox/source_version 放入明确事务边界。
+4. Repository boundary：将 `postgres_repositories/workbench.py` 中 Turnover relation/extras 持久化从 Workbench 命名耦合中解出，或至少先加 Turnover repository port。
+5. Runtime worker boundary：保持 `TurnoverLedgerReadModelRefreshService` 不知道 HTTP response；worker 只处理 event -> projection -> dirty scope completion。
+
+当前不做：
+
+- 不直接移除 legacy fallback。
+- 不直接改事务模型。
+- 不直接重写 export 或 grouped payload。
+- 不把 `/api/turnover-ledger/bank-row-tags/batch` 机械归入 Bankdetail；它是 Turnover API + Bankdetail facts influence，需要测试后设计 port。
+
 ## Batch Accounting
 
 范围：

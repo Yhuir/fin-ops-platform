@@ -188,6 +188,49 @@ PF-P004 已补充 Workbench `query/read-model` 子域事实链路，完整计划
 - `turnover_relation_changed` 如何影响 Workbench candidate grouping 和 source version。
 - `turnover_ledger_extras` 是否仍存在 legacy full snapshot fallback。
 
+PF-P046 已补充当前运行时序：
+
+```text
+GET /api/turnover-ledger?view=grouped
+  -> Application._handle_api_turnover_ledger
+  -> TurnoverLedgerApiRoutes.list_ledger
+  -> TurnoverLedgerQueryService.list_ledger
+  -> read_repository.list_turnover_ledger_view(scope_key="all")
+  -> compare expected source_versions
+  -> fresh: return SQL payload
+  -> stale/miss: RuntimeQueueRepository.enqueue_read_model_refresh(turnover_ledger, all)
+  -> route facade normalizes grouped payload
+```
+
+```text
+POST /api/turnover-ledger/relations/confirm
+  -> Application._handle_api_turnover_ledger_confirm
+  -> _turnover_mutation_session
+  -> TurnoverRelationService.rebuild_from_bank_rows
+  -> TurnoverLedgerApiRoutes.confirm_relation
+  -> TurnoverRelationService.confirm_relation
+  -> _after_turnover_relation_mutation
+  -> _persist_turnover_relations_best_effort
+  -> _invalidate_workbench_after_bank_transaction_categories
+  -> _clear_turnover_ledger_read_model_best_effort
+  -> _enqueue_turnover_ledger_read_model_refreshes
+```
+
+```text
+turnover_ledger.read_model.refresh event
+  -> app/worker.py
+  -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
+  -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
+  -> PostgresReadModelRepository.save_turnover_ledger_rows
+  -> RuntimeQueueRepository.complete_read_model_refresh(source_version)
+```
+
+PF-P046 风险判断：
+
+- Query service 已具备 SQL read model freshness gate，但仍保留 PostgreSQL-not-required 时的 legacy builder fallback。
+- Runtime queue 已提供 dirty scope + outbox 同事务 primitive；Turnover 写 handler 尚未把 relation facts/audit 和 dirty/outbox 纳入一个显式 UoW。
+- `/api/turnover-ledger/bank-row-tags/batch` 由 Turnover API 写 Bankdetail category facts，必须在后续 tests 中锁定 ownership 和 side effects。
+
 ### Batch Accounting
 
 - `GET /api/batch-accounting`

@@ -429,6 +429,24 @@ POST /api/turnover-ledger/relations/confirm
 
 Turnover Ledger 是独立模块。与 Workbench 的协作必须通过 relation facts、source version、dirty scope 和 read model 投影，不允许直接调用 Workbench usecase 做同步更新。
 
+### PF-P046 Turnover Ledger Discovery Update
+
+PF-P046 已对 PF-P045 main delta 后的 Turnover Ledger 做 Micro-JIT discovery。专项文档见 `turnover-ledger-discovery.md`。
+
+新增确认：
+
+- Turnover Ledger 读路径已经有 `TurnoverLedgerQueryService`，它优先读取 `read_model.turnover_ledger_rows`，通过 `source_version_mismatch_reasons` 判断 freshness，并在 stale/miss 时通过 runtime queue enqueue `turnover_ledger.read_model.refresh`。
+- `GET /api/turnover-ledger?view=grouped` 需要同时支持原生 grouped payload 和 flat SQL read model payload 转 grouped 的兼容路径；PF-P045 的 grouped breakdown 修正属于必须锁定的接口契约。
+- `TurnoverLedgerReadModelRefreshService` + `TurnoverLedgerSqlProjectionBuilder` 已形成 worker refresh 链路，worker registry 中 `turnover-ledger-read-model` 是 required 且 RabbitMQ eligible。
+- `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction()` 已提供 dirty scope + outbox + monotonic source_version 的平台能力，但 Turnover relation confirm/withdraw、extra update、bank-row-tags batch 仍由 `server.py` handler finalizer 编排多个 side effect，不是显式 Turnover Unit of Work。
+- `/api/turnover-ledger/bank-row-tags/batch` 是 Turnover API，但写入 Bankdetail category facts；后续必须用明确 service port 和 characterization tests 固定 ownership。
+- `turnover_ledger_extras` 仍存在 `legacy_turnover_ledger_extras_fallback_persist` 风险，后续应优先锁定并移除或限制 fallback。
+
+下一步建议：
+
+- `PF-P047 - Turnover Ledger Characterization Tests`，先锁定 freshness、grouped breakdown、relation write side effects、extra fallback、bank tag batch 和 export payload。
+- 不应直接进入 extraction/refactor。
+
 ## Batch Accounting Inventory
 
 范围：
