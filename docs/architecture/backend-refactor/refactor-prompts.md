@@ -14845,3 +14845,95 @@ Post-Flight:
   - `git ls-files --others --exclude-standard`：Pass。
   - `git diff --check`：Pass。
 - 下一步建议：从最新 `main` 新建分支，生成并审查 `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning`。PF-P055 只做真实 API 接入规划，不直接迁移 handler。
+
+## PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning
+
+Role:
+你是一位精通 Python Clean Architecture、渐进式重构、Unit of Work 接入规划和遗留系统风险控制的后端架构师。
+
+Context:
+PF-P054-MG 已合入并推送 `origin/main`。当前已有：
+- API-level characterization tests 锁定当前 Turnover Ledger 写路径行为；
+- `tests/test_turnover_ledger_uow_contract.py` 普通通过；
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py` 最小 skeleton；
+- 真实 Turnover Ledger 写 API 尚未接入 UoW，`server.py` 仍编排 tag selection、bank-row-tags batch、relation extra、confirm、withdraw side effects。
+
+本轮只做真实 API 接入规划，不写生产实现，不迁移 handler。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-discovery.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/app/server.py 中 Turnover Ledger 写 handler/helper
+2. 必须使用 CodeGraph 或源码确认以下当前调用链：
+   - `_handle_api_turnover_ledger_confirm`
+   - `_handle_api_turnover_ledger_withdraw`
+   - `_handle_api_turnover_ledger_relation_extra_update`
+   - `_handle_api_turnover_ledger_tag_selection_update`
+   - `_handle_api_turnover_ledger_bank_row_tags_batch`
+   - `_after_turnover_relation_mutation`
+3. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Required Planning Work:
+1. 更新 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`，新增 “Real API Integration Plan”。
+2. 为每个写入口输出 readiness matrix：
+   - `POST /api/turnover-ledger/relations/confirm`
+   - `POST /api/turnover-ledger/relations/{id}/withdraw`
+   - `PUT /api/turnover-ledger/relations/{id}/extra`
+   - `PUT /api/turnover-ledger/tag-selection`
+   - `POST /api/turnover-ledger/bank-row-tags/batch`
+3. 对每个入口明确：
+   - 当前 handler 负责的事情；
+   - 目标 facade/usecase 负责的事情；
+   - 需要的 granular dependency / port；
+   - 需要先补的 tests；
+   - 是否可以用当前 minimal UoW skeleton；
+   - 是否需要新增 repository adapter；
+   - 是否涉及跨模块 Bankdetail/Settings/Workbench influence；
+   - 推荐迁移顺序和风险。
+4. 输出下一步 prompt 建议：
+   - 优先选择一个最小可迁移入口；
+   - 如果还缺测试，下一步必须是 characterization/contract tests；
+   - 如果已具备测试，下一步可以是 facade extraction 或 repository/port skeleton。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得迁移任何真实 API。
+- 不得修改 `server.py`、repository、runtime queue、worker、SQL migration、frontend、deployment、生产配置或 feature flag。
+- 不得访问真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "Real API Integration Plan|readiness matrix|PF-P055|confirm|withdraw|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P055 status = implemented/verified/blocked。
+   - 记录规划结论和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P055 执行结果。
+3. 不执行 MG，除非只是文档规划切片且状态机判断应立即合入。
+```
+
+### 审查结论
+
+- PF-P055 是 PF-P054-MG 后合理的下一步：UoW foundation 已合入，下一步需要规划真实 API 接入顺序，避免直接迁移导致范围过大。
+- Prompt 明确 planning-only，不修改生产代码或测试。
+- Prompt 要求对 confirm、withdraw、extra、tag selection、bank-row-tags batch 分别做 readiness matrix。

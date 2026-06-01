@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` 已合入并推送 `origin/main` |
-| 当前 active prompt | 无 active prompt；下一步从最新 `main` 新建分支，生成并审查下一条 Turnover Ledger 写路径 prompt |
+| 当前阶段 | 已从最新 `main` 新建分支并生成 `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` |
+| 当前 active prompt | `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` (`planned`) |
 | 最近 verified prompt | `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P054-MG 已在功能分支和 `main` 上通过；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract tests.test_turnover_ledger_api tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service -v` 通过，70 tests；merge commit `1b03b1ed` 已 push 到 `origin/main` |
-| 下一条允许任务 | 从最新 `main` 新建 `codex/` 分支，生成并审查 `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning`；PF-P055 只做真实 API 接入规划，不直接迁移 handler |
+| 下一条允许任务 | 执行 `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning`；PF-P055 只做真实 API 接入规划，不直接迁移 handler |
 
 ## Prompt 执行日志
 
@@ -5588,6 +5588,25 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `git ls-files --others --exclude-standard`：Pass。
 - `git diff --check`：Pass。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract tests.test_turnover_ledger_api tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service -v`：Pass，70 tests。
+
+### PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Turnover Ledger 写路径真实 API 接入规划。
+- 盘点哪些 handler 可以先接入 `TurnoverLedgerWriteUnitOfWork`，以及需要哪些 repository/port adapter。
+- 不迁移真实 handler，不修改 production code，不改变 API 语义。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P055。
 
 ## 维护规则
 
