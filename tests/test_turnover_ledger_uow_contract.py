@@ -140,10 +140,112 @@ class _StalePreconditionPort:
             raise RuntimeError("turnover_write_conflict")
 
 
+class _RecordingTurnoverExtraSnapshotRepository:
+    def __init__(self) -> None:
+        self.saved_snapshots: list[dict[str, object]] = []
+
+    def save_turnover_ledger_extras(self, snapshot: dict[str, object]) -> None:
+        self.saved_snapshots.append(dict(snapshot))
+
+
+class _RecordingRepositoryFactory:
+    def __init__(self) -> None:
+        self.transactions: list[object] = []
+        self.repositories: list[_RecordingTurnoverExtraSnapshotRepository] = []
+
+    def __call__(self, transaction: object) -> _RecordingTurnoverExtraSnapshotRepository:
+        self.transactions.append(transaction)
+        repository = _RecordingTurnoverExtraSnapshotRepository()
+        self.repositories.append(repository)
+        return repository
+
+
+class _TransactionOnlyQueueRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def enqueue_read_model_refresh_in_transaction(
+        self,
+        *,
+        transaction: object,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        tenant_id: str,
+        priority: str,
+        trace_id: str | None,
+    ) -> dict[str, object]:
+        event = {
+            "transaction": transaction,
+            "scope_type": scope_type,
+            "scope_key": scope_key,
+            "reason": reason,
+            "tenant_id": tenant_id,
+            "priority": priority,
+            "trace_id": trace_id,
+        }
+        self.calls.append(event)
+        return event
+
+    def enqueue_read_model_refresh(self, **_kwargs: object) -> None:
+        raise AssertionError("non-transaction enqueue must not be used")
+
+
+class _NonTransactionalQueueRepository:
+    def enqueue_read_model_refresh(self, **_kwargs: object) -> None:
+        return None
+
+
+class _RecordingRelationExtraRowProvider:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, *, relation_id: str, extra: dict[str, object]) -> dict[str, object]:
+        self.calls.append({"relation_id": relation_id, "extra": dict(extra)})
+        return {
+            "relation_id": relation_id,
+            "note": extra.get("note"),
+            "interest_rate_type": extra.get("interest_rate_type", "none"),
+        }
+
+
+class _RecordingRelationExtraNormalizer:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, *, relation_id: str, payload: dict[str, object], actor_id: str) -> dict[str, object]:
+        self.calls.append({"relation_id": relation_id, "payload": dict(payload), "actor_id": actor_id})
+        if self.fail:
+            raise ValueError("invalid normalized extra")
+        return {
+            "relation_id": relation_id,
+            "interest_rate_type": str(payload.get("interest_rate_type") or "none"),
+            "interest_rate_value": "0.000000",
+            "interest_paid_amount": "0.00",
+            "interest_paid_date": None,
+            "interest_payment_method": "",
+            "note": f"normalized:{payload.get('note', '')}",
+            "updated_at": "2026-06-02T00:00:00+00:00",
+            "updated_by": actor_id,
+        }
+
+
 class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def _uow_class(self) -> type:
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_uow")
         return getattr(module, "TurnoverLedgerWriteUnitOfWork")
+
+    def _write_facade_class(self) -> type:
+        module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_facade")
+        return getattr(module, "TurnoverLedgerWriteFacade")
+
+    def _write_adapters_module(self) -> object:
+        return importlib.import_module("fin_ops_platform.services.turnover_ledger_write_adapters")
+
+    def _extra_service_class(self) -> type:
+        module = importlib.import_module("fin_ops_platform.services.turnover_ledger_extra_service")
+        return getattr(module, "TurnoverLedgerExtraService")
 
     def _build_uow(
         self,
@@ -297,3 +399,289 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             uow_class(application=object())
+
+    def test_relation_extra_write_facade_constructor_rejects_application_god_object(self) -> None:
+        # PF-P056 target contract: PF-P057 should implement the facade and remove this expectedFailure.
+        facade_class = self._write_facade_class()
+
+        with self.assertRaises(TypeError):
+            facade_class(application=object())
+
+    def test_relation_extra_write_facade_commits_extra_and_dirty_outbox_in_one_uow(self) -> None:
+        # PF-P056 target contract: facade must remain service-layer only and delegate transaction scope to UoW.
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "facade note"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(deps.connection.opened, 1)
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
+        self.assertEqual(len(deps.extra_repository.extras), 1)
+        self.assertIs(deps.extra_repository.extras[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(deps.extra_repository.extras[0]["extra"]["relation_id"], "turnover_rel_1")
+        self.assertEqual(deps.extra_repository.extras[0]["extra"]["note"], "facade note")
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_type"], "turnover_ledger")
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "relation_extra_update")
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_keys"], ["all"])
+        self.assertEqual(result["extra"]["relation_id"], "turnover_rel_1")
+
+    def test_relation_extra_write_facade_rolls_back_extra_when_dirty_outbox_fails(self) -> None:
+        # PF-P056 target contract: target semantics must not preserve current best-effort success behavior.
+        uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
+        facade = self._write_facade_class()(uow=uow)
+
+        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
+            facade.update_relation_extra(
+                relation_id="turnover_rel_1",
+                payload={"note": "must roll back"},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+            )
+
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_relation_extra_write_facade_command_result_are_not_http_coupled(self) -> None:
+        # PF-P056 target contract: command/result must not carry HTTP response or auth module dependencies.
+        uow, _deps = self._build_uow()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "service-layer payload"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertIsInstance(result, dict)
+        forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
+        self.assertTrue(forbidden_keys.isdisjoint(result))
+
+    def test_relation_extra_write_facade_uses_row_provider_without_http_coupling(self) -> None:
+        uow, _deps = self._build_uow()
+        row_provider = _RecordingRelationExtraRowProvider()
+        facade = self._write_facade_class()(uow=uow, row_provider=row_provider)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "row provider note"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(
+            row_provider.calls,
+            [
+                {
+                    "relation_id": "turnover_rel_1",
+                    "extra": {
+                        "note": "row provider note",
+                        "relation_id": "turnover_rel_1",
+                        "updated_by": "finance-user",
+                    },
+                }
+            ],
+        )
+        self.assertEqual(result["extra"]["note"], "row provider note")
+        self.assertEqual(result["row"]["relation_id"], "turnover_rel_1")
+        self.assertEqual(result["row"]["note"], "row provider note")
+        forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
+        self.assertTrue(forbidden_keys.isdisjoint(result))
+
+    def test_relation_extra_write_facade_saves_normalized_extra_not_raw_payload(self) -> None:
+        uow, deps = self._build_uow()
+        normalizer = _RecordingRelationExtraNormalizer()
+        facade = self._write_facade_class()(uow=uow, extra_normalizer=normalizer)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "raw note", "unknown": "must not leak"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(
+            normalizer.calls,
+            [
+                {
+                    "relation_id": "turnover_rel_1",
+                    "payload": {"note": "raw note", "unknown": "must not leak"},
+                    "actor_id": "finance-user",
+                }
+            ],
+        )
+        saved_extra = deps.extra_repository.extras[0]["extra"]
+        self.assertEqual(saved_extra["note"], "normalized:raw note")
+        self.assertEqual(saved_extra["updated_by"], "finance-user")
+        self.assertNotIn("unknown", saved_extra)
+        self.assertEqual(result["extra"], saved_extra)
+
+    def test_relation_extra_write_facade_row_provider_receives_normalized_extra(self) -> None:
+        uow, _deps = self._build_uow()
+        normalizer = _RecordingRelationExtraNormalizer()
+        row_provider = _RecordingRelationExtraRowProvider()
+        facade = self._write_facade_class()(
+            uow=uow,
+            extra_normalizer=normalizer,
+            row_provider=row_provider,
+        )
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "raw note"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(row_provider.calls[0]["extra"]["note"], "normalized:raw note")
+        self.assertEqual(result["row"]["note"], "normalized:raw note")
+
+    def test_relation_extra_write_facade_normalization_error_prevents_save_and_outbox(self) -> None:
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(
+            uow=uow,
+            extra_normalizer=_RecordingRelationExtraNormalizer(fail=True),
+        )
+
+        with self.assertRaisesRegex(ValueError, "invalid normalized extra"):
+            facade.update_relation_extra(
+                relation_id="turnover_rel_1",
+                payload={"note": "invalid"},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+            )
+
+        self.assertEqual(deps.connection.opened, 0)
+        self.assertEqual(deps.extra_repository.extras, [])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+
+    def test_relation_extra_repository_adapter_saves_single_extra_with_supplied_transaction(self) -> None:
+        module = self._write_adapters_module()
+        adapter_class = getattr(module, "TurnoverLedgerExtraRepositoryAdapter")
+        factory = _RecordingRepositoryFactory()
+        transaction = _RecordingTransaction()
+        adapter = adapter_class(repository_factory=factory)
+
+        adapter.save_extra({"relation_id": "turnover_rel_1", "note": "adapter note"}, transaction=transaction)
+
+        self.assertEqual(factory.transactions, [transaction])
+        self.assertEqual(
+            factory.repositories[0].saved_snapshots,
+            [{"extras": {"turnover_rel_1": {"relation_id": "turnover_rel_1", "note": "adapter note"}}}],
+        )
+
+    def test_relation_extra_repository_adapter_rejects_application_god_object(self) -> None:
+        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerExtraRepositoryAdapter")
+
+        with self.assertRaises(TypeError):
+            adapter_class(application=object())
+
+    def test_turnover_dirty_outbox_writer_uses_transaction_bound_queue_for_each_scope(self) -> None:
+        module = self._write_adapters_module()
+        writer_class = getattr(module, "TurnoverLedgerDirtyOutboxWriter")
+        queue = _TransactionOnlyQueueRepository()
+        transaction = _RecordingTransaction()
+        writer = writer_class(queue_repository=queue, tenant_id="tenant-a", priority="high", trace_id="trace-1")
+
+        events = writer.enqueue_refresh(
+            transaction=transaction,
+            scope_type="turnover_ledger",
+            scope_keys=["all", "2026-05"],
+            reason="relation_extra_update",
+            payload={"ignored": "not part of queue primitive"},
+        )
+
+        self.assertEqual(events, queue.calls)
+        self.assertEqual([call["transaction"] for call in queue.calls], [transaction, transaction])
+        self.assertEqual([call["scope_key"] for call in queue.calls], ["all", "2026-05"])
+        self.assertEqual([call["scope_type"] for call in queue.calls], ["turnover_ledger", "turnover_ledger"])
+        self.assertEqual([call["reason"] for call in queue.calls], ["relation_extra_update", "relation_extra_update"])
+        self.assertEqual([call["tenant_id"] for call in queue.calls], ["tenant-a", "tenant-a"])
+        self.assertEqual([call["priority"] for call in queue.calls], ["high", "high"])
+        self.assertEqual([call["trace_id"] for call in queue.calls], ["trace-1", "trace-1"])
+
+    def test_turnover_dirty_outbox_writer_rejects_non_transactional_queue(self) -> None:
+        writer_class = getattr(self._write_adapters_module(), "TurnoverLedgerDirtyOutboxWriter")
+        writer = writer_class(queue_repository=_NonTransactionalQueueRepository())
+
+        with self.assertRaisesRegex(RuntimeError, "enqueue_read_model_refresh_in_transaction"):
+            writer.enqueue_refresh(
+                transaction=_RecordingTransaction(),
+                scope_type="turnover_ledger",
+                scope_keys=["all"],
+                reason="relation_extra_update",
+            )
+
+    def test_relation_extra_normalizer_adapter_reuses_service_rules_without_state_mutation(self) -> None:
+        service = self._extra_service_class().from_snapshot(
+            {
+                "extras": [
+                    {
+                        "relation_id": "turnover_rel_1",
+                        "interest_rate_type": "annual",
+                        "interest_rate_value": "0.060000",
+                        "interest_paid_amount": "10.00",
+                        "note": "old",
+                        "updated_at": "2026-06-01T00:00:00+00:00",
+                        "updated_by": "creator",
+                    }
+                ]
+            }
+        )
+        before_snapshot = service.snapshot()
+        adapter = getattr(self._write_adapters_module(), "TurnoverLedgerExtraNormalizerAdapter")(extra_service=service)
+
+        normalized = adapter(
+            relation_id=" turnover_rel_1 ",
+            payload={"note": " new ", "interest_paid_amount": "12.345"},
+            actor_id=" editor ",
+        )
+
+        self.assertEqual(normalized["relation_id"], "turnover_rel_1")
+        self.assertEqual(normalized["interest_rate_type"], "annual")
+        self.assertEqual(normalized["interest_rate_value"], "0.060000")
+        self.assertEqual(normalized["interest_paid_amount"], "12.35")
+        self.assertEqual(normalized["note"], "new")
+        self.assertEqual(normalized["updated_by"], "editor")
+        self.assertEqual(service.snapshot(), before_snapshot)
+
+    def test_relation_extra_normalizer_adapter_feeds_facade_normalized_save(self) -> None:
+        service = self._extra_service_class().from_snapshot(None)
+        adapter = getattr(self._write_adapters_module(), "TurnoverLedgerExtraNormalizerAdapter")(extra_service=service)
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(uow=uow, extra_normalizer=adapter)
+
+        result = facade.update_relation_extra(
+            relation_id=" turnover_rel_1 ",
+            payload={"interest_rate_type": "none", "interest_rate_value": "9.99", "note": " saved "},
+            actor_id=" finance-user ",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        saved_extra = deps.extra_repository.extras[0]["extra"]
+        self.assertEqual(saved_extra["relation_id"], "turnover_rel_1")
+        self.assertEqual(saved_extra["interest_rate_type"], "none")
+        self.assertEqual(saved_extra["interest_rate_value"], "0.000000")
+        self.assertEqual(saved_extra["note"], "saved")
+        self.assertEqual(result["extra"], saved_extra)
+        self.assertEqual(service.snapshot(), {"version": 1, "extras": []})
+
+    def test_relation_extra_normalizer_adapter_rejects_application_god_object(self) -> None:
+        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerExtraNormalizerAdapter")
+
+        with self.assertRaises(TypeError):
+            adapter_class(application=object())

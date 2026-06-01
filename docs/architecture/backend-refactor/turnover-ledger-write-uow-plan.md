@@ -354,3 +354,314 @@ Next slice recommendation:
 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`
 
 This MG should cover PF-P051 through PF-P054 before migrating real Turnover Ledger write APIs.
+
+## Real API Integration Plan
+
+对应 prompt：`PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning`
+
+状态：`implemented`
+
+PF-P055 only plans the real API integration path. It does not modify production code, tests, handlers, repositories, runtime queue, worker, SQL migrations, frontend, deployment or production configuration.
+
+### Integration Principles
+
+- Keep `server.py` as HTTP/session/body parsing, dependency assembly, response mapping and error mapping only.
+- Do not call `TurnoverLedgerWriteUnitOfWork` directly from many handlers long term. Introduce a small `TurnoverLedgerWriteFacade` first so handler migration remains thin and reversible.
+- Do not inject `Application` into the facade or UoW.
+- Keep granular dependencies: relation service/repository port, extra repository port, settings port, Bankdetail port, stale precondition port, dirty/outbox writer.
+- Keep PF-P052 characterization tests unchanged until a specific migration prompt intentionally changes behavior and updates target tests.
+- Do not mix all write APIs in one prompt. Migrate one low-risk entry first, then continue by risk.
+
+### Readiness Matrix
+
+| API | Current handler responsibility | Target facade/usecase responsibility | Needed granular dependencies / ports | Current test baseline | UoW readiness | Risk | Recommendation |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `PUT /api/turnover-ledger/relations/{id}/extra` | Auth/session, JSON parsing, calls `TurnoverLedgerApiRoutes.update_relation_extra`, best-effort extra persistence, read model clear, refresh enqueue, response flag. | `TurnoverLedgerWriteFacade.update_relation_extra(command)` should validate command, call extra service/repository inside UoW, enqueue dirty/outbox transaction-bound, return payload for handler mapping. | Extra repository port; relation existence reader; dirty/outbox writer; optional stale precondition for future extra version. | PF-P052 locks success, invalid, readonly, legacy fallback and persistence failure best-effort behavior. | Highest readiness. It only changes Turnover extra facts and Turnover read model refresh; no Bankdetail/Workbench lifecycle. | Medium. Current persistence failure is best-effort success, target UoW will later change failure semantics. | First real integration candidate, but next prompt should add facade-level tests before production wiring. |
+| `POST /api/turnover-ledger/relations/confirm` | Auth/session, JSON parsing, rebuilds relations from bank rows, calls route confirm, computes affected months, runs `_after_turnover_relation_mutation`. | Facade should build confirm command, use relation service inside UoW, persist relation facts/audit, enqueue Turnover dirty/outbox and explicitly handle Workbench/Bankdetail influence. | Relation repository port; relation service; bank row provider; affected month provider; stale precondition; dirty/outbox writer; Workbench influence port. | PF-P052 locks success, duplicate confirm, persistence failure best-effort, audit and refresh. | Partial. Minimal UoW exists, but no real relation repository adapter or Workbench influence port. | High. Current `_after_turnover_relation_mutation` persists twice and triggers cross-module lifecycle. | Do after relation extra facade and after relation repository/Workbench influence contract tests. |
+| `POST /api/turnover-ledger/relations/{id}/withdraw` | Auth/session, JSON parsing, loads relation detail, blocks non-manual source in handler, calls route withdraw, computes affected months, runs `_after_turnover_relation_mutation`. | Facade should own manual-source precondition, stale expected version precondition, withdraw mutation, relation facts/audit persistence and dirty/outbox. | Relation detail reader; relation repository port; relation service; stale precondition; dirty/outbox writer; Workbench influence port. | PF-P052 locks system relation reject and current duplicate withdraw success/re-enqueue behavior. | Partial. UoW stale precondition primitive exists, but API does not expose expected relation version yet. | High. Target behavior should reject duplicate/stale withdraw, changing current behavior. | Do after planning expected version contract and response compatibility. |
+| `PUT /api/turnover-ledger/tag-selection` | Auth/session, JSON parsing, calls `AppSettingsService.update_turnover_ledger_tag_selection`, clears read model, enqueues refresh. | Facade should call settings port inside transaction and enqueue Turnover dirty/outbox in same boundary. | Settings port with transaction support; settings audit port; dirty/outbox writer. | PF-P052 locks version conflict and queue failure after settings save. | Partial. Needs settings service/repository transaction seam. | High. Crosses Platform/Settings boundary and target semantics change current save-before-queue behavior. | Do after a Settings port contract prompt. |
+| `POST /api/turnover-ledger/bank-row-tags/batch` | Auth/session, JSON parsing, validates target rows, calls BankTransactionCategoryService, saves Bankdetail categories, rebuilds Turnover relations, runs `_after_turnover_relation_mutation`, sets response flags. | Facade should use explicit Bankdetail port for category facts/audit, relation rebuild port, Turnover dirty/outbox and downstream influence event in one defined transaction boundary. | Bankdetail port; bank row effective category provider; relation service/repository port; Workbench influence port; dirty/outbox writer; stale/current-version port. | PF-P052 locks success, invalid target, queue failure after Bankdetail save and derived refresh attempts. | Lowest. Cross-module Bankdetail and Workbench influence are not yet ported. | Critical. Turnover API writes Bankdetail facts and triggers multiple downstream scopes. | Last among these write APIs. Needs Bankdetail port design and cross-module event contract first. |
+
+### Recommended Migration Order
+
+1. `relation extra PUT` facade-level tests and thin write facade extraction.
+2. `relation extra PUT` minimal UoW wiring, preserving current API response shape while moving dirty/outbox behind UoW.
+3. Relation repository port design for confirm/withdraw facts and audit.
+4. Confirm relation facade/UoW integration.
+5. Withdraw expected relation version contract and duplicate/stale conflict migration.
+6. Settings port contract for tag selection.
+7. Bankdetail port and downstream influence contract for bank-row-tags batch.
+
+### Next Prompt Recommendation
+
+`PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`
+
+PF-P056 should be test-only or facade-test-only. It should add tests for a future `TurnoverLedgerWriteFacade.update_relation_extra()` using fake granular dependencies and the existing `TurnoverLedgerWriteUnitOfWork`. It should not change `server.py` or the real API.
+
+## PF-P056 Relation Extra Write Facade Test Plan
+
+状态：`verified`
+
+PF-P056 只锁定未来 `TurnoverLedgerWriteFacade.update_relation_extra()` 的目标契约，不迁移真实 handler。
+
+测试边界：
+
+- 使用 fake transaction connection、fake extra write port、fake dirty/outbox writer 和 fake stale precondition port。
+- 验证 facade 不接收 `Application` god object。
+- 验证 relation extra write 与 Turnover dirty/outbox enqueue 在同一 UoW transaction 内完成。
+- 验证 dirty/outbox failure 会回滚 extra write，而不是沿用当前 best-effort success。
+- 验证 command/result 不携带 HTTP cookie/header、HTTP response object 或 `app.auth` 依赖。
+
+如果 production facade 尚不存在，PF-P056 可以用 `unittest.expectedFailure` 保留目标契约并保持默认 CI 绿色；下一步 PF-P057 应实现最小 `TurnoverLedgerWriteFacade` 并将这些 tests 转绿。
+
+PF-P056 execution result:
+
+- Added 4 target contract tests for future `TurnoverLedgerWriteFacade.update_relation_extra()`.
+- The 4 tests are explicit `unittest.expectedFailure` because the production facade does not exist yet.
+- Default targeted CI remains green:
+  - `tests.test_turnover_ledger_uow_contract` passes with 4 expected failures.
+  - `tests.test_turnover_ledger_api` still passes.
+
+PF-P057 recommended implementation:
+
+- Add the smallest `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`.
+- Implement `TurnoverLedgerWriteFacade.update_relation_extra()` against the existing `TurnoverLedgerWriteUnitOfWork`.
+- Remove the 4 PF-P056 `expectedFailure` decorators only when the facade implementation makes them pass as ordinary tests.
+- Do not wire the facade into `server.py` yet.
+
+## PF-P057 Relation Extra Write Facade Implementation Plan
+
+状态：`verified`
+
+PF-P057 should implement the smallest service-layer facade needed to turn the PF-P056 target tests green:
+
+- `TurnoverLedgerWriteFacade.__init__(uow=...)`;
+- `TurnoverLedgerWriteFacade.update_relation_extra(relation_id, payload, actor_id, tenant_id, scope_keys)`;
+- no `Application` injection;
+- no HTTP cookie/header/session parsing;
+- no `server.py` wiring;
+- no real API behavior change.
+
+The facade should treat relation extra write as a service command and rely on `TurnoverLedgerWriteUnitOfWork` for transaction scope and dirty/outbox enqueue.
+
+PF-P057 execution result:
+
+- Added `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`.
+- Implemented minimal `TurnoverLedgerWriteFacade.update_relation_extra()`.
+- Removed the 4 PF-P056 `expectedFailure` decorators; all facade contract tests now pass as ordinary tests.
+- Did not wire the facade into `server.py`.
+
+PF-P058 recommended direction:
+
+- Characterize the real `PUT /api/turnover-ledger/relations/{id}/extra` handler integration boundary before wiring.
+- Keep scope limited to relation extra; do not migrate confirm, withdraw, tag selection or bank-row-tags.
+
+## PF-P058 Relation Extra Handler Integration Characterization Plan
+
+状态：`verified`
+
+PF-P058 should lock the current real handler behavior before `server.py` delegates relation extra writes to the new facade.
+
+The highest-risk missing characterization is refresh queue failure:
+
+- current handler writes relation extra through `TurnoverLedgerApiRoutes.update_relation_extra()`;
+- then persists extras best-effort;
+- then clears the Turnover read model;
+- then enqueues `turnover_relation_extra_changed`;
+- if enqueue fails, the exception propagates after the extra has already been updated in memory.
+
+PF-P058 should add a targeted API test for that behavior. It must not wire the facade into `server.py`.
+
+PF-P058 execution result:
+
+- Added a targeted API characterization test for relation extra refresh queue failure.
+- Locked the current order: extra update, best-effort persistence, read model clear, enqueue attempt, then propagated queue failure.
+- Confirmed the extra remains readable after the queue failure, matching current non-atomic behavior.
+
+PF-P059 recommended direction:
+
+- First audit whether real transaction/repository/dirty-outbox adapters exist for relation extra handler wiring.
+- Do not wire `server.py` to the facade if doing so would require fake/no-op production transactions.
+- Preserve current API response shape and existing characterization tests unless a later prompt explicitly documents an intentional semantic change.
+- Do not migrate confirm, withdraw, tag selection or bank-row-tags.
+
+## PF-P059 Relation Extra Handler Wiring Readiness Plan
+
+状态：`verified`
+
+PF-P059 should verify that the runtime has real adapters before relation extra handler wiring:
+
+- PostgreSQL transaction connection usable by `TurnoverLedgerWriteUnitOfWork`;
+- relation extra repository adapter;
+- transaction-bound dirty/outbox writer adapter;
+- row/detail provider for preserving `row` response shape.
+
+If any of these are missing, the next prompt should build the missing adapter or contract tests first. It must not introduce a fake/no-op production transaction just to wire the handler.
+
+## PF-P059 Relation Extra Handler Wiring Readiness
+
+状态：`verified`
+
+PF-P059 审计结论：**不允许下一步直接把真实 relation extra handler 接到 facade**。原因不是 facade 不可用，而是 production adapter 边界还不完整；直接 wiring 容易制造假的一致性边界或破坏当前 response shape。
+
+### Current Runtime Facts
+
+| Boundary | Current fact | Reuse status | Risk |
+| --- | --- | --- | --- |
+| PostgreSQL transaction connection | `Application` 已能从 PostgreSQL `state_store._connection` 获取 `PostgresConnection`；Workbench confirm/cancel UoW 已用同一模式在 `_workbench_confirm_link_unit_of_work()` / `_workbench_cancel_link_unit_of_work()` 中创建 UoW。 | 可复用模式。 | 仅在 PostgreSQL runtime 可用；非 PostgreSQL runtime 必须保持 legacy path 或返回 no UoW。 |
+| Transaction primitive | `PostgresConnection.transaction()` 返回 `PostgresTransaction`，可传给 repository。 | 可复用。 | 不能在 production path 使用 fake/no-op transaction。 |
+| Relation extra facts repository | `PostgresWorkbenchRepository(transaction)` 已有 `save_turnover_ledger_extras(snapshot)`，但没有 `save_extra(extra, transaction=...)` port。 | 部分可复用。 | 当前 API facade contract 需要细粒度 `save_extra` port；直接保存整份 snapshot 会继续耦合 legacy full snapshot shape。 |
+| Dirty/outbox writer | `services.workbench_uow.RuntimeQueueReadModelRefreshWriter` 已包装 `queue_repository.enqueue_read_model_refresh_in_transaction(...)`，但接口是 singular `scope_key`；`TurnoverLedgerWriteUnitOfWork` 当前需要 `enqueue_refresh(..., scope_keys=[...], payload=...)`。 | 可复用思想，不能直接注入。 | 需要 Turnover-specific writer adapter，把 scope_keys 展开为 transaction-bound queue rows，并保留 source_version/outbox 语义。 |
+| Existing runtime queue repository | `runtime_queue.py` 提供 `enqueue_read_model_refresh_in_transaction`。 | 可复用。 | 需要 adapter contract tests，避免回退到非 transaction `enqueue_read_model_refresh`。 |
+| Response row shape | `TurnoverLedgerApiRoutes.update_relation_extra()` 当前通过 `ledger_service.get_relation_detail()` 取 row，并合并 `_row_extra_fields(extra)` 后返回 `{"extra": extra, "row": row}`。 | 需要抽成 row/detail provider 或保留 routes helper。 | 直接使用当前 facade 会只返回 `{"extra": extra}`，破坏 API response。 |
+
+### Missing Adapter Checklist
+
+- `TurnoverLedgerExtraRepositoryPort.save_extra(extra, *, transaction)`：
+  - 应优先用 `PostgresWorkbenchRepository(transaction)` 或更窄的 Turnover repository adapter 实现；
+  - 不应要求业务 facade 保存整份 full snapshot。
+- `TurnoverLedgerDirtyOutboxWriter`：
+  - 应包装 `queue_repository.enqueue_read_model_refresh_in_transaction(...)`；
+  - 必须拒绝缺少 transaction-bound enqueue 的 queue repository；
+  - 不得调用非事务 `enqueue_read_model_refresh`。
+- `TurnoverLedgerRelationRowProvider`：
+  - 提供 `row_for_relation_extra(relation_id, extra)` 或等价方法，保持当前 `row` response shape；
+  - 不让 facade 读取 HTTP 或依赖 `Application`。
+
+### Wiring Decision
+
+下一步不应直接执行 `PF-P060 - Handler Minimal Wiring`。正确下一步是先建立 Turnover-specific adapter contract/skeleton：
+
+`PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`
+
+PF-P060 应只添加 fake/contract tests 和最小 adapter skeleton，验证：
+
+- adapter 只接受真实 transaction；
+- writer 调用 transaction-bound queue enqueue；
+- relation extra repository 不依赖 `Application`；
+- row provider 可保持现有 response shape；
+- 不修改 `server.py`。
+
+## PF-P060 Relation Extra Adapter Contract Plan
+
+状态：`verified`
+
+PF-P060 should add minimal adapter contracts and skeletons:
+
+- `TurnoverLedgerExtraRepositoryAdapter.save_extra(extra, transaction=tx)`;
+- `TurnoverLedgerDirtyOutboxWriter.enqueue_refresh(transaction=tx, scope_type, scope_keys, reason, payload)`;
+- no `Application` injection;
+- no fake/no-op production transaction;
+- no `server.py` wiring.
+
+The adapter should reuse existing repository and runtime queue capabilities:
+
+- repository side should delegate to a transaction-bound repository factory, initially compatible with `PostgresWorkbenchRepository(transaction).save_turnover_ledger_extras(...)`;
+- dirty/outbox side should require `queue_repository.enqueue_read_model_refresh_in_transaction(...)` and must not fallback to non-transaction enqueue.
+
+PF-P060 execution result:
+
+- Added `TurnoverLedgerExtraRepositoryAdapter`.
+- Added `TurnoverLedgerDirtyOutboxWriter`.
+- Added passing contract tests for transaction-bound repository save and transaction-bound dirty/outbox enqueue.
+- `server.py` remains unchanged.
+
+Remaining gap before handler wiring:
+
+- The facade currently returns `{"extra": extra}`.
+- The real API response currently returns `{"extra": extra, "row": row, "turnover_ledger_invalidated": true}` after handler mapping.
+- PF-P061 should define a row provider / response composer boundary before `server.py` wiring.
+
+## PF-P061 Relation Extra Row Provider Contract Plan
+
+状态：`verified`
+
+PF-P061 should add a narrow row provider boundary to `TurnoverLedgerWriteFacade`:
+
+- optional `row_provider`;
+- provider receives `relation_id` and normalized `extra`;
+- facade result includes `row` only when provider is present;
+- no `Application`, HTTP headers/cookies or `app.auth` dependency.
+
+This preserves the current API response shape without pushing row composition back into `server.py`.
+
+PF-P061 execution result:
+
+- `TurnoverLedgerWriteFacade` now accepts optional `row_provider`.
+- When present, `update_relation_extra()` returns `{"extra": extra, "row": row}`.
+- Existing no-provider behavior remains `{"extra": extra}`.
+- `server.py` remains unchanged.
+
+Next step:
+
+- `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract`, because direct handler wiring would currently save raw payload and bypass existing `TurnoverLedgerExtraService` validation/defaulting semantics.
+
+## PF-P062 Relation Extra Normalization Boundary Plan
+
+状态：`verified`
+
+PF-P062 corrected the handler-wiring plan before execution:
+
+- direct handler wiring was rejected because `TurnoverLedgerWriteFacade.update_relation_extra()` saved raw payload, while the legacy API normalizes/validates relation extra data before persistence;
+- `TurnoverLedgerWriteFacade` now accepts a narrow `extra_normalizer` callable;
+- facade saves the normalized extra, returns the normalized extra, and passes normalized data to the optional row provider;
+- normalization failures prevent UoW execution, repository save and dirty/outbox enqueue.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 19 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 28 tests.
+
+Remaining gap before handler wiring:
+
+- The production handler still needs a pure relation extra normalizer that reuses existing `TurnoverLedgerExtraService` validation/defaulting rules without mutating in-memory state before the PostgreSQL transaction succeeds.
+- Do not wire `server.py` by calling `TurnoverLedgerExtraService.upsert()` inside the facade normalizer; that would create non-transactional in-memory side effects before the UoW commits.
+
+Next step:
+
+- Generate and execute `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`, or fold that exact pure-normalizer work into the next handler wiring prompt before touching `server.py`.
+
+## PF-P063 Relation Extra Pure Normalizer Adapter Plan
+
+状态：`verified`
+
+PF-P063 completed the remaining handler-wiring prerequisite:
+
+- `TurnoverLedgerExtraService.normalize_update(...)` now exposes the same validation/defaulting/formatting semantics as `upsert(...)` without mutating `self._extras`;
+- `TurnoverLedgerExtraNormalizerAdapter` wraps an explicit `extra_service` dependency and can be injected into `TurnoverLedgerWriteFacade(extra_normalizer=...)`;
+- facade integration can now save normalized relation extra data without calling mutating service methods before the UoW commit.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 22 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`: Pass, 10 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 28 tests.
+
+Next step:
+
+- `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`.
+- PF-P064 must only wire `PUT /api/turnover-ledger/relations/{id}/extra`.
+- PF-P064 must keep non-PostgreSQL / dependency-missing runtime on the legacy path.
+- PF-P064 must not migrate confirm, withdraw, tag selection or bank-row-tags.
+
+## PF-P064 Relation Extra Handler Minimal Wiring Plan
+
+状态：`verified`
+
+PF-P064 completed the first real Turnover Ledger write handler integration:
+
+- `server.py` now builds a relation-extra write facade only when PostgreSQL runtime and transaction-bound queue dependencies are present;
+- non-PostgreSQL and dependency-missing runtime keeps the legacy best-effort path;
+- the facade path uses `TurnoverLedgerWriteFacade`, `TurnoverLedgerWriteUnitOfWork`, `TurnoverLedgerExtraRepositoryAdapter`, `TurnoverLedgerDirtyOutboxWriter`, `TurnoverLedgerExtraNormalizerAdapter`, and a narrow row provider;
+- the handler still owns HTTP/session/body/error mapping;
+- no other Turnover Ledger write API was migrated.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 22 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`: Pass, 10 tests.
+
+Next step:
+
+- Generate cumulative MG `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`, covering PF-P055 through PF-P064.

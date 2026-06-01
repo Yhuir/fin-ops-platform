@@ -69,6 +69,33 @@ class TurnoverLedgerExtraServiceTests(unittest.TestCase):
         self.assertEqual(updated["updated_by"], "editor")
         self.assertNotEqual(updated["updated_at"], created["updated_at"])
 
+    def test_normalize_update_matches_upsert_shape_without_mutating_snapshot(self) -> None:
+        service = TurnoverLedgerExtraService.from_snapshot(None)
+        service.upsert(
+            "turnover_rel_001",
+            {
+                "interest_rate_type": "annual",
+                "interest_rate_value": "0.060000",
+                "interest_paid_amount": "10.00",
+                "note": "old",
+            },
+            actor="creator",
+        )
+        before_snapshot = service.snapshot()
+
+        normalized = service.normalize_update(
+            "turnover_rel_001",
+            {"note": " new ", "interest_paid_amount": "12.345"},
+            actor="editor",
+        )
+
+        self.assertEqual(normalized["interest_rate_type"], "annual")
+        self.assertEqual(normalized["interest_rate_value"], "0.060000")
+        self.assertEqual(normalized["interest_paid_amount"], "12.35")
+        self.assertEqual(normalized["note"], "new")
+        self.assertEqual(normalized["updated_by"], "editor")
+        self.assertEqual(service.snapshot(), before_snapshot)
+
     def test_none_interest_rate_normalizes_to_zero(self) -> None:
         service = TurnoverLedgerExtraService.from_snapshot(None)
 
