@@ -1481,3 +1481,17 @@ Verification:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py`: Pass.
+
+## PF-P083-MG Confirm Relation UoW Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖 PF-P079 到 PF-P083 的 confirm relation UoW slice 累计 diff。
+- 只执行 Merge Gate，不执行 Traffic Gate。
+- 合并前后运行 Turnover Ledger targeted tests 和 compileall。
+
+下一步：
+
+- 执行 PF-P083-MG。

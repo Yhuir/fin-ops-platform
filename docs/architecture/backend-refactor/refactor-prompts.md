@@ -18510,3 +18510,97 @@ Verification:
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py`: Pass。
 
 下一步建议：生成并审查 `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate`，统一覆盖 PF-P079 到 PF-P083 的完整 diff。
+
+## PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate
+
+```text
+/goal
+PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate
+
+Role:
+你是一位负责正式合入主干前门禁的后端架构工程师。你必须验证 PF-P079 到 PF-P083 的 confirm relation UoW slice 是否完整、范围是否受控、测试是否通过，然后才允许合入 `main` 并 push `origin/main`。
+
+Context:
+当前分支 `codex/turnover-ledger-post-bank-tags-p079` 已完成：
+- PF-P079 confirm relation facade contract tests；
+- PF-P080 confirm relation facade skeleton；
+- PF-P081 confirm handler wiring readiness；
+- PF-P082 confirm handler API target tests；
+- PF-P083 confirm relation local/dev/test handler UoW wiring。
+
+PF-P083-MG 只执行 Merge Gate，不执行 Traffic Gate，不部署，不访问生产，不修改 Nginx / feature flag / 生产配置。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 confirm relation helper 和 handler diff
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P079、PF-P080、PF-P081、PF-P082、PF-P083 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Branch / Diff Scope:
+1. 执行并审查：
+   - git status --short --branch
+   - git ls-files --others --exclude-standard
+   - git diff --stat main...HEAD
+   - git diff --name-only main...HEAD
+2. 允许累计变更文件：
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+3. 禁止出现：
+   - schema/migration 变更；
+   - deployment/Nginx/CI/CD/production config 变更；
+   - Workbench、No OA、Bankdetail 独立 API、withdraw handler 或其它模块 production code 变更；
+   - untracked `.pkl`、`.sqlite`、export、cache、临时文件。
+
+Required Verification:
+必须执行：
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- rg -n "_turnover_ledger_confirm_write_facade|confirm_relation|test_target_confirm_relation|expectedFailure|PF-P083|PF-P083-MG|turnover_relation_changed" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Merge Procedure:
+1. 如果当前分支有未提交的 MG 文档更新，必须先精确 `git add <具体文件>` 并 commit，禁止 `git add .` 或 `git add -A`。
+2. 切换到 `main` 前必须确认：
+   - git status --short 为空；
+   - git ls-files --others --exclude-standard 为空。
+3. 切换 `main` 后必须同步最新主干：
+   - git checkout main
+   - git pull origin main
+4. 如 `git pull` 或 merge 出现冲突，立即停止并报告；不得自行丢弃任何一方改动。
+5. 合并当前分支：
+   - git merge codex/turnover-ledger-post-bank-tags-p079 --no-ff -m "Merge branch 'codex/turnover-ledger-post-bank-tags-p079': turnover ledger confirm relation uow"
+6. 在 `main` 上重新执行 Required Verification 的测试和 compileall。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，执行 `git push origin main`。
+9. push 完成后，从最新 main 新建下一条 `codex/` 分支，准备下一 prompt。
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P083-MG status = verified / blocked；
+   - 记录 merge commit、main verification、push status；
+   - 记录下一条允许 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P083-MG 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 confirm relation UoW slice 已合入 main。
+4. 不执行 Traffic Gate。必须记录未执行原因：本轮只合入 Python local/dev/test path 与测试/文档，不涉及部署、网关切流或生产配置。
+```
+
+### 审查结论
+
+- PF-P083-MG 的范围只覆盖 confirm relation UoW slice，不把 withdraw、No OA、Bankdetail 独立 API 或 Workbench influence 混入。
+- Prompt 明确要求 untracked 检查、diff 白名单、targeted tests、compileall、main 合并后复验和失败不 push。
+- Prompt 明确 Merge Gate 不是 Traffic Gate，不执行部署或生产切流。

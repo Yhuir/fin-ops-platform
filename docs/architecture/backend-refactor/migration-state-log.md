@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` 已生成并审查 |
+| 当前 active prompt | `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` planned |
 | 最近 verified prompt | `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring` |
 | 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
 | 最近验证 | PF-P083 完成 confirm relation local/dev/test handler UoW wiring；PF-P082 的 2 条 target tests 已转普通通过，PostgreSQL production path 仍保留 legacy fallback |
-| 下一条允许任务 | 生成并审查 `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate`，覆盖 PF-P079 到 PF-P083 |
+| 下一条允许任务 | 执行 `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
