@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring` 已生成并审查 |
+| 当前 active prompt | `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring` planned |
 | 最近 verified prompt | `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests` |
 | 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
 | 最近验证 | PF-P082 完成 confirm handler API-level characterization / target tests；当前 legacy queue failure split-brain 已锁定，future rollback/no-direct-clear 以 2 条 expectedFailure 保留目标契约 |
-| 下一条允许任务 | 生成并审查 `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring` |
+| 下一条允许任务 | 执行 `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring` |
 
 ## Prompt 执行日志
 

@@ -1447,3 +1447,23 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests, 2 expectedFailure.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
+
+## PF-P083 Confirm Relation Local Handler UoW Wiring
+
+状态：`planned`
+
+目标：
+
+- 只迁移 `POST /api/turnover-ledger/relations/confirm` 的 local/dev/test path 到 `TurnoverLedgerWriteFacade.confirm_relation(...)`。
+- 保留 PostgreSQL production legacy fallback，不猜测 relation SQL。
+- 将 PF-P082 的 2 条 target `expectedFailure` 转为普通通过。
+
+边界：
+
+- 不迁移 withdraw 或其它 Turnover 写路径。
+- 不迁移 Workbench influence port。
+- current compatibility test 必须通过显式 legacy fallback seam 继续覆盖 split-brain 基线。
+
+下一步：
+
+- 执行 PF-P083。
