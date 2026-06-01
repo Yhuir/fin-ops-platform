@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步生成 tag selection tests/contract prompt |
+| 当前阶段 | `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` planned |
 | 最近 verified prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
 | 最近验证 | PF-P065 只读盘点 tag selection settings boundary；文档验证通过 |
-| 下一条允许任务 | 生成并审查 `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` |
+| 下一条允许任务 | 执行 `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests`；只改 tests/docs，不改 production code |
 
 ## Prompt 执行日志
 
@@ -6116,6 +6116,30 @@ Relation extra UoW integration slice 已合入 main。push 后必须从最新 ma
 #### 下一条 Prompt 上下文
 
 PF-P066 应先做 characterization / contract tests：锁定 tag selection 当前 API 行为，并增加 settings port / pure normalization target contracts。不得直接实现 production UoW 或迁移 handler。
+
+### PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests
+
+状态：`planned`
+
+#### 范围
+
+- 增强 tag selection 当前行为 characterization tests。
+- 增加 settings port / pure normalization target contract tests。
+- 不修改 production code，不迁移 handler，不实现 UoW。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P066。
+
+#### 验收标准
+
+- tests 锁定当前 queue failure after save 行为和 future UoW target contract。
+- 默认 test suite 必须保持绿色；未实现目标可使用 `unittest.expectedFailure`，但必须解释后续转绿路径。
 
 ## 维护规则
 

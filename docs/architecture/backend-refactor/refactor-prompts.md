@@ -16131,3 +16131,96 @@ Post-Flight:
   - `git ls-files --others --exclude-standard`：Pass，无输出。
   - 文档 `rg` 检查：Pass。
 - 下一步建议：生成并审查 `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests`。
+
+## PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests
+
+Role:
+你是一位精通 Python unittest、遗留行为 characterization、事务边界 contract tests 和 Clean Architecture 的后端测试工程师。
+
+Context:
+PF-P065 已确认 `PUT /api/turnover-ledger/tag-selection` 的事务断点：
+- settings save/audit 在 `AppSettingsService.update_turnover_ledger_tag_selection(...)` 内；
+- handler 后置 clear Turnover read model 并 enqueue refresh；
+- queue failure 当前发生在 settings save 之后；
+- PostgreSQL settings repository 暂无 transaction 参数。
+
+本轮只允许添加/调整 tests 和文档，不修改 production code。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - tests/test_turnover_ledger_api.py tag selection tests
+   - tests/test_turnover_ledger_uow_contract.py existing settings_port target test
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_tag_selection_update`
+   - backend/src/fin_ops_platform/services/app_settings_service.py 中 `update_turnover_ledger_tag_selection`
+2. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+补齐 tag selection 写路径的 characterization / target contract tests。
+
+Required Test Work:
+1. API characterization:
+   - 保留并强化当前 queue failure after settings save 行为；
+   - 明确断言 queue failure 后 settings version 已变化、selected tag codes 已变化、read model clear 已发生；
+   - 明确断言 invalid tag code 不触发 queue/clear；
+   - 明确断言 version conflict 不触发 queue/clear。
+2. UoW / port target contract:
+   - 在 `tests/test_turnover_ledger_uow_contract.py` 增加或强化 settings_port contract；
+   - 目标语义：tag selection 在一个 UoW 中提交 settings fact、settings audit、dirty/outbox；
+   - outbox failure 必须 roll back settings save/audit；
+   - settings port 必须是明确依赖，不得注入 `Application`。
+3. Pure normalization target:
+   - 如果 production pure method 尚不存在，可以用 `unittest.expectedFailure` 锁定目标；
+   - 目标：future settings normalizer 能基于当前 settings snapshot + payload + actor 返回 next selection/audit metadata，不保存、不 mutate `_snapshot`。
+4. 默认 test suite 必须绿色。
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得迁移 handler。
+- 不得实现 settings port/UoW。
+- 不得触碰 bank-row-tags、confirm、withdraw 或其它模块。
+- 不得删除或放宽现有 tests。
+- 不得执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n \"turnover_ledger_tag_selection|tag_selection|settings_port|expectedFailure|PF-P066\" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P066 status = implemented / verified / blocked。
+   - 记录新增 tests 和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P066 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 tag selection test baseline 和下一步实现候选。
+4. PF-P066 后不要生成 MG；下一步按结果生成 PF-P067 settings normalizer/port skeleton prompt。
+```
+
+### 审查结论
+
+- PF-P066 是 PF-P065 后正确的测试锁定步骤：先锁当前行为和目标合同，再改 production code。
+- Prompt 明确允许 expectedFailure 只用于尚未实现的 pure normalization target，默认 CI 必须绿色。
+- Prompt 禁止实现 handler/UoW，保持 Micro-JIT 顺序。
