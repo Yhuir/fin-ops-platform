@@ -1512,7 +1512,7 @@ Verification on main:
 
 ## PF-P084 Withdraw Relation Facade Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1527,4 +1527,18 @@ Verification on main:
 
 下一步：
 
-- 执行 PF-P084。
+- 生成 PF-P085 withdraw relation facade skeleton。
+
+执行结果：
+
+- 新增 `_RecordingWithdrawRelationPort` fake。
+- 新增 3 条 withdraw relation facade target tests，当前为 `unittest.expectedFailure`：
+  - relation port payload / transaction contract；
+  - dirty/outbox failure rollback；
+  - `turnover_ledger/all/turnover_relation_changed` refresh enqueue。
+- 未修改 production code。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 39 tests, 3 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests.
