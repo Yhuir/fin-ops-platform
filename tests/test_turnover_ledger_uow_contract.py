@@ -114,11 +114,21 @@ class _RecordingSettingsPort:
 
 
 class _RecordingBankdetailPort:
-    def __init__(self) -> None:
+    def __init__(self, *, result: dict[str, object] | None = None) -> None:
         self.category_updates: list[dict[str, object]] = []
+        self.result = result or {"updated_categories": [{"transaction_id": "bank_txn_1"}]}
 
-    def apply_turnover_category_updates(self, updates: list[dict[str, object]], *, transaction: object) -> None:
+    def apply_turnover_category_updates(
+        self,
+        updates: list[dict[str, object]],
+        *,
+        transaction: object,
+        actor_id: str | None = None,
+    ) -> dict[str, object]:
         self.category_updates.append({"updates": list(updates), "transaction": transaction})
+        if actor_id is not None:
+            self.category_updates[-1]["actor_id"] = actor_id
+        return dict(self.result)
 
 
 class _RecordingDirtyOutboxWriter:
@@ -615,6 +625,66 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_bank_row_tags_facade_uses_bankdetail_port_and_returns_service_payload(self) -> None:
+        uow, deps = self._build_uow(
+            bankdetail_port=_RecordingBankdetailPort(
+                result={"updated_categories": [{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}]}
+            )
+        )
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.update_bank_row_tags_batch(
+            updates=[{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}],
+            actor_id="finance-user",
+            tenant_id="default",
+            affected_months=["2026-02"],
+        )
+
+        self.assertEqual(result["updated_categories"], [{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.bankdetail_port.category_updates[0]["updates"], [{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}])
+        self.assertEqual(deps.bankdetail_port.category_updates[0]["actor_id"], "finance-user")
+        self.assertIs(deps.bankdetail_port.category_updates[0]["transaction"], deps.connection.transaction_obj)
+        self.assertTrue({"headers", "cookies", "response", "status_code"}.isdisjoint(result))
+
+    def test_bank_row_tags_facade_rolls_back_when_dirty_outbox_fails(self) -> None:
+        uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
+        facade = self._write_facade_class()(uow=uow)
+
+        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
+            facade.update_bank_row_tags_batch(
+                updates=[{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}],
+                actor_id="finance-user",
+                tenant_id="default",
+                affected_months=["2026-02"],
+            )
+
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_bank_row_tags_facade_enqueues_bankdetail_workbench_and_turnover_refreshes(self) -> None:
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(uow=uow)
+
+        facade.update_bank_row_tags_batch(
+            updates=[{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}],
+            actor_id="finance-user",
+            tenant_id="default",
+            affected_months=["2026-02", "2026-03"],
+        )
+
+        self.assertEqual(
+            [
+                (call["scope_type"], call["scope_keys"], call["reason"])
+                for call in deps.dirty_outbox_writer.calls
+            ],
+            [
+                ("bank_detail", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
+                ("workbench", ["2026-02", "2026-03"], "workbench_scope_invalidated"),
+                ("turnover_ledger", ["all"], "turnover_relation_changed"),
+            ],
+        )
 
     def test_uow_constructor_requires_granular_ports_not_application_god_object(self) -> None:
         uow_class = self._uow_class()

@@ -51,15 +51,26 @@ class TurnoverLedgerWriteUnitOfWork:
                 bankdetail_port=self._bankdetail_port,
             )
             result = handler(context)
-            self._dirty_outbox_writer.enqueue_refresh(
-                transaction=transaction,
-                scope_type="turnover_ledger",
-                scope_keys=list(getattr(command, "scope_keys", []) or ["all"]),
-                reason=str(getattr(command, "action_name", "") or "turnover_ledger_write"),
-                payload={
-                    "tenant_id": getattr(command, "tenant_id", None),
-                    "actor_id": getattr(command, "actor_id", None),
-                    "action_name": getattr(command, "action_name", None),
-                },
-            )
+            refresh_requests = list(getattr(command, "refresh_requests", []) or [])
+            if not refresh_requests:
+                refresh_requests = [
+                    {
+                        "scope_type": "turnover_ledger",
+                        "scope_keys": list(getattr(command, "scope_keys", []) or ["all"]),
+                        "reason": str(getattr(command, "action_name", "") or "turnover_ledger_write"),
+                    }
+                ]
+            for refresh_request in refresh_requests:
+                request = dict(refresh_request)
+                self._dirty_outbox_writer.enqueue_refresh(
+                    transaction=transaction,
+                    scope_type=str(request.get("scope_type") or "turnover_ledger"),
+                    scope_keys=list(request.get("scope_keys") or ["all"]),
+                    reason=str(request.get("reason") or getattr(command, "action_name", "") or "turnover_ledger_write"),
+                    payload={
+                        "tenant_id": getattr(command, "tenant_id", None),
+                        "actor_id": getattr(command, "actor_id", None),
+                        "action_name": getattr(command, "action_name", None),
+                    },
+                )
             return result

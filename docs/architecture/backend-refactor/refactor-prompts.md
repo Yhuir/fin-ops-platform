@@ -17699,3 +17699,23 @@ Post-Flight:
 - PF-P077 不碰 HTTP handler，先把 bank-row-tags 所需的 facade/port/multi-refresh UoW 能力建立起来，符合先边界后 wiring 的节奏。
 - Prompt 明确保持现有 UoW 默认行为兼容，同时用显式 refresh requests 支持 Bankdetail、Workbench、Turnover 三类刷新。
 - Prompt 禁止修改 PF-P076 API expectedFailure，避免在没有 handler wiring prompt 时提前改变真实 API 行为。
+
+### 执行结果
+
+- PF-P077 已执行并按自动工作流标记为 `verified`。
+- `TurnoverLedgerWriteCommand` 增加 `refresh_requests`，无显式 requests 时继续使用原默认 Turnover refresh。
+- `TurnoverLedgerWriteUnitOfWork.run(...)` 支持显式 multi-refresh requests。
+- `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 已建立，调用 bankdetail port 并返回 service-layer payload。
+- 新增 3 个 UoW contract tests，覆盖 bankdetail port 调用、dirty/outbox rollback、Bankdetail/Workbench/Turnover refresh requests。
+- 未修改 `server.py`；PF-P076 API expectedFailure 仍保留。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P077 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，33 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，36 tests，2 expectedFailure。
+- `rg -n "update_bank_row_tags_batch|bankdetail_port|refresh_requests|bank_transaction_category_changed|workbench_scope_invalidated|PF-P077" backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring`，只迁移 bank-row-tags handler，并让 PF-P076 的 2 个 API target tests 转绿。
