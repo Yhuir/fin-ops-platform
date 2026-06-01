@@ -2438,3 +2438,60 @@ PF-P099 建议边界：
 
 - push `origin/main` 后，从最新 main 新建分支。
 - 生成下一条 Turnover Ledger prompt。当前不应在 main 或旧分支继续开发。
+
+## PF-P101 Relation Extra Stale/Idempotency Discovery and Planning
+
+状态：`verified`
+
+目标：
+
+- 重新审计 relation extra 写路径的 stale/idempotency 缺口。
+- 明确 extra payload/response 是否有可作为 optimistic locking 的 version/updated marker。
+- 明确 repeated PUT same payload、blind overwrite、validation/persistence/queue failure 的当前行为和目标测试边界。
+- 给出下一条 PF-P102 characterization/contract tests 的精确范围。
+
+边界：
+
+- 只更新文档。
+- 不修改 production code。
+- 不新增 tests。
+- 不进入 MG。
+
+### 执行结果
+
+Relation extra 当前写路径：
+
+| Layer | 当前事实 | P101 判断 |
+| --- | --- | --- |
+| HTTP route | `PUT /api/turnover-ledger/relations/{id}/extra` 只接收 extra payload，不接收 `expected_versions` 或 `idempotency_key` | 下一步不能假设前端已有 stale/idempotency 契约，测试应先锁定兼容行为。 |
+| Handler | `_handle_api_turnover_ledger_relation_extra_update` 负责 auth/session、JSON、facade/fallback 分流和 HTTP error mapping | handler 仍是 HTTP mapping/composition 边界；stale/idempotency 目标应进入 facade/UoW，而不是直接散落在 handler。 |
+| Facade | `TurnoverLedgerWriteFacade.update_relation_extra(...)` 调用 normalizer、extra repository、row provider，并通过 UoW enqueue `relation_extra_update` | facade 当前没有 `expected_versions` 参数；可仿照 withdraw 的最小 skeleton 加入 optional expected_versions。 |
+| Normalizer/service | `TurnoverLedgerExtraService` 只产出 `updated_at` / `updated_by`，没有 durable integer version | stale precondition 可以先用 `updated_at` 作为兼容 token；长期若需要强一致 optimistic lock，应考虑 extra version 字段或 repository 层 source version。 |
+| Repository/UoW | UoW 已有 `expected_versions` seam；extra repository port 已通过 transaction 保存 normalized extra | 下一步只需 contract tests，不应直接实现 guard。 |
+| Tests | 已覆盖 GET default、PUT persist/reload、invalid payload、readonly、persistence warning、queue rollback/no direct clear、facade no HTTP coupling | 缺少 repeated PUT characterization、stale updated_at target、facade expected_versions target。 |
+
+### Relation Extra Stale / Idempotency Matrix
+
+| Concern | Current behavior | Risk | PF-P102 test direction |
+| --- | --- | --- | --- |
+| Repeated same PUT | 目前没有专门测试；根据 `TurnoverLedgerExtraService._next_updated_at(existing)`，重复 PUT 会生成新的 `updated_at` / `updated_by` 并触发 Turnover refresh | 用户重复提交或网络重试会制造无意义版本变化和 refresh | 新增 characterization：重复同 payload 当前会更新 marker 并再次 refresh；未来 durable idempotency 不在 PF-P102 实现。 |
+| Stale write | PUT 不携带 expected version；后写会基于当前 extra blind overwrite | 两个财务基于旧 extra 编辑，后提交覆盖先提交 | 新增 future target expectedFailure：携带旧 `expected_versions={"turnover_relation_extra:<relation_id>": <old_updated_at>}` 时应 409，不保存、不 enqueue。 |
+| Version identity | Response 有 `extra.updated_at`，无 explicit `version` / `submit_expected_versions` | 前端不知道应回传哪个字段；直接用 `updated_at` 是兼容方案但语义较弱 | 新增 target：GET/PUT response 应暴露 `submit_expected_versions` 或等价稳定对象；若先只用 `extra.updated_at`，必须在测试中注明兼容期。 |
+| Durable idempotency | 当前没有 idempotency key / record | 重试语义和 stale guard 混在一起会扩大范围 | PF-P102 只 discovery/contract；durable idempotency store 应在 stale guard 后单独切片。 |
+| Error mapping | invalid payload -> 400；unknown relation -> 404；readonly -> auth failure；queue failure 在 facade/UoW path rollback | 新增 stale conflict 必须稳定为 409，不能复用 validation 400 | PF-P102 target test 建议 409 `turnover_relation_extra_conflict` 或统一 Turnover write conflict code。 |
+
+### PF-P102 建议
+
+下一条应生成并审查：
+
+`PF-P102 - Turnover Ledger Relation Extra Stale/Idempotency Characterization Tests`
+
+边界：
+
+- 只修改 `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py` 和必要文档。
+- 新增 repeated same PUT current behavior characterization。
+- 新增 relation extra stale expectedFailure target tests：
+  - API target：旧 `updated_at`/expected version 下 PUT 返回 409，不保存、不 enqueue。
+  - Facade/UoW target：`update_relation_extra(..., expected_versions=...)` 把 expected_versions 写入 command，并在 stale precondition 前阻止 extra repository save。
+- 不实现 expected_versions 参数，不修改 production code。
+- 不做 durable idempotency repository/store。
