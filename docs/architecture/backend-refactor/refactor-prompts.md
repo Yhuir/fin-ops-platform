@@ -16571,3 +16571,96 @@ Verification:
 - `rg -n "save_settings_in_transaction|save_app_settings_in_transaction|TurnoverLedgerTagSelectionSettings|PF-P069|app_settings" backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`，规划 handler migration 前置测试和 durable audit 缺口处理，不直接迁移 handler。
+
+## PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning
+
+```text
+/goal
+PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning
+
+Role:
+你是一位精通遗留系统渐进式重构、事务一致性和生产级迁移门禁的后端架构师。
+
+Context:
+PF-P067 已建立 tag selection pure normalizer。PF-P068 已建立 settings adapter skeleton。PF-P069 已建立 transaction-bound app settings writer。当前还没有迁移 `PUT /api/turnover-ledger/tag-selection` handler。PF-P070 只做 integration planning 和文档回写，不改生产逻辑。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_tag_selection_update`
+   - backend/src/fin_ops_platform/services/app_settings_service.py 中 `normalize_turnover_ledger_tag_selection_update` / `update_turnover_ledger_tag_selection`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py 中 settings writer
+   - tests/test_turnover_ledger_api.py 的 tag selection tests
+   - tests/test_turnover_ledger_uow_contract.py 的 tag selection tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树中没有 unrelated dirty changes 或 untracked 临时文件。
+
+Task:
+生成生产级 tag selection UoW integration plan。PF-P070 不写代码，只输出下一步如何安全迁移 `PUT /api/turnover-ledger/tag-selection` 到 UoW 的计划、风险和测试顺序。
+
+Required Planning Work:
+1. 梳理当前 legacy handler 时序：
+   - auth / JSON parse / version validation / settings save / in-memory audit / read model clear / queue enqueue / response。
+2. 梳理目标 UoW handler 时序：
+   - handler 只做 HTTP mapping；
+   - service/facade 使用 pure normalizer；
+   - settings port 使用 transaction-bound writer；
+   - dirty/outbox 与 settings fact 同 transaction；
+   - response payload 不携带 HTTP coupling；
+   - durable audit 缺口必须明确。
+3. 明确必须先补哪些 characterization / compatibility tests：
+   - current success response shape；
+   - version conflict 409；
+   - invalid tag code no side effect；
+   - queue/outbox failure 目标语义是否从当前 split-brain 改为 rollback；
+   - read model clear 是否被 dirty/outbox 替代；
+   - source_version / freshness 影响点。
+4. 明确下一步 prompt：
+   - 如果测试还不足，下一步必须是 PF-P071 tag selection UoW compatibility/target tests；
+   - 不得直接进入 handler migration。
+5. 更新文档：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改任何 production code。
+- 不得修改 tests。
+- 不得迁移 handler。
+- 不得接入 production UoW wiring。
+- 不得修改 schema/migration。
+- 不得修改 queue/worker/read model refresh 行为。
+- 不得执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P070|tag selection UoW integration|durable audit|PF-P071" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P070 status = implemented / verified / blocked。
+   - 记录 integration plan、下一步 prompt 和 verification。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P070 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 migration sequence、target tests、durable audit strategy 和下一步建议。
+4. PF-P070 后不要生成 MG；下一步应生成 PF-P071 tag selection UoW compatibility/target tests。
+```
+
+### 审查结论
+
+- PF-P070 不直接迁移 handler 是合理的：tag selection 会改变当前 queue failure split-brain 语义，必须先明确目标测试。
+- Prompt 明确 durable audit 不能伪装完成，避免把 settings fact 与 audit 一致性混为一谈。
+- Prompt 明确下一步优先测试锁定，而不是直接改生产 handler。

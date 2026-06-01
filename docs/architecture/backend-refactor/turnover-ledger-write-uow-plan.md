@@ -858,3 +858,22 @@ Verification:
 
 - Durable audit persistence is not complete. The adapter carries audit metadata and fake tests record it, but the real repository does not yet persist audit in the same transaction.
 - `PUT /api/turnover-ledger/tag-selection` still uses the legacy `AppSettingsService.update_turnover_ledger_tag_selection(...)` path and post-save refresh enqueue.
+
+## PF-P070 Tag Selection UoW Integration Planning
+
+状态：`planned`
+
+目标：
+
+- 在迁移 `PUT /api/turnover-ledger/tag-selection` handler 之前，明确测试锁定、目标时序、durable audit 策略和后续 prompt 顺序。
+
+边界：
+
+- PF-P070 只做文档和计划。
+- 不修改 production code。
+- 不修改 tests。
+- 不迁移 handler。
+
+下一步：
+
+- 执行 PF-P070。

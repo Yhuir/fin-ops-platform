@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` 已执行并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` planned |
 | 最近 verified prompt | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
 | 最近验证 | PF-P069 增加 transaction-bound app settings writer；UoW contract 27 tests 通过，API 29 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`；不得直接迁移 handler |
+| 下一条允许任务 | 执行 `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`；只做规划和文档回写，不改生产逻辑 |
 
 ## Prompt 执行日志
 
@@ -6285,6 +6285,34 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 - `git diff --check`: Pass。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，27 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
+
+#### Commit
+
+- `eba61433 feat(turnover-ledger): add transaction-bound settings writer`
+
+### PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning
+
+状态：`planned`
+
+#### 范围
+
+- 规划 tag selection handler 迁移到 UoW 前的测试、adapter wiring、durable audit 缺口和风险。
+- 只更新文档，不改生产逻辑，不新增实现测试。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P070。
+
+#### 验收标准
+
+- 输出 tag selection UoW integration sequence。
+- 明确下一条实现/测试 prompt。
+- 明确 durable audit 处理策略和当前不可伪装完成的范围。
 
 ## 维护规则
 
