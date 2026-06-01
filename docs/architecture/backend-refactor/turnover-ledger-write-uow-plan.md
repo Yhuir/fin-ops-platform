@@ -1667,7 +1667,7 @@ Verification:
 
 ## PF-P087 Withdraw Relation Handler UoW Target Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1685,5 +1685,24 @@ Verification:
 
 下一步：
 
-- 执行 PF-P087。
 - 若验证通过，生成 PF-P088 withdraw handler UoW wiring，使 PF-P087 target tests 转为普通通过。
+
+执行结果：
+
+- 新增普通通过的 legacy split-brain characterization：
+  `test_withdraw_relation_queue_failure_happens_after_relation_withdraw_and_read_model_clear`。
+- 新增 2 条 future target tests，并使用 `unittest.expectedFailure` 保持默认 CI 绿色：
+  - `test_target_withdraw_relation_queue_failure_rolls_back_relation_withdraw`；
+  - `test_target_withdraw_relation_uow_path_does_not_clear_read_model_directly`。
+- 补强成功 withdraw payload，断言 `affected_months == ["2026-02", "2026-03"]`。
+- 补强 system-generated relation rejection，断言不产生 withdraw audit。
+- 未修改 production code。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 42 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 39 tests.
+- `git status --short --branch`: Pass，仅 PF-P087 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "test_target_withdraw_relation|expectedFailure|system_relation_cannot_withdraw|affected_months|PF-P087|withdraw_relation" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。

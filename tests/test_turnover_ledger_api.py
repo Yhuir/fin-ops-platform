@@ -1719,6 +1719,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(first_withdraw_response.status_code, 200)
         self.assertEqual(second_withdraw_response.status_code, 200)
         self.assertEqual(second_payload["relation"]["status"], "withdrawn")
+        self.assertEqual(second_payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(
             [(entry["action"], entry["new_status"]) for entry in audit_log],
             [
@@ -1732,6 +1733,109 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
                 ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+            ],
+        )
+
+    def test_withdraw_relation_queue_failure_happens_after_relation_withdraw_and_read_model_clear(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before withdraw"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+            failing_queue = _FailingQueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": failing_queue})()
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "POST",
+                    f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                    body=json.dumps({"note": "queue failure after withdraw"}),
+                )
+            audit_log = app._turnover_relation_service.audit_log()
+            relation_detail = app._turnover_ledger_api_routes.get_relation(relation_id)
+
+        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
+        self.assertEqual(relation_detail["relation"]["status"], "withdrawn")
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(
+            [item for item in failing_queue.attempts if item[0] == "turnover_ledger"],
+            [("turnover_ledger", "all", "turnover_relation_changed")],
+        )
+
+    @unittest.expectedFailure
+    def test_target_withdraw_relation_queue_failure_rolls_back_relation_withdraw(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before target withdraw"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+            failing_queue = _FailingQueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": failing_queue})()
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "POST",
+                    f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                    body=json.dumps({"note": "target rollback"}),
+                )
+            audit_log = app._turnover_relation_service.audit_log()
+            relation_detail = app._turnover_ledger_api_routes.get_relation(relation_id)
+
+        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
+        self.assertEqual(relation_detail["relation"]["status"], "confirmed")
+        self.assertEqual(
+            [item for item in failing_queue.attempts if item[0] == "turnover_ledger"],
+            [("turnover_ledger", "all", "turnover_relation_changed")],
+        )
+
+    @unittest.expectedFailure
+    def test_target_withdraw_relation_uow_path_does_not_clear_read_model_directly(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before no-clear withdraw"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+
+            response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "target no clear"}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [
                 ("turnover_ledger", "all", "turnover_relation_changed"),
                 ("turnover_ledger", "all", "turnover_relation_changed"),
             ],
@@ -1755,11 +1859,13 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 body=json.dumps({"note": "不能撤回系统关系"}),
             )
             payload = json.loads(response.body)
+            audit_log = app._turnover_relation_service.audit_log()
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["error"], "system_relation_cannot_withdraw")
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(queue.enqueued, [])
+        self.assertEqual(audit_log, [])
 
     def test_turnover_bank_row_tag_batch_rejects_non_turnover_rows_without_refresh_side_effects(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

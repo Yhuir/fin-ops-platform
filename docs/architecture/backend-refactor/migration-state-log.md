@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` 已生成并审查 |
-| 当前 active prompt | `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` |
-| 最近 verified prompt | `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness` |
+| 当前阶段 | `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` 已验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` |
 | 当前分支 | `codex/turnover-ledger-withdraw-relation-p084` |
-| 最近验证 | PF-P086 完成 withdraw relation handler UoW wiring readiness；未修改业务代码 |
-| 下一条允许任务 | 执行 `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` |
+| 最近验证 | PF-P087 新增 withdraw handler UoW target tests；API suite 42 tests，2 expectedFailure |
+| 下一条允许任务 | 生成并审查 `PF-P088 - Turnover Ledger Withdraw Relation Handler UoW Wiring` |
 
 ## Prompt 执行日志
 
@@ -6987,7 +6987,7 @@ PF-P084/PF-P085 完成了 withdraw relation facade-level contract 和 skeleton�
 
 ### PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7001,9 +7001,35 @@ PF-P084/PF-P085 完成了 withdraw relation facade-level contract 和 skeleton�
 - `turnover-ledger-write-uow-plan.md` 记录 PF-P087 测试锁定结果。
 - `refactor-prompts.md` 和本文档记录 PF-P087 执行结果。
 
+#### 执行摘要
+
+- 补强 `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues`，断言 withdraw response 的 `affected_months` 为 `["2026-02", "2026-03"]`。
+- 新增普通通过的 legacy characterization：`test_withdraw_relation_queue_failure_happens_after_relation_withdraw_and_read_model_clear`，锁定当前 queue failure 发生在 relation withdraw/audit 和 read model direct clear 之后。
+- 新增 2 条 future target tests，并以 `unittest.expectedFailure` 保持默认 CI 绿色：
+  - `test_target_withdraw_relation_queue_failure_rolls_back_relation_withdraw`；
+  - `test_target_withdraw_relation_uow_path_does_not_clear_read_model_directly`。
+- 补强 `test_withdraw_rejects_system_generated_relation`，断言 system-generated rejection 不触发 withdraw audit。
+- 未修改 production code。
+
+#### 变更文件
+
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，42 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，39 tests。
+- `git status --short --branch`：Pass，仅 PF-P087 允许文件变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `rg -n "test_target_withdraw_relation|expectedFailure|system_relation_cannot_withdraw|affected_months|PF-P087|withdraw_relation" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`：Pass。
+
 #### 下一条 Prompt 上下文
 
-PF-P087 执行并验证后，下一步应生成 `PF-P088 - Turnover Ledger Withdraw Relation Handler UoW Wiring`：只把 local/dev/test withdraw handler 接入 PF-P085 facade/UoW，让 PF-P087 的 target tests 转为普通通过；仍保留 PostgreSQL production legacy fallback，不迁移其它写路径。
+下一步应生成 `PF-P088 - Turnover Ledger Withdraw Relation Handler UoW Wiring`：只把 local/dev/test withdraw handler 接入 PF-P085 facade/UoW，让 PF-P087 的 target tests 转为普通通过；仍保留 PostgreSQL production legacy fallback，不迁移其它写路径。
 
 ## 维护规则
 

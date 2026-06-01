@@ -19061,3 +19061,24 @@ Post-Flight:
 - PF-P087 符合 Micro-JIT：先测试锁定 withdraw handler，再允许后续 PF-P088 迁移 handler。
 - Prompt 明确只允许测试和文档变更，禁止 production code。
 - Prompt 保留 legacy compatibility，同时用 expectedFailure 锁定 rollback/no-direct-clear 目标语义。
+
+### 执行结果
+
+- PF-P087 已执行并按自动工作流标记为 `verified`。
+- 在 `tests/test_turnover_ledger_api.py` 中新增/补强 withdraw handler tests：
+  - 普通通过的 legacy split-brain characterization；
+  - 2 条 `unittest.expectedFailure` future target tests，分别锁定 rollback 和 no-direct-clear 目标；
+  - system-generated guard 不触发 withdraw audit；
+  - manual withdraw response 保留 `affected_months`。
+- 未修改 production code。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，42 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，39 tests。
+- `git status --short --branch`: Pass，仅 PF-P087 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "test_target_withdraw_relation|expectedFailure|system_relation_cannot_withdraw|affected_months|PF-P087|withdraw_relation" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P088 - Turnover Ledger Withdraw Relation Handler UoW Wiring`，只迁移 local/dev/test withdraw handler path，让 PF-P087 的 2 条 expectedFailure 转为普通通过。
