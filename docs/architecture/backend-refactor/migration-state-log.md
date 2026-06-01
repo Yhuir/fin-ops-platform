@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 已合入 main 并通过验证 |
-| 当前 active prompt | 无 |
-| 最近 verified prompt | `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` |
-| 当前分支 | `codex/turnover-ledger-next-uow-slice-p074` |
+| 当前阶段 | `PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests` 已生成并审查 |
+| 当前 active prompt | `PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests` planned |
+| 最近 verified prompt | `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
+| 当前分支 | `codex/turnover-ledger-bank-row-tags-uow-p076` |
 | 最近验证 | PF-P075-MG 已合入 main；main 上 API 33 tests 通过，UoW contract 30 tests 通过 |
-| 下一条允许任务 | push origin/main 后，从最新 main 新建分支并生成下一条 Turnover Ledger 写路径 prompt |
+| 下一条允许任务 | 执行 `PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests` |
 
 ## Prompt 执行日志
 

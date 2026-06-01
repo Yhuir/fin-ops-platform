@@ -17489,3 +17489,93 @@ Verification on main:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
 
 下一步建议：`git push origin main` 后，从最新 `main` 新建分支，再生成下一条 Turnover Ledger 写路径 prompt。
+
+## PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests
+
+```text
+/goal
+PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests
+
+Role:
+你是一位负责遗留写路径测试锁定的后端工程师，熟悉 Python unittest、Clean Architecture、Turnover Ledger write UoW 和 Bankdetail category projection。
+
+Context:
+PF-P075-MG 已合入 main。当前 `POST /api/turnover-ledger/bank-row-tags/batch` 仍在 `server.py` handler 内直接调用 `BankTransactionCategoryService.apply_turnover_updates(...)`、直接保存 category snapshot、重建 turnover relations、调用 `_after_turnover_relation_mutation(...)`，其中包含 Workbench invalidation、Turnover read model clear 和 refresh enqueue。已有 UoW contract 中存在 `bankdetail_port.apply_turnover_category_updates(...)` 的 fake-port rollback 测试，但真实 handler 尚未迁移。PF-P076 只补 tests，不修改 production code。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_bank_row_tags_batch`、`_ensure_turnover_bank_row_tag_targets`、`_after_turnover_relation_mutation`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py bank-row-tags tests
+   - tests/test_turnover_ledger_uow_contract.py bankdetail_port tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+4. 必须确认 PF-P075-MG 已 verified，并且当前分支从最新 main 创建。
+
+Task:
+为 `POST /api/turnover-ledger/bank-row-tags/batch` 增加 compatibility / target tests。PF-P076 不迁移 handler、不改 production code、不改 schema。目标是让后续 PF-P077 可以小步建立 bank row tags write facade / port，PF-P078 再迁移 handler。
+
+Required Test Work:
+1. 保留并补强当前 compatibility tests：
+   - successful batch updates bank category and Bank Details projection；
+   - non-turnover row rejects with `not_turnover_bank_row` and no refresh side effects；
+   - duplicate / missing / invalid update payload stays 400/409 according to existing service behavior if already testable。
+2. 明确当前 split-brain behavior：
+   - queue failure currently happens after category save, relation rebuild, read model clear and partial refresh enqueue；
+   - current behavior test must remain explicit and must not be deleted。
+3. 新增 future target tests，若当前 handler 尚未实现，必须用 `unittest.expectedFailure` 保持默认 CI 绿色：
+   - queue/outbox failure must roll back bank category save and relation rebuild；
+   - successful UoW path must not call `_clear_turnover_ledger_read_model_best_effort()` directly；
+   - target UoW path must enqueue the same logical scopes/reasons currently required: bank_detail affected month, workbench affected month, turnover_ledger all。
+4. 新增或补强 handler boundary / facade override test if a seam already exists；如果没有 seam，不得为了测试创建 production seam，本轮只写 target tests。
+5. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得修改 production service/repository/adapter code。
+- 不得迁移 bank-row-tags handler。
+- 不得迁移 relation extra、tag selection、confirm、withdraw 或其它 Turnover 写路径。
+- 不得修改 schema/migration。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+- 不得删除、弱化或跳过现有 tests；未实现目标语义必须用 `unittest.expectedFailure` 保存。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "bank-row-tags|bank_row_tag|bank_row_tags|expectedFailure|PF-P076|_handle_api_turnover_ledger_bank_row_tags_batch|_clear_turnover_ledger_read_model_best_effort" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P076 status = implemented / verified / blocked。
+   - 记录新增 tests、expectedFailure 数量、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P076 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 bank-row-tags UoW tests 状态。
+4. PF-P076 后不要生成 MG；下一步应生成 PF-P077 bank row tags facade / port skeleton。
+```
+
+### 审查结论
+
+- PF-P076 是 relation extra slice 合入后的正确下一步：bank-row-tags 是剩余 Turnover 写路径中已有 UoW fake-port 测试、但真实 handler 仍 split-brain 的高价值切片。
+- Prompt 明确 tests-only，避免在没有目标测试锁定前改 handler。
+- Prompt 要求保留当前 split-brain 事实，同时用 expectedFailure 保存未来 rollback/no-clear/scope target。

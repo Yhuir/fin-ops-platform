@@ -1160,3 +1160,24 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 33 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+
+## PF-P076 Bank Row Tags UoW Compatibility and Target Tests
+
+状态：`planned`
+
+目标：
+
+- 只为 `POST /api/turnover-ledger/bank-row-tags/batch` 增加 compatibility / target tests。
+- 保留当前 queue failure split-brain 行为事实。
+- 增加未来 UoW rollback/no-clear/scope target tests，未实现目标用 `unittest.expectedFailure` 保持默认 CI 绿色。
+
+边界：
+
+- 不修改 production code。
+- 不迁移 handler。
+- 不进入 MG。
+
+下一步：
+
+- 执行 PF-P076。
+- PF-P076 verified 后生成 PF-P077 bank row tags facade / port skeleton。
