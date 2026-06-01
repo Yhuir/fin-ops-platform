@@ -612,9 +612,13 @@ PF-P050-MG has been executed, merged into local `main`, confirmed by the user as
 
 `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` has been generated and reviewed on branch `codex/turnover-ledger-write-uow-p051`.
 
-PF-P051 should be executed only after explicit user confirmation. It is a discovery/planning prompt: it must document write-path runtime sequence, UoW readiness, transaction side effects, repository ownership and test gaps, without modifying production code.
+PF-P051 has been executed as a planning-only slice. The output is:
 
-PF-P051 must cover at least:
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+PF-P051 documented write-path runtime sequence, UoW readiness, transaction side effects, repository ownership and test gaps without modifying production code.
+
+PF-P051 covered:
 
 - confirm relation;
 - withdraw relation;
@@ -627,4 +631,10 @@ PF-P051 must cover at least:
 - Bankdetail and Workbench influence;
 - future UoW facts/audit/dirty scope/outbox boundary.
 
-Status: verified.
+Next recommendation:
+
+`PF-P052 - Turnover Ledger Write Path Characterization Tests`
+
+PF-P052 should remain test-only and lock current duplicate/stale/failure behavior before any UoW implementation.
+
+Status: implemented; awaiting user confirmation before marking verified.

@@ -9446,7 +9446,7 @@ Main 上复验：
 
 ## PF-P032 - Workbench Ignore Row Stale Guard Migration
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -14384,3 +14384,24 @@ Stop Conditions:
 - PF-P051 保持 discovery/planning 边界，不修改生产代码，不补测试，不实现 UoW，符合 Micro-JIT 工作流。
 - Prompt 已把 CodeGraph 发现转化为必检入口：confirm、withdraw、extra PUT、tag selection PUT、bank-row-tags batch 和 `_after_turnover_relation_mutation`。
 - Prompt 明确下一步优先进入 characterization/contract tests，而不是直接大规模迁移写 API。
+
+### 执行结果
+
+- PF-P051 已执行，状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- 新增 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`。
+- 更新 `migration-state-log.md` 和 `turnover-ledger-discovery.md`。
+- 已完成 Turnover Ledger 写路径 API matrix、runtime sequence、UoW readiness assessment、transaction/outbox/dirty scope audit、idempotency/stale baseline、repository ownership audit 和 test gap matrix。
+- 关键发现：
+  - tag selection PUT、bank-row-tags batch、relation extra PUT、confirm、withdraw 都仍由 `server.py` 编排写路径 side effects。
+  - `_after_turnover_relation_mutation` 当前将 relation snapshot persistence、Workbench invalidation、read model clear 和 refresh enqueue 串在 handler 后置流程中。
+  - Runtime queue 已有 `enqueue_read_model_refresh_in_transaction()`，但当前 Turnover 写路径未将 facts/audit/dirty scope/outbox 放入同一个外层 transaction。
+  - `bank-row-tags/batch` 是 Turnover API 但写 Bankdetail facts，未来必须通过显式 Bankdetail port 和 UoW 边界处理。
+  - relation extra PUT 仍存在 legacy full snapshot fallback。
+- 未修改 production code、tests、SQL migration、worker、runtime queue、frontend、deployment 或 production config。
+- 未执行 Traffic Gate、部署、staging/prod 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
+- 验证：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，仅本轮新增计划文档。
+  - `git diff --check`：Pass。
+  - `rg -n "PF-P051|Turnover Ledger Write Path|UoW|_after_turnover_relation_mutation|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor`：Pass。
+- 下一步建议：用户确认 PF-P051 `verified` 后，生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests`。PF-P052 应只补测试，锁定 duplicate/stale/failure 当前行为，不直接实现 UoW。

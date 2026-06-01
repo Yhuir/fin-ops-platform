@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已生成并审查 `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`，等待用户确认是否执行 |
-| 当前 active prompt | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` (`planned`) |
+| 当前阶段 | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` (`implemented`) |
 | 最近 verified prompt | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
-| 最近验证 | `main` 与 `origin/main` 已对齐到 `d7979b97`；已从最新 `main` 新建 PF-P051 分支；已用 CodeGraph 确认 Turnover Ledger 写路径入口、mutation finalizer、read model clear/enqueue 关系；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 等待用户确认后执行 PF-P051；PF-P051 只能做 Turnover Ledger 写路径 discovery/planning 和文档回写 |
+| 最近验证 | PF-P051 只做 discovery/planning；已新增 `turnover-ledger-write-uow-plan.md`；已运行文档检查；未修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
+| 下一条允许任务 | 等待用户确认 PF-P051；确认后将 PF-P051 标记为 `verified`，再生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -5359,7 +5359,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -5385,9 +5385,29 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认是否执行 PF-P051。
-- 执行 PF-P051 后只能到 `implemented` 或 `blocked`，未经用户确认不得标记 `verified`。
-- PF-P051 如果发现写路径 UoW 前置测试缺口，下一条 prompt 应优先是 characterization / contract tests，而不是直接实现 UoW。
+- 等待用户确认 PF-P051。
+- 用户确认后，将 PF-P051 标记为 `verified`。
+- 下一条建议 prompt：`PF-P052 - Turnover Ledger Write Path Characterization Tests`。
+- PF-P052 应先锁定 duplicate/stale/failure 当前行为，不应直接实现 UoW。
+
+#### 执行结果
+
+- 已执行 PF-P051。
+- 新增 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`。
+- 更新 `docs/architecture/backend-refactor/turnover-ledger-discovery.md`，记录 PF-P051 产物和下一步建议。
+- 已确认 Turnover Ledger 写路径当前仍由 `server.py` 编排，写 handler 包括 tag selection PUT、bank-row-tags batch、relation extra PUT、confirm 和 withdraw。
+- 已确认 `_after_turnover_relation_mutation` 负责 relation snapshot persistence、Workbench invalidation、read model clear 和 refresh enqueue。
+- 已确认 `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction()` 已提供 transaction-bound dirty scope + outbox primitive，但当前 Turnover 写路径未使用外层 transaction-bound 调用。
+- 已确认 Bankdetail category facts、Turnover relation facts/audit、extras、settings mutation、read model clear 和 outbox enqueue 目前分散在多个 service/helper 中。
+- 已确认下一步不应直接实现 UoW；应先补 API-level characterization tests。
+- 未修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `git status --short --branch`：Pass，当前分支 `codex/turnover-ledger-write-uow-p051`，仅本轮文档文件有修改。
+- `git ls-files --others --exclude-standard`：Pass，仅本轮新增计划文档。
+- `git diff --check`：Pass。
+- `rg -n "PF-P051|Turnover Ledger Write Path|UoW|_after_turnover_relation_mutation|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor`：Pass。
 
 ## 维护规则
 
