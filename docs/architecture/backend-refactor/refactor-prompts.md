@@ -18275,3 +18275,87 @@ Verification:
 - `rg -n "PF-P081|Confirm Relation Handler UoW Wiring Readiness|Current Runtime Sequence|Wiring Readiness Matrix|Decision|Blockers" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`: Pass。
 
 下一步建议：生成并审查 `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests`，先补 API-level target tests，再决定 PF-P083 handler wiring。
+
+## PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests
+
+```text
+/goal
+PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests
+
+Role:
+你是一位负责 legacy handler API characterization / target tests 的后端工程师。你必须先锁定 confirm relation handler 的目标 UoW 行为，不得修改 production code。
+
+Context:
+PF-P081 readiness 结论：local/dev/test path 可以下一步做 handler target tests；PostgreSQL production path 缺少 transaction-bound relation repository/adapter，必须保留 legacy fallback；Workbench influence port 是后续 blocker。PF-P082 只补 API-level tests，不迁移 handler。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_confirm` 和 `_after_turnover_relation_mutation`
+   - tests/test_turnover_ledger_api.py confirm tests 和 queue recorder helpers
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+4. 必须确认 PF-P081 已 verified。
+
+Task:
+只为 `POST /api/turnover-ledger/relations/confirm` 增加 API-level compatibility / target tests。PF-P082 不修改 production code，不迁移 handler，不改 service/facade。
+
+Required Test Work:
+1. 保留现有 confirm tests：
+   - permission/audit；
+   - duplicate submit；
+   - persistence failure best-effort success。
+2. 新增 current compatibility test：
+   - 当前 legacy queue failure 会发生在 relation confirm/audit 和 read model clear 之后；
+   - 该测试必须明确当前 split-brain 风险，不得删除。
+3. 新增 future target tests，若当前 handler 尚未实现，必须用 `unittest.expectedFailure` 保持默认 CI 绿色：
+   - queue/outbox failure must roll back relation confirm/audit；
+   - successful UoW path must not call `_clear_turnover_ledger_read_model_best_effort()` directly。
+4. target tests 不得通过放宽断言变绿；必须等待后续 PF-P083 handler wiring。
+5. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得修改 production service/repository/adapter code。
+- 不得修改 `tests/test_turnover_ledger_uow_contract.py`。
+- 不得迁移 confirm handler、withdraw handler 或其它 Turnover 写路径。
+- 不得修改 schema/migration。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "confirm_relation|turnover_ledger_confirm|expectedFailure|PF-P082|queue failure|read_model" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P082 status = implemented / verified / blocked。
+   - 记录新增 compatibility / target tests、expectedFailure 数量、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P082 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 confirm handler target tests 状态。
+4. PF-P082 后不要生成 MG；下一步应生成 PF-P083 confirm local/dev/test handler UoW wiring。
+```
+
+### 审查结论
+
+- PF-P082 符合 PF-P081 的 decision：先锁定 API-level target behavior，再进入 handler wiring。
+- Prompt 明确同时保留 current split-brain compatibility test 和 future target expectedFailure，后续 PF-P083 可以用 seam 保留 legacy 测试。
+- Prompt 禁止改 production code，避免在测试锁定阶段提前迁移 handler。

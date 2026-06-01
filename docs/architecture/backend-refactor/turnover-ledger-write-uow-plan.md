@@ -1416,3 +1416,23 @@ Verification:
 - 允许直接调用 `TurnoverLedgerApiRoutes.confirm_relation(...)` 作为 local/dev/test temporary relation port；不允许把它定义为长期 production repository。
 - 不允许猜测 PostgreSQL relation SQL。真实 production UoW 需要后续 transaction-bound relation repository/adapter。
 - Workbench influence 本轮不应强行迁入 facade/UoW；否则会跨模块扩大 scope。PF-P083 如只做 local/dev/test wiring，应保留 production fallback，并明确 Workbench influence port 是后续 blocker。
+
+## PF-P082 Confirm Relation Handler UoW Target Tests
+
+状态：`planned`
+
+目标：
+
+- 只为 `POST /api/turnover-ledger/relations/confirm` 增加 API-level compatibility / target tests。
+- 保留 current legacy queue failure split-brain 事实。
+- 用 `unittest.expectedFailure` 锁定 future UoW rollback/no-direct-clear 行为。
+
+边界：
+
+- 不修改 production code。
+- 不迁移 handler。
+- 不进入 MG。
+
+下一步：
+
+- 执行 PF-P082。
