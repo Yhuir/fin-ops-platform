@@ -19932,5 +19932,5 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，45 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，45 tests。
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass。
-- `git push origin main`: Pass，`origin/main` 已更新到 `2373b9fb`。
+- `git push origin main`: Pass，`origin/main` 已与当前 `main` 对齐。
 - push 完成后必须从最新 main 新建下一条 `codex/` 分支。

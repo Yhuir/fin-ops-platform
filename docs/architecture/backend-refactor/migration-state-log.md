@@ -60,7 +60,7 @@
 | 当前 active prompt | 无 |
 | 最近 verified prompt | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P093-MG 已在 main 上复验通过；merge commit `e0056963`；`origin/main` 已更新到 `2373b9fb` |
+| 最近验证 | PF-P093-MG 已在 main 上复验通过；merge commit `e0056963`；`origin/main` 已与当前 `main` 对齐 |
 | 下一条允许任务 | 从最新 `main` 新建下一条 `codex/` 分支，并生成下一条 Turnover Ledger prompt |
 
 ## Prompt 执行日志
@@ -7318,7 +7318,7 @@ PF-P093 已 verified。本分支从 PF-P089 到 PF-P093 已包含 discovery、co
 
 - 本地 merge 到 `main`：Pass，merge commit `e0056963`。
 - `main` 复验：Pass。
-- `git push origin main`：Pass，`origin/main` 已更新到 `2373b9fb`。
+- `git push origin main`：Pass，`origin/main` 已与当前 `main` 对齐。
 
 #### 下一条 Prompt 上下文
 
