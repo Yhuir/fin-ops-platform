@@ -17579,3 +17579,23 @@ Post-Flight:
 - PF-P076 是 relation extra slice 合入后的正确下一步：bank-row-tags 是剩余 Turnover 写路径中已有 UoW fake-port 测试、但真实 handler 仍 split-brain 的高价值切片。
 - Prompt 明确 tests-only，避免在没有目标测试锁定前改 handler。
 - Prompt 要求保留当前 split-brain 事实，同时用 expectedFailure 保存未来 rollback/no-clear/scope target。
+
+### 执行结果
+
+- PF-P076 已执行并按自动工作流标记为 `verified`。
+- 新增 2 个 future bank-row-tags target tests，当前为 `unittest.expectedFailure`：
+  - queue/outbox failure must roll back bank category save；
+  - successful UoW path must not clear read model directly。
+- 新增普通通过测试，锁定 bank-row-tags success path 需要刷新 Bankdetail affected month、Workbench affected month 和 Turnover Ledger all scope。
+- 未修改 production code。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P076 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，36 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+- `rg -n "bank-row-tags|bank_row_tag|bank_row_tags|expectedFailure|PF-P076|_handle_api_turnover_ledger_bank_row_tags_batch|_clear_turnover_ledger_read_model_best_effort" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P077 - Turnover Ledger Bank Row Tags Facade / Port Skeleton`，只建立 service/facade/port skeleton，不迁移 handler。

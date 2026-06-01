@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests` 已生成并审查 |
-| 当前 active prompt | `PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests` planned |
+| 当前阶段 | `PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests` 已执行并通过验证 |
+| 当前 active prompt | 无 |
 | 最近 verified prompt | `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
 | 当前分支 | `codex/turnover-ledger-bank-row-tags-uow-p076` |
-| 最近验证 | PF-P075-MG 已合入 main；main 上 API 33 tests 通过，UoW contract 30 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests` |
+| 最近验证 | PF-P076 增加 bank-row-tags UoW target tests；API 36 tests 通过（2 expectedFailure），UoW contract 30 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P077 - Turnover Ledger Bank Row Tags Facade / Port Skeleton` |
 
 ## Prompt 执行日志
 
@@ -6539,6 +6539,37 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 - 执行 `git push origin main`。
 - push 后必须从最新 `main` 新建 `codex/` 分支，再生成下一条 Turnover Ledger 写路径 prompt。
+
+### PF-P076 - Turnover Ledger Bank Row Tags UoW Compatibility and Target Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只补 `POST /api/turnover-ledger/bank-row-tags/batch` 的 compatibility / target tests。
+- 不修改 production code。
+- 不迁移 handler。
+
+#### 执行结果
+
+- 新增 2 个 future target tests，并以 `unittest.expectedFailure` 保持默认 CI 绿色：
+  - queue/outbox failure 应回滚 bank category save；
+  - successful UoW path 不应直接 clear read model。
+- 新增普通通过测试，锁定 bank-row-tags success path 必须刷新 Bankdetail affected month、Workbench affected month 和 Turnover Ledger all scope。
+- 保留 current queue failure split-brain behavior test，继续记录当前会先保存 category、重建 relation、clear read model，再遇到 queue failure。
+
+#### Verification
+
+- `git status --short --branch`: Pass，仅 PF-P076 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，36 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+- `rg -n "bank-row-tags|bank_row_tag|bank_row_tags|expectedFailure|PF-P076|_handle_api_turnover_ledger_bank_row_tags_batch|_clear_turnover_ledger_read_model_best_effort" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+#### 下一步
+
+- 生成并审查 `PF-P077 - Turnover Ledger Bank Row Tags Facade / Port Skeleton`。
 
 ## 维护规则
 

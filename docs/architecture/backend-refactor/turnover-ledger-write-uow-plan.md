@@ -1163,7 +1163,7 @@ Verification:
 
 ## PF-P076 Bank Row Tags UoW Compatibility and Target Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1179,5 +1179,17 @@ Verification:
 
 下一步：
 
-- 执行 PF-P076。
-- PF-P076 verified 后生成 PF-P077 bank row tags facade / port skeleton。
+- 生成 PF-P077 bank row tags facade / port skeleton。
+
+执行结果：
+
+- 新增 2 个 future target tests，当前为 `unittest.expectedFailure`：
+  - queue/outbox failure rolls back bank category save；
+  - successful UoW path does not clear read model directly。
+- 新增普通通过测试，锁定 Bankdetail affected month、Workbench affected month 和 Turnover Ledger all scope refresh。
+- 未修改 production code。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
