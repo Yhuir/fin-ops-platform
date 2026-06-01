@@ -57,23 +57,49 @@ class TurnoverLedgerExtraService:
         normalized_actor = self._normalize_actor(actor)
         incoming = payload if isinstance(payload, dict) else {}
         with self._lock:
-            existing = self._extras.get(normalized_relation_id)
-            updated_at = self._next_updated_at(existing)
-            normalized = self._normalize_extra(
+            normalized = self._normalize_update_locked(
                 normalized_relation_id,
                 incoming,
-                existing=existing,
-                updated_at=updated_at,
-                updated_by=normalized_actor,
+                normalized_actor=normalized_actor,
             )
             self._extras[normalized_relation_id] = normalized
             return deepcopy(normalized)
+
+    def normalize_update(self, relation_id: str, payload: dict[str, object], *, actor: str) -> dict[str, object]:
+        normalized_relation_id = self._normalize_relation_id(relation_id)
+        normalized_actor = self._normalize_actor(actor)
+        incoming = payload if isinstance(payload, dict) else {}
+        with self._lock:
+            return deepcopy(
+                self._normalize_update_locked(
+                    normalized_relation_id,
+                    incoming,
+                    normalized_actor=normalized_actor,
+                )
+            )
 
     def remove(self, relation_id: str, *, actor: str) -> None:
         normalized_relation_id = self._normalize_relation_id(relation_id)
         self._normalize_actor(actor)
         with self._lock:
             self._extras.pop(normalized_relation_id, None)
+
+    def _normalize_update_locked(
+        self,
+        normalized_relation_id: str,
+        incoming: dict[str, object],
+        *,
+        normalized_actor: str,
+    ) -> dict[str, object]:
+        existing = self._extras.get(normalized_relation_id)
+        updated_at = self._next_updated_at(existing)
+        return self._normalize_extra(
+            normalized_relation_id,
+            incoming,
+            existing=existing,
+            updated_at=updated_at,
+            updated_by=normalized_actor,
+        )
 
     @classmethod
     def _normalize_snapshot_extra(cls, payload: dict[str, Any]) -> dict[str, Any]:

@@ -55,3 +55,14 @@ class TurnoverLedgerDirtyOutboxWriter:
                 )
             )
         return events
+
+
+class TurnoverLedgerExtraNormalizerAdapter:
+    def __init__(self, *, extra_service: Any) -> None:
+        self._extra_service = extra_service
+
+    def __call__(self, *, relation_id: str, payload: dict[str, object], actor_id: str) -> dict[str, object]:
+        normalize = getattr(self._extra_service, "normalize_update", None)
+        if not callable(normalize):
+            raise RuntimeError("extra_service must expose normalize_update.")
+        return dict(normalize(relation_id, payload, actor=actor_id))

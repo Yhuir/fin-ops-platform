@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` planned |
-| 最近 verified prompt | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` |
+| 当前阶段 | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步可进入 relation extra handler minimal wiring |
+| 最近 verified prompt | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P062 为 relation extra facade 增加 `extra_normalizer` boundary；UoW contract 19 tests 通过，API 28 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`；只补纯 normalizer，不接真实 handler |
+| 最近验证 | PF-P063 增加 pure normalizer adapter；UoW contract 22 tests、Extra service 10 tests、API 28 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`；只最小接入 relation extra handler |
 
 ## Prompt 执行日志
 
@@ -5934,7 +5934,7 @@ PF-P062 只建立 facade normalization boundary。真实 handler wiring 前还�
 
 ### PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5950,13 +5950,31 @@ PF-P062 只建立 facade normalization boundary。真实 handler wiring 前还�
 
 #### 下一步
 
-- 执行 PF-P063。
+- 生成并审查 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`。
 
 #### 验收标准
 
 - `TurnoverLedgerExtraService` 或 adapter 暴露 pure normalize 能力，行为与现有 `upsert()` 归一化一致但无状态副作用。
 - `TurnoverLedgerWriteFacade(extra_normalizer=...)` 可使用该 adapter 保存 normalized extra。
 - UoW contract tests、Turnover API tests 必须通过。
+
+#### 执行结果
+
+- `TurnoverLedgerExtraService` 新增 `normalize_update(...)` pure 方法，复用现有 validation/defaulting/formatting 规则但不修改 snapshot。
+- `TurnoverLedgerExtraNormalizerAdapter` 可作为 `TurnoverLedgerWriteFacade(extra_normalizer=...)` 的细粒度依赖。
+- 新增 tests 覆盖 pure normalizer 无状态副作用、adapter 注入 facade、invalid payload 不保存不 enqueue。
+- 未修改 `server.py`，未接入真实 handler。
+
+#### 验证
+
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+
+#### 下一条 Prompt 上下文
+
+PF-P063 已补齐 handler wiring 前的 pure normalizer。PF-P064 可以只做 `PUT /api/turnover-ledger/relations/{id}/extra` 的最小 handler wiring：仅在 PostgreSQL runtime 且存在 transaction-bound queue 时创建 facade；非 PostgreSQL/依赖不齐继续 legacy path；不得迁移其它 Turnover Ledger 写 API。
 
 ## 维护规则
 

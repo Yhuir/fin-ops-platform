@@ -620,3 +620,26 @@ Remaining gap before handler wiring:
 Next step:
 
 - Generate and execute `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`, or fold that exact pure-normalizer work into the next handler wiring prompt before touching `server.py`.
+
+## PF-P063 Relation Extra Pure Normalizer Adapter Plan
+
+状态：`verified`
+
+PF-P063 completed the remaining handler-wiring prerequisite:
+
+- `TurnoverLedgerExtraService.normalize_update(...)` now exposes the same validation/defaulting/formatting semantics as `upsert(...)` without mutating `self._extras`;
+- `TurnoverLedgerExtraNormalizerAdapter` wraps an explicit `extra_service` dependency and can be injected into `TurnoverLedgerWriteFacade(extra_normalizer=...)`;
+- facade integration can now save normalized relation extra data without calling mutating service methods before the UoW commit.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 22 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`: Pass, 10 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 28 tests.
+
+Next step:
+
+- `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`.
+- PF-P064 must only wire `PUT /api/turnover-ledger/relations/{id}/extra`.
+- PF-P064 must keep non-PostgreSQL / dependency-missing runtime on the legacy path.
+- PF-P064 must not migrate confirm, withdraw, tag selection or bank-row-tags.

@@ -15761,3 +15761,17 @@ Post-Flight:
 - PF-P063 是 PF-P062 后必须补齐的生产级边界：不能用会修改内存状态的 `upsert()` 作为未来 UoW normalizer。
 - Prompt 明确禁止 `server.py` diff 和真实 handler wiring，只建立可复用的纯归一化 adapter。
 - Prompt 继续保持单一切片，不迁移其它 Turnover Ledger 写 API。
+
+### 执行结果
+
+- PF-P063 已执行并按自动工作流标记为 `verified`。
+- `TurnoverLedgerExtraService` 新增 `normalize_update(...)` pure 方法，复用现有 validation/defaulting/formatting 规则但不修改 snapshot。
+- `TurnoverLedgerExtraNormalizerAdapter` 可作为 `TurnoverLedgerWriteFacade(extra_normalizer=...)` 的细粒度依赖。
+- 新增 tests 覆盖 pure normalizer 无状态副作用、adapter 注入 facade、invalid payload 不保存不 enqueue。
+- 未修改 `server.py`、真实 handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+- 下一步建议：生成并审查 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`。

@@ -243,6 +243,10 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def _write_adapters_module(self) -> object:
         return importlib.import_module("fin_ops_platform.services.turnover_ledger_write_adapters")
 
+    def _extra_service_class(self) -> type:
+        module = importlib.import_module("fin_ops_platform.services.turnover_ledger_extra_service")
+        return getattr(module, "TurnoverLedgerExtraService")
+
     def _build_uow(
         self,
         *,
@@ -620,3 +624,64 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 scope_keys=["all"],
                 reason="relation_extra_update",
             )
+
+    def test_relation_extra_normalizer_adapter_reuses_service_rules_without_state_mutation(self) -> None:
+        service = self._extra_service_class().from_snapshot(
+            {
+                "extras": [
+                    {
+                        "relation_id": "turnover_rel_1",
+                        "interest_rate_type": "annual",
+                        "interest_rate_value": "0.060000",
+                        "interest_paid_amount": "10.00",
+                        "note": "old",
+                        "updated_at": "2026-06-01T00:00:00+00:00",
+                        "updated_by": "creator",
+                    }
+                ]
+            }
+        )
+        before_snapshot = service.snapshot()
+        adapter = getattr(self._write_adapters_module(), "TurnoverLedgerExtraNormalizerAdapter")(extra_service=service)
+
+        normalized = adapter(
+            relation_id=" turnover_rel_1 ",
+            payload={"note": " new ", "interest_paid_amount": "12.345"},
+            actor_id=" editor ",
+        )
+
+        self.assertEqual(normalized["relation_id"], "turnover_rel_1")
+        self.assertEqual(normalized["interest_rate_type"], "annual")
+        self.assertEqual(normalized["interest_rate_value"], "0.060000")
+        self.assertEqual(normalized["interest_paid_amount"], "12.35")
+        self.assertEqual(normalized["note"], "new")
+        self.assertEqual(normalized["updated_by"], "editor")
+        self.assertEqual(service.snapshot(), before_snapshot)
+
+    def test_relation_extra_normalizer_adapter_feeds_facade_normalized_save(self) -> None:
+        service = self._extra_service_class().from_snapshot(None)
+        adapter = getattr(self._write_adapters_module(), "TurnoverLedgerExtraNormalizerAdapter")(extra_service=service)
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(uow=uow, extra_normalizer=adapter)
+
+        result = facade.update_relation_extra(
+            relation_id=" turnover_rel_1 ",
+            payload={"interest_rate_type": "none", "interest_rate_value": "9.99", "note": " saved "},
+            actor_id=" finance-user ",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        saved_extra = deps.extra_repository.extras[0]["extra"]
+        self.assertEqual(saved_extra["relation_id"], "turnover_rel_1")
+        self.assertEqual(saved_extra["interest_rate_type"], "none")
+        self.assertEqual(saved_extra["interest_rate_value"], "0.000000")
+        self.assertEqual(saved_extra["note"], "saved")
+        self.assertEqual(result["extra"], saved_extra)
+        self.assertEqual(service.snapshot(), {"version": 1, "extras": []})
+
+    def test_relation_extra_normalizer_adapter_rejects_application_god_object(self) -> None:
+        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerExtraNormalizerAdapter")
+
+        with self.assertRaises(TypeError):
+            adapter_class(application=object())
