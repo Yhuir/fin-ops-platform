@@ -293,10 +293,10 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn("from read_model.bank_detail_rows", sql_text)
         self.assertNotIn("schema_version = %s", sql_text)
 
-    def test_transactions_treat_schema_six_as_mismatch_after_external_turnover_candidate_contract(self) -> None:
+    def test_transactions_treat_schema_seven_as_mismatch_after_external_turnover_multi_candidate_contract(self) -> None:
         connection = FakeConnection(
             rows=[
-                [scope_row("2026-05", schema_version=6)],
+                [scope_row("2026-05", schema_version=7)],
                 {"total": 1},
                 [{"category_code": "external_turnover", "count": 1}],
                 [

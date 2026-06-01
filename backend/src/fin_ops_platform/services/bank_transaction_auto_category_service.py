@@ -143,22 +143,18 @@ class BankTransactionAutoCategoryService:
                 )
             if len(matched_suggestions) == 1:
                 suggestion = matched_suggestions[0]
-                if (
-                    str(suggestion.get("turnover_role") or "") == EXTERNAL_TURNOVER_ROLE
-                    and not suggestion.get("category_third_label")
-                ):
-                    candidates = external_turnover_candidate_variants(suggestion)
-                    if candidates:
-                        return self._confirmation_suggestion(
-                            transaction_id=transaction_id,
-                            candidates=candidates,
-                            reason="命中外部往来款自动规则，需要确认往来对象类型。",
-                        )
+                candidates = self._external_turnover_confirmation_candidates([suggestion])
+                if candidates:
+                    return self._confirmation_suggestion(
+                        transaction_id=transaction_id,
+                        candidates=candidates,
+                        reason="命中外部往来款自动规则，需要确认往来对象类型。",
+                    )
                 return suggestion
             if len(matched_suggestions) > 1:
                 return self._confirmation_suggestion(
                     transaction_id=transaction_id,
-                    candidates=matched_suggestions,
+                    candidates=self._expanded_confirmation_candidates(matched_suggestions),
                 )
         return None
 
@@ -177,6 +173,25 @@ class BankTransactionAutoCategoryService:
         except (TypeError, ValueError):
             sort_order = 10_000
         return (cls._rule_priority(rule), max(sort_order, 0), str(rule.get("code") or ""))
+
+    @classmethod
+    def _expanded_confirmation_candidates(cls, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        expanded: list[dict[str, Any]] = []
+        for candidate in candidates:
+            external_candidates = cls._external_turnover_confirmation_candidates([candidate])
+            expanded.extend(external_candidates or [candidate])
+        return expanded
+
+    @staticmethod
+    def _external_turnover_confirmation_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        expanded: list[dict[str, Any]] = []
+        for candidate in candidates:
+            if (
+                str(candidate.get("turnover_role") or "") == EXTERNAL_TURNOVER_ROLE
+                and not candidate.get("category_third_label")
+            ):
+                expanded.extend(external_turnover_candidate_variants(candidate))
+        return expanded
 
     @classmethod
     def _semantic_text_fields(cls, row: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:

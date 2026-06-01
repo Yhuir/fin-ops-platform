@@ -549,6 +549,87 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         )
         self.assertEqual({candidate["turnover_action_type"] for candidate in candidates}, {"pending_collection"})
 
+    def test_multiple_external_turnover_rule_matches_expand_each_sub_label_to_third_level_candidates(self) -> None:
+        self.service.configure_tag_dictionary(
+            {
+                "version": 23,
+                "definitions": [
+                    {
+                        "code": "external_borrow_out_pending_collection",
+                        "label": "借出款",
+                        "path": ["自动识别", "借出款"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 2,
+                        "sort_order": 1,
+                        "direction": "expense",
+                        "output_primary_label": "外部往来款付款",
+                        "output_sub_label": "借出款",
+                        "turnover_action_type": "pending_collection",
+                        "rules": {
+                            "match_fields": ["summary_text", "purpose_text"],
+                            "exact_any": [],
+                            "contains_any": ["共同外部往来测试词"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    },
+                    {
+                        "code": "external_borrow_in_repaid",
+                        "label": "归还借款",
+                        "path": ["自动识别", "归还借款"],
+                        "source": "custom",
+                        "status": "active",
+                        "priority": 2,
+                        "sort_order": 2,
+                        "direction": "expense",
+                        "output_primary_label": "外部往来款付款",
+                        "output_sub_label": "归还借款",
+                        "turnover_action_type": "repaid",
+                        "rules": {
+                            "match_fields": ["summary_text", "purpose_text"],
+                            "exact_any": [],
+                            "contains_any": ["共同外部往来测试词"],
+                            "contains_all": [],
+                            "none_of": [],
+                            "regex_any": [],
+                        },
+                    },
+                ],
+            }
+        )
+
+        suggestion = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-external-multi-sub",
+                    "debit_amount": "240000.00",
+                    "summary": "共同外部往来测试词",
+                }
+            ]
+        )["txn-external-multi-sub"]
+
+        self.assertEqual(suggestion["category_resolution_status"], "needs_confirmation")
+        candidates = suggestion["auto_candidate_categories"]
+        self.assertEqual(len(candidates), 8)
+        self.assertEqual(
+            [
+                (candidate["category_code"], candidate["category_sub_label"], candidate["category_third_label"])
+                for candidate in candidates
+            ],
+            [
+                ("external_borrow_out_pending_collection", "借出款", "个人往来"),
+                ("external_borrow_out_pending_collection", "借出款", "公司往来"),
+                ("external_borrow_out_pending_collection", "借出款", "银行往来"),
+                ("external_borrow_out_pending_collection", "借出款", "业务往来"),
+                ("external_borrow_in_repaid", "归还借款", "个人往来"),
+                ("external_borrow_in_repaid", "归还借款", "公司往来"),
+                ("external_borrow_in_repaid", "归还借款", "银行往来"),
+                ("external_borrow_in_repaid", "归还借款", "业务往来"),
+            ],
+        )
+
     def test_detects_holiday_bonus_from_keywords(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [{"id": "txn-holiday", "purpose": "中秋过节费", "note": "员工慰问金"}]

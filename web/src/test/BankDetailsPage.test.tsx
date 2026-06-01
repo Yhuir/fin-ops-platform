@@ -646,7 +646,15 @@ describe("Bank details page", () => {
     await user.click(within(primaryMenu).getByRole("menuitem", { name: "外部往来款付款" }));
     const childMenu = await screen.findByRole("menu", { name: "外部往来款付款候选标签" });
     expect(within(childMenu).getByRole("menuitem", { name: "借出款" })).toBeInTheDocument();
+    expect(within(childMenu).getByRole("menuitem", { name: "归还借款" })).toBeInTheDocument();
     expect(within(childMenu).queryByRole("menuitem", { name: "借出款 / 公司往来" })).not.toBeInTheDocument();
+
+    await user.click(within(childMenu).getByRole("menuitem", { name: "归还借款" }));
+    const repaymentThirdMenu = await screen.findByRole("menu", { name: "归还借款候选业务类型" });
+    expect(within(repaymentThirdMenu).getByRole("menuitem", { name: "个人往来" })).toBeInTheDocument();
+    expect(within(repaymentThirdMenu).getByRole("menuitem", { name: "公司往来" })).toBeInTheDocument();
+    expect(within(repaymentThirdMenu).getByRole("menuitem", { name: "银行往来" })).toBeInTheDocument();
+    expect(within(repaymentThirdMenu).getByRole("menuitem", { name: "业务往来" })).toBeInTheDocument();
 
     await user.click(within(childMenu).getByRole("menuitem", { name: "借出款" }));
     const thirdMenu = await screen.findByRole("menu", { name: "借出款候选业务类型" });
