@@ -1501,6 +1501,7 @@ Verification:
 - PF-P079 到 PF-P083 的 confirm relation UoW slice 已合入本地 `main`。
 - Merge commit: `a1ba5532`。
 - main 上 Turnover Ledger targeted tests 和 compileall 已通过。
+- 已执行 `git push origin main`，`origin/main` 更新到 `8a8007cf`。
 - 未执行 Traffic Gate、部署、Nginx 修改或生产访问。
 
 Verification on main:
@@ -1508,3 +1509,22 @@ Verification on main:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass.
+
+## PF-P084 Withdraw Relation Facade Contract Tests
+
+状态：`planned`
+
+目标：
+
+- 只为未来 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 增加 facade-level target contract tests。
+- 不修改 production code，不迁移 handler。
+- 未实现语义用 `unittest.expectedFailure` 保持默认 CI 绿色。
+
+边界：
+
+- 使用细粒度 relation port fake，不构造 `Application`。
+- 不修改 `server.py`、write facade、write UoW 或 API tests。
+
+下一步：
+
+- 执行 PF-P084。

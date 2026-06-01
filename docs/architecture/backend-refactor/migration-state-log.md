@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests` 已生成并审查 |
+| 当前 active prompt | `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests` planned |
 | 最近 verified prompt | `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P079 到 PF-P083 confirm relation UoW slice 已合入本地 main；main 上 Turnover Ledger targeted tests 与 compileall 通过 |
-| 下一条允许任务 | `git push origin main` 后，从最新 main 新建 `codex/` 分支并生成 `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests` |
+| 当前分支 | `codex/turnover-ledger-withdraw-relation-p084` |
+| 最近验证 | PF-P079 到 PF-P083 confirm relation UoW slice 已合入并 push 到 origin/main；main 上 Turnover Ledger targeted tests 与 compileall 通过 |
+| 下一条允许任务 | 执行 `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -6849,6 +6849,7 @@ PF-P079 到 PF-P083 构成 confirm relation UoW slice：facade contract、facade
 - 当前分支已通过 no-untracked、diff-check、targeted tests 和 compileall。
 - 已合入本地 `main`，merge commit：`a1ba5532`。
 - `main` 上 targeted verification 已通过。
+- 已执行 `git push origin main`，`origin/main` 更新到 `8a8007cf`。
 - 未执行 Traffic Gate、部署、Nginx 修改、生产配置修改或生产访问。
 
 #### 验证
