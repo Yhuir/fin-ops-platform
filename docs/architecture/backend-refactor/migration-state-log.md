@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` (`implemented`) |
-| 最近 verified prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` |
+| 当前阶段 | `PF-P047 - Turnover Ledger Characterization Tests` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P047 - Turnover Ledger Characterization Tests` (`planned`) |
+| 最近 verified prompt | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` |
 | 当前分支 | `codex/turnover-ledger-discovery-p046` |
 | 最近验证 | 用户已确认 PF-P045-MG `verified`；`main` 已 push 到 `origin/main`，本地与远端对齐到 `de513774`；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 用户确认 PF-P046 后，将 PF-P046 标记为 verified；然后生成并审查 `PF-P047 - Turnover Ledger Characterization Tests` |
+| 下一条允许任务 | 执行 `PF-P047 - Turnover Ledger Characterization Tests`；只允许补 Turnover Ledger 特征测试和必要文档回写，不允许 production refactor |
 
 ## Prompt 执行日志
 
@@ -4909,7 +4909,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4985,9 +4985,69 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认 PF-P046。
-- 用户确认后，将 PF-P046 标记为 `verified`。
-- 下一条 prompt 建议：`PF-P047 - Turnover Ledger Characterization Tests`，只写/补测试，不做 production refactor。
+- 用户已确认 PF-P046 `verified`。
+- 已生成并审查 `PF-P047 - Turnover Ledger Characterization Tests`。
+- 下一步允许执行 PF-P047；PF-P047 只写/补 Turnover Ledger characterization tests 和必要文档回写，不做 production refactor。
+
+### PF-P047 - Turnover Ledger Characterization Tests
+
+状态：`planned`
+
+#### 范围
+
+- 基于 PF-P046 的 `turnover-ledger-discovery.md`，为 Turnover Ledger 当前行为补充 characterization tests。
+- 只允许新增或扩展 Turnover Ledger 相关测试，以及必要状态机/prompt 文档回写。
+- 不允许重构 production code，不允许 extraction，不允许引入 Turnover UoW，不允许修改事务语义。
+
+#### 必须锁定的行为
+
+- Query freshness：
+  - fresh SQL read model 返回当前 payload，不触发 legacy rebuild。
+  - source_versions mismatch 返回 refreshing/stale payload，并 enqueue `api_stale`。
+  - SQL read model miss 且 PostgreSQL required 时返回 empty refreshing payload，并 enqueue `api_miss`。
+- Grouped breakdown：
+  - flat SQL read model rows 经过 route facade 转 grouped payload 时，保留 `pending_repayment_amount`、`repaid_amount`、`pending_collection_amount`、`collected_amount`、`closed_amount`。
+  - 原生 grouped payload 的 `summary_row`、`flow_rows`、`allocation_lots`、`lot_rows` 在 normalization 后不丢字段。
+- Relation writes：
+  - confirm/withdraw 当前 response shape、relation/audit side effects、read model clear/enqueue 行为。
+  - non-manual relation withdraw 当前阻断行为。
+  - 失败发生在 mutation 前时，不应 enqueue Turnover read model refresh。
+- Extra writes：
+  - extra update 当前 persistence 和 refresh scheduling 行为。
+  - legacy full snapshot fallback 路径必须被明确锁定或标记为 removal candidate，不得静默忽略。
+- Bank row tag batch：
+  - turnover-eligible target validation。
+  - Bankdetail category facts update 对 Turnover 和 Workbench projection invalidation 的当前影响。
+  - conflict/error response shape。
+- Export：
+  - export preview/export 对 grouped payload 的 summary + flow row 展平行为。
+  - row limit、family filter、空数据当前行为。
+- Cross-module source versions：
+  - relation snapshot、extras、tag selection、bank category snapshot、auto tag rules 和 OA projection sync version 改变时，expected source_versions 改变。
+  - 相关 Workbench turnover grouping tests 必须保留在验证集。
+
+#### 禁止范围
+
+- 不修改 Turnover Ledger production code。
+- 不修改 `server.py` handler 逻辑。
+- 不修改 service/repository/worker 实现。
+- 不修改 SQL migration。
+- 不修改前端、部署、Nginx、worker routing、环境变量或生产配置。
+- 不执行 Traffic Gate、部署、生产访问或 staging 访问。
+- 不进入 Merge Gate。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已包含完整 PF-P047 prompt，正文以 `/goal` 开头。
+- PF-P047 prompt 明确读取 PF-P046 discovery 文档。
+- PF-P047 prompt 明确先锁行为，不做重构。
+- PF-P047 prompt 明确测试状态隔离要求，避免 PostgreSQL/Redis/state store 污染其他测试。
+- PF-P047 prompt 明确执行后只能标记 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+
+#### 下一步
+
+- 执行 PF-P047。
+- PF-P047 执行完成并由用户确认 verified 后，再根据测试结果生成下一条 Turnover Ledger extraction/refactor 或测试补强 prompt。
 
 ## 维护规则
 

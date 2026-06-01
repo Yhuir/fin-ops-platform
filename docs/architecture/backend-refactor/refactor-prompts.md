@@ -13087,7 +13087,7 @@ Stop Conditions:
 
 ## PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -13292,4 +13292,165 @@ Stop Conditions:
   - `rg -n 'PF-P046|Turnover Ledger|turnover_ledger|grouped breakdown|source_version|dirty scope|outbox|Workbench projection|Bankdetail' docs/architecture/backend-refactor`：Pass。
 - 未运行 Python 单元测试：本轮只做 discovery/planning 文档，不修改业务代码或测试实现。
 - 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
-- 下一步建议：用户确认 PF-P046 后，将 PF-P046 标记为 `verified`，然后生成并审查 `PF-P047 - Turnover Ledger Characterization Tests`。
+- 下一步建议：用户已确认 PF-P046 `verified`；已生成并审查 `PF-P047 - Turnover Ledger Characterization Tests`。
+
+## PF-P047 - Turnover Ledger Characterization Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P047 - Turnover Ledger Characterization Tests。
+
+Role: 你是一位严格的 Python 遗留系统测试专家，熟悉 characterization tests、Read Model freshness、source_version、Transactional Outbox、低耦合边界和生产级测试隔离。你的任务是为 Turnover Ledger 当前行为补充机械测试护栏，不做 production refactor。
+
+Context:
+- 当前重构方向是 Python-first 模块化重构，不引入 Go，不替换运行时。
+- `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` 已由用户确认 `verified`。
+- 当前分支仍应是 `codex/turnover-ledger-discovery-p046`，因为 PF-P046 discovery 和 PF-P047 characterization tests 属于同一个 Turnover Ledger 模块任务；本任务完成后再决定是否进入 cumulative MG。
+- PF-P046 已确认 Turnover Ledger 是独立业务模块，并输出 `docs/architecture/backend-refactor/turnover-ledger-discovery.md`。
+- 本轮只允许写/补 characterization tests 和必要文档回写；不得修改 production code，不得进行 extraction/refactor，不得进入 Merge Gate。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+   - `docs/architecture/backend-refactor/architecture-inventory.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/runtime-call-chain.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+2. 必须确认：
+   - 当前分支是 `codex/turnover-ledger-discovery-p046`。
+   - PF-P046 已 `verified`。
+   - 当前 active prompt 是 PF-P047 planned。
+   - 工作区没有无关未提交变更。
+   - `git ls-files --others --exclude-standard` 不包含临时文件、`.pkl`、`.sqlite`、`__pycache__` 或测试输出。
+3. 必须先读取现有 Turnover Ledger tests，优先复用已有测试基建、fake、helper 和 fixture；不得重复造轮子。
+
+Required Code / Test Reading:
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_service.py`
+- `tests/test_turnover_ledger_query_service.py`
+- `tests/test_turnover_ledger_export_service.py`
+- `tests/test_turnover_relation_service.py`
+- `tests/test_turnover_ledger_extra_service.py`
+- `tests/test_workbench_turnover_grouping.py`
+- PF-P045 后新增或修改的 Turnover / grouped breakdown 相关 tests。
+- 必要时只读：
+  - `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_source_versions.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_sql_projection.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_service.py`
+  - `backend/src/fin_ops_platform/services/turnover_relation_service.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_export_service.py`
+  - `backend/src/fin_ops_platform/services/runtime_queue.py`
+  - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
+  - `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`
+
+Allowed Scope:
+- 允许新增或修改 Turnover Ledger 相关测试文件。
+- 允许新增小型 test helper，但必须放在现有测试约定位置，并优先复用已有 helper。
+- 允许更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-discovery.md` 的测试计划/执行结果小节。
+- 允许为了测试导入路径或测试数据构造读取 production code，但不得修改 production code。
+
+Forbidden Scope:
+- 不修改 `backend/src/fin_ops_platform/**` production code。
+- 不修改 `server.py` handler 行为。
+- 不修改 route facade、service、repository、worker 或 state store 实现。
+- 不修改 SQL migration。
+- 不修改前端。
+- 不修改部署、Nginx、Vite、worker routing、环境变量或生产配置。
+- 不引入 Turnover Unit of Work。
+- 不修 stale write、不修事务模型、不移动代码。
+- 不执行 Merge Gate。
+- 不执行 Traffic Gate、部署、生产访问或 staging 访问。
+- 不使用 mock patch 屏蔽整条 HTTP/service 链路来伪造通过。现有黑盒/半黑盒测试必须继续覆盖真实 handler -> route facade/service -> fake/repository helper 的行为。
+
+Required Test Work:
+1. Query freshness characterization
+   - Fresh SQL read model returns current payload without legacy rebuild.
+   - Source version mismatch returns current stale/refreshing payload shape and enqueues `api_stale`.
+   - SQL read model miss with PostgreSQL-required mode returns empty refreshing payload and enqueues `api_miss`.
+   - Request-path legacy builder fallback is characterized when PostgreSQL read model is not required; do not remove fallback in this prompt.
+2. Grouped breakdown characterization
+   - Flat SQL read model rows converted by the route facade preserve `pending_repayment_amount`, `repaid_amount`, `pending_collection_amount`, `collected_amount`, `closed_amount`, mixed direction and grouped totals.
+   - Native grouped payload with `summary_row`, `flow_rows`, `allocation_lots`, `lot_rows` survives normalization without losing backend-only compatibility fields.
+   - Do not delete or “clean up” backend-only fields during characterization. If a field appears redundant, assert current value and add a short TODO marker for later removal review.
+3. Relation write side effects
+   - Confirm relation current response shape, relation snapshot/audit effect, Workbench invalidation trigger and Turnover read model refresh scheduling.
+   - Withdraw blocks non-manual/system relations with current status/error shape.
+   - Manual withdraw schedules refresh and preserves current affected_months shape.
+   - Failures before mutation do not enqueue Turnover read model refresh.
+4. Extra writes
+   - Extra update persists current snapshot and schedules Turnover refresh.
+   - Legacy full snapshot fallback path is either explicitly characterized or documented in the test as a removal candidate. Do not silently ignore it.
+5. Bank row tag batch
+   - Turnover-eligible target validation.
+   - Category updates affect Bankdetail facts through the current service path.
+   - Current Turnover and Workbench projection invalidation effects are locked.
+   - Conflict/error response shape is locked.
+6. Export payload
+   - Export preview/export flatten grouped payload into summary rows plus real flow rows using current order and field names.
+   - Row limit, family filter and empty payload behavior are locked.
+7. Cross-module source versions
+   - Relation snapshot, extras, tag selection, bank category snapshot, auto tag rules and OA projection sync version changes alter expected source_versions.
+   - Keep `tests/test_workbench_turnover_grouping.py` or equivalent Workbench turnover grouping coverage in the verification set.
+8. Test state isolation
+   - Any PostgreSQL/Redis/state-store-like test data must be isolated by existing transaction/fake/tearDown patterns.
+   - Tests must not leak dirty scopes, outbox rows, read model rows, local state files, `.pkl`, `.sqlite`, or global singleton mutations into other tests.
+
+Testing Rules:
+- Prefer narrow deterministic tests over broad fragile end-to-end snapshots.
+- Preserve current behavior exactly, even if behavior is ugly. This prompt locks behavior; it does not improve behavior.
+- Do not assert implementation internals unless the behavior is otherwise unobservable.
+- Do not add sleeps, timing-sensitive polling, network calls or production/staging dependencies.
+- Do not weaken or skip existing tests.
+- If a desired test cannot be written without production code changes, stop and mark the item as blocker in docs/state log instead of changing production code.
+
+Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- Run the smallest relevant Turnover Ledger test set that covers changed tests, for example:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping -v`
+- If the exact module names differ, inspect existing tests and run the equivalent targeted unittest modules. Do not skip verification silently.
+- `rg -n "PF-P047|Turnover Ledger Characterization|grouped breakdown|api_stale|api_miss|legacy fallback|bank-row-tags|source_versions" docs/architecture/backend-refactor tests`
+
+Post-Flight:
+- Update `migration-state-log.md`:
+  - PF-P047 status must be `implemented` or `blocked`;未经用户确认不得标记 `verified`。
+  - Record changed tests, verification commands/results, blockers, and next recommended prompt.
+- Update `refactor-prompts.md` with PF-P047 execution result.
+- Update `turnover-ledger-discovery.md` if tests reveal facts that refine the discovery plan.
+- Final response must state:
+  - This prompt only added/updated characterization tests.
+  - Whether targeted tests passed.
+  - No production refactor, Traffic Gate, deploy or production access occurred.
+  - Suggested next prompt. If tests pass, likely next prompt is a Turnover Ledger extraction/refactor planning or a cumulative MG depending on diff size.
+
+Stop Conditions:
+- If current branch is not `codex/turnover-ledger-discovery-p046`, stop.
+- If unrelated uncommitted changes exist, stop.
+- If test setup requires production secrets, production DB, staging service, or OA live access, stop.
+- If a required characterization needs production code changes, stop and document blocker.
+- If any targeted test fails for reasons unrelated to the intended characterization, stop and diagnose before editing more tests.
+```
+
+### 审查结论
+
+- PF-P047 是 PF-P046 之后合理的下一条 prompt：Turnover Ledger 已完成 discovery，下一步必须先锁定现有行为，避免后续 extraction/refactor 造成静默退化。
+- PF-P047 边界正确：只允许测试和必要文档回写，不允许 production refactor、不允许事务语义变更、不允许 UoW 实现。
+- PF-P047 已覆盖 PF-P046 识别的核心风险：grouped breakdown、read model freshness/source_versions、relation side effects、extra legacy fallback、bank-row-tags 跨模块影响、export payload 和测试状态隔离。
+- PF-P047 不进入 Merge Gate；它执行完成后应标记为 `implemented`，等待用户确认后再 `verified`。
