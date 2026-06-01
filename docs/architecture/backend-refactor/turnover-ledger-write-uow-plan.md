@@ -2145,3 +2145,27 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
 - 生成并审查 `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton`。
 - PF-P096 只实现最小 write port classes 并让 PF-P095 的 4 条 expectedFailure tests 转为普通通过。
 - PF-P096 不迁移 `server.py` helper，不修改 API handler，不新增 SQL migration。
+
+## PF-P096 PostgreSQL Write Port Ownership Skeleton
+
+状态：`planned`
+
+目标：
+
+- 实现最小 `TurnoverLedgerRelationWritePort` 和 `TurnoverLedgerBankdetailWritePort` classes。
+- 将 PF-P095 的 4 条 expectedFailure target tests 转为普通通过。
+- 先建立 service-level write port ownership，不迁移 `server.py` PostgreSQL helper。
+
+边界：
+
+- relation write port 负责 confirm/withdraw 的 service orchestration 与 transaction-bound relation snapshot persistence。
+- bankdetail write port 负责 category update、relation rebuild、category snapshot persistence 和 relation snapshot persistence。
+- repository factory 只通过 supplied transaction 构造 persistence repository。
+- 不接收 `Application`、完整 runtime repositories、state store 或 HTTP request/response。
+
+禁止：
+
+- 不修改 `server.py`。
+- 不修改 API handler。
+- 不新增 SQL migration。
+- 不访问真实外部服务。

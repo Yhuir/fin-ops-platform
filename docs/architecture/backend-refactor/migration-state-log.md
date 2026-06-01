@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests` 已执行并验证通过 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton` |
 | 最近 verified prompt | `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-repository-ownership-p094` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests，4 expected failures |
-| 下一条允许任务 | 生成并审查 `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton` |
+| 下一条允许任务 | 执行 `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton` |
 
 ## Prompt 执行日志
 
@@ -7390,6 +7390,36 @@ PF-P094 已 verified。下一条应生成 `PF-P095 - Turnover Ledger PostgreSQL 
 #### 下一条 Prompt 上下文
 
 PF-P095 已 verified。下一步应生成并审查 `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton`，只实现最小 `TurnoverLedgerRelationWritePort` 和 `TurnoverLedgerBankdetailWritePort` classes，让 PF-P095 的 4 条 expectedFailure target tests 转为普通通过。PF-P096 不得迁移 `server.py` helper，不得修改 API handler，不得新增 SQL migration。
+
+### PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 在 `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 中实现最小 write port classes：
+  - `TurnoverLedgerRelationWritePort`
+  - `TurnoverLedgerBankdetailWritePort`
+- 将 PF-P095 的 4 条 expectedFailure target tests 转为普通通过测试。
+- 只做 service-level port skeleton，不迁移 `server.py` helper。
+
+#### 允许变更文件
+
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 禁止范围
+
+- 不得修改 `server.py`。
+- 不得迁移 `_postgres_turnover_ledger_relation_repository(...)` 或 `_postgres_turnover_ledger_bankdetail_repository(...)`。
+- 不得修改 API handler、SQL migration、部署配置或生产配置。
+
+#### 下一条 Prompt 上下文
+
+PF-P096 planned。执行后若 4 条 PF-P095 target tests 转为普通通过，下一条应生成 `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring`，将 `server.py` PostgreSQL nested helper 的 orchestration 替换为 new ports；不得在 PF-P096 中提前执行。
 
 ## 维护规则
 
