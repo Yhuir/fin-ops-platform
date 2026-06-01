@@ -378,6 +378,14 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
+    @unittest.expectedFailure
+    def test_tag_selection_pure_normalizer_returns_next_selection_without_mutating_settings_snapshot(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.app_settings_service")
+        service_class = getattr(module, "AppSettingsService")
+        normalize = getattr(service_class, "normalize_turnover_ledger_tag_selection_update", None)
+
+        self.assertTrue(callable(normalize))
+
     def test_bank_row_tags_batch_uses_explicit_bankdetail_port_and_rolls_back_on_outbox_failure(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 

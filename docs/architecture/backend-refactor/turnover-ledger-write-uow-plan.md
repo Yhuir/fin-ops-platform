@@ -743,3 +743,24 @@ Scope:
   - transaction-bound settings port save;
   - outbox failure rolling back settings save/audit at fake UoW level.
 - Do not modify production code yet.
+
+## PF-P066 Tag Selection Characterization and Contract Tests
+
+状态：`verified`
+
+PF-P066 strengthened tag selection tests:
+
+- success path now explicitly asserts exactly one Turnover refresh enqueue and one read model clear;
+- version conflict and invalid tag paths assert no additional enqueue/clear side effects;
+- UoW contract suite now includes an expectedFailure target for `AppSettingsService.normalize_turnover_ledger_tag_selection_update`.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 23 tests, 1 expectedFailure.
+
+Next step:
+
+- `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton`.
+- PF-P067 should only implement the pure normalizer target and turn the expectedFailure into an ordinary passing test.
+- PF-P067 must not migrate handler/UoW production wiring.

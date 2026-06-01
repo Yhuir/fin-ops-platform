@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` planned |
-| 最近 verified prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步生成 settings normalizer/port skeleton prompt |
+| 最近 verified prompt | `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
-| 最近验证 | PF-P065 只读盘点 tag selection settings boundary；文档验证通过 |
-| 下一条允许任务 | 执行 `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests`；只改 tests/docs，不改 production code |
+| 最近验证 | PF-P066 增强 tag selection tests；API 29 tests 通过，UoW contract 23 tests 通过（1 expectedFailure） |
+| 下一条允许任务 | 生成并审查 `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton` |
 
 ## Prompt 执行日志
 
@@ -6119,7 +6119,7 @@ PF-P066 应先做 characterization / contract tests：锁定 tag selection 当�
 
 ### PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -6134,12 +6134,31 @@ PF-P066 应先做 characterization / contract tests：锁定 tag selection 当�
 
 #### 下一步
 
-- 执行 PF-P066。
+- 生成并审查 `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton`。
 
 #### 验收标准
 
 - tests 锁定当前 queue failure after save 行为和 future UoW target contract。
 - 默认 test suite 必须保持绿色；未实现目标可使用 `unittest.expectedFailure`，但必须解释后续转绿路径。
+
+#### 执行结果
+
+- 强化 `test_turnover_ledger_tag_selection_get_put_and_version_conflict`：
+  - success 只 enqueue 一次并 clear 一次；
+  - conflict 和 invalid tag 不额外 enqueue/clear。
+- 新增 `test_tag_selection_pure_normalizer_returns_next_selection_without_mutating_settings_snapshot` expectedFailure：
+  - 锁定未来 `AppSettingsService.normalize_turnover_ledger_tag_selection_update` pure target。
+- 未修改 production code。
+
+#### 验证
+
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，23 tests，1 expectedFailure。
+
+#### 下一条 Prompt 上下文
+
+PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expectedFailure 转绿。不得迁移 handler，不得实现 transaction-bound settings repository 或 UoW production wiring。
 
 ## 维护规则
 

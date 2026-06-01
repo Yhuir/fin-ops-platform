@@ -16224,3 +16224,17 @@ Post-Flight:
 - PF-P066 是 PF-P065 后正确的测试锁定步骤：先锁当前行为和目标合同，再改 production code。
 - Prompt 明确允许 expectedFailure 只用于尚未实现的 pure normalization target，默认 CI 必须绿色。
 - Prompt 禁止实现 handler/UoW，保持 Micro-JIT 顺序。
+
+### 执行结果
+
+- PF-P066 已执行并按自动工作流标记为 `verified`。
+- 强化 `test_turnover_ledger_tag_selection_get_put_and_version_conflict`：
+  - success 只 enqueue 一次并 clear 一次；
+  - conflict 和 invalid tag 不额外 enqueue/clear。
+- 新增 `test_tag_selection_pure_normalizer_returns_next_selection_without_mutating_settings_snapshot` expectedFailure。
+- 未修改 production code。
+- 验证：
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，23 tests，1 expectedFailure。
+- 下一步建议：生成并审查 `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton`。

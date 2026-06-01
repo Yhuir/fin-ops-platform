@@ -474,7 +474,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             )
             app = build_application(data_dir=Path(temp_dir))
             queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
 
             response = app.handle_request("GET", "/api/turnover-ledger/tag-selection")
             payload = json.loads(response.body)
@@ -518,11 +520,14 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(set(payload["selected_tag_codes"]), {"external_rule_borrow_out", "external_rule_repaid"})
         self.assertEqual(save_response.status_code, 200)
         self.assertEqual(saved_payload["selected_tag_codes"], ["external_rule_borrow_out"])
-        self.assertIn(("turnover_ledger", "all", "turnover_ledger_tag_selection_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
+        self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(conflict_response.status_code, 409)
         self.assertEqual(json.loads(conflict_response.body)["error"], "turnover_ledger_tag_selection_version_conflict")
         self.assertEqual(invalid_response.status_code, 400)
         self.assertEqual(json.loads(invalid_response.body)["error"], "invalid_turnover_ledger_tag")
+        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
+        self.assertEqual(read_repository.clear_calls, 1)
 
     def test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save(self) -> None:
         with TemporaryDirectory() as temp_dir:
