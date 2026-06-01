@@ -1193,3 +1193,24 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests, 2 expectedFailure.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+
+## PF-P077 Bank Row Tags Facade / Port Skeleton
+
+状态：`planned`
+
+目标：
+
+- 建立 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 的 service-layer skeleton。
+- 扩展 UoW 支持显式 multi-refresh requests，同时保持现有默认 turnover refresh 行为兼容。
+- 不迁移真实 HTTP handler。
+
+边界：
+
+- 不修改 `server.py`。
+- 不修改 PF-P076 API expectedFailure。
+- 不修改 schema/migration。
+
+下一步：
+
+- 执行 PF-P077。
+- PF-P077 verified 后生成 PF-P078 bank-row-tags handler UoW wiring。
