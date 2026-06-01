@@ -542,15 +542,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             {"external_rule_borrow_out", "external_rule_repaid"},
         )
         self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
-        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(conflict_response.status_code, 409)
         self.assertEqual(json.loads(conflict_response.body)["error"], "turnover_ledger_tag_selection_version_conflict")
         self.assertEqual(invalid_response.status_code, 400)
         self.assertEqual(json.loads(invalid_response.body)["error"], "invalid_turnover_ledger_tag")
         self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
-        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(read_repository.clear_calls, 0)
 
-    def test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save(self) -> None:
+    def test_turnover_ledger_tag_selection_queue_failure_rolls_back_settings_save(self) -> None:
         with TemporaryDirectory() as temp_dir:
             ApplicationStateStore(Path(temp_dir)).save_app_settings(
                 {
@@ -631,12 +631,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 )
             restored_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
-        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
-        self.assertEqual(restored_payload["selected_tag_codes"], ["external_rule_borrow_out"])
-        self.assertGreater(restored_payload["version"], initial_payload["version"])
+        self.assertEqual(restored_payload["selected_tag_codes"], initial_payload["selected_tag_codes"])
+        self.assertEqual(restored_payload["version"], initial_payload["version"])
 
-    @unittest.expectedFailure
     def test_target_turnover_ledger_tag_selection_queue_failure_rolls_back_settings_save(self) -> None:
         with TemporaryDirectory() as temp_dir:
             ApplicationStateStore(Path(temp_dir)).save_app_settings(
@@ -694,7 +693,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(restored_payload["selected_tag_codes"], initial_payload["selected_tag_codes"])
         self.assertEqual(restored_payload["version"], initial_payload["version"])
 
-    @unittest.expectedFailure
     def test_target_turnover_ledger_tag_selection_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory() as temp_dir:
             ApplicationStateStore(Path(temp_dir)).save_app_settings(

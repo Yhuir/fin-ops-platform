@@ -1042,7 +1042,7 @@ Verification:
 
 ## PF-P073 Tag Selection Handler UoW Wiring
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1059,5 +1059,17 @@ Verification:
 
 下一步：
 
-- 执行 PF-P073。
-- PF-P073 通过后，生成 cumulative MG 覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。
+- 生成 cumulative MG 覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。
+
+执行结果：
+
+- `PUT /api/turnover-ledger/tag-selection` handler 已迁移到 `TurnoverLedgerWriteFacade.update_tag_selection(...)`。
+- PostgreSQL path 使用 transaction-bound settings adapter 和 dirty/outbox writer。
+- Local state store path 使用最小 transaction shim，queue failure 时恢复 normalized app settings snapshot。
+- 成功路径不再直接 clear read model。
+- PF-P071 的 2 个 handler target tests 已转为普通通过。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.

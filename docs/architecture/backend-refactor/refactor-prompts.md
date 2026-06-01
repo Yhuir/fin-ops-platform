@@ -17017,3 +17017,22 @@ Post-Flight:
 - PF-P073 是 PF-P072 后正确的最小 handler migration：只迁移 `PUT /api/turnover-ledger/tag-selection`，不扩大到其它 Turnover 写路径。
 - Prompt 明确要求 Postgres production path 使用真实 transaction-bound writer，同时要求 local state store compatibility path 具备 rollback 语义，能让 PF-P071 target tests 从 expectedFailure 转为普通通过。
 - Prompt 明确禁止直接 clear read model 和直接 enqueue legacy queue，从而把 settings fact 与 dirty/outbox 收敛到 UoW 边界。
+
+### 执行结果
+
+- PF-P073 已执行并按自动工作流标记为 `verified`。
+- `PUT /api/turnover-ledger/tag-selection` handler 现在优先调用 `TurnoverLedgerWriteFacade.update_tag_selection(...)`。
+- PostgreSQL path 使用 `TurnoverLedgerTagSelectionSettingsAdapter`、`PostgresOpsTaxEtcRepository(transaction)` 和 `TurnoverLedgerDirtyOutboxWriter`。
+- Local state store path 增加最小 transaction shim，queue failure 时恢复 normalized app settings snapshot。
+- 成功路径不再直接调用 `_clear_turnover_ledger_read_model_best_effort()`。
+- PF-P071 的 2 个 handler target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P073 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+
+下一步建议：生成并审查 cumulative MG，覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。
