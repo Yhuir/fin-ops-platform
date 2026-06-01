@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已执行 `PF-P045-MG - Main Delta Rebaseline Merge Gate`，已本地合入 `main` 并完成 main 复验，等待用户确认 verified |
-| 当前 active prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` (`implemented`) |
-| 最近 verified prompt | `PF-P045 - Main Delta Rebaseline / Refactor Plan Resync` |
+| 当前阶段 | `PF-P045-MG - Main Delta Rebaseline Merge Gate` 已 verified，正在推送 `origin/main` |
+| 当前 active prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` (`verified`) |
+| 最近 verified prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | PF-P045-MG 已在本地 `main` 完成 no-ff merge；main 复验通过；未执行 Traffic Gate、部署、生产访问、feature flag 打开或 push |
-| 下一条允许任务 | 用户确认 PF-P045-MG `verified`；之后可执行 `git push origin main`，push 后从最新 `main` 新建分支生成下一条实际模块 prompt |
+| 最近验证 | 用户已确认 PF-P045-MG `verified`；本地 `main` 已完成 no-ff merge 和 main 复验；本次状态更新将随 `git push origin main` 推送；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
+| 下一条允许任务 | push 完成后，从最新 `main` 新建分支；下一条实际模块 prompt 必须读取 PF-P045 delta 事实 |
 
 ## Prompt 执行日志
 
@@ -4836,7 +4836,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P045-MG - Main Delta Rebaseline Merge Gate
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4898,12 +4898,13 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
   - `test ! -e backend-go`：Pass。
   - `rg -n "PF-P045|Main Delta Rebaseline|低耦合|不允许机械拆文件|server.py|routes_\\*" docs/architecture/backend-refactor`：Pass。
 - 未执行：Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改、feature flag 打开、push。
+- 用户已确认 PF-P045-MG 可标记为 `verified`；本次状态更新将随 `git push origin main` 推送到远端。
 
 #### 下一步
 
-- 用户确认 PF-P045-MG `verified`。
-- 确认后可执行 `git push origin main`。
-- push 后从最新 `main` 新建分支生成下一条实际模块 prompt；下一条 prompt 必须读取 PF-P045 delta 事实。
+- 执行 `git push origin main`。
+- push 完成后，从最新 `main` 新建分支生成下一条实际模块 prompt。
+- 下一条 prompt 必须读取 PF-P045 delta 事实。
 
 ## 维护规则
 
