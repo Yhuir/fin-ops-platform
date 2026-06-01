@@ -19423,3 +19423,92 @@ Post-Flight:
   - tag selection 与 relation extra 已具备 PostgreSQL adapter path。
   - bank-row-tags batch、confirm relation、withdraw relation 在 `storage_backend == "postgres"` 时仍 fallback，因为缺少 transaction-aware Bankdetail port adapter 与 relation repository adapter。
 - 下一条最小 prompt 选择为 `PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests`：先写 production write port contract tests，不实现 adapters，不迁移 handler，不访问真实 PostgreSQL。
+
+## PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests
+
+```text
+/goal
+PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的测试驱动后端工程师。你必须先用 contract tests 锁定 Turnover Ledger PostgreSQL write port 边界，不实现 adapters，不迁移 handler，不访问真实数据库。
+
+Context:
+PF-P089 已 verified。扫描结论表明：Turnover Ledger 五条写 path 都已有 facade seam；tag selection 和 relation extra 已具备 PostgreSQL adapter path；bank-row-tags batch、confirm relation、withdraw relation 在 `storage_backend == "postgres"` 时仍 fallback，因为缺少 transaction-aware Bankdetail port adapter 与 relation repository adapter。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - tests/test_turnover_ledger_uow_contract.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P089 已 verified。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Task:
+在 `tests/test_turnover_ledger_uow_contract.py` 中新增 Turnover Ledger PostgreSQL write port target contract tests。测试应描述未来 adapters 的生产级契约；如果 adapter 类尚不存在，使用 `unittest.expectedFailure` 保持默认 CI 绿色。不得 skip，不得删除既有断言。
+
+Required Test Work:
+1. Relation repository adapter contracts:
+   - 目标类名：`TurnoverLedgerRelationRepositoryAdapter`。
+   - 必须断言 constructor 拒绝 `application=object()` 这类 god object。
+   - 必须断言 confirm relation 使用 supplied transaction 创建 repository，并调用明确的 relation repository/service method，而不是在 adapter 内散落 SQL。
+   - 必须断言 withdraw relation 使用 supplied transaction 创建 repository，并调用明确的 relation repository/service method。
+   - 必须断言 adapter result 是 service payload，不包含 HTTP response/cookie/header/status/auth 字段。
+2. Bankdetail port adapter contracts:
+   - 目标类名：`TurnoverLedgerBankdetailPortAdapter`。
+   - 必须断言 constructor 拒绝 `application=object()`。
+   - 必须断言 `apply_turnover_category_updates(updates, actor_id, transaction)` 使用 supplied transaction 创建 repository/service boundary。
+   - 必须断言 result 不包含 HTTP response/cookie/header/status/auth 字段。
+   - 必须断言 adapter 不直接 enqueue read model refresh；dirty/outbox 仍由 UoW 的 dirty_outbox_writer 负责。
+3. UoW rollback semantics:
+   - 新增 target test，证明 adapter-raised exception 会让 `TurnoverLedgerWriteUnitOfWork.run(...)` rollback，不能 best-effort success。
+   - 这个测试可使用 fake adapter/port，不依赖真实 PostgreSQL。
+4. Test hygiene:
+   - 新 tests 必须使用 fake repository factory / fake transaction；
+   - 不得连接真实 PostgreSQL；
+   - 不得依赖真实 Redis/RabbitMQ/OA/Mongo/MySQL；
+   - 不得修改现有通过测试的期望来绕过 failure。
+
+Allowed Files:
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得实现 `TurnoverLedgerRelationRepositoryAdapter` 或 `TurnoverLedgerBankdetailPortAdapter`。
+- 不得修改 `server.py`、routes、facade、UoW、repository、SQL migration、worker、frontend、deployment 或生产配置。
+- 不得访问真实 PostgreSQL 或任何外部服务。
+- 不得执行 Traffic Gate。
+- 不得把 expectedFailure 改成 skip。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "PF-P090|PostgreSQL Write Port Contract|TurnoverLedgerRelationRepositoryAdapter|TurnoverLedgerBankdetailPortAdapter|expectedFailure" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P090 status = implemented / verified / blocked。
+   - 记录新增 tests、expectedFailure 数量、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P090 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 PostgreSQL write port contract tests 状态。
+4. PF-P090 verified 后，下一条 prompt 应实现最小 adapter skeleton，使 PF-P090 target tests 转绿；不得直接迁移 handler。
+```
+
+### 审查结论
+
+- PF-P090 的边界正确：只写 production write port target contracts，不实现 adapters，不改 handler。
+- 使用 `unittest.expectedFailure` 是合理的：这些 adapter 类当前尚不存在，contract tests 用于锁定下一步实现目标，同时保持默认 CI 绿色。
+- 下一步若 PF-P090 verified，应生成 adapter skeleton prompt，而不是直接迁移 PostgreSQL handler path。

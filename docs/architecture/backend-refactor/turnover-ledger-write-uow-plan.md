@@ -1865,3 +1865,27 @@ Verification on main:
   - adapter failure 必须让 UoW rollback，而不是 best-effort success。
 
 PF-P090 通过后，再进入 adapter skeleton / PostgreSQL facade wiring。
+
+## PF-P090 PostgreSQL Write Port Contract Tests
+
+状态：`planned`
+
+目标：
+
+- 先用 contract tests 锁定 Turnover Ledger PostgreSQL write port 的生产级接口。
+- 目标 ports：
+  - `TurnoverLedgerRelationRepositoryAdapter`
+  - `TurnoverLedgerBankdetailPortAdapter`
+- 本轮不实现 adapters，不迁移 handler，不修改 production code。
+
+测试原则：
+
+- 使用 fake repository factory / fake transaction。
+- 尚未实现的 adapter target tests 使用 `unittest.expectedFailure`，保持默认 CI 绿色。
+- 不允许 skip。
+- 不访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo 或 MySQL。
+- 必须断言 adapters 不接收 `Application` god object，不知道 HTTP response/cookie/header/status/auth。
+
+下一步：
+
+- PF-P090 verified 后，生成 adapter skeleton prompt，使 target tests 转绿。
