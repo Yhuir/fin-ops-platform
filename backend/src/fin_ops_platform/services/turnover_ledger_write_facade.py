@@ -8,6 +8,7 @@ from typing import Any, Callable
 class TurnoverLedgerWriteCommand:
     action_name: str
     scope_keys: list[str] = field(default_factory=lambda: ["all"])
+    refresh_requests: list[dict[str, object]] = field(default_factory=list)
     expected_versions: dict[str, object] = field(default_factory=dict)
     actor_id: str = ""
     tenant_id: str = "default"
@@ -63,6 +64,61 @@ class TurnoverLedgerWriteFacade:
             if self._row_provider is not None:
                 result["row"] = self._row_provider(relation_id=relation_id, extra=dict(extra))
             return result
+
+        return self._uow.run(command, handler)
+
+    def update_bank_row_tags_batch(
+        self,
+        *,
+        updates: list[dict[str, object]],
+        actor_id: str,
+        tenant_id: str,
+        affected_months: list[str],
+    ) -> dict[str, object]:
+        normalized_updates = [dict(update) for update in list(updates or [])]
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip()
+        ]
+        refresh_requests = [
+            {
+                "scope_type": "bank_detail",
+                "scope_keys": list(normalized_months),
+                "reason": "bank_transaction_category_changed",
+            },
+            {
+                "scope_type": "workbench",
+                "scope_keys": list(normalized_months),
+                "reason": "workbench_scope_invalidated",
+            },
+            {
+                "scope_type": "turnover_ledger",
+                "scope_keys": ["all"],
+                "reason": "turnover_relation_changed",
+            },
+        ]
+        command = TurnoverLedgerWriteCommand(
+            action_name="bank_row_tags_batch",
+            scope_keys=["all"],
+            refresh_requests=refresh_requests,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            payload={
+                "updates": list(normalized_updates),
+                "affected_months": list(normalized_months),
+            },
+        )
+
+        def handler(context: Any) -> dict[str, object]:
+            result = context.bankdetail_port.apply_turnover_category_updates(
+                list(normalized_updates),
+                actor_id=actor_id,
+                transaction=context.transaction,
+            )
+            payload = dict(result or {})
+            payload.setdefault("affected_months", list(normalized_months))
+            return payload
 
         return self._uow.run(command, handler)
 

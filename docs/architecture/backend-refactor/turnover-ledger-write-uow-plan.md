@@ -1160,3 +1160,117 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 33 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+
+## PF-P076 Bank Row Tags UoW Compatibility and Target Tests
+
+状态：`verified`
+
+目标：
+
+- 只为 `POST /api/turnover-ledger/bank-row-tags/batch` 增加 compatibility / target tests。
+- 保留当前 queue failure split-brain 行为事实。
+- 增加未来 UoW rollback/no-clear/scope target tests，未实现目标用 `unittest.expectedFailure` 保持默认 CI 绿色。
+
+边界：
+
+- 不修改 production code。
+- 不迁移 handler。
+- 不进入 MG。
+
+下一步：
+
+- 生成 PF-P077 bank row tags facade / port skeleton。
+
+执行结果：
+
+- 新增 2 个 future target tests，当前为 `unittest.expectedFailure`：
+  - queue/outbox failure rolls back bank category save；
+  - successful UoW path does not clear read model directly。
+- 新增普通通过测试，锁定 Bankdetail affected month、Workbench affected month 和 Turnover Ledger all scope refresh。
+- 未修改 production code。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+
+## PF-P077 Bank Row Tags Facade / Port Skeleton
+
+状态：`verified`
+
+目标：
+
+- 建立 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 的 service-layer skeleton。
+- 扩展 UoW 支持显式 multi-refresh requests，同时保持现有默认 turnover refresh 行为兼容。
+- 不迁移真实 HTTP handler。
+
+边界：
+
+- 不修改 `server.py`。
+- 不修改 PF-P076 API expectedFailure。
+- 不修改 schema/migration。
+
+下一步：
+
+- 生成 PF-P078 bank-row-tags handler UoW wiring。
+
+执行结果：
+
+- `TurnoverLedgerWriteCommand` 增加 `refresh_requests`，保持默认 Turnover refresh 兼容。
+- `TurnoverLedgerWriteUnitOfWork` 支持显式 multi-refresh requests。
+- `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 已建立，使用 `bankdetail_port.apply_turnover_category_updates(...)`。
+- 新增 3 个 UoW contract tests，覆盖 service payload、dirty/outbox rollback 和三类 refresh requests。
+- 未修改真实 API handler。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 33 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests, 2 expectedFailure.
+
+## PF-P078 Bank Row Tags Handler UoW Wiring
+
+状态：`verified`
+
+目标：
+
+- 只迁移 `POST /api/turnover-ledger/bank-row-tags/batch` 到 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)`。
+- 将 PF-P076 的 2 个 bank-row-tags API target `expectedFailure` 转为普通通过测试。
+- 保持当前 legacy split-brain behavior test，但通过显式 fallback seam 覆盖旧路径。
+
+边界：
+
+- Handler 只做 session/auth、JSON parsing、target validation、affected months 计算、HTTP error mapping 和 facade 调用。
+- Local/dev/test path 使用最小 transaction shim，queue/outbox failure 必须恢复 bank category snapshot 和 turnover relation snapshot。
+- 成功路径不得直接调用 `_clear_turnover_ledger_read_model_best_effort()`；refresh enqueue 必须走 UoW dirty/outbox explicit refresh requests。
+- 如果缺少明确 transaction-bound Bankdetail category adapter，不得猜测生产 SQL；production path 可以保留 legacy fallback 并记录 blocker。
+
+下一步：
+
+- 生成 cumulative MG，覆盖 PF-P076 到 PF-P078。
+
+执行结果：
+
+- `POST /api/turnover-ledger/bank-row-tags/batch` 的 local/dev/test path 已迁移到 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)`。
+- local transaction shim 在 queue/outbox failure 时恢复 bank transaction categories snapshot 与 turnover relations snapshot。
+- 成功路径不再直接 clear Turnover Ledger read model，refresh enqueue 由 UoW explicit refresh requests 负责。
+- PF-P076 的 2 个 target tests 已转为普通通过。
+- PostgreSQL production path 暂保留 legacy fallback；当前缺少明确 transaction-bound Bankdetail category adapter，未猜测 SQL。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 33 tests.
+
+## PF-P078-MG Bank Row Tags UoW Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖 PF-P076 到 PF-P078 的 bank-row-tags UoW slice 累计 diff。
+- 只执行 Merge Gate，不执行 Traffic Gate。
+- 合并前后运行 Turnover Ledger targeted tests。
+
+下一步：
+
+- 执行 PF-P078-MG。

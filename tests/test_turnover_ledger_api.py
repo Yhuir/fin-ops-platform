@@ -794,6 +794,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_bank_row_tags_write_facade = lambda: None  # type: ignore[method-assign]
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -828,6 +829,95 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(details_payload["pagination"]["total"], 1)
         self.assertEqual(details_payload["rows"][0]["id"], transaction_ids[0])
         self.assertEqual(details_payload["rows"][0]["category_code"], "borrow_in_company_pending_repayment")
+
+    def test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _FailingQueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "POST",
+                    "/api/turnover-ledger/bank-row-tags/batch",
+                    body=json.dumps(
+                        {
+                            "updates": [
+                                {
+                                    "transaction_id": transaction_ids[0],
+                                    "category_code": "borrow_in_company_pending_repayment",
+                                    "expected_version": 0,
+                                }
+                            ]
+                        }
+                    ),
+                )
+            details_response = app.handle_request(
+                "GET",
+                f"/api/bank-details/transactions?category_code=borrow_in_company_pending_repayment",
+            )
+            details_payload = json.loads(details_response.body)
+
+        self.assertEqual(details_response.status_code, 200)
+        self.assertEqual(details_payload["pagination"]["total"], 0)
+        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.attempts)
+
+    def test_target_turnover_bank_row_tag_batch_uow_path_does_not_clear_read_model_directly(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(read_repository.clear_calls, 0)
+
+    def test_turnover_bank_row_tag_batch_refreshes_all_required_scopes(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
     def test_grouped_view_preserves_service_flow_rows_and_allocation_lots(self) -> None:
         class FakeLedgerService:

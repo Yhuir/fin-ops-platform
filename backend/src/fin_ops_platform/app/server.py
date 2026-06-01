@@ -2656,6 +2656,157 @@ class Application:
             row_provider=self._turnover_ledger_relation_extra_row_provider,
         )
 
+    def _turnover_ledger_bank_row_tags_write_facade(self) -> TurnoverLedgerWriteFacade | None:
+        override = getattr(self, "_turnover_ledger_bank_row_tags_write_facade_override", None)
+        if override is not None:
+            return override
+        state_store = getattr(self, "_state_store", None)
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if state_store is None or queue_repository is None:
+            return None
+        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            return None
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return None
+        uow = TurnoverLedgerWriteUnitOfWork(
+            connection=self._local_turnover_ledger_bank_row_tags_connection(state_store),
+            relation_repository=SimpleNamespace(),
+            extra_repository=SimpleNamespace(),
+            settings_port=SimpleNamespace(),
+            bankdetail_port=self._local_turnover_ledger_bankdetail_port(),
+            dirty_outbox_writer=self._local_turnover_ledger_dirty_outbox_writer(queue_repository),
+            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+        )
+        return TurnoverLedgerWriteFacade(uow=uow)
+
+    def _local_turnover_ledger_bank_row_tags_connection(self, state_store: object) -> object:
+        application = self
+
+        class _LocalBankRowTagsConnection:
+            @contextmanager
+            def transaction(self) -> Any:
+                previous_category_snapshot = application._bank_transaction_category_service.snapshot()
+                previous_relation_snapshot = application._turnover_relation_service.snapshot()
+                try:
+                    yield SimpleNamespace()
+                except Exception:
+                    application._replace_local_bank_transaction_category_snapshot(previous_category_snapshot)
+                    application._replace_local_turnover_relation_snapshot(previous_relation_snapshot)
+                    application._save_local_bank_transaction_categories_snapshot(
+                        state_store,
+                        previous_category_snapshot,
+                    )
+                    application._save_local_turnover_relations_snapshot(
+                        state_store,
+                        previous_relation_snapshot,
+                    )
+                    raise
+                else:
+                    application._save_local_bank_transaction_categories_snapshot(
+                        state_store,
+                        application._bank_transaction_category_service.snapshot(),
+                    )
+                    application._save_local_turnover_relations_snapshot(
+                        state_store,
+                        application._turnover_relation_service.snapshot(),
+                    )
+
+        return _LocalBankRowTagsConnection()
+
+    def _local_turnover_ledger_bankdetail_port(self) -> object:
+        application = self
+
+        class _LocalTurnoverLedgerBankdetailPort:
+            def apply_turnover_category_updates(
+                self,
+                updates: list[dict[str, object]],
+                *,
+                actor_id: str,
+                transaction: object,
+            ) -> dict[str, object]:
+                result = application._bank_transaction_category_service.apply_turnover_updates(
+                    list(updates or []),
+                    actor=actor_id,
+                )
+                application._turnover_relation_service.rebuild_from_bank_rows(
+                    application._turnover_bank_transaction_rows()
+                )
+                return dict(result or {})
+
+        return _LocalTurnoverLedgerBankdetailPort()
+
+    def _replace_local_bank_transaction_category_snapshot(self, snapshot: dict[str, object]) -> None:
+        category_service = BankTransactionCategoryService.from_snapshot(
+            dict(snapshot),
+            transaction_exists=self._bank_transaction_exists,
+        )
+        auto_category_service = BankTransactionAutoCategoryService(
+            category_service=category_service,
+        )
+        effective_category_provider = BankTransactionEffectiveCategoryProvider(
+            category_service=category_service,
+            auto_category_service=auto_category_service,
+        )
+        self._bank_transaction_category_service = category_service
+        self._bank_transaction_auto_category_service = auto_category_service
+        self._bank_transaction_effective_category_provider = effective_category_provider
+        if getattr(self, "_app_settings_service", None) is not None:
+            setattr(self._app_settings_service, "_bank_transaction_category_service", category_service)
+            setattr(self._app_settings_service, "_bank_transaction_auto_category_service", auto_category_service)
+        if getattr(self, "_bank_details_service", None) is not None:
+            setattr(self._bank_details_service, "_category_service", category_service)
+            setattr(self._bank_details_service, "_auto_category_service", auto_category_service)
+        if getattr(self, "_turnover_ledger_service", None) is not None:
+            setattr(self._turnover_ledger_service, "_category_service", category_service)
+            setattr(self._turnover_ledger_service, "_category_provider", effective_category_provider)
+        if getattr(self, "_live_workbench_service", None) is not None:
+            setattr(self._live_workbench_service, "_category_provider", effective_category_provider)
+
+    def _replace_local_turnover_relation_snapshot(self, snapshot: dict[str, object]) -> None:
+        relation_service = TurnoverRelationService.from_snapshot(
+            dict(snapshot),
+            bank_rows=self._turnover_bank_transaction_rows(),
+        )
+        self._turnover_relation_service = relation_service
+        if getattr(self, "_turnover_ledger_service", None) is not None:
+            setattr(self._turnover_ledger_service, "_relation_service", relation_service)
+        if getattr(self, "_turnover_ledger_api_routes", None) is not None:
+            setattr(self._turnover_ledger_api_routes, "_relation_service", relation_service)
+
+    def _save_local_bank_transaction_categories_snapshot(
+        self,
+        state_store: object,
+        snapshot: dict[str, object],
+    ) -> None:
+        save_categories = getattr(state_store, "save_bank_transaction_categories", None)
+        if not callable(save_categories):
+            raise RuntimeError("state store must expose save_bank_transaction_categories.")
+        try:
+            save_categories(dict(snapshot))
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(
+                operation="bank_transaction_categories_updated",
+                detail=str(exc),
+            )
+
+    def _save_local_turnover_relations_snapshot(
+        self,
+        state_store: object,
+        snapshot: dict[str, object],
+    ) -> None:
+        save_relations = getattr(state_store, "save_turnover_relations", None)
+        if not callable(save_relations):
+            raise RuntimeError("state store must expose save_turnover_relations.")
+        try:
+            save_relations(dict(snapshot))
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(
+                operation="turnover_relations_updated",
+                detail=str(exc),
+            )
+
     def _local_turnover_ledger_relation_extra_connection(self, state_store: object) -> object:
         application = self
 
@@ -12282,10 +12433,21 @@ class Application:
             for update in updates
             if str(update.get("transaction_id") or "").strip()
         ]
+        facade: TurnoverLedgerWriteFacade | None = None
         try:
             self._ensure_turnover_bank_row_tag_targets(transaction_ids)
             actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-            result = self._bank_transaction_category_service.apply_turnover_updates(updates, actor=actor)
+            affected_months = self._bank_transaction_category_affected_months(transaction_ids)
+            facade = self._turnover_ledger_bank_row_tags_write_facade()
+            if facade is not None:
+                result = facade.update_bank_row_tags_batch(
+                    updates=updates,
+                    actor_id=actor,
+                    tenant_id=tenant_id_for_session(session_response),
+                    affected_months=affected_months,
+                )
+            else:
+                result = self._bank_transaction_category_service.apply_turnover_updates(updates, actor=actor)
         except BankTransactionCategoryConflictError as exc:
             return self._json_response(
                 HTTPStatus.CONFLICT,
@@ -12302,10 +12464,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
             )
-        affected_months = self._bank_transaction_category_affected_months(transaction_ids)
-        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
-        self._turnover_relation_service.rebuild_from_bank_rows(self._turnover_bank_transaction_rows())
-        self._after_turnover_relation_mutation(affected_months)
+        if facade is None:
+            self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
+            self._turnover_relation_service.rebuild_from_bank_rows(self._turnover_bank_transaction_rows())
+            self._after_turnover_relation_mutation(affected_months)
         result["affected_months"] = affected_months
         result["turnover_ledger_invalidated"] = True
         result["workbench_invalidated"] = True
