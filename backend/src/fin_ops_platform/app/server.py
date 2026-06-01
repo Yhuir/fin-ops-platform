@@ -54,6 +54,7 @@ from fin_ops_platform.app.routes_turnover_ledger import (
     TurnoverLedgerApiRoutes,
     TurnoverLedgerExtraValidationError,
 )
+from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadFacade
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.access_control_service import AccessControlService
@@ -957,6 +958,9 @@ class Application:
             relation_service=self._turnover_relation_service,
             extra_service=self._turnover_ledger_extra_service,
             query_service=self._turnover_ledger_query_service,
+        )
+        self._turnover_ledger_read_facade = TurnoverLedgerReadFacade(
+            routes=self._turnover_ledger_api_routes,
         )
 
     def _configure_tax_offset_application_services(self) -> None:
@@ -11914,7 +11918,7 @@ class Application:
         page = int(query.get("page", ["1"])[0] or 1)
         page_size = int(query.get("page_size", ["50"])[0] or 50)
         try:
-            payload = self._turnover_ledger_api_routes.list_ledger(
+            payload = self._turnover_ledger_read_facade.list_ledger(
                 view=view,
                 family=family,
                 direction=direction,
@@ -12066,7 +12070,7 @@ class Application:
 
     def _handle_api_turnover_ledger_export_preview(self, query: dict[str, list[str]]) -> Response:
         try:
-            payload = self._turnover_ledger_api_routes.export_preview(
+            payload = self._turnover_ledger_read_facade.export_preview(
                 family=query.get("family", ["all"])[0],
                 limit=int(query.get("limit", ["20"])[0] or 20),
             )
@@ -12079,7 +12083,7 @@ class Application:
 
     def _handle_api_turnover_ledger_export(self, query: dict[str, list[str]]) -> Response:
         try:
-            filename, content = self._turnover_ledger_api_routes.export(
+            filename, content = self._turnover_ledger_read_facade.export(
                 family=query.get("family", ["all"])[0],
             )
         except (TypeError, ValueError) as exc:
@@ -12101,7 +12105,7 @@ class Application:
 
     def _handle_api_turnover_ledger_relation(self, relation_id: str) -> Response:
         try:
-            payload = self._turnover_ledger_api_routes.get_relation(relation_id)
+            payload = self._turnover_ledger_read_facade.get_relation(relation_id)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -12111,7 +12115,7 @@ class Application:
 
     def _handle_api_turnover_ledger_relation_extra(self, relation_id: str) -> Response:
         try:
-            payload = self._turnover_ledger_api_routes.get_relation_extra(relation_id)
+            payload = self._turnover_ledger_read_facade.get_relation_extra(relation_id)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,

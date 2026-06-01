@@ -13668,7 +13668,7 @@ Stop Conditions:
 
 ## PF-P049 - Turnover Ledger Query/Route Facade Extraction
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -13833,3 +13833,34 @@ Stop Conditions:
 - PF-P049 的修改范围足够窄：只允许 `server.py`、`routes_turnover_ledger.py` 或一个小型 read-only helper 文件；明确排除 mutation handlers、UoW、repository、worker、migration、frontend 和 deploy。
 - PF-P049 明确保留 `server.py` 的 HTTP response mapping，避免把 `Response`、headers/cookies 或 auth 依赖带入 service/facade。
 - PF-P049 保留 PF-P047 79-test command 作为硬门禁，能覆盖 query freshness、grouped compatibility、export、relation/extra read 和 cross-module source_versions。
+
+### 执行结果
+
+状态：`implemented`
+
+- 已执行 PF-P049，完成 Turnover Ledger read-only query/route facade extraction。
+- TDD RED：
+  - 新增 `tests/test_turnover_ledger_read_facade.py` 后，`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v` 因缺少 `fin_ops_platform.app.turnover_ledger_read_facade` 失败。
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`
+  - `tests/test_turnover_ledger_read_facade.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+- 实现摘要：
+  - 新增 `TurnoverLedgerReadFacade`，只接收现有 `TurnoverLedgerApiRoutes` 风格对象。
+  - facade 返回 plain `dict[str, object]` 或 `(filename, bytes)`，并传播 `TypeError`、`ValueError`、`KeyError` 给 `server.py` 做现有 HTTP 映射。
+  - `server.py` 初始化 `_turnover_ledger_read_facade`，并仅替换 list、export-preview、export、relation GET、extra GET 五个 read-only handler 的内部委托。
+  - `server.py` 继续负责 query parsing、JSON/XLSX `Response` 构造和错误到 HTTP response 映射。
+- 未修改：
+  - extra PUT、confirm、withdraw、bank-row-tags batch、tag-selection update mutation handlers；
+  - Turnover UoW、stale write、durable idempotency、dirty scope/outbox、source_version/read model freshness 语义；
+  - `TurnoverLedgerQueryService`、`TurnoverLedgerExportService`、`TurnoverLedgerExtraService`、`TurnoverLedgerService`、`TurnoverRelationService` 业务逻辑；
+  - repository、worker、runtime queue、SQL migration、frontend、deployment、Nginx、Vite、environment variables 或 production config。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
+  - `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
+- 未执行 Merge Gate、Traffic Gate、部署、生产访问或 staging 访问。
+- 下一步建议：用户确认 PF-P049 `verified` 后，生成 cumulative MG 覆盖 PF-P046 到 PF-P049；如果用户希望继续 read-only cleanup，则先生成更窄的 cleanup prompt。

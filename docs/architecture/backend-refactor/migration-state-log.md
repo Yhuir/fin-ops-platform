@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P049 - Turnover Ledger Query/Route Facade Extraction` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P049 - Turnover Ledger Query/Route Facade Extraction` (`planned`) |
+| 当前阶段 | `PF-P049 - Turnover Ledger Query/Route Facade Extraction` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P049 - Turnover Ledger Query/Route Facade Extraction` (`implemented`) |
 | 最近 verified prompt | `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning` |
 | 当前分支 | `codex/turnover-ledger-discovery-p046` |
 | 最近验证 | 用户已确认 PF-P045-MG `verified`；`main` 已 push 到 `origin/main`，本地与远端对齐到 `de513774`；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`；只允许 read-only query/route facade extraction，不允许 mutation/UoW/Traffic Gate |
+| 下一条允许任务 | 用户确认 PF-P049 后，将 PF-P049 标记为 `verified`；然后生成 cumulative MG 覆盖 PF-P046 到 PF-P049，或如用户要求继续 read-only cleanup 则先生成下一条窄切片 |
 
 ## Prompt 执行日志
 
@@ -5141,7 +5141,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P049 - Turnover Ledger Query/Route Facade Extraction
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -5180,8 +5180,36 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P049。
-- PF-P049 完成后状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+- 等待用户确认 PF-P049。
+- 用户确认后，将 PF-P049 标记为 `verified`。
+- 下一条建议 prompt：`PF-P049-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`，覆盖 PF-P046 到 PF-P049 的完整 diff。
+- 如果用户希望继续 read-only cleanup，再生成一条更窄的 Turnover Ledger read-only cleanup prompt。
+
+#### 执行结果
+
+- 已实施 Turnover Ledger read-only query/route facade extraction。
+- TDD RED：
+  - 新增 `tests/test_turnover_ledger_read_facade.py` 后，`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v` 因缺少 `fin_ops_platform.app.turnover_ledger_read_facade` 失败，证明新 helper 边界测试有效。
+- Production 变更：
+  - 新增 `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`，`TurnoverLedgerReadFacade` 只接收 `routes` 细粒度依赖，返回 plain Python payload 或 `(filename, bytes)`，不构造 `Response`，不读取 headers/cookies，不 import auth。
+  - `backend/src/fin_ops_platform/app/server.py` 初始化 `_turnover_ledger_read_facade`，并只把以下 read-only handlers 的内部委托改为 facade：
+    - `_handle_api_turnover_ledger`
+    - `_handle_api_turnover_ledger_export_preview`
+    - `_handle_api_turnover_ledger_export`
+    - `_handle_api_turnover_ledger_relation`
+    - `_handle_api_turnover_ledger_relation_extra`
+- 未修改 mutation handlers：
+  - `_handle_api_turnover_ledger_tag_selection_update`
+  - `_handle_api_turnover_ledger_bank_row_tags_batch`
+  - `_handle_api_turnover_ledger_relation_extra_update`
+  - `_handle_api_turnover_ledger_confirm`
+  - `_handle_api_turnover_ledger_withdraw`
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
+  - `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
+- 未修改 `TurnoverLedgerQueryService`、`TurnoverLedgerExportService`、`TurnoverLedgerExtraService`、`TurnoverLedgerService`、`TurnoverRelationService`、repository、worker、runtime queue、SQL migration、frontend、deployment、Nginx、Vite、environment variables 或 production config。
+- 未执行 Merge Gate、Traffic Gate、部署、生产访问或 staging 访问。
 
 ## 维护规则
 

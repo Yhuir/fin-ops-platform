@@ -499,11 +499,56 @@ PF-P049 should implement the read-only facade extraction above. If review finds 
 1. `PF-P049A - Turnover Ledger List/Grouped Read Facade Extraction`
 2. `PF-P049B - Turnover Ledger Export/Detail Read Facade Extraction`
 
+## PF-P049 Query/Route Facade Extraction Result
+
+PF-P049 implemented the read-only extraction described above. It added a narrow app-boundary helper, `TurnoverLedgerReadFacade`, and wired `server.py` to use it for read-only Turnover Ledger routes.
+
+Changed read-only paths:
+
+- `_handle_api_turnover_ledger`
+- `_handle_api_turnover_ledger_export_preview`
+- `_handle_api_turnover_ledger_export`
+- `_handle_api_turnover_ledger_relation`
+- `_handle_api_turnover_ledger_relation_extra`
+
+Boundary kept in `server.py`:
+
+- query parsing;
+- JSON/XLSX `Response` construction;
+- current BAD_REQUEST / NOT_FOUND mapping;
+- XLSX `Content-Type` and `Content-Disposition` headers.
+
+Boundary moved behind the new facade:
+
+- delegating list/grouped query to `TurnoverLedgerApiRoutes`;
+- delegating export preview/export to the existing route/export composition;
+- delegating relation detail and relation extra GET to the current route facade.
+
+The new facade does not know `Response`, headers, cookies, auth/session, `Application`, `state_store`, `RuntimeRepositories`, repository implementations or worker/runtime queues. It only receives the existing route facade dependency and returns plain payloads or `(filename, bytes)`.
+
+PF-P049 did not modify mutation paths:
+
+- extra PUT;
+- confirm;
+- withdraw;
+- bank-row-tags batch;
+- tag-selection update.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`: Pass, 2 tests.
+- `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`: Pass.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`: Pass, 81 tests.
+
+Next recommendation after user confirms PF-P049 verified:
+
+`PF-P049-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`
+
 ## Risk Register
 
 | Risk | Severity | Evidence | Next action |
 | --- | --- | --- | --- |
-| Request path legacy rebuild fallback | High | `TurnoverLedgerQueryService` falls back to `legacy_payload_builder` when PostgreSQL read model is not required | Preserve in PF-P049; removal requires a later prompt and rollout decision. |
+| Request path legacy rebuild fallback | High | `TurnoverLedgerQueryService` falls back to `legacy_payload_builder` when PostgreSQL read model is not required | Preserved in PF-P049; removal requires a later prompt and rollout decision. |
 | Mutation side effects not under explicit UoW | High | Handler finalizer persists relation snapshot, runs derived lifecycle, clears read model and enqueues refresh separately | Exclude from PF-P049; later design Turnover write UoW after read route extraction. |
 | Extra write legacy full snapshot fallback | High | `_persist_turnover_ledger_extras_best_effort()` can call `legacy_turnover_ledger_extras_fallback_persist` | Exclude from PF-P049; later remove or gate fallback after dedicated mutation tests. |
 | Turnover API writes Bankdetail facts | High | `/bank-row-tags/batch` calls `BankTransactionCategoryService.apply_turnover_updates()` | Define service port and transaction boundary before refactor. |
