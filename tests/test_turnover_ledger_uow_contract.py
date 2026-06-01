@@ -161,6 +161,36 @@ class _RecordingConfirmRelationPort:
         return dict(self.result)
 
 
+class _RecordingWithdrawRelationPort:
+    def __init__(self, *, result: dict[str, object] | None = None) -> None:
+        self.withdraw_calls: list[dict[str, object]] = []
+        self.result = result or {
+            "relation": {
+                "relation_id": "turnover_rel_1",
+                "status": "withdrawn",
+                "bank_row_ids": ["bank_txn_1", "bank_txn_2"],
+            }
+        }
+
+    def withdraw_relation(
+        self,
+        *,
+        relation_id: str,
+        actor_id: str,
+        note: str | None,
+        transaction: object,
+    ) -> dict[str, object]:
+        self.withdraw_calls.append(
+            {
+                "relation_id": relation_id,
+                "actor_id": actor_id,
+                "note": note,
+                "transaction": transaction,
+            }
+        )
+        return dict(self.result)
+
+
 class _RecordingDirtyOutboxWriter:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
@@ -575,6 +605,73 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             actor_id="finance-user",
             tenant_id="default",
             note="manual confirm",
+            affected_months=["2026-02"],
+        )
+
+        self.assertEqual(
+            [(call["scope_type"], call["scope_keys"], call["reason"]) for call in deps.dirty_outbox_writer.calls],
+            [("turnover_ledger", ["all"], "turnover_relation_changed")],
+        )
+
+    def test_target_withdraw_relation_facade_uses_relation_port_and_returns_service_payload(self) -> None:
+        relation_port = _RecordingWithdrawRelationPort()
+        uow, deps = self._build_uow(relation_repository=relation_port)  # type: ignore[arg-type]
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.withdraw_relation(
+            relation_id="turnover_rel_1",
+            actor_id="finance-user",
+            tenant_id="default",
+            note="manual withdraw",
+            affected_months=["2026-02"],
+        )
+
+        self.assertEqual(result["relation"]["status"], "withdrawn")
+        self.assertEqual(
+            relation_port.withdraw_calls,
+            [
+                {
+                    "relation_id": "turnover_rel_1",
+                    "actor_id": "finance-user",
+                    "note": "manual withdraw",
+                    "transaction": deps.connection.transaction_obj,
+                }
+            ],
+        )
+        self.assertEqual(deps.connection.commits, 1)
+
+    def test_target_withdraw_relation_facade_rolls_back_when_dirty_outbox_fails(self) -> None:
+        relation_port = _RecordingWithdrawRelationPort()
+        uow, deps = self._build_uow(
+            relation_repository=relation_port,  # type: ignore[arg-type]
+            dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True),
+        )
+        facade = self._write_facade_class()(uow=uow)
+
+        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
+            facade.withdraw_relation(
+                relation_id="turnover_rel_1",
+                actor_id="finance-user",
+                tenant_id="default",
+                note="manual withdraw",
+                affected_months=["2026-02"],
+            )
+
+        self.assertEqual(len(relation_port.withdraw_calls), 1)
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_target_withdraw_relation_facade_enqueues_turnover_refresh(self) -> None:
+        uow, deps = self._build_uow(
+            relation_repository=_RecordingWithdrawRelationPort(),  # type: ignore[arg-type]
+        )
+        facade = self._write_facade_class()(uow=uow)
+
+        facade.withdraw_relation(
+            relation_id="turnover_rel_1",
+            actor_id="finance-user",
+            tenant_id="default",
+            note="manual withdraw",
             affected_months=["2026-02"],
         )
 

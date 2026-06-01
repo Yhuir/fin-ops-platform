@@ -170,6 +170,50 @@ class TurnoverLedgerWriteFacade:
 
         return self._uow.run(command, handler)
 
+    def withdraw_relation(
+        self,
+        *,
+        relation_id: str,
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        affected_months: list[str],
+    ) -> dict[str, object]:
+        normalized_relation_id = str(relation_id or "").strip()
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip()
+        ]
+        command = TurnoverLedgerWriteCommand(
+            action_name="withdraw_relation",
+            scope_keys=["all"],
+            refresh_requests=[
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_keys": ["all"],
+                    "reason": "turnover_relation_changed",
+                }
+            ],
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            payload={
+                "relation_id": normalized_relation_id,
+                "affected_months": list(normalized_months),
+            },
+        )
+
+        def handler(context: Any) -> dict[str, object]:
+            result = context.relation_repository.withdraw_relation(
+                relation_id=normalized_relation_id,
+                actor_id=actor_id,
+                note=note,
+                transaction=context.transaction,
+            )
+            return dict(result or {})
+
+        return self._uow.run(command, handler)
+
     def update_tag_selection(
         self,
         *,
