@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` 已生成并审查 |
-| 当前 active prompt | `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` planned |
+| 当前阶段 | `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` 已执行并通过验证 |
+| 当前 active prompt | 无 |
 | 最近 verified prompt | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` |
 | 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
-| 最近验证 | PF-P080 实现 confirm relation facade skeleton；UoW contract 36 tests 通过，API 36 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` |
+| 最近验证 | PF-P081 完成 confirm handler readiness；local/dev/test 可进入 target tests，PostgreSQL production 需保留 legacy fallback |
+| 下一条允许任务 | 生成并审查 `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests` |
 
 ## Prompt 执行日志
 
@@ -6718,6 +6718,39 @@ PF-P079 已锁定 confirm relation facade target contract。下一步应生成�
 #### 下一条 Prompt 上下文
 
 PF-P079/PF-P080 完成了 confirm relation facade-level skeleton。下一步应生成 `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness`，先审计真实 handler 接入所需的 local transaction shim、relation repository/port、affected months、legacy fallback test 和 Workbench influence blocker；不得在没有 readiness 结论前直接迁移 handler。
+
+### PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness
+
+状态：`verified`
+
+#### 范围
+
+- 只审计 `POST /api/turnover-ledger/relations/confirm` 真实 handler 接入 UoW 的 readiness。
+- 不修改 production code，不新增 tests，不迁移 handler。
+
+#### 执行摘要
+
+- 已记录 confirm 当前运行时序：handler rebuild relations -> route confirm -> relation service facts/audit -> `_after_turnover_relation_mutation` persistence / Workbench invalidation / read model clear / refresh enqueue。
+- 结论：local/dev/test path readiness 高，可复用 local transaction shim 和 `TurnoverLedgerApiRoutes.confirm_relation(...)` 作为 temporary relation port。
+- 结论：PostgreSQL production path readiness 低，缺少明确 transaction-bound relation repository/adapter，不得猜 SQL，后续必须保留 legacy fallback。
+- 结论：Workbench influence port 仍是 cross-module blocker，不应在 confirm handler wiring 中强行迁移。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅 PF-P081 允许文件变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P081|Confirm Relation Handler UoW Wiring Readiness|Current Runtime Sequence|Wiring Readiness Matrix|Decision|Blockers" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+#### 下一条 Prompt 上下文
+
+下一步应生成 `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests`，只补 API-level target tests，锁定 local/dev/test UoW rollback/no-direct-clear 行为；不得直接进行 handler wiring。
 
 ## 维护规则
 

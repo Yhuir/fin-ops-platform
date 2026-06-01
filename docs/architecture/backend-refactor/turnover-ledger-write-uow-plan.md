@@ -1351,7 +1351,7 @@ Verification:
 
 ## PF-P081 Confirm Relation Handler UoW Wiring Readiness
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1361,4 +1361,58 @@ Verification:
 
 下一步：
 
-- 执行 PF-P081。
+- 生成 PF-P082 confirm relation handler UoW target tests，先锁定 local/dev/test rollback/no-clear 行为；不要直接 wiring。
+
+### Current Runtime Sequence
+
+当前 `POST /api/turnover-ledger/relations/confirm` 运行时序：
+
+1. `Application._handle_api_turnover_ledger_confirm` 解析 session、JSON body 和 `bank_row_ids`。
+2. Handler 调用 `TurnoverRelationService.rebuild_from_bank_rows(self._turnover_bank_transaction_rows())`，先基于当前银行流水和标签重建系统推导关系。
+3. Handler 调用 `TurnoverLedgerApiRoutes.confirm_relation(...)`。
+4. `TurnoverLedgerApiRoutes.confirm_relation(...)` 调用 `TurnoverRelationService.confirm_relation(...)`。
+5. `TurnoverRelationService.confirm_relation(...)` 在内存中写 relation facts，追加 `confirm_relation` audit，然后返回 relation payload。
+6. Handler 计算 `affected_months = _bank_transaction_category_affected_months(bank_row_ids)`。
+7. Handler 调用 `_after_turnover_relation_mutation(affected_months)`：
+   - `_persist_turnover_relations_best_effort("turnover_relation_mutation_pre_invalidation")`;
+   - `_invalidate_workbench_after_bank_transaction_categories(affected_months)`;
+   - `_persist_turnover_relations_best_effort("turnover_relation_mutation")`;
+   - `_clear_turnover_ledger_read_model_best_effort()`;
+   - `_enqueue_turnover_ledger_read_model_refreshes(["all"], reason="turnover_relation_changed")`。
+
+当前 facts/audit 在 `TurnoverRelationService` 内存中同步改变；local state store persistence 是 best-effort 且发生在 `_after_turnover_relation_mutation`，不是和 dirty/outbox 同一 transaction。Workbench invalidation、Turnover read model clear 和 refresh enqueue 也在 handler finalizer 中串联。
+
+### Existing Reusable Boundaries
+
+- `TurnoverLedgerWriteFacade.confirm_relation(...)` 已存在，可调用 `context.relation_repository.confirm_relation(..., transaction=...)`，并通过 explicit refresh request enqueue `turnover_ledger/all/turnover_relation_changed`。
+- relation extra 已有 local transaction shim 模式，可作为 confirm local/dev/test rollback 参考。
+- bank-row-tags 已有 local snapshot restore 模式，可复用到 confirm：queue/outbox failure 时恢复 `TurnoverRelationService.snapshot()` 并回写 local state store。
+- `TurnoverLedgerApiRoutes.confirm_relation(...)` 可以作为 local/dev/test relation port 的内部调用，因为它复用现有 `TurnoverRelationService` 规则并返回现有 response shape；但它不应直接作为长期 production repository 边界。
+- 当前未发现明确 transaction-bound PostgreSQL relation repository/adapter 可直接用于 confirm relation facts/audit；不得猜测 SQL。
+
+### Wiring Readiness Matrix
+
+| 边界 | Readiness | 结论 |
+| --- | --- | --- |
+| local/dev/test path | High | 可用 local transaction shim 包住 `TurnoverLedgerApiRoutes.confirm_relation(...)`，失败时恢复 relation snapshot 和 state store snapshot。 |
+| PostgreSQL production path | Low | 缺少明确 transaction-bound relation repository/adapter；下一步不得猜 SQL，production 应保留 legacy fallback。 |
+| Workbench influence port | Partial | `_invalidate_workbench_after_bank_transaction_categories` 仍是 handler finalizer 里的 cross-module side effect；下一步 local UoW wiring 可先不迁移 Workbench influence，保留 legacy fallback 或记录 blocker。 |
+| affected months calculation | High | Handler 已能从 `bank_row_ids` 调用 `_bank_transaction_category_affected_months(...)`，可在调用 facade 前传入。 |
+| legacy compatibility tests | Medium | 已有 confirm duplicate、permission/audit、persistence failure best-effort tests；但缺少 target rollback/no-clear API tests，应先补 PF-P082。 |
+
+### Decision
+
+下一条不应直接 handler wiring。应先生成 `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests`：
+
+- 只补 API-level target tests；
+- 保留当前 legacy persistence failure / duplicate submit behavior；
+- 用 `unittest.expectedFailure` 锁定 future local/dev/test UoW rollback 和 no direct read-model clear；
+- 不修改 production code。
+
+如果 PF-P082 通过，PF-P083 才能执行 local/dev/test confirm handler UoW wiring，并保留 PostgreSQL production legacy fallback。
+
+### Risks / Blockers
+
+- 允许直接调用 `TurnoverLedgerApiRoutes.confirm_relation(...)` 作为 local/dev/test temporary relation port；不允许把它定义为长期 production repository。
+- 不允许猜测 PostgreSQL relation SQL。真实 production UoW 需要后续 transaction-bound relation repository/adapter。
+- Workbench influence 本轮不应强行迁入 facade/UoW；否则会跨模块扩大 scope。PF-P083 如只做 local/dev/test wiring，应保留 production fallback，并明确 Workbench influence port 是后续 blocker。
