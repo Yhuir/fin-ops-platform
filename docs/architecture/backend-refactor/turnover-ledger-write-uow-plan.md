@@ -789,3 +789,23 @@ Next step:
 - `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`.
 - PF-P068 should introduce the minimal settings port / adapter contract needed by future UoW integration.
 - PF-P068 must not migrate `server.py`, must not wire production UoW, and must not change the current queue-failure split-brain behavior yet.
+
+## PF-P068 Tag Selection Settings Port / Adapter Skeleton
+
+状态：`planned`
+
+目标：
+
+- 建立最小 settings port / adapter skeleton，让 tag selection settings fact save 能在未来进入 `TurnoverLedgerWriteUnitOfWork` transaction。
+- 只建立边界和 contract tests，不迁移 HTTP handler。
+
+边界：
+
+- `settings_port` 应接收 PF-P067 pure normalizer 产出的 `next_snapshot` / audit metadata。
+- `settings_port` 必须通过 supplied `transaction` 保存，不得直接调用 `state_store.save_app_settings(...)`。
+- adapter 必须接收细粒度依赖，例如 `repository_factory(transaction)` 或明确 writer callable；不得接收 `Application`、HTTP request、state store god object。
+- 本轮不改变当前 `PUT /api/turnover-ledger/tag-selection` 的 queue failure split-brain 行为。
+
+下一步：
+
+- 执行 PF-P068。

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton` 已执行并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton` planned |
 | 最近 verified prompt | `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
 | 最近验证 | PF-P067 增加 pure tag selection normalizer；UoW contract 23 tests 通过，API 29 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`；不得迁移 handler，不得接入 production UoW |
+| 下一条允许任务 | 执行 `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`；只建立 settings port / adapter skeleton，不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -6197,6 +6197,35 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 - `git diff --check`: Pass。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，23 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
+
+#### Commit
+
+- `2195f2fd feat(turnover-ledger): add tag selection pure normalizer`
+
+### PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 建立 tag selection settings port / adapter skeleton，让未来 UoW 能把 settings fact save 纳入同一 transaction。
+- 只允许 fake/in-memory contract 与最小 production adapter skeleton。
+- 不迁移 handler，不接入 production UoW，不改变当前 queue failure split-brain 行为。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P068。
+
+#### 验收标准
+
+- UoW contract tests 覆盖 settings port 使用 supplied transaction 保存 next snapshot。
+- Adapter 只接收细粒度 repository factory / writer，不接收 `Application` 或 state store god object。
+- 默认 Turnover API tests 保持绿色。
 
 ## 维护规则
 

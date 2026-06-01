@@ -16351,3 +16351,99 @@ Verification:
 - `rg -n "normalize_turnover_ledger_tag_selection_update|expectedFailure|PF-P067|turnover_ledger_tag_selection" backend/src/fin_ops_platform/services/app_settings_service.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`，只建立 settings port / adapter skeleton，不迁移 handler，不接入 production UoW。
+
+## PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton
+
+```text
+/goal
+PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton
+
+Role:
+你是一位精通 Python 遗留系统重构、Repository/UoW 边界和事务一致性的后端架构师。
+
+Context:
+我们正在继续 Python-first 后端架构重构。PF-P067 已实现 `AppSettingsService.normalize_turnover_ledger_tag_selection_update(...)` pure normalizer，并保持当前 handler 写路径不变。下一步只允许建立 Turnover Ledger tag selection settings port / adapter skeleton，让未来 UoW 能把 settings fact save 纳入同一 PostgreSQL transaction。
+
+Pre-Flight:
+1. 必须先读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/app_settings_service.py
+   - backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py 中 app settings save 相关方法
+   - tests/test_turnover_ledger_uow_contract.py
+   - tests/test_turnover_ledger_api.py 的 tag selection tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树中没有 unrelated dirty changes 或 untracked 临时文件。
+
+Task:
+建立最小 tag selection settings port / adapter skeleton 和 contract tests。该 port 的职责是接收 PF-P067 pure normalizer 产出的 `next_snapshot` / audit metadata，并通过 supplied transaction 保存 settings fact。PF-P068 只建立边界和机械测试，不迁移 HTTP handler。
+
+Required Implementation Work:
+1. 在 `tests/test_turnover_ledger_uow_contract.py` 增加或补强 tests：
+   - fake settings port 必须通过 `transaction` 参数保存 `next_snapshot`；
+   - tag selection handler function 在 `TurnoverLedgerWriteUnitOfWork.run(...)` 内调用 `context.settings_port`，并与 dirty/outbox 同一 transaction；
+   - outbox failure 时 settings save / audit 通过 fake transaction rollback；
+   - settings port 不允许依赖 `Application` / state store god object。
+2. 在 `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 中新增最小 production adapter skeleton，例如 `TurnoverLedgerTagSelectionSettingsAdapter`。
+3. Adapter 必须：
+   - 接收细粒度依赖，例如 `repository_factory` 或明确 writer callable；
+   - 暴露一个最小方法，例如 `save_tag_selection_settings(next_snapshot, audit_event, *, transaction)`；
+   - 必须使用 supplied `transaction`；
+   - 不得调用 `state_store.save_app_settings(...)`；
+   - 不得 import 或接收 `Application`；
+   - 不得读取 HTTP cookie/header；
+   - 不得 enqueue read model refresh。
+4. 如现有 PostgreSQL repository 没有 transaction-bound settings save 方法，本轮允许：
+   - 只建立 adapter skeleton 并用 tests 锁定其对 `repository_factory(transaction)` 或 writer callable 的调用；
+   - 不要求立即修改真实 SQL repository；
+   - 但必须在文档中明确下一步缺口。
+5. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得迁移 `GET/PUT /api/turnover-ledger/tag-selection` handler。
+- 不得改变 `AppSettingsService.update_turnover_ledger_tag_selection(...)` 当前生产行为。
+- 不得修改真实 queue/worker/read model refresh 行为。
+- 不得修改 PostgreSQL schema/migration。
+- 不得接入 production UoW wiring。
+- 不得触碰 bank-row-tags、relation extra、confirm/withdraw 或其它业务模块。
+- 不得执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "TurnoverLedgerTagSelectionSettings|save_tag_selection|settings_port|PF-P068|turnover_ledger_tag_selection" backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P068 status = implemented / verified / blocked。
+   - 记录 adapter skeleton、contract tests、verification 和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P068 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 settings port / adapter 状态、真实 repository 缺口和下一步建议。
+4. PF-P068 后不要生成 MG；下一步应根据结果生成 PF-P069，用于 transaction-bound repository writer 或 tag selection UoW integration planning。
+```
+
+### 审查结论
+
+- PF-P068 是 PF-P067 后正确的小步：先建立 settings port / adapter 边界，再考虑 handler/UoW wiring。
+- Prompt 明确允许 adapter skeleton 使用 `repository_factory(transaction)` 或 writer callable，避免在真实 SQL repository 尚未准备好时扩大 scope。
+- Prompt 明确禁止修改 `server.py`、生产 handler、queue/worker/read model refresh 和 schema。
