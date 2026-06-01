@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring` |
-| 当前分支 | `codex/turnover-ledger-repository-ownership-p094` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，45 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests |
-| 下一条允许任务 | 执行 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` |
+| 当前阶段 | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` 已合入 main 并通过 main 复验 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P097-MG main 复验通过；merge commit `014b72e0` |
+| 下一条允许任务 | `git push origin main` 后，从最新 main 新建下一条 `codex/` 分支并生成 Turnover Ledger 下一切片 prompt |
 
 ## Prompt 执行日志
 
@@ -7493,7 +7493,7 @@ PF-P097 已 verified。当前分支已覆盖 PF-P094 到 PF-P097：repository ow
 
 ### PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7515,9 +7515,26 @@ PF-P097 已 verified。当前分支已覆盖 PF-P094 到 PF-P097：repository ow
 - 不得新增业务实现。
 - 不得执行 Traffic Gate、部署、生产配置、Nginx 或 feature flag 修改。
 
+#### 执行结果
+
+- 分支侧 scope audit 通过，`git diff --name-only main...HEAD` 仅包含预期 6 个文件。
+- 分支侧无 untracked 临时文件，`git diff --check` 通过。
+- 已 merge 到 `main`，merge commit `014b72e0`。
+- main 上复验通过。
+- 未执行 Traffic Gate，未部署，未修改生产配置。
+
+#### main 复验
+
+- `git status --short --branch`：Pass，main 仅 ahead `origin/main`。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，45 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
 #### 下一条 Prompt 上下文
 
-PF-P097-MG planned。执行后若 merge main、main 复验和 push 均通过，必须从最新 main 新建下一条 `codex/` 分支，再选择 Turnover Ledger 下一切片。
+PF-P097-MG 已 verified，待 `git push origin main`。push 完成后，必须从最新 main 新建下一条 `codex/` 分支。Turnover Ledger 下一切片应继续沿写路径收敛，优先选择 remaining PostgreSQL write ownership cleanup 或下一组 write path UoW/repository ownership，不得在 main 或旧分支继续开发。
 
 ## 维护规则
 

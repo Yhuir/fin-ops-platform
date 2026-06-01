@@ -20450,3 +20450,25 @@ Post-Flight:
 - PF-P097-MG 范围明确，只覆盖当前 repository ownership 分支的 6 个文件。
 - MG 明确禁止新增业务实现，并要求 main 上复验通过后才 push。
 - 本 MG 不执行 Traffic Gate，不部署，不修改生产配置。
+
+### 执行结果
+
+- 状态：`verified`。
+- 分支侧 scope audit 通过，`git diff --name-only main...HEAD` 仅包含预期 6 个文件。
+- 分支侧无 untracked 临时文件，`git diff --check` 通过。
+- 已 merge 到 `main`，merge commit `014b72e0`。
+- main 上复验通过。
+- 未执行 Traffic Gate，未部署，未修改生产配置。
+
+### main 复验
+
+- `git status --short --branch`：Pass，main 仅 ahead `origin/main`。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，45 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+### 下一条 Prompt 上下文
+
+PF-P097-MG 已 verified，待 `git push origin main`。push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 Turnover Ledger prompt；不得在 main 或旧分支继续开发。

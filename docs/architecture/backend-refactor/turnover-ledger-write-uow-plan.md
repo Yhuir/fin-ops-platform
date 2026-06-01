@@ -2231,7 +2231,7 @@ Merge 边界：
 
 ## PF-P097-MG Repository Ownership Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -2253,3 +2253,15 @@ Merge 边界：
 - Turnover Ledger UoW contract tests。
 - `server.py` 与 `turnover_ledger_write_adapters.py` compileall。
 - main 上复验通过后才允许 push。
+
+执行结果：
+
+- PF-P094 到 PF-P097 的 repository ownership 切片已合入 main。
+- merge commit：`014b72e0`。
+- main 上 Turnover Ledger API tests 与 UoW contract tests 均通过。
+- 未执行 Traffic Gate，未部署，未修改生产配置。
+
+下一步：
+
+- `git push origin main`。
+- push 完成后，从最新 main 新建下一条 `codex/` 分支，再选择 Turnover Ledger 下一切片。
