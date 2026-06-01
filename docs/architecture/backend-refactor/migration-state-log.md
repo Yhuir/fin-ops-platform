@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P053 - Turnover Ledger Write UoW Contract Tests` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger 写路径最小 UoW skeleton |
+| 当前阶段 | 已生成并审查 `PF-P054 - Turnover Ledger Minimal UoW Skeleton` |
+| 当前 active prompt | `PF-P054 - Turnover Ledger Minimal UoW Skeleton` (`planned`) |
 | 最近 verified prompt | `PF-P053 - Turnover Ledger Write UoW Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
 | 最近验证 | PF-P053 新增 Turnover Ledger UoW 目标契约测试；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v` 通过，7 expected failures；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未修改 production code、SQL migration、worker、frontend、deployment 或生产配置 |
-| 下一条允许任务 | 生成并审查 `PF-P054 - Turnover Ledger Minimal UoW Skeleton`；PF-P054 只建立最小 skeleton 和 fake-port contract wiring，不迁移真实 Turnover Ledger 写 API |
+| 下一条允许任务 | 执行 `PF-P054 - Turnover Ledger Minimal UoW Skeleton`；PF-P054 只建立最小 UoW skeleton 和 fake-port contract wiring，不迁移真实 Turnover Ledger 写 API |
 
 ## Prompt 执行日志
 
@@ -5500,6 +5500,31 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 expected failures。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+
+### PF-P054 - Turnover Ledger Minimal UoW Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 只新增最小 `TurnoverLedgerWriteUnitOfWork` skeleton。
+- 只让 PF-P053 fake-port contract tests 从 expectedFailure 转为普通通过。
+- 不接入真实 Turnover Ledger 写 API，不迁移 handler，不修改真实 repository/runtime queue/worker/SQL migration/frontend/deployment/生产配置。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+- prompt 要求先运行 PF-P053 contract tests 观察 expected failures，再实现最小 skeleton 并移除对应 expectedFailure。
+
+#### 审查结论
+
+- PF-P054 是 PF-P053 后合理的下一步：目标契约已存在，下一步可以建立纯底座 skeleton，但不能碰真实写路径。
+- PF-P054 应只实现 UoW 的事务 wrapper、stale precondition 调用、handler context、dirty/outbox writer 调用和 granular constructor dependency。
+
+#### 下一步
+
+- 执行 PF-P054。
 
 ## 维护规则
 

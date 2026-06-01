@@ -14647,3 +14647,90 @@ Post-Flight:
   - `git ls-files --others --exclude-standard`：Pass。
   - `git diff --check`：Pass。
 - 下一步建议：生成并审查 `PF-P054 - Turnover Ledger Minimal UoW Skeleton`。PF-P054 只应建立最小 skeleton 和 fake-port contract wiring，不迁移真实 Turnover Ledger 写 API。
+
+## PF-P054 - Turnover Ledger Minimal UoW Skeleton
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P054 - Turnover Ledger Minimal UoW Skeleton
+
+Role:
+你是一位精通 Python Clean Architecture、Unit of Work、事务边界和测试驱动重构的后端架构师。
+
+Context:
+PF-P053 已新增 `tests/test_turnover_ledger_uow_contract.py`，包含 7 个 expectedFailure 目标契约测试。当前目标是只建立最小 `TurnoverLedgerWriteUnitOfWork.run(command, handler)` skeleton，让 fake/in-memory contract tests 转为普通通过。不得迁移真实 Turnover Ledger 写 API。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - tests/test_turnover_ledger_uow_contract.py
+   - tests/test_turnover_ledger_api.py
+2. 必须先运行：
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+   记录当前 7 expected failures。
+3. 必须确认当前分支不是 main，且没有 unrelated dirty changes。
+
+Required Implementation Work:
+1. 新增最小 production module：
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+2. 实现最小 class：
+   - `TurnoverLedgerWriteUnitOfWork`
+   - constructor 只接收 granular dependencies：
+     - `connection`
+     - `relation_repository`
+     - `extra_repository`
+     - `settings_port`
+     - `bankdetail_port`
+     - `dirty_outbox_writer`
+     - `stale_precondition_port`
+   - 不得接收 `application` 或 `app` god object。
+3. 实现 `run(command, handler)`：
+   - 打开 `connection.transaction()`。
+   - 构造 context，至少暴露 `transaction`、各 granular ports、`command`。
+   - 在 handler 前调用 `stale_precondition_port.assert_current(expected_versions=..., transaction=...)`，如果 command 有 expected_versions。
+   - 调用 handler(context) 获取 result。
+   - 调用 `dirty_outbox_writer.enqueue_refresh(transaction=..., scope_type="turnover_ledger", scope_keys=command.scope_keys, reason=command.action_name, payload=...)`。
+   - dirty/outbox writer 抛错时必须让 transaction context rollback，并向调用方传播异常。
+4. 更新 `tests/test_turnover_ledger_uow_contract.py`：
+   - 移除已由 skeleton 转绿的 `unittest.expectedFailure`。
+   - 不得删除测试，不得弱化断言。
+5. 保持真实 API 行为不变。
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得接入真实 Turnover Ledger confirm/withdraw/extra/tag-selection/bank-row-tags API。
+- 不得修改真实 repository、runtime queue、worker、SQL migration、frontend、deployment、生产配置或 feature flag。
+- 不得访问真实外部服务。
+- 不得引入 Application god object。
+- 不得删除 PF-P052 characterization tests。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P054 status = implemented/verified/blocked。
+   - 记录转绿的 contract tests、验证命令和结果。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P054 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 minimal skeleton 能力和仍未接入真实 API 的边界。
+4. 不执行 MG，除非状态机判断当前 Turnover write UoW skeleton slice 达到可合并边界。
+```
+
+### 审查结论
+
+- PF-P054 是 PF-P053 后的正确下一步：先让 fake-port contract tests 转绿，建立 UoW 机制骨架。
+- Prompt 明确禁止真实 API migration，避免把 skeleton 与 handler 重构混在一起。
+- Prompt 明确 constructor granular dependency 和 Application god object 禁止线。

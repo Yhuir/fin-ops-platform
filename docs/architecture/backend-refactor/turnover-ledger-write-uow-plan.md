@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
 
-状态：PF-P051 `verified`；PF-P052 `verified`；PF-P053 `verified`
+状态：PF-P051 `verified`；PF-P052 `verified`；PF-P053 `verified`；PF-P054 `planned`
 
 ## Scope
 
@@ -326,3 +326,20 @@ Next slice recommendation:
 `PF-P054 - Turnover Ledger Minimal UoW Skeleton`
 
 PF-P054 should introduce the smallest `TurnoverLedgerWriteUnitOfWork.run(command, handler)` skeleton needed to start turning these contract tests green with fake/in-memory ports. PF-P054 must not migrate real Turnover Ledger write APIs.
+
+## PF-P054 Minimal Skeleton Slice
+
+`PF-P054 - Turnover Ledger Minimal UoW Skeleton` has been generated and reviewed.
+
+PF-P054 may add only the minimal production skeleton needed by `tests/test_turnover_ledger_uow_contract.py`:
+
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`;
+- `TurnoverLedgerWriteUnitOfWork`;
+- `run(command, handler)`;
+- transaction context creation;
+- stale precondition port call before handler;
+- handler context exposing transaction and granular ports;
+- transaction-bound dirty/outbox writer call after handler;
+- no `Application` god object constructor.
+
+PF-P054 must not connect the skeleton to `server.py` or any real Turnover Ledger API.
