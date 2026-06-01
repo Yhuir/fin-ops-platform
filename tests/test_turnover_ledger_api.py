@@ -1082,7 +1082,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(restored_payload["extra"]["interest_paid_amount"], "120.50")
         self.assertEqual(reloaded_response.status_code, 200)
         self.assertEqual(reloaded_payload["extra"]["note"], "页面维护备注")
-        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(read_repository.clear_calls, 0)
         self.assertIn(("turnover_ledger", "all", "turnover_relation_extra_changed"), queue.enqueued)
 
     def test_relation_extra_persistence_failure_is_best_effort_success_and_refreshes(self) -> None:
@@ -1115,7 +1115,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertTrue(payload["turnover_ledger_invalidated"])
         self.assertEqual(restored_response.status_code, 200)
         self.assertEqual(restored_payload["extra"]["note"], "persistence warning is best effort")
-        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
 
     def test_relation_extra_queue_failure_happens_after_extra_update_and_read_model_clear(self) -> None:
@@ -1128,6 +1128,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_relation_extra_write_facade = lambda: None  # type: ignore[method-assign]
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -1143,7 +1144,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
 
-    @unittest.expectedFailure
     def test_target_relation_extra_queue_failure_rolls_back_extra_save(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1169,7 +1169,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(restored_payload["extra"], initial_payload["extra"])
         self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
 
-    @unittest.expectedFailure
     def test_target_relation_extra_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

@@ -1130,7 +1130,7 @@ Verification:
 
 ## PF-P075 Relation Extra Handler UoW Completion
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1147,5 +1147,16 @@ Verification:
 
 下一步：
 
-- 执行 PF-P075。
-- PF-P075 verified 后生成 cumulative MG，覆盖 PF-P074 + PF-P075。
+- 生成 cumulative MG，覆盖 PF-P074 + PF-P075。
+
+执行结果：
+
+- local/dev/test relation extra path 现在通过 `TurnoverLedgerWriteFacade.update_relation_extra(...)` 和 `TurnoverLedgerWriteUnitOfWork` 执行。
+- local transaction shim 在 queue/outbox failure 时恢复 in-memory extra snapshot 与 local state store extras snapshot。
+- 成功路径不再直接 clear read model，dirty/outbox writer 负责 enqueue `turnover_relation_extra_changed`。
+- PF-P074 的 2 个 target tests 已转为普通通过。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 33 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` 已生成并审查 |
-| 当前 active prompt | `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` planned |
+| 当前阶段 | `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` 已执行并通过验证 |
+| 当前 active prompt | 无 |
 | 最近 verified prompt | `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` |
 | 当前分支 | `codex/turnover-ledger-next-uow-slice-p074` |
-| 最近验证 | PF-P074 增加 relation extra UoW completion target tests；API 33 tests 通过（2 expectedFailure），UoW contract 30 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` |
+| 最近验证 | PF-P075 完成 relation extra local/dev/test UoW path；API 33 tests 通过，UoW contract 30 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，覆盖 PF-P074 + PF-P075 |
 
 ## Prompt 执行日志
 
@@ -6477,6 +6477,40 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 #### 下一步
 
 - 生成并审查 `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion`。
+
+### PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion
+
+状态：`verified`
+
+#### 范围
+
+- 只完成 `PUT /api/turnover-ledger/relations/{id}/extra` 的 local/dev/test UoW path。
+- 保持 PostgreSQL transaction-bound path 不降级。
+- 不迁移 tag selection、bank row tags、confirm、withdraw 或其它 Turnover 写路径。
+
+#### 执行结果
+
+- `_turnover_ledger_relation_extra_write_facade()` 现在在 local/dev/test path 中也会返回 `TurnoverLedgerWriteFacade`。
+- 新增 local relation extra transaction shim：
+  - queue/outbox failure 时恢复 in-memory extra snapshot；
+  - queue/outbox failure 时恢复 local state store extras snapshot；
+  - 成功路径通过 local dirty/outbox writer enqueue refresh，不再直接 clear read model。
+- 新增 local extra repository wrapper，只向 facade/UoW 暴露细粒度 `save_extra(...)` 能力。
+- PF-P074 的 2 个 relation extra target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+- 保留 legacy fallback behavior test，通过强制 facade unavailable 继续锁定旧路径行为。
+
+#### Verification
+
+- `git status --short --branch`: Pass，仅 PF-P075 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，33 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+- `rg -n "relation_extra|turnover_relation_extra_changed|_turnover_ledger_relation_extra_write_facade|_local_turnover_ledger|clear_turnover_ledger_read_model|expectedFailure|PF-P075" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+#### 下一步
+
+- 生成并审查 `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，统一覆盖 PF-P074 + PF-P075。
 
 ## 维护规则
 

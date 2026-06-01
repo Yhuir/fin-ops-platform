@@ -17362,3 +17362,23 @@ Post-Flight:
 - PF-P075 是 PF-P074 后正确的最小实现：只完成 relation extra local/dev/test UoW path，并让 PF-P074 的两个目标测试转绿。
 - Prompt 明确保留 PostgreSQL transaction-bound path，不引入新事务架构、不迁移其它写路径。
 - Prompt 明确要求 local transaction shim 在 queue failure 时同时恢复 in-memory extra snapshot 和 local state store snapshot，避免只做表面回滚。
+
+### 执行结果
+
+- PF-P075 已执行并按自动工作流标记为 `verified`。
+- `_turnover_ledger_relation_extra_write_facade()` 已扩展 local/dev/test path：当 queue repository 暴露 `enqueue_read_model_refresh` 时返回 relation extra facade。
+- 新增 local relation extra connection shim、extra repository wrapper 和 snapshot replace/save helpers。
+- queue/outbox failure 会恢复 in-memory extra snapshot 和 local state store extras snapshot。
+- 成功路径不再直接调用 `_clear_turnover_ledger_read_model_best_effort()`；refresh 由 UoW dirty/outbox writer 负责。
+- PF-P074 的 2 个 relation extra target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P075 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，33 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+- `rg -n "relation_extra|turnover_relation_extra_changed|_turnover_ledger_relation_extra_write_facade|_local_turnover_ledger|clear_turnover_ledger_read_model|expectedFailure|PF-P075" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，统一覆盖 PF-P074 + PF-P075。

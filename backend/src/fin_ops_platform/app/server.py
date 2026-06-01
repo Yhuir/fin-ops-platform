@@ -2616,26 +2616,36 @@ class Application:
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
-            return None
-        connection = getattr(state_store, "_connection", None)
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-        if connection is None or queue_repository is None or not callable(enqueue_in_transaction):
+        if state_store is None or queue_repository is None:
             return None
-        extra_repository = TurnoverLedgerExtraRepositoryAdapter(
-            repository_factory=lambda transaction: PostgresWorkbenchRepository(transaction)
-        )
+        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            connection = getattr(state_store, "_connection", None)
+            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            extra_repository = TurnoverLedgerExtraRepositoryAdapter(
+                repository_factory=lambda transaction: PostgresWorkbenchRepository(transaction)
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+        else:
+            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+            if not callable(enqueue):
+                return None
+            connection = self._local_turnover_ledger_relation_extra_connection(state_store)
+            extra_repository = self._local_turnover_ledger_extra_repository()
+            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=SimpleNamespace(),
             extra_repository=extra_repository,
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            ),
+            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
         )
         return TurnoverLedgerWriteFacade(
@@ -2645,6 +2655,74 @@ class Application:
             ),
             row_provider=self._turnover_ledger_relation_extra_row_provider,
         )
+
+    def _local_turnover_ledger_relation_extra_connection(self, state_store: object) -> object:
+        application = self
+
+        class _LocalRelationExtraConnection:
+            @contextmanager
+            def transaction(self) -> Any:
+                previous_snapshot = application._turnover_ledger_api_routes.extras_snapshot()
+                try:
+                    yield SimpleNamespace()
+                except Exception:
+                    application._replace_local_turnover_ledger_extra_snapshot(previous_snapshot)
+                    application._save_local_turnover_ledger_extras_snapshot(state_store, previous_snapshot)
+                    raise
+                else:
+                    current_snapshot = application._turnover_ledger_api_routes.extras_snapshot()
+                    application._save_local_turnover_ledger_extras_snapshot(state_store, current_snapshot)
+
+        return _LocalRelationExtraConnection()
+
+    def _local_turnover_ledger_extra_repository(self) -> object:
+        save_extra = self._save_local_turnover_ledger_relation_extra
+
+        class _LocalTurnoverLedgerExtraRepository:
+            def save_extra(self, extra: dict[str, object], *, transaction: object) -> None:
+                save_extra(extra)
+
+        return _LocalTurnoverLedgerExtraRepository()
+
+    def _save_local_turnover_ledger_relation_extra(self, extra: dict[str, object]) -> None:
+        relation_id = str(extra.get("relation_id") or "").strip()
+        if not relation_id:
+            raise ValueError("relation_id is required.")
+        current_snapshot = self._turnover_ledger_api_routes.extras_snapshot()
+        extras = [
+            dict(item)
+            for item in list(current_snapshot.get("extras") or [])
+            if isinstance(item, dict) and str(item.get("relation_id") or "").strip() != relation_id
+        ]
+        extras.append(dict(extra))
+        self._replace_local_turnover_ledger_extra_snapshot(
+            {
+                "version": current_snapshot.get("version") or 1,
+                "extras": extras,
+            }
+        )
+
+    def _replace_local_turnover_ledger_extra_snapshot(self, snapshot: dict[str, object]) -> None:
+        extra_service = self._build_turnover_ledger_extra_service(snapshot)
+        self._turnover_ledger_extra_service = extra_service
+        self._turnover_ledger_api_routes._extra_service = extra_service
+        setattr(self._turnover_ledger_service, "_extra_service", extra_service)
+
+    def _save_local_turnover_ledger_extras_snapshot(
+        self,
+        state_store: object,
+        snapshot: dict[str, object],
+    ) -> None:
+        save_extras = getattr(state_store, "save_turnover_ledger_extras", None)
+        if not callable(save_extras):
+            raise RuntimeError("state store must expose save_turnover_ledger_extras.")
+        try:
+            save_extras(dict(snapshot))
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(
+                operation="turnover_ledger_extra_updated",
+                detail=str(exc),
+            )
 
     def _turnover_ledger_tag_selection_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         override = getattr(self, "_turnover_ledger_tag_selection_write_facade_override", None)
@@ -2740,12 +2818,17 @@ class Application:
                 if not callable(enqueue):
                     raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
                 events: list[object] = []
+                refresh_reason = (
+                    "turnover_relation_extra_changed"
+                    if reason == "relation_extra_update"
+                    else reason
+                )
                 for scope_key in list(scope_keys or ["all"]):
                     events.append(
                         enqueue(
                             scope_type=scope_type,
                             scope_key=str(scope_key or "all"),
-                            reason=reason,
+                            reason=refresh_reason,
                         )
                     )
                 return events
