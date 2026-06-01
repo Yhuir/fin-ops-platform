@@ -10784,7 +10784,7 @@ PF-P036-MG 已执行：
 
 ## PF-P037 - Workbench Durable Idempotency PostgreSQL Store Planning
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -14937,3 +14937,26 @@ Post-Flight:
 - PF-P055 是 PF-P054-MG 后合理的下一步：UoW foundation 已合入，下一步需要规划真实 API 接入顺序，避免直接迁移导致范围过大。
 - Prompt 明确 planning-only，不修改生产代码或测试。
 - Prompt 要求对 confirm、withdraw、extra、tag selection、bank-row-tags batch 分别做 readiness matrix。
+
+### 执行结果
+
+- PF-P055 已执行并按自动工作流标记为 `verified`。
+- 更新 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`，新增 `Real API Integration Plan`。
+- Readiness matrix 覆盖：
+  - `PUT /api/turnover-ledger/relations/{id}/extra`
+  - `POST /api/turnover-ledger/relations/confirm`
+  - `POST /api/turnover-ledger/relations/{id}/withdraw`
+  - `PUT /api/turnover-ledger/tag-selection`
+  - `POST /api/turnover-ledger/bank-row-tags/batch`
+- 规划结论：
+  - relation extra PUT 是最低风险第一候选；
+  - confirm/withdraw 需要 relation repository 和 Workbench influence port；
+  - tag selection 需要 Settings port transaction seam；
+  - bank-row-tags batch 跨 Bankdetail/Workbench，风险最高，应最后处理。
+- 未修改 production code、tests、handler、repository、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+  - `rg -n "Real API Integration Plan|Readiness Matrix|PF-P055|confirm|withdraw|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+- 下一步建议：生成并审查 `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`。PF-P056 应优先补 facade-level tests，不迁移真实 handler。

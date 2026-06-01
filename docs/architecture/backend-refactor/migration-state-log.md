@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已从最新 `main` 新建分支并生成 `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` |
-| 当前 active prompt | `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` (`planned`) |
-| 最近 verified prompt | `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` |
+| 当前阶段 | `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra write facade tests |
+| 最近 verified prompt | `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P054-MG 已在功能分支和 `main` 上通过；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract tests.test_turnover_ledger_api tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service -v` 通过，70 tests；merge commit `1b03b1ed` 已 push 到 `origin/main` |
-| 下一条允许任务 | 执行 `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning`；PF-P055 只做真实 API 接入规划，不直接迁移 handler |
+| 最近验证 | PF-P055 只更新 `turnover-ledger-write-uow-plan.md` 的 Real API Integration Plan；已运行文档检查；未修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置 |
+| 下一条允许任务 | 生成并审查 `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`；PF-P056 应优先补 facade-level tests，不迁移真实 handler |
 
 ## Prompt 执行日志
 
@@ -5591,7 +5591,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5606,7 +5606,28 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P055。
+- PF-P055 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`。
+
+#### 执行结果
+
+- 已执行 PF-P055。
+- 更新 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`，新增 `Real API Integration Plan`。
+- 已为 5 个写入口建立 readiness matrix：
+  - relation extra PUT；
+  - confirm relation；
+  - withdraw relation；
+  - tag selection PUT；
+  - bank-row-tags batch。
+- 规划结论：relation extra PUT 是第一候选真实接入点；bank-row-tags batch 风险最高，应最后处理。
+- 未修改 production code、tests、handler、repository、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "Real API Integration Plan|Readiness Matrix|PF-P055|confirm|withdraw|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
 
 ## 维护规则
 
