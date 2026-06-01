@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
-| 当前 active prompt | `PF-P052 - Turnover Ledger Write Path Characterization Tests` (`planned`) |
-| 最近 verified prompt | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` |
+| 当前阶段 | `PF-P052 - Turnover Ledger Write Path Characterization Tests` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger 写路径 UoW 前置切片 |
+| 最近 verified prompt | `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
-| 最近验证 | PF-P051 只做 discovery/planning；已新增 `turnover-ledger-write-uow-plan.md`；已运行文档检查；未修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 `PF-P052 - Turnover Ledger Write Path Characterization Tests`；PF-P052 必须只补测试，锁定 duplicate/stale/failure 当前行为，不得实现 UoW 或迁移真实写路径 |
+| 最近验证 | PF-P052 只补 Turnover Ledger 写路径 characterization tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未修改 production code、SQL migration、worker、frontend、deployment 或生产配置；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
+| 下一条允许任务 | 生成并审查下一条 Turnover Ledger 写路径 prompt；建议 `PF-P053 - Turnover Ledger Write UoW Contract Tests`，先写目标契约测试，不迁移真实写 API |
 
 ## Prompt 执行日志
 
@@ -5410,7 +5410,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P052 - Turnover Ledger Write Path Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5432,8 +5432,26 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P052。
-- PF-P052 完成后若验证通过，可按自动工作流标记为 `verified`，再决定继续 Turnover write test/contract 切片或进入 cumulative MG。
+- PF-P052 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P053 - Turnover Ledger Write UoW Contract Tests`。
+- PF-P053 应先定义目标契约测试，不应迁移真实 Turnover Ledger 写 API。
+
+#### 执行结果
+
+- 已执行 PF-P052。
+- 仅修改 `tests/test_turnover_ledger_api.py` 以及本轮文档。
+- 新增 `_FailingQueueRecorder` 测试 fake。
+- 新增 tag selection PUT 队列失败 characterization：当前行为是 settings 已保存、read model 已 clear，随后 queue failure 抛出。
+- 新增 bank-row-tags batch 队列失败 characterization：当前行为是 Bankdetail category facts 已保存，派生刷新尝试包含 Bankdetail/Workbench/Turnover，随后 queue failure 抛出。
+- 新增 relation extra PUT persistence failure characterization：当前行为是 best-effort 成功、内存 extra 可读、read model clear 和 refresh enqueue 继续执行。
+- 新增 confirm duplicate characterization：第一次成功后重复 confirm 返回 `relation_row_conflict`，不会第二次触发 Turnover refresh。
+- 新增 confirm relation persistence failure characterization：当前 relation snapshot persistence failure 被 warning 吞掉，API 仍返回成功并继续 refresh enqueue。
+- 新增 duplicate withdraw characterization：当前重复 withdraw 仍返回 200，追加第二条 withdraw audit，并再次触发 Turnover refresh。
+- 未实现 UoW，未迁移 handler，未修改 production code、repository、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
 
 ## 维护规则
 

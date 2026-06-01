@@ -9783,7 +9783,7 @@ PF-P033 已由用户确认 `verified`。PF-P032-MG 和 PF-P033-MG 均不单独�
 
 ## PF-P034 - Workbench Withdraw Submit Stale Guard Migration
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -14511,3 +14511,29 @@ Post-Flight:
 - PF-P052 明确限定 test-only，不允许修改 production code 或提前修复 stale/idempotency/transaction 语义。
 - 测试范围覆盖当前最高风险写入口：confirm、withdraw、relation extra PUT、tag selection PUT 和 bank-row-tags batch。
 - Prompt 明确要求若失败注入无法低风险表达，只记录缺口并停止对应实现，不通过生产代码改动扩大范围。
+
+### 执行结果
+
+- PF-P052 已执行并按自动工作流标记为 `verified`。
+- 仅修改 `tests/test_turnover_ledger_api.py` 以及 backend-refactor 文档。
+- 新增 6 个 API-level characterization tests：
+  - `test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save`
+  - `test_turnover_bank_row_tag_batch_queue_failure_happens_after_category_save`
+  - `test_relation_extra_persistence_failure_is_best_effort_success_and_refreshes`
+  - `test_confirm_duplicate_submit_rejects_after_first_success_without_second_refresh`
+  - `test_confirm_relation_persistence_failure_is_best_effort_success_and_still_enqueues_refresh`
+  - `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues`
+- 关键已锁定事实：
+  - tag selection 队列失败发生在 settings save 和 read model clear 之后。
+  - bank-row-tags batch 队列失败发生在 Bankdetail category facts 保存之后，且派生刷新链会先尝试 Bankdetail/Workbench 等 scope，再到 Turnover refresh。
+  - relation extra persistence failure 当前为 best-effort success。
+  - relation snapshot persistence failure 当前为 best-effort success。
+  - duplicate confirm 当前返回 `relation_row_conflict`。
+  - duplicate withdraw 当前仍返回 200，并重复写 withdraw audit / Turnover refresh。
+- 未修改 production code、SQL migration、worker、runtime queue、frontend、deployment、生产配置或 feature flag。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+- 下一步建议：生成并审查 `PF-P053 - Turnover Ledger Write UoW Contract Tests`。PF-P053 应先定义目标契约测试，不迁移真实 Turnover Ledger 写 API。

@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
 
-状态：PF-P051 `verified`；PF-P052 `planned`
+状态：PF-P051 `verified`；PF-P052 `verified`
 
 ## Scope
 
@@ -217,7 +217,7 @@ Do not implement UoW until the tests below are added and the repository/port own
 
 `PF-P052 - Turnover Ledger Write Path Characterization Tests` has been generated and reviewed.
 
-PF-P052 must remain test-only. It should lock current duplicate/stale/failure behavior for:
+PF-P052 remained test-only and locked current duplicate/stale/failure behavior for:
 
 - tag selection PUT;
 - bank-row-tags batch;
@@ -225,7 +225,16 @@ PF-P052 must remain test-only. It should lock current duplicate/stale/failure be
 - confirm relation;
 - withdraw relation.
 
-PF-P052 must not implement `TurnoverLedgerWriteUnitOfWork`, migrate handlers, change repository semantics, change runtime queue behavior, or modify production configuration.
+PF-P052 did not implement `TurnoverLedgerWriteUnitOfWork`, migrate handlers, change repository semantics, change runtime queue behavior, or modify production configuration.
+
+PF-P052 added API-level characterization tests proving:
+
+- tag selection PUT saves settings and clears the read model before queue failure propagates;
+- bank-row-tags batch saves Bankdetail category facts before queue failure propagates, and the attempted queue sequence includes Bankdetail/Workbench/Turnover scopes;
+- relation extra persistence failure is currently best-effort success and still refreshes;
+- confirm relation snapshot persistence failure is currently best-effort success and still refreshes;
+- duplicate confirm currently rejects with `relation_row_conflict`;
+- duplicate withdraw currently succeeds again, appends a second withdraw audit entry, and refreshes again.
 
 ## Idempotency / Stale Write / Conflict Baseline
 
@@ -264,35 +273,24 @@ Future ownership target:
 
 | Area | Existing coverage | Missing before UoW implementation | Recommended test type |
 | --- | --- | --- | --- |
-| Tag selection PUT | Version conflict, invalid tag, queue enqueue on success. | Persistence failure vs refresh enqueue failure behavior; atomic target contract. | Characterization first, then contract tests. |
-| Bank row tags batch | Success updates Bankdetail and response flags; invalid non-turnover rows have no refresh side effects. | Failure after Bankdetail category save but before relation persist/enqueue; duplicate/current-version behavior; Workbench invalidation atomicity. | Characterization tests. |
-| Relation extra PUT | GET default, PUT persists, reload works, invalid payload, readonly rejection, legacy fallback. | Duplicate extra PUT behavior; persistence failure swallowed; stale extra version target contract. | Characterization tests. |
-| Confirm relation | Service-level confirm validation/audit; API permission/audit/enqueue success. | API duplicate confirm response; persistence failure after in-memory relation mutation; enqueue failure after relation persist; future expected version behavior. | Characterization tests. |
-| Withdraw relation | Service-level withdraw audit; API permission/audit success; system relation rejection. | Duplicate withdraw behavior; stale relation version behavior; persistence/enqueue failure split. | Characterization tests. |
+| Tag selection PUT | Version conflict, invalid tag, queue enqueue on success; PF-P052 locks queue failure after settings save/read model clear. | Atomic target contract for settings + dirty/outbox. | Future UoW/contract tests. |
+| Bank row tags batch | Success updates Bankdetail and response flags; invalid non-turnover rows have no refresh side effects; PF-P052 locks queue failure after Bankdetail category save and derived refresh attempts. | Duplicate/current-version behavior; Workbench invalidation atomicity target contract. | Future UoW/contract tests. |
+| Relation extra PUT | GET default, PUT persists, reload works, invalid payload, readonly rejection, legacy fallback; PF-P052 locks persistence failure as best-effort success. | Duplicate extra PUT behavior; stale extra version target contract. | Future UoW/contract tests. |
+| Confirm relation | Service-level confirm validation/audit; API permission/audit/enqueue success; PF-P052 locks duplicate confirm and relation persistence failure behavior. | Enqueue failure after relation persist; future expected version behavior. | Future UoW/contract tests. |
+| Withdraw relation | Service-level withdraw audit; API permission/audit success; system relation rejection; PF-P052 locks duplicate withdraw currently succeeding and re-enqueueing. | Stale relation version behavior; persistence/enqueue failure split target contract. | Future UoW/contract tests. |
 | Dirty scope/outbox | RuntimeQueue repository has transaction-bound primitive. | Turnover write path does not use transaction-bound primitive. | Future contract tests after characterization. |
 | Repository ownership | Existing repository methods persist relation/extras. | No Turnover-specific transaction-bound repository port. | Planning/design then contract tests. |
 
 ## Next Slice Recommendation
 
-下一条 prompt 应该是：
+PF-P052 已完成。下一条 prompt 应该是：
 
-`PF-P052 - Turnover Ledger Write Path Characterization Tests`
+`PF-P053 - Turnover Ledger Write UoW Contract Tests`
 
 原因：
 
-- 当前写路径的失败模式和 duplicate/stale behavior 还没有被 API-level tests 锁死。
-- 直接实现 UoW 会改变错误语义、事务边界和 refresh enqueue 行为，风险过大。
-- PF-P052 应只补测试，不改 production code。优先锁定：
-  - duplicate confirm；
-  - duplicate withdraw；
-  - relation extra PUT persistence failure 当前行为；
-  - confirm/withdraw relation persistence failure vs enqueue failure 当前行为；
-  - bank-row-tags batch 在不同失败点的当前 side effects；
-  - tag selection save success but enqueue failure 当前行为。
-
-PF-P052 之后，再根据测试结果决定是否进入：
-
-- `PF-P053 - Turnover Ledger Write UoW Contract Tests`
-- 或者 `PF-P053 - Turnover Ledger Write Facade Extraction`
+- 当前行为已经被 PF-P052 的 API-level characterization tests 锁定。
+- 下一步不应直接迁移真实写 API；应先定义目标 UoW 契约，明确哪些行为需要从当前 best-effort / split side effects 收敛为 transaction-bound facts/audit/dirty/outbox。
+- PF-P053 应聚焦 contract tests / expected failures / fake repository ports，不改真实 handler 语义。
 
 不建议下一步直接实现 UoW。

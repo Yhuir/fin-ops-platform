@@ -27,6 +27,15 @@ class _QueueRecorder:
         self.enqueued.append((scope_type, scope_key, reason))
 
 
+class _FailingQueueRecorder:
+    def __init__(self) -> None:
+        self.attempts: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+        self.attempts.append((scope_type, scope_key, reason))
+        raise RuntimeError("queue unavailable")
+
+
 class _TurnoverReadModelRecorder:
     def __init__(self) -> None:
         self.clear_calls = 0
@@ -483,6 +492,92 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(invalid_response.status_code, 400)
         self.assertEqual(json.loads(invalid_response.body)["error"], "invalid_turnover_ledger_tag")
 
+    def test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            ApplicationStateStore(Path(temp_dir)).save_app_settings(
+                {
+                    "bank_transaction_tags": {
+                        "version": 1,
+                        "definitions": [
+                            {
+                                "code": "external_rule_borrow_out",
+                                "label": "借出款",
+                                "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                                "source": "custom",
+                                "status": "active",
+                                "output_primary_label": "外部往来款付款",
+                                "output_sub_label": "借出款",
+                                "turnover_role": "external_turnover",
+                                "turnover_action_type": "pending_collection",
+                                "direction": "any",
+                                "account_scope": {"type": "any", "values": []},
+                                "rules": {
+                                    "match_fields": ["all_text"],
+                                    "contains_any": ["借出"],
+                                    "contains_all": [],
+                                    "exact_any": [],
+                                    "regex_any": [],
+                                    "none_of": [],
+                                },
+                            },
+                            {
+                                "code": "external_rule_repaid",
+                                "label": "归还借款",
+                                "path": ["银行明细自动标签规则", "外部往来款付款", "归还借款"],
+                                "source": "custom",
+                                "status": "active",
+                                "output_primary_label": "外部往来款付款",
+                                "output_sub_label": "归还借款",
+                                "turnover_role": "external_turnover",
+                                "turnover_action_type": "repaid",
+                                "direction": "any",
+                                "account_scope": {"type": "any", "values": []},
+                                "rules": {
+                                    "match_fields": ["all_text"],
+                                    "contains_any": ["归还"],
+                                    "contains_all": [],
+                                    "exact_any": [],
+                                    "regex_any": [],
+                                    "none_of": [],
+                                },
+                            },
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "version": 1,
+                        "groups": {
+                            "requires_invoice": {"tag_codes": []},
+                            "bank_statement_as_invoice": {"tag_codes": []},
+                            "no_invoice_required": {"tag_codes": []},
+                        },
+                    },
+                }
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            queue = _FailingQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "PUT",
+                    "/api/turnover-ledger/tag-selection",
+                    body=json.dumps(
+                        {
+                            "expected_version": initial_payload["version"],
+                            "selected_tag_codes": ["external_rule_borrow_out"],
+                        }
+                    ),
+                )
+            restored_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
+
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
+        self.assertEqual(restored_payload["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertGreater(restored_payload["version"], initial_payload["version"])
+
     def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -517,6 +612,49 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(details_payload["pagination"]["total"], 1)
         self.assertEqual(details_payload["rows"][0]["category_code"], "borrow_in_company_pending_repayment")
         self.assertEqual(details_payload["rows"][0]["category_label"], "公司暂借款：待还款")
+
+    def test_turnover_bank_row_tag_batch_queue_failure_happens_after_category_save(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _FailingQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "POST",
+                    "/api/turnover-ledger/bank-row-tags/batch",
+                    body=json.dumps(
+                        {
+                            "updates": [
+                                {
+                                    "transaction_id": transaction_ids[0],
+                                    "category_code": "borrow_in_company_pending_repayment",
+                                    "expected_version": 0,
+                                }
+                            ]
+                        }
+                    ),
+                )
+            details_response = app.handle_request(
+                "GET",
+                f"/api/bank-details/transactions?category_code=borrow_in_company_pending_repayment",
+            )
+            details_payload = json.loads(details_response.body)
+
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.attempts)
+        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.attempts)
+        self.assertEqual(
+            [item for item in queue.attempts if item[0] == "turnover_ledger"],
+            [("turnover_ledger", "all", "turnover_relation_changed")],
+        )
+        self.assertEqual(details_response.status_code, 200)
+        self.assertEqual(details_payload["pagination"]["total"], 1)
+        self.assertEqual(details_payload["rows"][0]["id"], transaction_ids[0])
+        self.assertEqual(details_payload["rows"][0]["category_code"], "borrow_in_company_pending_repayment")
 
     def test_grouped_view_preserves_service_flow_rows_and_allocation_lots(self) -> None:
         class FakeLedgerService:
@@ -774,6 +912,39 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertIn(("turnover_ledger", "all", "turnover_relation_extra_changed"), queue.enqueued)
 
+    def test_relation_extra_persistence_failure_is_best_effort_success_and_refreshes(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            def fail_save_turnover_ledger_extras(_snapshot: dict[str, object]) -> None:
+                raise RuntimeError("extra store unavailable")
+
+            app._state_store.save_turnover_ledger_extras = fail_save_turnover_ledger_extras  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps({"note": "persistence warning is best effort"}),
+            )
+            payload = json.loads(response.body)
+            restored_response = app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
+            restored_payload = json.loads(restored_response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["extra"]["note"], "persistence warning is best effort")
+        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertEqual(restored_response.status_code, 200)
+        self.assertEqual(restored_payload["extra"]["note"], "persistence warning is best effort")
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+
     def test_relation_extra_fallback_persists_full_snapshot_when_dedicated_store_method_is_missing(self) -> None:
         class LegacyBootstrapRecorder:
             def __init__(self) -> None:
@@ -1003,6 +1174,122 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+            ],
+        )
+
+    def test_confirm_duplicate_submit_rejects_after_first_success_without_second_refresh(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            first_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "first confirm"}),
+            )
+            duplicate_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "duplicate confirm"}),
+            )
+            duplicate_payload = json.loads(duplicate_response.body)
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(duplicate_response.status_code, 400)
+        self.assertEqual(duplicate_payload["error"], "relation_row_conflict")
+        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [("turnover_ledger", "all", "turnover_relation_changed")],
+        )
+
+    def test_confirm_relation_persistence_failure_is_best_effort_success_and_still_enqueues_refresh(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            def fail_save_turnover_relations(_snapshot: dict[str, object]) -> None:
+                raise RuntimeError("relation store unavailable")
+
+            app._state_store.save_turnover_relations = fail_save_turnover_relations  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "persistence failure"}),
+            )
+            payload = json.loads(response.body)
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["relation"]["status"], "confirmed")
+        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [("turnover_ledger", "all", "turnover_relation_changed")],
+        )
+
+    def test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "first confirm"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+
+            first_withdraw_response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "first withdraw"}),
+            )
+            second_withdraw_response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "duplicate withdraw"}),
+            )
+            second_payload = json.loads(second_withdraw_response.body)
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(confirmed_response.status_code, 200)
+        self.assertEqual(first_withdraw_response.status_code, 200)
+        self.assertEqual(second_withdraw_response.status_code, 200)
+        self.assertEqual(second_payload["relation"]["status"], "withdrawn")
+        self.assertEqual(
+            [(entry["action"], entry["new_status"]) for entry in audit_log],
+            [
+                ("confirm_relation", "confirmed"),
+                ("withdraw_relation", "withdrawn"),
+                ("withdraw_relation", "withdrawn"),
+            ],
+        )
+        self.assertEqual(read_repository.clear_calls, 3)
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [
+                ("turnover_ledger", "all", "turnover_relation_changed"),
                 ("turnover_ledger", "all", "turnover_relation_changed"),
                 ("turnover_ledger", "all", "turnover_relation_changed"),
             ],
