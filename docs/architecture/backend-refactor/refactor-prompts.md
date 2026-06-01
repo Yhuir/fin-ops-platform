@@ -10120,7 +10120,7 @@ Post-Flight:
 
 ## PF-P035 - Workbench Confirm Link UoW Integration Slice
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -14625,3 +14625,25 @@ Post-Flight:
 - PF-P053 是 PF-P052 后的正确下一步：API 当前行为已锁定，下一步应定义目标 UoW 语义，而不是直接改 handler。
 - Prompt 明确 contract-test-only，允许 expectedFailure 承载尚未实现的目标语义，避免默认 CI 红。
 - Prompt 覆盖了 Turnover 写路径的核心一致性目标：facts/audit/dirty/outbox 同事务、duplicate/stale conflict、best-effort failure 收敛、Bankdetail port 边界和 granular dependency rule。
+
+### 执行结果
+
+- PF-P053 已执行并按自动工作流标记为 `verified`。
+- 新增 `tests/test_turnover_ledger_uow_contract.py`。
+- 新增 7 个 `unittest.expectedFailure` target contract tests：
+  - `test_confirm_relation_commits_relation_audit_dirty_scope_and_outbox_in_one_transaction`
+  - `test_confirm_relation_outbox_failure_rolls_back_relation_fact_and_audit`
+  - `test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs`
+  - `test_relation_extra_outbox_failure_does_not_return_best_effort_success`
+  - `test_tag_selection_outbox_failure_rolls_back_settings_save_and_audit`
+  - `test_bank_row_tags_batch_uses_explicit_bankdetail_port_and_rolls_back_on_outbox_failure`
+  - `test_uow_constructor_requires_granular_ports_not_application_god_object`
+- 默认 CI 绿色；expectedFailure 保留 future contract 和 unexpected success 信号。
+- 未实现 `TurnoverLedgerWriteUnitOfWork`，未修改 production code、repository、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 expected failures。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+- 下一步建议：生成并审查 `PF-P054 - Turnover Ledger Minimal UoW Skeleton`。PF-P054 只应建立最小 skeleton 和 fake-port contract wiring，不迁移真实 Turnover Ledger 写 API。

@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
 
-状态：PF-P051 `verified`；PF-P052 `verified`；PF-P053 `planned`
+状态：PF-P051 `verified`；PF-P052 `verified`；PF-P053 `verified`
 
 ## Scope
 
@@ -297,9 +297,9 @@ PF-P052 已完成。下一条 prompt 应该是：
 
 ## PF-P053 Contract Test Slice
 
-`PF-P053 - Turnover Ledger Write UoW Contract Tests` has been generated and reviewed.
+`PF-P053 - Turnover Ledger Write UoW Contract Tests` has been generated, reviewed and executed.
 
-PF-P053 must create target contract tests before any production UoW implementation. The contract tests should preserve future expectations for:
+PF-P053 created target contract tests before any production UoW implementation. The contract tests preserve future expectations for:
 
 - transaction-bound relation facts + relation audit + dirty scope + outbox;
 - rollback when dirty scope / outbox fails;
@@ -309,4 +309,20 @@ PF-P053 must create target contract tests before any production UoW implementati
 - bank-row-tags batch explicit Bankdetail port / transaction-bound downstream event boundary;
 - granular UoW dependencies without `Application` god object, HTTP headers/cookies or `app.auth`.
 
-PF-P053 should use `unittest.expectedFailure` or an equivalent mechanism for target contracts that cannot pass before the minimal UoW skeleton exists. Default CI must remain green, while unexpected success should signal that a contract has become implemented.
+PF-P053 uses `unittest.expectedFailure` for target contracts that cannot pass before the minimal UoW skeleton exists. Default CI remains green, while unexpected success should signal that a contract has become implemented.
+
+PF-P053 added `tests/test_turnover_ledger_uow_contract.py` with 7 expected failures:
+
+- confirm relation commits relation facts, audit, dirty scope and outbox in one transaction;
+- confirm relation outbox failure rolls back relation facts/audit;
+- withdraw relation rejects stale or duplicate submit before the handler runs;
+- relation extra outbox failure does not return best-effort success;
+- tag selection outbox failure rolls back settings save/audit;
+- bank-row-tags batch uses an explicit Bankdetail port and rolls back on outbox failure;
+- UoW constructor requires granular ports and rejects `Application` god object injection.
+
+Next slice recommendation:
+
+`PF-P054 - Turnover Ledger Minimal UoW Skeleton`
+
+PF-P054 should introduce the smallest `TurnoverLedgerWriteUnitOfWork.run(command, handler)` skeleton needed to start turning these contract tests green with fake/in-memory ports. PF-P054 must not migrate real Turnover Ledger write APIs.

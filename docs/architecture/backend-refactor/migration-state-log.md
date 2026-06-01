@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已生成并审查 `PF-P053 - Turnover Ledger Write UoW Contract Tests` |
-| 当前 active prompt | `PF-P053 - Turnover Ledger Write UoW Contract Tests` (`planned`) |
-| 最近 verified prompt | `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
+| 当前阶段 | `PF-P053 - Turnover Ledger Write UoW Contract Tests` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger 写路径最小 UoW skeleton |
+| 最近 verified prompt | `PF-P053 - Turnover Ledger Write UoW Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
-| 最近验证 | PF-P052 只补 Turnover Ledger 写路径 characterization tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未修改 production code、SQL migration、worker、frontend、deployment 或生产配置；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 `PF-P053 - Turnover Ledger Write UoW Contract Tests`；PF-P053 只建立目标契约测试，不迁移真实写 API，不实现 UoW |
+| 最近验证 | PF-P053 新增 Turnover Ledger UoW 目标契约测试；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v` 通过，7 expected failures；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未修改 production code、SQL migration、worker、frontend、deployment 或生产配置 |
+| 下一条允许任务 | 生成并审查 `PF-P054 - Turnover Ledger Minimal UoW Skeleton`；PF-P054 只建立最小 skeleton 和 fake-port contract wiring，不迁移真实 Turnover Ledger 写 API |
 
 ## Prompt 执行日志
 
@@ -5455,7 +5455,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P053 - Turnover Ledger Write UoW Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5478,7 +5478,28 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P053。
+- PF-P053 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P054 - Turnover Ledger Minimal UoW Skeleton`。
+- PF-P054 只应建立最小 skeleton 和 fake-port contract wiring，不应迁移真实 Turnover Ledger 写 API。
+
+#### 执行结果
+
+- 已执行 PF-P053。
+- 新增 `tests/test_turnover_ledger_uow_contract.py`。
+- 新增 7 个 `unittest.expectedFailure` 目标契约测试，覆盖：
+  - confirm relation facts/audit/dirty/outbox 同事务；
+  - confirm dirty/outbox failure rollback；
+  - withdraw stale/duplicate precondition conflict；
+  - relation extra outbox failure 不得 best-effort success；
+  - tag selection outbox failure rollback；
+  - bank-row-tags batch 通过 explicit Bankdetail port 并在 outbox failure 时 rollback；
+  - UoW constructor 不接受 `Application` god object。
+- 未实现 `TurnoverLedgerWriteUnitOfWork`，未迁移 handler，未修改 production code、repository、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
 
 ## 维护规则
 
