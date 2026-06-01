@@ -1706,3 +1706,25 @@ Verification:
 - `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
 - `git diff --check`: Pass。
 - `rg -n "test_target_withdraw_relation|expectedFailure|system_relation_cannot_withdraw|affected_months|PF-P087|withdraw_relation" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+## PF-P088 Withdraw Relation Handler UoW Wiring
+
+状态：`planned`
+
+目标：
+
+- 将 withdraw relation 的 local/dev/test handler path 接入 `TurnoverLedgerWriteFacade.withdraw_relation(...)`。
+- 让 PF-P087 的 2 条 target tests 从 `unittest.expectedFailure` 转为普通通过。
+- 继续保留 PostgreSQL production legacy fallback。
+
+实现边界：
+
+- 新增 withdraw 专用 facade seam、local transaction shim 和 relation repository wrapper。
+- manual/system relation guard、unknown 404、validation 400 和 `affected_months` 计算必须保留在 handler 边界。
+- 只有 legacy fallback path 才调用 `_after_turnover_relation_mutation(...)`。
+- 不迁移 Workbench influence port，不修改 schema，不实现 production PostgreSQL relation SQL。
+
+下一步：
+
+- 执行 PF-P088。
+- 如果验证通过，生成 PF-P088-MG，统一覆盖 PF-P084 到 PF-P088 的 withdraw relation UoW slice。
