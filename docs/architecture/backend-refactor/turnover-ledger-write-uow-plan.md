@@ -1664,3 +1664,26 @@ Verification:
 - `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
 - `git diff --check`: Pass。
 - `rg -n "PF-P086|Withdraw Relation Handler UoW Wiring Readiness|Current Runtime Sequence|Wiring Readiness Matrix|Compatibility|PF-P087|system_relation_cannot_withdraw|affected_months" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`: Pass。
+
+## PF-P087 Withdraw Relation Handler UoW Target Tests
+
+状态：`planned`
+
+目标：
+
+- 只为真实 withdraw handler 增加 API 层 UoW target tests。
+- 不修改 production code，不迁移 handler。
+- 未实现目标语义使用 `unittest.expectedFailure` 保持默认 CI 绿色。
+
+测试边界：
+
+- 保留 legacy split-brain characterization：当前 queue failure 发生在 relation withdraw/audit 和 read model direct clear 后。
+- 新增 future rollback target：dirty/outbox failure 应 rollback withdraw relation facts/audit。
+- 新增 future no-direct-clear target：successful UoW path 不应直接调用 `_clear_turnover_ledger_read_model_best_effort()`。
+- 补强 guard compatibility：system-generated relation rejection 不触发 queue、read-model clear 或 withdraw audit。
+- 补强 `affected_months` compatibility：manual withdraw response 的 `affected_months` 来源必须是 withdraw 前 relation bank rows。
+
+下一步：
+
+- 执行 PF-P087。
+- 若验证通过，生成 PF-P088 withdraw handler UoW wiring，使 PF-P087 target tests 转为普通通过。

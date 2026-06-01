@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` 已生成并审查 |
+| 当前 active prompt | `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` |
 | 最近 verified prompt | `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness` |
 | 当前分支 | `codex/turnover-ledger-withdraw-relation-p084` |
 | 最近验证 | PF-P086 完成 withdraw relation handler UoW wiring readiness；未修改业务代码 |
-| 下一条允许任务 | 生成并审查 `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` |
+| 下一条允许任务 | 执行 `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests` |
 
 ## Prompt 执行日志
 
@@ -6984,6 +6984,26 @@ PF-P084/PF-P085 完成了 withdraw relation facade-level contract 和 skeleton�
 #### 下一条 Prompt 上下文
 
 下一步应生成 `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests`：只为真实 `POST /api/turnover-ledger/relations/{id}/withdraw` handler 增加 local/dev/test UoW target tests，仍不直接迁移 handler。
+
+### PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只为 withdraw relation HTTP handler 增加/调整 API 层 characterization 和 future target tests。
+- 不修改 production code，不迁移 handler，不改 UoW/facade 实现。
+- 未实现的目标语义必须使用 `unittest.expectedFailure` 保持默认 CI 绿色。
+
+#### 预期产物
+
+- `tests/test_turnover_ledger_api.py` 增加 withdraw handler UoW target tests。
+- `turnover-ledger-write-uow-plan.md` 记录 PF-P087 测试锁定结果。
+- `refactor-prompts.md` 和本文档记录 PF-P087 执行结果。
+
+#### 下一条 Prompt 上下文
+
+PF-P087 执行并验证后，下一步应生成 `PF-P088 - Turnover Ledger Withdraw Relation Handler UoW Wiring`：只把 local/dev/test withdraw handler 接入 PF-P085 facade/UoW，让 PF-P087 的 target tests 转为普通通过；仍保留 PostgreSQL production legacy fallback，不迁移其它写路径。
 
 ## 维护规则
 
