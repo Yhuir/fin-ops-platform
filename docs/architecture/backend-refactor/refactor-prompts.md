@@ -19820,3 +19820,27 @@ Post-Flight:
 - PF-P093 只覆盖 PF-P092 已锁定的 3 条 PostgreSQL facade seam，不进入其它模块。
 - Prompt 明确禁止用 direct read-model clear 或 non-transactional enqueue 假装转绿。
 - 如果真实 transaction-bound repository/port 不足，PF-P093 必须 blocked；这是比扩大 scope 更安全的选择。
+
+### 执行结果
+
+- PF-P093 已执行并按自动工作流标记为 `verified`。
+- 3 条 PF-P092 target tests 已移除 `unittest.expectedFailure` 并转为普通通过：
+  - PostgreSQL bank-row-tags batch 进入 facade/UoW path；
+  - PostgreSQL confirm relation 进入 facade/UoW path；
+  - PostgreSQL withdraw relation 进入 facade/UoW path。
+- `server.py` 的 PostgreSQL storage backend seam 现在复用：
+  - `TurnoverLedgerWriteUnitOfWork`
+  - `TurnoverLedgerDirtyOutboxWriter`
+  - `TurnoverLedgerRelationRepositoryAdapter`
+  - `TurnoverLedgerBankdetailPortAdapter`
+- 新增 server composition helper 只捕获细粒度依赖，不把 `Application` god object 注入 service/facade/adapter。
+- 测试 fake PostgreSQL connection 已补强为本地 transaction context，不访问真实 PostgreSQL。
+
+Verification:
+
+- RED：移除 3 个 `unittest.expectedFailure` 后，3 条 PostgreSQL facade readiness target tests 因 direct read-model clear 失败。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，45 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，45 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass。
+
+下一步建议：生成并审查 `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate`，统一覆盖 PF-P089 到 PF-P093 的完整 diff；不要继续扩大实现范围。

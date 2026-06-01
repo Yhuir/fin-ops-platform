@@ -44,12 +44,18 @@ class _TurnoverReadModelRecorder:
         self.clear_calls += 1
 
 
+class _PostgresFakeConnection:
+    @contextmanager
+    def transaction(self) -> object:
+        yield object()
+
+
 class _PostgresLikeStateStore:
     storage_backend = "postgres"
 
     def __init__(self, delegate: object) -> None:
         self._delegate = delegate
-        self._connection = object()
+        self._connection = _PostgresFakeConnection()
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._delegate, name)
@@ -926,7 +932,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
 
-    @unittest.expectedFailure
     def test_target_postgres_bank_row_tags_batch_uses_facade_without_direct_read_model_clear(self) -> None:
         # PF-P092 PostgreSQL Facade Readiness: postgres storage should enter facade/UoW path.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -1754,7 +1759,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
 
-    @unittest.expectedFailure
     def test_target_postgres_confirm_relation_uses_facade_without_direct_read_model_clear(self) -> None:
         # PF-P092 PostgreSQL Facade Readiness: confirm relation should not fall back on postgres.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -1830,7 +1834,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
 
-    @unittest.expectedFailure
     def test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear(self) -> None:
         # PF-P092 PostgreSQL Facade Readiness: withdraw relation should not fall back on postgres.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
