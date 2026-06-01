@@ -66,6 +66,11 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
 
         self.assertEqual(worker_app._infer_worker_kind(args), "bank-account-balance-read-model")
 
+    def test_worker_kind_inference_uses_registry_for_turnover_ledger_worker(self) -> None:
+        args = worker_app.build_parser().parse_args(["--enable-turnover-ledger-read-model-refresh"])
+
+        self.assertEqual(worker_app._infer_worker_kind(args), "turnover-ledger-read-model")
+
 
 if __name__ == "__main__":
     unittest.main()

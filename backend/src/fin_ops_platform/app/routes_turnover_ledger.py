@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.turnover_ledger_export_service import TurnoverLedgerExportService
+from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
 
@@ -139,10 +140,12 @@ class TurnoverLedgerApiRoutes:
         ledger_service: TurnoverLedgerService,
         relation_service: TurnoverRelationService,
         extra_service: Any | None = None,
+        query_service: TurnoverLedgerQueryService | None = None,
     ) -> None:
         self._ledger_service = ledger_service
         self._relation_service = relation_service
         self._extra_service = extra_service or InMemoryTurnoverLedgerExtraService()
+        self._query_service = query_service
         self._export_service = TurnoverLedgerExportService(self.list_grouped_ledger)
 
     def list_ledger(
@@ -155,6 +158,34 @@ class TurnoverLedgerApiRoutes:
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, object]:
+        if self._query_service is not None:
+            if str(view or "").strip().lower() == "grouped":
+                payload = self._query_service.list_ledger(
+                    family=family,
+                    direction=direction,
+                    status=status,
+                    page=page,
+                    page_size=page_size,
+                )
+                if isinstance(payload.get("groups"), list):
+                    return self._normalize_grouped_payload(payload)
+                if "read_model_status" not in payload:
+                    return self.list_grouped_ledger(
+                        family=family,
+                        direction=direction,
+                        status=status,
+                        page=page,
+                        page_size=page_size,
+                    )
+                return self._normalize_grouped_payload(self._flat_payload_to_grouped(payload))
+            return self._query_service.list_ledger(
+                view=view,
+                family=family,
+                direction=direction,
+                status=status,
+                page=page,
+                page_size=page_size,
+            )
         if str(view or "").strip().lower() == "grouped":
             return self.list_grouped_ledger(
                 family=family,
@@ -282,12 +313,32 @@ class TurnoverLedgerApiRoutes:
                     "row_span": 0,
                     "group_tone": row_with_extra.get("row_tone") or "muted",
                     "rows": [],
+                    "flow_rows": [],
+                    "allocation_lots": [],
+                    "lot_rows": [],
                 },
             )
             group_rows = list(group.get("rows") or [])
             grouped_row = self._grouped_row_from_flat_row(row_with_extra)
             group_rows.append(grouped_row)
             group["rows"] = group_rows
+            flow_rows = list(group.get("flow_rows") or [])
+            flow_rows.extend(
+                dict(item)
+                for item in list(row_with_extra.get("flow_rows") or [])
+                if isinstance(item, dict)
+            )
+            group["flow_rows"] = flow_rows
+            allocation_lots = list(group.get("allocation_lots") or [])
+            allocation_lots.extend(
+                dict(item)
+                for item in list(row_with_extra.get("allocation_lots") or [])
+                if isinstance(item, dict)
+            )
+            group["allocation_lots"] = allocation_lots
+            lot_rows = list(group.get("lot_rows") or [])
+            lot_rows.extend(dict(item) for item in list(row_with_extra.get("lot_rows") or []) if isinstance(item, dict))
+            group["lot_rows"] = lot_rows
             group["row_span"] = len(group_rows)
             group["pending_amount"] = self._format_money(
                 self._money(group.get("pending_amount")) + self._money(row_with_extra.get("balance_amount"))
@@ -416,7 +467,8 @@ class TurnoverLedgerApiRoutes:
         }
 
     @staticmethod
-    def _row_extra_fields(extra: dict[str, object]) -> dict[str, object]:
+    def _row_extra_fields(extra: dict[str, object] | None) -> dict[str, object]:
+        extra = extra or {}
         return {
             "interest_rate_type": extra.get("interest_rate_type") or "none",
             "interest_rate_value": extra.get("interest_rate_value") or "0.000000",

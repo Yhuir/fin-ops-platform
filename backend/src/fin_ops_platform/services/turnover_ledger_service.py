@@ -254,14 +254,16 @@ class TurnoverLedgerService:
                     continue
             enriched = dict(row)
             enriched["category_code"] = category_code
-            enriched["category_label"] = category.get("category_label") or BANK_TRANSACTION_CATEGORY_LABELS.get(
-                category_code
+            enriched["category_label"] = (
+                category.get("category_label")
+                or category.get("effective_category_label")
+                or BANK_TRANSACTION_CATEGORY_LABELS.get(category_code)
             )
-            enriched["category_path"] = list(category.get("category_path") or [])
-            enriched["category_primary_label"] = category.get("category_primary_label")
-            enriched["category_sub_label"] = category.get("category_sub_label")
-            enriched["category_third_label"] = category.get("category_third_label")
-            enriched["category_label_path"] = list(category.get("category_label_path") or [])
+            enriched["category_path"] = list(category.get("category_path") or category.get("effective_category_path") or [])
+            enriched["category_primary_label"] = category.get("category_primary_label") or category.get("effective_category_primary_label")
+            enriched["category_sub_label"] = category.get("category_sub_label") or category.get("effective_category_sub_label")
+            enriched["category_third_label"] = category.get("category_third_label") or category.get("effective_category_third_label")
+            enriched["category_label_path"] = list(category.get("category_label_path") or category.get("effective_category_label_path") or [])
             enriched["turnover_role"] = category.get("turnover_role")
             enriched["turnover_action_type"] = category.get("turnover_action_type")
             enriched["turnover_family"] = category.get("turnover_family")

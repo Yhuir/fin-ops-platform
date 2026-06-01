@@ -5437,14 +5437,19 @@ class PostgresReadModelRepository:
         status: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
+        scope_key: str | None = None,
     ) -> dict[str, Any] | None:
         normalized_family = (text(family) or "all").lower()
         normalized_direction = (text(direction) or "all").lower()
         normalized_status = text(status)
+        normalized_scope_key = text(scope_key) or "all"
         normalized_page = max(int_value(page, 1), 1)
         normalized_page_size = min(max(int_value(page_size, 50), 1), 200)
         clauses: list[str] = ["status <> 'withdrawn'"]
         params: list[Any] = []
+        if normalized_scope_key != "all":
+            clauses.append("scope_month = %s::date")
+            params.append(month_start(normalized_scope_key))
         if normalized_family != "all":
             clauses.append("family = %s")
             params.append(normalized_family)
@@ -5494,13 +5499,20 @@ class PostgresReadModelRepository:
             "source_versions": source_versions,
         }
 
-    def save_turnover_ledger_rows(self, payload: dict[str, Any]) -> None:
+    def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
         rows = payload.get("rows") if isinstance(payload, dict) else None
         if not isinstance(rows, list):
             return
+        normalized_scope_key = text(scope_key) or text(payload.get("scope_key")) or "all"
 
         def write(connection: Any) -> None:
-            connection.execute("delete from read_model.turnover_ledger_rows", ())
+            if normalized_scope_key == "all":
+                connection.execute("delete from read_model.turnover_ledger_rows", ())
+            else:
+                connection.execute(
+                    "delete from read_model.turnover_ledger_rows where scope_month = %s::date",
+                    (month_start(normalized_scope_key),),
+                )
             for index, item in enumerate(rows):
                 if not isinstance(item, dict):
                     continue

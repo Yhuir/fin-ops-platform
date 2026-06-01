@@ -241,7 +241,7 @@ class DeployOAScriptTest(unittest.TestCase):
         script = ENSURE_WORKERS_SCRIPT_PATH.read_text()
 
         self.assertIn(
-            "oa-sync workbench workbench-matching bank-detail search-pending invoice-usage-collection cost-tax import",
+            "oa-sync workbench workbench-matching bank-detail turnover-ledger search-pending invoice-usage-collection cost-tax import",
             script,
         )
         for instance_name in (
@@ -249,6 +249,7 @@ class DeployOAScriptTest(unittest.TestCase):
             "workbench",
             "workbench-matching",
             "bank-detail",
+            "turnover-ledger",
             "search-pending",
             "invoice-usage-collection",
             "cost-tax",

@@ -4,6 +4,7 @@ import unittest
 
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+from fin_ops_platform.services.runtime_worker_registry import required_worker_instance_names
 
 
 class FakeConnection:
@@ -123,7 +124,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["max_pending_age_seconds"], 42.0)
         self.assertEqual(summary["oldest_pending_event_age_seconds"], 42.0)
         self.assertEqual(summary["worker_heartbeat_lag_seconds"], 8.0)
-        self.assertEqual(summary["missing_required_worker_count"], 8)
+        self.assertEqual(summary["missing_required_worker_count"], len(required_worker_instance_names()))
         self.assertEqual(summary["stale_required_worker_count"], 0)
         self.assertEqual(summary["worker_metrics"][0]["status"], "missing")
         self.assertEqual(summary["read_model_refresh_duration_ms"], {"p50": 120.0, "p95": 300.0, "p99": 450.0})

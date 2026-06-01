@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
+from types import SimpleNamespace
 from threading import Thread
 from typing import Any
 
@@ -19,7 +20,11 @@ from fin_ops_platform.services.cost_tax_sql_projection import (
     CostStatisticsSqlProjectionBuilder,
     TaxOffsetSqlProjectionBuilder,
 )
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConfigurationError,
+    PostgresConnection,
+    PostgresSettings,
+)
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
 from fin_ops_platform.services.etc_business_batch_application_service import ETC_BUSINESS_OA_DETECTION_EVENT_TYPE
 from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
@@ -43,6 +48,8 @@ from fin_ops_platform.services.search_pending_read_model_refresh import SearchPe
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 from fin_ops_platform.services.state_store import default_data_dir
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
+from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
+from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLedgerSqlProjectionBuilder
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
@@ -78,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-pending-invoice-read-model-refresh", action="store_true", help="Register pending invoice SQL read model refresh handler.")
     parser.add_argument("--enable-bank-account-balance-read-model-refresh", action="store_true", help="Register bank account balance SQL read model refresh handler.")
     parser.add_argument("--enable-bank-detail-read-model-refresh", action="store_true", help="Register bank detail SQL read model refresh handler.")
+    parser.add_argument("--enable-turnover-ledger-read-model-refresh", action="store_true", help="Register turnover ledger SQL read model refresh handler.")
     parser.add_argument("--enable-input-invoice-usage-read-model-refresh", action="store_true", help="Register input invoice usage SQL read model refresh handler.")
     parser.add_argument("--enable-output-invoice-collection-read-model-refresh", action="store_true", help="Register output invoice collection SQL read model refresh handler.")
     parser.add_argument("--enable-oa-pending-payment-read-model-refresh", action="store_true", help="Register OA pending payment SQL read model refresh handler.")
@@ -94,10 +102,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    settings = PostgresSettings.from_env()
+    postgres_configuration_error = ""
+    try:
+        settings = PostgresSettings.from_env()
+    except PostgresConfigurationError as exc:
+        if not args.check:
+            raise
+        settings = None
+        postgres_configuration_error = str(exc)
     queue_settings = RuntimeQueueSettings.from_env()
-    connection = PostgresConnection(settings)
-    queue = RuntimeQueueRepository(connection)
+    connection = PostgresConnection(settings) if settings is not None else None
+    queue = RuntimeQueueRepository(connection) if connection is not None else SimpleNamespace()
     redis_helper = RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env())
     config = RuntimeWorkerConfig(
         worker_id=args.worker_id or RuntimeWorkerConfig().worker_id,
@@ -205,6 +220,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers["bank_detail.read_model.refresh"] = refresh_service.handle_runtime_event
         if "bank_detail.read_model.refresh" not in config.event_types:
             config.event_types.append("bank_detail.read_model.refresh")
+    if args.enable_turnover_ledger_read_model_refresh:
+        projection_builder = TurnoverLedgerSqlProjectionBuilder(connection=connection)
+        refresh_service = TurnoverLedgerReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue,
+        )
+        handlers["turnover_ledger.read_model.refresh"] = refresh_service.handle_runtime_event
+        if "turnover_ledger.read_model.refresh" not in config.event_types:
+            config.event_types.append("turnover_ledger.read_model.refresh")
     if args.enable_bank_account_balance_read_model_refresh:
         projection_builder = BankAccountBalanceProjectionBuilder(connection=connection)
         refresh_service = BankAccountBalanceReadModelRefreshService(
@@ -258,7 +282,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "service": "fin-ops-platform-worker",
-                    "postgres": settings.redacted_database_url,
+                    "postgres": settings.redacted_database_url if settings is not None else "unconfigured",
+                    "postgres_config_error": postgres_configuration_error,
                     "queue_backend": queue_settings.backend,
                     "rabbitmq_configured": bool(queue_settings.rabbitmq_url),
                     "rabbitmq_exchange": queue_settings.rabbitmq_exchange,

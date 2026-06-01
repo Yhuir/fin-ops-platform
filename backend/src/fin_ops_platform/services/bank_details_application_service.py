@@ -43,6 +43,7 @@ class BankDetailsApplicationService:
         clear_relation_tag_projection_cache: Callable[[], Any],
         available_month_scope_keys_provider: Callable[[], list[str]],
         enqueue_bank_account_balance_refresh: Callable[..., bool],
+        enqueue_turnover_ledger_refresh: Callable[..., bool] | None = None,
         suggestion_provider: Callable[[str], dict[str, object] | None] | None = None,
         after_category_mutation: Callable[..., Any] | None = None,
     ) -> None:
@@ -63,6 +64,7 @@ class BankDetailsApplicationService:
         self._clear_relation_tag_projection_cache = clear_relation_tag_projection_cache
         self._available_month_scope_keys_provider = available_month_scope_keys_provider
         self._enqueue_bank_account_balance_refresh = enqueue_bank_account_balance_refresh
+        self._enqueue_turnover_ledger_refresh = enqueue_turnover_ledger_refresh
         self._suggestion_provider = suggestion_provider
         self._after_category_mutation = after_category_mutation
 
@@ -279,6 +281,7 @@ class BankDetailsApplicationService:
     def finalize_auto_tag_rules_update(self, event: dict[str, object]) -> None:
         self._clear_relation_tag_projection_cache()
         self._clear_turnover_ledger_read_model()
+        self._enqueue_turnover_ledger_read_model_refreshes(["all"], reason="bank_auto_tag_rules_changed")
         priority_scope_keys = [
             str(scope_key).strip()
             for scope_key in list(event.get("bank_detail_priority_scope_keys") or [])
@@ -608,6 +611,10 @@ class BankDetailsApplicationService:
             )
         else:
             self._enqueue_read_model_refreshes(affected_months or ["all"], reason="bank_detail_category_confirmation_changed")
+            self._enqueue_turnover_ledger_read_model_refreshes(
+                affected_months or ["all"],
+                reason="bank_detail_category_confirmation_changed",
+            )
             self._invalidate_after_category_mutation(affected_months)
             self._audit_service.record_action(
                 actor_id=actor_id,
@@ -783,6 +790,25 @@ class BankDetailsApplicationService:
         for scope_key in [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]:
             self._delete_redis_cache(scope_key)
             enqueue(scope_type="bank_detail", scope_key=scope_key, reason=reason)
+            enqueued = True
+        return enqueued
+
+    def _enqueue_turnover_ledger_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
+        enqueue = self._enqueue_turnover_ledger_refresh
+        if callable(enqueue):
+            return bool(enqueue(scope_keys, reason=reason))
+        queue_repository = getattr(self._runtime_repositories, "queue_repository", None)
+        queue_enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(queue_enqueue):
+            return False
+        normalized_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if str(scope_key).strip()
+        ] or ["all"]
+        enqueued = False
+        for scope_key in sorted(dict.fromkeys(normalized_scope_keys)):
+            queue_enqueue(scope_type="turnover_ledger", scope_key=scope_key, reason=reason)
             enqueued = True
         return enqueued
 

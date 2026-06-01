@@ -19,6 +19,14 @@ from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
+class _QueueRecorder:
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+        self.enqueued.append((scope_type, scope_key, reason))
+
+
 class TurnoverLedgerApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -168,7 +176,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         return transaction_id
 
     def test_get_turnover_ledger_returns_summary_rows_and_filters(self) -> None:
-        with TemporaryDirectory() as temp_dir:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -188,7 +196,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(detail_payload["relation"]["relation_id"], relation_id)
         self.assertEqual(len(detail_payload["bank_rows"]), 2)
 
-    def test_get_turnover_ledger_rebuilds_stale_sql_read_model_source_versions(self) -> None:
+    def test_get_turnover_ledger_enqueues_refresh_for_stale_sql_read_model_source_versions(self) -> None:
         class StaleTurnoverReadRepository:
             def __init__(self) -> None:
                 self.saved_payload: dict[str, object] | None = None
@@ -203,26 +211,30 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "source_versions": {"turnover_ledger_schema_version": "old"},
                 }
 
-            def save_turnover_ledger_rows(self, payload: dict[str, object]) -> None:
+            def save_turnover_ledger_rows(self, payload: dict[str, object], **_kwargs: object) -> None:
                 self.saved_payload = payload
 
-        with TemporaryDirectory() as temp_dir:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
             repository = StaleTurnoverReadRepository()
+            queue = _QueueRecorder()
             app._workbench_sql_read_repository = repository
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._turnover_ledger_query_service._read_repository = repository
+            app._turnover_ledger_query_service._refresh_queue_repository = queue
 
             response = app.handle_request("GET", "/api/turnover-ledger")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["rows"][0]["counterparty_name"], "梁希涛")
-        self.assertNotEqual(payload["rows"][0]["relation_id"], "stale_sql_row")
-        self.assertIsNotNone(repository.saved_payload)
-        saved_payload = repository.saved_payload or {}
-        self.assertEqual(saved_payload["source_versions"], app._turnover_ledger_source_versions())
-        self.assertEqual(saved_payload["rows"][0]["source_versions"], app._turnover_ledger_source_versions())
+        self.assertEqual(payload["rows"][0]["relation_id"], "stale_sql_row")
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
+        self.assertIn(("turnover_ledger", "all", "api_stale"), queue.enqueued)
+        self.assertIsNone(repository.saved_payload)
 
     def test_get_turnover_ledger_grouped_view_returns_groups(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -251,6 +263,95 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["groups"][0]["row_span"], 1 + len(payload["groups"][0]["flow_rows"]))
         self.assertNotIn("rows", payload)
         self.assertNotIn("rows", payload["groups"][0])
+
+    def test_confirmed_external_turnover_rule_enters_ledger_with_default_selection(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            ApplicationStateStore(Path(temp_dir)).save_app_settings(
+                {
+                    "bank_transaction_tags": {
+                        "version": 1,
+                        "definitions": [
+                            {
+                                "code": "external_rule_borrow_out",
+                                "label": "借出款",
+                                "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                                "source": "custom",
+                                "status": "active",
+                                "output_primary_label": "外部往来款付款",
+                                "output_sub_label": "借出款",
+                                "turnover_role": "external_turnover",
+                                "turnover_action_type": "pending_collection",
+                                "direction": "any",
+                                "account_scope": {"type": "any", "values": []},
+                                "rules": {
+                                    "match_fields": ["all_text"],
+                                    "contains_any": ["借出"],
+                                    "contains_all": [],
+                                    "exact_any": [],
+                                    "regex_any": [],
+                                    "none_of": [],
+                                },
+                            }
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "version": 1,
+                        "groups": {
+                            "requires_invoice": {"tag_codes": []},
+                            "bank_statement_as_invoice": {"tag_codes": []},
+                            "no_invoice_required": {"tag_codes": []},
+                        },
+                    },
+                }
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            preview = app._import_service.preview_import(
+                batch_type=BatchType.BANK_TRANSACTION,
+                source_name="external-turnover.xlsx",
+                imported_by="YNSYLP005",
+                rows=[
+                    {
+                        "account_no": "6222000011118106",
+                        "account_name": "云南溯源科技有限公司基本户",
+                        "txn_date": "2026-03-06",
+                        "trade_time": "2026-03-06 10:00:00",
+                        "counterparty_name": "昆明建设集团",
+                        "debit_amount": "5000.00",
+                        "credit_amount": "",
+                        "summary": "借出周转款",
+                        "remark": "项目A",
+                    }
+                ],
+            )
+            app._import_service.confirm_import(preview.id)
+            transaction_id = app._import_service.list_transactions()[0].id
+
+            before_response = app.handle_request("GET", "/api/turnover-ledger")
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/bank-details/transactions/{transaction_id}/category-confirmation",
+                body=json.dumps({"category_code": "external_rule_borrow_out", "category_third_label": "公司往来"}),
+            )
+            flat_response = app.handle_request("GET", "/api/turnover-ledger")
+            grouped_response = app.handle_request("GET", "/api/turnover-ledger?view=grouped&family=company")
+            before_payload = json.loads(before_response.body)
+            flat_payload = json.loads(flat_response.body)
+            grouped_payload = json.loads(grouped_response.body)
+
+        self.assertEqual(before_response.status_code, 200)
+        self.assertEqual(before_payload["pagination"]["total"], 0)
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(flat_response.status_code, 200)
+        self.assertEqual(flat_payload["pagination"]["total"], 1)
+        self.assertEqual(flat_payload["rows"][0]["family"], "company")
+        self.assertEqual(flat_payload["rows"][0]["category_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(grouped_response.status_code, 200)
+        self.assertEqual(grouped_payload["pagination"]["total"], 1)
+        flow = grouped_payload["groups"][0]["flow_rows"][0]
+        self.assertEqual(flow["category_primary_label"], "外部往来款付款")
+        self.assertEqual(flow["category_sub_label"], "借出款")
+        self.assertEqual(flow["category_third_label"], "公司往来")
+        self.assertEqual(flow["category_label_path"], ["外部往来款付款", "借出款", "公司往来"])
 
     def test_turnover_ledger_tag_selection_get_put_and_version_conflict(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -323,6 +424,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 }
             )
             app = build_application(data_dir=Path(temp_dir))
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
 
             response = app.handle_request("GET", "/api/turnover-ledger/tag-selection")
             payload = json.loads(response.body)
@@ -366,13 +469,14 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(set(payload["selected_tag_codes"]), {"external_rule_borrow_out", "external_rule_repaid"})
         self.assertEqual(save_response.status_code, 200)
         self.assertEqual(saved_payload["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertIn(("turnover_ledger", "all", "turnover_ledger_tag_selection_changed"), queue.enqueued)
         self.assertEqual(conflict_response.status_code, 409)
         self.assertEqual(json.loads(conflict_response.body)["error"], "turnover_ledger_tag_selection_version_conflict")
         self.assertEqual(invalid_response.status_code, 400)
         self.assertEqual(json.loads(invalid_response.body)["error"], "invalid_turnover_ledger_tag")
 
     def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
-        with TemporaryDirectory() as temp_dir:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
 
@@ -622,7 +726,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_turnover_ledger_extra")
 
     def test_relation_extra_put_rejects_readonly_user(self) -> None:
-        with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:
+        with self._without_default_test_auth(), TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
@@ -726,7 +830,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(data_row[6], "昆明建设集团")
 
     def test_confirm_and_withdraw_require_mutation_permission_and_write_audit(self) -> None:
-        with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:
+        with self._without_default_test_auth(), TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._app_settings_service.update_settings(
                 completed_project_ids=[],

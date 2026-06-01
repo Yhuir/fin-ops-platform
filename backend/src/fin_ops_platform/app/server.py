@@ -268,8 +268,10 @@ from fin_ops_platform.services.tax_offset_read_model_service import (
 )
 from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntimeService
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
+from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION, TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_TYPE
+from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_relation_service import (
     TURNOVER_CATEGORY_RULES,
     TURNOVER_RELATION_SCHEMA_VERSION,
@@ -845,6 +847,13 @@ class Application:
             category_provider=self._bank_transaction_effective_category_provider,
             selected_tag_codes_provider=self._app_settings_service.turnover_ledger_selected_tag_codes,
         )
+        self._turnover_ledger_query_service = TurnoverLedgerQueryService(
+            read_repository=getattr(self, "_workbench_sql_read_repository", None),
+            refresh_queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            source_versions_provider=self._turnover_ledger_source_versions,
+            legacy_payload_builder=self._turnover_ledger_service.list_ledger,
+            settings_provider=lambda: {"postgres_required": self._requires_sql_read_model_runtime()},
+        )
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_service = EtcService(state_store=self._state_store)
         self._etc_service.set_canonical_invoice_key_exists(self._canonical_invoice_key_exists_for_etc_import)
@@ -949,6 +958,7 @@ class Application:
             ledger_service=self._turnover_ledger_service,
             relation_service=self._turnover_relation_service,
             extra_service=self._turnover_ledger_extra_service,
+            query_service=self._turnover_ledger_query_service,
         )
 
     def _configure_tax_offset_application_services(self) -> None:
@@ -10860,6 +10870,10 @@ class Application:
     ) -> None:
         scope_keys = affected_months or ["all"]
         self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="bank_detail_category_confirmation_changed")
+        self._enqueue_turnover_ledger_read_model_refreshes(
+            scope_keys,
+            reason="bank_detail_category_confirmation_changed",
+        )
         self._invalidate_workbench_after_bank_transaction_categories(affected_months)
         self._audit_service.record_action(
             actor_id=actor_id,
@@ -11450,6 +11464,24 @@ class Application:
             enqueued = True
         return enqueued
 
+    def _enqueue_turnover_ledger_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        normalized_scope_keys = [
+            str(item).strip()
+            for item in list(scope_keys or [])
+            if str(item).strip() and (str(item).strip() == "all" or SEARCH_MONTH_RE.match(str(item).strip()))
+        ]
+        if not normalized_scope_keys:
+            normalized_scope_keys = ["all"]
+        enqueued = False
+        for scope_key in sorted(dict.fromkeys(normalized_scope_keys)):
+            enqueue(scope_type="turnover_ledger", scope_key=scope_key, reason=reason)
+            enqueued = True
+        return enqueued
+
     def _bank_detail_redis_cache_key(self, kind: str, query: dict[str, object], *, scope_summary: dict[str, object]) -> str:
         signature = {
             "kind": kind,
@@ -11638,6 +11670,11 @@ class Application:
             ),
             available_month_scope_keys_provider=getattr(self, "_bank_detail_available_month_scope_keys", lambda: ["all"]),
             enqueue_bank_account_balance_refresh=getattr(self, "_enqueue_bank_account_balance_read_model_refresh", lambda **_kwargs: False),
+            enqueue_turnover_ledger_refresh=getattr(
+                self,
+                "_enqueue_turnover_ledger_read_model_refreshes",
+                lambda _scope_keys, **_kwargs: False,
+            ),
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
             after_category_mutation=after_category_mutation if callable(after_category_mutation) else None,
         )
@@ -11997,21 +12034,6 @@ class Application:
         status = query.get("status", [None])[0]
         page = int(query.get("page", ["1"])[0] or 1)
         page_size = int(query.get("page_size", ["50"])[0] or 50)
-        repository = getattr(self, "_workbench_sql_read_repository", None)
-        if str(view or "").strip().lower() != "grouped":
-            read_turnover_ledger = getattr(repository, "list_turnover_ledger_view", None)
-            if callable(read_turnover_ledger):
-                read_model_payload = read_turnover_ledger(
-                    family=family,
-                    direction=direction,
-                    status=status,
-                    page=page,
-                    page_size=page_size,
-                )
-                if isinstance(read_model_payload, dict):
-                    stale_reasons = self._turnover_ledger_stale_reasons(read_model_payload.get("source_versions"))
-                    if not stale_reasons:
-                        return self._json_response(HTTPStatus.OK, read_model_payload)
         try:
             payload = self._turnover_ledger_api_routes.list_ledger(
                 view=view,
@@ -12026,14 +12048,6 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_turnover_ledger_request", "message": str(exc)},
             )
-        if str(view or "").strip().lower() != "grouped":
-            payload = self._with_turnover_ledger_source_versions(payload)
-            save_turnover_ledger = getattr(repository, "save_turnover_ledger_rows", None)
-            if callable(save_turnover_ledger):
-                try:
-                    save_turnover_ledger(payload)
-                except Exception:
-                    pass
         return self._json_response(HTTPStatus.OK, payload)
 
     def _handle_api_turnover_ledger_tag_selection(self) -> Response:
@@ -12067,6 +12081,10 @@ class Application:
             )
             return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
         self._clear_turnover_ledger_read_model_best_effort()
+        self._enqueue_turnover_ledger_read_model_refreshes(
+            ["all"],
+            reason="turnover_ledger_tag_selection_changed",
+        )
         return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_turnover_ledger_bank_row_tags_batch(
@@ -12258,6 +12276,10 @@ class Application:
             )
         self._persist_turnover_ledger_extras_best_effort(operation="turnover_ledger_extra_updated")
         self._clear_turnover_ledger_read_model_best_effort()
+        self._enqueue_turnover_ledger_read_model_refreshes(
+            ["all"],
+            reason="turnover_relation_extra_changed",
+        )
         result["turnover_ledger_invalidated"] = True
         return self._json_response(HTTPStatus.OK, result)
 
@@ -12357,9 +12379,14 @@ class Application:
         return session
 
     def _after_turnover_relation_mutation(self, affected_months: list[str]) -> None:
+        self._persist_turnover_relations_best_effort(operation="turnover_relation_mutation_pre_invalidation")
         self._invalidate_workbench_after_bank_transaction_categories(affected_months)
         self._persist_turnover_relations_best_effort(operation="turnover_relation_mutation")
         self._clear_turnover_ledger_read_model_best_effort()
+        self._enqueue_turnover_ledger_read_model_refreshes(
+            affected_months or ["all"],
+            reason="turnover_relation_changed",
+        )
 
     def _clear_turnover_ledger_read_model_best_effort(self) -> None:
         repository = getattr(self, "_workbench_sql_read_repository", None)
@@ -12421,6 +12448,10 @@ class Application:
                 break
         self._search_service.clear_cache()
         self._enqueue_bank_detail_read_model_refreshes(["all"], reason="bank_transaction_tag_settings_changed")
+        self._enqueue_turnover_ledger_read_model_refreshes(
+            ["all"],
+            reason="bank_transaction_tag_settings_changed",
+        )
 
     def _finalize_bank_auto_tag_rules_update(self, event: dict[str, object]) -> None:
         projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
@@ -12431,6 +12462,10 @@ class Application:
             except Exception:
                 pass
         self._clear_turnover_ledger_read_model_best_effort()
+        self._enqueue_turnover_ledger_read_model_refreshes(
+            ["all"],
+            reason="bank_auto_tag_rules_changed",
+        )
         priority_scope_keys = [
             str(scope_key).strip()
             for scope_key in list(event.get("bank_detail_priority_scope_keys") or [])
@@ -14405,28 +14440,14 @@ class Application:
         return reasons
 
     def _turnover_ledger_source_versions(self) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "turnover_ledger_schema_version": TURNOVER_LEDGER_SCHEMA_VERSION,
-            "turnover_relation_schema_version": TURNOVER_RELATION_SCHEMA_VERSION,
-            "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
-            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
-            "turnover_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._turnover_relation_service.snapshot()
-            ),
-            "turnover_ledger_extras_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._turnover_ledger_api_routes.extras_snapshot()
-            ),
-            "turnover_ledger_tag_selection_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._app_settings_service.get_turnover_ledger_tag_selection_payload()
-            ),
-            "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._bank_transaction_category_service.snapshot()
-            ),
-        }
-        projection_sync_version = self._current_oa_projection_sync_version()
-        if projection_sync_version:
-            payload["oa_projection_sync_version"] = projection_sync_version
-        return payload
+        return build_turnover_ledger_source_versions(
+            relation_service=self._turnover_relation_service,
+            extra_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
+            app_settings_service=self._app_settings_service,
+            bank_transaction_category_service=self._bank_transaction_category_service,
+            bank_auto_tag_rules_version_provider=self._current_bank_auto_tag_rules_version,
+            oa_projection_sync_version=self._current_oa_projection_sync_version(),
+        )
 
     def _turnover_ledger_stale_reasons(self, source_versions: object) -> list[str]:
         return source_version_mismatch_reasons(
