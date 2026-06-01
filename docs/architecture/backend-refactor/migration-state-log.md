@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra handler minimal wiring |
+| 当前阶段 | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` planned |
 | 最近 verified prompt | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P058 新增 relation extra queue failure characterization；`tests.test_turnover_ledger_api` 28 tests 通过，UoW contract 11 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P059 - Turnover Ledger Relation Extra Handler Minimal Wiring`；只把 relation extra handler 最小接入 facade，不迁移其他写 API |
+| 下一条允许任务 | 执行 `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary`；先审计真实 transaction/repository/dirty-outbox adapter 可用性，不贸然改 `server.py` |
 
 ## Prompt 执行日志
 
@@ -5752,6 +5752,30 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests。
+
+### PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary
+
+状态：`planned`
+
+#### 范围
+
+- 只审计 relation extra handler 接入 facade/UoW 前所需的真实 adapter 边界。
+- 明确是否已有可用 PostgreSQL transaction connection、extra repository adapter 和 dirty/outbox writer adapter。
+- 不修改 production code，不迁移 `server.py` handler。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P059。
+
+#### 验收标准
+
+- 文档明确能否安全进行真实 handler wiring。
+- 如果缺少真实 transaction boundary，必须将下一步调整为 adapter/repository skeleton，而不是直接接入 handler。
 
 ## 维护规则
 

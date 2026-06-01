@@ -15250,4 +15250,95 @@ Post-Flight:
 - 验证：
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests。
-- 下一步建议：生成并审查 `PF-P059 - Turnover Ledger Relation Extra Handler Minimal Wiring`。PF-P059 只允许把 relation extra handler 最小接入 facade，不得迁移 confirm、withdraw、tag selection 或 bank-row-tags。
+- 下一步建议：生成并审查 `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary`。PF-P059 应先确认真实 transaction/repository/dirty-outbox adapter 是否具备，不应在缺少真实 transaction boundary 时贸然改 `server.py`。
+
+## PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary
+
+Role:
+你是一位精通 Python Clean Architecture、事务边界、Repository/Adapter 设计和遗留系统渐进迁移的后端架构师。
+
+Context:
+PF-P057 已新增最小 `TurnoverLedgerWriteFacade.update_relation_extra()`；PF-P058 已锁定真实 relation extra handler 当前 queue failure 行为。
+
+在准备把真实 `PUT /api/turnover-ledger/relations/{id}/extra` handler 接入 facade 前，必须先确认真实 runtime 是否具备：
+- 可注入 `TurnoverLedgerWriteUnitOfWork` 的 PostgreSQL transaction connection；
+- relation extra repository adapter；
+- transaction-bound dirty/outbox writer adapter；
+- 兼容现有 response row shape 的 row/detail provider。
+
+如果这些 adapter 不存在，不得用 no-op/fake transaction 在 production path 假装接入 UoW。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 Application 初始化、relation extra handler、Postgres/runtime repository 相关成员
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py 中 `update_relation_extra`
+   - tests/test_turnover_ledger_api.py relation extra tests
+2. 必须用 CodeGraph 或源码确认：
+   - `Application.__init__` 是否持有可用于业务写 UoW 的 transaction connection；
+   - 当前 state store / postgres repository / runtime queue 中是否已有可复用 adapter；
+   - `TurnoverLedgerApiRoutes.update_relation_extra` 当前如何构造 `row` response。
+3. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+只做 readiness / adapter boundary 审计和文档回写，不修改生产代码或测试。
+
+Required Planning Work:
+1. 更新 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`，新增 “Relation Extra Handler Wiring Readiness”。
+2. 必须输出：
+   - 当前可用 connection / repository / runtime queue facts；
+   - 可复用封装清单；
+   - 缺失 adapter 清单；
+   - 是否允许下一步直接 wiring；
+   - 如果不允许，下一步应先做哪个 adapter/repository skeleton。
+3. 必须明确禁止：
+   - no-op transaction；
+   - fake transaction；
+   - 将 `Application` 注入 facade；
+   - service 内直接读 HTTP header/cookie；
+   - service 直接 import `app.auth`。
+4. 更新下一条 prompt 建议：
+   - 若 adapter 齐备，下一步可以是 `PF-P060 - Turnover Ledger Relation Extra Handler Minimal Wiring`；
+   - 若 adapter 不齐，下一步必须是最小 adapter/repository skeleton 或 contract tests。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得修改 `server.py`。
+- 不得接入真实 handler。
+- 不得迁移 confirm、withdraw、tag selection 或 bank-row-tags batch。
+- 不得修改 runtime queue、worker、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得访问真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "Relation Extra Handler Wiring Readiness|PF-P059|no-op transaction|fake transaction|adapter" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P059 status = implemented / verified / blocked。
+   - 记录 readiness 判断和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P059 执行结果。
+3. 不生成 MG，除非状态机确认当前 relation extra facade slice 已达到可合并边界。
+```
+
+### 审查结论
+
+- PF-P059 调整为 readiness/adapters 审计是必要的：当前尚未证明 `Application` 中存在可直接注入 Turnover Ledger 写 UoW 的真实 transaction connection。
+- Prompt 明确禁止 fake/no-op transaction，避免为了“接入 facade”制造假的一致性边界。

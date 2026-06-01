@@ -480,6 +480,20 @@ PF-P058 execution result:
 
 PF-P059 recommended direction:
 
-- Wire only `PUT /api/turnover-ledger/relations/{id}/extra` to the new facade.
-- Preserve current API response shape and existing characterization tests unless the prompt explicitly documents an intentional semantic change.
+- First audit whether real transaction/repository/dirty-outbox adapters exist for relation extra handler wiring.
+- Do not wire `server.py` to the facade if doing so would require fake/no-op production transactions.
+- Preserve current API response shape and existing characterization tests unless a later prompt explicitly documents an intentional semantic change.
 - Do not migrate confirm, withdraw, tag selection or bank-row-tags.
+
+## PF-P059 Relation Extra Handler Wiring Readiness Plan
+
+状态：`planned`
+
+PF-P059 should verify that the runtime has real adapters before relation extra handler wiring:
+
+- PostgreSQL transaction connection usable by `TurnoverLedgerWriteUnitOfWork`;
+- relation extra repository adapter;
+- transaction-bound dirty/outbox writer adapter;
+- row/detail provider for preserving `row` response shape.
+
+If any of these are missing, the next prompt should build the missing adapter or contract tests first. It must not introduce a fake/no-op production transaction just to wire the handler.
