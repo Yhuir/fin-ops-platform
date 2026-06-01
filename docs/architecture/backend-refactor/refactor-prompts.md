@@ -20472,3 +20472,408 @@ Post-Flight:
 ### 下一条 Prompt 上下文
 
 PF-P097-MG 已 verified，待 `git push origin main`。push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 Turnover Ledger prompt；不得在 main 或旧分支继续开发。
+
+## PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
+
+```text
+/goal
+PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构审计工程师。你必须只做 discovery/planning 和文档回写，基于 PF-P097-MG 后的最新 main，重新盘点 Turnover Ledger 剩余写路径，并选择下一条最小可执行切片。
+
+Context:
+PF-P097-MG 已 verified 并已 push 到 `origin/main`。当前分支必须从最新 main 新建。Turnover Ledger 已完成：
+- read facade 初步抽离；
+- tag selection UoW；
+- relation extra UoW；
+- bank row tags batch / confirm / withdraw PostgreSQL path 接入 UoW seam；
+- PostgreSQL write port ownership skeleton 和 server composition wiring。
+
+PF-P098 的目标不是写代码，而是校准剩余工作，避免在 stale plan 上继续执行。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - docs/architecture/backend-refactor/module-refactor-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P097-MG 已 verified。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+5. 如使用 CodeGraph，优先用 `codegraph_context` / `codegraph_explore` 盘点 Turnover Ledger write handlers 和 facade methods。
+
+Task:
+1. 更新 Turnover Ledger write path matrix：
+   - 列出所有 Turnover Ledger write/read-like mutation endpoints；
+   - 标明 handler、facade method、UoW status、PostgreSQL path status、local/dev/test path status、remaining gap。
+2. 盘点 `server.py` 中仍属于 Turnover Ledger 的 orchestration 残留：
+   - handler 内是否仍直接做业务计算；
+   - handler 是否仍直接调用 state store persistence；
+   - handler 是否仍直接 clear read model；
+   - handler 是否仍组合 facts/audit/dirty/outbox。
+3. 盘点 service/repository ownership：
+   - business service 是否仍散落 SQL；
+   - repository 是否承担业务规则；
+   - write ports 是否仍依赖 Application 或 HTTP context。
+4. 盘点 tests：
+   - 当前哪些 write paths 有 API characterization tests；
+   - 哪些 write paths 有 UoW contract tests；
+   - 哪些路径仍缺 rollback、idempotency、stale write、dirty/outbox tests。
+5. 输出下一条最小 Micro-JIT prompt 决策：
+   - 如果下一步应写 characterization/contract tests，说明测试目标；
+   - 如果下一步应做 extraction/refactor，说明具体文件和函数；
+   - 如果当前 Turnover Ledger 已到可合并/完成边界，说明需要 completion/MG。
+6. 更新 `turnover-ledger-write-uow-plan.md`，写入 PF-P098 rebaseline 结果和下一条 prompt 建议。
+
+Allowed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 SQL migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+- 不得进入其它业务模块。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P098|Remaining Write Path Rebaseline|Next Slice Decision|Write Path Matrix|Residual Orchestration" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P098 status = implemented / verified / blocked。
+   - 记录 rebaseline 结论、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P098 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 remaining write path matrix、residual orchestration、test gaps、next slice decision。
+4. PF-P098 verified 后，只生成一条下一 prompt，不得一次性生成多个。
+```
+
+### 审查结论
+
+- PF-P098 是 PF-P097-MG 后合理的再校准步骤，避免在已被 PF-P097 改写过的旧矩阵上继续执行。
+- prompt 只允许文档和发现，不修改业务代码或 tests，适合作为下一切片选择门。
+
+### 执行结果
+
+- 状态：`verified`。
+- 已基于 PF-P097-MG 后的最新 main 重新盘点 Turnover Ledger write path matrix。
+- 确认 tag selection、bank row tags batch、relation extra、confirm、withdraw 都已有 facade/UoW seam。
+- 确认 PostgreSQL bank row tags / confirm / withdraw 已接入 service-level write ports。
+- 确认最大剩余 correctness gap 是 withdraw duplicate/stale write：当前 `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` 仍记录第二次 withdraw 会二次 mutation/refresh。
+- 确认 UoW 已有 expected_versions / stale_precondition_port seam，但真实 relation write commands 尚未传 expected_versions，server composition 仍是 no-op stale precondition port。
+
+### 验证结果
+
+- `git status --short --branch`：Pass，仅有 PF-P098 文档范围改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P098|Remaining Write Path Rebaseline|Next Slice Decision|Write Path Matrix|Residual Orchestration" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests`。PF-P099 只应新增/调整 tests，锁定 withdraw duplicate/stale write 的目标行为；不得修改 production code，不得同时处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
+
+## PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests
+
+```text
+/goal
+PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须只新增/调整测试，锁定 Turnover Ledger withdraw relation 的 duplicate/stale write 目标行为。不得修改 production code。
+
+Context:
+PF-P098 已 verified。PF-P098 发现当前最大 correctness gap 是 withdraw duplicate/stale write：
+- `tests/test_turnover_ledger_api.py::test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` 明确记录当前第二次 withdraw 仍会二次 mutation/refresh。
+- `TurnoverLedgerWriteUnitOfWork` 已有 `expected_versions` / `stale_precondition_port` seam。
+- 真实 `TurnoverLedgerWriteFacade.withdraw_relation(...)` command 当前未携带 expected_versions，server composition 仍注入 no-op stale precondition port。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P098 已 verified。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Task:
+1. 在 `tests/test_turnover_ledger_api.py` 中保留 current behavior characterization：
+   - `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` 可以保留原名或标记为 legacy/current behavior；
+   - 不得删除该测试，除非新增等价 current behavior coverage。
+2. 在 `tests/test_turnover_ledger_api.py` 中新增 future target test，使用 `unittest.expectedFailure`：
+   - duplicate withdraw 应被拒绝；
+   - 第二次 withdraw 不得追加第二条 withdraw audit；
+   - 第二次 withdraw 不得 enqueue 第二次 turnover read model refresh；
+   - 响应应为 conflict/error，而不是 200 success。
+3. 在 `tests/test_turnover_ledger_uow_contract.py` 中新增 future target test，使用 `unittest.expectedFailure`：
+   - `TurnoverLedgerWriteFacade.withdraw_relation(...)` 应支持传入 expected_versions；
+   - expected_versions 应进入 `TurnoverLedgerWriteCommand.expected_versions`；
+   - stale precondition failure 时，不得调用 relation repository withdraw handler；
+   - transaction 必须 rollback，不得 dirty/outbox enqueue。
+4. 保持默认 CI 绿色。尚未实现目标语义必须使用 `unittest.expectedFailure`，不得 skip。
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 SQL migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+- 不得同时处理 relation extra stale write、fallback path cleanup 或 local transaction shim extraction。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "PF-P099|withdraw.*duplicate|expected_versions|expectedFailure|stale" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P099 status = implemented / verified / blocked。
+   - 记录新增 tests、expectedFailure 数量、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P099 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 withdraw stale/duplicate contract tests 状态。
+4. PF-P099 verified 后，下一条应实现最小 withdraw expected_versions/stale guard skeleton，让 PF-P099 target tests 转绿；不得顺手处理 relation extra 或 fallback cleanup。
+```
+
+### 审查结论
+
+- PF-P099 是 PF-P098 后的正确测试锁定步骤：先保留 current behavior，再用 expectedFailure 锁定目标行为。
+- prompt 明确禁止 production code 修改，因此不会提前改变 withdraw 线上行为。
+
+### 执行结果
+
+- 状态：`verified`。
+- 保留 current behavior test `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues`。
+- 新增 API future target test `test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh`，使用 `unittest.expectedFailure`。
+- 新增 UoW/facade future target test `test_target_withdraw_relation_facade_passes_expected_versions_before_repository`，使用 `unittest.expectedFailure`。
+- 两条 target tests 锁定 duplicate/stale withdraw 目标行为：不得二次 mutation/audit/refresh，facade 应支持 expected_versions 并让 UoW 在 stale 时阻止 repository handler。
+- 未修改 production code。
+
+### 验证结果
+
+- `git status --short --branch`：Pass，仅有 PF-P099 范围内 tests 改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests，1 expected failure。
+- `rg -n "PF-P099|withdraw.*duplicate|expected_versions|expectedFailure|stale" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton`，只实现最小 expected_versions/stale guard skeleton，让 PF-P099 的 2 条 expectedFailure target tests 转为普通通过；不得处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
+
+## PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton
+
+```text
+/goal
+PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须实现最小 withdraw relation expected_versions/stale guard skeleton，让 PF-P099 的 2 条 target tests 转为普通通过，同时严格禁止扩大范围。
+
+Context:
+PF-P099 已 verified，新增 2 条 expectedFailure target tests：
+- API 层 duplicate withdraw 应被拒绝，不得二次 mutation/audit/refresh。
+- Facade/UoW 层 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 应支持 expected_versions，并让 UoW stale precondition 在 repository handler 前执行。
+
+现有事实：
+- `TurnoverRelationService.withdraw_relation(...)` 会递增 relation `version`。
+- `TurnoverLedgerWriteUnitOfWork` 已支持 command.expected_versions 和 stale_precondition_port。
+- `server.py` withdraw handler 已读取 relation detail，可看到当前 relation status/version。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P099 已 verified。
+4. 必须先运行 targeted tests，确认 PF-P099 的 2 条 expectedFailure 存在。
+
+Task:
+1. 更新 `TurnoverLedgerWriteFacade.withdraw_relation(...)`：
+   - 增加可选 `expected_versions: dict[str, object] | None = None` 参数；
+   - 将 normalized expected_versions 写入 `TurnoverLedgerWriteCommand.expected_versions`；
+   - 不改变现有 response payload shape。
+2. 更新 `server.py` withdraw handler 的最小 duplicate guard：
+   - 如果当前 relation status 已是 `withdrawn`，返回 conflict/error response；
+   - 不得执行 facade、relation mutation、audit、dirty/outbox refresh；
+   - 不能改变 `source != "manual"` guard。
+3. 在调用 facade withdraw 时，从当前 relation version 构造最小 expected_versions：
+   - key 建议为 `relation:{relation_id}`；
+   - value 使用当前 relation `version`。
+4. 移除 PF-P099 两条 target tests 的 `unittest.expectedFailure`，让它们转为普通通过。
+
+Allowed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 SQL migration。
+- 不得处理 relation extra stale write。
+- 不得清理 fallback path。
+- 不得抽离 local transaction shim。
+- 不得修改 unrelated Turnover Ledger read/query/export code。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- rg -n "PF-P100|expected_versions|relation_already_withdrawn|test_target_withdraw_duplicate|test_target_withdraw_relation_facade_passes_expected_versions|expectedFailure" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P100 status = implemented / verified / blocked。
+   - 记录 expectedFailure 转绿、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P100 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 withdraw expected_versions skeleton 状态和剩余 gap。
+4. PF-P100 verified 后，评估是否生成 cumulative MG 覆盖 PF-P098 到 PF-P100；不得直接进入 relation extra stale write。
+```
+
+### 审查结论
+
+- PF-P100 是 PF-P099 后的最小实现步骤：只处理 withdraw duplicate/stale skeleton。
+- prompt 明确不处理 relation extra、fallback cleanup 或 local transaction shim，避免 scope creep。
+
+### 执行结果
+
+- 状态：`verified`。
+- `TurnoverLedgerWriteFacade.withdraw_relation(...)` 已增加 optional `expected_versions` 参数，并透传到 `TurnoverLedgerWriteCommand.expected_versions`。
+- withdraw handler 已对已 `withdrawn` relation 返回 409 `relation_already_withdrawn`，避免 duplicate submit 二次 mutation/audit/refresh。
+- withdraw handler 已从当前 relation `version` 构造 `relation:{relation_id}` expected version 后调用 facade。
+- PF-P099 的 2 条 target tests 已从 `unittest.expectedFailure` 转为普通通过。
+- 旧 duplicate-withdraw current behavior characterization 已收敛为当前新契约。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条应生成并执行 `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate`，统一覆盖 PF-P098 到 PF-P100 的完整 diff；不得直接进入下一实现切片。
+
+## PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端重构合并门禁的高级工程师。你必须只执行当前 Turnover Ledger withdraw stale/duplicate 切片的 cumulative Merge Gate，覆盖 PF-P098 到 PF-P100 的完整 diff。不得新增业务实现。
+
+Context:
+PF-P098 到 PF-P100 已在当前分支完成：
+- PF-P098：重新盘点 Turnover Ledger 剩余写路径，选择 withdraw duplicate/stale 为下一最小切片。
+- PF-P099：新增 withdraw duplicate/stale characterization/contract tests。
+- PF-P100：实现最小 withdraw expected_versions/stale guard skeleton，让 PF-P099 的 target tests 转为普通通过。
+
+Gate Scope:
+1. 只验证并合入 Turnover Ledger withdraw stale/duplicate 切片。
+2. 允许范围只包含：
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+3. 不执行 Traffic Gate，不部署，不访问生产，不修改 Nginx、生产配置或 feature flag。
+4. 不开始 relation extra stale write、fallback cleanup、local transaction shim 抽离或下一模块。
+
+Pre-Flight:
+1. 读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 确认 PF-P098、PF-P099、PF-P100 均为 verified。
+3. 确认当前分支不是 main。
+4. 确认当前分支只包含 PF-P098 到 PF-P100 的预期 diff。
+
+Mandatory Checks:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+
+Commit / Merge Rules:
+1. 严禁使用 `git add .` 或 `git add -A`。
+2. 必须精确 `git add` 允许范围内的具体文件。
+3. 严禁提交 untracked 临时文件、`.pkl`、`.sqlite`、缓存目录或测试产物。
+4. 如果用户授权自动 MG，则验证通过后可以 commit、merge 到 main、在 main 上重跑 Mandatory Checks，然后 `git push origin main`。
+5. 如果 main 上复验失败，必须停止，不得 push。
+6. 如果 merge/rebase 冲突，必须停止，不得丢弃任何一方改动。
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P100-MG status = verified / blocked。
+   - 记录 commit、merge、main 上复验结果和 push 结果。
+   - push 完成后，下一条允许任务必须写为从最新 main 新建分支后生成下一条 Turnover Ledger prompt。
+2. 更新 refactor-prompts.md 和 turnover-ledger-write-uow-plan.md：
+   - 记录 MG 结果。
+3. 不得执行 Traffic Gate。
+```
+
+### 审查结论
+
+- PF-P100-MG 是 PF-P098 到 PF-P100 的正确 cumulative Merge Gate。
+- MG 只做 scope audit、untracked audit、diff check、target tests、compileall、commit/merge/push；不得新增业务实现。

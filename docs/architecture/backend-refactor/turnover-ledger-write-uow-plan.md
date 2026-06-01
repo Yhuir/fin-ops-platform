@@ -2265,3 +2265,154 @@ Merge 边界：
 
 - `git push origin main`。
 - push 完成后，从最新 main 新建下一条 `codex/` 分支，再选择 Turnover Ledger 下一切片。
+
+## PF-P098 Remaining Write Path Rebaseline / Next Slice Selection
+
+状态：`verified`
+
+目标：
+
+- 基于 PF-P097-MG 后的最新 main，重新盘点 Turnover Ledger 剩余写路径。
+- 输出最新 write path matrix、residual orchestration、service/repository ownership、test gaps。
+- 选择下一条最小 Micro-JIT prompt。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code。
+- 不修改 tests。
+- 不新增 SQL migration。
+- 不执行 Traffic Gate。
+
+### Write Path Matrix
+
+| Path | Handler | Facade / UoW status | PostgreSQL status | Local/dev/test status | Remaining gap |
+| --- | --- | --- | --- | --- | --- |
+| `PUT /api/turnover-ledger/tag-selection` | `_handle_api_turnover_ledger_tag_selection_update` | `TurnoverLedgerWriteFacade.update_tag_selection` | 已通过 `TurnoverLedgerTagSelectionSettingsAdapter` + transaction-bound outbox | 已通过 local transaction shim + settings writer | Handler fallback 仍 direct clear/enqueue；当前已有 version conflict test，非下一条 blocker。 |
+| `POST /api/turnover-ledger/bank-row-tags/batch` | `_handle_api_turnover_ledger_bank_row_tags_batch` | `TurnoverLedgerWriteFacade.update_bank_row_tags_batch` | 已通过 `TurnoverLedgerBankdetailWritePort` + `_postgres_turnover_ledger_persistence_repository` | 已通过 local transaction shim + local bankdetail port | Handler 仍负责 target validation、affected_months 和 fallback direct state store；category expected_version 已由 bankdetail category service 覆盖。 |
+| `PUT /api/turnover-ledger/relations/{id}/extra` | `_handle_api_turnover_ledger_relation_extra_update` | `TurnoverLedgerWriteFacade.update_relation_extra` | 已通过 `TurnoverLedgerExtraRepositoryAdapter` | 已通过 local transaction shim + local extra repository | 无 stale/idempotency contract；handler fallback 仍 direct route update + best-effort persistence/clear/enqueue。 |
+| `POST /api/turnover-ledger/relations/confirm` | `_handle_api_turnover_ledger_confirm` | `TurnoverLedgerWriteFacade.confirm_relation` | 已通过 `TurnoverLedgerRelationWritePort` + `_postgres_turnover_ledger_persistence_repository` | 已通过 local transaction shim + local confirm relation repository | duplicate confirm 当前已有 conflict behavior；command 未携带 expected_versions，stale precondition port 仍 no-op。 |
+| `POST /api/turnover-ledger/relations/{id}/withdraw` | `_handle_api_turnover_ledger_withdraw` | `TurnoverLedgerWriteFacade.withdraw_relation` | 已通过 `TurnoverLedgerRelationWritePort` + `_postgres_turnover_ledger_persistence_repository` | 已通过 local transaction shim + local withdraw relation repository | `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` 明确记录当前 duplicate withdraw 仍会二次 mutation/refresh；command 未携带 expected_versions，stale precondition port 仍 no-op。 |
+
+### Residual Orchestration
+
+- `server.py` 仍负责 HTTP session、permission、payload parsing、response mapping 和部分 request-level validation；这符合当前目标。
+- `server.py` 仍保留 local/dev/test transaction shims 和 local snapshot restore/save 逻辑，属于 legacy state path 兼容层；不应在下一条 prompt 一次性迁移。
+- `server.py` fallback path 仍会直接执行 state store persistence、read model clear 和 queue enqueue；这些 fallback 只在 facade unavailable 时触发，下一步不应为了清理 fallback 扩大范围。
+- `TurnoverLedgerWriteUnitOfWork` 已具备 `expected_versions` / `stale_precondition_port` seam，但当前 Turnover Ledger facade commands 基本不传 expected versions，server composition 也统一注入 no-op stale precondition port。
+- `TurnoverLedgerRelationWritePort` / `TurnoverLedgerBankdetailWritePort` 已避免 Application god object 和 HTTP context 注入。
+
+### Test Gap Matrix
+
+| Gap | Current evidence | Risk |
+| --- | --- | --- |
+| Withdraw duplicate/stale write | `tests/test_turnover_ledger_api.py::test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` | 同一 relation 可被重复 withdraw，导致重复 audit 与重复 refresh，后续可能形成 stale/blind write。 |
+| Relation command expected_versions | UoW 有 `_StalePreconditionPort` contract test，但 `confirm_relation` / `withdraw_relation` commands 未传 expected_versions | UoW seam 存在但真实 Turnover Ledger relation writes 尚未使用 optimistic locking。 |
+| Relation extra stale/idempotency | relation extra facade tests 覆盖 rollback/no direct clear，但没有 relation extra version/idempotency contract | 多人并发编辑 extra 可能盲写，需后续单独评估。 |
+| Fallback direct persistence | facade unavailable 时 handler 仍走 direct state store/read model clear/enqueue | 兼容路径仍存在；不应和 stale write 切片混在一起。 |
+
+### Next Slice Decision
+
+下一条最小 Micro-JIT prompt：
+
+`PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests`
+
+理由：
+
+- 当前代码和测试已经明确暴露 duplicate withdraw gap。
+- `TurnoverLedgerWriteUnitOfWork` 已有 stale precondition seam，适合先用 tests 锁定目标行为，再分步接入真实 relation expected versions。
+- 该切片只应写 characterization / target contract tests，不直接修改 production code。
+- 不应同时处理 relation extra stale write、fallback path cleanup 或 local transaction shim 抽离。
+
+PF-P099 建议边界：
+
+- 新增/调整 tests，锁定 withdraw duplicate/stale write 的目标行为。
+- 保留现有 current behavior test，或将其改名为 legacy compatibility，另加 future target `expectedFailure`。
+- 目标行为应要求第二次 withdraw 不得执行 relation mutation、audit、dirty/outbox refresh。
+- 不迁移 production code，不修改 UoW/facade/server implementation。
+
+### Verification
+
+- `git status --short --branch`：Pass，仅有 PF-P098 文档范围改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P098|Remaining Write Path Rebaseline|Next Slice Decision|Write Path Matrix|Residual Orchestration" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+## PF-P099 Withdraw Relation Stale/Duplicate Contract Tests
+
+状态：`verified`
+
+目标：
+
+- 保留当前 duplicate withdraw behavior characterization。
+- 新增 future target tests，锁定 duplicate/stale withdraw 不得二次 mutation、audit 或 refresh。
+- 锁定 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 未来应支持 expected_versions，并把 expected_versions 传入 UoW command。
+
+边界：
+
+- 只修改 tests 和文档。
+- 不修改 production code。
+- 不同时处理 relation extra stale write、fallback cleanup 或 local transaction shim extraction。
+
+执行结果：
+
+- 保留 current behavior test `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues`。
+- 新增 API future target test `test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh`，当前为 `unittest.expectedFailure`。
+- 新增 UoW/facade future target test `test_target_withdraw_relation_facade_passes_expected_versions_before_repository`，当前为 `unittest.expectedFailure`。
+- 未修改 production code。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests，1 expected failure。
+- `git diff --check`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton`。
+- PF-P100 只让 PF-P099 的 2 条 target tests 转为普通通过；不得扩大到 relation extra stale write 或 fallback cleanup。
+
+## PF-P100 Withdraw Relation Expected Versions Skeleton
+
+状态：`verified`
+
+目标：
+
+- 为 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 增加 optional expected_versions 参数。
+- withdraw handler 对已 withdrawn relation 返回 conflict/error，避免 duplicate submit 二次 mutation/audit/refresh。
+- 将 PF-P099 的 2 条 target tests 转为普通通过。
+
+边界：
+
+- 不处理 relation extra stale write。
+- 不清理 fallback path。
+- 不抽离 local transaction shim。
+- 不新增 SQL migration。
+
+执行结果：
+
+- `TurnoverLedgerWriteFacade.withdraw_relation(...)` 已增加 optional `expected_versions` 参数，并透传到 `TurnoverLedgerWriteCommand.expected_versions`。
+- withdraw handler 已拒绝已 `withdrawn` relation 的 duplicate submit，返回 409 `relation_already_withdrawn`，不再二次 mutation/audit/refresh。
+- withdraw handler 已从当前 relation `version` 构造最小 expected version：`relation:{relation_id}`。
+- PF-P099 的 2 条 target tests 已转为普通通过。
+- 旧 duplicate-withdraw current behavior test 已收敛为当前契约：第二次 withdraw 返回 409，audit/refresh 不增加。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+剩余 gap：
+
+- relation extra stale write 尚未处理。
+- fallback cleanup 尚未处理。
+- local transaction shim 尚未抽离。
+- 当前 P100 只建立 withdraw duplicate/stale 最小骨架，不代表 Turnover Ledger 写路径全部完成。
+
+下一条：
+
+- 执行 `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate`，统一覆盖 PF-P098 到 PF-P100。

@@ -12898,8 +12898,21 @@ class Application:
                         "message": "系统自动生成的往来款关系不能直接撤回，请先人工确认或调整银行流水标签。",
                     },
                 )
+            if str(relation.get("status") or "") == "withdrawn":
+                return self._json_response(
+                    HTTPStatus.CONFLICT,
+                    {
+                        "error": "relation_already_withdrawn",
+                        "message": "该往来款关系已撤回，请刷新后重试。",
+                    },
+                )
             bank_row_ids = list(relation.get("bank_row_ids") or [])
             affected_months = self._bank_transaction_category_affected_months([str(row_id) for row_id in bank_row_ids])
+            expected_versions = {}
+            try:
+                expected_versions[f"relation:{relation_id}"] = int(relation.get("version") or 0)
+            except (TypeError, ValueError):
+                expected_versions = {}
             facade = self._turnover_ledger_withdraw_write_facade()
             if facade is not None:
                 result = facade.withdraw_relation(
@@ -12908,6 +12921,7 @@ class Application:
                     tenant_id=tenant_id_for_session(session_response),
                     note=str(payload.get("note")) if payload.get("note") is not None else None,
                     affected_months=affected_months,
+                    expected_versions=expected_versions,
                 )
             else:
                 result = self._turnover_ledger_api_routes.withdraw_relation(
