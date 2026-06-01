@@ -17245,3 +17245,22 @@ Post-Flight:
 - PF-P074 是 PF-P073-MG 后正确的小步：relation extra 已有 facade/adapter 基础，但缺少像 tag selection 一样的 local completion target tests。
 - Prompt 明确 tests-only，不修改 production code，避免在没有测试锁定时直接改 handler。
 - Prompt 保留 legacy behavior 测试，同时用 `expectedFailure` 明确未来 rollback/no-clear/response-shape 目标。
+
+### 执行结果
+
+- PF-P074 已执行并按自动工作流标记为 `verified`。
+- 新增 2 个 future relation extra target tests，当前为 `unittest.expectedFailure`：
+  - queue/outbox failure must roll back extra save；
+  - successful UoW path must not clear read model directly。
+- 补强 facade override response shape 断言。
+- 未修改 production code。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P074 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，33 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+
+下一步建议：生成并审查 `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion`，只实现 relation extra local/dev/test UoW completion，不迁移其它写路径。

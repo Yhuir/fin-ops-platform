@@ -1143,6 +1143,57 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
 
+    @unittest.expectedFailure
+    def test_target_relation_extra_queue_failure_rolls_back_extra_save(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
+            initial_payload = json.loads(
+                app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra").body
+            )
+            queue = _FailingQueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "PUT",
+                    f"/api/turnover-ledger/relations/{relation_id}/extra",
+                    body=json.dumps({"note": "target rollback"}),
+                )
+            restored_payload = json.loads(
+                app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra").body
+            )
+
+        self.assertEqual(restored_payload["extra"], initial_payload["extra"])
+        self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+
+    @unittest.expectedFailure
+    def test_target_relation_extra_uow_path_does_not_clear_read_model_directly(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps({"note": "target no clear"}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["extra"]["note"], "target no clear")
+        self.assertEqual(payload["row"]["relation_id"], relation_id)
+        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+        self.assertEqual(read_repository.clear_calls, 0)
+
     def test_relation_extra_facade_override_skips_legacy_best_effort_side_effects(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1165,6 +1216,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["extra"]["note"], "facade path")
+        self.assertEqual(payload["row"], {"relation_id": "turnover_rel_facade", "note": "facade path"})
         self.assertTrue(payload["turnover_ledger_invalidated"])
         self.assertEqual(
             facade.calls,

@@ -1097,7 +1097,7 @@ Verification:
 
 ## PF-P074 Relation Extra UoW Completion Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1113,5 +1113,17 @@ Verification:
 
 下一步：
 
-- 执行 PF-P074。
 - PF-P074 通过后生成 PF-P075 relation extra handler UoW completion implementation。
+
+执行结果：
+
+- 新增 2 个 relation extra future target tests，当前为 `unittest.expectedFailure`：
+  - queue/outbox failure rolls back extra save；
+  - successful UoW path does not clear read model directly。
+- 补强 facade override response shape 断言。
+- 未修改 production code。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 33 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.

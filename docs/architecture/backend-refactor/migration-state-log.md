@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` 已生成并审查 |
-| 当前 active prompt | `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` planned |
+| 当前阶段 | `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` 已执行并通过验证 |
+| 当前 active prompt | 无 |
 | 最近 verified prompt | `PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate` |
 | 当前分支 | `codex/turnover-ledger-next-uow-slice-p074` |
-| 最近验证 | PF-P073-MG 已合入 main；Turnover Ledger API 31 tests 通过，UoW contract 30 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` |
+| 最近验证 | PF-P074 增加 relation extra UoW completion target tests；API 33 tests 通过（2 expectedFailure），UoW contract 30 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` |
 
 ## Prompt 执行日志
 
@@ -6447,6 +6447,36 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 #### 下一步
 
 - 生成 cumulative MG，覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。
+
+### PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只补 relation extra UoW completion 前的 API-level characterization / target tests。
+- 不修改 production code。
+- 不迁移 handler。
+
+#### 执行结果
+
+- 新增 2 个 future target tests，并以 `unittest.expectedFailure` 保持默认 CI 绿色：
+  - queue/outbox failure 应回滚 relation extra save；
+  - successful UoW path 不应直接 clear read model。
+- 补强 facade override response shape 断言，确保 `{"extra": ..., "row": ...}` 仍由 handler 返回。
+- 保留 current legacy queue failure behavior test，继续记录 legacy path 当前会先保存 extra、clear read model，再遇到 queue failure。
+
+#### Verification
+
+- `git status --short --branch`: Pass，仅 PF-P074 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，33 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+
+#### 下一步
+
+- 生成并审查 `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion`。
 
 ## 维护规则
 
