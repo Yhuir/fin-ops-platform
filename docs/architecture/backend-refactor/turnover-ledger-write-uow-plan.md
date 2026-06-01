@@ -825,7 +825,7 @@ Verification:
 
 ## PF-P069 Tag Selection Transaction-bound Repository Writer
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -843,4 +843,18 @@ Verification:
 
 下一步：
 
-- 执行 PF-P069。
+- `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`。
+- PF-P070 should plan the production integration order now that pure normalizer, settings adapter and transaction-bound repository writer exist.
+- PF-P070 should still avoid direct handler migration unless it first locks the remaining compatibility tests.
+
+执行结果：
+
+- `PostgresOpsTaxEtcRepository.save_settings_in_transaction(...)` and `save_app_settings_in_transaction(...)` now provide a transaction-bound settings writer seam.
+- Existing `save_settings(...)` still has the same public contract and reuses the same SQL helper.
+- `TurnoverLedgerTagSelectionSettingsAdapter` can save through a repository bound by `repository_factory(transaction)`.
+- UoW contract tests now verify the repository writer uses the supplied transaction.
+
+仍未完成：
+
+- Durable audit persistence is not complete. The adapter carries audit metadata and fake tests record it, but the real repository does not yet persist audit in the same transaction.
+- `PUT /api/turnover-ledger/tag-selection` still uses the legacy `AppSettingsService.update_turnover_ledger_tag_selection(...)` path and post-save refresh enqueue.

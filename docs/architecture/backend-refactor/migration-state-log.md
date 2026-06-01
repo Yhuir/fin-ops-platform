@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` planned |
-| 最近 verified prompt | `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton` |
+| 当前阶段 | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
-| 最近验证 | PF-P068 增加 tag selection settings adapter skeleton；UoW contract 26 tests 通过，API 29 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer`；只补 transaction-bound repository writer，不迁移 handler |
+| 最近验证 | PF-P069 增加 transaction-bound app settings writer；UoW contract 27 tests 通过，API 29 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`；不得直接迁移 handler |
 
 ## Prompt 执行日志
 
@@ -6248,7 +6248,7 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 ### PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -6263,13 +6263,28 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 #### 下一步
 
-- 执行 PF-P069。
+- 生成并审查 `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`。
 
 #### 验收标准
 
 - 事务绑定 writer 使用 supplied transaction 执行 `app.app_settings` upsert。
 - 现有 `save_settings(...)` 行为不变。
 - 默认 Turnover API tests 保持绿色。
+
+#### 执行结果
+
+- `PostgresOpsTaxEtcRepository.save_settings_in_transaction(...)` 和 `save_app_settings_in_transaction(...)` 已增加。
+- `save_settings(...)` 复用同一 SQL helper，保持现有 public behavior。
+- `TurnoverLedgerTagSelectionSettingsAdapter` 可通过 `repository_factory(transaction)` 调用 `save_app_settings(...)` 或 `save_settings("app_settings", ...)`。
+- durable audit persistence 仍是后续缺口；本轮只保留 audit metadata 传递，不宣称 audit 已同事务落库。
+
+#### Verification
+
+- `git status --short --branch`: Pass，仅 PF-P069 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，27 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
 
 ## 维护规则
 

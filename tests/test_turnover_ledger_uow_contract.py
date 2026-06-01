@@ -29,9 +29,13 @@ class _Command:
 class _RecordingTransaction:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.executed: list[dict[str, object]] = []
 
     def record(self, operation: str, **payload: object) -> None:
         self.calls.append((operation, dict(payload)))
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        self.executed.append({"sql": sql, "params": params})
 
 
 class _TransactionContext:
@@ -180,7 +184,7 @@ class _RecordingSettingsRepository:
         self.saved_settings: list[dict[str, object]] = []
         self.audit_events: list[dict[str, object]] = []
 
-    def save_settings(self, payload: dict[str, object]) -> None:
+    def save_app_settings(self, payload: dict[str, object]) -> None:
         self.saved_settings.append(dict(payload))
 
     def append_audit(self, event: dict[str, object]) -> None:
@@ -790,6 +794,22 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             adapter_class(application=object())
+
+    def test_postgres_settings_repository_saves_app_settings_with_supplied_transaction(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.postgres_repositories.ops_tax_etc")
+        repository_class = getattr(module, "PostgresOpsTaxEtcRepository")
+        transaction = _RecordingTransaction()
+        repository = repository_class(connection=SimpleNamespace())
+
+        repository.save_app_settings_in_transaction(
+            {"turnover_ledger_tag_selection": {"version": 2}},
+            transaction=transaction,
+        )
+
+        self.assertEqual(len(transaction.executed), 1)
+        call = transaction.executed[0]
+        self.assertIn("app.app_settings", str(call["sql"]))
+        self.assertEqual(call["params"][0], "app_settings")
 
     def test_turnover_dirty_outbox_writer_uses_transaction_bound_queue_for_each_scope(self) -> None:
         module = self._write_adapters_module()

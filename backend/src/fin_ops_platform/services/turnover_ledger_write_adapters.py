@@ -44,14 +44,17 @@ class TurnoverLedgerTagSelectionSettingsAdapter:
         if self._repository_factory is None:
             raise RuntimeError("repository_factory is required.")
         repository = self._repository_factory(transaction)
-        save_settings = getattr(repository, "save_settings", None)
-        if not callable(save_settings):
-            raise RuntimeError("settings repository must expose save_settings.")
-        save_settings(dict(next_snapshot))
+        save_app_settings = getattr(repository, "save_app_settings", None)
+        if callable(save_app_settings):
+            save_app_settings(dict(next_snapshot))
+        else:
+            save_settings = getattr(repository, "save_settings", None)
+            if not callable(save_settings):
+                raise RuntimeError("settings repository must expose save_app_settings or save_settings.")
+            save_settings("app_settings", dict(next_snapshot))
         append_audit = getattr(repository, "append_audit", None)
         if callable(append_audit):
             append_audit(dict(audit_event))
-
 
 class TurnoverLedgerDirtyOutboxWriter:
     def __init__(

@@ -16551,3 +16551,23 @@ Post-Flight:
 - PF-P069 是 PF-P068 后正确的小步：补真实 repository transaction seam，但不迁移 handler。
 - Prompt 要求保留 `save_settings(...)` 现有行为，降低对其它 settings 调用方的风险。
 - Prompt 明确 durable audit 仍可作为缺口记录，不允许把 audit 一致性伪装为已完成。
+
+### 执行结果
+
+- PF-P069 已执行并按自动工作流标记为 `verified`。
+- `PostgresOpsTaxEtcRepository.save_settings_in_transaction(...)` 和 `save_app_settings_in_transaction(...)` 已增加。
+- `save_settings(...)` 保持原有 public contract，并复用同一 SQL helper。
+- `TurnoverLedgerTagSelectionSettingsAdapter` 可通过 `repository_factory(transaction)` 保存 app settings snapshot。
+- 新增 UoW contract test，确认 repository writer 使用 supplied transaction 执行 `app.app_settings` upsert。
+- durable audit persistence 仍是后续缺口；本轮未宣称 audit 已同事务落库。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P069 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，27 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
+- `rg -n "save_settings_in_transaction|save_app_settings_in_transaction|TurnoverLedgerTagSelectionSettings|PF-P069|app_settings" backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`，规划 handler migration 前置测试和 durable audit 缺口处理，不直接迁移 handler。

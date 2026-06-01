@@ -68,8 +68,17 @@ class PostgresOpsTaxEtcRepository:
         return dict(payload) if isinstance(payload, dict) else {}
 
     def save_settings(self, settings_key: str, payload: dict[str, Any]) -> None:
+        self._save_settings_with_executor(self._connection, settings_key, payload)
+
+    def save_settings_in_transaction(self, settings_key: str, payload: dict[str, Any], *, transaction: Any) -> None:
+        self._save_settings_with_executor(transaction, settings_key, payload)
+
+    def save_app_settings_in_transaction(self, payload: dict[str, Any], *, transaction: Any) -> None:
+        self.save_settings_in_transaction("app_settings", payload, transaction=transaction)
+
+    def _save_settings_with_executor(self, executor: Any, settings_key: str, payload: dict[str, Any]) -> None:
         normalized = serialize_value(payload)
-        self._connection.execute(
+        executor.execute(
             """
             insert into app.app_settings(settings_key, version, settings_payload, raw_payload, updated_at)
             values (%s, 1, %s, %s, now())
