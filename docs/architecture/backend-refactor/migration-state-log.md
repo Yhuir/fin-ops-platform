@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra row provider / handler wiring readiness |
+| 当前阶段 | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` planned |
 | 最近 verified prompt | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P060 新增 relation extra repository adapter 与 dirty/outbox writer adapter；UoW contract 15 tests 通过，API 28 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P061 - Turnover Ledger Relation Extra Row Provider and Handler Wiring Plan`；先补 row response shape 边界或 planning，不扩大到其他写 API |
+| 下一条允许任务 | 执行 `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract`；只补 facade row response shape 边界，不修改 `server.py` |
 
 ## Prompt 执行日志
 
@@ -5843,6 +5843,30 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，15 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+
+### PF-P061 - Turnover Ledger Relation Extra Row Provider Contract
+
+状态：`planned`
+
+#### 范围
+
+- 给 `TurnoverLedgerWriteFacade.update_relation_extra()` 增加 row provider contract，以保持真实 API 当前 `row` response shape。
+- 不修改 `server.py`，不接入真实 handler。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P061。
+
+#### 验收标准
+
+- facade 可通过细粒度 row provider 返回 `row`。
+- row provider 不依赖 `Application`，不读取 HTTP。
+- targeted tests 通过。
 
 ## 维护规则
 

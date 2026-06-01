@@ -571,3 +571,16 @@ Remaining gap before handler wiring:
 - The facade currently returns `{"extra": extra}`.
 - The real API response currently returns `{"extra": extra, "row": row, "turnover_ledger_invalidated": true}` after handler mapping.
 - PF-P061 should define a row provider / response composer boundary before `server.py` wiring.
+
+## PF-P061 Relation Extra Row Provider Contract Plan
+
+状态：`planned`
+
+PF-P061 should add a narrow row provider boundary to `TurnoverLedgerWriteFacade`:
+
+- optional `row_provider`;
+- provider receives `relation_id` and normalized `extra`;
+- facade result includes `row` only when provider is present;
+- no `Application`, HTTP headers/cookies or `app.auth` dependency.
+
+This preserves the current API response shape without pushing row composition back into `server.py`.
