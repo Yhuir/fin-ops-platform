@@ -574,7 +574,7 @@ Remaining gap before handler wiring:
 
 ## PF-P061 Relation Extra Row Provider Contract Plan
 
-状态：`planned`
+状态：`verified`
 
 PF-P061 should add a narrow row provider boundary to `TurnoverLedgerWriteFacade`:
 
@@ -584,3 +584,14 @@ PF-P061 should add a narrow row provider boundary to `TurnoverLedgerWriteFacade`
 - no `Application`, HTTP headers/cookies or `app.auth` dependency.
 
 This preserves the current API response shape without pushing row composition back into `server.py`.
+
+PF-P061 execution result:
+
+- `TurnoverLedgerWriteFacade` now accepts optional `row_provider`.
+- When present, `update_relation_extra()` returns `{"extra": extra, "row": row}`.
+- Existing no-provider behavior remains `{"extra": extra}`.
+- `server.py` remains unchanged.
+
+Next step:
+
+- `PF-P062 - Turnover Ledger Relation Extra Handler Minimal Wiring`, or cumulative MG if the current foundation should be merged before touching `server.py`.

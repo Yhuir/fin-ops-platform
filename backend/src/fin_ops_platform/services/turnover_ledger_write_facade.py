@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass(frozen=True)
@@ -15,8 +15,14 @@ class TurnoverLedgerWriteCommand:
 
 
 class TurnoverLedgerWriteFacade:
-    def __init__(self, *, uow: Any) -> None:
+    def __init__(
+        self,
+        *,
+        uow: Any,
+        row_provider: Callable[..., dict[str, object]] | None = None,
+    ) -> None:
         self._uow = uow
+        self._row_provider = row_provider
 
     def update_relation_extra(
         self,
@@ -40,6 +46,9 @@ class TurnoverLedgerWriteFacade:
 
         def handler(context: Any) -> dict[str, object]:
             context.extra_repository.save_extra(extra, transaction=context.transaction)
-            return {"extra": dict(extra)}
+            result: dict[str, object] = {"extra": dict(extra)}
+            if self._row_provider is not None:
+                result["row"] = self._row_provider(relation_id=relation_id, extra=dict(extra))
+            return result
 
         return self._uow.run(command, handler)

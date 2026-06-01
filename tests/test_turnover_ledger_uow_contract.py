@@ -196,6 +196,19 @@ class _NonTransactionalQueueRepository:
         return None
 
 
+class _RecordingRelationExtraRowProvider:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, *, relation_id: str, extra: dict[str, object]) -> dict[str, object]:
+        self.calls.append({"relation_id": relation_id, "extra": dict(extra)})
+        return {
+            "relation_id": relation_id,
+            "note": extra.get("note"),
+            "interest_rate_type": extra.get("interest_rate_type", "none"),
+        }
+
+
 class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def _uow_class(self) -> type:
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_uow")
@@ -424,6 +437,38 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
 
         self.assertIsInstance(result, dict)
+        forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
+        self.assertTrue(forbidden_keys.isdisjoint(result))
+
+    def test_relation_extra_write_facade_uses_row_provider_without_http_coupling(self) -> None:
+        uow, _deps = self._build_uow()
+        row_provider = _RecordingRelationExtraRowProvider()
+        facade = self._write_facade_class()(uow=uow, row_provider=row_provider)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "row provider note"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(
+            row_provider.calls,
+            [
+                {
+                    "relation_id": "turnover_rel_1",
+                    "extra": {
+                        "note": "row provider note",
+                        "relation_id": "turnover_rel_1",
+                        "updated_by": "finance-user",
+                    },
+                }
+            ],
+        )
+        self.assertEqual(result["extra"]["note"], "row provider note")
+        self.assertEqual(result["row"]["relation_id"], "turnover_rel_1")
+        self.assertEqual(result["row"]["note"], "row provider note")
         forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
         self.assertTrue(forbidden_keys.isdisjoint(result))
 

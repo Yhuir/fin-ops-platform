@@ -15466,7 +15466,7 @@ Post-Flight:
 
 ## PF-P061 - Turnover Ledger Relation Extra Row Provider Contract
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -15544,3 +15544,14 @@ Post-Flight:
 
 - PF-P061 是 PF-P060 后正确的兼容性步骤：先补齐 facade 的 `row` response shape，再接入 handler。
 - Prompt 明确禁止 `server.py` diff 和其它 Turnover 写 API migration。
+
+### 执行结果
+
+- PF-P061 已执行并按自动工作流标记为 `verified`。
+- `TurnoverLedgerWriteFacade` 支持可选 `row_provider`。
+- 新增 row provider contract test，普通通过。
+- 未修改 `server.py`、真实 handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，16 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+- 下一步建议：生成并审查 `PF-P062 - Turnover Ledger Relation Extra Handler Minimal Wiring`，或先生成 cumulative MG 合入当前 facade/adapter foundation。

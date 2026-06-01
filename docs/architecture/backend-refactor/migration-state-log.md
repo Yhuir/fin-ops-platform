@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` planned |
-| 最近 verified prompt | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` |
+| 当前阶段 | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步可进入 relation extra handler minimal wiring 或 cumulative MG |
+| 最近 verified prompt | `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P060 新增 relation extra repository adapter 与 dirty/outbox writer adapter；UoW contract 15 tests 通过，API 28 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P061 - Turnover Ledger Relation Extra Row Provider Contract`；只补 facade row response shape 边界，不修改 `server.py` |
+| 最近验证 | PF-P061 为 relation extra facade 增加 row provider contract；UoW contract 16 tests 通过，API 28 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P062 - Turnover Ledger Relation Extra Handler Minimal Wiring`，或如果判断当前切片已足够独立则生成 cumulative MG |
 
 ## Prompt 执行日志
 
@@ -5846,7 +5846,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P061 - Turnover Ledger Relation Extra Row Provider Contract
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5860,13 +5860,28 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P061。
+- PF-P061 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P062 - Turnover Ledger Relation Extra Handler Minimal Wiring`，除非先做 cumulative MG。
 
 #### 验收标准
 
 - facade 可通过细粒度 row provider 返回 `row`。
 - row provider 不依赖 `Application`，不读取 HTTP。
 - targeted tests 通过。
+
+#### 执行结果
+
+- `TurnoverLedgerWriteFacade` 支持可选 `row_provider`。
+- 新增 contract test 验证：
+  - row provider 接收 `relation_id` 和 `extra`；
+  - facade result 包含 `extra` 和 `row`；
+  - result 不携带 HTTP response/status/cookie/header/auth coupling。
+- 未修改 `server.py`、真实 handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，16 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
 
 ## 维护规则
 
