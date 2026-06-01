@@ -9252,7 +9252,7 @@ Post-Flight:
 
 ## PF-P031-MG - Workbench Cancel Link Stale Guard Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -13263,3 +13263,33 @@ Stop Conditions:
 - PF-P046 边界正确：只做 discovery/planning 和文档回写，不修改业务代码，不新增测试实现，不进入 Merge Gate。
 - PF-P046 明确要求 CodeGraph / 静态调用链和动态运行时序，符合“每个模块先梳理调用链”的全局规则。
 - PF-P046 的下一步不应直接 extraction/refactor，应先生成 `PF-P047 - Turnover Ledger Characterization Tests` 锁定行为。
+
+### 执行结果
+
+状态：`implemented`
+
+- 已使用 CodeGraph 和只读源码扫描完成 Turnover Ledger discovery。
+- 已新增 `docs/architecture/backend-refactor/turnover-ledger-discovery.md`。
+- 已更新：
+  - `docs/architecture/backend-refactor/README.md`
+  - `docs/architecture/backend-refactor/architecture-inventory.md`
+  - `docs/architecture/backend-refactor/module-refactor-plan.md`
+  - `docs/architecture/backend-refactor/runtime-call-chain.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 核心发现：
+  - Turnover read path 已有 `TurnoverLedgerQueryService`，优先读 SQL read model，stale/miss 时 enqueue `turnover_ledger.read_model.refresh`。
+  - grouped view 需要同时支持原生 grouped payload 和 flat read model 转 grouped 的兼容路径。
+  - runtime queue 已提供 dirty scope + outbox + source_version 原子 primitive，但 Turnover relation confirm/withdraw、extra update 和 bank-row-tags batch 仍由 `server.py` handler finalizer 编排 side effects。
+  - `turnover_ledger_extras` 仍存在 legacy full snapshot fallback 风险。
+  - `/api/turnover-ledger/bank-row-tags/batch` 是 Turnover API，但写 Bankdetail category facts，后续必须明确 port 和 transaction boundary。
+- 验证：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `test -f docs/architecture/backend-refactor/turnover-ledger-discovery.md`：Pass。
+  - `rg -n 'PF-P046|Turnover Ledger|turnover_ledger|grouped breakdown|source_version|dirty scope|outbox|Workbench projection|Bankdetail' docs/architecture/backend-refactor`：Pass。
+- 未运行 Python 单元测试：本轮只做 discovery/planning 文档，不修改业务代码或测试实现。
+- 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
+- 下一步建议：用户确认 PF-P046 后，将 PF-P046 标记为 `verified`，然后生成并审查 `PF-P047 - Turnover Ledger Characterization Tests`。

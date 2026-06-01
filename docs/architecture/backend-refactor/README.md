@@ -20,10 +20,11 @@
 4. `platform-runtime-boundary-audit.md`：PF-P002 产出的 Platform / Ops / Runtime 边界审计和后续底座约束。
 5. `runtime-call-chain.md`：静态调用链、动态运行时序和优化方法。
 6. `read-model-and-external-services.md`：Read Model、Redis、RabbitMQ、PostgreSQL、OA Mongo、对象存储等外部服务契约。
-7. `migration-roadmap.md`：按阶段推进的重构路线、merge 策略和回滚口径。
-8. `ai-execution-rules.md`：Codex/Gemini 执行 prompt 时必须遵守的状态记录、测试和分支规则。
-9. `migration-state-log.md`：AI 状态机，记录每次 prompt 的完成度、验证和下一步上下文。
-10. `refactor-prompts.md`：可执行 prompt 库，保存后续每条经过审查的 prompt。
+7. `turnover-ledger-discovery.md`：PF-P046 产出的 Turnover Ledger 专项 discovery、调用链、风险和下一步测试计划。
+8. `migration-roadmap.md`：按阶段推进的重构路线、merge 策略和回滚口径。
+9. `ai-execution-rules.md`：Codex/Gemini 执行 prompt 时必须遵守的状态记录、测试和分支规则。
+10. `migration-state-log.md`：AI 状态机，记录每次 prompt 的完成度、验证和下一步上下文。
+11. `refactor-prompts.md`：可执行 prompt 库，保存后续每条经过审查的 prompt。
 
 ## 不再采用的旧方向
 

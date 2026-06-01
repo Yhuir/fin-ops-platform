@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` (`planned`) |
+| 当前阶段 | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` (`implemented`) |
 | 最近 verified prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` |
 | 当前分支 | `codex/turnover-ledger-discovery-p046` |
 | 最近验证 | 用户已确认 PF-P045-MG `verified`；`main` 已 push 到 `origin/main`，本地与远端对齐到 `de513774`；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 PF-P046；PF-P046 只做 Turnover Ledger discovery/planning 和文档回写，不修改业务代码、不执行测试实现、不进入 Merge Gate |
+| 下一条允许任务 | 用户确认 PF-P046 后，将 PF-P046 标记为 verified；然后生成并审查 `PF-P047 - Turnover Ledger Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -4909,7 +4909,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -4944,9 +4944,50 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - PF-P046 明确不执行 Traffic Gate、不部署、不访问生产、不进入 Merge Gate。
 - PF-P046 明确后续下一步应是 Turnover Ledger characterization tests prompt，而不是直接 extraction/refactor。
 
+#### 执行结果
+
+- 已使用 CodeGraph 和只读源码扫描梳理 Turnover Ledger：
+  - route/server handler 到 `TurnoverLedgerApiRoutes`、`TurnoverLedgerQueryService`、`TurnoverLedgerService`、`TurnoverRelationService` 的调用链。
+  - SQL read model / source_versions / runtime queue / worker refresh / projection builder 的运行时序。
+  - relation confirm/withdraw、bank-row-tags batch、extra update、tag-selection update 的副作用链。
+- 已新增 `turnover-ledger-discovery.md`，覆盖 API/action matrix、file ownership、static call chain、dynamic runtime sequence、freshness/source_version audit、transaction/outbox audit、cross-module influence、low-coupling targets、PF-P047 测试计划和 risk register。
+- 已更新 `architecture-inventory.md`，加入 PF-P046 Turnover Ledger discovery update。
+- 已更新 `module-refactor-plan.md`，加入 Turnover 后续切片建议。
+- 已更新 `runtime-call-chain.md`，加入 Turnover query/write/worker 三条运行时序。
+- 已更新 `README.md` 文档索引。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/README.md`
+- `docs/architecture/backend-refactor/architecture-inventory.md`
+- `docs/architecture/backend-refactor/module-refactor-plan.md`
+- `docs/architecture/backend-refactor/runtime-call-chain.md`
+- `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，当前分支为 `codex/turnover-ledger-discovery-p046`。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪临时文件；仅新增预期文档。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `test -f docs/architecture/backend-refactor/turnover-ledger-discovery.md`：Pass。
+- `rg -n 'PF-P046|Turnover Ledger|turnover_ledger|grouped breakdown|source_version|dirty scope|outbox|Workbench projection|Bankdetail' docs/architecture/backend-refactor`：Pass。
+- 未运行 Python 单元测试：本轮只做 discovery/planning 文档，不修改业务代码或测试实现。
+
+#### 风险 / 阻断
+
+- 当前没有阻断 PF-P047 的发现。
+- Turnover 写路径尚未具备显式 Turnover Unit of Work；relation facts/audit、Workbench invalidation、read model clear/enqueue 仍由 handler finalizer 编排。
+- `turnover_ledger_extras` 仍存在 legacy full snapshot fallback，需要 PF-P047 characterization 后再处理。
+- `/api/turnover-ledger/bank-row-tags/batch` 是 Turnover API 但写 Bankdetail category facts，后续必须明确 service port 与事务边界。
+
 #### 下一步
 
-- 等待用户执行 PF-P046。
+- 等待用户确认 PF-P046。
+- 用户确认后，将 PF-P046 标记为 `verified`。
+- 下一条 prompt 建议：`PF-P047 - Turnover Ledger Characterization Tests`，只写/补测试，不做 production refactor。
 
 ## 维护规则
 
