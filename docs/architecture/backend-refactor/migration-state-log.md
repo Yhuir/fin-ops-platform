@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P045 - Main Delta Rebaseline / Refactor Plan Resync` 已执行，等待用户确认 verified |
-| 当前 active prompt | `PF-P045 - Main Delta Rebaseline / Refactor Plan Resync` (`implemented`) |
-| 最近 verified prompt | `PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate` |
+| 当前阶段 | 已生成并审查 `PF-P045-MG - Main Delta Rebaseline Merge Gate`，等待执行 |
+| 当前 active prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P045 - Main Delta Rebaseline / Refactor Plan Resync` |
 | 当前分支 | `codex/main-delta-rebaseline-p045` |
-| 最近验证 | `main` 已先推送并与 `origin/main` 对齐到 `f68d2683`；已从最新 `main` 新建 PF-P045 分支；已完成 main delta 文档再校准；未改业务代码、未执行 Traffic Gate、未部署 |
-| 下一条允许任务 | 用户确认 PF-P045 `verified`；随后生成 PF-P045-MG 或直接合并文档分支；下一条实际模块 prompt 必须基于 PF-P045 delta 事实生成 |
+| 最近验证 | 用户已确认 PF-P045 `verified`；PF-P045 只更新重构文档并提交 `02e75d9b`；未改业务代码、未执行 Traffic Gate、未部署 |
+| 下一条允许任务 | 执行 PF-P045-MG；未经用户确认不得将 PF-P045-MG 标记为 `verified` |
 
 ## Prompt 执行日志
 
@@ -4775,7 +4775,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P045 - Main Delta Rebaseline / Refactor Plan Resync
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -4830,9 +4830,56 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 用户确认 PF-P045 `verified`。
-- 之后可生成 PF-P045-MG 或按用户确认合并该文档分支。
+- 用户已确认 PF-P045 `verified`。
+- 已生成并审查 `PF-P045-MG - Main Delta Rebaseline Merge Gate`。
 - 下一条实际模块 prompt 必须读取 PF-P045 delta 事实，不能继续基于 PF-P044-MG 之前的旧状态生成。
+
+### PF-P045-MG - Main Delta Rebaseline Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 覆盖 PF-P045 的文档-only diff。
+- 当前分支：`codex/main-delta-rebaseline-p045`。
+- 当前分支相对 `main` 的预期提交：
+  - `02e75d9b docs(backend-refactor): rebaseline main delta for PF-P045`
+- 预期 diff 文件：
+  - `docs/architecture/backend-refactor/ai-execution-rules.md`
+  - `docs/architecture/backend-refactor/architecture-inventory.md`
+  - `docs/architecture/backend-refactor/module-refactor-plan.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 审查结论
+
+- PF-P045-MG 是文档分支的 Merge Gate，只决定是否把 main delta rebaseline 文档合入 `main`。
+- 本 MG 不执行 Traffic Gate、部署、生产访问、staging 访问或 feature flag 打开。
+- 本 MG 不执行任何模块业务重构，不生成下一条模块实现 prompt。
+- 合入后，后续模块 prompt 必须读取 PF-P045 的 delta 事实和低耦合规则。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已包含完整 PF-P045-MG prompt，正文以 `/goal` 开头。
+- PF-P045-MG prompt 明确只允许文档 diff。
+- PF-P045-MG prompt 明确执行 branch/diff scope、untracked files、upstream sync、main 复验和状态机更新。
+- PF-P045-MG prompt 明确禁止 `git add .` / `git add -A`。
+- PF-P045-MG prompt 明确未经用户确认不得标记 `verified`。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，当前分支为 `codex/main-delta-rebaseline-p045`。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+
+#### 下一步
+
+- 执行 PF-P045-MG。
+- PF-P045-MG 成功后，应完成合入 `main`、main 复验和状态机更新；未经用户确认不得标记 `verified`。
 
 ## 维护规则
 
