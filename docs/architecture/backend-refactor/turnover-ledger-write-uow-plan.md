@@ -2416,3 +2416,25 @@ PF-P099 建议边界：
 下一条：
 
 - 执行 `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate`，统一覆盖 PF-P098 到 PF-P100。
+
+## PF-P100-MG Withdraw Stale/Duplicate Cumulative Merge Gate
+
+状态：`verified`
+
+结果：
+
+- `codex/turnover-ledger-next-slice-p098` 已合入 `main`。
+- merge commit：`fac75b67`。
+- main 上 Turnover Ledger API tests、UoW contract tests 和 compileall 均通过。
+- 未执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一步：
+
+- push `origin/main` 后，从最新 main 新建分支。
+- 生成下一条 Turnover Ledger prompt。当前不应在 main 或旧分支继续开发。

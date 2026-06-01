@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton` |
-| 当前分支 | `codex/turnover-ledger-next-slice-p098` |
+| 当前阶段 | `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate` 已 verified，main 复验通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate` |
+| 下一条允许任务 | `git push origin main` 后，从最新 `main` 新建 `codex/` 分支，再生成下一条 Turnover Ledger prompt |
 
 ## Prompt 执行日志
 
@@ -7672,7 +7672,7 @@ PF-P100 已 verified。执行结果：
 
 ### PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7692,7 +7692,17 @@ PF-P100 已 verified。执行结果：
 
 #### 下一条 Prompt 上下文
 
-PF-P100-MG planned。MG 通过并 push `origin/main` 后，必须从最新 `main` 新建分支，再根据状态机选择下一条 Turnover Ledger prompt；不得在 `main` 或旧分支继续开发。
+PF-P100-MG 已 verified。执行结果：
+
+- 分支 `codex/turnover-ledger-next-slice-p098` 已合入 `main`。
+- merge commit：`fac75b67`。
+- main 上复验通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+- 未执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+
+下一步：推送 `origin/main`。push 完成后，必须从最新 `main` 新建 `codex/` 分支，再生成下一条 Turnover Ledger prompt；不得在 `main` 或旧分支继续开发。
 
 ## 维护规则
 
