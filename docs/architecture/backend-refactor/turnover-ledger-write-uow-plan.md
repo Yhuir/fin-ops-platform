@@ -665,3 +665,426 @@ Verification:
 Next step:
 
 - Generate cumulative MG `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`, covering PF-P055 through PF-P064.
+
+## PF-P065 Tag Selection Settings Port Discovery
+
+状态：`verified`
+
+### Runtime Call Chain
+
+`PUT /api/turnover-ledger/tag-selection` currently runs:
+
+1. `Application._handle_api_turnover_ledger_tag_selection_update(...)`
+   - resolves mutation session through `_turnover_mutation_session(headers)`;
+   - parses JSON body;
+   - derives `actor` from OA session identity.
+2. `AppSettingsService.update_turnover_ledger_tag_selection(payload, actor_id=actor)`
+   - refreshes settings snapshot from state store;
+   - reads current `turnover_ledger_tag_selection`;
+   - checks `expected_version` / `version`;
+   - validates selected tag codes through `_normalize_turnover_ledger_tag_selection(...)`;
+   - builds `next_snapshot`;
+   - calls `state_store.save_app_settings(next_snapshot)`;
+   - mutates in-memory `_snapshot`;
+   - reconfigures category service;
+   - records in-memory audit through `_record_turnover_ledger_tag_selection_audit(...)`;
+   - returns public payload.
+3. Handler post-write side effects:
+   - `_clear_turnover_ledger_read_model_best_effort()`;
+   - `_enqueue_turnover_ledger_read_model_refreshes(["all"], reason="turnover_ledger_tag_selection_changed")`;
+   - returns `200 OK`.
+
+### Transaction Breaks
+
+| Boundary | Current fact | Risk |
+| --- | --- | --- |
+| Settings fact save | `state_store.save_app_settings(next_snapshot)` happens inside `AppSettingsService`. PostgreSQL runtime delegates to `PostgresOpsTaxEtcRepository.save_settings(...)`, which writes `app.app_settings` through `self._connection.execute(...)` without an explicit transaction parameter. | Cannot yet join `TurnoverLedgerWriteUnitOfWork` transaction without an adapter/repository seam. |
+| Settings audit | `AuditTrailService.record_action(...)` is in-memory, not transaction-bound PostgreSQL audit. | Audit and settings fact can diverge from future dirty/outbox semantics. |
+| Read model dirty/outbox | Handler clears read model and enqueues refresh after settings update returns. | Queue failure currently happens after settings save; existing characterization test proves settings version changes despite queue failure. |
+| Optimistic version | `expected_version` mismatch raises `turnover_ledger_tag_selection_version_conflict` and maps to `409`. | Existing version contract is usable; future UoW must preserve this API shape. |
+
+### Existing Coverage
+
+- `test_turnover_ledger_tag_selection_get_put_and_version_conflict`
+  - locks GET/PUT success, selected tag code validation, queue enqueue and version conflict.
+- `test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save`
+  - locks current split-brain behavior: queue failure raises, but settings save/version still changed and read model clear already happened.
+- `test_tag_selection_outbox_failure_rolls_back_settings_save_and_audit`
+  - UoW target contract already exists at fake port level.
+
+### Reuse / Missing Ports
+
+Reusable:
+
+- `AppSettingsService._normalize_turnover_ledger_tag_selection(...)` for validation/defaulting.
+- Existing version contract in `update_turnover_ledger_tag_selection(...)`.
+- `TurnoverLedgerWriteUnitOfWork.settings_port` fake contract.
+- `TurnoverLedgerDirtyOutboxWriter` for transaction-bound Turnover dirty/outbox.
+
+Missing:
+
+- A pure `normalize_turnover_ledger_tag_selection_update(...)` method that validates and returns next selection + audit metadata without mutating `_snapshot` or saving settings.
+- A transaction-bound settings repository/port, for example `TurnoverLedgerTagSelectionSettingsPort.save_tag_selection(payload, transaction=...)`.
+- A transaction-bound audit persistence story. If durable audit is not currently available, the next slice must explicitly keep audit as current in-memory behavior or define a follow-up durable audit port.
+- A production adapter for `app.app_settings` that can save via the active transaction instead of `state_store.save_app_settings(...)`.
+
+### Next Prompt Recommendation
+
+Next prompt should be:
+
+`PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests`
+
+Scope:
+
+- Add/extend tests only.
+- Lock current API behavior around queue failure, version conflict, invalid tag code and no legacy side effects outside tag selection.
+- Add target contract tests for:
+  - pure settings update normalization without snapshot mutation;
+  - transaction-bound settings port save;
+  - outbox failure rolling back settings save/audit at fake UoW level.
+- Do not modify production code yet.
+
+## PF-P066 Tag Selection Characterization and Contract Tests
+
+状态：`verified`
+
+PF-P066 strengthened tag selection tests:
+
+- success path now explicitly asserts exactly one Turnover refresh enqueue and one read model clear;
+- version conflict and invalid tag paths assert no additional enqueue/clear side effects;
+- UoW contract suite now includes an expectedFailure target for `AppSettingsService.normalize_turnover_ledger_tag_selection_update`.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 23 tests, 1 expectedFailure.
+
+Next step:
+
+- `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton`.
+- PF-P067 should only implement the pure normalizer target and turn the expectedFailure into an ordinary passing test.
+- PF-P067 must not migrate handler/UoW production wiring.
+
+## PF-P067 Tag Selection Pure Settings Normalizer Skeleton
+
+状态：`verified`
+
+PF-P067 implemented the first production seam for tag selection settings updates without moving the HTTP handler or changing transaction semantics.
+
+Implemented:
+
+- `AppSettingsService.normalize_turnover_ledger_tag_selection_update(payload, *, actor_id)` now performs current snapshot refresh, expected version validation and existing tag selection normalization.
+- The pure method returns `next_snapshot`, `next_selection`, `audit_event` and `public_payload`.
+- The pure method does not call `save_app_settings`, does not mutate `_snapshot`, does not configure category services and does not record audit.
+- `update_turnover_ledger_tag_selection(...)` now reuses the pure method while preserving current save/configure/audit behavior.
+- The PF-P066 expectedFailure target test is now a normal passing test.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 23 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.
+
+Next step:
+
+- `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`.
+- PF-P068 should introduce the minimal settings port / adapter contract needed by future UoW integration.
+- PF-P068 must not migrate `server.py`, must not wire production UoW, and must not change the current queue-failure split-brain behavior yet.
+
+## PF-P068 Tag Selection Settings Port / Adapter Skeleton
+
+状态：`verified`
+
+目标：
+
+- 建立最小 settings port / adapter skeleton，让 tag selection settings fact save 能在未来进入 `TurnoverLedgerWriteUnitOfWork` transaction。
+- 只建立边界和 contract tests，不迁移 HTTP handler。
+
+边界：
+
+- `settings_port` 应接收 PF-P067 pure normalizer 产出的 `next_snapshot` / audit metadata。
+- `settings_port` 必须通过 supplied `transaction` 保存，不得直接调用 `state_store.save_app_settings(...)`。
+- adapter 必须接收细粒度依赖，例如 `repository_factory(transaction)` 或明确 writer callable；不得接收 `Application`、HTTP request、state store god object。
+- 本轮不改变当前 `PUT /api/turnover-ledger/tag-selection` 的 queue failure split-brain 行为。
+
+下一步：
+
+- `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer`。
+- PF-P069 should close the real repository/writer gap so the adapter can save `app.app_settings` through the active transaction.
+- PF-P069 must still not migrate `server.py` or change current handler behavior.
+
+执行结果：
+
+- Added `TurnoverLedgerTagSelectionSettingsAdapter` in `turnover_ledger_write_adapters.py`.
+- Added contract tests proving `settings_port` and dirty/outbox share the same UoW transaction.
+- Added adapter tests proving `repository_factory(transaction)` is used and `Application` god object injection is rejected.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 26 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.
+
+## PF-P069 Tag Selection Transaction-bound Repository Writer
+
+状态：`verified`
+
+目标：
+
+- 为 `app.app_settings` 增加 transaction-bound writer/repository seam，使 tag selection settings save 能通过 supplied transaction 执行。
+
+边界：
+
+- 新 writer 必须复用现有 `save_settings(...)` 的 upsert 语义。
+- 新 writer 必须使用 supplied `transaction.execute(...)`，不得使用 repository 自身连接。
+- 本轮不迁移 handler，不接入 production UoW，不改变当前 tag selection queue failure 行为。
+
+已知缺口：
+
+- durable audit persistence 尚未完成；PF-P069 可以传递 audit metadata，但不得宣称 audit 与 settings fact 已完成同事务落库，除非本轮明确实现并测试 durable audit repository。
+
+下一步：
+
+- `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning`。
+- PF-P070 should plan the production integration order now that pure normalizer, settings adapter and transaction-bound repository writer exist.
+- PF-P070 should still avoid direct handler migration unless it first locks the remaining compatibility tests.
+
+执行结果：
+
+- `PostgresOpsTaxEtcRepository.save_settings_in_transaction(...)` and `save_app_settings_in_transaction(...)` now provide a transaction-bound settings writer seam.
+- Existing `save_settings(...)` still has the same public contract and reuses the same SQL helper.
+- `TurnoverLedgerTagSelectionSettingsAdapter` can save through a repository bound by `repository_factory(transaction)`.
+- UoW contract tests now verify the repository writer uses the supplied transaction.
+
+仍未完成：
+
+- Durable audit persistence is not complete. The adapter carries audit metadata and fake tests record it, but the real repository does not yet persist audit in the same transaction.
+- `PUT /api/turnover-ledger/tag-selection` still uses the legacy `AppSettingsService.update_turnover_ledger_tag_selection(...)` path and post-save refresh enqueue.
+
+## PF-P070 Tag Selection UoW Integration Planning
+
+状态：`verified`
+
+目标：
+
+- 在迁移 `PUT /api/turnover-ledger/tag-selection` handler 之前，明确测试锁定、目标时序、durable audit 策略和后续 prompt 顺序。
+
+边界：
+
+- PF-P070 只做文档和计划。
+- 不修改 production code。
+- 不修改 tests。
+- 不迁移 handler。
+
+下一步：
+
+- `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`。
+- PF-P071 should add tests first. It must not migrate the handler.
+
+### Current Legacy Runtime Sequence
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Handler as "server.py PUT /api/turnover-ledger/tag-selection"
+    participant Auth as "_turnover_mutation_session"
+    participant Settings as "AppSettingsService"
+    participant Store as "state_store / app.app_settings"
+    participant Audit as "in-memory AuditTrailService"
+    participant ReadModel as "Turnover read model"
+    participant Queue as "runtime queue"
+
+    Client->>Handler: "PUT payload + headers"
+    Handler->>Auth: "validate mutation session"
+    Handler->>Handler: "parse JSON body"
+    Handler->>Settings: "update_turnover_ledger_tag_selection(payload, actor_id)"
+    Settings->>Settings: "refresh snapshot + validate expected_version + selected tag codes"
+    Settings->>Store: "save_app_settings(next_snapshot)"
+    Settings->>Settings: "mutate in-memory snapshot + configure category service"
+    Settings->>Audit: "record in-memory audit"
+    Settings-->>Handler: "public response payload"
+    Handler->>ReadModel: "clear best-effort"
+    Handler->>Queue: "enqueue read model refresh"
+    Handler-->>Client: "200 response"
+```
+
+Current facts:
+
+- Version conflict is raised by `AppSettingsService` as `turnover_ledger_tag_selection_version_conflict` and mapped by the handler to `409`.
+- Invalid tag code is mapped to `400`.
+- Queue failure currently happens after settings save. `test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save` locks that split-brain behavior.
+- The handler directly performs read model clear/enqueue after service returns.
+
+### Target UoW Runtime Sequence
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Handler as "server.py handler"
+    participant Facade as "Turnover tag selection facade/service"
+    participant Settings as "AppSettingsService pure normalizer"
+    participant UoW as "TurnoverLedgerWriteUnitOfWork"
+    participant SettingsPort as "TurnoverLedgerTagSelectionSettingsAdapter"
+    participant DB as "app.app_settings transaction writer"
+    participant Outbox as "Turnover dirty/outbox writer"
+
+    Client->>Handler: "PUT payload + headers"
+    Handler->>Handler: "auth + JSON mapping only"
+    Handler->>Facade: "update_tag_selection(payload, actor_id, tenant_id)"
+    Facade->>Settings: "normalize_turnover_ledger_tag_selection_update"
+    Settings-->>Facade: "next_snapshot + public_payload + audit_event"
+    Facade->>UoW: "run(command, handler)"
+    UoW->>SettingsPort: "save next_snapshot using transaction"
+    SettingsPort->>DB: "upsert app.app_settings using supplied transaction"
+    UoW->>Outbox: "enqueue turnover_ledger read model refresh using same transaction"
+    UoW-->>Facade: "public payload"
+    Facade-->>Handler: "service-layer result"
+    Handler-->>Client: "HTTP response"
+```
+
+Target facts:
+
+- Handler remains HTTP-only: session/auth, JSON parsing, mapping validation errors to status codes, JSON response.
+- The facade/service owns pure normalization and UoW command construction.
+- Settings fact and dirty/outbox must be in the same transaction.
+- Read model clear should be removed or reduced to a documented compatibility no-op once dirty/outbox is authoritative.
+- Response payload should remain compatible with current `GET/PUT` tests.
+
+### Required Compatibility / Target Tests Before Migration
+
+PF-P071 should add or strengthen tests before any handler migration:
+
+1. Current success response shape remains stable.
+2. Version conflict still maps to `409` with `turnover_ledger_tag_selection_version_conflict`.
+3. Invalid tag code still maps to `400` and causes no enqueue/clear side effect.
+4. Target queue/outbox failure semantics are explicit:
+   - current characterization: settings save already happened when queue fails;
+   - target contract: once UoW path is used, outbox failure must roll back settings fact.
+5. Target path must not call `_clear_turnover_ledger_read_model_best_effort` separately if dirty/outbox succeeds.
+6. Source-version/freshness impact must be documented as Turnover read model refresh reason `turnover_ledger_tag_selection_changed` with scope `all`.
+
+### Durable Audit Strategy
+
+Decision for now:
+
+- Do not block tag selection UoW migration on durable audit persistence.
+- Keep audit metadata in the pure normalizer and settings port command/result.
+- Record the gap explicitly: real audit is still in-memory in the legacy service path, and real `PostgresOpsTaxEtcRepository` does not yet persist this audit event in the same transaction.
+- A later Platform / Audit prompt should introduce a durable audit port if product requirements require durable settings audit.
+
+### Recommended Prompt Sequence
+
+1. `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`
+   - Tests only.
+   - Lock current compatibility and future rollback/no-clear target semantics.
+2. `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`
+   - Service/facade only.
+   - Use pure normalizer, UoW, settings adapter, dirty/outbox writer at fake-port level.
+   - Do not wire server handler yet.
+3. `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`
+   - Minimal `server.py` wiring.
+   - Preserve response/error contract.
+   - Remove direct post-save clear/enqueue only when target tests prove dirty/outbox path.
+4. `PF-P073-MG` or cumulative MG if PF-P071 to PF-P073 complete the tag selection slice.
+
+## PF-P071 Tag Selection UoW Compatibility and Target Tests
+
+状态：`verified`
+
+目标：
+
+- 补强 current API compatibility tests。
+- 增加 future UoW target tests，未实现语义用 `unittest.expectedFailure` 保持默认 CI 绿色。
+- 不修改 production code，不迁移 handler。
+
+下一步：
+
+- `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`。
+- PF-P072 should create a service-layer facade using the pure normalizer and fake/UoW ports, without wiring `server.py`.
+
+执行结果：
+
+- Strengthened current tag selection API compatibility assertions for response shape and active tag fields.
+- Added 2 future handler target tests as explicit `unittest.expectedFailure`:
+  - future UoW queue/outbox failure rolls back settings save;
+  - future UoW success path does not call read model clear directly.
+- Strengthened fake UoW result assertions to remain service-layer payloads without HTTP coupling.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 27 tests.
+
+## PF-P072 Tag Selection Facade Skeleton
+
+状态：`verified`
+
+目标：
+
+- 在 `TurnoverLedgerWriteFacade` 中新增 `update_tag_selection(...)` service-layer method。
+- 使用 pure normalizer、UoW 和 settings port。
+- 不迁移 `server.py` handler。
+
+下一步：
+
+- `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`。
+- PF-P073 should minimally wire `PUT /api/turnover-ledger/tag-selection` to the facade/UoW path and turn the 2 PF-P071 handler target expectedFailure tests into ordinary passing tests.
+
+执行结果：
+
+- Added `TurnoverLedgerWriteFacade.update_tag_selection(...)`.
+- Facade accepts `tag_selection_normalizer` or `app_settings_service`, calls pure normalizer before opening UoW, saves through `context.settings_port.save_tag_selection_settings(...)`, and returns service-layer `public_payload`.
+- Added facade success, outbox rollback and normalization-error tests.
+- PF-P071 API handler expectedFailure tests remain in place until PF-P073.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests, 2 expectedFailure.
+
+## PF-P073 Tag Selection Handler UoW Wiring
+
+状态：`verified`
+
+目标：
+
+- 只迁移 `PUT /api/turnover-ledger/tag-selection` 到 `TurnoverLedgerWriteFacade.update_tag_selection(...)`。
+- 将 PF-P071 的 2 个 handler target `expectedFailure` 转为普通通过测试。
+- 保持 `GET /api/turnover-ledger/tag-selection`、No OA tag selection、relation extra、bank row tags 和其它 Turnover 写路径不变。
+
+边界：
+
+- Handler 只做 session/auth、JSON parsing、HTTP error mapping 和调用 facade。
+- Production PostgreSQL path 必须使用 `PostgresConnection.transaction()`、`TurnoverLedgerTagSelectionSettingsAdapter` 和 `TurnoverLedgerDirtyOutboxWriter`。
+- Local state store compatibility path 可以使用最小本地 transaction shim，以便 queue/outbox failure 时恢复 app settings snapshot；该 shim 只用于 local/dev/test state store，不得替代 PostgreSQL transaction-bound path。
+- 成功路径不得再直接调用 `_clear_turnover_ledger_read_model_best_effort()`。
+
+下一步：
+
+- 生成 cumulative MG 覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。
+
+执行结果：
+
+- `PUT /api/turnover-ledger/tag-selection` handler 已迁移到 `TurnoverLedgerWriteFacade.update_tag_selection(...)`。
+- PostgreSQL path 使用 transaction-bound settings adapter 和 dirty/outbox writer。
+- Local state store path 使用最小 transaction shim，queue failure 时恢复 normalized app settings snapshot。
+- 成功路径不再直接 clear read model。
+- PF-P071 的 2 个 handler target tests 已转为普通通过。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+
+## PF-P073-MG Tag Selection UoW Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice 累计 diff。
+- 只执行 Merge Gate，不执行 Traffic Gate。
+- 合并前后运行 Turnover Ledger targeted tests。
+
+下一步：
+
+- 执行 PF-P073-MG。
+- MG 通过并 push `origin/main` 后，必须从最新 `main` 新建分支，再生成下一条 prompt。

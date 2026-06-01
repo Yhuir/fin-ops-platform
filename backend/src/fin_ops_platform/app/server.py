@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -19,7 +19,7 @@ from pathlib import Path
 from threading import Lock, Thread
 from time import monotonic, sleep
 from types import SimpleNamespace
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from uuid import uuid4
 
@@ -240,6 +240,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
 )
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
@@ -273,6 +274,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
+    TurnoverLedgerTagSelectionSettingsAdapter,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
@@ -2643,6 +2645,112 @@ class Application:
             ),
             row_provider=self._turnover_ledger_relation_extra_row_provider,
         )
+
+    def _turnover_ledger_tag_selection_write_facade(self) -> TurnoverLedgerWriteFacade | None:
+        override = getattr(self, "_turnover_ledger_tag_selection_write_facade_override", None)
+        if override is not None:
+            return override
+        state_store = getattr(self, "_state_store", None)
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if state_store is None or queue_repository is None:
+            return None
+        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            connection = getattr(state_store, "_connection", None)
+            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            settings_port = TurnoverLedgerTagSelectionSettingsAdapter(
+                repository_factory=lambda transaction: PostgresOpsTaxEtcRepository(transaction)
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+        else:
+            connection = self._local_turnover_ledger_tag_selection_connection(state_store)
+            settings_port = TurnoverLedgerTagSelectionSettingsAdapter(
+                writer=lambda next_snapshot, audit_event, transaction: self._save_local_turnover_ledger_tag_selection(
+                    next_snapshot=next_snapshot,
+                    audit_event=audit_event,
+                )
+            )
+            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+        uow = TurnoverLedgerWriteUnitOfWork(
+            connection=connection,
+            relation_repository=SimpleNamespace(),
+            extra_repository=SimpleNamespace(),
+            settings_port=settings_port,
+            bankdetail_port=SimpleNamespace(),
+            dirty_outbox_writer=dirty_outbox_writer,
+            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+        )
+        return TurnoverLedgerWriteFacade(
+            uow=uow,
+            app_settings_service=self._app_settings_service,
+        )
+
+    def _save_local_turnover_ledger_tag_selection(
+        self,
+        *,
+        next_snapshot: dict[str, object],
+        audit_event: dict[str, object],
+    ) -> None:
+        state_store = getattr(self, "_state_store", None)
+        if state_store is None:
+            raise RuntimeError("state store is required.")
+        state_store.save_app_settings(dict(next_snapshot))
+        self._refresh_local_app_settings_snapshot(dict(next_snapshot))
+
+    def _refresh_local_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
+        setattr(self._app_settings_service, "_snapshot", dict(snapshot))
+        configure_category_service = getattr(self._app_settings_service, "_configure_category_service", None)
+        if callable(configure_category_service):
+            configure_category_service(dict(snapshot))
+
+    def _local_turnover_ledger_tag_selection_connection(self, state_store: object) -> object:
+        application = self
+
+        class _LocalTagSelectionConnection:
+            @contextmanager
+            def transaction(self) -> Any:
+                previous_snapshot = dict(getattr(application._app_settings_service, "_snapshot", {}) or {})
+                try:
+                    yield SimpleNamespace()
+                except Exception:
+                    state_store.save_app_settings(previous_snapshot)
+                    application._refresh_local_app_settings_snapshot(previous_snapshot)
+                    raise
+
+        return _LocalTagSelectionConnection()
+
+    @staticmethod
+    def _local_turnover_ledger_dirty_outbox_writer(queue_repository: object) -> object:
+        class _LocalTurnoverLedgerDirtyOutboxWriter:
+            def enqueue_refresh(
+                self,
+                *,
+                transaction: object,
+                scope_type: str,
+                scope_keys: list[str],
+                reason: str,
+                payload: dict[str, object] | None = None,
+            ) -> list[object]:
+                enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+                if not callable(enqueue):
+                    raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
+                events: list[object] = []
+                for scope_key in list(scope_keys or ["all"]):
+                    events.append(
+                        enqueue(
+                            scope_type=scope_type,
+                            scope_key=str(scope_key or "all"),
+                            reason=reason,
+                        )
+                    )
+                return events
+
+        return _LocalTurnoverLedgerDirtyOutboxWriter()
 
     def _turnover_ledger_relation_extra_row_provider(
         self,
@@ -12035,11 +12143,20 @@ class Application:
         if error is not None:
             return error
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
+        facade = self._turnover_ledger_tag_selection_write_facade()
         try:
-            result = self._app_settings_service.update_turnover_ledger_tag_selection(
-                payload,
-                actor_id=actor,
-            )
+            if facade is not None:
+                result = facade.update_tag_selection(
+                    payload=payload,
+                    actor_id=actor,
+                    tenant_id=tenant_id_for_session(session_response),
+                    scope_keys=["all"],
+                )
+            else:
+                result = self._app_settings_service.update_turnover_ledger_tag_selection(
+                    payload,
+                    actor_id=actor,
+                )
         except AppSettingsValidationError as exc:
             status = (
                 HTTPStatus.CONFLICT
@@ -12047,11 +12164,12 @@ class Application:
                 else HTTPStatus.BAD_REQUEST
             )
             return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
-        self._clear_turnover_ledger_read_model_best_effort()
-        self._enqueue_turnover_ledger_read_model_refreshes(
-            ["all"],
-            reason="turnover_ledger_tag_selection_changed",
-        )
+        if facade is None:
+            self._clear_turnover_ledger_read_model_best_effort()
+            self._enqueue_turnover_ledger_read_model_refreshes(
+                ["all"],
+                reason="turnover_ledger_tag_selection_changed",
+            )
         return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_turnover_ledger_bank_row_tags_batch(

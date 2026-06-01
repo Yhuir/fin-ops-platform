@@ -589,6 +589,21 @@ class AppSettingsService:
         *,
         actor_id: str,
     ) -> dict[str, Any]:
+        normalized_update = self.normalize_turnover_ledger_tag_selection_update(payload, actor_id=actor_id)
+        next_snapshot = dict(normalized_update["next_snapshot"])
+        if self._state_store is not None:
+            self._state_store.save_app_settings(next_snapshot)
+        self._snapshot = next_snapshot
+        self._configure_category_service(next_snapshot)
+        self._record_turnover_ledger_tag_selection_audit(dict(normalized_update["audit_event"]))
+        return self.get_turnover_ledger_tag_selection_payload()
+
+    def normalize_turnover_ledger_tag_selection_update(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+    ) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
         current = self._snapshot["turnover_ledger_tag_selection"]
         requested_version = BankTransactionCategoryService._normalize_version(
@@ -609,20 +624,22 @@ class AppSettingsService:
         )
         next_snapshot = dict(self._snapshot)
         next_snapshot["turnover_ledger_tag_selection"] = next_selection
-        if self._state_store is not None:
-            self._state_store.save_app_settings(next_snapshot)
-        self._snapshot = next_snapshot
-        self._configure_category_service(next_snapshot)
-        self._record_turnover_ledger_tag_selection_audit(
-            {
-                "actor_id": actor_id,
-                "old_version": int(current.get("version") or 1),
-                "new_version": int(next_selection.get("version") or 1),
-                "old_selected_tag_codes": list(current.get("selected_tag_codes") or []),
-                "new_selected_tag_codes": list(next_selection.get("selected_tag_codes") or []),
-            }
-        )
-        return self.get_turnover_ledger_tag_selection_payload()
+        audit_event = {
+            "actor_id": actor_id,
+            "old_version": int(current.get("version") or 1),
+            "new_version": int(next_selection.get("version") or 1),
+            "old_selected_tag_codes": list(current.get("selected_tag_codes") or []),
+            "new_selected_tag_codes": list(next_selection.get("selected_tag_codes") or []),
+        }
+        return {
+            "next_snapshot": next_snapshot,
+            "next_selection": dict(next_selection),
+            "audit_event": audit_event,
+            "public_payload": self._public_turnover_ledger_tag_selection(
+                next_selection,
+                bank_transaction_tags=next_snapshot["bank_transaction_tags"],
+            ),
+        }
 
     def sync_oa_projects(self, *, actor_id: str) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()

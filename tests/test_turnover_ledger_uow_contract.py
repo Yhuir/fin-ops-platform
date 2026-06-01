@@ -29,9 +29,13 @@ class _Command:
 class _RecordingTransaction:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.executed: list[dict[str, object]] = []
 
     def record(self, operation: str, **payload: object) -> None:
         self.calls.append((operation, dict(payload)))
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        self.executed.append({"sql": sql, "params": params})
 
 
 class _TransactionContext:
@@ -89,6 +93,21 @@ class _RecordingSettingsPort:
 
     def save_tag_selection(self, payload: dict[str, object], *, transaction: object) -> None:
         self.saved.append({"payload": dict(payload), "transaction": transaction})
+
+    def save_tag_selection_settings(
+        self,
+        *,
+        next_snapshot: dict[str, object],
+        audit_event: dict[str, object],
+        transaction: object,
+    ) -> None:
+        self.saved.append(
+            {
+                "next_snapshot": dict(next_snapshot),
+                "audit_event": dict(audit_event),
+                "transaction": transaction,
+            }
+        )
 
     def append_audit(self, event: dict[str, object], *, transaction: object) -> None:
         self.audit.append({"event": dict(event), "transaction": transaction})
@@ -160,6 +179,30 @@ class _RecordingRepositoryFactory:
         return repository
 
 
+class _RecordingSettingsRepository:
+    def __init__(self) -> None:
+        self.saved_settings: list[dict[str, object]] = []
+        self.audit_events: list[dict[str, object]] = []
+
+    def save_app_settings(self, payload: dict[str, object]) -> None:
+        self.saved_settings.append(dict(payload))
+
+    def append_audit(self, event: dict[str, object]) -> None:
+        self.audit_events.append(dict(event))
+
+
+class _RecordingSettingsRepositoryFactory:
+    def __init__(self) -> None:
+        self.transactions: list[object] = []
+        self.repositories: list[_RecordingSettingsRepository] = []
+
+    def __call__(self, transaction: object) -> _RecordingSettingsRepository:
+        self.transactions.append(transaction)
+        repository = _RecordingSettingsRepository()
+        self.repositories.append(repository)
+        return repository
+
+
 class _TransactionOnlyQueueRepository:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -196,6 +239,83 @@ class _NonTransactionalQueueRepository:
         return None
 
 
+class _AppSettingsStateStore:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = dict(payload)
+        self.saved_payloads: list[dict[str, object]] = []
+
+    def load_app_settings(self) -> dict[str, object]:
+        return dict(self.payload)
+
+    def save_app_settings(self, payload: dict[str, object]) -> None:
+        self.payload = dict(payload)
+        self.saved_payloads.append(dict(payload))
+
+
+class _ProjectCostingStub:
+    def restore_manual_projects(self, _projects: list[object]) -> None:
+        return None
+
+    def list_projects(self) -> list[object]:
+        return []
+
+
+def _tag_selection_settings_payload() -> dict[str, object]:
+    return {
+        "bank_transaction_tags": {
+            "version": 1,
+            "definitions": [
+                {
+                    "code": "external_rule_borrow_out",
+                    "label": "借出款",
+                    "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "外部往来款付款",
+                    "output_sub_label": "借出款",
+                    "turnover_role": "external_turnover",
+                    "turnover_action_type": "pending_collection",
+                    "direction": "any",
+                    "account_scope": {"type": "any", "values": []},
+                    "rules": {
+                        "match_fields": ["all_text"],
+                        "contains_any": ["借出"],
+                        "contains_all": [],
+                        "exact_any": [],
+                        "regex_any": [],
+                        "none_of": [],
+                    },
+                },
+                {
+                    "code": "external_rule_repaid",
+                    "label": "归还借款",
+                    "path": ["银行明细自动标签规则", "外部往来款付款", "归还借款"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "外部往来款付款",
+                    "output_sub_label": "归还借款",
+                    "turnover_role": "external_turnover",
+                    "turnover_action_type": "repaid",
+                    "direction": "any",
+                    "account_scope": {"type": "any", "values": []},
+                    "rules": {
+                        "match_fields": ["all_text"],
+                        "contains_any": ["归还"],
+                        "contains_all": [],
+                        "exact_any": [],
+                        "regex_any": [],
+                        "none_of": [],
+                    },
+                },
+            ],
+        },
+        "turnover_ledger_tag_selection": {
+            "version": 1,
+            "selected_tag_codes": ["external_rule_borrow_out", "external_rule_repaid"],
+        },
+    }
+
+
 class _RecordingRelationExtraRowProvider:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -228,6 +348,39 @@ class _RecordingRelationExtraNormalizer:
             "note": f"normalized:{payload.get('note', '')}",
             "updated_at": "2026-06-02T00:00:00+00:00",
             "updated_by": actor_id,
+        }
+
+
+class _RecordingTagSelectionNormalizer:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, *, payload: dict[str, object], actor_id: str) -> dict[str, object]:
+        self.calls.append({"payload": dict(payload), "actor_id": actor_id})
+        if self.fail:
+            raise ValueError("invalid tag selection")
+        return {
+            "next_snapshot": {
+                "turnover_ledger_tag_selection": {
+                    "version": 2,
+                    "selected_tag_codes": ["external_rule_borrow_out"],
+                }
+            },
+            "next_selection": {
+                "version": 2,
+                "selected_tag_codes": ["external_rule_borrow_out"],
+            },
+            "audit_event": {
+                "actor_id": actor_id,
+                "old_version": 1,
+                "new_version": 2,
+            },
+            "public_payload": {
+                "version": 2,
+                "selected_tag_codes": ["external_rule_borrow_out"],
+                "active_tags": [{"code": "external_rule_borrow_out", "label": "借出款"}],
+            },
         }
 
 
@@ -378,6 +531,75 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
+    def test_tag_selection_settings_port_uses_uow_transaction_before_dirty_outbox(self) -> None:
+        uow, deps = self._build_uow()
+
+        def handler(context: object) -> dict[str, object]:
+            transaction = getattr(context, "transaction")
+            context.settings_port.save_tag_selection_settings(
+                next_snapshot={"turnover_ledger_tag_selection": {"version": 2}},
+                audit_event={"action": "turnover_ledger_tag_selection_changed"},
+                transaction=transaction,
+            )
+            return {
+                "version": 2,
+                "selected_tag_codes": ["external_rule_borrow_out"],
+                "active_tags": [{"code": "external_rule_borrow_out", "label": "借出款"}],
+            }
+
+        result = self._run_uow(
+            uow,
+            _Command(action_name="turnover_ledger_tag_selection_changed", scope_keys=["all"]),
+            handler,
+        )
+
+        self.assertEqual(result["version"], 2)
+        self.assertEqual(result["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(result["active_tags"][0]["code"], "external_rule_borrow_out")
+        forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
+        self.assertTrue(forbidden_keys.isdisjoint(result))
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertIs(deps.settings_port.saved[0]["transaction"], deps.connection.transaction_obj)
+        self.assertIs(deps.dirty_outbox_writer.calls[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_ledger_tag_selection_changed")
+
+    def test_tag_selection_pure_normalizer_returns_next_selection_without_mutating_settings_snapshot(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.app_settings_service")
+        service_class = getattr(module, "AppSettingsService")
+        state_store = _AppSettingsStateStore(_tag_selection_settings_payload())
+        service = service_class(
+            state_store=state_store,
+            project_costing_service=_ProjectCostingStub(),
+        )
+
+        before_payload = service.get_turnover_ledger_tag_selection_payload()
+        normalized = service.normalize_turnover_ledger_tag_selection_update(
+            {
+                "expected_version": before_payload["version"],
+                "selected_tag_codes": ["external_rule_borrow_out"],
+            },
+            actor_id="finance-user",
+        )
+
+        self.assertEqual(normalized["next_selection"]["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(normalized["audit_event"]["actor_id"], "finance-user")
+        self.assertEqual(normalized["audit_event"]["old_version"], before_payload["version"])
+        self.assertEqual(normalized["audit_event"]["new_version"], before_payload["version"] + 1)
+        self.assertEqual(normalized["public_payload"]["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(state_store.saved_payloads, [])
+        self.assertEqual(service.get_turnover_ledger_tag_selection_payload(), before_payload)
+
+        updated = service.update_turnover_ledger_tag_selection(
+            {
+                "expected_version": before_payload["version"],
+                "selected_tag_codes": ["external_rule_borrow_out"],
+            },
+            actor_id="finance-user",
+        )
+
+        self.assertEqual(updated["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(len(state_store.saved_payloads), 1)
+
     def test_bank_row_tags_batch_uses_explicit_bankdetail_port_and_rolls_back_on_outbox_failure(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
@@ -406,6 +628,83 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             facade_class(application=object())
+
+    def test_tag_selection_write_facade_commits_settings_and_dirty_outbox_in_one_uow(self) -> None:
+        uow, deps = self._build_uow()
+        normalizer = _RecordingTagSelectionNormalizer()
+        facade = self._write_facade_class()(uow=uow, tag_selection_normalizer=normalizer)
+
+        result = facade.update_tag_selection(
+            payload={"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(
+            normalizer.calls,
+            [
+                {
+                    "payload": {"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
+                    "actor_id": "finance-user",
+                }
+            ],
+        )
+        self.assertEqual(result["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(result["active_tags"][0]["code"], "external_rule_borrow_out")
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
+        self.assertIs(deps.settings_port.saved[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(
+            deps.settings_port.saved[0]["next_snapshot"],
+            {
+                "turnover_ledger_tag_selection": {
+                    "version": 2,
+                    "selected_tag_codes": ["external_rule_borrow_out"],
+                }
+            },
+        )
+        self.assertIs(deps.dirty_outbox_writer.calls[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_ledger_tag_selection_changed")
+        forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
+        self.assertTrue(forbidden_keys.isdisjoint(result))
+
+    def test_tag_selection_write_facade_rolls_back_settings_when_dirty_outbox_fails(self) -> None:
+        uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
+        facade = self._write_facade_class()(
+            uow=uow,
+            tag_selection_normalizer=_RecordingTagSelectionNormalizer(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
+            facade.update_tag_selection(
+                payload={"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+            )
+
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_tag_selection_write_facade_normalization_error_prevents_uow_side_effects(self) -> None:
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(
+            uow=uow,
+            tag_selection_normalizer=_RecordingTagSelectionNormalizer(fail=True),
+        )
+
+        with self.assertRaisesRegex(ValueError, "invalid tag selection"):
+            facade.update_tag_selection(
+                payload={"expected_version": 1, "selected_tag_codes": ["fee"]},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+            )
+
+        self.assertEqual(deps.connection.opened, 0)
+        self.assertEqual(deps.settings_port.saved, [])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_relation_extra_write_facade_commits_extra_and_dirty_outbox_in_one_uow(self) -> None:
         # PF-P056 target contract: facade must remain service-layer only and delegate transaction scope to UoW.
@@ -588,6 +887,47 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             adapter_class(application=object())
+
+    def test_tag_selection_settings_adapter_saves_snapshot_and_audit_with_supplied_transaction(self) -> None:
+        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerTagSelectionSettingsAdapter")
+        factory = _RecordingSettingsRepositoryFactory()
+        transaction = _RecordingTransaction()
+        adapter = adapter_class(repository_factory=factory)
+
+        adapter.save_tag_selection_settings(
+            next_snapshot={"turnover_ledger_tag_selection": {"version": 2}},
+            audit_event={"actor_id": "finance-user", "new_version": 2},
+            transaction=transaction,
+        )
+
+        self.assertEqual(factory.transactions, [transaction])
+        self.assertEqual(
+            factory.repositories[0].saved_settings,
+            [{"turnover_ledger_tag_selection": {"version": 2}}],
+        )
+        self.assertEqual(factory.repositories[0].audit_events, [{"actor_id": "finance-user", "new_version": 2}])
+
+    def test_tag_selection_settings_adapter_rejects_application_god_object(self) -> None:
+        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerTagSelectionSettingsAdapter")
+
+        with self.assertRaises(TypeError):
+            adapter_class(application=object())
+
+    def test_postgres_settings_repository_saves_app_settings_with_supplied_transaction(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.postgres_repositories.ops_tax_etc")
+        repository_class = getattr(module, "PostgresOpsTaxEtcRepository")
+        transaction = _RecordingTransaction()
+        repository = repository_class(connection=SimpleNamespace())
+
+        repository.save_app_settings_in_transaction(
+            {"turnover_ledger_tag_selection": {"version": 2}},
+            transaction=transaction,
+        )
+
+        self.assertEqual(len(transaction.executed), 1)
+        call = transaction.executed[0]
+        self.assertIn("app.app_settings", str(call["sql"]))
+        self.assertEqual(call["params"][0], "app_settings")
 
     def test_turnover_dirty_outbox_writer_uses_transaction_bound_queue_for_each_scope(self) -> None:
         module = self._write_adapters_module()
