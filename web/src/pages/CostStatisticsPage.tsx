@@ -872,7 +872,23 @@ export default function CostStatisticsPage() {
     expenseTypeScopeEndDate,
   ]);
 
-  const isRootEmpty = !isExplorerLoading && !loadError && explorerData
+  const readModelStatus = explorerData?.readModelStatus;
+  const isReadModelRefreshing = readModelStatus === "refreshing";
+  const isReadModelStale = readModelStatus === "stale";
+  const isReadModelUnavailable = readModelStatus === "unavailable";
+  const readModelStaleReasons = explorerData?.readModelStaleReasons ?? [];
+  const readModelPendingLabel = isReadModelRefreshing
+    ? "成本统计读模型正在刷新，当前结果生成后会自动更新。"
+    : isReadModelUnavailable
+      ? "成本统计读模型暂不可用，刷新队列恢复后会自动重建。"
+      : null;
+  const readModelPendingTableLabel = isReadModelRefreshing
+    ? "读模型刷新中。"
+    : isReadModelUnavailable
+      ? "读模型暂不可用。"
+      : null;
+
+  const isRootEmpty = !isExplorerLoading && !loadError && explorerData && !isReadModelRefreshing && !isReadModelUnavailable
     ? viewMode === "time"
       ? filteredTimeRows.length === 0
       : viewMode === "project"
@@ -1392,6 +1408,18 @@ export default function CostStatisticsPage() {
           <div className="state-panel">正在加载成本统计数据...</div>
         ) : null}
         {detailLoadingMessage ? <div className="state-panel">{detailLoadingMessage}</div> : null}
+        {isReadModelRefreshing ? (
+          <div className="state-panel">成本统计读模型正在刷新，当前结果生成后会自动更新。</div>
+        ) : null}
+        {isReadModelStale ? (
+          <div className="state-panel">
+            成本统计读模型已过期，正在排队刷新，当前显示最近一次结果。
+            {readModelStaleReasons.length > 0 ? ` 原因：${Array.from(new Set(readModelStaleReasons)).join("、")}` : ""}
+          </div>
+        ) : null}
+        {isReadModelUnavailable ? (
+          <div className="state-panel error">成本统计读模型暂不可用，刷新队列恢复后会自动重建。</div>
+        ) : null}
         {exportFeedback && !isExportCenterOpen ? (
           <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
         ) : null}
@@ -1513,7 +1541,7 @@ export default function CostStatisticsPage() {
                     columns={timeColumns}
                     rows={filteredTimeRows}
                     getRowKey={(row) => row.transactionId}
-                    emptyLabel="当前时间范围没有可用于成本统计的支出流水。"
+                    emptyLabel={readModelPendingTableLabel ?? "当前时间范围没有可用于成本统计的支出流水。"}
                     onRowClick={(row) => void openTransactionDetail(row, "time")}
                     getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                   />

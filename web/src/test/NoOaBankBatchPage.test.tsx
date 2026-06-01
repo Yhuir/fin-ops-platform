@@ -417,6 +417,9 @@ describe("NoOaBankBatchPage", () => {
           rows: [{ ...feeDetailPayload.rows[0], transaction_id: "bank-row-002", account_key: "boc:7001", bank_name: "中国银行", account_last4: "7001" }],
         });
       }
+      if (url.pathname === "/api/no-oa-bank-batches/submit-selection") {
+        return jsonResponse({ affected_case_ids: [], affected_months: ["2026-05"] });
+      }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -425,11 +428,23 @@ describe("NoOaBankBatchPage", () => {
     renderPage();
 
     await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    await user.click(await screen.findByRole("button", { name: "查看中国银行7001流水" }));
     await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-002" }));
 
     expect(await screen.findByText("请先清空已选银行区域，再选择其他银行流水。")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "选择流水 bank-row-001" })).toBeChecked();
+    expect(screen.getByText("已选 1 条")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "选择流水 bank-row-002" })).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "提交批次" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/no-oa-bank-batches/submit-selection",
+        expect.objectContaining({
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+          method: "POST",
+        }),
+      );
+    });
   });
 
   test("switches to submitted bucket and withdraws a submitted batch", async () => {

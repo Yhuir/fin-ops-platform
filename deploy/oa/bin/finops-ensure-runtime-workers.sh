@@ -6,7 +6,7 @@ systemd_dir="${FINOPS_SYSTEMD_DIR:-/etc/systemd/system}"
 env_dir="${FINOPS_ENV_DIR:-/etc/fin-ops}"
 worker_template="$release_src/deploy/oa/systemd/fin-ops-worker@.service.example"
 worker_unit="$systemd_dir/fin-ops-worker@.service"
-required_workers="${FINOPS_REQUIRED_WORKERS:-oa-sync workbench workbench-matching bank-detail search-pending invoice-usage-collection cost-tax import}"
+required_workers="${FINOPS_REQUIRED_WORKERS:-oa-sync workbench workbench-matching bank-detail search-pending invoice-usage-collection cost-tax import etc-business-oa-detection}"
 optional_workers="${FINOPS_OPTIONAL_WORKERS:-}"
 
 fail() {
@@ -55,6 +55,7 @@ worker_env_example() {
     invoice-usage-collection) printf '%s\n' "fin-ops.worker.invoice-usage-collection.env.example" ;;
     cost-tax) printf '%s\n' "fin-ops.worker.cost-tax.env.example" ;;
     import) printf '%s\n' "fin-ops.worker.import.env.example" ;;
+    etc-business-oa-detection) printf '%s\n' "fin-ops.worker.etc-business-oa-detection.env.example" ;;
     file-migration) printf '%s\n' "fin-ops.worker.file-migration.env.example" ;;
     *) fail "unsupported worker instance: $1" ;;
   esac

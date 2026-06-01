@@ -49,6 +49,7 @@ class NoOaBankBatchApplicationService:
         execute_derived_data_lifecycle_event: Callable[..., Any] | None = None,
         expand_workbench_read_model_scope_keys_for_base_scopes: Callable[[list[str]], list[str]] | None = None,
         search_cache_clearer: Callable[[], Any] | None = None,
+        queue_repository: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._effective_category_provider = effective_category_provider
@@ -69,6 +70,7 @@ class NoOaBankBatchApplicationService:
             expand_workbench_read_model_scope_keys_for_base_scopes or (lambda scope_keys: scope_keys)
         )
         self._search_cache_clearer = search_cache_clearer or (lambda: None)
+        self._queue_repository = queue_repository
 
     def list_batches_payload(self, query: dict[str, list[str]]) -> dict[str, object]:
         filters = {
@@ -89,14 +91,13 @@ class NoOaBankBatchApplicationService:
             if summary_read_model_batches is not None and read_model_batches is not None:
                 stale_reasons = self.no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
                 if stale_reasons:
-                    self.refresh_batches()
-                    summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
-                    batches = self._no_oa_bank_batch_service.list_batches(filters)
                     return {
-                        "summary": self.summary(summary_batches),
-                        "batches": self.resolve_labels(batches),
+                        "summary": self.summary(summary_read_model_batches),
+                        "batches": self.resolve_labels(read_model_batches),
                         "read_model_status": "stale",
                         "read_model_stale_reasons": stale_reasons,
+                        "refresh_enqueued": self.enqueue_background_refresh(["all"], reason="api_no_oa_source_versions_stale"),
+                        "refresh_reason": "api_no_oa_source_versions_stale",
                     }
                 return {
                     "summary": self.summary(summary_read_model_batches),
@@ -120,8 +121,8 @@ class NoOaBankBatchApplicationService:
         if self._tag_selection_service is not None:
             return self._tag_selection_service.update_tag_selection(payload, actor_id=actor_id)
         result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(payload, actor_id=actor_id)
-        self.refresh_batches()
-        self.after_mutation(["all"], changed_case_ids=[], persist=True)
+        self.enqueue_background_refresh(["all"], reason="no_oa_bank_batch_tag_selection_changed")
+        self.after_mutation(["all"], changed_case_ids=[], persist=False)
         return result
 
     def detail_payload(self, batch_id: str) -> dict[str, object]:
@@ -497,6 +498,16 @@ class NoOaBankBatchApplicationService:
                 changed_scope_keys=self._expand_workbench_read_model_scope_keys_for_base_scopes(scope_keys),
             )
         return bool(normalized_months)
+
+    def enqueue_background_refresh(self, scope_keys: list[str], *, reason: str) -> bool:
+        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueued = False
+        for scope_key in [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]:
+            enqueue(scope_type="no_oa_bank_batch", scope_key=scope_key, reason=reason)
+            enqueued = True
+        return enqueued
 
     def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
         if self._state_store is None:

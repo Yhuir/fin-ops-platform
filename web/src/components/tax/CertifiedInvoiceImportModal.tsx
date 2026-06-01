@@ -16,17 +16,19 @@ import FileDropzone from "../common/FileDropzone";
 import { useSession } from "../../contexts/SessionContext";
 import {
   confirmTaxCertifiedImport,
+  fetchTaxCertifiedImportJob,
   previewTaxCertifiedImport,
+  taxCertifiedImportConfirmedFromJob,
 } from "../../features/tax/api";
 import type {
-  TaxCertifiedImportConfirmResult,
+  TaxCertifiedImportConfirmedResult,
   TaxCertifiedImportPreviewResult,
 } from "../../features/tax/types";
 
 type CertifiedInvoiceImportModalProps = {
   currentMonth: string;
   onClose: () => void;
-  onImported: (result: TaxCertifiedImportConfirmResult) => Promise<void> | void;
+  onImported: (result: TaxCertifiedImportConfirmedResult) => Promise<void> | void;
 };
 
 function isExcelFile(file: File) {
@@ -47,6 +49,7 @@ export default function CertifiedInvoiceImportModal({
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState("正在导入已认证结果并刷新税金抵扣页面...");
 
   const canPreview = canMutateData && selectedFiles.length > 0 && !isPreviewing && !isConfirming;
   const canConfirm = canMutateData && previewResult !== null && !isPreviewing && !isConfirming;
@@ -108,12 +111,41 @@ export default function CertifiedInvoiceImportModal({
       return;
     }
     setErrorMessage(null);
+    setConfirmMessage("正在导入已认证结果并刷新税金抵扣页面...");
     setIsConfirming(true);
     try {
       const result = await confirmTaxCertifiedImport(previewResult.sessionId);
+      if (result.status === "queued") {
+        setConfirmMessage("已提交导入任务，正在等待后台确认结果...");
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, 250);
+        });
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          const job = await fetchTaxCertifiedImportJob(result.importJob.importJobId);
+          const normalizedStatus = job.status.toLowerCase();
+          const normalizedStage = job.stage.toLowerCase();
+          if (normalizedStatus === "succeeded" || normalizedStage === "succeeded" || normalizedStage === "completed") {
+            const confirmedResult = taxCertifiedImportConfirmedFromJob(job);
+            if (!confirmedResult) {
+              throw new Error("Tax certified import job succeeded without a batch result.");
+            }
+            await onImported(confirmedResult);
+            return;
+          }
+          if (normalizedStatus === "failed" || normalizedStage === "failed") {
+            throw new Error(job.lastError || "Tax certified import job failed.");
+          }
+          await new Promise((resolve) => {
+            window.setTimeout(resolve, 1000);
+          });
+        }
+        throw new Error("Tax certified import job polling timed out.");
+      }
       await onImported(result);
-    } catch {
-      setErrorMessage("已认证发票导入失败，请稍后重试。");
+    } catch (error) {
+      setErrorMessage(error instanceof Error && error.message
+        ? error.message
+        : "已认证发票导入失败，请稍后重试。");
       setIsConfirming(false);
     }
   }
@@ -184,7 +216,7 @@ export default function CertifiedInvoiceImportModal({
           {isConfirming ? (
             <Box>
               <Typography color="text.secondary" sx={{ mb: 1 }}>
-                正在导入已认证结果并刷新税金抵扣页面...
+                {confirmMessage}
               </Typography>
               <LinearProgress />
             </Box>

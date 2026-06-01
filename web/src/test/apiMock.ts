@@ -20,6 +20,7 @@ type MockApiOptions = {
   workbenchErrorMonths?: string[];
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
+  costRefreshingMonths?: string[];
   costExportErrorViews?: string[];
   sessionMode?: "authorized" | "forbidden" | "expired" | "error";
   sessionAccessTier?: "admin" | "full_access" | "read_export_only" | "denied";
@@ -4956,6 +4957,20 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const projectScope = url.searchParams.get("project_scope") ?? "active";
       if (options.costErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "cost statistics failed" } };
+      }
+      if (options.costRefreshingMonths?.includes(month)) {
+        return {
+          status: 202,
+          body: {
+            ...buildCostStatisticsExplorerPayload(month, projectScope),
+            summary: { row_count: 0, transaction_count: 0, total_amount: "0.00" },
+            time_rows: [],
+            project_rows: [],
+            expense_type_rows: [],
+            read_model_status: "refreshing",
+            read_model_scope_key: `${projectScope}:${month}`,
+          },
+        };
       }
       return { body: buildCostStatisticsExplorerPayload(month, projectScope) };
     },

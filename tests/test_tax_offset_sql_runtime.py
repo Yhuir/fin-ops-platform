@@ -229,6 +229,43 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["error"], "read_model_unavailable")
         self.assertEqual(queue.refreshes, [("tax_offset", "2026-05", "api_sql_repository_unavailable")])
 
+    def test_production_postgres_tax_offset_calculate_miss_queues_refresh_without_sync_build(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": queue, "redis_helper": RedisRecorder()},
+        )()
+        app._tax_offset_sql_read_repository = type(
+            "SqlTaxOffset",
+            (),
+            {"get_tax_offset_view": lambda *_args, **_kwargs: None},
+        )()
+        app._tax_api_routes = type(
+            "TaxRoutes",
+            (),
+            {"calculate": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("production calculate must not sync rebuild"))},
+        )()
+
+        response = app._handle_api_tax_offset_calculate(
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "selected_output_ids": ["output-1"],
+                    "selected_input_ids": ["input-1"],
+                }
+            )
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(queue.refreshes, [("tax_offset", "2026-05", "api_miss")])
+
     def test_tax_offset_api_reads_sql_and_populates_short_redis_cache(self) -> None:
         redis = RedisRecorder()
         app = object.__new__(Application)

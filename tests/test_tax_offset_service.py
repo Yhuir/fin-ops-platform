@@ -470,13 +470,13 @@ class TaxOffsetServiceTests(unittest.TestCase):
             selected_input_ids=[],
         )
 
-        self.assertEqual(result["summary"]["output_tax"], "41,600.00")
+        self.assertEqual(result["summary"]["output_tax"], "0.00")
         self.assertEqual(result["summary"]["input_tax"], "14,080.00")
         self.assertEqual(result["summary"]["planned_input_tax"], "0.00")
         self.assertEqual(result["summary"]["certified_input_tax"], "14,080.00")
-        self.assertEqual(result["summary"]["deductible_tax"], "14,080.00")
-        self.assertEqual(result["summary"]["result_label"], "本月应纳税额")
-        self.assertEqual(result["summary"]["result_amount"], "27,520.00")
+        self.assertEqual(result["summary"]["deductible_tax"], "0.00")
+        self.assertEqual(result["summary"]["result_label"], "本月留抵税额")
+        self.assertEqual(result["summary"]["result_amount"], "14,080.00")
 
     def test_match_certified_to_plan_supports_digital_invoice_then_code_number_then_fallback(self) -> None:
         service = TaxOffsetService(

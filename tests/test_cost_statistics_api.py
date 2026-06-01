@@ -196,6 +196,45 @@ class CostStatisticsApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["time_rows"][0]["transaction_id"], "cached-sentinel")
 
+    def test_cost_statistics_route_facade_delegates_month_and_explorer_to_query_service(self) -> None:
+        from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
+        from fin_ops_platform.app.server import Response
+
+        calls: list[tuple[str, str, str]] = []
+
+        class QueryService:
+            def get_month_statistics(self, month: str, project_scope: str):
+                calls.append(("month", month, project_scope))
+                return {
+                    "month": month,
+                    "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+                    "rows": [],
+                }, False
+
+            def get_explorer(self, month: str, project_scope: str):
+                calls.append(("explorer", month, project_scope))
+                return {
+                    "month": month,
+                    "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+                    "time_rows": [],
+                    "project_rows": [],
+                    "expense_type_rows": [],
+                }, False
+
+        routes = CostStatisticsApiRoutes(
+            query_service=QueryService(),
+            cost_statistics_service=self.app._cost_statistics_service,
+            json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
+            file_response=lambda _filename, _content: Response(status_code=200, body=b""),
+        )
+
+        month_response = routes.handle_month("2026-03", "active")
+        explorer_response = routes.handle_explorer("2026-04", "all")
+
+        self.assertEqual(month_response.status_code, 200)
+        self.assertEqual(explorer_response.status_code, 200)
+        self.assertEqual(calls, [("month", "2026-03", "active"), ("explorer", "2026-04", "all")])
+
     def test_cost_statistics_explorer_miss_writes_cache_and_logs_hit_metrics(self) -> None:
         calls: list[tuple[str, str]] = []
 
@@ -274,7 +313,15 @@ class CostStatisticsApiTests(unittest.TestCase):
                     },
                 )
 
-        with patch.object(self.app, "_schedule_cost_statistics_cache_warmup") as schedule_warmup:
+        job = SimpleNamespace(job_id="warmup-job-invalidated-month", owner_user_id="system")
+        with (
+            patch.object(
+                self.app._background_job_service,
+                "create_or_get_idempotent_job_with_created",
+                return_value=(job, True),
+            ) as create_job,
+            patch.object(self.app._background_job_service, "run_job") as run_job,
+        ):
             deleted_workbench_scopes = self.app._invalidate_workbench_read_model_scopes(["2026-03"])
 
         self.assertEqual(deleted_workbench_scopes, ["2026-03"])
@@ -282,8 +329,10 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertIsNone(service.get_read_model("2026-03", "all"))
         self.assertIsNone(service.get_read_model("all", "active"))
         self.assertIsNone(service.get_read_model("all", "all"))
-        schedule_warmup.assert_called_once()
-        self.assertEqual(schedule_warmup.call_args.args[0], ["2026-03"])
+        create_job.assert_called_once()
+        self.assertEqual(create_job.call_args.kwargs["job_type"], "cost_statistics_cache_warmup")
+        self.assertEqual(create_job.call_args.kwargs["affected_months"], ["2026-03"])
+        run_job.assert_called_once()
 
         for project_scope in ("active", "all"):
             service.upsert_read_model(
@@ -298,13 +347,23 @@ class CostStatisticsApiTests(unittest.TestCase):
                 },
             )
 
-        with patch.object(self.app, "_schedule_cost_statistics_cache_warmup") as schedule_warmup:
+        job = SimpleNamespace(job_id="warmup-job-invalidated-all", owner_user_id="system")
+        with (
+            patch.object(
+                self.app._background_job_service,
+                "create_or_get_idempotent_job_with_created",
+                return_value=(job, True),
+            ) as create_job,
+            patch.object(self.app._background_job_service, "run_job") as run_job,
+        ):
             self.app._invalidate_workbench_read_model_scopes(["all"])
 
         self.assertIsNone(service.get_read_model("all", "active"))
         self.assertIsNone(service.get_read_model("all", "all"))
-        schedule_warmup.assert_called_once()
-        self.assertEqual(schedule_warmup.call_args.args[0], ["all"])
+        create_job.assert_called_once()
+        self.assertEqual(create_job.call_args.kwargs["job_type"], "cost_statistics_cache_warmup")
+        self.assertEqual(create_job.call_args.kwargs["affected_months"], ["all"])
+        run_job.assert_called_once()
 
     def test_cost_statistics_month_warmup_does_not_append_all_scope(self) -> None:
         job = SimpleNamespace(job_id="warmup-job-2026-03", owner_user_id="system")

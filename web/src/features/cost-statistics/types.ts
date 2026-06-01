@@ -40,6 +40,10 @@ export type CostStatisticsExplorer = {
   timeRows: CostTimeRow[];
   projectRows: CostProjectExplorerRow[];
   expenseTypeRows: CostExpenseTypeExplorerRow[];
+  readModelStatus?: "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
+  readModelScopeKey?: string;
+  readModelGeneratedAt?: string;
+  readModelStaleReasons?: string[];
 };
 
 export type CostMonthSummaryRow = {

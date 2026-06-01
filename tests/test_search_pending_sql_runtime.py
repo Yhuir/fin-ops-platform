@@ -7,6 +7,7 @@ import unittest
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.pending_invoice_read_model_service import PendingInvoiceReadModelService
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
@@ -22,6 +23,17 @@ class QueueRecorder:
 
     def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> None:
         self.completed.append((tenant_id, scope_type, scope_key))
+
+
+def _pending_invoice_expected_source_versions() -> dict[str, object]:
+    return {
+        "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
+        "pending_invoice_tag_groups_version": 1,
+        "pending_output_invoice_tag_groups_version": 1,
+        "bank_auto_tag_rules_version": 1,
+        "oa_attachment_invoice_parser_version": "2026-05-28-attachment-status-v1:2026-05-11-evidence-v1",
+        "oa_projection_sync_version": "2026-05-28-scope-replace-v1",
+    }
 
 
 class SearchPendingConnection:
@@ -539,7 +551,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
-                    "source_versions": app._pending_invoice_expected_source_versions(),
+                    "source_versions": _pending_invoice_expected_source_versions(),
                 }
             },
         )()
@@ -573,7 +585,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
-                    "source_versions": app._pending_invoice_expected_source_versions(),
+                    "source_versions": _pending_invoice_expected_source_versions(),
                 }
             },
         )()
@@ -710,6 +722,34 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [])
 
+    def test_pending_invoice_read_model_service_rejects_unconfigured_repository_without_sync_scan(self) -> None:
+        service = PendingInvoiceReadModelService(
+            repository=None,
+            queue_repository=QueueRecorder(),
+            row_normalizer=lambda rows: rows,
+            settings_provider=lambda: {},
+            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1"},
+        )
+
+        with self.assertRaisesRegex(Exception, "Pending invoice SQL read repository is not configured"):
+            service.rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+
+    def test_pending_invoice_read_model_service_all_rows_returns_refreshing_payload_without_fallback(self) -> None:
+        queue = QueueRecorder()
+        service = PendingInvoiceReadModelService(
+            repository=type("PendingRepo", (), {"list_pending_invoice_rows": lambda *_args, **_kwargs: None})(),
+            queue_repository=queue,
+            row_normalizer=lambda rows: rows,
+            settings_provider=lambda: {},
+            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1"},
+        )
+
+        payload = service.all_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_miss")])
+
     def test_pending_invoice_sql_page_preserves_bank_tag_settings(self) -> None:
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()
@@ -738,7 +778,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
-                    "source_versions": app._pending_invoice_expected_source_versions(),
+                    "source_versions": _pending_invoice_expected_source_versions(),
                 }
             },
         )()
@@ -749,59 +789,6 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["bank_transaction_tags"], {"version": 7, "items": [{"code": "A1"}]})
         self.assertEqual(payload["bank_transaction_tags_version"], 7)
-
-    def test_pending_invoice_worker_rebuild_paginates_all_rows(self) -> None:
-        saved: list[dict[str, object]] = []
-
-        class PendingService:
-            def list_rows(self, **kwargs: object) -> dict[str, object]:
-                page = int(kwargs["page"])
-                rows = [
-                    {
-                        "id": f"txn-{index}",
-                        "bank_transaction": {
-                            "id": f"txn-{index}",
-                            "trade_time": "2026-05-01",
-                            "amount": "1.00",
-                            "counterparty_name": f"供应商{index}",
-                        },
-                        "invoices": [],
-                        "can_create_invoice": True,
-                    }
-                    for index in range(1, 201)
-                ]
-                if page == 2:
-                    rows = [
-                        {
-                            "id": "txn-201",
-                            "bank_transaction": {
-                                "id": "txn-201",
-                                "trade_time": "2026-05-02",
-                                "amount": "2.00",
-                                "counterparty_name": "供应商201",
-                            },
-                            "invoices": [],
-                            "can_create_invoice": True,
-                        }
-                    ]
-                return {
-                    "rows": rows,
-                    "pagination": {"page": page, "page_size": 200, "total": 201},
-                }
-
-        app = object.__new__(Application)
-        app._pending_invoice_query_service = PendingService()
-        app._pending_invoice_sql_read_repository = type(
-            "PendingRepo",
-            (),
-            {"save_pending_invoice_rows": lambda *_args, **kwargs: saved.extend(kwargs["rows"])},
-        )()
-
-        result = app.rebuild_pending_invoice_read_model_scope("expense:all")
-
-        self.assertEqual(result["row_count"], 201)
-        self.assertEqual(len(saved), 201)
-        self.assertEqual(saved[-1]["payload"]["id"], "txn-201")
 
     def test_pending_invoice_sql_projection_emits_upgraded_four_zone_payload(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingProjectionConnection())

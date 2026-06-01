@@ -21,7 +21,7 @@ import { calculateTaxOffset, fetchTaxOffsetMonth } from "../features/tax/api";
 import { FINANCE_DOMAIN_EVENTS, subscribeFinanceDomainEvent } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
-  TaxCertifiedImportConfirmResult,
+  TaxCertifiedImportConfirmedResult,
   TaxMonthData,
   TaxSummary,
 } from "../features/tax/types";
@@ -246,6 +246,19 @@ export default function TaxOffsetPage() {
     };
   }, [currentMonth, monthData, selectedInputIds]);
 
+  const readModelStatus = monthData?.readModelStatus;
+  const isReadModelRefreshing = readModelStatus === "refreshing" || readModelStatus === "stale";
+
+  useEffect(() => {
+    if (!isReadModelRefreshing || isLoading || isRefreshing) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void loadMonthData("refresh");
+    }, 1000);
+    return () => window.clearTimeout(timeoutId);
+  }, [isLoading, isReadModelRefreshing, isRefreshing, loadMonthData]);
+
   useEffect(() => {
     const tableWraps = [outputTableWrapRef.current, inputTableWrapRef.current].filter(
       (node): node is HTMLDivElement => Boolean(node),
@@ -312,7 +325,7 @@ export default function TaxOffsetPage() {
     };
   }, [monthData]);
 
-  const isEmpty = !isLoading && !loadError && monthData
+  const isEmpty = !isReadModelRefreshing && !isLoading && !loadError && monthData
     ? monthData.outputInvoices.length === 0
       && monthData.inputPlanInvoices.length === 0
       && monthData.certifiedMatchedInvoices.length === 0
@@ -330,7 +343,7 @@ export default function TaxOffsetPage() {
           : null);
 
   const handleCertifiedImportComplete = useCallback(
-    async (result: TaxCertifiedImportConfirmResult) => {
+    async (result: TaxCertifiedImportConfirmedResult) => {
       setIsCertifiedImportModalOpen(false);
       await loadMonthData("refresh");
       setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，并已刷新当前税金抵扣页面。`);
@@ -361,6 +374,9 @@ export default function TaxOffsetPage() {
       {loadError ? <StatePanel tone="error">{loadError}</StatePanel> : null}
       {!hasVisibleMonthData && isLoading ? (
         <StatePanel tone="loading">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</StatePanel>
+      ) : null}
+      {isReadModelRefreshing ? (
+        <StatePanel tone="loading">税金抵扣读模型正在刷新，页面会自动重试。</StatePanel>
       ) : null}
       {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
 

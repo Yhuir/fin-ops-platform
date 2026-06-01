@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import fin_ops_platform.app.server as server_module
 from fin_ops_platform.app.server import build_application
-from fin_ops_platform.app.worker import _run_workbench_matching_dirty_queue_loop, build_parser
+from fin_ops_platform.app.worker import _build_workbench_matching_dirty_scope_worker, build_parser
 from fin_ops_platform.services.workbench_reconciliation_models import expand_scope_month_window
 
 
@@ -113,6 +113,27 @@ class FailingMarkDirtyQueue(RecordingDirtyQueue):
         source_versions: dict[str, object] | None = None,
     ) -> list[str]:
         raise RuntimeError("db queue unavailable")
+
+
+class RecordingHeartbeatRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def record_worker_heartbeat(
+        self,
+        worker_id: str,
+        worker_kind: str,
+        status: str,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        self.calls.append(
+            {
+                "worker_id": worker_id,
+                "worker_kind": worker_kind,
+                "status": status,
+                "payload": dict(payload or {}),
+            }
+        )
 
 
 class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
@@ -500,32 +521,32 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertEqual(args.workbench_matching_lease_seconds, 300)
         self.assertEqual(args.workbench_matching_retry_delay_seconds, 45)
 
-    def test_worker_loop_keeps_polling_after_dirty_queue_iteration_failure(self) -> None:
-        class FlakyApplication:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
+    def test_worker_wiring_uses_decoupled_dirty_scope_runner(self) -> None:
+        queue = RecordingDirtyQueue()
+        heartbeat_recorder = RecordingHeartbeatRecorder()
+        app = SimpleNamespace(
+            _workbench_reconciliation_dirty_queue=queue,
+            _workbench_matching_orchestrator=SimpleNamespace(run=lambda **kwargs: {}),
+            _workbench_matching_source_versions=lambda: {"rules": "v1"},
+        )
 
-            def _rebuild_workbench_matching_dirty_scopes_once(self, **kwargs) -> None:
-                self.calls.append(dict(kwargs))
-                if len(self.calls) == 1:
-                    raise RuntimeError("temporary queue failure")
+        worker = _build_workbench_matching_dirty_scope_worker(
+            app,
+            heartbeat_recorder=heartbeat_recorder,
+            worker_id="worker-a",
+            poll_interval_seconds=0.1,
+            batch_size=7,
+            lease_seconds=300,
+            retry_delay_seconds=45,
+            max_iterations=1,
+        )
+        worker.run_once()
 
-        app = FlakyApplication()
-
-        with patch("fin_ops_platform.app.worker.sleep", return_value=None):
-            _run_workbench_matching_dirty_queue_loop(
-                app,
-                worker_id="worker-a",
-                poll_interval_seconds=0.1,
-                batch_size=7,
-                lease_seconds=300,
-                retry_delay_seconds=45,
-                max_iterations=2,
-            )
-
-        self.assertEqual(len(app.calls), 2)
-        self.assertEqual(app.calls[0]["worker_id"], "worker-a")
-        self.assertEqual(app.calls[0]["limit"], 7)
+        self.assertEqual(queue.claim_calls[0]["worker_id"], "worker-a")
+        self.assertEqual(queue.claim_calls[0]["limit"], 7)
+        self.assertEqual(queue.claim_calls[0]["lease_seconds"], 300)
+        self.assertEqual([call["status"] for call in heartbeat_recorder.calls], ["polling", "idle"])
+        self.assertEqual(heartbeat_recorder.calls[-1]["worker_kind"], "workbench-matching")
 
     def test_deploy_env_includes_dedicated_workbench_matching_worker(self) -> None:
         root_dir = Path(__file__).resolve().parents[1]

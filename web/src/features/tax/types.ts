@@ -36,6 +36,10 @@ export type TaxMonthData = {
   defaultSelectedOutputIds: string[];
   defaultSelectedInputIds: string[];
   summary: TaxSummary;
+  readModelStatus?: "fresh" | "refreshing" | "stale" | string;
+  readModelScopeKey?: string;
+  readModelGeneratedAt?: string | null;
+  readModelStaleReasons?: string[];
 };
 
 export type TaxCertifiedImportPreviewRow = {
@@ -81,7 +85,24 @@ export type TaxCertifiedImportPreviewResult = {
   };
 };
 
-export type TaxCertifiedImportConfirmResult = {
+export type TaxCertifiedImportJob = {
+  importJobId: string;
+  tenantId?: string;
+  importType: string;
+  importSessionId?: string | null;
+  sourceFileId?: string | null;
+  status: string;
+  stage: string;
+  priority?: string;
+  attemptCount?: number;
+  maxAttempts?: number;
+  lastError?: string | null;
+  traceId?: string | null;
+  resultPayload?: Record<string, unknown>;
+};
+
+export type TaxCertifiedImportConfirmedResult = {
+  status: "confirmed";
   batchId: string;
   sessionId: string;
   importedBy: string;
@@ -89,3 +110,12 @@ export type TaxCertifiedImportConfirmResult = {
   months: string[];
   persistedRecordCount: number;
 };
+
+export type TaxCertifiedImportQueuedResult = {
+  status: "queued";
+  importJob: TaxCertifiedImportJob;
+};
+
+export type TaxCertifiedImportConfirmResult =
+  | TaxCertifiedImportConfirmedResult
+  | TaxCertifiedImportQueuedResult;

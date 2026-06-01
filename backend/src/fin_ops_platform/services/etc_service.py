@@ -100,6 +100,12 @@ ETC_BUSINESS_BATCH_DRAFT_REVOCABLE_STATUSES = {
     EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value,
 }
 
+ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES = {
+    EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value,
+    EtcBusinessBatchStatus.OA_DETECTION_CONFLICT.value,
+    EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value,
+}
+
 
 class EtcServiceError(RuntimeError):
     pass
@@ -1082,9 +1088,9 @@ class EtcService:
             self._assert_business_batch_version(batch, expected_version)
             if normalized_decision == "submitted":
                 before_status = batch.status
-                if before_status not in ETC_BUSINESS_BATCH_DRAFT_REVOCABLE_STATUSES:
+                if before_status not in ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES:
                     raise EtcBusinessBatchInvalidTransitionError(
-                        "manual submitted decision is allowed only while an OA draft is under detection or exception handling.",
+                        "manual submitted decision is allowed only after OA detection timed out, conflicted, or became unavailable.",
                         code="invalid_manual_status",
                     )
                 now = datetime.now(UTC)
@@ -1192,6 +1198,11 @@ class EtcService:
             "oaRowId": batch.oa_row_id,
             "oaProcessStatus": batch.oa_process_status,
             "oaDetectionStatus": batch.oa_detection_status,
+            "oaDetectionError": batch.oa_detection_error,
+            "oaDetectionStartedAt": batch.oa_detection_started_at,
+            "oaDetectionNextRunAt": batch.oa_detection_next_run_at,
+            "oaDetectionDeadlineAt": batch.oa_detection_deadline_at,
+            "oaDetectionFinalRetryUntil": batch.oa_detection_final_retry_until,
             "oaDetectionAttempts": batch.oa_detection_attempts,
             "oaDetectionReason": batch.oa_detection_reason,
             "invoiceIds": list(batch.invoice_ids),

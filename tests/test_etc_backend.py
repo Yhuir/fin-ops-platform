@@ -35,6 +35,7 @@ from fin_ops_platform.services.historical_etc_repair_service import (
     HistoricalEtcRepairBatchSpec,
     HistoricalEtcRepairService,
 )
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.existing_etc_batch_link_service import (
     ExistingEtcBatchLinkService,
     ExistingEtcBatchLinkSpec,
@@ -410,10 +411,12 @@ class EtcServiceTests(unittest.TestCase):
                 expected_version=preview["businessBatch"]["version"],
             )
             drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
-            submitted = service.manual_business_batch_oa_status(
+            submitted = service.apply_business_batch_oa_detection_result(
                 batch.business_batch_id,
-                decision="submitted",
-                reason="OA 已进入流程",
+                detection_status="detected",
+                reason="oa_row_in_progress",
+                oa_row_id="oa-row-001",
+                process_status="in_progress",
                 expected_version=drafted.version,
             )
 
@@ -2217,7 +2220,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(submitted_delete.body)["error"], "etc_batch_delete_conflict")
 
     def test_delete_etc_submission_batch_route_cascades_mutable_batch_contents(self) -> None:
-        with TemporaryDirectory() as temp_dir:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
             app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001", "ETC002"]))])
@@ -2313,6 +2316,223 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(deleted_detail_response.status_code, 404)
         self.assertEqual(json.loads(deleted_list_response.body)["data"]["items"], [])
         self.assertEqual(json.loads(deleted_legacy_response.body)["items"], [])
+
+    def test_etc_business_batch_detail_returns_invoice_items_and_detection_fields(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            create_response = app.handle_request(
+                "POST",
+                "/api/etc/business-batches",
+                json.dumps({"taskId": "ETC-TASK-DETAIL"}),
+            )
+            created = json.loads(create_response.body)["data"]["businessBatch"]
+            preview_body, preview_headers = multipart(
+                {"invoices.zip": etc_zip(["ETC001"])},
+                {"expectedVersion": str(created["version"])},
+            )
+            preview_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
+                preview_body,
+                preview_headers,
+            )
+            preview = json.loads(preview_response.body)["data"]
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
+                json.dumps({
+                    "sessionId": preview["sessionId"],
+                    "expectedVersion": preview["businessBatch"]["version"],
+                }),
+            )
+            detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 200)
+        detail = json.loads(detail_response.body)["data"]["businessBatch"]
+        self.assertEqual(detail["invoiceItems"][0]["invoice_number"], "ETC001")
+        self.assertIn("oaDetectionError", detail)
+        self.assertIn("oaDetectionStartedAt", detail)
+        self.assertIn("oaDetectionNextRunAt", detail)
+        self.assertIn("oaDetectionDeadlineAt", detail)
+        self.assertIn("oaDetectionFinalRetryUntil", detail)
+
+    def test_etc_business_batch_scope_uses_session_dept_id(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._access_control_service.dynamic_allowed_usernames_provider = lambda: ["OWNER", "OTHER", "ADMIN"]
+            app._access_control_service.dynamic_admin_usernames_provider = lambda: ["ADMIN"]
+
+            identities = {
+                "owner-token": OAUserIdentity(
+                    user_id="owner-id",
+                    username="OWNER",
+                    nickname="Owner",
+                    display_name="Owner",
+                    dept_id="D01",
+                    permissions=[app._access_control_service.required_permission],
+                ),
+                "other-token": OAUserIdentity(
+                    user_id="other-id",
+                    username="OTHER",
+                    nickname="Other",
+                    display_name="Other",
+                    dept_id="D02",
+                    permissions=[app._access_control_service.required_permission],
+                ),
+                "admin-token": OAUserIdentity(
+                    user_id="admin-id",
+                    username="ADMIN",
+                    nickname="Admin",
+                    display_name="Admin",
+                    dept_id="D99",
+                    permissions=[app._access_control_service.required_permission],
+                ),
+            }
+            app._oa_identity_service.resolve_identity = lambda token: identities[str(token)]
+            owner_headers = {"Authorization": "Bearer owner-token"}
+            other_headers = {"Authorization": "Bearer other-token"}
+            admin_headers = {"Authorization": "Bearer admin-token"}
+
+            create_response = app.handle_request(
+                "POST",
+                "/api/etc/business-batches",
+                json.dumps({"taskId": "ETC-TASK-SCOPE"}),
+                owner_headers,
+            )
+            created = json.loads(create_response.body)["data"]["businessBatch"]
+            other_list_response = app.handle_request("GET", "/api/etc/business-batches", headers=other_headers)
+            other_detail_response = app.handle_request(
+                "GET",
+                f"/api/etc/business-batches/{created['businessBatchId']}",
+                headers=other_headers,
+            )
+            admin_detail_response = app.handle_request(
+                "GET",
+                f"/api/etc/business-batches/{created['businessBatchId']}",
+                headers=admin_headers,
+            )
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(created["ownerUserId"], "OWNER")
+        self.assertEqual(created["ownerOrgId"], "D01")
+        self.assertEqual(json.loads(other_list_response.body)["data"]["items"], [])
+        self.assertEqual(other_detail_response.status_code, 403)
+        self.assertEqual(json.loads(other_detail_response.body)["error"]["code"], "forbidden_scope")
+        self.assertEqual(admin_detail_response.status_code, 200)
+
+    def test_etc_business_batch_oa_draft_enqueues_detection_event(self) -> None:
+        class QueueRecorder:
+            def __init__(self) -> None:
+                self.events: list[dict[str, object]] = []
+
+            def enqueue(self, **kwargs):
+                self.events.append(dict(kwargs))
+                return {"event_id": f"evt-{len(self.events)}"}
+
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+            queue = QueueRecorder()
+            object.__setattr__(app._runtime_repositories, "queue_repository", queue)
+
+            create_response = app.handle_request(
+                "POST",
+                "/api/etc/business-batches",
+                json.dumps({"taskId": "ETC-TASK-QUEUE"}),
+            )
+            created = json.loads(create_response.body)["data"]["businessBatch"]
+            preview_body, preview_headers = multipart(
+                {"invoices.zip": etc_zip(["ETC001"])},
+                {"expectedVersion": str(created["version"])},
+            )
+            preview_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
+                preview_body,
+                preview_headers,
+            )
+            preview = json.loads(preview_response.body)["data"]
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
+                json.dumps({
+                    "sessionId": preview["sessionId"],
+                    "expectedVersion": preview["businessBatch"]["version"],
+                }),
+            )
+            confirmed = json.loads(confirm_response.body)["data"]["businessBatch"]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": confirmed["version"]}),
+            )
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(draft_response.status_code, 200)
+        self.assertEqual([event["event_type"] for event in queue.events], ["etc_business.oa_detection.refresh"])
+        self.assertEqual(queue.events[0]["aggregate_id"], created["businessBatchId"])
+
+    def test_etc_business_batch_source_files_append_to_reconciliation_task(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC source files", created_by="alice")
+            create_response = app.handle_request(
+                "POST",
+                "/api/etc/business-batches",
+                json.dumps({"taskId": task.task_id}),
+            )
+            created = json.loads(create_response.body)["data"]["businessBatch"]
+            body, headers = multipart({"ticket-root.zip": b"zip-bytes"})
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/source-files",
+                body,
+                headers,
+            )
+            payload = json.loads(response.body)["data"]
+            task_after_upload = app._etc_reconciliation_task_service.get_task(task.task_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["businessBatch"]["businessBatchId"], created["businessBatchId"])
+        self.assertEqual(payload["sourceFiles"][0]["originalName"], "ticket-root.zip")
+        self.assertEqual(payload["sourceFiles"][0]["sourceKind"], "etc_zip")
+        self.assertEqual(task_after_upload.source_files[0].original_name, "ticket-root.zip")
+
+    def test_etc_business_manual_status_rejects_detecting_state(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+            app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001"]))])
+            batch = app._etc_service.create_business_batch(task_id="ETC-TASK-MANUAL", owner_user_id="alice")
+            imported, _ = app._etc_service.confirm_business_batch_import(
+                batch.business_batch_id,
+                app._etc_service.preview_business_batch_import_zips(
+                    batch.business_batch_id,
+                    [UploadedEtcZipFile("manual.zip", etc_zip(["ETC002"]))],
+                    expected_version=batch.version,
+                )["sessionId"],
+                expected_version=batch.version,
+            )
+            drafted = app._etc_service.create_business_batch_oa_draft(
+                imported.business_batch_id,
+                expected_version=imported.version,
+            )
+
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError) as context:
+                app._etc_service.manual_business_batch_oa_status(
+                    drafted.business_batch_id,
+                    decision="submitted",
+                    reason="人工确认",
+                    expected_version=drafted.version,
+                )
+
+        self.assertEqual(context.exception.code, "invalid_manual_status")
 
     def test_etc_business_batch_delete_is_idempotent_for_stale_business_ids(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -4,9 +4,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.pending_invoice_read_model_service import pending_invoice_source_versions
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.pending_invoice_rules import pending_invoice_rules_payload
 
@@ -16,6 +18,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor API")
+            self._install_pending_invoice_sql_read_model(app)
 
             response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
 
@@ -32,6 +35,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Attach")
             invoice_id = self._create_input_invoice(app, seller_name="Vendor Attach", invoice_no="ATTACH-001")
+            self._install_pending_invoice_sql_read_model(app)
 
             candidates_response = app.handle_request(
                 "GET",
@@ -96,6 +100,72 @@ class PendingInvoiceApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["error"], "invalid_filter_for_income")
+
+    def test_read_model_miss_returns_refreshing_without_sync_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._create_bank_transaction(app, counterparty_name="Vendor Read Model Miss")
+
+            class MissingPendingInvoiceSqlReadRepository:
+                def list_pending_invoice_rows(self, **_kwargs: object) -> None:
+                    return None
+
+                def pending_invoice_source_summary(self, **_kwargs: object) -> dict[str, int]:
+                    return {}
+
+            class QueueRepository:
+                def __init__(self) -> None:
+                    self.enqueued: list[dict[str, str]] = []
+
+                def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                    self.enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "reason": reason})
+
+            queue_repository = QueueRepository()
+            app._pending_invoice_sql_read_repository = MissingPendingInvoiceSqlReadRepository()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue_repository)
+
+            def fail_sync_scan(**_kwargs: object) -> dict[str, object]:
+                raise AssertionError("Pending invoice API must not synchronously scan facts on read model miss.")
+
+            app._pending_invoice_query_service.list_rows = fail_sync_scan
+
+            rows_response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
+            filter_options_response = app.handle_request("GET", "/api/pending-invoices/filter-options?direction=expense")
+            export_preview_response = app.handle_request("GET", "/api/pending-invoices/export-preview?direction=expense")
+            export_response = app.handle_request("GET", "/api/pending-invoices/export?direction=expense")
+
+        rows_payload = json.loads(rows_response.body)
+        filter_options_payload = json.loads(filter_options_response.body)
+        export_preview_payload = json.loads(export_preview_response.body)
+        export_payload = json.loads(export_response.body)
+        self.assertEqual(rows_response.status_code, 202)
+        self.assertEqual(filter_options_response.status_code, 202)
+        self.assertEqual(export_preview_response.status_code, 202)
+        self.assertEqual(export_response.status_code, 202)
+        self.assertEqual(rows_payload["read_model_status"], "refreshing")
+        self.assertEqual(filter_options_payload["read_model_status"], "refreshing")
+        self.assertEqual(export_preview_payload["read_model_status"], "refreshing")
+        self.assertEqual(export_payload["read_model_status"], "refreshing")
+        self.assertIn(
+            {"scope_type": "pending_invoice", "scope_key": "expense:all", "reason": "api_miss"},
+            queue_repository.enqueued,
+        )
+
+    def test_rows_endpoint_rejects_unconfigured_read_model_without_sync_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._create_bank_transaction(app, counterparty_name="Vendor No Repository")
+
+            def fail_sync_scan(**_kwargs: object) -> dict[str, object]:
+                raise AssertionError("Pending invoice API must not use PendingInvoiceQueryService.list_rows.")
+
+            app._pending_invoice_query_service.list_rows = fail_sync_scan
+
+            response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "pending_invoice_read_model_unavailable")
 
     def test_preview_and_confirm_endpoint_create_invoice_and_relation_idempotently(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -452,6 +522,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_bank_transaction(app, counterparty_name="Income Customer", credit=True)
             body = {"status_code": "cash_income", "request_id": "income-status-001"}
+            self._install_pending_invoice_sql_read_model(app)
 
             response = app.handle_request(
                 "PUT",
@@ -626,6 +697,43 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 },
             }
         )
+
+    @staticmethod
+    def _install_pending_invoice_sql_read_model(app: object) -> None:
+        class PendingInvoiceSqlReadRepository:
+            def list_pending_invoice_rows(self, **kwargs: object) -> dict[str, object]:
+                payload = app._pending_invoice_query_service.list_rows(**kwargs)
+                result = dict(payload)
+                result["refresh_status"] = "fresh"
+                result["source_versions"] = pending_invoice_source_versions(
+                    app._app_settings_service.get_settings_payload(),
+                    attachment_invoice_parser_version=app._current_oa_attachment_invoice_parser_version(),
+                    oa_projection_sync_version=app._current_oa_projection_sync_version(),
+                )
+                return result
+
+            def pending_invoice_source_summary(
+                self,
+                *,
+                direction: str,
+                date_from: str | None = None,
+                date_to: str | None = None,
+            ) -> dict[str, int]:
+                payload = app._pending_invoice_query_service.list_rows(
+                    direction=direction,
+                    filter="all",
+                    date_from=date_from,
+                    date_to=date_to,
+                    page=1,
+                    page_size=1,
+                )
+                summary = payload.get("summary") if isinstance(payload, dict) else {}
+                source_summary = summary.get("source_summary") if isinstance(summary, dict) else {}
+                return dict(source_summary) if isinstance(source_summary, dict) else {}
+
+        app._pending_invoice_sql_read_repository = PendingInvoiceSqlReadRepository()
+        if hasattr(app, "_pending_invoice_api_routes"):
+            delattr(app, "_pending_invoice_api_routes")
 
     @staticmethod
     def _active_rule_codes(tag_source: object, *, excluding: set[str]) -> list[str]:

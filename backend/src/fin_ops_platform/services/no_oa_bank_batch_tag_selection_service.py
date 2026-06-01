@@ -30,10 +30,9 @@ class NoOaBankBatchTagSelectionApplicationService:
             payload,
             actor_id=actor_id,
         )
-        self._refresh_no_oa_bank_batches()
         self._after_no_oa_bank_batch_mutation(
             ["all"],
             changed_case_ids=[],
-            persist=True,
+            persist=False,
         )
         return result

@@ -844,6 +844,7 @@ describe("ETC ticket management page", () => {
     expect(within(oaStatusPanel).getByRole("button", { name: "打开草稿" })).toBeEnabled();
     expect(within(oaStatusPanel).getByRole("button", { name: "刷新检测" })).toBeEnabled();
     expect(within(oaStatusPanel).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
+    expect(within(oaStatusPanel).queryByRole("button", { name: "异常处理" })).not.toBeInTheDocument();
   });
 
   test("shows the reconciliation workspace with upload blocks, statuses, supplements, and parse issues", async () => {

@@ -41,10 +41,14 @@ from fin_ops_platform.app.bank_detail_category_api import (
     confirmation_selection,
     manual_assignment_selection,
 )
+from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
+from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
+from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
 from fin_ops_platform.app.routes_output_invoice_collections import OutputInvoiceCollectionApiRoutes
+from fin_ops_platform.app.routes_pending_invoices import PendingInvoiceApiRoutes, PendingInvoiceExportFile
 from fin_ops_platform.app.routes_turnover_ledger import (
     InMemoryTurnoverLedgerExtraService,
     TurnoverLedgerApiRoutes,
@@ -72,6 +76,7 @@ from fin_ops_platform.services.bank_details_export_service import (
     BankDetailsExportService,
 )
 from fin_ops_platform.services.bank_details_service import BankDetailsService
+from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
@@ -93,6 +98,8 @@ from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     CostStatisticsReadModelService,
 )
+from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsQueryService
+from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_service import (
@@ -115,6 +122,7 @@ from fin_ops_platform.services.etc_service import (
     EtcServiceError,
     UploadedEtcZipFile,
 )
+from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
 import fin_ops_platform.services.etc_document_parsers as etc_document_parsers
 from fin_ops_platform.services.etc_document_parsers import (
     CcbCreditCardStatementParser,
@@ -122,7 +130,6 @@ from fin_ops_platform.services.etc_document_parsers import (
     TicketRootClipboardTextParser,
     TicketRootDocumentParser,
 )
-from fin_ops_platform.services.etc_oa_detection import EtcOADetectionContext, EtcOADetectionService
 from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, ParseIssue, ParseIssueSeverity, SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
@@ -135,6 +142,7 @@ from fin_ops_platform.services.etc_reconciliation_zip_filter import (
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
 from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobRepository
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
+from fin_ops_platform.services.import_processing_service import ImportProcessingService
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_export_service import (
@@ -222,17 +230,17 @@ from fin_ops_platform.services.operations_dashboard import OperationsDashboardSe
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
 from fin_ops_platform.services.oa_sync_service import OASyncService
 from fin_ops_platform.services.pending_invoice_service import (
-    EXPENSE_FILTERS as PENDING_INVOICE_EXPENSE_FILTERS,
     PendingInvoiceApplicationService,
     PendingInvoiceError,
     PendingInvoiceQueryService,
-    VALID_FILTERS as PENDING_INVOICE_VALID_FILTERS,
     latest_income_status_override_from_commands,
 )
-from fin_ops_platform.services.pending_invoice_rules import (
-    editable_pending_invoice_tag_groups_payload,
-    pending_invoice_rules_payload,
+from fin_ops_platform.services.pending_invoice_lifecycle_service import PendingInvoiceLifecycleService
+from fin_ops_platform.services.pending_invoice_read_model_service import (
+    PendingInvoiceReadModelService,
+    pending_invoice_source_versions,
 )
+from fin_ops_platform.services.pending_invoice_rules_application_service import PendingInvoiceRulesApplicationService
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
@@ -251,11 +259,14 @@ from fin_ops_platform.services.settings_data_reset_service import (
 )
 from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap, RuntimeRepositoryContext
 from fin_ops_platform.services.state_store_factory import build_state_store
+from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
+from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
 from fin_ops_platform.services.tax_offset_read_model_service import (
     TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
     TaxOffsetReadModelService,
 )
+from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntimeService
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION, TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_TYPE
@@ -273,6 +284,11 @@ from fin_ops_platform.services.workbench_candidate_match_service import (
     WorkbenchCandidateMatchService,
 )
 from fin_ops_platform.services.workbench_matching_dirty_scope_service import WorkbenchMatchingDirtyScopeService
+from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
+    WorkbenchMatchingDirtyScopeWorker,
+    WorkbenchMatchingDirtyScopeWorkerConfig,
+    WorkbenchMatchingScopeRunnerAdapter,
+)
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
 from fin_ops_platform.services.workbench_matching_rules import (
     WORKBENCH_MATCHING_RULES_VERSION,
@@ -429,8 +445,6 @@ class Application:
         self._workbench_matching_running_scope_months: set[str] = set()
         self._workbench_events_active_streams_lock = Lock()
         self._workbench_events_active_streams: dict[str, int] = {}
-        self._etc_business_oa_detection_loop_lock = Lock()
-        self._etc_business_oa_detection_loop_batch_ids: set[str] = set()
         self._seed_payload = build_demo_seed()
         if self._bootstrap_mode == "lightweight":
             return
@@ -778,6 +792,11 @@ class Application:
                 transaction_id,
             ),
         )
+        self._pending_invoice_lifecycle_service = PendingInvoiceLifecycleService(
+            audit_service=self._audit_service,
+            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
+            relation_tag_projection_service=self._bank_details_relation_tag_projection_service,
+        )
         self._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
@@ -808,8 +827,8 @@ class Application:
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
             command_store=self._pending_invoice_commands,
-            audit_recorder=self._record_pending_invoice_manual_invoice_audit,
-            finalizer=self._finalize_pending_invoice_manual_invoice,
+            audit_recorder=self._pending_invoice_lifecycle_service.record_manual_invoice_audit,
+            finalizer=self._pending_invoice_lifecycle_service.finalize_manual_invoice,
             row_provider=lambda transaction_id, direction: self._pending_invoice_query_service.row_for_transaction(
                 transaction_id,
                 direction=direction,
@@ -853,6 +872,29 @@ class Application:
             else None
         )
         self._background_job_service = BackgroundJobService(self._state_store)
+        self._import_processing_service = ImportProcessingService(
+            import_service=self._import_service,
+            file_import_service=self._file_import_service,
+            tax_certified_import_service=self._tax_certified_import_service,
+            etc_service=self._etc_service,
+            etc_reconciliation_task_service=self._etc_reconciliation_task_service,
+            background_job_service=self._background_job_service,
+            serialize_value=self._serialize_value,
+            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
+            schedule_or_run_workbench_auto_matching_for_scopes=self._schedule_or_run_workbench_auto_matching_for_scopes,
+            enqueue_workbench_auto_matching_for_scopes=self._enqueue_workbench_auto_matching_for_scopes,
+            persist_state_with_workbench_invalidation=self._persist_state_with_workbench_invalidation,
+            invalidate_tax_offset_read_model_scopes=self._invalidate_tax_offset_read_model_scopes,
+            workbench_matching_scope_months_for_import_preview=self._workbench_matching_scope_months_for_import_preview,
+            workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
+            tax_offset_scope_keys_for_import_preview=self._tax_offset_scope_keys_for_import_preview,
+            tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
+            cost_statistics_scope_keys_for_import_preview=self._cost_statistics_scope_keys_for_import_preview,
+            cost_statistics_scope_keys_for_import_file_session=self._cost_statistics_scope_keys_for_import_file_session,
+            sync_etc_import_result_to_canonical_invoices=self._sync_etc_import_result_to_canonical_invoices,
+            refresh_after_etc_invoice_sync=self._refresh_after_etc_invoice_sync,
+            oa_manual_import_create_processor=self._process_oa_manual_import_create_job,
+        )
         self._app_health_service = AppHealthService()
         self._app_health_alert_service = AppHealthAlertService.from_snapshot(
             self._state_store.load_app_health_alerts() if self._state_store is not None else {}
@@ -877,6 +919,7 @@ class Application:
             certified_records_loader=self._tax_certified_import_service.list_records_for_month,
             oa_attachment_invoice_rows_loader=self._list_tax_offset_oa_attachment_invoice_rows,
         )
+        self._configure_tax_offset_application_services()
         self._cost_statistics_service = CostStatisticsService(
             self._import_service,
             grouped_workbench_loader=self._build_api_workbench_payload,
@@ -884,6 +927,7 @@ class Application:
             raw_workbench_loader=self._build_raw_workbench_payload,
             project_active_checker=self._app_settings_service.is_project_active,
         )
+        self._configure_cost_statistics_application_services()
         self._search_service = SearchService(
             known_months_loader=self._list_search_months,
             grouped_workbench_loader=self._build_api_workbench_payload,
@@ -901,12 +945,144 @@ class Application:
         )
         if isinstance(source_oa_adapter, MongoOAAdapter):
             source_oa_adapter.set_attachment_invoice_cache_updated_callback(self._handle_oa_attachment_invoice_cache_updated)
-        self._tax_api_routes = TaxApiRoutes(self._tax_offset_service)
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
             ledger_service=self._turnover_ledger_service,
             relation_service=self._turnover_relation_service,
             extra_service=self._turnover_ledger_extra_service,
         )
+
+    def _configure_tax_offset_application_services(self) -> None:
+        runtime_repositories = getattr(self, "_runtime_repositories", None)
+        tax_offset_service = getattr(self, "_tax_offset_service", None)
+        self._tax_offset_runtime_service = TaxOffsetRuntimeService(
+            read_model_service=getattr(self, "_tax_offset_read_model_service", None),
+            queue_repository=getattr(runtime_repositories, "queue_repository", None),
+            redis_helper=getattr(runtime_repositories, "redis_helper", None),
+            source_versions_provider=self._tax_offset_source_versions,
+            persist_read_models=self._persist_tax_offset_read_models_best_effort,
+            month_cache_clearer=getattr(tax_offset_service, "clear_month_cache", None),
+            schedule_cache_warmup=self._schedule_tax_offset_cache_warmup,
+            cache_error_emitter=self._emit_runtime_cache_error,
+        )
+        self._tax_offset_query_service = TaxOffsetQueryService(
+            tax_offset_service=tax_offset_service,
+            runtime_service=self._tax_offset_runtime_service,
+            sql_read_repository=getattr(self, "_tax_offset_sql_read_repository", None),
+            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
+        )
+        self._tax_certified_import_job_service = TaxCertifiedImportJobService(
+            import_job_repository_provider=self._get_import_job_repository,
+        )
+        self._tax_api_routes = TaxApiRoutes(
+            tax_offset_service,
+            query_service=self._tax_offset_query_service,
+            certified_import_job_service=self._tax_certified_import_job_service,
+            json_response=self._json_response,
+            month_metric_emitter=self._emit_tax_offset_month_metric,
+            calculate_metric_emitter=self._emit_tax_offset_calculate_metric,
+            duration_ms=self._duration_ms,
+        )
+        self._tax_offset_dependency_key = self._tax_offset_current_dependency_key()
+
+    def _tax_offset_current_dependency_key(self) -> tuple[int | None, ...]:
+        return (
+            id(getattr(self, "_tax_offset_service", None)) if getattr(self, "_tax_offset_service", None) is not None else None,
+            id(getattr(self, "_tax_offset_read_model_service", None)) if getattr(self, "_tax_offset_read_model_service", None) is not None else None,
+            id(getattr(self, "_tax_offset_sql_read_repository", None)) if getattr(self, "_tax_offset_sql_read_repository", None) is not None else None,
+            id(getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None))
+            if getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None) is not None
+            else None,
+            id(getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None))
+            if getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None) is not None
+            else None,
+            id(self.__dict__.get("_import_job_repository")),
+            id(getattr(self, "_import_job_repository_override", None)),
+        )
+
+    def _ensure_tax_offset_application_services(self) -> None:
+        if (
+            not isinstance(getattr(self, "_tax_api_routes", None), TaxApiRoutes)
+            or getattr(self, "_tax_offset_dependency_key", None) != self._tax_offset_current_dependency_key()
+        ):
+            self._configure_tax_offset_application_services()
+
+    def _tax_offset_routes(self) -> TaxApiRoutes:
+        self._ensure_tax_offset_application_services()
+        return self._tax_api_routes
+
+    def _tax_offset_runtime(self) -> TaxOffsetRuntimeService:
+        self._ensure_tax_offset_application_services()
+        return self._tax_offset_runtime_service
+
+    def _tax_offset_query(self) -> TaxOffsetQueryService:
+        self._ensure_tax_offset_application_services()
+        return self._tax_offset_query_service
+
+    def _configure_cost_statistics_application_services(self) -> None:
+        runtime_repositories = getattr(self, "_runtime_repositories", None)
+        cost_statistics_service = getattr(self, "_cost_statistics_service", None)
+        self._cost_statistics_runtime_service = CostStatisticsRuntimeService(
+            read_model_service=getattr(self, "_cost_statistics_read_model_service", None),
+            background_job_service=getattr(self, "_background_job_service", None),
+            queue_repository=getattr(runtime_repositories, "queue_repository", None),
+            redis_helper=getattr(runtime_repositories, "redis_helper", None),
+            source_versions_provider=self._cost_statistics_source_versions,
+            persist_read_models=self._persist_cost_statistics_read_models_best_effort,
+            explorer_loader=getattr(cost_statistics_service, "get_explorer", None),
+            entry_count=CostStatisticsQueryService.explorer_entry_count,
+        )
+        self._cost_statistics_query_service = CostStatisticsQueryService(
+            cost_statistics_service=cost_statistics_service,
+            runtime_service=self._cost_statistics_runtime_service,
+            read_model_service=getattr(self, "_cost_statistics_read_model_service", None),
+            redis_helper=getattr(runtime_repositories, "redis_helper", None),
+            sql_read_repository=getattr(self, "_cost_statistics_sql_read_repository", None),
+            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
+            persist_read_models=self._persist_cost_statistics_read_models_best_effort,
+        )
+        self._cost_statistics_api_routes = CostStatisticsApiRoutes(
+            query_service=self._cost_statistics_query_service,
+            cost_statistics_service=cost_statistics_service,
+            json_response=self._json_response,
+            file_response=self._cost_statistics_file_response,
+            metric_emitter=self._emit_cost_statistics_explorer_metric,
+            entry_count=CostStatisticsQueryService.explorer_entry_count,
+            duration_ms=self._duration_ms,
+        )
+        self._cost_statistics_dependency_key = self._cost_statistics_current_dependency_key()
+
+    def _cost_statistics_current_dependency_key(self) -> tuple[int | None, ...]:
+        return (
+            id(getattr(self, "_cost_statistics_service", None)) if getattr(self, "_cost_statistics_service", None) is not None else None,
+            id(getattr(self, "_cost_statistics_read_model_service", None)) if getattr(self, "_cost_statistics_read_model_service", None) is not None else None,
+            id(getattr(self, "_cost_statistics_sql_read_repository", None)) if getattr(self, "_cost_statistics_sql_read_repository", None) is not None else None,
+            id(getattr(self, "_background_job_service", None)) if getattr(self, "_background_job_service", None) is not None else None,
+            id(getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None))
+            if getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None) is not None
+            else None,
+            id(getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None))
+            if getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None) is not None
+            else None,
+        )
+
+    def _ensure_cost_statistics_application_services(self) -> None:
+        if (
+            not hasattr(self, "_cost_statistics_api_routes")
+            or getattr(self, "_cost_statistics_dependency_key", None) != self._cost_statistics_current_dependency_key()
+        ):
+            self._configure_cost_statistics_application_services()
+
+    def _cost_statistics_routes(self) -> CostStatisticsApiRoutes:
+        self._ensure_cost_statistics_application_services()
+        return self._cost_statistics_api_routes
+
+    def _cost_statistics_runtime(self) -> CostStatisticsRuntimeService:
+        self._ensure_cost_statistics_application_services()
+        return self._cost_statistics_runtime_service
+
+    def _cost_statistics_query(self) -> CostStatisticsQueryService:
+        self._ensure_cost_statistics_application_services()
+        return self._cost_statistics_query_service
 
     def _configure_workbench_exception_application_service(self) -> None:
         self._workbench_exception_application_service = WorkbenchExceptionApplicationService(
@@ -1446,12 +1622,9 @@ class Application:
         if route_path.startswith("/api/etc/reconciliation-tasks/"):
             return self._route_api_etc_reconciliation_task(method, route_path, body, headers)
         if route_path == "/api/etc/business-batches":
-            if method == "GET":
-                return self._handle_api_etc_business_batches(query)
-            if method == "POST":
-                return self._handle_api_etc_business_batch_create(body, headers)
+            return self._handle_api_etc_business_batches_route(method, query, body, headers)
         if route_path.startswith("/api/etc/business-batches/"):
-            return self._route_api_etc_business_batch(method, route_path, body, headers)
+            return self._route_api_etc_business_batch_v2(method, route_path, body, headers)
         if method == "GET" and route_path == "/api/etc/invoices":
             return self._handle_api_etc_invoices(
                 status=query.get("status", [None])[0],
@@ -1588,6 +1761,9 @@ class Application:
             return self._handle_api_tax_certified_import_preview(body, headers)
         if method == "POST" and route_path == "/api/tax-offset/certified-import/confirm":
             return self._handle_api_tax_certified_import_confirm(body)
+        if method == "GET" and route_path.startswith("/api/tax-offset/certified-import/jobs/"):
+            import_job_id = unquote(route_path.removeprefix("/api/tax-offset/certified-import/jobs/")).strip()
+            return self._handle_api_tax_certified_import_job(import_job_id)
         if method == "GET" and route_path == "/api/tax-offset/certified-imports":
             month = query.get("month", [None])[0]
             return self._handle_api_tax_certified_imports(month)
@@ -1910,6 +2086,7 @@ class Application:
                 "/api/tax-offset/summary",
                 "/api/tax-offset/certified-import/preview",
                 "/api/tax-offset/certified-import/confirm",
+                "/api/tax-offset/certified-import/jobs/{import_job_id}",
                 "/api/tax-offset/certified-imports",
                 "/api/tax-offset/calculate",
                 "/api/cost-statistics",
@@ -4250,70 +4427,14 @@ class Application:
         ]
 
     def _retry_cost_statistics_warmup_scope_keys(self, job) -> list[str]:
-        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
-        failed_scope_keys = self._result_summary_scope_keys(result_summary, "failed_scope_keys")
-        remaining_scope_keys = self._result_summary_scope_keys(result_summary, "remaining_scope_keys")
-        if getattr(job, "status", None) == "partial_success" and failed_scope_keys:
-            return self._normalize_cost_statistics_scope_keys(failed_scope_keys)
-        if getattr(job, "error", None) == "interrupted_by_restart" and remaining_scope_keys:
-            return self._normalize_cost_statistics_scope_keys([*remaining_scope_keys, *failed_scope_keys])
-        derived_remaining_scope_keys = self._derive_remaining_cost_statistics_warmup_scope_keys(job)
-        if getattr(job, "error", None) == "interrupted_by_restart" and derived_remaining_scope_keys:
-            return self._normalize_cost_statistics_scope_keys([*derived_remaining_scope_keys, *failed_scope_keys])
-        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
-        if target_scope_keys:
-            return self._normalize_cost_statistics_scope_keys(target_scope_keys)
-        affected_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(getattr(job, "affected_scopes", []) or [])
-            if str(scope_key).strip()
-        ]
-        if affected_scope_keys:
-            return self._normalize_cost_statistics_scope_keys(affected_scope_keys)
-        months = self._retry_cost_statistics_warmup_months(job)
-        return [
-            target["scope_key"]
-            for target in self._cost_statistics_warmup_targets(months=months, project_scopes=["active", "all"])
-        ]
+        return self._cost_statistics_runtime().retry_warmup_scope_keys(job)
 
     def _derive_remaining_cost_statistics_warmup_scope_keys(self, job) -> list[str]:
-        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
-        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
-        if not target_scope_keys:
-            return []
-        completed_scope_keys = set(
-            self._normalize_cost_statistics_scope_keys(
-                [
-                    *self._result_summary_scope_keys(result_summary, "warmed_scope_keys"),
-                    *self._result_summary_scope_keys(result_summary, "failed_scope_keys"),
-                ]
-            )
-        )
-        return [
-            scope_key
-            for scope_key in self._normalize_cost_statistics_scope_keys(target_scope_keys)
-            if scope_key not in completed_scope_keys
-        ]
+        return self._cost_statistics_runtime().derive_remaining_warmup_scope_keys(job)
 
     @staticmethod
     def _retry_cost_statistics_warmup_months(job) -> list[str]:
-        source = job.source if isinstance(job.source, dict) else {}
-        candidates = [
-            getattr(job, "affected_months", []),
-            source.get("affected_months"),
-            source.get("months"),
-            source.get("month"),
-        ]
-        months: list[str] = []
-        for candidate in candidates:
-            values = candidate if isinstance(candidate, (list, tuple, set)) else [candidate]
-            for value in values:
-                month = str(value or "").strip()
-                if not month:
-                    continue
-                if month == "all" or SEARCH_MONTH_RE.match(month):
-                    months.append(month)
-        return list(dict.fromkeys(months))
+        return CostStatisticsRuntimeService.retry_warmup_months(job)
 
     def _resolve_background_job_owner(self, headers: dict[str, str] | None) -> str:
         try:
@@ -4527,11 +4648,7 @@ class Application:
         owner_user_id: str,
         idempotency_key: str,
     ):
-        existing_batches = self._etc_service.list_business_batches(task_id=task_id)
-        for batch in existing_batches:
-            if getattr(batch, "is_active", False):
-                return batch
-        return self._etc_service.create_business_batch(
+        return self._import_processing_service.resolve_task_etc_business_batch(
             task_id=task_id,
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,
@@ -4548,85 +4665,15 @@ class Application:
         confirmed_item_set_hash: str,
         total: int,
     ) -> dict[str, object]:
-        if not session_id or not task_id or task_version <= 0:
-            raise ValueError("ETC import job payload requires session_id, task_id and task_version.")
-        running_job = self._background_job_service.start_job(background_job_id) if background_job_id else None
-
-        def progress_callback(result) -> None:
-            if running_job is None:
-                return
-            summary = self._etc_import_job_summary(result, total)
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="persist_items",
-                message=f"正在导入 ETC发票 {summary['total_current']}/{total}。",
-                current=int(summary["total_current"]),
-                total=total,
-                result_summary={key: value for key, value in summary.items() if key != "total_current"},
-            )
-
-        try:
-            business_batch = self._resolve_task_etc_business_batch(
-                task_id=task_id,
-                owner_user_id=owner_user_id,
-                idempotency_key=f"etc_business_task_import:{task_id}:{session_id}",
-            )
-            business_batch, result = self._etc_service.confirm_business_batch_import(
-                business_batch.business_batch_id,
-                session_id,
-                expected_version=business_batch.version,
-                idempotency_key=f"etc_import_session:{session_id}",
-                progress_callback=progress_callback,
-            )
-        except Exception as exc:
-            self._etc_reconciliation_task_service.mark_import_failed(
-                task_id=task_id,
-                task_version=task_version,
-                confirmed_item_set_hash=confirmed_item_set_hash,
-                actor=owner_user_id,
-                note=str(exc),
-            )
-            if running_job is not None:
-                self._background_job_service.fail_job(running_job.job_id, "后台任务失败。", str(exc))
-            raise
-        import_batch = next(
-            (
-                batch
-                for batch in self._etc_service.list_import_batches()
-                if batch.id in set(getattr(business_batch, "import_batch_ids", []) or [])
-            ),
-            None,
+        return self._import_processing_service.execute_etc_invoice_import_confirm_job(
+            session_id=session_id,
+            task_id=task_id,
+            owner_user_id=owner_user_id,
+            background_job_id=background_job_id,
+            task_version=task_version,
+            confirmed_item_set_hash=confirmed_item_set_hash,
+            total=total,
         )
-        changed_months = self._sync_etc_import_result_to_canonical_invoices(result)
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_import_confirm")
-        summary = self._etc_import_job_summary(result, total)
-        result_summary = {key: value for key, value in summary.items() if key != "total_current"}
-        status = "partial_success" if result.failed > 0 else "succeeded"
-        if status == "partial_success":
-            self._etc_reconciliation_task_service.mark_import_failed(
-                task_id=task_id,
-                task_version=task_version,
-                confirmed_item_set_hash=confirmed_item_set_hash,
-                actor=owner_user_id,
-                note="ETC zip import partially failed; task remains ready for retry.",
-            )
-        else:
-            self._etc_reconciliation_task_service.mark_imported(
-                task_id=task_id,
-                task_version=task_version,
-                confirmed_item_set_hash=confirmed_item_set_hash,
-                import_batch_id=getattr(import_batch, "id", None),
-                actor=owner_user_id,
-            )
-        message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
-        if running_job is not None:
-            self._background_job_service.succeed_job(
-                running_job.job_id,
-                message,
-                result_summary=result_summary,
-                status=status,
-            )
-        return result_summary
 
     def _handle_api_etc_import_confirm_legacy(self, normalized_session_id: str, headers: dict[str, str] | None) -> Response:
         try:
@@ -4666,51 +4713,18 @@ class Application:
             return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
 
         def run_etc_import(running_job):
-            def progress_callback(result) -> None:
-                summary = self._etc_import_job_summary(result, total)
-                self._background_job_service.update_progress(
-                    running_job.job_id,
-                    phase="persist_items",
-                    message=f"正在导入 ETC发票 {summary['total_current']}/{total}。",
-                    current=int(summary["total_current"]),
-                    total=total,
-                    result_summary={key: value for key, value in summary.items() if key != "total_current"},
-                )
-
-            result = self._etc_service.confirm_import_session_with_progress(
-                normalized_session_id,
-                progress_callback=progress_callback,
+            return self._import_processing_service.execute_legacy_etc_invoice_import_confirm_job(
+                session_id=normalized_session_id,
+                total=total,
+                background_job_id=running_job.job_id,
             )
-            changed_months = self._sync_etc_import_result_to_canonical_invoices(result)
-            self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_import_confirm")
-            summary = self._etc_import_job_summary(result, total)
-            result_summary = {key: value for key, value in summary.items() if key != "total_current"}
-            status = "partial_success" if result.failed > 0 else "succeeded"
-            message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
-            self._background_job_service.succeed_job(
-                running_job.job_id,
-                message,
-                result_summary=result_summary,
-                status=status,
-            )
-            return result_summary
 
         self._background_job_service.run_job(job, run_etc_import)
         return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
 
     @staticmethod
     def _etc_import_job_summary(result, total: int) -> dict[str, int]:
-        total_current = result.imported + result.attachments_completed + result.duplicates_skipped + result.failed
-        return {
-            "created": result.imported,
-            "imported": result.imported,
-            "updated": result.attachments_completed,
-            "attachments_completed": result.attachments_completed,
-            "duplicates": result.duplicates_skipped,
-            "failed": result.failed,
-            "total": total,
-            "total_current": total_current,
-        }
+        return ImportProcessingService.etc_import_job_summary(result, total)
 
     def _sync_etc_import_result_to_canonical_invoices(self, result: object) -> list[str]:
         invoice_numbers = [
@@ -4802,6 +4816,175 @@ class Application:
             metadata={"source": "historical_etc_repair_sync", "reason": reason},
         )
         self._persist_state()
+
+    def _etc_business_application_service(self) -> EtcBusinessBatchApplicationService:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        dependency_key = (
+            id(getattr(self, "_etc_service", None)),
+            id(getattr(self, "_etc_reconciliation_task_service", None)),
+            id(queue_repository) if queue_repository is not None else None,
+            id(getattr(self, "_workbench_query_service", None)),
+        )
+        service = getattr(self, "_etc_business_batch_application_service", None)
+        if isinstance(service, EtcBusinessBatchApplicationService) and getattr(self, "_etc_business_batch_dependency_key", None) == dependency_key:
+            return service
+        service = EtcBusinessBatchApplicationService(
+            etc_service=self._etc_service,
+            reconciliation_task_service=self._etc_reconciliation_task_service,
+            queue_repository=queue_repository,
+            oa_client_factory=self._build_etc_oa_client,
+            oa_adapter_provider=lambda: getattr(getattr(self, "_workbench_query_service", None), "_oa_adapter", None),
+            sync_etc_invoices_to_canonical_invoices=self._sync_etc_invoices_to_canonical_invoices,
+            refresh_after_etc_invoice_sync=self._refresh_after_etc_invoice_sync,
+        )
+        self._etc_business_batch_application_service = service
+        self._etc_business_batch_dependency_key = dependency_key
+        return service
+
+    def _etc_business_routes(self) -> EtcBusinessBatchApiRoutes:
+        service = self._etc_business_application_service()
+        routes = getattr(self, "_etc_business_batch_api_routes", None)
+        if isinstance(routes, EtcBusinessBatchApiRoutes) and getattr(routes, "_application_service", None) is service:
+            return routes
+        routes = EtcBusinessBatchApiRoutes(service)
+        self._etc_business_batch_api_routes = routes
+        return routes
+
+    def _etc_business_session(self, headers: dict[str, str] | None, *, require_mutation: bool) -> OARequestSession | Response:
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+        except OAAuthError as exc:
+            return self._etc_business_response(HTTPStatus.UNAUTHORIZED, None, code="unauthorized", message=str(exc))
+        if require_mutation and not session.can_mutate_data:
+            return self._etc_business_response(
+                HTTPStatus.FORBIDDEN,
+                None,
+                code="permission_denied",
+                message="当前账户没有操作 ETC 批次的权限。",
+            )
+        if not require_mutation and not session.can_access_app:
+            return self._etc_business_response(
+                HTTPStatus.FORBIDDEN,
+                None,
+                code="permission_denied",
+                message="当前账户没有访问 ETC 批次的权限。",
+            )
+        return session
+
+    def _handle_api_etc_business_batches_route(
+        self,
+        method: str,
+        query: dict[str, list[str]],
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        if method == "GET":
+            session = self._etc_business_session(headers, require_mutation=False)
+            if isinstance(session, Response):
+                return session
+            status_code, payload = self._etc_business_routes().list_batches(query, session=session)
+            return self._json_response(status_code, payload)
+        if method == "POST":
+            session = self._etc_business_session(headers, require_mutation=True)
+            if isinstance(session, Response):
+                return session
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            status_code, result = self._etc_business_routes().create_batch(payload, session=session)
+            return self._json_response(status_code, result)
+        return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
+    def _route_api_etc_business_batch_v2(
+        self,
+        method: str,
+        route_path: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        relative = route_path.removeprefix("/api/etc/business-batches/").strip("/")
+        parts = [unquote(part) for part in relative.split("/") if part]
+        if not parts:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+        business_batch_id = parts[0]
+        action = "/".join(parts[1:])
+        if len(parts) == 1 and method == "GET":
+            session = self._etc_business_session(headers, require_mutation=False)
+            if isinstance(session, Response):
+                return session
+            status_code, payload = self._etc_business_routes().detail(business_batch_id, session=session)
+            return self._json_response(status_code, payload)
+        if len(parts) == 1 and method == "DELETE":
+            return self._handle_api_etc_business_batch_delete(business_batch_id, body)
+        session = self._etc_business_session(headers, require_mutation=True)
+        if isinstance(session, Response):
+            return session
+        routes = self._etc_business_routes()
+        if method == "POST" and action == "source-files":
+            _fields, files, error = self._load_multipart_body(body, headers)
+            if error is not None:
+                return error
+            status_code, payload = routes.source_files(business_batch_id, files, session=session)
+            return self._json_response(status_code, payload)
+        if method == "POST" and action == "etc-import/preview":
+            fields, files, error = self._load_multipart_body(body, headers)
+            if error is not None:
+                return error
+            if not files:
+                return self._etc_business_response(
+                    HTTPStatus.BAD_REQUEST,
+                    None,
+                    code="invalid_etc_import_request",
+                    message="At least one zip file is required.",
+                )
+            invalid_files = [file.file_name for file in files if not file.file_name.lower().endswith(".zip")]
+            if invalid_files:
+                return self._etc_business_response(
+                    HTTPStatus.BAD_REQUEST,
+                    None,
+                    code="invalid_etc_import_request",
+                    message="Only .zip files can be imported.",
+                )
+            uploads = [UploadedEtcZipFile(file_name=file.file_name, content=file.content) for file in files]
+            expected_version = self._optional_int((fields.get("expectedVersion") or fields.get("expected_version") or [None])[0])
+            status_code, payload = routes.preview_import(
+                business_batch_id,
+                uploads,
+                expected_version=expected_version,
+                session=session,
+            )
+            return self._json_response(status_code, payload)
+        if method == "POST" and action == "etc-import/confirm":
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            status_code, result = routes.confirm_import(business_batch_id, payload, session=session)
+            return self._json_response(status_code, result)
+        if method == "POST" and action == "oa-draft":
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            status_code, result = routes.create_oa_draft(business_batch_id, payload, session=session, headers=headers)
+            return self._json_response(status_code, result)
+        if method == "POST" and action == "oa-status/refresh":
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            status_code, result = routes.refresh_oa_status(business_batch_id, payload, session=session)
+            return self._json_response(status_code, result)
+        if method == "POST" and action == "manual-oa-status":
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            status_code, result = routes.manual_oa_status(business_batch_id, payload, session=session)
+            return self._json_response(status_code, result)
+        if method == "POST" and action == "oa-draft/revoke":
+            return self._handle_api_etc_business_oa_draft_revoke(business_batch_id, body)
+        return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def _handle_api_etc_business_batches(self, query: dict[str, list[str]]) -> Response:
         requested_status = str(query.get("status", [None])[0] or "").strip()
@@ -5114,54 +5297,9 @@ class Application:
         *,
         expected_version: int | None,
     ):
-        batch = self._etc_service.get_business_batch(business_batch_id)
-        payload = self._etc_service.business_batch_payload(batch)
-        invoice_summary = payload.get("invoiceSummary") if isinstance(payload.get("invoiceSummary"), dict) else {}
-        context = EtcOADetectionContext(
-            business_batch_id=str(payload.get("businessBatchId") or ""),
-            external_etc_batch_id=str(payload.get("externalEtcBatchId") or ""),
-            amount=invoice_summary.get("amount", "0.00") if isinstance(invoice_summary, dict) else "0.00",
-            invoice_count=int(invoice_summary.get("count", 0) or 0) if isinstance(invoice_summary, dict) else 0,
-            owner_user_id=str(payload.get("ownerUserId") or "").strip() or None,
-            owner_org_id=str(payload.get("ownerOrgId") or "").strip() or None,
-            oa_draft_created_at=getattr(batch, "updated_at", None),
-            oa_detection_deadline_at=getattr(batch, "oa_detection_deadline_at", None),
-            oa_detection_final_retry_until=getattr(batch, "oa_detection_final_retry_until", None),
-        )
-        adapter = getattr(getattr(self, "_workbench_query_service", None), "_oa_adapter", None)
-        detector = EtcOADetectionService()
-        if not isinstance(adapter, MongoOAAdapter):
-            return self._etc_service.apply_business_batch_oa_detection_result(
-                business_batch_id,
-                expected_version=expected_version,
-                detection_status="unavailable",
-                reason="oa_detector_not_configured",
-                error="OA Mongo adapter is not configured.",
-            )
-        start, end = detector.detection_window(context)
-        if start is None or end is None:
-            now = datetime.now(UTC)
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = now
-        result = detector.detect_with_adapter(
-            context,
-            lambda detection_context: adapter.list_etc_oa_detection_candidates(
-                business_batch_id=detection_context.business_batch_id,
-                external_etc_batch_id=detection_context.external_etc_batch_id,
-                created_from=start,
-                created_to=end,
-            ),
-            now=datetime.now(UTC),
-        )
-        return self._etc_service.apply_business_batch_oa_detection_result(
+        return self._etc_business_application_service().refresh_oa_detection(
             business_batch_id,
             expected_version=expected_version,
-            detection_status=result.status,
-            reason=result.reason,
-            oa_row_id=result.oa_row_id,
-            process_status=result.process_status,
-            error=result.error,
-            candidates=result.candidates,
         )
 
     def _recover_pending_etc_business_oa_detection_loops(self) -> None:
@@ -5173,39 +5311,13 @@ class Application:
             except Exception:
                 return
             for batch in batches:
-                self._schedule_etc_business_oa_detection_loop(batch.business_batch_id)
+                self._etc_business_application_service().enqueue_oa_detection(batch)
 
     def _schedule_etc_business_oa_detection_loop(self, business_batch_id: str) -> bool:
         normalized_id = str(business_batch_id or "").strip()
         if not normalized_id:
             return False
-        with self._etc_business_oa_detection_loop_lock:
-            if normalized_id in self._etc_business_oa_detection_loop_batch_ids:
-                return False
-            self._etc_business_oa_detection_loop_batch_ids.add(normalized_id)
-        Thread(target=self._run_etc_business_oa_detection_loop, args=(normalized_id,), daemon=True).start()
-        return True
-
-    def _run_etc_business_oa_detection_loop(self, business_batch_id: str) -> None:
-        max_attempts = max(1, int(os.getenv("FIN_OPS_ETC_OA_DETECTION_MAX_ATTEMPTS", "120") or "120"))
-        interval_seconds = max(1.0, float(os.getenv("FIN_OPS_ETC_OA_DETECTION_INTERVAL_SECONDS", "15") or "15"))
-        try:
-            for _ in range(max_attempts):
-                try:
-                    batch = self._refresh_etc_business_batch_oa_detection(business_batch_id, expected_version=None)
-                except Exception:
-                    return
-                if str(getattr(batch, "status", "")) != EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value:
-                    if str(getattr(batch, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
-                        changed_months = self._sync_etc_invoices_to_canonical_invoices(
-                            self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
-                        )
-                        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_status_detected_async")
-                    return
-                sleep(interval_seconds)
-        finally:
-            with self._etc_business_oa_detection_loop_lock:
-                self._etc_business_oa_detection_loop_batch_ids.discard(business_batch_id)
+        return self._etc_business_application_service().enqueue_oa_detection(normalized_id)
 
     def _handle_api_etc_business_manual_oa_status(self, business_batch_id: str, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -6871,55 +6983,24 @@ class Application:
         except ValueError:
             configured_limit = 10
         resolved_limit = max(1, int(limit or configured_limit))
-        scope_months = queue.claim_due_scopes(
-            worker_id=resolved_worker_id,
-            limit=resolved_limit,
-            lease_seconds=lease_seconds,
-            request_id=resolved_request_id,
+        heartbeat_recorder = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None) or object()
+        worker = WorkbenchMatchingDirtyScopeWorker(
+            dirty_queue=queue,
+            matching_orchestrator=WorkbenchMatchingScopeRunnerAdapter(self._run_workbench_auto_matching_for_scopes),
+            source_versions_provider=self._workbench_matching_source_versions,
+            heartbeat_recorder=heartbeat_recorder,
+            config=WorkbenchMatchingDirtyScopeWorkerConfig(
+                worker_id=resolved_worker_id,
+                batch_size=resolved_limit,
+                lease_seconds=lease_seconds or 600,
+                retry_delay_seconds=retry_delay_seconds,
+                max_iterations=1,
+                request_id_factory=lambda: resolved_request_id,
+            ),
         )
-        if not scope_months:
+        summary = worker.run_once()
+        if not summary.get("scope_months"):
             return None
-
-        summary: dict[str, object] = {
-            "request_id": resolved_request_id,
-            "processed_months": [],
-            "failed_months": [],
-            "candidate_count": 0,
-            "scope_months": list(scope_months),
-        }
-        for scope_month in scope_months:
-            scope_request_id = f"{resolved_request_id}:{scope_month}"
-            try:
-                run_summary = self._run_workbench_auto_matching_for_scopes(
-                    [scope_month],
-                    reason="dirty_scope_retry",
-                    request_id=scope_request_id,
-                    requeue_on_error=False,
-                    raise_on_error=True,
-                ) or {}
-                queue.complete(
-                    scope_month,
-                    source_versions=self._workbench_matching_source_versions(),
-                    worker_id=resolved_worker_id,
-                    request_id=scope_request_id,
-                )
-                processed_months = list(summary["processed_months"])
-                processed_months.append(scope_month)
-                summary["processed_months"] = processed_months
-                summary["candidate_count"] = int(summary.get("candidate_count") or 0) + int(
-                    run_summary.get("candidate_count") or 0
-                )
-            except Exception as exc:
-                queue.fail(
-                    scope_month,
-                    error=str(exc),
-                    retry_delay_seconds=retry_delay_seconds,
-                    worker_id=resolved_worker_id,
-                    request_id=scope_request_id,
-                )
-                failed_months = list(summary["failed_months"])
-                failed_months.append(scope_month)
-                summary["failed_months"] = failed_months
         return summary
 
     def _run_oa_sync_polling_worker(self, *, interval_seconds: float) -> None:
@@ -8579,80 +8660,69 @@ class Application:
         enqueue(scope_type="oa_pending_payment", scope_key=scope_key, reason=reason)
         return True
 
+    def _pending_invoice_routes(self) -> PendingInvoiceApiRoutes:
+        routes = getattr(self, "_pending_invoice_api_routes", None)
+        if isinstance(routes, PendingInvoiceApiRoutes):
+            return routes
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        query_service = getattr(self, "_pending_invoice_query_service", None)
+        settings_service = getattr(self, "_app_settings_service", None)
+        get_settings_payload = getattr(settings_service, "get_settings_payload", None)
+        settings_provider = get_settings_payload if callable(get_settings_payload) else (lambda: {})
+        row_normalizer = getattr(query_service, "normalize_row_payloads", None)
+        read_model_service = PendingInvoiceReadModelService(
+            repository=getattr(self, "_pending_invoice_sql_read_repository", None),
+            queue_repository=queue_repository,
+            row_normalizer=row_normalizer if callable(row_normalizer) else None,
+            settings_provider=settings_provider,
+            source_versions_provider=lambda: pending_invoice_source_versions(
+                settings_provider(),
+                attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version(),
+                oa_projection_sync_version=self._current_oa_projection_sync_version(),
+            ),
+        )
+        rules_service = PendingInvoiceRulesApplicationService(
+            app_settings_service=settings_service,
+            persist_callback=self._persist_state if getattr(self, "_state_store", None) is not None else None,
+            invalidate_read_model_scopes=read_model_service.invalidate_base_scopes,
+            after_bank_transaction_tag_settings_saved=getattr(self, "_finalize_bank_transaction_tag_settings_update", None),
+        )
+        routes = PendingInvoiceApiRoutes(
+            query_service=query_service,
+            application_service=getattr(self, "_pending_invoice_application_service", None),
+            read_model_service=read_model_service,
+            rules_service=rules_service,
+            export_content_type=XLSX_MIME_TYPE,
+        )
+        self._pending_invoice_api_routes = routes
+        return routes
+
     def _handle_api_pending_invoice_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
         _session, auth_error = self._resolve_pending_invoice_read_session(headers)
         if auth_error is not None:
             return auth_error
         try:
-            sql_payload = self._get_pending_invoice_rows_from_sql_read_model(query)
-            if sql_payload is not None:
-                status_code = (
-                    HTTPStatus.ACCEPTED
-                    if sql_payload.get("read_model_status") == "refreshing" and not sql_payload.get("rows")
-                    else HTTPStatus.OK
-                )
-                return self._json_response(status_code, sql_payload)
-            payload = self._pending_invoice_query_service.list_rows(
-                direction=query.get("direction", [""])[0],
-                filter=query.get("filter", ["all"])[0],
-                date_from=query.get("date_from", [None])[0],
-                date_to=query.get("date_to", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                filters=query.get("filters", [None])[0],
-                sort_field=query.get("sort_field", [None])[0],
-                sort_direction=query.get("sort_direction", [None])[0],
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-            )
+            status_code, payload = self._pending_invoice_routes().rows(query)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._json_response(status_code, payload)
 
     def _handle_api_pending_invoice_filter_options(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
         _session, auth_error = self._resolve_pending_invoice_read_session(headers)
         if auth_error is not None:
             return auth_error
         try:
-            sql_rows_payload = self._get_pending_invoice_all_rows_from_sql_read_model(query)
-            if isinstance(sql_rows_payload, Response):
-                return sql_rows_payload
-            if isinstance(sql_rows_payload, dict):
-                payload = self._pending_invoice_query_service.filter_options_for_rows(
-                    rows=list(sql_rows_payload.get("rows") or []),
-                    direction=str(sql_rows_payload.get("direction") or query.get("direction", ["expense"])[0]),
-                    filter=str(sql_rows_payload.get("filter") or query.get("filter", ["all"])[0]),
-                )
-            else:
-                payload = self._pending_invoice_query_service.filter_options(
-                    direction=query.get("direction", ["expense"])[0],
-                    filter=query.get("filter", ["all"])[0],
-                    date_from=query.get("date_from", [None])[0],
-                    date_to=query.get("date_to", [None])[0],
-                    keyword=query.get("keyword", [None])[0],
-                    filters=query.get("filters", [None])[0],
-                )
+            status_code, payload = self._pending_invoice_routes().filter_options(query)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._json_response(status_code, payload)
 
     def _handle_api_pending_invoice_candidates(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
         _session, auth_error = self._resolve_pending_invoice_read_session(headers)
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._pending_invoice_query_service.invoice_candidates(
-                transaction_id=query.get("transaction_id", [""])[0],
-                keyword=query.get("keyword", [None])[0],
-                seller_name=query.get("seller_name", [None])[0],
-                issue_date_from=query.get("issue_date_from", [None])[0],
-                issue_date_to=query.get("issue_date_to", [None])[0],
-                amount_min=query.get("amount_min", [None])[0],
-                amount_max=query.get("amount_max", [None])[0],
-                sort_field=query.get("sort_field", [None])[0],
-                sort_direction=query.get("sort_direction", [None])[0],
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-            )
+            payload = self._pending_invoice_routes().invoice_candidates(query)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -8662,7 +8732,7 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._pending_invoice_query_service.relation_detail(transaction_id=transaction_id)
+            payload = self._pending_invoice_routes().relation_detail(transaction_id)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -8672,7 +8742,7 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._pending_invoice_query_service.bank_transaction_detail(bank_transaction_id)
+            payload = self._pending_invoice_routes().bank_transaction_detail(bank_transaction_id)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -8682,7 +8752,7 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._pending_invoice_query_service.invoice_detail(invoice_id)
+            payload = self._pending_invoice_routes().invoice_detail(invoice_id)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -8692,7 +8762,7 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._pending_invoice_query_service.oa_detail(oa_id)
+            payload = self._pending_invoice_routes().oa_detail(oa_id)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -8710,10 +8780,7 @@ class Application:
         if error is not None:
             return error
         try:
-            preview = self._pending_invoice_application_service.preview_attach_existing_invoice(
-                transaction_id=transaction_id,
-                payload=payload,
-            )
+            preview = self._pending_invoice_routes().attach_existing_preview(transaction_id, payload)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, preview)
@@ -8732,17 +8799,11 @@ class Application:
             identity_service=self._oa_identity_service,
             access_control_service=self._access_control_service,
         )
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有选择已有发票权限。"},
-            )
-        actor_id = str(session.identity.username or "pending_invoice").strip()
         try:
-            result = self._pending_invoice_application_service.confirm_attach_existing_invoice(
-                transaction_id=transaction_id,
-                payload=payload,
-                actor_id=actor_id,
+            result = self._pending_invoice_routes().attach_existing_confirm(
+                transaction_id,
+                payload,
+                session=session,
             )
         except PendingInvoiceError as exc:
             self._persist_state()
@@ -8757,14 +8818,7 @@ class Application:
         session, auth_error = self._resolve_pending_invoice_read_session(headers)
         if auth_error is not None:
             return auth_error
-        direction = query.get("direction", ["expense"])[0]
-        settings = self._app_settings_service.get_pending_invoice_settings_payload()
-        rules_payload = pending_invoice_rules_payload(settings, direction=direction)
-        rules_payload["permissions"] = {"can_save": bool(session.can_mutate_data) if session is not None else True}
-        return self._json_response(
-            HTTPStatus.OK,
-            rules_payload,
-        )
+        return self._json_response(HTTPStatus.OK, self._pending_invoice_routes().rules(query, session=session))
 
     def _handle_api_pending_invoice_rules_update(self, query: dict[str, list[str]], body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -8780,53 +8834,11 @@ class Application:
             return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
         except ForbiddenOAAccessError as exc:
             return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存待找发票规则权限。"},
-            )
-        direction = query.get("direction", ["expense"])[0]
-        pending_invoice_tag_groups = payload.get("pending_invoice_tag_groups", payload)
-        if str(direction or "").strip() == "income":
-            pending_invoice_tag_groups = payload.get("pending_output_invoice_tag_groups", pending_invoice_tag_groups)
-        if not isinstance(pending_invoice_tag_groups, dict):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_pending_invoice_rules_request", "message": "pending_invoice_tag_groups must be an object."},
-            )
-        pending_invoice_tag_groups = editable_pending_invoice_tag_groups_payload(pending_invoice_tag_groups, direction=direction)
-        current = self._app_settings_service.get_pending_invoice_settings_payload()
-        access_control = current.get("access_control") if isinstance(current.get("access_control"), dict) else {}
-        projects = current.get("projects") if isinstance(current.get("projects"), dict) else {}
-        actor_id = str(session.identity.username or "pending_invoice_rules").strip()
         try:
-            self._app_settings_service.update_settings(
-                completed_project_ids=list(projects.get("completed_project_ids") or projects.get("completed") or []),
-                bank_account_mappings=list(current.get("bank_account_mappings") or []),
-                allowed_usernames=list(access_control.get("allowed_usernames") or []),
-                readonly_export_usernames=list(access_control.get("readonly_export_usernames") or []),
-                admin_usernames=list(access_control.get("admin_usernames") or []),
-                workbench_column_layouts=current.get("workbench_column_layouts") if isinstance(current.get("workbench_column_layouts"), dict) else {},
-                oa_retention=current.get("oa_retention") if isinstance(current.get("oa_retention"), dict) else {},
-                oa_import=current.get("oa_import") if isinstance(current.get("oa_import"), dict) else {},
-                oa_invoice_offset=current.get("oa_invoice_offset") if isinstance(current.get("oa_invoice_offset"), dict) else {},
-                bank_transaction_tags=None,
-                pending_invoice_tag_groups=pending_invoice_tag_groups if str(direction or "").strip() != "income" else None,
-                pending_output_invoice_tag_groups=pending_invoice_tag_groups if str(direction or "").strip() == "income" else None,
-                actor_id=actor_id or "pending_invoice_rules",
-                after_bank_transaction_tag_settings_saved=self._finalize_bank_transaction_tag_settings_update,
-            )
-        except AppSettingsValidationError as exc:
-            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": exc.error_code, "message": str(exc)})
-        if self._state_store is not None:
-            self._persist_state()
-        self._invalidate_pending_invoice_read_model_scopes(reason="pending_invoice_rules_update")
-        rules_payload = pending_invoice_rules_payload(
-            self._app_settings_service.get_pending_invoice_settings_payload(),
-            direction=direction,
-        )
-        rules_payload["permissions"] = {"can_save": True}
-        return self._json_response(HTTPStatus.OK, rules_payload)
+            status_code, result = self._pending_invoice_routes().update_rules(query, payload, session=session)
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(status_code, result)
 
     def _handle_api_pending_invoice_income_status_update(
         self,
@@ -8847,17 +8859,11 @@ class Application:
             return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
         except ForbiddenOAAccessError as exc:
             return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有标记收入流水开票状态权限。"},
-            )
-        actor_id = str(session.identity.username or "pending_invoice_income_status").strip()
         try:
-            result = self._pending_invoice_application_service.confirm_income_status_override(
-                transaction_id=transaction_id,
-                payload=payload if isinstance(payload, dict) else {},
-                actor_id=actor_id or "pending_invoice_income_status",
+            result = self._pending_invoice_routes().update_income_status(
+                transaction_id,
+                payload if isinstance(payload, dict) else {},
+                session=session,
             )
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
@@ -8876,19 +8882,10 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            sql_rows_payload = self._get_pending_invoice_all_rows_from_sql_read_model(query)
-            if isinstance(sql_rows_payload, Response):
-                return sql_rows_payload
-            if isinstance(sql_rows_payload, dict):
-                payload = self._pending_invoice_query_service.export_preview_for_rows(
-                    rows=list(sql_rows_payload.get("rows") or []),
-                    filters=self._pending_invoice_query_kwargs(query),
-                )
-            else:
-                payload = self._pending_invoice_query_service.export_preview(**self._pending_invoice_query_kwargs(query))
+            status_code, payload = self._pending_invoice_routes().export_preview(query)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._json_response(status_code, payload)
 
     def _handle_api_pending_invoice_export(
         self,
@@ -8899,48 +8896,29 @@ class Application:
         if auth_error is not None:
             return auth_error
         try:
-            sql_rows_payload = self._get_pending_invoice_all_rows_from_sql_read_model(query)
-            if isinstance(sql_rows_payload, Response):
-                return sql_rows_payload
-            if isinstance(sql_rows_payload, dict):
-                filename, content = self._pending_invoice_query_service.export_for_rows(
-                    rows=list(sql_rows_payload.get("rows") or []),
-                )
-            else:
-                filename, content = self._pending_invoice_query_service.export(**self._pending_invoice_query_kwargs(query))
+            status_code, result = self._pending_invoice_routes().export(query)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
+        if not isinstance(result, PendingInvoiceExportFile):
+            return self._json_response(status_code, result)
         self._audit_service.record_action(
             actor_id=str(session.identity.username or "pending_invoice_export") if session is not None else "pending_invoice_export",
             action="pending_invoice_export_downloaded",
             entity_type="pending_invoice_export",
-            entity_id=filename,
+            entity_id=result.filename,
             metadata={"query": {key: values[0] for key, values in query.items() if values}},
         )
         return Response(
             status_code=int(HTTPStatus.OK),
-            body=content,
+            body=result.content,
             headers={
-                "Content-Type": XLSX_MIME_TYPE,
-                "Content-Disposition": _build_content_disposition(filename),
+                "Content-Type": result.content_type,
+                "Content-Disposition": _build_content_disposition(result.filename),
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
-
-    @staticmethod
-    def _pending_invoice_query_kwargs(query: dict[str, list[str]]) -> dict[str, object]:
-        return {
-            "direction": query.get("direction", ["expense"])[0],
-            "filter": query.get("filter", ["all"])[0],
-            "date_from": query.get("date_from", [None])[0],
-            "date_to": query.get("date_to", [None])[0],
-            "keyword": query.get("keyword", [None])[0],
-            "filters": query.get("filters", [None])[0],
-            "sort_field": query.get("sort_field", [None])[0],
-            "sort_direction": query.get("sort_direction", [None])[0],
-        }
 
     def _resolve_pending_invoice_read_session(
         self,
@@ -9014,342 +8992,12 @@ class Application:
             )
         return session, None
 
-    def _get_pending_invoice_all_rows_from_sql_read_model(
-        self,
-        query: dict[str, list[str]],
-    ) -> dict[str, object] | Response | None:
-        repository = getattr(self, "_pending_invoice_sql_read_repository", None)
-        list_rows = getattr(repository, "list_pending_invoice_rows", None)
-        if not callable(list_rows):
-            return None
-        page_size = 200
-        first_query = {key: list(values) for key, values in query.items()}
-        first_query["page"] = ["1"]
-        first_query["page_size"] = [str(page_size)]
-        first_payload = self._get_pending_invoice_rows_from_sql_read_model(first_query)
-        if first_payload is None:
-            return None
-        if first_payload.get("read_model_status") != "fresh":
-            return self._json_response(HTTPStatus.ACCEPTED, first_payload)
-        rows = list(first_payload.get("rows") or [])
-        pagination = first_payload.get("pagination") if isinstance(first_payload.get("pagination"), dict) else {}
-        total = int(pagination.get("total") or len(rows))
-        page = 2
-        while len(rows) < total:
-            page_query = {key: list(values) for key, values in query.items()}
-            page_query["page"] = [str(page)]
-            page_query["page_size"] = [str(page_size)]
-            page_payload = self._get_pending_invoice_rows_from_sql_read_model(page_query)
-            if not isinstance(page_payload, dict):
-                return None
-            if page_payload.get("read_model_status") != "fresh":
-                return self._json_response(HTTPStatus.ACCEPTED, page_payload)
-            page_rows = list(page_payload.get("rows") or [])
-            if not page_rows:
-                break
-            rows.extend(page_rows)
-            page += 1
-        return {
-            "direction": first_payload.get("direction"),
-            "filter": first_payload.get("filter"),
-            "rows": rows,
-            "pagination": {"page": 1, "page_size": page_size, "total": total},
-            "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
-            "read_model_status": "fresh",
-            "read_model_scope_key": first_payload.get("read_model_scope_key"),
-        }
-
-    def _get_pending_invoice_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
-        repository = getattr(self, "_pending_invoice_sql_read_repository", None)
-        list_rows = getattr(repository, "list_pending_invoice_rows", None)
-        if not callable(list_rows):
-            return None
-        direction = query.get("direction", [""])[0]
-        filter_name = query.get("filter", ["all"])[0]
-        normalized_direction = str(direction or "").strip()
-        normalized_filter = str(filter_name or "all").strip() or "all"
-        if normalized_direction not in {"expense", "income", "all"}:
-            raise PendingInvoiceError("invalid_direction", "direction must be expense, income or all.")
-        if normalized_filter not in PENDING_INVOICE_VALID_FILTERS:
-            raise PendingInvoiceError("invalid_filter", "filter must be all or a supported pending invoice group.")
-        if normalized_direction == "all" and normalized_filter != "all":
-            raise PendingInvoiceError(
-                "invalid_filter_for_all",
-                "All pending invoice rows only support filter=all.",
-                status_code=HTTPStatus.BAD_REQUEST,
-            )
-        if normalized_direction == "income" and normalized_filter in PENDING_INVOICE_EXPENSE_FILTERS:
-            raise PendingInvoiceError(
-                "invalid_filter_for_income",
-                "Income pending invoice rows do not support expense invoice tag filters.",
-                status_code=HTTPStatus.BAD_REQUEST,
-            )
-        try:
-            payload = list_rows(
-                direction=normalized_direction,
-                filter=normalized_filter,
-                date_from=query.get("date_from", [None])[0],
-                date_to=query.get("date_to", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                filters=query.get("filters", [None])[0],
-                sort_field=query.get("sort_field", [None])[0],
-                sort_direction=query.get("sort_direction", [None])[0],
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-            )
-        except ValueError as exc:
-            raise PendingInvoiceError("invalid_pending_invoice_query", str(exc)) from exc
-        scope_key = self._pending_invoice_scope_key(direction=normalized_direction, filter_name=normalized_filter)
-        if not isinstance(payload, dict):
-            self._enqueue_pending_invoice_read_model_refreshes_for_scope(
-                direction=normalized_direction,
-                filter_name=normalized_filter,
-                reason="api_miss",
-            )
-            return self._pending_invoice_refreshing_payload(
-                direction=normalized_direction,
-                filter_name=normalized_filter,
-                scope_key=scope_key,
-                query=query,
-            )
-        refresh_status = str(payload.get("refresh_status") or "fresh")
-        if self._pending_invoice_sql_payload_requires_schema_refresh(payload):
-            if refresh_status == "fresh":
-                self._enqueue_pending_invoice_read_model_refreshes_for_scope(
-                    direction=normalized_direction,
-                    filter_name=normalized_filter,
-                    reason="api_schema_stale",
-                )
-            return self._pending_invoice_refreshing_payload(
-                direction=normalized_direction,
-                filter_name=normalized_filter,
-                scope_key=scope_key,
-                query=query,
-                source_payload=payload,
-            )
-        if refresh_status != "fresh":
-            result = self._pending_invoice_sql_payload_response(
-                payload,
-                read_model_status=refresh_status,
-                scope_key=scope_key,
-            )
-            return result
-        stale_reasons = source_version_mismatch_reasons(
-            expected=self._pending_invoice_expected_source_versions(),
-            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            self._enqueue_pending_invoice_read_model_refreshes_for_scope(
-                direction=normalized_direction,
-                filter_name=normalized_filter,
-                reason="api_source_versions_stale",
-            )
-            if list(payload.get("rows") or []):
-                result = self._pending_invoice_sql_payload_response(
-                    payload,
-                    read_model_status="refreshing",
-                    scope_key=scope_key,
-                )
-                result["read_model_stale_reasons"] = list(stale_reasons)
-                return result
-            return self._pending_invoice_refreshing_payload(
-                direction=normalized_direction,
-                filter_name=normalized_filter,
-                scope_key=scope_key,
-                query=query,
-                source_payload=payload,
-                stale_reasons=stale_reasons,
-            )
-        result = self._pending_invoice_sql_payload_response(
-            payload,
-            read_model_status=refresh_status,
-            scope_key=scope_key,
-        )
-        return result
-
-    def _pending_invoice_sql_payload_response(
-        self,
-        payload: dict[str, object],
-        *,
-        read_model_status: str,
-        scope_key: str,
-    ) -> dict[str, object]:
-        result = dict(payload)
-        summary = result.get("summary")
-        if isinstance(summary, dict) and not isinstance(summary.get("source_summary"), dict):
-            direction, _sep, _filter_name = scope_key.partition(":")
-            summary = dict(summary)
-            summary["source_summary"] = self._pending_invoice_source_summary_for_query(
-                direction=direction,
-                query={},
-                source_payload=result,
-            )
-            result["summary"] = summary
-        rows = result.get("rows")
-        pending_invoice_query_service = getattr(self, "_pending_invoice_query_service", None)
-        normalizer = getattr(pending_invoice_query_service, "normalize_row_payloads", None)
-        if isinstance(rows, list) and callable(normalizer):
-            result["rows"] = normalizer([row for row in rows if isinstance(row, dict)])
-        settings_service = getattr(self, "_app_settings_service", None)
-        get_settings_payload = getattr(settings_service, "get_settings_payload", None)
-        if callable(get_settings_payload):
-            settings_payload = get_settings_payload()
-            bank_transaction_tags = (
-                settings_payload.get("bank_transaction_tags")
-                if isinstance(settings_payload, dict)
-                else None
-            )
-            if isinstance(bank_transaction_tags, dict):
-                result["bank_transaction_tags"] = bank_transaction_tags
-                result["bank_transaction_tags_version"] = int(
-                    bank_transaction_tags.get("version") or result.get("bank_transaction_tags_version") or 1
-                )
-        result["read_model_status"] = read_model_status
-        result["read_model_scope_key"] = scope_key
-        result.pop("refresh_status", None)
-        return result
-
-    def _pending_invoice_refreshing_payload(
-        self,
-        *,
-        direction: str,
-        filter_name: str,
-        scope_key: str,
-        query: dict[str, list[str]],
-        source_payload: dict[str, object] | None = None,
-        stale_reasons: list[str] | None = None,
-    ) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "direction": direction,
-            "filter": filter_name,
-            "rows": [],
-            "pagination": {"page": 1, "page_size": 50, "total": 0},
-            "summary": {
-                "total_rows": 0,
-                "missing_invoice_rows": 0,
-                "create_invoice_available_rows": 0,
-                "source_summary": self._pending_invoice_source_summary_for_query(
-                    direction=direction,
-                    query=query,
-                    source_payload=source_payload,
-                ),
-            },
-            "bank_transaction_tags": {},
-            "bank_transaction_tags_version": 1,
-            "read_model_status": "refreshing",
-            "read_model_scope_key": scope_key,
-        }
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = list(stale_reasons)
-        return payload
-
-    def _pending_invoice_expected_source_versions(self) -> dict[str, object]:
-        settings_service = getattr(self, "_app_settings_service", None)
-        get_settings_payload = getattr(settings_service, "get_settings_payload", None)
-        settings = get_settings_payload() if callable(get_settings_payload) else {}
-        if not isinstance(settings, dict):
-            settings = {}
-        pending_groups = settings.get("pending_invoice_tag_groups")
-        pending_output_groups = settings.get("pending_output_invoice_tag_groups")
-        bank_tags = settings.get("bank_transaction_tags")
-        return {
-            "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
-            "pending_invoice_tag_groups_version": (
-                pending_groups.get("version") if isinstance(pending_groups, dict) else 1
-            ),
-            "pending_output_invoice_tag_groups_version": (
-                pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1
-            ),
-            "bank_auto_tag_rules_version": (
-                bank_tags.get("version") if isinstance(bank_tags, dict) else self._current_bank_auto_tag_rules_version()
-            ),
-            "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
-            "oa_projection_sync_version": self._current_oa_projection_sync_version(),
-        }
-
-    def _pending_invoice_source_summary_for_query(
-        self,
-        *,
-        direction: str,
-        query: dict[str, list[str]],
-        source_payload: dict[str, object] | None = None,
-    ) -> dict[str, int]:
-        summary = source_payload.get("summary") if isinstance(source_payload, dict) else None
-        source_summary = summary.get("source_summary") if isinstance(summary, dict) else None
-        if isinstance(source_summary, dict):
-            return {
-                "bank_transaction_rows": self._optional_int(source_summary.get("bank_transaction_rows")) or 0,
-                "expense_rows": self._optional_int(source_summary.get("expense_rows")) or 0,
-                "income_rows": self._optional_int(source_summary.get("income_rows")) or 0,
-                "current_direction_rows": self._optional_int(source_summary.get("current_direction_rows")) or 0,
-                "excluded_direction_rows": self._optional_int(source_summary.get("excluded_direction_rows")) or 0,
-            }
-        repository = getattr(self, "_pending_invoice_sql_read_repository", None)
-        source_summary_loader = getattr(repository, "pending_invoice_source_summary", None)
-        if callable(source_summary_loader):
-            try:
-                return source_summary_loader(
-                    direction=direction,
-                    date_from=query.get("date_from", [None])[0],
-                    date_to=query.get("date_to", [None])[0],
-                )
-            except Exception:
-                return {}
-        return {}
-
-    @staticmethod
-    def _pending_invoice_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:
-        rows = list(payload.get("rows") or [])
-        if not rows:
-            return False
-        for row in rows:
-            if not isinstance(row, dict):
-                return True
-            if not isinstance(row.get("invoice_acquisition_status"), dict):
-                return True
-            if not isinstance(row.get("input_invoices"), dict):
-                return True
-            if not isinstance(row.get("oa"), dict):
-                return True
-        return False
-
-    @staticmethod
-    def _pending_invoice_scope_key(*, direction: str, filter_name: str | None = None) -> str:
-        normalized_direction = str(direction or "").strip()
-        normalized_filter = str(filter_name or "all").strip() or "all"
-        return f"{normalized_direction}:{normalized_filter}"
-
-    def _enqueue_pending_invoice_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
-            return False
-        enqueue(scope_type="pending_invoice", scope_key=scope_key, reason=reason)
-        return True
-
-    def _enqueue_pending_invoice_read_model_refreshes_for_scope(
-        self,
-        *,
-        direction: str,
-        filter_name: str,
-        reason: str,
-    ) -> list[str]:
-        if direction == "all":
-            scope_keys = ["expense:all", "income:all"]
-        else:
-            scope_keys = [self._pending_invoice_scope_key(direction=direction, filter_name=filter_name)]
-        return [
-            scope_key
-            for scope_key in scope_keys
-            if self._enqueue_pending_invoice_read_model_refresh(scope_key, reason=reason)
-        ]
-
     def _handle_api_pending_invoice_manual_preview(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         try:
-            preview = self._pending_invoice_application_service.preview_manual_invoice(payload)
+            preview = self._pending_invoice_routes().manual_preview(payload)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, preview)
@@ -9367,14 +9015,8 @@ class Application:
             identity_service=self._oa_identity_service,
             access_control_service=self._access_control_service,
         )
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有手工补票权限。"},
-            )
-        actor_id = str(session.identity.username or "pending_invoice").strip()
         try:
-            result = self._pending_invoice_application_service.confirm_manual_invoice(payload, actor_id=actor_id)
+            result = self._pending_invoice_routes().manual_confirm(payload, session=session)
         except PendingInvoiceError as exc:
             self._persist_state()
             return self._pending_invoice_error_response(exc)
@@ -9389,38 +9031,6 @@ class Application:
         if exc.details:
             payload["details"] = exc.details
         return self._json_response(exc.status_code, payload)
-
-    def _record_pending_invoice_manual_invoice_audit(self, event: dict[str, object]) -> None:
-        action = str(event.get("action") or "pending_invoice_manual_invoice_confirmed")
-        entity_type = str(event.get("entity_type") or event.get("source") or "")
-        if not entity_type:
-            entity_type = "pending_invoice_attach_existing_invoice" if action == "pending_invoice_attach_existing_invoice_confirmed" else "pending_invoice_manual_invoice"
-        self._audit_service.record_action(
-            actor_id=str(event.get("actor_id") or "pending_invoice"),
-            action=action,
-            entity_type=entity_type,
-            entity_id=str(event.get("request_id") or event.get("invoice_id") or ""),
-            metadata=dict(event),
-        )
-
-    def _finalize_pending_invoice_manual_invoice(self, event: dict[str, object]) -> None:
-        affected_months = [str(month) for month in list(event.get("affected_months") or []) if str(month).strip()]
-        action = str(event.get("action") or "pending_invoice_manual_invoice_confirmed")
-        source = str(event.get("source") or event.get("entity_type") or "")
-        if not source:
-            source = "pending_invoice_attach_existing_invoice" if action == "pending_invoice_attach_existing_invoice_confirmed" else "pending_invoice_manual_invoice"
-        self._execute_derived_data_lifecycle_event(
-            action,
-            months=affected_months,
-            metadata={"source": source, **dict(event)},
-        )
-        projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
-        if projection is not None:
-            try:
-                setattr(projection, "_index_cache_key", "")
-                setattr(projection, "_index_cache", {})
-            except Exception:
-                pass
 
     def _handle_api_workbench_ignored(self, month: str | None) -> Response:
         current_month = month or "all"
@@ -10444,286 +10054,47 @@ class Application:
         return isinstance(records_by_id, dict) and row_id in records_by_id
 
     def _handle_api_cost_statistics(self, month: str | None, project_scope: str | None) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        normalized_project_scope = str(project_scope or "active").strip().lower()
-        try:
-            if normalized_project_scope not in {"active", "all"}:
-                raise ValueError("project_scope must be active or all")
-            sql_result = self._get_cost_statistics_month_from_sql_read_model(
-                current_month,
-                normalized_project_scope,
-            )
-            if sql_result is not None:
-                payload, _cache_hit = sql_result
-                status = (
-                    HTTPStatus.ACCEPTED
-                    if payload.get("read_model_status") == "refreshing" and not payload.get("rows")
-                    else HTTPStatus.OK
-                )
-                return self._json_response(status, payload)
-            payload = self._cost_statistics_service.get_month_statistics(
-                current_month,
-                project_scope=normalized_project_scope,
-            )
-        except ValueError as error:
-            return self._cost_statistics_project_scope_error_response(error)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._cost_statistics_routes().handle_month(month, project_scope)
 
     def _handle_api_cost_statistics_explorer(self, month: str | None, project_scope: str | None) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        normalized_project_scope = str(project_scope or "active").strip().lower()
-        started_at = monotonic()
-        cache_hit = False
-        try:
-            if normalized_project_scope not in {"active", "all"}:
-                raise ValueError("project_scope must be active or all")
-            payload, cache_hit = self._get_or_build_cost_statistics_explorer(
-                current_month,
-                normalized_project_scope,
-            )
-        except ValueError as error:
-            return self._cost_statistics_project_scope_error_response(error)
-        self._emit_cost_statistics_explorer_metric(
-            month=current_month,
-            project_scope=normalized_project_scope,
-            cache_hit=cache_hit,
-            duration_ms=self._duration_ms(started_at),
-            entry_count=self._cost_statistics_explorer_entry_count(payload),
-        )
-        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" and not payload.get("time_rows") else HTTPStatus.OK
-        return self._json_response(status, payload)
+        return self._cost_statistics_routes().handle_explorer(month, project_scope)
 
     def _get_or_build_cost_statistics_explorer(
         self,
         month: str,
         project_scope: str,
     ) -> tuple[dict[str, object], bool]:
-        sql_result = self._get_cost_statistics_explorer_from_sql_read_model(month, project_scope)
-        if sql_result is not None:
-            return sql_result
-        if self._requires_sql_read_model_runtime():
-            scope_key = self._cost_statistics_request_scope_key(month, project_scope)
-            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
-            payload = self._empty_cost_statistics_explorer_payload(month)
-            payload["error"] = "read_model_unavailable"
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        read_model_service = self._cost_statistics_read_model_service
-        if read_model_service is not None:
-            cached_read_model = read_model_service.get_read_model(month, project_scope)
-            if isinstance(cached_read_model, dict):
-                cached_payload = cached_read_model.get("payload")
-                if isinstance(cached_payload, dict):
-                    return cached_payload, True
-
-        if month == "all":
-            self._schedule_cost_statistics_cache_warmup(["all"], reason="explorer_all_cache_miss")
-            return self._empty_cost_statistics_explorer_payload(month), False
-
-        payload = self._cost_statistics_service.get_explorer(
-            month,
-            project_scope=project_scope,
-        )
-        if read_model_service is not None:
-            read_model = read_model_service.upsert_read_model(
-                month,
-                project_scope,
-                payload,
-                generated_at=datetime.now().isoformat(),
-                source_scope_keys=[month],
-                cache_status="ready",
-            )
-            scope_key = self._cost_statistics_read_model_scope_key(month, project_scope, read_model=read_model)
-            self._persist_cost_statistics_read_models_best_effort(
-                snapshot=read_model_service.snapshot_scope_keys([scope_key]),
-                changed_scope_keys=[scope_key],
-                operation="upsert_cost_statistics_explorer_read_model",
-            )
-        return payload, False
+        return self._cost_statistics_query().get_explorer(month, project_scope)
 
     def _get_cost_statistics_explorer_from_sql_read_model(
         self,
         month: str,
         project_scope: str,
     ) -> tuple[dict[str, object], bool] | None:
-        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
-        get_view = getattr(repository, "get_cost_statistics_view", None)
-        if not callable(get_view):
-            return None
-        scope_key = self._cost_statistics_request_scope_key(month, project_scope)
-        expected_source_versions = self._cost_statistics_expected_source_versions(scope_key)
-        cache_key = self._cost_statistics_redis_cache_key(scope_key, source_versions=expected_source_versions)
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        get_cached = getattr(redis_helper, "get_json", None)
-        if callable(get_cached):
-            cached = get_cached(cache_key)
-            if isinstance(cached, dict):
-                cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-                payload = dict(cached_payload)
-                payload["read_model_status"] = "fresh"
-                payload["read_model_scope_key"] = scope_key
-                return payload, True
-
-        view = get_view(scope_key=scope_key)
-        if not isinstance(view, dict):
-            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_miss")
-            payload = self._empty_cost_statistics_explorer_payload(month)
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
-        refresh_status = str(view.get("refresh_status") or "fresh")
-        stale_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions,
-            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            refresh_status = "stale"
-        if refresh_status != "fresh":
-            self._enqueue_cost_statistics_read_model_refresh(
-                scope_key,
-                reason="api_source_versions_stale" if stale_reasons else "api_stale",
-            )
-        payload["read_model_status"] = refresh_status
-        payload["read_model_scope_key"] = scope_key
-        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = stale_reasons
-        if view.get("generated_at"):
-            payload["read_model_generated_at"] = view.get("generated_at")
-        set_cached = getattr(redis_helper, "set_json", None)
-        if callable(set_cached) and refresh_status == "fresh":
-            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._cost_statistics_redis_ttl_seconds())
-        return payload, False
+        return self._cost_statistics_query().get_explorer_from_sql_read_model(month, project_scope)
 
     def _get_cost_statistics_month_from_sql_read_model(
         self,
         month: str,
         project_scope: str,
     ) -> tuple[dict[str, object], bool] | None:
-        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
-        get_view = getattr(repository, "get_cost_statistics_view", None)
-        if not callable(get_view):
-            return None
-        scope_key = self._cost_statistics_request_scope_key(month, project_scope)
-        expected_source_versions = self._cost_statistics_expected_source_versions(scope_key)
-        cache_key = self._cost_statistics_month_redis_cache_key(scope_key, source_versions=expected_source_versions)
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        get_cached = getattr(redis_helper, "get_json", None)
-        if callable(get_cached):
-            cached = get_cached(cache_key)
-            if isinstance(cached, dict):
-                cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-                payload = dict(cached_payload)
-                payload["read_model_status"] = "fresh"
-                payload["read_model_scope_key"] = scope_key
-                return payload, True
-
-        view = get_view(scope_key=scope_key)
-        if not isinstance(view, dict):
-            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_month_miss")
-            payload = self._empty_cost_statistics_month_payload(month)
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        explorer_payload = view.get("payload") if isinstance(view.get("payload"), dict) else {}
-        payload = self._cost_statistics_month_payload_from_explorer_payload(month, explorer_payload)
-        refresh_status = str(view.get("refresh_status") or "fresh")
-        stale_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions,
-            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            refresh_status = "stale"
-        if refresh_status != "fresh":
-            self._enqueue_cost_statistics_read_model_refresh(
-                scope_key,
-                reason="api_month_source_versions_stale" if stale_reasons else "api_month_stale",
-            )
-        payload["read_model_status"] = refresh_status
-        payload["read_model_scope_key"] = scope_key
-        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = stale_reasons
-        if view.get("generated_at"):
-            payload["read_model_generated_at"] = view.get("generated_at")
-        set_cached = getattr(redis_helper, "set_json", None)
-        if callable(set_cached) and refresh_status == "fresh":
-            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._cost_statistics_redis_ttl_seconds())
-        return payload, False
+        return self._cost_statistics_query().get_month_from_sql_read_model(month, project_scope)
 
     def _cost_statistics_month_payload_from_explorer_payload(
         self,
         month: str,
         explorer_payload: dict[str, object],
     ) -> dict[str, object]:
-        time_rows = explorer_payload.get("time_rows")
-        if not isinstance(time_rows, list):
-            time_rows = []
-        grouped: dict[tuple[str, str, str], dict[str, object]] = {}
-        transaction_ids: set[str] = set()
-        total_amount = Decimal("0.00")
-        for raw_row in time_rows:
-            if not isinstance(raw_row, dict):
-                continue
-            amount = self._decimal_from_value(raw_row.get("amount")) or Decimal("0.00")
-            transaction_id = str(raw_row.get("transaction_id") or "").strip()
-            if transaction_id:
-                transaction_ids.add(transaction_id)
-            total_amount += amount
-            key = (
-                str(raw_row.get("project_name") or "").strip(),
-                str(raw_row.get("expense_type") or "").strip(),
-                str(raw_row.get("expense_content") or "").strip(),
-            )
-            bucket = grouped.setdefault(
-                key,
-                {
-                    "project_name": key[0],
-                    "expense_type": key[1],
-                    "expense_content": key[2],
-                    "amount_decimal": Decimal("0.00"),
-                    "transaction_count": 0,
-                    "sample_transaction_ids": [],
-                },
-            )
-            bucket["amount_decimal"] = bucket["amount_decimal"] + amount
-            bucket["transaction_count"] = int(bucket["transaction_count"]) + 1
-            samples = bucket["sample_transaction_ids"]
-            if transaction_id and isinstance(samples, list) and transaction_id not in samples:
-                samples.append(transaction_id)
-
-        rows = []
-        for bucket in sorted(grouped.values(), key=lambda item: (item["project_name"], item["expense_type"], item["expense_content"])):
-            rows.append(
-                {
-                    "project_name": bucket["project_name"],
-                    "expense_type": bucket["expense_type"],
-                    "expense_content": bucket["expense_content"],
-                    "amount": self._plain_money(bucket["amount_decimal"]),
-                    "transaction_count": bucket["transaction_count"],
-                    "sample_transaction_ids": list(bucket["sample_transaction_ids"]),
-                }
-            )
-        return {
-            "month": month,
-            "summary": {
-                "row_count": len(rows),
-                "transaction_count": len(transaction_ids) if transaction_ids else len(time_rows),
-                "total_amount": self._plain_money(total_amount),
-            },
-            "rows": rows,
-        }
+        return CostStatisticsQueryService.month_payload_from_explorer_payload(month, explorer_payload)
 
     @staticmethod
     def _cost_statistics_request_scope_key(month: str, project_scope: str) -> str:
-        return f"{str(project_scope or 'active').strip().lower()}:{str(month or 'all').strip() or 'all'}"
+        return CostStatisticsRuntimeService.request_scope_key(month, project_scope)
 
     def _cost_statistics_expected_source_versions(self, scope_key: str) -> dict[str, object]:
+        return self._cost_statistics_source_versions(scope_key)
+
+    def _cost_statistics_source_versions(self, scope_key: str) -> dict[str, object]:
         _project_scope, month = str(scope_key or "active:all").split(":", 1)
         return {
             "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
@@ -10740,12 +10111,7 @@ class Application:
         *,
         source_versions: dict[str, object] | None = None,
     ) -> str:
-        return self._read_model_redis_cache_key(
-            "cost_statistics:explorer",
-            scope_key,
-            schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-            source_versions=source_versions,
-        )
+        return self._cost_statistics_runtime().redis_cache_key(scope_key, source_versions=source_versions)
 
     def _cost_statistics_month_redis_cache_key(
         self,
@@ -10753,12 +10119,7 @@ class Application:
         *,
         source_versions: dict[str, object] | None = None,
     ) -> str:
-        return self._read_model_redis_cache_key(
-            "cost_statistics:month",
-            scope_key,
-            schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-            source_versions=source_versions,
-        )
+        return self._cost_statistics_runtime().month_redis_cache_key(scope_key, source_versions=source_versions)
 
     def _read_model_redis_cache_key(
         self,
@@ -10768,72 +10129,31 @@ class Application:
         schema_version: str,
         source_versions: dict[str, object] | None,
     ) -> str:
-        normalized_source_versions = normalize_source_versions(source_versions)
-        source_hash = hashlib.sha256(
-            json.dumps(
-                normalized_source_versions or {"source_versions": "unknown"},
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()[:16]
-        return f"{prefix}:{scope_key}:schema:{schema_version}:sources:{source_hash}"
+        return CostStatisticsRuntimeService.read_model_redis_cache_key(
+            prefix,
+            scope_key,
+            schema_version=schema_version,
+            source_versions=source_versions,
+        )
 
     @staticmethod
     def _cost_statistics_redis_ttl_seconds() -> int:
-        raw_value = os.getenv("FIN_OPS_COST_STATISTICS_REDIS_TTL_SECONDS", "60").strip()
-        try:
-            return min(120, max(1, int(raw_value)))
-        except ValueError:
-            return 60
+        return CostStatisticsRuntimeService.redis_ttl_seconds()
 
     def _enqueue_cost_statistics_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
-            return False
-        enqueue(scope_type="cost_statistics", scope_key=scope_key, reason=reason)
-        return True
+        return self._cost_statistics_runtime().enqueue_read_model_refresh(scope_key, reason=reason)
 
     @staticmethod
     def _empty_cost_statistics_explorer_payload(month: str) -> dict[str, object]:
-        return {
-            "month": month,
-            "summary": {
-                "row_count": 0,
-                "transaction_count": 0,
-                "total_amount": "0.00",
-            },
-            "time_rows": [],
-            "project_rows": [],
-            "expense_type_rows": [],
-        }
+        return CostStatisticsQueryService.empty_explorer_payload(month)
 
     @staticmethod
     def _empty_cost_statistics_month_payload(month: str) -> dict[str, object]:
-        return {
-            "month": month,
-            "summary": {
-                "row_count": 0,
-                "transaction_count": 0,
-                "total_amount": "0.00",
-            },
-            "rows": [],
-        }
+        return CostStatisticsQueryService.empty_month_payload(month)
 
     @staticmethod
     def _cost_statistics_explorer_entry_count(payload: dict[str, object]) -> int:
-        time_rows = payload.get("time_rows")
-        if isinstance(time_rows, list):
-            return len(time_rows)
-        summary = payload.get("summary")
-        if isinstance(summary, dict):
-            raw_count = summary.get("transaction_count", summary.get("row_count", 0))
-            try:
-                return int(raw_count)
-            except (TypeError, ValueError):
-                return 0
-        return 0
+        return CostStatisticsQueryService.explorer_entry_count(payload)
 
     def _emit_cost_statistics_explorer_metric(
         self,
@@ -10917,16 +10237,7 @@ class Application:
         project_name: str,
         project_scope: str | None,
     ) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        try:
-            payload = self._cost_statistics_service.get_project_statistics(
-                current_month,
-                project_name,
-                project_scope=project_scope or "active",
-            )
-        except ValueError as error:
-            return self._cost_statistics_project_scope_error_response(error)
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._cost_statistics_routes().handle_project(month, project_name, project_scope)
 
     def _handle_api_cost_statistics_export(
         self,
@@ -10949,54 +10260,24 @@ class Application:
         sort_by: str | None = None,
         project_scope: str | None = None,
     ) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        if view not in {"month", "time", "project", "expense_type", "transaction"}:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cost_statistics_export_request", "message": "view must be month, time, project, expense_type, or transaction."},
-            )
-        try:
-            filename, content = self._cost_statistics_service.export_view(
-                month=current_month,
-                view=view,
-                project_names=project_names,
-                expense_types=expense_types,
-                transaction_id=transaction_id,
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-                aggregate_by=aggregate_by,
-                include_oa_details=include_oa_details,
-                include_invoice_details=include_invoice_details,
-                include_exception_rows=include_exception_rows,
-                include_ignored_rows=include_ignored_rows,
-                include_expense_content_summary=include_expense_content_summary,
-                sort_by=sort_by or "time",
-                project_scope=project_scope or "active",
-            )
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
-            )
-        except ValueError as error:
-            if str(error) == "project_scope must be active or all":
-                return self._cost_statistics_project_scope_error_response(error)
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cost_statistics_export_request", "message": str(error)},
-            )
-        return Response(
-            status_code=int(HTTPStatus.OK),
-            body=content,
-            headers={
-                "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "Content-Disposition": _build_content_disposition(filename),
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            },
+        return self._cost_statistics_routes().handle_export(
+            month=month,
+            view=view,
+            project_names=project_names,
+            expense_types=expense_types,
+            transaction_id=transaction_id,
+            start_month=start_month,
+            end_month=end_month,
+            start_date=start_date,
+            end_date=end_date,
+            aggregate_by=aggregate_by,
+            include_oa_details=include_oa_details,
+            include_invoice_details=include_invoice_details,
+            include_exception_rows=include_exception_rows,
+            include_ignored_rows=include_ignored_rows,
+            include_expense_content_summary=include_expense_content_summary,
+            sort_by=sort_by,
+            project_scope=project_scope,
         )
 
     def _handle_api_cost_statistics_export_preview(
@@ -11013,55 +10294,25 @@ class Application:
         aggregate_by: str | None = None,
         project_scope: str | None = None,
     ) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        if view not in {"time", "project", "expense_type"}:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_cost_statistics_export_preview_request",
-                    "message": "view must be time, project, or expense_type.",
-                },
-            )
-        try:
-            payload = self._cost_statistics_service.get_export_preview(
-                month=current_month,
-                view=view,
-                project_names=project_names,
-                expense_types=expense_types,
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-                aggregate_by=aggregate_by,
-                project_scope=project_scope or "active",
-            )
-        except ValueError as error:
-            if str(error) == "project_scope must be active or all":
-                return self._cost_statistics_project_scope_error_response(error)
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cost_statistics_export_preview_request", "message": str(error)},
-            )
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._cost_statistics_routes().handle_export_preview(
+            month=month,
+            view=view,
+            project_names=project_names,
+            expense_types=expense_types,
+            start_month=start_month,
+            end_month=end_month,
+            start_date=start_date,
+            end_date=end_date,
+            aggregate_by=aggregate_by,
+            project_scope=project_scope,
+        )
 
     def _handle_api_cost_statistics_transaction(
         self,
         transaction_id: str,
         project_scope: str | None,
     ) -> Response:
-        try:
-            payload = self._cost_statistics_service.get_transaction_detail(
-                transaction_id,
-                project_scope=project_scope or "active",
-            )
-        except ValueError as error:
-            return self._cost_statistics_project_scope_error_response(error)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
-            )
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._cost_statistics_routes().handle_transaction(transaction_id, project_scope)
 
     def _cost_statistics_project_scope_error_response(self, error: ValueError) -> Response:
         return self._json_response(
@@ -11069,6 +10320,19 @@ class Application:
             {
                 "error": "invalid_cost_statistics_project_scope",
                 "message": str(error),
+            },
+        )
+
+    def _cost_statistics_file_response(self, filename: str, content: bytes) -> Response:
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "Content-Disposition": _build_content_disposition(filename),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
 
@@ -11308,224 +10572,28 @@ class Application:
         return self._handle_workbench_unignore_row_payload(payload)
 
     def _handle_api_tax_offset(self, month: str | None) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        started_at = monotonic()
-        cache_hit = False
-        try:
-            payload, cache_hit = self._get_or_build_tax_offset_month_payload(current_month)
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_tax_offset_request", "message": str(exc)},
-            )
-        self._emit_tax_offset_month_metric(
-            month=current_month,
-            cache_hit=cache_hit,
-            duration_ms=self._duration_ms(started_at),
-            payload=payload,
-        )
-        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" and not payload.get("input_plan_items") and not payload.get("output_items") and not payload.get("certified_items") else HTTPStatus.OK
-        return self._json_response(status, payload)
+        return self._tax_offset_routes().handle_month(month)
 
     def _handle_api_tax_offset_summary(self, month: str | None) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        try:
-            payload, _cache_hit = self._get_tax_offset_month_summary_payload(current_month)
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_tax_offset_request", "message": str(exc)},
-            )
-        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-        return self._json_response(status, payload)
+        return self._tax_offset_routes().handle_summary(month)
 
     def _get_or_build_tax_offset_month_payload(self, month: str) -> tuple[dict[str, object], bool]:
-        sql_result = self._get_tax_offset_month_from_sql_read_model(month)
-        if sql_result is not None:
-            return sql_result
-        if self._requires_sql_read_model_runtime():
-            scope_key = self._tax_offset_request_scope_key(month)
-            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
-            payload = self._empty_tax_offset_month_payload(month)
-            payload["error"] = "read_model_unavailable"
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        read_model_service = self._tax_offset_read_model_service
-        if read_model_service is not None:
-            cached_read_model = read_model_service.get_read_model(month)
-            if isinstance(cached_read_model, dict):
-                cached_payload = cached_read_model.get("payload")
-                if isinstance(cached_payload, dict):
-                    return cached_payload, True
-
-        payload = self._tax_api_routes.get_tax_offset(month)
-        if read_model_service is not None:
-            read_model = read_model_service.upsert_read_model(
-                month,
-                payload,
-                generated_at=datetime.now().isoformat(),
-                source_scope_keys=[month],
-                cache_status="ready",
-            )
-            scope_key = self._tax_offset_read_model_scope_key(month, read_model=read_model)
-            self._persist_tax_offset_read_models_best_effort(
-                snapshot=read_model_service.snapshot_scope_keys([scope_key]),
-                changed_scope_keys=[scope_key],
-                operation="upsert_tax_offset_read_model",
-            )
-        return payload, False
+        return self._tax_offset_query().get_month_payload(month)
 
     def _get_tax_offset_month_from_sql_read_model(self, month: str) -> tuple[dict[str, object], bool] | None:
-        repository = getattr(self, "_tax_offset_sql_read_repository", None)
-        get_view = getattr(repository, "get_tax_offset_view", None)
-        if not callable(get_view):
-            return None
-        scope_key = self._tax_offset_request_scope_key(month)
-        expected_source_versions = self._tax_offset_expected_source_versions()
-        cache_key = self._tax_offset_redis_cache_key(scope_key, source_versions=expected_source_versions)
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        get_cached = getattr(redis_helper, "get_json", None)
-        if callable(get_cached):
-            cached = self._runtime_redis_get_json_best_effort(cache_key)
-            if isinstance(cached, dict):
-                cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-                payload = dict(cached_payload)
-                payload["read_model_status"] = "fresh"
-                payload["read_model_scope_key"] = scope_key
-                return payload, True
-
-        view = get_view(scope_key=scope_key)
-        if not isinstance(view, dict):
-            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_miss")
-            payload = self._empty_tax_offset_month_payload(month)
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
-        refresh_status = str(view.get("refresh_status") or "fresh")
-        stale_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions,
-            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            refresh_status = "stale"
-        if refresh_status != "fresh":
-            self._enqueue_tax_offset_read_model_refresh(
-                scope_key,
-                reason="api_source_versions_stale" if stale_reasons else "api_stale",
-            )
-        payload["read_model_status"] = refresh_status
-        payload["read_model_scope_key"] = scope_key
-        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = stale_reasons
-        if view.get("generated_at"):
-            payload["read_model_generated_at"] = view.get("generated_at")
-        if view.get("schema_version"):
-            payload["read_model_schema_version"] = view.get("schema_version")
-        set_cached = getattr(redis_helper, "set_json", None)
-        if callable(set_cached) and refresh_status == "fresh":
-            self._runtime_redis_set_json_best_effort(
-                cache_key,
-                {"payload": payload},
-                ttl_seconds=self._tax_offset_redis_ttl_seconds(),
-            )
-        return payload, False
+        return self._tax_offset_query().get_month_from_sql_read_model(month)
 
     def _get_tax_offset_month_summary_payload(self, month: str) -> tuple[dict[str, object], bool]:
-        scope_key = self._tax_offset_request_scope_key(month)
-        expected_source_versions = self._tax_offset_expected_source_versions()
-        cache_key = self._tax_offset_summary_redis_cache_key(scope_key, source_versions=expected_source_versions)
-        cached = self._runtime_redis_get_json_best_effort(cache_key)
-        if isinstance(cached, dict):
-            cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-            payload = dict(cached_payload)
-            payload["read_model_status"] = "fresh"
-            payload["read_model_scope_key"] = scope_key
-            return payload, True
-
-        repository = getattr(self, "_tax_offset_sql_read_repository", None)
-        get_view = getattr(repository, "get_tax_offset_view", None)
-        if not callable(get_view):
-            full_payload, cache_hit = self._get_or_build_tax_offset_month_payload(month)
-            return self._tax_offset_summary_payload(full_payload, scope_key=scope_key), cache_hit
-
-        view = get_view(scope_key=scope_key)
-        if not isinstance(view, dict):
-            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_summary_miss")
-            payload = self._tax_offset_summary_payload(
-                self._empty_tax_offset_month_payload(month),
-                scope_key=scope_key,
-            )
-            payload["read_model_status"] = "refreshing"
-            return payload, False
-
-        full_payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
-        payload = self._tax_offset_summary_payload(full_payload, scope_key=scope_key)
-        refresh_status = str(view.get("refresh_status") or "fresh")
-        stale_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions,
-            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            refresh_status = "stale"
-        if refresh_status != "fresh":
-            self._enqueue_tax_offset_read_model_refresh(
-                scope_key,
-                reason="api_summary_source_versions_stale" if stale_reasons else "api_summary_stale",
-            )
-        payload["read_model_status"] = refresh_status
-        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = stale_reasons
-        if view.get("generated_at"):
-            payload["read_model_generated_at"] = view.get("generated_at")
-        if view.get("schema_version"):
-            payload["read_model_schema_version"] = view.get("schema_version")
-        if refresh_status == "fresh":
-            self._runtime_redis_set_json_best_effort(
-                cache_key,
-                {"payload": payload},
-                ttl_seconds=self._tax_offset_redis_ttl_seconds(),
-            )
-        return payload, False
+        return self._tax_offset_query().get_summary_payload(month)
 
     def _runtime_redis_get_json_best_effort(self, cache_key: str) -> dict[str, object] | None:
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        get_cached = getattr(redis_helper, "get_json", None)
-        if not callable(get_cached):
-            return None
-        try:
-            cached = get_cached(cache_key)
-        except Exception as exc:  # pragma: no cover - concrete Redis exception classes vary by client version.
-            self._emit_runtime_cache_error(operation="get_json", cache_key=cache_key, error=exc)
-            return None
-        return cached if isinstance(cached, dict) else None
+        return self._tax_offset_runtime().redis_get_json_best_effort(cache_key)
 
     def _runtime_redis_set_json_best_effort(self, cache_key: str, payload: dict[str, object], *, ttl_seconds: int) -> bool:
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        set_cached = getattr(redis_helper, "set_json", None)
-        if not callable(set_cached):
-            return False
-        try:
-            return bool(set_cached(cache_key, payload, ttl_seconds=ttl_seconds))
-        except Exception as exc:  # pragma: no cover - concrete Redis exception classes vary by client version.
-            self._emit_runtime_cache_error(operation="set_json", cache_key=cache_key, error=exc)
-            return False
+        return self._tax_offset_runtime().redis_set_json_best_effort(cache_key, payload, ttl_seconds=ttl_seconds)
 
     def _runtime_redis_delete_best_effort(self, cache_key: str) -> bool:
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        delete = getattr(redis_helper, "delete", None)
-        if not callable(delete):
-            return False
-        try:
-            return bool(delete(cache_key))
-        except Exception as exc:  # pragma: no cover - concrete Redis exception classes vary by client version.
-            self._emit_runtime_cache_error(operation="delete", cache_key=cache_key, error=exc)
-            return False
+        return self._tax_offset_runtime().redis_delete_best_effort(cache_key)
 
     @staticmethod
     def _emit_runtime_cache_error(*, operation: str, cache_key: str, error: Exception) -> None:
@@ -11545,47 +10613,16 @@ class Application:
 
     @staticmethod
     def _tax_offset_summary_payload(payload: dict[str, object], *, scope_key: str) -> dict[str, object]:
-        item_list_keys = (
-            "output_items",
-            "input_plan_items",
-            "certified_items",
-            "certified_matched_rows",
-            "certified_outside_plan_rows",
-            "locked_certified_input_ids",
-            "default_selected_output_ids",
-            "default_selected_input_ids",
-        )
-        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-        result: dict[str, object] = {
-            "month": str(payload.get("month") or scope_key),
-            "summary": dict(summary),
-            "item_counts": {
-                key: len(value) if isinstance(value, list) else 0
-                for key in item_list_keys
-                for value in [payload.get(key)]
-            },
-            "read_model_scope_key": scope_key,
-        }
-        if payload.get("read_model_status"):
-            result["read_model_status"] = payload.get("read_model_status")
-        if payload.get("read_model_generated_at"):
-            result["read_model_generated_at"] = payload.get("read_model_generated_at")
-        if payload.get("read_model_schema_version"):
-            result["read_model_schema_version"] = payload.get("read_model_schema_version")
-        if isinstance(payload.get("source_versions"), dict):
-            result["source_versions"] = payload.get("source_versions")
-        if payload.get("error"):
-            result["error"] = payload.get("error")
-        return result
+        return self._tax_offset_runtime().summary_payload(payload, scope_key=scope_key)
 
     @staticmethod
     def _tax_offset_request_scope_key(month: str) -> str:
-        normalized_month = str(month or "").strip()
-        if not SEARCH_MONTH_RE.match(normalized_month):
-            raise ValueError("month must be YYYY-MM for tax offset read model.")
-        return normalized_month
+        return TaxOffsetRuntimeService.request_scope_key(month)
 
     def _tax_offset_expected_source_versions(self) -> dict[str, object]:
+        return self._tax_offset_runtime().expected_source_versions()
+
+    def _tax_offset_source_versions(self) -> dict[str, object]:
         return {
             "tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
             "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
@@ -11598,12 +10635,7 @@ class Application:
         *,
         source_versions: dict[str, object] | None = None,
     ) -> str:
-        return self._read_model_redis_cache_key(
-            "tax_offset:month",
-            scope_key,
-            schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-            source_versions=source_versions,
-        )
+        return self._tax_offset_runtime().redis_cache_key(scope_key, source_versions=source_versions)
 
     def _tax_offset_summary_redis_cache_key(
         self,
@@ -11611,77 +10643,32 @@ class Application:
         *,
         source_versions: dict[str, object] | None = None,
     ) -> str:
-        return self._read_model_redis_cache_key(
-            "tax_offset:summary",
-            scope_key,
-            schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-            source_versions=source_versions,
-        )
+        return self._tax_offset_runtime().summary_redis_cache_key(scope_key, source_versions=source_versions)
 
     @staticmethod
     def _tax_offset_redis_ttl_seconds() -> int:
-        raw_value = os.getenv("FIN_OPS_TAX_OFFSET_REDIS_TTL_SECONDS", "60").strip()
-        try:
-            return min(120, max(1, int(raw_value)))
-        except ValueError:
-            return 60
+        return TaxOffsetRuntimeService.redis_ttl_seconds()
 
     def _enqueue_tax_offset_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
-            return False
-        enqueue(scope_type="tax_offset", scope_key=scope_key, reason=reason)
-        return True
+        return self._tax_offset_runtime().enqueue_read_model_refresh(scope_key, reason=reason)
 
     @staticmethod
     def _empty_tax_offset_month_payload(month: str) -> dict[str, object]:
-        return {
-            "month": month,
-            "summary": {
-                "output_tax": "0.00",
-                "input_tax": "0.00",
-                "planned_input_tax": "0.00",
-                "certified_input_tax": "0.00",
-                "deductible_tax": "0.00",
-                "result_label": "本月留抵税额",
-                "result_amount": "0.00",
-            },
-            "output_items": [],
-            "input_plan_items": [],
-            "certified_items": [],
-            "certified_matched_rows": [],
-            "certified_outside_plan_rows": [],
-            "locked_certified_input_ids": [],
-            "default_selected_output_ids": [],
-            "default_selected_input_ids": [],
-        }
+        return TaxOffsetRuntimeService.empty_month_payload(month)
 
     def _tax_offset_month_entry_count(self, payload: dict[str, object]) -> int:
-        return (
-            self._safe_list_count(payload.get("output_items"))
-            + self._safe_list_count(payload.get("input_plan_items"))
-            + self._safe_list_count(payload.get("certified_items"))
-        )
+        return TaxOffsetRuntimeService.month_entry_count(payload)
 
     def _handle_api_bank_details_accounts(self, *, date_from: str | None, date_to: str | None) -> Response:
-        if self._requires_sql_read_model_runtime():
-            sql_payload = self._get_bank_detail_accounts_from_sql_read_model(date_from=date_from, date_to=date_to)
-            if sql_payload is not None:
-                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status, sql_payload)
-        return self._json_response(
-            HTTPStatus.OK,
-            self._bank_details_service.list_accounts(date_from=date_from, date_to=date_to),
-        )
+        status, payload = self._bank_details_routes().accounts(date_from=date_from, date_to=date_to)
+        return self._json_response(status, payload)
 
     def _handle_api_bank_details_auto_tag_rules(self, headers: dict[str, str] | None) -> Response:
         session, auth_error = self._resolve_bank_details_read_session(headers)
         if auth_error is not None:
             return auth_error
-        can_save = True if session is None else bool(session.can_mutate_data)
-        payload = self._app_settings_service.get_bank_auto_tag_rules_payload(can_save=can_save)
-        return self._json_response(HTTPStatus.OK, payload)
+        status, payload = self._bank_details_routes().auto_tag_rules(session=session)
+        return self._json_response(status, payload)
 
     def _handle_api_bank_details_auto_tag_rules_update(
         self,
@@ -11699,43 +10686,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor_id = (
-            session.identity.username or session.identity.user_id
-            if session is not None
-            else "bank_auto_tag_rules"
-        )
-        try:
-            priority_scope_keys = self._bank_detail_refresh_scope_keys_from_auto_tag_rules_payload(payload)
-            updated = self._app_settings_service.update_bank_auto_tag_rules(
-                payload,
-                actor_id=str(actor_id or "bank_auto_tag_rules"),
-                after_bank_auto_tag_rules_saved=lambda event: self._finalize_bank_auto_tag_rules_update(
-                    {
-                        **dict(event),
-                        **({"bank_detail_priority_scope_keys": priority_scope_keys} if priority_scope_keys else {}),
-                    }
-                ),
-            )
-        except BankAutoTagRulesValidationError as exc:
-            status = HTTPStatus.CONFLICT if exc.error_code == "bank_transaction_tags_version_conflict" else HTTPStatus.BAD_REQUEST
-            return self._json_response(
-                status,
-                {
-                    "error": exc.error_code,
-                    "message": str(exc),
-                    "field_errors": list(exc.field_errors),
-                    "references": list(exc.references),
-                },
-            )
-        except BankAutoTagRulesPersistenceError as exc:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": exc.error_code,
-                    "message": str(exc),
-                },
-            )
-        return self._json_response(HTTPStatus.OK, updated)
+        status, result = self._bank_details_routes().update_auto_tag_rules(payload, session=session)
+        return self._json_response(status, result)
 
     def _handle_api_bank_details_auto_tag_rules_reapply(
         self,
@@ -11750,48 +10702,8 @@ class Application:
                 {"error": "permission_denied", "message": "当前账户没有重新应用自动标签规则权限。"},
             )
 
-        scope_keys = self._bank_detail_available_month_scope_keys()
-        enqueued = self._enqueue_bank_detail_read_model_refreshes(
-            scope_keys,
-            reason="bank_auto_tag_rules_reapply_requested",
-        )
-        if not enqueued:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "bank_auto_tag_rules_reapply_unavailable",
-                    "message": "自动标签规则已保存，但银行明细刷新队列暂时不可用，请稍后重试。",
-                },
-            )
-
-        version = self._current_bank_auto_tag_rules_version()
-        actor_id = (
-            session.identity.username or session.identity.user_id
-            if session is not None
-            else "bank_auto_tag_rules_reapply"
-        )
-        self._audit_service.record_action(
-            actor_id=str(actor_id or "bank_auto_tag_rules_reapply"),
-            action="bank_auto_tag_rules_reapply_requested",
-            entity_type="app_settings",
-            entity_id="bank_auto_tag_rules",
-            metadata={
-                "version": version,
-                "scope_keys": list(scope_keys),
-                "reason": "bank_auto_tag_rules_reapply_requested",
-                "enqueued_jobs": ["bank_detail.read_model.refresh"],
-            },
-        )
-
-        can_save = True if session is None else bool(session.can_mutate_data)
-        payload = self._app_settings_service.get_bank_auto_tag_rules_payload(
-            can_save=can_save,
-            read_model_status="refreshing",
-        )
-        payload["read_model_status"] = "refreshing"
-        payload["read_model_scope_keys"] = list(scope_keys)
-        payload["enqueued_jobs"] = ["bank_detail.read_model.refresh"]
-        return self._json_response(HTTPStatus.ACCEPTED, payload)
+        status, payload = self._bank_details_routes().reapply_auto_tag_rules(session=session)
+        return self._json_response(status, payload)
 
     def _handle_api_bank_details_auto_tag_rules_file_replacement(
         self,
@@ -11814,37 +10726,8 @@ class Application:
             source = payload.get("source") if isinstance(payload, dict) and "source" in payload else payload
         else:
             source = self._default_bank_auto_tag_rules_file_source()
-        actor_id = (
-            session.identity.username or session.identity.user_id
-            if session is not None
-            else "bank_auto_tag_rules_file_replacement"
-        )
-        try:
-            updated = self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
-                source,
-                actor_id=str(actor_id or "bank_auto_tag_rules_file_replacement"),
-                after_bank_auto_tag_rules_saved=self._finalize_bank_auto_tag_rules_update,
-            )
-        except (BankAutoTagRulesValidationError, FileNotFoundError, json.JSONDecodeError) as exc:
-            error_code = getattr(exc, "error_code", "invalid_bank_auto_tag_rule_file")
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": error_code,
-                    "message": str(exc),
-                    "field_errors": list(getattr(exc, "field_errors", [])),
-                    "references": list(getattr(exc, "references", [])),
-                },
-            )
-        except BankAutoTagRulesPersistenceError as exc:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": exc.error_code,
-                    "message": str(exc),
-                },
-            )
-        return self._json_response(HTTPStatus.OK, updated)
+        status, result = self._bank_details_routes().replace_auto_tag_rules_from_file_source(source, session=session)
+        return self._json_response(status, result)
 
     @staticmethod
     def _default_bank_auto_tag_rules_file_source() -> dict[str, object]:
@@ -11870,47 +10753,19 @@ class Application:
         page: str | None,
         page_size: str | None,
     ) -> Response:
-        if self._requires_sql_read_model_runtime():
-            try:
-                sql_payload = self._get_bank_detail_transactions_from_sql_read_model(
-                    account_key=account_key,
-                    date_from=date_from,
-                    date_to=date_to,
-                    keyword=keyword,
-                    category_code=category_code,
-                    category_primary_label=category_primary_label,
-                    category_sub_label=category_sub_label,
-                    category_third_label=category_third_label,
-                    page=int(page or 1),
-                    page_size=int(page_size or 100),
-                )
-            except ValueError as exc:
-                return self._json_response(
-                    HTTPStatus.BAD_REQUEST,
-                    {"error": "invalid_bank_details_request", "message": str(exc)},
-                )
-            if sql_payload is not None:
-                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status, sql_payload)
-        try:
-            payload = self._bank_details_service.list_transactions(
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                keyword=keyword,
-                category_code=category_code,
-                category_primary_label=category_primary_label,
-                category_sub_label=category_sub_label,
-                category_third_label=category_third_label,
-                page=int(page or 1),
-                page_size=int(page_size or 100),
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_bank_details_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, payload)
+        status, payload = self._bank_details_routes().transactions(
+            account_key=account_key,
+            date_from=date_from,
+            date_to=date_to,
+            keyword=keyword,
+            category_code=category_code,
+            category_primary_label=category_primary_label,
+            category_sub_label=category_sub_label,
+            category_third_label=category_third_label,
+            page=page,
+            page_size=page_size,
+        )
+        return self._json_response(status, payload)
 
     def _handle_api_bank_detail_category_confirmation(
         self,
@@ -11929,55 +10784,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor_id = (
-            session.identity.username or session.identity.user_id
-            if session is not None
-            else "bank_category_confirmation"
-        )
-        try:
-            active_rule_codes = set(self._active_bank_auto_tag_rule_codes())
-            suggestion = self._latest_bank_detail_auto_category_suggestion(transaction_id)
-            selection = confirmation_selection(
-                payload=payload,
-                suggestion=suggestion if isinstance(suggestion, dict) else None,
-                active_rule_codes=active_rule_codes,
-                transaction_id=transaction_id,
-            )
-            selected_code = str(selection["category_code"])
-            candidate_codes = list(selection.get("candidate_category_codes") or [])
-            result = self._bank_transaction_category_service.confirm_auto_category(
-                transaction_id=transaction_id,
-                category_code=selected_code,
-                candidate_category_codes=candidate_codes,
-                rule_version=self._bank_transaction_auto_category_service.current_rule_version(),
-                actor=str(actor_id or "bank_category_confirmation"),
-                category_primary_label=selection.get("category_primary_label"),
-                category_sub_label=selection.get("category_sub_label"),
-                category_third_label=selection.get("category_third_label"),
-                category_label_path=list(selection.get("category_label_path") or []),
-                turnover_action_type=selection.get("turnover_action_type"),
-                turnover_family=selection.get("turnover_family"),
-            )
-        except BankTransactionCategoryValidationError as exc:
-            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
-            return self._json_response(
-                status,
-                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
-            )
-        affected_months = self._bank_transaction_category_affected_months([transaction_id])
-        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
-        self._after_bank_category_confirmation_mutation(
-            transaction_id=transaction_id,
-            actor_id=str(actor_id or "bank_category_confirmation"),
-            action="bank_detail_category_confirmed",
-            affected_months=affected_months,
-            metadata={
-                "selected_category_code": selected_code,
-                "selected_category_third_label": selection.get("category_third_label"),
-                "candidate_category_codes": candidate_codes,
-            },
-        )
-        return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
+        status, result = self._bank_details_routes().confirm_category(transaction_id, payload, session=session)
+        return self._json_response(status, result)
 
     def _handle_api_bank_detail_category_confirmation_delete(
         self,
@@ -11992,32 +10800,8 @@ class Application:
                 HTTPStatus.FORBIDDEN,
                 {"error": "permission_denied", "message": "当前账户没有撤销银行明细标签确认权限。"},
             )
-        actor_id = (
-            session.identity.username or session.identity.user_id
-            if session is not None
-            else "bank_category_confirmation"
-        )
-        try:
-            result = self._bank_transaction_category_service.revoke_auto_category_confirmation(
-                transaction_id=transaction_id,
-                actor=str(actor_id or "bank_category_confirmation"),
-            )
-        except BankTransactionCategoryValidationError as exc:
-            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
-            return self._json_response(
-                status,
-                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
-            )
-        affected_months = self._bank_transaction_category_affected_months([transaction_id])
-        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
-        self._after_bank_category_confirmation_mutation(
-            transaction_id=transaction_id,
-            actor_id=str(actor_id or "bank_category_confirmation"),
-            action="bank_detail_category_confirmation_revoked",
-            affected_months=affected_months,
-            metadata={},
-        )
-        return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
+        status, result = self._bank_details_routes().revoke_category_confirmation(transaction_id, session=session)
+        return self._json_response(status, result)
 
     def _handle_api_bank_detail_category_assignment(
         self,
@@ -12036,63 +10820,8 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        selection = manual_assignment_selection(payload)
-        selected_code = str(selection["category_code"])
-        actor_id = (
-            session.identity.username or session.identity.user_id
-            if session is not None
-            else "bank_category_assignment"
-        )
-        try:
-            suggestion = self._latest_bank_detail_auto_category_suggestion(transaction_id)
-            previous_resolution_status = "unmatched"
-            if isinstance(suggestion, dict):
-                previous_resolution_status = str(suggestion.get("category_resolution_status") or "unmatched") or "unmatched"
-            if previous_resolution_status != "unmatched":
-                raise BankTransactionCategoryValidationError(
-                    "invalid_manual_category_assignment_target",
-                    "当前流水已有自动标签或候选确认状态，不能走人工待分类入口。",
-                    transaction_id=transaction_id,
-                )
-            active_rule_codes = set(self._active_bank_auto_tag_rule_codes())
-            if selected_code not in active_rule_codes:
-                raise BankTransactionCategoryValidationError(
-                    "invalid_manual_category_assignment_candidate",
-                    "只能选择当前自动标签规则中的可用标签。",
-                    transaction_id=transaction_id,
-                )
-            result = self._bank_transaction_category_service.assign_manual_category(
-                transaction_id=transaction_id,
-                category_code=selected_code,
-                actor=str(actor_id or "bank_category_assignment"),
-                category_primary_label=selection.get("category_primary_label"),
-                category_sub_label=selection.get("category_sub_label"),
-                category_third_label=selection.get("category_third_label"),
-                category_label_path=list(selection.get("category_label_path") or []),
-                turnover_action_type=selection.get("turnover_action_type"),
-                turnover_family=selection.get("turnover_family"),
-            )
-        except BankTransactionCategoryValidationError as exc:
-            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
-            return self._json_response(
-                status,
-                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
-            )
-        affected_months = self._bank_transaction_category_affected_months([transaction_id])
-        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
-        self._after_bank_category_confirmation_mutation(
-            transaction_id=transaction_id,
-            actor_id=str(actor_id or "bank_category_assignment"),
-            action="bank_detail_category_manually_assigned",
-            affected_months=affected_months,
-            metadata={
-                "selected_category_code": selected_code,
-                "selected_category_third_label": selection.get("category_third_label"),
-                "previous_resolution_status": previous_resolution_status,
-                "assignment_source": "manual",
-            },
-        )
-        return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
+        status, result = self._bank_details_routes().assign_category(transaction_id, payload, session=session)
+        return self._json_response(status, result)
 
     def _handle_api_bank_detail_category_assignment_delete(
         self,
@@ -12107,32 +10836,8 @@ class Application:
                 HTTPStatus.FORBIDDEN,
                 {"error": "permission_denied", "message": "当前账户没有撤销银行明细人工标签权限。"},
             )
-        actor_id = (
-            session.identity.username or session.identity.user_id
-            if session is not None
-            else "bank_category_assignment"
-        )
-        try:
-            result = self._bank_transaction_category_service.clear_manual_category(
-                transaction_id=transaction_id,
-                actor=str(actor_id or "bank_category_assignment"),
-            )
-        except BankTransactionCategoryValidationError as exc:
-            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
-            return self._json_response(
-                status,
-                {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
-            )
-        affected_months = self._bank_transaction_category_affected_months([transaction_id])
-        self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
-        self._after_bank_category_confirmation_mutation(
-            transaction_id=transaction_id,
-            actor_id=str(actor_id or "bank_category_assignment"),
-            action="bank_detail_category_manual_assignment_cleared",
-            affected_months=affected_months,
-            metadata={"assignment_source": "manual"},
-        )
-        return self._json_response(HTTPStatus.OK, {**result, "affected_months": affected_months})
+        status, result = self._bank_details_routes().clear_category_assignment(transaction_id, session=session)
+        return self._json_response(status, result)
 
     def _latest_bank_detail_auto_category_suggestion(self, transaction_id: str) -> dict[str, object] | None:
         normalized_transaction_id = str(transaction_id or "").strip()
@@ -12902,10 +11607,43 @@ class Application:
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
             search_cache_clearer=self._search_service.clear_cache,
+            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
         )
 
     def _no_oa_bank_batch_routes(self) -> NoOaBankBatchApiRoutes:
         return NoOaBankBatchApiRoutes(self._no_oa_bank_batch_application_service())
+
+    def _bank_details_application_service(self) -> BankDetailsApplicationService:
+        suggestion_provider = self.__dict__.get("_latest_bank_detail_auto_category_suggestion")
+        after_category_mutation = self.__dict__.get("_after_bank_category_confirmation_mutation")
+        return BankDetailsApplicationService(
+            import_service=getattr(self, "_import_service", SimpleNamespace(get_transaction=lambda transaction_id: (_ for _ in ()).throw(KeyError(transaction_id)))),
+            bank_details_service=getattr(self, "_bank_details_service", SimpleNamespace(list_accounts=lambda **_kwargs: {}, list_transactions=lambda **_kwargs: {}, _bank_transaction_tags_payload=lambda: {})),
+            app_settings_service=getattr(self, "_app_settings_service", SimpleNamespace(get_bank_auto_tag_rules_payload=lambda **_kwargs: {"version": 1, "active_rules": []})),
+            bank_transaction_category_service=getattr(self, "_bank_transaction_category_service", SimpleNamespace(snapshot=lambda: {})),
+            bank_transaction_auto_category_service=getattr(self, "_bank_transaction_auto_category_service", SimpleNamespace(current_rule_version=lambda: 1, suggest_for_rows=lambda _rows: {})),
+            audit_service=getattr(self, "_audit_service", SimpleNamespace(record_action=lambda **_kwargs: None)),
+            state_store=self._state_store,
+            bank_detail_sql_read_repository=getattr(self, "_bank_detail_sql_read_repository", None),
+            runtime_repositories=getattr(self, "_runtime_repositories", None),
+            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
+            affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),
+            invalidate_after_category_mutation=getattr(self, "_invalidate_workbench_after_bank_transaction_categories", lambda _affected_months: False),
+            execute_derived_data_lifecycle_event=getattr(self, "_execute_derived_data_lifecycle_event", lambda *_args, **_kwargs: None),
+            clear_turnover_ledger_read_model=getattr(self, "_clear_turnover_ledger_read_model_best_effort", lambda: None),
+            clear_relation_tag_projection_cache=getattr(
+                getattr(self, "_bank_details_relation_tag_projection_service", None),
+                "clear_cache",
+                lambda: None,
+            ),
+            available_month_scope_keys_provider=getattr(self, "_bank_detail_available_month_scope_keys", lambda: ["all"]),
+            enqueue_bank_account_balance_refresh=getattr(self, "_enqueue_bank_account_balance_read_model_refresh", lambda **_kwargs: False),
+            suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
+            after_category_mutation=after_category_mutation if callable(after_category_mutation) else None,
+        )
+
+    def _bank_details_routes(self) -> BankDetailsApiRoutes:
+        return BankDetailsApiRoutes(self._bank_details_application_service())
 
     def _handle_api_no_oa_bank_batches(self, query: dict[str, list[str]]) -> Response:
         status_code, payload = self._no_oa_bank_batch_routes().list_batches(query)
@@ -13711,6 +12449,7 @@ class Application:
                 "reason": "bank_auto_tag_rules_changed",
                 "new_version": event.get("new_version"),
             },
+            schedule_cost_warmup=False,
         )
 
     def _list_tax_offset_oa_attachment_invoice_rows(self, month: str) -> list[dict[str, object]]:
@@ -13813,21 +12552,10 @@ class Application:
         return self._json_response(HTTPStatus.OK, result)
 
     def _execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
-        batch = self._tax_certified_import_service.confirm_session(session_id)
-        self._execute_derived_data_lifecycle_event(
-            "tax_certified_import_confirmed",
-            months=list(getattr(batch, "months", []) or []),
-            include_all=False,
-            metadata={
-                "source": "tax_certified_import_confirm",
-                "reason": "tax_certified_import_confirm",
-                "session_id": session_id,
-            },
-        )
-        return {
-            "success": True,
-            "batch": self._serialize_value(batch),
-        }
+        return self._import_processing_service.execute_tax_certified_import_confirm(session_id)
+
+    def _handle_api_tax_certified_import_job(self, import_job_id: str) -> Response:
+        return self._tax_offset_routes().handle_import_job(import_job_id)
 
     def _handle_api_tax_certified_imports(self, month: str | None) -> Response:
         if month is None or not month.strip():
@@ -13852,21 +12580,7 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        started_at = monotonic()
-        try:
-            result = self._tax_api_routes.calculate(payload)
-        except (KeyError, TypeError, ValueError) as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_tax_offset_calculate_request", "message": str(exc)},
-            )
-        self._emit_tax_offset_calculate_metric(
-            month=str(payload.get("month") or ""),
-            selected_output_count=self._safe_list_count(payload.get("selected_output_ids")),
-            selected_input_count=self._safe_list_count(payload.get("selected_input_ids")),
-            duration_ms=self._duration_ms(started_at),
-        )
-        return self._json_response(HTTPStatus.OK, result)
+        return self._tax_offset_routes().handle_calculate(payload)
 
     def _handle_workbench(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
@@ -14665,49 +13379,19 @@ class Application:
         )
 
     def build_import_job_processors(self) -> dict[str, Callable[[ImportJob], dict[str, object]]]:
-        return {
-            "general_import.confirm": self._process_general_import_confirm_job,
-            "file_import.confirm": self._process_file_import_confirm_job,
-            "etc_invoice_import.confirm": self._process_etc_invoice_import_confirm_job,
-            "tax_certified_import.confirm": self._process_tax_certified_import_confirm_job,
-            "oa_manual_import.create": self._process_oa_manual_import_create_job,
-        }
+        return self._import_processing_service.build_import_job_processors()
 
     def _process_general_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        batch_id = str(import_job.payload.get("batch_id") or "").strip()
-        if not batch_id:
-            raise ValueError("import job payload.batch_id is required.")
-        return self._execute_general_import_confirm(batch_id)
+        return self._import_processing_service.process_general_import_confirm_job(import_job)
 
     def _process_tax_certified_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        session_id = str(import_job.payload.get("session_id") or "").strip()
-        if not session_id:
-            raise ValueError("import job payload.session_id is required.")
-        return self._execute_tax_certified_import_confirm(session_id)
+        return self._import_processing_service.process_tax_certified_import_confirm_job(import_job)
 
     def _process_file_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        session_id = str(import_job.payload.get("session_id") or "").strip()
-        selected_file_ids = import_job.payload.get("selected_file_ids")
-        if not session_id or not isinstance(selected_file_ids, list):
-            raise ValueError("import job payload.session_id and payload.selected_file_ids are required.")
-        return self._execute_file_import_confirm_job(
-            session_id=session_id,
-            selected_file_ids=[str(item) for item in selected_file_ids],
-            owner_user_id=str(import_job.payload.get("owner_user_id") or import_job.created_by or "system"),
-            background_job_id=str(import_job.payload.get("background_job_id") or "").strip(),
-        )
+        return self._import_processing_service.process_file_import_confirm_job(import_job)
 
     def _process_etc_invoice_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        payload = import_job.payload
-        return self._execute_etc_invoice_import_confirm_job(
-            session_id=str(payload.get("session_id") or "").strip(),
-            task_id=str(payload.get("task_id") or "").strip(),
-            owner_user_id=str(payload.get("owner_user_id") or import_job.created_by or "system").strip(),
-            background_job_id=str(payload.get("background_job_id") or "").strip(),
-            task_version=int(payload.get("task_version") or 0),
-            confirmed_item_set_hash=str(payload.get("confirmed_item_set_hash") or "").strip(),
-            total=int(payload.get("total") or 0),
-        )
+        return self._import_processing_service.process_etc_invoice_import_confirm_job(import_job)
 
     def _process_oa_manual_import_create_job(self, import_job: ImportJob) -> dict[str, object]:
         row_ids = import_job.payload.get("row_ids")
@@ -14717,23 +13401,7 @@ class Application:
         return self._execute_oa_manual_import_create([str(row_id) for row_id in row_ids], actor_id=actor_id)
 
     def _execute_general_import_confirm(self, batch_id: str) -> dict[str, object]:
-        batch = self._import_service.confirm_import(batch_id)
-        preview = self._import_service.get_batch(batch_id)
-        self._invalidate_tax_offset_read_model_scopes(
-            self._tax_offset_scope_keys_for_import_preview(preview),
-            reason="invoice_import_confirm",
-        )
-        self._schedule_or_run_workbench_auto_matching_for_scopes(
-            self._workbench_matching_scope_months_for_import_preview(preview),
-            reason="import_confirm",
-        )
-        self._persist_state_with_workbench_invalidation(
-            cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_preview(preview),
-        )
-        return {
-            "batch": self._serialize_value(batch),
-            "row_results": self._serialize_value(preview.row_results),
-        }
+        return self._import_processing_service.execute_general_import_confirm(batch_id)
 
     def _handle_import_batch(self, batch_id: str) -> Response:
         try:
@@ -14808,20 +13476,7 @@ class Application:
 
     @staticmethod
     def _serialize_import_job(import_job: ImportJob) -> dict[str, object]:
-        return {
-            "import_job_id": import_job.import_job_id,
-            "tenant_id": import_job.tenant_id,
-            "import_type": import_job.import_type,
-            "import_session_id": import_job.import_session_id,
-            "source_file_id": import_job.source_file_id,
-            "status": import_job.status,
-            "stage": import_job.stage,
-            "priority": import_job.priority,
-            "attempt_count": import_job.attempt_count,
-            "max_attempts": import_job.max_attempts,
-            "last_error": import_job.last_error,
-            "trace_id": import_job.trace_id,
-        }
+        return TaxCertifiedImportJobService.serialize_import_job(import_job)
 
     def _handle_import_batch_download(self, batch_id: str) -> Response:
         try:
@@ -15016,17 +13671,7 @@ class Application:
 
     @staticmethod
     def _file_import_job_label(session, selected_file_ids: list[str]) -> str:
-        selected = set(selected_file_ids)
-        batch_types = {
-            file.batch_type.value if isinstance(file.batch_type, BatchType) else str(file.batch_type)
-            for file in session.files
-            if file.id in selected and file.batch_type is not None
-        }
-        if batch_types == {BatchType.BANK_TRANSACTION.value}:
-            return "导入 银行流水"
-        if batch_types and batch_types.issubset({BatchType.INPUT_INVOICE.value, BatchType.OUTPUT_INVOICE.value}):
-            return "导入 发票"
-        return "导入文件"
+        return ImportProcessingService.file_import_job_label(session, selected_file_ids)
 
     def _execute_file_import_confirm_job(
         self,
@@ -15036,84 +13681,12 @@ class Application:
         owner_user_id: str,
         background_job_id: str,
     ) -> dict[str, object]:
-        session = self._file_import_service.get_session(session_id)
-        selected = set(selected_file_ids)
-        total = len(selected_file_ids)
-        label = self._file_import_job_label(session, selected_file_ids)
-        running_job = self._background_job_service.start_job(background_job_id) if background_job_id else None
-
-        def progress_callback(progress_session, current: int, progress_total: int) -> None:
-            if running_job is None:
-                return
-            confirmed_count = sum(1 for file in progress_session.files if file.id in selected and file.status == "confirmed")
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="confirm_files",
-                message=f"正在{label} {current}/{max(progress_total, 1)}。",
-                current=current,
-                total=progress_total,
-                result_summary={
-                    "confirmed": confirmed_count,
-                    "selected": progress_total,
-                    "matching_results": 0,
-                },
-            )
-
-        try:
-            confirmed_session = self._file_import_service.confirm_session(
-                session_id=session_id,
-                selected_file_ids=selected_file_ids,
-                progress_callback=progress_callback,
-            )
-            confirmed_count = sum(1 for file in confirmed_session.files if file.id in selected and file.status == "confirmed")
-            scope_months = self._workbench_matching_scope_months_for_import_file_session(
-                confirmed_session,
-                selected_file_ids,
-            )
-            matching_job_id = None
-            if any(file.status == "confirmed" for file in confirmed_session.files):
-                matching_job = self._enqueue_workbench_auto_matching_for_scopes(
-                    scope_months,
-                    reason="import_file_confirm",
-                    owner_user_id=owner_user_id,
-                    source={
-                        "session_id": confirmed_session.id,
-                        "selected_file_ids": selected_file_ids,
-                        "trigger_job_id": background_job_id,
-                    },
-                    triggered_by=f"import_session:{confirmed_session.id}",
-                )
-                matching_job_id = matching_job.job_id if matching_job is not None else None
-            self._invalidate_tax_offset_read_model_scopes(
-                self._tax_offset_scope_keys_for_import_file_session(
-                    confirmed_session,
-                    selected_file_ids,
-                ),
-                reason="invoice_file_import_confirm",
-            )
-            self._persist_state_with_workbench_invalidation(
-                cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_file_session(
-                    confirmed_session,
-                    selected_file_ids,
-                ),
-            )
-            result_summary = {
-                "confirmed": confirmed_count,
-                "selected": total,
-                "affected_months": scope_months,
-                "enqueued_matching_job_id": matching_job_id,
-            }
-            if running_job is not None:
-                self._background_job_service.succeed_job(
-                    running_job.job_id,
-                    f"{label}完成。",
-                    result_summary=result_summary,
-                )
-            return result_summary
-        except Exception as exc:
-            if running_job is not None:
-                self._background_job_service.fail_job(running_job.job_id, "后台任务失败。", str(exc))
-            raise
+        return self._import_processing_service.execute_file_import_confirm_job(
+            session_id=session_id,
+            selected_file_ids=selected_file_ids,
+            owner_user_id=owner_user_id,
+            background_job_id=background_job_id,
+        )
 
     def _handle_import_file_retry(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -16433,49 +15006,7 @@ class Application:
         self._runtime_redis_delete_best_effort(self._workbench_groups_redis_version_key(normalized_scope_key))
 
     def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
-        parsed = self._parse_cost_statistics_scope_key(scope_key)
-        if parsed is None:
-            raise ValueError("cost statistics read model scope_key must be project_scope:month.")
-        project_scope, month = parsed
-        payload = self._cost_statistics_service.get_explorer(month, project_scope=project_scope)
-        source_versions = self._cost_statistics_expected_source_versions(scope_key)
-        read_model = self._cost_statistics_read_model_service.upsert_read_model(
-            month,
-            project_scope,
-            payload,
-            generated_at=datetime.now().isoformat(),
-            source_scope_keys=[month],
-            source_versions=source_versions,
-            cache_status="ready",
-        )
-        warmed_scope_key = self._cost_statistics_read_model_scope_key(
-            month,
-            project_scope,
-            read_model=read_model,
-        )
-        self._persist_cost_statistics_read_models_best_effort(
-            snapshot=self._cost_statistics_read_model_service.snapshot_scope_keys([warmed_scope_key]),
-            changed_scope_keys=[warmed_scope_key],
-            operation="worker_cost_statistics_read_model_refresh",
-        )
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        set_cached = getattr(redis_helper, "set_json", None)
-        if callable(set_cached):
-            cached_payload = dict(payload)
-            cached_payload["read_model_status"] = "fresh"
-            cached_payload["read_model_scope_key"] = warmed_scope_key
-            cached_payload["source_versions"] = source_versions
-            set_cached(
-                self._cost_statistics_redis_cache_key(warmed_scope_key, source_versions=source_versions),
-                {"payload": cached_payload},
-                ttl_seconds=self._cost_statistics_redis_ttl_seconds(),
-            )
-        return {
-            "scope_key": warmed_scope_key,
-            "month": month,
-            "project_scope": project_scope,
-            "entry_count": self._cost_statistics_explorer_entry_count(payload),
-        }
+        return self._cost_statistics_runtime().rebuild_read_model_scope(scope_key)
 
     def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
         month = self._tax_offset_request_scope_key(scope_key)
@@ -16712,75 +15243,6 @@ class Application:
                     }
                 )
         return rows
-
-    def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
-        direction, _, filter_name = str(scope_key or "").partition(":")
-        normalized_direction = direction or "expense"
-        normalized_filter = filter_name or "all"
-        repository = getattr(self, "_pending_invoice_sql_read_repository", None)
-        save_rows = getattr(repository, "save_pending_invoice_rows", None)
-        if not callable(save_rows):
-            raise RuntimeError("Pending invoice SQL read repository is not configured.")
-        page_size = 200
-        page = 1
-        source_rows: list[object] = []
-        total_rows: int | None = None
-        while True:
-            payload = self._pending_invoice_query_service.list_rows(
-                direction=normalized_direction,
-                filter=normalized_filter,
-                page=page,
-                page_size=page_size,
-            )
-            page_rows = list(payload.get("rows") or []) if isinstance(payload, dict) else []
-            source_rows.extend(page_rows)
-            pagination = payload.get("pagination") if isinstance(payload, dict) else {}
-            if isinstance(pagination, dict):
-                total_rows = self._optional_int(pagination.get("total")) or len(source_rows)
-            if not page_rows or len(page_rows) < page_size or (total_rows is not None and len(source_rows) >= total_rows):
-                break
-            page += 1
-        rows = self._pending_invoice_rows_for_read_model(source_rows)
-        source_versions = self._pending_invoice_expected_source_versions()
-        save_rows(scope_key=f"{normalized_direction}:{normalized_filter}", rows=rows, source_versions=source_versions)
-        return {"scope_key": f"{normalized_direction}:{normalized_filter}", "row_count": len(rows), "source_versions": source_versions}
-
-    def _pending_invoice_rows_for_read_model(self, rows: object) -> list[dict[str, object]]:
-        result: list[dict[str, object]] = []
-        for row in list(rows or []):
-            if not isinstance(row, dict):
-                continue
-            bank_transaction = row.get("bank_transaction") if isinstance(row.get("bank_transaction"), dict) else {}
-            tag_code = str(bank_transaction.get("effective_tag_code") or "").strip()
-            filter_group = self._pending_invoice_filter_group_for_tag(tag_code) or "all"
-            searchable_text = " ".join(
-                str(part)
-                for part in (
-                    row.get("id"),
-                    bank_transaction.get("counterparty_name"),
-                    bank_transaction.get("trade_time"),
-                    bank_transaction.get("amount"),
-                    bank_transaction.get("effective_tag_label"),
-                    row.get("oa_applicant"),
-                )
-                if str(part or "").strip()
-            )
-            payload = dict(row)
-            payload["filter_group"] = filter_group
-            result.append({"filter_group": filter_group, "searchable_text": searchable_text, "payload": payload})
-        return result
-
-    def _pending_invoice_filter_group_for_tag(self, tag_code: str) -> str | None:
-        if not tag_code:
-            return None
-        settings = self._app_settings_service.get_settings_payload()
-        groups = ((settings.get("pending_invoice_tag_groups") or {}).get("groups") or {})
-        for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required"):
-            group = groups.get(group_name) if isinstance(groups, dict) else None
-            tag_codes = list((group or {}).get("tag_codes") or []) if isinstance(group, dict) else []
-            if tag_code in {str(code).strip() for code in tag_codes}:
-                return group_name
-        return None
 
     def _save_workbench_overrides_snapshot(self, *, changed_row_ids: list[str] | None = None) -> None:
         self._search_service.clear_cache()
@@ -19006,8 +17468,12 @@ class Application:
 
     def _invalidate_pending_invoice_read_model_scopes(self, *, reason: str) -> list[str]:
         scope_keys = self._pending_invoice_read_model_scope_keys()
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return []
         for scope_key in scope_keys:
-            self._enqueue_pending_invoice_read_model_refresh(scope_key, reason=reason)
+            enqueue(scope_type="pending_invoice", scope_key=scope_key, reason=reason)
         return scope_keys
 
     def _invalidate_invoice_usage_collection_read_model_scopes(self, scope_keys: list[str], *, reason: str) -> list[str]:
@@ -19024,23 +17490,7 @@ class Application:
         return invalidated
 
     def _invalidate_cost_statistics_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
-        read_model_service = self._cost_statistics_read_model_service
-        if read_model_service is None:
-            return []
-        deleted_scope_keys = read_model_service.clear()
-        self._persist_cost_statistics_read_models_best_effort(
-            snapshot=read_model_service.snapshot(),
-            changed_scope_keys=deleted_scope_keys,
-            operation="invalidate_cost_statistics_read_models",
-        )
-        if not schedule_warmup or not deleted_scope_keys:
-            return deleted_scope_keys
-        warmup_months = self._cost_statistics_warmup_months_from_read_model_scope_keys(deleted_scope_keys)
-        if not warmup_months:
-            warmup_months = ["all"]
-        if not self._enqueue_cost_statistics_refresh_for_months(warmup_months, reason="cost_statistics_read_model_invalidated"):
-            self._schedule_cost_statistics_cache_warmup(warmup_months, reason="cost_statistics_read_model_invalidated")
-        return deleted_scope_keys
+        return self._cost_statistics_runtime().invalidate_read_models(schedule_warmup=schedule_warmup)
 
     def _invalidate_cost_statistics_read_model_scopes(
         self,
@@ -19049,84 +17499,24 @@ class Application:
         reason: str = "",
         schedule_warmup: bool = True,
     ) -> list[str]:
-        read_model_service = self._cost_statistics_read_model_service
-        if read_model_service is None:
-            return []
-        months = self._cost_statistics_months_from_workbench_scope_keys(scope_keys)
-        if not months:
-            return []
-        specific_months = sorted(month for month in months if month != "all")
-        if specific_months:
-            deleted_scope_keys = read_model_service.invalidate_months(
-                specific_months,
-                project_scopes=["active", "all"],
-                include_all=True,
-            )
-            warmup_months = specific_months
-        else:
-            deleted_scope_keys = read_model_service.invalidate_months(
-                [],
-                project_scopes=["active", "all"],
-                include_all=True,
-            )
-            warmup_months = ["all"]
-        self._persist_cost_statistics_read_models_best_effort(
-            snapshot=read_model_service.snapshot(),
-            changed_scope_keys=deleted_scope_keys,
-            operation=reason or "invalidate_cost_statistics_read_model_scopes",
+        return self._cost_statistics_runtime().invalidate_read_model_scopes(
+            scope_keys,
+            reason=reason,
+            schedule_warmup=schedule_warmup,
         )
-        if schedule_warmup:
-            enqueued = self._enqueue_cost_statistics_refresh_for_months(
-                warmup_months,
-                reason=reason or "cost_statistics_scope_invalidated",
-            )
-            if deleted_scope_keys and not enqueued:
-                self._schedule_cost_statistics_cache_warmup(
-                    warmup_months,
-                    reason=reason or "cost_statistics_scope_invalidated",
-                )
-        return deleted_scope_keys
 
     def _enqueue_cost_statistics_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
-        enqueued = False
-        for target in self._cost_statistics_warmup_targets(months=months, project_scopes=["active", "all"]):
-            scope_key = target["scope_key"]
-            self._delete_cost_statistics_redis_cache(scope_key)
-            enqueued = self._enqueue_cost_statistics_read_model_refresh(scope_key, reason=reason) or enqueued
-        return enqueued
+        return self._cost_statistics_runtime().enqueue_refresh_for_months(months, reason=reason)
 
     def _delete_cost_statistics_redis_cache(self, scope_key: str) -> None:
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        delete = getattr(redis_helper, "delete", None)
-        if callable(delete):
-            source_versions = self._cost_statistics_expected_source_versions(scope_key)
-            delete(self._cost_statistics_redis_cache_key(scope_key, source_versions=source_versions))
-            delete(self._cost_statistics_month_redis_cache_key(scope_key, source_versions=source_versions))
-            delete(f"cost_statistics:explorer:{scope_key}")
-            delete(f"cost_statistics:month:{scope_key}")
+        self._cost_statistics_runtime().delete_redis_cache(scope_key)
 
     @staticmethod
     def _cost_statistics_months_from_workbench_scope_keys(scope_keys: list[str]) -> set[str]:
-        months: set[str] = set()
-        for raw_scope_key in list(scope_keys or []):
-            scope_key = str(raw_scope_key).strip()
-            if not scope_key:
-                continue
-            for part in reversed(scope_key.split(":")):
-                normalized_part = str(part).strip()
-                if normalized_part == "all" or SEARCH_MONTH_RE.match(normalized_part):
-                    months.add(normalized_part)
-                    break
-        return months
+        return CostStatisticsRuntimeService.months_from_workbench_scope_keys(scope_keys)
 
     def _cost_statistics_warmup_months_from_read_model_scope_keys(self, scope_keys: list[str]) -> list[str]:
-        months = self._cost_statistics_months_from_workbench_scope_keys(scope_keys)
-        specific_months = sorted(month for month in months if month != "all")
-        if specific_months:
-            return specific_months
-        if "all" in months:
-            return ["all"]
-        return []
+        return self._cost_statistics_runtime().warmup_months_from_read_model_scope_keys(scope_keys)
 
     def _cost_statistics_read_model_scope_key(
         self,
@@ -19135,86 +17525,22 @@ class Application:
         *,
         read_model: dict[str, object] | None = None,
     ) -> str:
-        if isinstance(read_model, dict):
-            scope_key = str(read_model.get("scope_key", "")).strip()
-            if scope_key:
-                return scope_key
-        return str(self._cost_statistics_read_model_service.scope_key(month, project_scope))
+        return self._cost_statistics_runtime().read_model_scope_key(month, project_scope, read_model=read_model)
 
     def _recover_interrupted_cost_statistics_cache_warmup_jobs(self) -> None:
-        list_attention_jobs = getattr(self._background_job_service, "list_attention_jobs", None)
-        if not callable(list_attention_jobs):
-            return
-        try:
-            attention_jobs = list_attention_jobs("system", include_system=True)
-        except Exception:
-            return
-        for job in attention_jobs:
-            if getattr(job, "type", None) != "cost_statistics_cache_warmup":
-                continue
-            if getattr(job, "error", None) != "interrupted_by_restart":
-                continue
-            target_scope_keys = self._retry_cost_statistics_warmup_scope_keys(job)
-            if not target_scope_keys:
-                continue
-            existing_job = self._find_reusable_cost_statistics_warmup_job(
-                target_scope_keys,
-                exclude_job_id=getattr(job, "job_id", None),
-            )
-            recovery_job = existing_job or self._schedule_cost_statistics_cache_warmup(
-                [],
-                reason="startup_recovery",
-                target_scope_keys=target_scope_keys,
-            )
-            if recovery_job is None:
-                continue
-            self._close_replaced_cost_statistics_warmup_job(job, "system", recovery_job)
+        self._cost_statistics_runtime().recover_interrupted_cache_warmup_jobs()
 
     def _find_reusable_cost_statistics_warmup_job(self, target_scope_keys: list[str], *, exclude_job_id: str | None = None):
-        normalized_target_scope_keys = set(self._normalize_cost_statistics_scope_keys(target_scope_keys))
-        if not normalized_target_scope_keys:
-            return None
-        for job in self._background_job_service.list_active_jobs("system", include_system=True):
-            if getattr(job, "type", None) != "cost_statistics_cache_warmup":
-                continue
-            if exclude_job_id and getattr(job, "job_id", None) == exclude_job_id:
-                continue
-            job_scope_keys = set(self._cost_statistics_job_target_scope_keys(job))
-            if job_scope_keys == normalized_target_scope_keys:
-                return job
-        return None
+        return self._cost_statistics_runtime().find_reusable_warmup_job(
+            target_scope_keys,
+            exclude_job_id=exclude_job_id,
+        )
 
     def _cost_statistics_job_target_scope_keys(self, job) -> list[str]:
-        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
-        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
-        if target_scope_keys:
-            return self._normalize_cost_statistics_scope_keys(target_scope_keys)
-        affected_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(getattr(job, "affected_scopes", []) or [])
-            if str(scope_key).strip()
-        ]
-        if affected_scope_keys:
-            return self._normalize_cost_statistics_scope_keys(affected_scope_keys)
-        months = self._retry_cost_statistics_warmup_months(job)
-        return [
-            target["scope_key"]
-            for target in self._cost_statistics_warmup_targets(months=months, project_scopes=["active", "all"])
-        ]
+        return self._cost_statistics_runtime().job_target_scope_keys(job)
 
     def _close_replaced_cost_statistics_warmup_job(self, old_job, owner_user_id: str, replacement_job) -> None:
-        if replacement_job is None:
-            self._background_job_service.acknowledge_job(old_job.job_id, owner_user_id)
-            return
-        supersede_job = getattr(self._background_job_service, "supersede_job", None)
-        if callable(supersede_job):
-            supersede_job(
-                old_job.job_id,
-                owner_user_id,
-                superseded_by_job_id=replacement_job.job_id,
-            )
-            return
-        self._background_job_service.acknowledge_job(old_job.job_id, owner_user_id)
+        self._cost_statistics_runtime().close_replaced_warmup_job(old_job, owner_user_id, replacement_job)
 
     def _schedule_cost_statistics_cache_warmup(
         self,
@@ -19223,59 +17549,11 @@ class Application:
         *,
         target_scope_keys: list[str] | None = None,
     ):
-        read_model_service = self._cost_statistics_read_model_service
-        if read_model_service is None:
-            return None
-        project_scopes = ["active", "all"]
-        targets = self._cost_statistics_warmup_targets(
-            months=months,
-            project_scopes=project_scopes,
+        return self._cost_statistics_runtime().schedule_cache_warmup(
+            months,
+            reason,
             target_scope_keys=target_scope_keys,
         )
-        if not targets:
-            return None
-        affected_scope_keys = [target["scope_key"] for target in targets]
-        existing_job = self._find_reusable_cost_statistics_warmup_job(affected_scope_keys)
-        if existing_job is not None:
-            return existing_job
-        deduped_months = list(dict.fromkeys([target["month"] for target in targets]))
-        idempotency_key = f"cost_statistics_cache_warmup:{','.join(affected_scope_keys)}"
-        initial_result_summary = self._cost_statistics_warmup_result_summary(
-            target_scope_keys=affected_scope_keys,
-            warmed_scope_keys=[],
-            failed_scope_keys=[],
-            remaining_scope_keys=affected_scope_keys,
-        )
-        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
-            job_type="cost_statistics_cache_warmup",
-            label="预热成本统计缓存",
-            owner_user_id="system",
-            idempotency_key=idempotency_key,
-            visibility="system",
-            phase="queued",
-            current=0,
-            total=len(affected_scope_keys),
-            message="成本统计缓存预热任务已创建。",
-            result_summary=initial_result_summary,
-            source={
-                "reason": reason,
-                "months": deduped_months,
-                "project_scopes": project_scopes,
-                "target_scope_keys": affected_scope_keys,
-            },
-            affected_scopes=affected_scope_keys,
-            affected_months=deduped_months,
-        )
-        if not created:
-            return job
-        self._background_job_service.run_job(
-            job,
-            lambda running_job: self._run_cost_statistics_cache_warmup_job(
-                running_job,
-                targets=targets,
-            ),
-        )
-        return job
 
     def _run_cost_statistics_cache_warmup_job(
         self,
@@ -19285,103 +17563,12 @@ class Application:
         project_scopes: list[str] | None = None,
         targets: list[dict[str, str]] | None = None,
     ) -> dict[str, object]:
-        read_model_service = self._cost_statistics_read_model_service
-        if read_model_service is None:
-            return self._cost_statistics_warmup_result_summary(
-                target_scope_keys=[],
-                warmed_scope_keys=[],
-                failed_scope_keys=[],
-                remaining_scope_keys=[],
-            )
-        resolved_targets = (
-            list(targets or [])
-            if targets is not None
-            else self._cost_statistics_warmup_targets(
-                months=months or [],
-                project_scopes=project_scopes or ["active", "all"],
-            )
+        return self._cost_statistics_runtime().run_cache_warmup_job(
+            running_job,
+            months=months,
+            project_scopes=project_scopes,
+            targets=targets,
         )
-        target_scope_keys = [target["scope_key"] for target in resolved_targets]
-        total = len(resolved_targets)
-        warmed_scope_keys: list[str] = []
-        failed_scope_keys: list[str] = []
-        for index, target in enumerate(resolved_targets, start=1):
-            month = target["month"]
-            project_scope = target["project_scope"]
-            scope_key = target["scope_key"]
-            remaining_scope_keys = target_scope_keys[index - 1 :]
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="build_cost_statistics_cache",
-                message=f"正在预热成本统计缓存 {index}/{max(total, 1)}。",
-                current=index - 1,
-                total=total,
-                result_summary=self._cost_statistics_warmup_result_summary(
-                    target_scope_keys=target_scope_keys,
-                    warmed_scope_keys=warmed_scope_keys,
-                    failed_scope_keys=failed_scope_keys,
-                    remaining_scope_keys=remaining_scope_keys,
-                ),
-            )
-            try:
-                payload = self._cost_statistics_service.get_explorer(
-                    month,
-                    project_scope=project_scope,
-                )
-            except Exception:
-                failed_scope_keys.append(scope_key)
-                continue
-            read_model = read_model_service.upsert_read_model(
-                month,
-                project_scope,
-                payload,
-                generated_at=datetime.now().isoformat(),
-                source_scope_keys=[month],
-                cache_status="ready",
-            )
-            warmed_scope_key = self._cost_statistics_read_model_scope_key(
-                month,
-                project_scope,
-                read_model=read_model,
-            )
-            warmed_scope_keys.append(warmed_scope_key)
-            self._persist_cost_statistics_read_models_best_effort(
-                snapshot=read_model_service.snapshot_scope_keys([warmed_scope_key]),
-                changed_scope_keys=[warmed_scope_key],
-                operation="cost_statistics_cache_warmup",
-            )
-
-            remaining_scope_keys = target_scope_keys[index:]
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="build_cost_statistics_cache",
-                message=f"正在预热成本统计缓存 {index}/{max(total, 1)}。",
-                current=index,
-                total=total,
-                result_summary=self._cost_statistics_warmup_result_summary(
-                    target_scope_keys=target_scope_keys,
-                    warmed_scope_keys=warmed_scope_keys,
-                    failed_scope_keys=failed_scope_keys,
-                    remaining_scope_keys=remaining_scope_keys,
-                ),
-            )
-
-        result_summary = {
-            **self._cost_statistics_warmup_result_summary(
-                target_scope_keys=target_scope_keys,
-                warmed_scope_keys=warmed_scope_keys,
-                failed_scope_keys=failed_scope_keys,
-                remaining_scope_keys=[],
-            ),
-        }
-        message = "成本统计缓存预热完成。" if not failed_scope_keys else "成本统计缓存预热部分完成。"
-        self._background_job_service.succeed_job(
-            running_job.job_id,
-            message,
-            result_summary=result_summary,
-            status="partial_success" if failed_scope_keys else "succeeded",
-        )
-        return result_summary
 
     def _cost_statistics_warmup_targets(
         self,
@@ -19390,63 +17577,18 @@ class Application:
         project_scopes: list[str],
         target_scope_keys: list[str] | None = None,
     ) -> list[dict[str, str]]:
-        if target_scope_keys is not None:
-            targets: list[dict[str, str]] = []
-            for scope_key in self._normalize_cost_statistics_scope_keys(target_scope_keys):
-                parsed = self._parse_cost_statistics_scope_key(scope_key)
-                if parsed is None:
-                    continue
-                project_scope, month = parsed
-                targets.append({"month": month, "project_scope": project_scope, "scope_key": scope_key})
-            return targets
-
-        normalized_months = {
-            str(month).strip()
-            for month in list(months or [])
-            if str(month).strip()
-        }
-        ordered_months = sorted((month for month in normalized_months if month != "all"), reverse=True)
-        if "all" in normalized_months:
-            ordered_months.append("all")
-        deduped_months = list(dict.fromkeys(ordered_months))
-        normalized_project_scopes = [
-            str(project_scope).strip()
-            for project_scope in list(project_scopes or [])
-            if str(project_scope).strip()
-        ]
-        targets = []
-        for month in deduped_months:
-            for project_scope in normalized_project_scopes:
-                scope_key = self._cost_statistics_read_model_scope_key(month, project_scope)
-                targets.append({"month": month, "project_scope": project_scope, "scope_key": scope_key})
-        return targets
+        return self._cost_statistics_runtime().warmup_targets(
+            months=months,
+            project_scopes=project_scopes,
+            target_scope_keys=target_scope_keys,
+        )
 
     def _normalize_cost_statistics_scope_keys(self, scope_keys: list[str]) -> list[str]:
-        normalized: list[str] = []
-        for raw_scope_key in list(scope_keys or []):
-            scope_key = str(raw_scope_key or "").strip()
-            parsed = self._parse_cost_statistics_scope_key(scope_key)
-            if parsed is None:
-                continue
-            project_scope, month = parsed
-            resolved_scope_key = self._cost_statistics_read_model_scope_key(month, project_scope)
-            if resolved_scope_key not in normalized:
-                normalized.append(resolved_scope_key)
-        return normalized
+        return self._cost_statistics_runtime().normalize_scope_keys(scope_keys)
 
     @staticmethod
     def _parse_cost_statistics_scope_key(scope_key: str) -> tuple[str, str] | None:
-        raw_scope_key = str(scope_key or "").strip()
-        if ":" not in raw_scope_key:
-            return None
-        project_scope, month = raw_scope_key.split(":", 1)
-        project_scope = project_scope.strip()
-        month = month.strip()
-        if project_scope not in {"active", "all"}:
-            return None
-        if month != "all" and not SEARCH_MONTH_RE.match(month):
-            return None
-        return project_scope, month
+        return CostStatisticsRuntimeService.parse_scope_key(scope_key)
 
     @staticmethod
     def _cost_statistics_warmup_result_summary(
@@ -19456,36 +17598,15 @@ class Application:
         failed_scope_keys: list[str],
         remaining_scope_keys: list[str],
     ) -> dict[str, object]:
-        return {
-            "target_scope_keys": list(target_scope_keys),
-            "warmed_scope_keys": list(warmed_scope_keys),
-            "failed_scope_keys": list(failed_scope_keys),
-            "remaining_scope_keys": list(remaining_scope_keys),
-            "warmed": len(warmed_scope_keys),
-            "failed": len(failed_scope_keys),
-            "total": len(target_scope_keys),
-        }
+        return CostStatisticsRuntimeService.warmup_result_summary(
+            target_scope_keys=target_scope_keys,
+            warmed_scope_keys=warmed_scope_keys,
+            failed_scope_keys=failed_scope_keys,
+            remaining_scope_keys=remaining_scope_keys,
+        )
 
     def _invalidate_tax_offset_read_models(self) -> list[str]:
-        self._tax_offset_service.clear_month_cache()
-        read_model_service = self._tax_offset_read_model_service
-        if read_model_service is None:
-            return []
-        deleted_scope_keys = read_model_service.clear()
-        self._persist_tax_offset_read_models_best_effort(
-            snapshot=read_model_service.snapshot(),
-            changed_scope_keys=deleted_scope_keys,
-            operation="invalidate_tax_offset_read_models",
-        )
-        warmup_months = self._tax_offset_warmup_months_from_scope_keys(deleted_scope_keys)
-        if not warmup_months:
-            warmup_months = self._default_tax_offset_warmup_months()
-        if not self._enqueue_tax_offset_refresh_for_months(
-            warmup_months,
-            reason="tax_offset_read_model_invalidated",
-        ):
-            self._schedule_tax_offset_cache_warmup(warmup_months, reason="tax_offset_read_model_invalidated")
-        return deleted_scope_keys
+        return self._tax_offset_runtime().invalidate_read_models()
 
     def _invalidate_tax_offset_read_model_scopes(
         self,
@@ -19493,74 +17614,25 @@ class Application:
         *,
         reason: str = "",
     ) -> list[str]:
-        months = self._tax_offset_months_from_scope_keys(scope_keys)
-        if not months:
-            return []
-        ordered_months = sorted(months)
-        self._tax_offset_service.clear_month_cache(ordered_months)
-        read_model_service = self._tax_offset_read_model_service
-        deleted_scope_keys: list[str] = []
-        if read_model_service is not None:
-            deleted_scope_keys = read_model_service.invalidate_months(ordered_months)
-            self._persist_tax_offset_read_models_best_effort(
-                snapshot=read_model_service.snapshot(),
-                changed_scope_keys=deleted_scope_keys,
-                operation=reason or "invalidate_tax_offset_read_model_scopes",
-            )
-        refresh_enqueued = self._enqueue_tax_offset_refresh_for_months(
-            ordered_months,
-            reason=reason or "tax_offset_scope_invalidated",
-        )
-        if not refresh_enqueued and deleted_scope_keys:
-            self._schedule_tax_offset_cache_warmup(
-                ordered_months,
-                reason=reason or "tax_offset_scope_invalidated",
-            )
-        return deleted_scope_keys
+        return self._tax_offset_runtime().invalidate_read_model_scopes(scope_keys, reason=reason)
 
     def _enqueue_tax_offset_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
-        enqueued = False
-        for month in sorted(self._tax_offset_months_from_scope_keys(months)):
-            self._delete_tax_offset_redis_cache(month)
-            enqueued = self._enqueue_tax_offset_read_model_refresh(month, reason=reason) or enqueued
-        return enqueued
+        return self._tax_offset_runtime().enqueue_refresh_for_months(months, reason=reason)
 
     def _delete_tax_offset_redis_cache(self, scope_key: str) -> None:
-        source_versions = self._tax_offset_expected_source_versions()
-        self._runtime_redis_delete_best_effort(self._tax_offset_redis_cache_key(scope_key, source_versions=source_versions))
-        self._runtime_redis_delete_best_effort(self._tax_offset_summary_redis_cache_key(scope_key, source_versions=source_versions))
-        self._runtime_redis_delete_best_effort(f"tax_offset:month:{scope_key}")
-        self._runtime_redis_delete_best_effort(f"tax_offset:summary:{scope_key}")
+        self._tax_offset_runtime().delete_redis_cache(scope_key)
 
     @staticmethod
     def _tax_offset_months_from_scope_keys(scope_keys: list[str]) -> set[str]:
-        months: set[str] = set()
-        for raw_scope_key in list(scope_keys or []):
-            scope_key = str(raw_scope_key).strip()
-            if SEARCH_MONTH_RE.match(scope_key):
-                months.add(scope_key)
-        return months
+        return TaxOffsetRuntimeService.months_from_scope_keys(scope_keys)
 
     @staticmethod
     def _tax_offset_warmup_months_from_scope_keys(scope_keys: list[str]) -> list[str]:
-        return sorted(
-            {
-                str(scope_key).strip()
-                for scope_key in list(scope_keys or [])
-                if SEARCH_MONTH_RE.match(str(scope_key).strip())
-            }
-        )
+        return TaxOffsetRuntimeService.warmup_months_from_scope_keys(scope_keys)
 
     @staticmethod
     def _default_tax_offset_warmup_months() -> list[str]:
-        current_month = datetime.now().strftime("%Y-%m")
-        current_year = int(current_month[:4])
-        current_month_number = int(current_month[5:7])
-        if current_month_number == 1:
-            previous_month = f"{current_year - 1}-12"
-        else:
-            previous_month = f"{current_year}-{current_month_number - 1:02d}"
-        return [previous_month, current_month]
+        return TaxOffsetRuntimeService.default_warmup_months()
 
     def _tax_offset_read_model_scope_key(
         self,
@@ -19568,11 +17640,7 @@ class Application:
         *,
         read_model: dict[str, object] | None = None,
     ) -> str:
-        if isinstance(read_model, dict):
-            scope_key = str(read_model.get("scope_key", "")).strip()
-            if scope_key:
-                return scope_key
-        return str(self._tax_offset_read_model_service.scope_key(month))
+        return self._tax_offset_runtime().read_model_scope_key(month, read_model=read_model)
 
     def _schedule_tax_offset_cache_warmup(self, months: list[str], reason: str) -> None:
         read_model_service = self._tax_offset_read_model_service

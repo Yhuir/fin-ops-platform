@@ -241,6 +241,7 @@ export default function NoOaBankBatchPage() {
   const [selectedSubKey, setSelectedSubKey] = useState("");
   const [details, setDetails] = useState<Record<string, NoOaBankBatchDetail>>({});
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
+  const [selectedBatchId, setSelectedBatchId] = useState("");
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
   const [selectedAccountForSubmit, setSelectedAccountForSubmit] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -252,6 +253,7 @@ export default function NoOaBankBatchPage() {
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const batchRequestSeqRef = useRef(0);
+  const detailRequestSeqRef = useRef(0);
   const batchQueryKeyRef = useRef("");
   const readModelStatus = payload.readModelStatus;
   const readModelNeedsRefresh = readModelStatus !== "fresh";
@@ -317,6 +319,8 @@ export default function NoOaBankBatchPage() {
     if (batchQueryKeyRef.current !== batchQueryKey) {
       batchQueryKeyRef.current = batchQueryKey;
       setDetails({});
+      setDetailErrors({});
+      setSelectedBatchId("");
     }
     loadBatches(controller.signal);
     return () => controller.abort();
@@ -450,18 +454,40 @@ export default function NoOaBankBatchPage() {
   }, [selectedSubGroup, visibleBucketBatches]);
 
   useEffect(() => {
-    visibleBatches.forEach((batch) => {
-      if (details[batch.batchId] || detailErrors[batch.batchId]) {
-        return;
-      }
-      fetchNoOaBankBatchDetail(batch.batchId)
-        .then((detail) => setDetails((current) => ({ ...current, [batch.batchId]: detail })))
-        .catch((caught) => setDetailErrors((current) => ({
-          ...current,
-          [batch.batchId]: caught instanceof Error ? caught.message : "批次明细加载失败",
-        })));
-    });
-  }, [detailErrors, details, visibleBatches]);
+    if (visibleBatches.length === 0) {
+      setSelectedBatchId("");
+      return;
+    }
+    if (!visibleBatches.some((batch) => batch.batchId === selectedBatchId)) {
+      setSelectedBatchId(visibleBatches[0].batchId);
+    }
+  }, [selectedBatchId, visibleBatches]);
+
+  useEffect(() => {
+    if (!selectedBatchId || details[selectedBatchId] || detailErrors[selectedBatchId]) {
+      return undefined;
+    }
+    const requestId = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestId;
+    let cancelled = false;
+    fetchNoOaBankBatchDetail(selectedBatchId)
+      .then((detail) => {
+        if (!cancelled && requestId === detailRequestSeqRef.current) {
+          setDetails((current) => ({ ...current, [selectedBatchId]: detail }));
+        }
+      })
+      .catch((caught) => {
+        if (!cancelled && requestId === detailRequestSeqRef.current) {
+          setDetailErrors((current) => ({
+            ...current,
+            [selectedBatchId]: caught instanceof Error ? caught.message : "批次明细加载失败",
+          }));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailErrors, details, selectedBatchId]);
 
   useEffect(() => {
     const handleCategoryUpdated = () => {
@@ -490,6 +516,7 @@ export default function NoOaBankBatchPage() {
     setSelectedTransactionIds(new Set());
     setSelectedAccountForSubmit(null);
     setDetails({});
+    setDetailErrors({});
     setSnackbar({ severity: "success", message });
     loadBatches();
   };
@@ -607,6 +634,7 @@ export default function NoOaBankBatchPage() {
       setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
       setTagDrawerOpen(false);
       setDetails({});
+      setDetailErrors({});
       setSnackbar({ severity: "success", message: "免OA流水标签范围已保存" });
       loadBatches();
     } catch (caught) {
@@ -766,6 +794,7 @@ export default function NoOaBankBatchPage() {
             {!loading ? visibleBatches.map((batch) => {
               const detail = details[batch.batchId];
               const rows = detail?.rows ?? [];
+              const selected = selectedBatchId === batch.batchId;
               const rowSelectionEnabled = canSelectBatchRows(batch, bucket);
               const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
               const regionChecked = rowSelectionEnabled && rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
@@ -780,7 +809,10 @@ export default function NoOaBankBatchPage() {
                         <BatchStatusChip status={batch.status} />
                       </Stack>
                       <Stack direction="row" spacing={1}>
-                        {rowSelectionEnabled ? (
+                        {!selected ? (
+                          <Button aria-label={`查看${accountLabel(batch)}流水`} onClick={() => setSelectedBatchId(batch.batchId)} size="small" variant="outlined">查看流水</Button>
+                        ) : null}
+                        {selected && rowSelectionEnabled ? (
                           <>
                             <Button disabled={rows.length === 0 || mutating} onClick={() => setRegionSelection(rows, true)} size="small">全选</Button>
                             <Button disabled={rows.length === 0 || mutating} onClick={() => setRegionSelection(rows, false)} size="small">清空</Button>
@@ -794,10 +826,11 @@ export default function NoOaBankBatchPage() {
                         ) : null}
                       </Stack>
                     </Stack>
-                    {detailErrors[batch.batchId] ? <Alert severity="error">{detailErrors[batch.batchId]}</Alert> : null}
-                    {!detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
-                    {detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
-                    {rows.length > 0 ? (
+                    {selected && detailErrors[batch.batchId] ? <Alert severity="error">{detailErrors[batch.batchId]}</Alert> : null}
+                    {selected && !detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
+                    {!selected ? <StatePanel compact tone="empty" title="选择后加载流水明细" /> : null}
+                    {selected && detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
+                    {selected && rows.length > 0 ? (
                       <TableContainer>
                         <Table size="small" aria-label={`${accountLabel(batch)}流水`}>
                           <TableHead>

@@ -44,6 +44,7 @@ class TaxOffsetService:
         summary = self._calculate_from_month_snapshot(
             month=month,
             month_snapshot=month_snapshot,
+            selected_output_ids=default_selected_output_ids,
             selected_input_ids=default_selected_input_ids,
         )["summary"]
         return {
@@ -71,6 +72,31 @@ class TaxOffsetService:
         return self._calculate_from_month_snapshot(
             month=month,
             month_snapshot=month_snapshot,
+            selected_output_ids=selected_output_ids,
+            selected_input_ids=selected_input_ids,
+        )
+
+    def calculate_from_month_payload(
+        self,
+        *,
+        month: str,
+        month_payload: dict[str, Any],
+        selected_output_ids: list[str],
+        selected_input_ids: list[str],
+    ) -> dict[str, object]:
+        input_plan_items = month_payload.get("input_plan_items")
+        if not isinstance(input_plan_items, list):
+            input_plan_items = month_payload.get("input_items")
+        month_snapshot = {
+            "output_items": list(month_payload.get("output_items") or []),
+            "input_plan_items": list(input_plan_items or []),
+            "certified_items": list(month_payload.get("certified_items") or []),
+            "locked_certified_input_ids": list(month_payload.get("locked_certified_input_ids") or []),
+        }
+        return self._calculate_from_month_snapshot(
+            month=month,
+            month_snapshot=month_snapshot,
+            selected_output_ids=selected_output_ids,
             selected_input_ids=selected_input_ids,
         )
 
@@ -79,15 +105,22 @@ class TaxOffsetService:
         *,
         month: str,
         month_snapshot: dict[str, Any],
+        selected_output_ids: list[str],
         selected_input_ids: list[str],
     ) -> dict[str, object]:
         locked_ids = set(month_snapshot["locked_certified_input_ids"])
+        selected_output_id_set = set(selected_output_ids)
+        selected_output_items = [
+            item
+            for item in month_snapshot["output_items"]
+            if item["id"] in selected_output_id_set
+        ]
         selected_uncertified_input = [
             item
             for item in month_snapshot["input_plan_items"]
             if item["id"] in selected_input_ids and item["id"] not in locked_ids
         ]
-        output_tax = sum((self._to_decimal(item["tax_amount"]) for item in month_snapshot["output_items"]), start=ZERO)
+        output_tax = sum((self._to_decimal(item["tax_amount"]) for item in selected_output_items), start=ZERO)
         certified_input_tax = sum((self._certified_tax_amount(item) for item in month_snapshot["certified_items"]), start=ZERO)
         planned_input_tax = sum((self._to_decimal(item["tax_amount"]) for item in selected_uncertified_input), start=ZERO)
         input_tax = certified_input_tax + planned_input_tax
@@ -97,7 +130,7 @@ class TaxOffsetService:
 
         return {
             "month": month,
-            "selected_output_ids": [item["id"] for item in month_snapshot["output_items"]],
+            "selected_output_ids": [item["id"] for item in selected_output_items],
             "selected_input_ids": list(selected_input_ids),
             "summary": {
                 "output_tax": self._format_money(output_tax),

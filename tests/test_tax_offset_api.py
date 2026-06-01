@@ -106,7 +106,11 @@ class TaxOffsetApiTests(unittest.TestCase):
             calls.append(month)
             return tax_offset_payload(month, output_count=1, input_count=2, certified_count=0)
 
-        app._tax_api_routes = SimpleNamespace(get_tax_offset=build_tax_offset)
+        app._tax_offset_service = SimpleNamespace(
+            get_month_payload=build_tax_offset,
+            clear_month_cache=lambda *_args, **_kwargs: None,
+        )
+        app._tax_offset_dependency_key = None
 
         with patch("builtins.print") as print_mock:
             first_response = app.handle_request("GET", "/api/tax-offset?month=2026-05")
@@ -229,7 +233,7 @@ class TaxOffsetApiTests(unittest.TestCase):
             ],
         )
 
-        with patch.object(app, "_invalidate_tax_offset_read_model_scopes") as invalidate:
+        with patch.object(app._import_processing_service, "_invalidate_tax_offset_read_model_scopes") as invalidate:
             response = app.handle_request(
                 "POST",
                 "/imports/confirm",
@@ -257,7 +261,7 @@ class TaxOffsetApiTests(unittest.TestCase):
             ],
         )
 
-        with patch.object(app, "_invalidate_tax_offset_read_model_scopes") as invalidate:
+        with patch.object(app._import_processing_service, "_invalidate_tax_offset_read_model_scopes") as invalidate:
             response = app.handle_request(
                 "POST",
                 "/imports/confirm",

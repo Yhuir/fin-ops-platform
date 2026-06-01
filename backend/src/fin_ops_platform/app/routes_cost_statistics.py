@@ -1,0 +1,230 @@
+from __future__ import annotations
+
+from datetime import datetime
+from http import HTTPStatus
+from time import monotonic
+from typing import Any, Callable
+
+
+class CostStatisticsApiRoutes:
+    def __init__(
+        self,
+        *,
+        query_service: Any,
+        cost_statistics_service: Any,
+        json_response: Callable[[HTTPStatus, dict[str, Any]], Any],
+        file_response: Callable[[str, bytes], Any],
+        metric_emitter: Callable[..., None] | None = None,
+        entry_count: Callable[[dict[str, Any]], int] | None = None,
+        duration_ms: Callable[[float], float] | None = None,
+        now_provider: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._query_service = query_service
+        self._cost_statistics_service = cost_statistics_service
+        self._json_response = json_response
+        self._file_response = file_response
+        self._metric_emitter = metric_emitter
+        self._entry_count = entry_count or _explorer_entry_count
+        self._duration_ms = duration_ms or (lambda started_at: (monotonic() - started_at) * 1000)
+        self._now_provider = now_provider or datetime.now
+
+    def handle_month(self, month: str | None, project_scope: str | None) -> Any:
+        current_month = month or self._now_provider().strftime("%Y-%m")
+        try:
+            normalized_project_scope = self._normalize_project_scope(project_scope)
+            payload, _cache_hit = self._query_service.get_month_statistics(current_month, normalized_project_scope)
+        except ValueError as error:
+            return self._project_scope_error_response(error)
+        status = (
+            HTTPStatus.ACCEPTED
+            if payload.get("read_model_status") == "refreshing" and not payload.get("rows")
+            else HTTPStatus.OK
+        )
+        return self._json_response(status, payload)
+
+    def handle_explorer(self, month: str | None, project_scope: str | None) -> Any:
+        current_month = month or self._now_provider().strftime("%Y-%m")
+        started_at = monotonic()
+        cache_hit = False
+        try:
+            normalized_project_scope = self._normalize_project_scope(project_scope)
+            payload, cache_hit = self._query_service.get_explorer(current_month, normalized_project_scope)
+        except ValueError as error:
+            return self._project_scope_error_response(error)
+        if self._metric_emitter is not None:
+            self._metric_emitter(
+                month=current_month,
+                project_scope=normalized_project_scope,
+                cache_hit=cache_hit,
+                duration_ms=self._duration_ms(started_at),
+                entry_count=self._entry_count(payload),
+            )
+        status = (
+            HTTPStatus.ACCEPTED
+            if payload.get("read_model_status") == "refreshing" and not payload.get("time_rows")
+            else HTTPStatus.OK
+        )
+        return self._json_response(status, payload)
+
+    def handle_project(self, month: str | None, project_name: str, project_scope: str | None) -> Any:
+        current_month = month or self._now_provider().strftime("%Y-%m")
+        try:
+            payload = self._cost_statistics_service.get_project_statistics(
+                current_month,
+                project_name,
+                project_scope=project_scope or "active",
+            )
+        except ValueError as error:
+            return self._project_scope_error_response(error)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def handle_export(
+        self,
+        *,
+        month: str | None,
+        view: str | None,
+        project_names: list[str] | None,
+        expense_types: list[str] | None,
+        transaction_id: str | None,
+        start_month: str | None = None,
+        end_month: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        aggregate_by: str | None = None,
+        include_oa_details: bool = True,
+        include_invoice_details: bool = True,
+        include_exception_rows: bool = True,
+        include_ignored_rows: bool = True,
+        include_expense_content_summary: bool = True,
+        sort_by: str | None = None,
+        project_scope: str | None = None,
+    ) -> Any:
+        current_month = month or self._now_provider().strftime("%Y-%m")
+        if view not in {"month", "time", "project", "expense_type", "transaction"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_cost_statistics_export_request", "message": "view must be month, time, project, expense_type, or transaction."},
+            )
+        try:
+            filename, content = self._cost_statistics_service.export_view(
+                month=current_month,
+                view=view,
+                project_names=project_names,
+                expense_types=expense_types,
+                transaction_id=transaction_id,
+                start_month=start_month,
+                end_month=end_month,
+                start_date=start_date,
+                end_date=end_date,
+                aggregate_by=aggregate_by,
+                include_oa_details=include_oa_details,
+                include_invoice_details=include_invoice_details,
+                include_exception_rows=include_exception_rows,
+                include_ignored_rows=include_ignored_rows,
+                include_expense_content_summary=include_expense_content_summary,
+                sort_by=sort_by or "time",
+                project_scope=project_scope or "active",
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
+            )
+        except ValueError as error:
+            if str(error) == "project_scope must be active or all":
+                return self._project_scope_error_response(error)
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_cost_statistics_export_request", "message": str(error)},
+            )
+        return self._file_response(filename, content)
+
+    def handle_export_preview(
+        self,
+        *,
+        month: str | None,
+        view: str | None,
+        project_names: list[str] | None,
+        expense_types: list[str] | None,
+        start_month: str | None = None,
+        end_month: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        aggregate_by: str | None = None,
+        project_scope: str | None = None,
+    ) -> Any:
+        current_month = month or self._now_provider().strftime("%Y-%m")
+        if view not in {"time", "project", "expense_type"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_cost_statistics_export_preview_request",
+                    "message": "view must be time, project, or expense_type.",
+                },
+            )
+        try:
+            payload = self._cost_statistics_service.get_export_preview(
+                month=current_month,
+                view=view,
+                project_names=project_names,
+                expense_types=expense_types,
+                start_month=start_month,
+                end_month=end_month,
+                start_date=start_date,
+                end_date=end_date,
+                aggregate_by=aggregate_by,
+                project_scope=project_scope or "active",
+            )
+        except ValueError as error:
+            if str(error) == "project_scope must be active or all":
+                return self._project_scope_error_response(error)
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_cost_statistics_export_preview_request", "message": str(error)},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def handle_transaction(self, transaction_id: str, project_scope: str | None) -> Any:
+        try:
+            payload = self._cost_statistics_service.get_transaction_detail(
+                transaction_id,
+                project_scope=project_scope or "active",
+            )
+        except ValueError as error:
+            return self._project_scope_error_response(error)
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    @staticmethod
+    def _normalize_project_scope(project_scope: str | None) -> str:
+        normalized_project_scope = str(project_scope or "active").strip().lower()
+        if normalized_project_scope not in {"active", "all"}:
+            raise ValueError("project_scope must be active or all")
+        return normalized_project_scope
+
+    def _project_scope_error_response(self, error: ValueError) -> Any:
+        return self._json_response(
+            HTTPStatus.BAD_REQUEST,
+            {
+                "error": "invalid_cost_statistics_project_scope",
+                "message": str(error),
+            },
+        )
+
+
+def _explorer_entry_count(payload: dict[str, Any]) -> int:
+    time_rows = payload.get("time_rows")
+    if isinstance(time_rows, list):
+        return len(time_rows)
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        raw_count = summary.get("transaction_count", summary.get("row_count", 0))
+        try:
+            return int(raw_count)
+        except (TypeError, ValueError):
+            return 0
+    return 0

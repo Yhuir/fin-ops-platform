@@ -867,7 +867,8 @@ class PostgresReadModelRepository:
                         %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s,
-                        %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s
                     )
                     on conflict (tenant_id, transaction_id) do update set
                         scope_key = excluded.scope_key,

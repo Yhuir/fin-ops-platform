@@ -417,6 +417,17 @@ describe("Cost statistics page", () => {
     expect(await screen.findByText("成本统计数据加载失败，请稍后重试。")).toBeInTheDocument();
   });
 
+  test("shows read model refreshing state without treating empty accepted payload as final empty data", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    installMockApiFetch({ costRefreshingMonths: ["2026-03"] });
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    expect(await screen.findByText("成本统计读模型正在刷新，当前结果生成后会自动更新。")).toBeInTheDocument();
+    expect(screen.queryByText("当前时间范围没有可用于成本统计的支出流水。")).not.toBeInTheDocument();
+  });
+
   test("opens export center in time view with exact date range and shows export feedback inside the modal", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();

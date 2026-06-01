@@ -6,7 +6,10 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application, build_application
-from fin_ops_platform.app.worker import _run_workbench_matching_dirty_queue_loop
+from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
+    WorkbenchMatchingDirtyScopeWorker,
+    WorkbenchMatchingDirtyScopeWorkerConfig,
+)
 from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
 from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
@@ -1541,38 +1544,47 @@ class WorkbenchWriteWorkerTriggerCharacterizationTests(unittest.TestCase):
         thread_class.return_value.start.assert_called_once()
 
     def test_standalone_matching_loop_honors_max_iterations_without_sleeping_after_final_iteration(self) -> None:
-        class FakeApplication:
+        class FakeDirtyQueue:
             def __init__(self) -> None:
                 self.calls: list[dict[str, object]] = []
 
-            def _rebuild_workbench_matching_dirty_scopes_once(self, **kwargs) -> None:
+            def claim_due_scopes(self, **kwargs) -> list[str]:
                 self.calls.append(dict(kwargs))
+                return []
 
-        application = FakeApplication()
-
-        with patch("fin_ops_platform.app.worker.sleep") as sleep:
-            _run_workbench_matching_dirty_queue_loop(
-                application,
+        dirty_queue = FakeDirtyQueue()
+        sleep_calls: list[float] = []
+        worker = WorkbenchMatchingDirtyScopeWorker(
+            dirty_queue=dirty_queue,
+            matching_orchestrator=object(),
+            source_versions_provider=lambda: {},
+            heartbeat_recorder=object(),
+            config=WorkbenchMatchingDirtyScopeWorkerConfig(
                 worker_id="worker-test",
                 poll_interval_seconds=0,
                 batch_size=3,
                 lease_seconds=120,
                 retry_delay_seconds=15,
                 max_iterations=1,
-            )
+                request_id_factory=lambda: "request-test",
+            ),
+            sleep=sleep_calls.append,
+        )
+
+        worker.run_forever()
 
         self.assertEqual(
-            application.calls,
+            dirty_queue.calls,
             [
                 {
                     "worker_id": "worker-test",
                     "limit": 3,
                     "lease_seconds": 120,
-                    "retry_delay_seconds": 15,
+                    "request_id": "request-test",
                 }
             ],
         )
-        sleep.assert_not_called()
+        self.assertEqual(sleep_calls, [])
 
 
 if __name__ == "__main__":

@@ -1634,11 +1634,69 @@ export default function BankDetailsPage() {
     setSearchInput(value);
   };
 
+  const applyOptimisticCategoryChoice = (row: BankDetailTransaction, choice: ConfirmationChoice) => {
+    const labelPath = choice.labelPath.length
+      ? choice.labelPath
+      : [choice.primaryLabel, choice.subLabel, choice.thirdLabel].filter((value): value is string => Boolean(value));
+    const categoryLabel = labelPath.join(" / ") || choice.categoryCode;
+    const nextRow: BankDetailTransaction = {
+      ...row,
+      categoryCode: choice.categoryCode,
+      categoryLabel,
+      categoryPath: labelPath,
+      categoryPrimaryLabel: choice.primaryLabel,
+      categorySubLabel: choice.subLabel,
+      categoryThirdLabel: choice.thirdLabel,
+      categoryLabelPath: labelPath,
+      categorySource: "manual",
+      categoryResolutionStatus: "manual_confirmed",
+      manualConfirmedCategoryCode: choice.categoryCode,
+      effectiveCategoryCode: choice.categoryCode,
+      effectiveCategoryLabel: categoryLabel,
+      effectiveCategoryPath: labelPath,
+      effectiveCategoryPrimaryLabel: choice.primaryLabel,
+      effectiveCategorySubLabel: choice.subLabel,
+      effectiveCategoryThirdLabel: choice.thirdLabel,
+      effectiveCategoryLabelPath: labelPath,
+      effectiveCategorySource: "manual",
+    };
+    const rowStillVisible = (() => {
+      if (selectedCategoryFilter.kind === "uncategorized") {
+        return false;
+      }
+      if (selectedCategoryFilter.kind === "tag") {
+        return selectedCategoryFilter.code === choice.categoryCode;
+      }
+      if (selectedCategoryFilter.kind === "primary") {
+        return selectedCategoryFilter.primaryLabel === choice.primaryLabel;
+      }
+      return true;
+    })();
+    setRows((currentRows) => (
+      rowStillVisible
+        ? currentRows.map((currentRow) => (currentRow.id === row.id ? nextRow : currentRow))
+        : currentRows.filter((currentRow) => currentRow.id !== row.id)
+    ));
+    setRowCount((current) => (rowStillVisible ? current : Math.max(0, current - 1)));
+    setCategoryCounts((current) => ({
+      ...current,
+      uncategorized: Math.max(0, Number(current.uncategorized ?? 0) - 1),
+      [choice.categoryCode]: Number(current[choice.categoryCode] ?? 0) + 1,
+    }));
+  };
+
   const handleConfirmCategory = (row: BankDetailTransaction, choice: ConfirmationChoice) => {
     setCategoryMutationId(row.id);
     setError(null);
     confirmBankDetailCategory(row.id, choice.categoryCode, choice.thirdLabel)
-      .then(() => setRefreshToken((current) => current + 1))
+      .then(() => {
+        applyOptimisticCategoryChoice(row, choice);
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
+          affectedRowIds: [row.id],
+          action: "bank_detail_category_confirmed",
+        });
+        setRefreshToken((current) => current + 1);
+      })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签确认失败。"))
       .finally(() => setCategoryMutationId(null));
   };
@@ -1657,7 +1715,14 @@ export default function BankDetailsPage() {
       }
       : {};
     assignBankDetailCategory(row.id, choice.categoryCode, structuredSelection)
-      .then(() => setRefreshToken((current) => current + 1))
+      .then(() => {
+        applyOptimisticCategoryChoice(row, choice);
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
+          affectedRowIds: [row.id],
+          action: "bank_detail_category_manually_assigned",
+        });
+        setRefreshToken((current) => current + 1);
+      })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签设置失败。"))
       .finally(() => setCategoryMutationId(null));
   };

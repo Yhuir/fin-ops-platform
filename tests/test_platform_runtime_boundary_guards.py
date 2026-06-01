@@ -169,6 +169,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         pending_invoice_paths = {
             SERVICES_ROOT / "pending_invoice_service.py",
             SERVICES_ROOT / "pending_invoice_rules.py",
+            SERVICES_ROOT / "pending_invoice_lifecycle_service.py",
+            SERVICES_ROOT / "pending_invoice_read_model_service.py",
+            SERVICES_ROOT / "pending_invoice_rules_application_service.py",
             SERVICES_ROOT / "search_pending_sql_projection.py",
             SERVICES_ROOT / "search_pending_read_model_refresh.py",
         }
@@ -187,6 +190,39 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"{_relative(path)} imports {imported_forbidden}")
 
         self.assertEqual(violations, [])
+
+    def test_server_no_longer_owns_pending_invoice_read_model_builder_or_gate(self) -> None:
+        source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        forbidden_symbols = {
+            "def _get_pending_invoice_rows_from_sql_read_model",
+            "def _get_pending_invoice_all_rows_from_sql_read_model",
+            "def _pending_invoice_expected_source_versions",
+            "def _pending_invoice_refreshing_payload",
+            "def _pending_invoice_sql_payload_response",
+            "def _enqueue_pending_invoice_read_model_refresh",
+            "def _record_pending_invoice_manual_invoice_audit",
+            "def _finalize_pending_invoice_manual_invoice",
+            "def rebuild_pending_invoice_read_model_scope",
+        }
+        violations = [symbol for symbol in sorted(forbidden_symbols) if symbol in source]
+
+        self.assertEqual(violations, [])
+
+    def test_server_no_longer_owns_import_confirm_processors(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        service_source = (SERVICES_ROOT / "import_processing_service.py").read_text(encoding="utf-8")
+        forbidden_server_snippets = {
+            "self._import_service.confirm_import(",
+            "self._tax_certified_import_service.confirm_session(",
+            "self._file_import_service.confirm_session(",
+            "self._etc_service.confirm_import_session_with_progress(",
+        }
+        violations = [snippet for snippet in sorted(forbidden_server_snippets) if snippet in server_source]
+
+        self.assertEqual(violations, [])
+        self.assertIn("class ImportProcessingService", service_source)
+        self.assertIn("def execute_file_import_confirm_job", service_source)
+        self.assertIn("def execute_etc_invoice_import_confirm_job", service_source)
 
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
@@ -262,6 +298,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/services/workbench_matching_rules.py",
             "backend/src/fin_ops_platform/services/workbench_candidate_match_service.py",
             "backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_service.py",
+            "backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py",
             "backend/src/fin_ops_platform/services/workbench_amount_check_service.py",
             "backend/src/fin_ops_platform/services/workbench_special_pair_rule_service.py",
             "backend/src/fin_ops_platform/services/workbench_special_rule_detectors.py",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
@@ -114,6 +115,43 @@ def runtime_event(scope_key: str) -> RuntimeQueueEvent:
 
 
 class BankDetailSqlRepositoryTests(unittest.TestCase):
+    def test_save_bank_detail_rows_keeps_insert_placeholders_aligned_with_record(self) -> None:
+        connection = FakeConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_bank_detail_rows(
+            scope_key="2026-05",
+            rows=[
+                {
+                    "transaction_id": "txn-001",
+                    "trade_time_sort": "2026-05-03T10:00:00+00:00",
+                    "category_resolution_status": "auto_matched",
+                    "relation_tags": ["oa"],
+                    "generated_at": "2026-05-25T00:00:00+00:00",
+                    "source_versions": {"source_version": 7},
+                }
+            ],
+        )
+
+        insert_calls = [
+            (sql, params)
+            for method, sql, params in connection.calls
+            if method == "execute" and "insert into read_model.bank_detail_rows" in sql
+        ]
+        self.assertEqual(len(insert_calls), 1)
+        insert_sql, params = insert_calls[0]
+        columns_match = re.search(
+            r"insert into read_model\.bank_detail_rows\s*\((.*?)\)\s*values",
+            insert_sql,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        self.assertIsNotNone(columns_match)
+        insert_columns = [column.strip() for column in columns_match.group(1).split(",") if column.strip()]
+        placeholder_count = len(re.findall(r"%s", insert_sql))
+        self.assertEqual(len(insert_columns), len(params))
+        self.assertEqual(placeholder_count, len(params))
+        self.assertEqual(len(params), 72)
+
     def test_transactions_return_none_when_month_scope_is_missing(self) -> None:
         connection = FakeConnection(rows=[[]])
         repository = PostgresReadModelRepository(connection)

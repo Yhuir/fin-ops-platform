@@ -388,8 +388,17 @@ GET /api/pending-invoices/export
 - stale/dirty 或 `source_versions` 过期但已有可用 SQL 行：`200 OK`，返回最近一次稳定行数据，`read_model_status=refreshing` 或 `stale`，由后台 worker 收敛新版本；读请求不得重复写 dirty scope/outbox。
 - missing 或 schema 不兼容：`202 Accepted`、`rows=[]`、`read_model_status=refreshing`，enqueue `pending_invoice.read_model.refresh`。
 - API 热路径不得因 read model miss/stale 同步扫描全量事实。
+- SQL read model repository 未配置是运行时配置错误，接口返回 `503` 和 `pending_invoice_read_model_unavailable`，不得静默 fallback 到 `PendingInvoiceQueryService.list_rows`。
+- `rows`、`filter-options`、`export-preview`、`export` 都只通过 pending invoice read model service 判定 fresh/refreshing；只有 fresh 时才使用既有 query service 将 read model 行转换为筛选项或导出内容。
 
 实现阶段需要扩展 SQL query columns 和索引，至少覆盖 `status_code`、`seller_name`、`invoice_total`、`oa_applicant`、`project_name` 和筛选/排序需要的日期金额字段。
+
+## 后端实现边界
+
+- `server.py` 只负责路由匹配、权限解析、body 解析、错误转换和 `Response` 包装。
+- 待找发票 read model gate、scope key、source_versions、refreshing payload 和 enqueue refresh 由 `PendingInvoiceReadModelService` 维护。
+- 规则 GET/PUT 编排由 `PendingInvoiceRulesApplicationService` 维护；旧客户端提交的 `requires_invoice` 只作为兼容输入被忽略，最终返回和持久化事实以后端补集为准。
+- 页面 API 编排由 `routes_pending_invoices.py` 维护；候选发票、关系详情、对象详情、补票、选择已有发票和收入人工标记继续复用现有 query/application service，不重复实现业务规则。
 
 ## Redis / RabbitMQ 边界
 

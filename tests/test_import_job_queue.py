@@ -16,6 +16,39 @@ from fin_ops_platform.services.import_job_queue import (
     ImportJobRepository,
     ImportJobWorker,
 )
+from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
+
+
+def build_multipart_payload(
+    *,
+    imported_by: str,
+    files: list[MockImportFile],
+) -> tuple[bytes, dict[str, str]]:
+    boundary = "----finops-import-job-tax-certified-boundary"
+    chunks: list[bytes] = []
+
+    def add_text(name: str, value: str) -> None:
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        chunks.append(value.encode("utf-8"))
+        chunks.append(b"\r\n")
+
+    def add_file(name: str, file: MockImportFile) -> None:
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(
+            (
+                f'Content-Disposition: form-data; name="{name}"; filename="{file.name}"\r\n'
+                "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n"
+            ).encode("utf-8")
+        )
+        chunks.append(file.content)
+        chunks.append(b"\r\n")
+
+    add_text("imported_by", imported_by)
+    for file in files:
+        add_file("files", file)
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(chunks), {"Content-Type": f"multipart/form-data; boundary={boundary}"}
 
 
 class FakeTransaction:
@@ -307,6 +340,70 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(queue.enqueued[0]["event_type"], IMPORT_PROCESS_REQUESTED_EVENT)
         batch_response = app.handle_request("GET", f"/imports/batches/{batch_id}")
         self.assertNotEqual(json.loads(batch_response.body)["batch"]["status"], "completed")
+
+    def test_tax_certified_import_confirm_queue_result_can_be_polled(self) -> None:
+        app = build_application()
+        queue = FakeRuntimeQueue()
+        import_jobs = FakeApplicationImportJobRepository()
+        app._runtime_repositories = SimpleNamespace(  # noqa: SLF001
+            queue_repository=queue,
+            queue_settings=SimpleNamespace(backend="rabbitmq"),
+        )
+        app._import_job_repository = import_jobs  # noqa: SLF001
+        preview_body, preview_headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            files=[CERTIFIED_JAN],
+        )
+        preview_response = app.handle_request(
+            "POST",
+            "/api/tax-offset/certified-import/preview",
+            body=preview_body,
+            headers=preview_headers,
+        )
+        session_id = json.loads(preview_response.body)["session"]["id"]
+
+        with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "rabbitmq"}):
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/confirm",
+                json.dumps({"session_id": session_id}),
+            )
+
+        self.assertEqual(confirm_response.status_code, 202)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertEqual(confirm_payload["status"], "queued")
+        self.assertEqual(confirm_payload["import_job"]["import_type"], "tax_certified_import.confirm")
+        self.assertEqual(import_jobs.created[0]["idempotency_key"], f"tax_certified_import.confirm:{session_id}")
+        self.assertEqual(queue.enqueued[0]["event_type"], IMPORT_PROCESS_REQUESTED_EVENT)
+
+        batch_payload = {
+            "id": "tax-certified-batch-1",
+            "session_id": session_id,
+            "imported_by": "user_finance_01",
+            "file_count": 1,
+            "months": ["2026-01"],
+            "persisted_record_count": 2,
+        }
+        app._import_job_repository = SimpleNamespace(  # noqa: SLF001
+            get_job=lambda import_job_id: import_job(
+                import_job_id=import_job_id,
+                import_type="tax_certified_import.confirm",
+                import_session_id=session_id,
+                status="succeeded",
+                stage="succeeded",
+                result_payload={"success": True, "batch": batch_payload},
+            )
+        )
+
+        status_response = app.handle_request(
+            "GET",
+            f"/api/tax-offset/certified-import/jobs/{confirm_payload['import_job']['import_job_id']}",
+        )
+
+        self.assertEqual(status_response.status_code, 200)
+        status_payload = json.loads(status_response.body)
+        self.assertEqual(status_payload["import_job"]["status"], "succeeded")
+        self.assertEqual(status_payload["import_job"]["result_payload"]["batch"]["persisted_record_count"], 2)
 
     def test_application_import_processor_registry_runs_general_import_confirm(self) -> None:
         app = build_application()

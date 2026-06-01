@@ -121,6 +121,17 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         heartbeat_stale_after_seconds=900,
     ),
     RuntimeWorkerRegistration(
+        instance_name="etc-business-oa-detection",
+        worker_kind="etc-business-oa-detection",
+        handler_flags=("--enable-etc-business-oa-detection",),
+        event_types=("etc_business.oa_detection.refresh",),
+        required=True,
+        rabbitmq_eligible=True,
+        env_example="fin-ops.worker.etc-business-oa-detection.env.example",
+        rabbitmq_env_example="fin-ops.worker.etc-business-oa-detection-rabbitmq.env.example",
+        dependencies=("postgres", "oa_projection"),
+    ),
+    RuntimeWorkerRegistration(
         instance_name="bank-account-balance",
         worker_kind="bank-account-balance-read-model",
         handler_flags=("--enable-bank-account-balance-read-model-refresh",),

@@ -197,6 +197,65 @@ describe("etc api", () => {
     });
   });
 
+  test("maps business-batch detail invoice items from backend envelope with nullable detection fields", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        ok: true,
+        data: {
+          businessBatch: {
+            businessBatchId: "etc_business_batch_0001",
+            taskId: "ETC-TASK-001",
+            status: "imported",
+            version: 3,
+            oaDetectionError: null,
+            oaDetectionStartedAt: null,
+            oaDetectionNextRunAt: null,
+            oaDetectionDeadlineAt: null,
+            oaDetectionFinalRetryUntil: null,
+            invoiceSummary: { count: 1, amount: "13.07" },
+            invoiceItems: [
+              {
+                id: "etc_invoice_0001",
+                invoice_number: "ETC001",
+                issue_date: "2026-02-27",
+                plate_number: "云ADA0381",
+                total_amount: "13.07",
+                status: "unsubmitted",
+                has_pdf: true,
+                has_xml: true,
+              },
+            ],
+          },
+        },
+        error: null,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+    global.fetch = fetchMock as typeof fetch;
+
+    const detail = await fetchEtcBusinessBatchDetail("etc_business_batch_0001");
+
+    expect(detail).toMatchObject({
+      businessBatchId: "etc_business_batch_0001",
+      status: "imported",
+      oaDetectionError: "",
+      oaDetectionStartedAt: "",
+      oaDetectionNextRunAt: "",
+      oaDetectionDeadlineAt: "",
+      oaDetectionFinalRetryUntil: "",
+    });
+    expect(detail.invoiceItems).toEqual([
+      expect.objectContaining({
+        id: "etc_invoice_0001",
+        invoiceNumber: "ETC001",
+        plateNumber: "云ADA0381",
+        totalAmount: "13.07",
+        hasPdf: true,
+        hasXml: true,
+      }),
+    ]);
+  });
+
   test("requires a reason for business-batch manual OA fallback", async () => {
     await expect(manualEtcBusinessBatchOaStatus("etc_business_batch_0001", {
       decision: "not_submitted",

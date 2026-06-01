@@ -1,5 +1,7 @@
 import type {
   TaxCertifiedImportConfirmResult,
+  TaxCertifiedImportConfirmedResult,
+  TaxCertifiedImportJob,
   TaxCertifiedImportPreviewFile,
   TaxCertifiedImportPreviewResult,
   TaxCertifiedImportPreviewRow,
@@ -69,6 +71,10 @@ type ApiTaxMonthPayload = {
   default_selected_output_ids: string[];
   default_selected_input_ids: string[];
   summary: ApiTaxSummary;
+  read_model_status?: string;
+  read_model_scope_key?: string;
+  read_model_generated_at?: string | null;
+  read_model_stale_reasons?: string[];
 };
 
 type ApiTaxCalculatePayload = {
@@ -121,16 +127,40 @@ type ApiTaxCertifiedImportPreviewPayload = {
   };
 };
 
+type ApiTaxCertifiedImportBatch = {
+  id: string;
+  session_id: string;
+  imported_by: string;
+  file_count: number;
+  months: string[];
+  persisted_record_count: number;
+};
+
+type ApiTaxCertifiedImportJob = {
+  import_job_id: string;
+  tenant_id?: string;
+  import_type: string;
+  import_session_id?: string | null;
+  source_file_id?: string | null;
+  status: string;
+  stage: string;
+  priority?: string;
+  attempt_count?: number;
+  max_attempts?: number;
+  last_error?: string | null;
+  trace_id?: string | null;
+  result_payload?: Record<string, unknown>;
+};
+
 type ApiTaxCertifiedImportConfirmPayload = {
-  success: boolean;
-  batch: {
-    id: string;
-    session_id: string;
-    imported_by: string;
-    file_count: number;
-    months: string[];
-    persisted_record_count: number;
-  };
+  status?: "confirmed" | "queued" | string;
+  success?: boolean;
+  batch?: ApiTaxCertifiedImportBatch;
+  import_job?: ApiTaxCertifiedImportJob;
+};
+
+type ApiTaxCertifiedImportJobPayload = {
+  import_job: ApiTaxCertifiedImportJob;
 };
 
 function parseMoney(value: string) {
@@ -246,6 +276,36 @@ function mapPreviewFile(file: ApiTaxCertifiedImportPreviewFile): TaxCertifiedImp
   };
 }
 
+function mapCertifiedImportBatch(batch: ApiTaxCertifiedImportBatch): TaxCertifiedImportConfirmedResult {
+  return {
+    status: "confirmed",
+    batchId: batch.id,
+    sessionId: batch.session_id,
+    importedBy: batch.imported_by,
+    fileCount: batch.file_count,
+    months: batch.months,
+    persistedRecordCount: batch.persisted_record_count,
+  };
+}
+
+function mapImportJob(job: ApiTaxCertifiedImportJob): TaxCertifiedImportJob {
+  return {
+    importJobId: job.import_job_id,
+    tenantId: job.tenant_id,
+    importType: job.import_type,
+    importSessionId: job.import_session_id ?? null,
+    sourceFileId: job.source_file_id ?? null,
+    status: job.status,
+    stage: job.stage,
+    priority: job.priority,
+    attemptCount: job.attempt_count,
+    maxAttempts: job.max_attempts,
+    lastError: job.last_error ?? null,
+    traceId: job.trace_id ?? null,
+    resultPayload: job.result_payload,
+  };
+}
+
 export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): Promise<TaxMonthData> {
   const payload = await requestJson<ApiTaxMonthPayload>(`/api/tax-offset?month=${month}`, {
     method: "GET",
@@ -266,6 +326,10 @@ export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): 
     defaultSelectedOutputIds: payload.default_selected_output_ids,
     defaultSelectedInputIds: payload.default_selected_input_ids,
     summary: mapSummary(payload.summary),
+    readModelStatus: payload.read_model_status,
+    readModelScopeKey: payload.read_model_scope_key,
+    readModelGeneratedAt: payload.read_model_generated_at,
+    readModelStaleReasons: payload.read_model_stale_reasons ?? [],
   };
 }
 
@@ -325,12 +389,51 @@ export async function confirmTaxCertifiedImport(sessionId: string): Promise<TaxC
     }),
   });
 
-  return {
-    batchId: payload.batch.id,
-    sessionId: payload.batch.session_id,
-    importedBy: payload.batch.imported_by,
-    fileCount: payload.batch.file_count,
-    months: payload.batch.months,
-    persistedRecordCount: payload.batch.persisted_record_count,
-  };
+  if (payload.status === "queued" || payload.import_job) {
+    if (!payload.import_job) {
+      throw new Error("Queued tax certified import response is missing import_job.");
+    }
+    return {
+      status: "queued",
+      importJob: mapImportJob(payload.import_job),
+    };
+  }
+  if (!payload.batch) {
+    throw new Error("Confirmed tax certified import response is missing batch.");
+  }
+  return mapCertifiedImportBatch(payload.batch);
+}
+
+export async function fetchTaxCertifiedImportJob(importJobId: string): Promise<TaxCertifiedImportJob> {
+  const payload = await requestJson<ApiTaxCertifiedImportJobPayload>(
+    `/api/tax-offset/certified-import/jobs/${encodeURIComponent(importJobId)}`,
+    { method: "GET" },
+  );
+  return mapImportJob(payload.import_job);
+}
+
+export function taxCertifiedImportConfirmedFromJob(job: TaxCertifiedImportJob): TaxCertifiedImportConfirmedResult | null {
+  const batch = job.resultPayload?.batch;
+  if (!batch || typeof batch !== "object") {
+    return null;
+  }
+  const candidate = batch as Partial<ApiTaxCertifiedImportBatch>;
+  if (
+    typeof candidate.id !== "string"
+    || typeof candidate.session_id !== "string"
+    || typeof candidate.imported_by !== "string"
+    || typeof candidate.file_count !== "number"
+    || !Array.isArray(candidate.months)
+    || typeof candidate.persisted_record_count !== "number"
+  ) {
+    return null;
+  }
+  return mapCertifiedImportBatch({
+    id: candidate.id,
+    session_id: candidate.session_id,
+    imported_by: candidate.imported_by,
+    file_count: candidate.file_count,
+    months: candidate.months.filter((item): item is string => typeof item === "string"),
+    persisted_record_count: candidate.persisted_record_count,
+  });
 }

@@ -886,4 +886,169 @@ describe("Tax offset workbench", () => {
     expect(screen.getByRole("checkbox", { name: /11203490/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /11203999/ })).toBeInTheDocument();
   });
+
+  test("shows read model refreshing state without treating empty refreshing payload as no data", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/session/me") {
+        return new Response(JSON.stringify({
+          user: { user_id: "101", username: "liuji", display_name: "刘际涛" },
+          roles: ["finance"],
+          permissions: ["finops:app:view"],
+          allowed: true,
+          can_access_app: true,
+          can_mutate_data: true,
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/tax-offset?month=2026-03") {
+        return new Response(JSON.stringify({
+          month: "2026-03",
+          read_model_status: "refreshing",
+          read_model_scope_key: "2026-03",
+          summary: {
+            output_tax: "0.00",
+            certified_input_tax: "0.00",
+            planned_input_tax: "0.00",
+            input_tax: "0.00",
+            deductible_tax: "0.00",
+            result_label: "本月留抵税额",
+            result_amount: "0.00",
+          },
+          output_items: [],
+          input_plan_items: [],
+          certified_items: [],
+          certified_matched_rows: [],
+          certified_outside_plan_rows: [],
+          locked_certified_input_ids: [],
+          default_selected_output_ids: [],
+          default_selected_input_ids: [],
+        }), { status: 202, headers: { "Content-Type": "application/json" } });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("税金抵扣读模型正在刷新，页面会自动重试。")).toBeInTheDocument();
+    expect(screen.queryByText("当前月份没有可用于计划与试算的发票数据。")).not.toBeInTheDocument();
+  });
+
+  test("keeps certified import modal processing while queued import job completes", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const user = userEvent.setup();
+    let taxFetchCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/session/me") {
+        return new Response(JSON.stringify({
+          user: { user_id: "101", username: "liuji", display_name: "刘际涛" },
+          roles: ["finance"],
+          permissions: ["finops:app:view"],
+          allowed: true,
+          can_access_app: true,
+          can_mutate_data: true,
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/tax-offset?month=2026-03") {
+        taxFetchCount += 1;
+        const certified = taxFetchCount > 1;
+        return new Response(JSON.stringify({
+          month: "2026-03",
+          output_items: [],
+          input_plan_items: [],
+          certified_items: certified ? [{ id: "tc-queued-1", invoice_no: "11203490", seller_name: "设备供应商", issue_date: "2026-03-22", tax_amount: "12,480.00", total_with_tax: "108,480.00", status: "已认证" }] : [],
+          certified_matched_rows: [],
+          certified_outside_plan_rows: certified ? [{ id: "tc-queued-1", invoice_no: "11203490", seller_name: "设备供应商", issue_date: "2026-03-22", tax_amount: "12,480.00", total_with_tax: "108,480.00", status: "已认证" }] : [],
+          locked_certified_input_ids: [],
+          default_selected_output_ids: [],
+          default_selected_input_ids: [],
+          summary: {
+            output_tax: "0.00",
+            certified_input_tax: certified ? "12,480.00" : "0.00",
+            planned_input_tax: "0.00",
+            input_tax: certified ? "12,480.00" : "0.00",
+            deductible_tax: "0.00",
+            result_label: "本月留抵税额",
+            result_amount: certified ? "12,480.00" : "0.00",
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/tax-offset/certified-import/preview") {
+        return new Response(JSON.stringify({
+          session: { id: "tax-certified-session-queued", imported_by: "liuji", file_count: 1, status: "preview_ready" },
+          files: [{
+            id: "tax-certified-file-0001",
+            file_name: "queued.xlsx",
+            month: "2026-03",
+            recognized_count: 1,
+            invalid_count: 0,
+            matched_plan_count: 0,
+            outside_plan_count: 1,
+            rows: [{ id: "tc-queued-1", month: "2026-03", invoice_no: "11203490", seller_name: "设备供应商", issue_date: "2026-03-22", tax_amount: "12,480.00", deductible_tax_amount: "12,480.00", source_file_name: "queued.xlsx", source_row_number: 4 }],
+          }],
+          summary: { recognized_count: 1, invalid_count: 0, matched_plan_count: 0, outside_plan_count: 1 },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/tax-offset/certified-import/confirm") {
+        expect(JSON.parse(String(init?.body))).toEqual({ session_id: "tax-certified-session-queued" });
+        return new Response(JSON.stringify({
+          status: "queued",
+          import_job: {
+            import_job_id: "import-job-tax-1",
+            import_type: "tax_certified_import.confirm",
+            status: "queued",
+            stage: "queued",
+            priority: "normal",
+            attempt_count: 0,
+            max_attempts: 5,
+          },
+        }), { status: 202, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/tax-offset/certified-import/jobs/import-job-tax-1") {
+        return new Response(JSON.stringify({
+          import_job: {
+            import_job_id: "import-job-tax-1",
+            import_type: "tax_certified_import.confirm",
+            status: "succeeded",
+            stage: "succeeded",
+            priority: "normal",
+            attempt_count: 1,
+            max_attempts: 5,
+            result_payload: {
+              success: true,
+              batch: {
+                id: "tax-certified-batch-queued",
+                session_id: "tax-certified-session-queued",
+                imported_by: "liuji",
+                file_count: 1,
+                months: ["2026-03"],
+                persisted_record_count: 1,
+              },
+            },
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "已认证发票导入" }));
+    const modal = screen.getByRole("dialog", { name: "已认证发票导入" });
+    await user.upload(within(modal).getByLabelText("选择已认证发票文件"), new File(["mock"], "queued.xlsx"));
+    await user.click(within(modal).getByRole("button", { name: "预览识别结果" }));
+    expect(await within(modal).findByText(/识别记录\s*1\s*条/)).toBeInTheDocument();
+    await user.click(within(modal).getByRole("button", { name: "确认导入" }));
+
+    expect(await within(modal).findByText("已提交导入任务，正在等待后台确认结果...")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "已认证发票导入" })).not.toBeInTheDocument();
+    });
+    expect(await screen.findByText("已导入 1 条已认证记录，并已刷新当前税金抵扣页面。")).toBeInTheDocument();
+    expect(within(getStatCard("已认证结果进项税额")).getByText("12,480.00")).toBeInTheDocument();
+  });
 });

@@ -119,6 +119,8 @@ OA 详情点击后展示 OA 系统中的原始支付申请信息，支付申请�
 - missing scope 或 schema 不兼容时返回 `202 Accepted`、`read_model_status=refreshing`，并 enqueue `pending_invoice.read_model.refresh`。
 - 读请求不得因为已有 active dirty scope 而重复写 `job.read_model_dirty_scopes` 或 `job.outbox_events`。
 - API 热路径不得因为 read model miss/stale 同步扫描全量流水、发票、OA 和关系事实。
+- SQL read model repository 未配置属于运行时配置错误，接口必须明确返回 `pending_invoice_read_model_unavailable`，不能退回内存事实源或同步 query service。
+- 筛选项、导出预览和导出与列表共享同一个 read model gate；只有 fresh read model 才能继续生成筛选项和文件内容，非 fresh 时返回刷新中状态。
 - RabbitMQ 只作为现有 runtime queue 的生产投递层使用；页面接口和待找发票业务服务不得直接调用 RabbitMQ 客户端。
 - 如未来压测证明 SQL read model 和索引无法满足目标 p95，再设计独立短 TTL cache；cache key 必须绑定 `source_versions`、方向、筛选、分页和排序，并由 derived lifecycle 失效。
 

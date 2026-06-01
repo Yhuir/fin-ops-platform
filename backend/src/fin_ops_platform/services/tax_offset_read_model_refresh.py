@@ -10,10 +10,9 @@ class TaxOffsetReadModelRefreshService:
         self,
         *,
         projection_builder: Any | None = None,
-        application: Any | None = None,
         queue_repository: Any | None = None,
     ) -> None:
-        self._projection_builder = projection_builder if projection_builder is not None else application
+        self._projection_builder = projection_builder
         self._queue_repository = queue_repository
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
@@ -31,7 +30,7 @@ class TaxOffsetReadModelRefreshService:
 
         rebuild = getattr(self._projection_builder, "rebuild_tax_offset_read_model_scope", None)
         if not callable(rebuild):
-            raise RuntimeError("Application does not expose rebuild_tax_offset_read_model_scope.")
+            raise RuntimeError("Tax offset projection builder does not expose rebuild_tax_offset_read_model_scope.")
         result = rebuild(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
 
