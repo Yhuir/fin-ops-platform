@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` 已验证，准备生成 `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
-| 当前 active prompt | 无 active prompt；下一步生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
+| 当前阶段 | 已生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
+| 当前 active prompt | `PF-P052 - Turnover Ledger Write Path Characterization Tests` (`planned`) |
 | 最近 verified prompt | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
 | 最近验证 | PF-P051 只做 discovery/planning；已新增 `turnover-ledger-write-uow-plan.md`；已运行文档检查；未修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests`；PF-P052 必须只补测试，锁定 duplicate/stale/failure 当前行为，不得实现 UoW 或迁移真实写路径 |
+| 下一条允许任务 | 执行 `PF-P052 - Turnover Ledger Write Path Characterization Tests`；PF-P052 必须只补测试，锁定 duplicate/stale/failure 当前行为，不得实现 UoW 或迁移真实写路径 |
 
 ## Prompt 执行日志
 
@@ -5407,6 +5407,33 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `git ls-files --others --exclude-standard`：Pass，仅本轮新增计划文档。
 - `git diff --check`：Pass。
 - `rg -n "PF-P051|Turnover Ledger Write Path|UoW|_after_turnover_relation_mutation|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor`：Pass。
+
+### PF-P052 - Turnover Ledger Write Path Characterization Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只补 Turnover Ledger 写路径 characterization tests。
+- 锁定 tag selection PUT、bank-row-tags batch、relation extra PUT、confirm 和 withdraw 的当前 duplicate/stale/failure side-effect 行为。
+- 不修改 production code，不实现 UoW，不改变真实 API 语义，不迁移 handler，不改 repository、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+- prompt 要求执行前读取状态机、prompt 库、Turnover discovery、PF-P051 write UoW 计划和现有 Turnover API/service tests。
+
+#### 审查结论
+
+- PF-P052 是 PF-P051 后合理的下一条 prompt：PF-P051 已确认写路径 side effects 和事务边界未收敛，不能直接进入 UoW 实现。
+- PF-P052 保持 test-only 边界，用现有 `tests/test_turnover_ledger_api.py`、`tests/test_turnover_relation_service.py` 和测试 helper 锁定当前行为。
+- PF-P052 明确禁止通过删除测试、放宽断言或修改业务代码来获得绿色。
+
+#### 下一步
+
+- 执行 PF-P052。
+- PF-P052 完成后若验证通过，可按自动工作流标记为 `verified`，再决定继续 Turnover write test/contract 切片或进入 cumulative MG。
 
 ## 维护规则
 

@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
 
-状态：`implemented`
+状态：PF-P051 `verified`；PF-P052 `planned`
 
 ## Scope
 
@@ -212,6 +212,20 @@ Current blockers:
 - `confirm`/`withdraw` do not take expected relation versions from the client.
 
 Do not implement UoW until the tests below are added and the repository/port ownership is made explicit.
+
+## PF-P052 Test Slice
+
+`PF-P052 - Turnover Ledger Write Path Characterization Tests` has been generated and reviewed.
+
+PF-P052 must remain test-only. It should lock current duplicate/stale/failure behavior for:
+
+- tag selection PUT;
+- bank-row-tags batch;
+- relation extra PUT;
+- confirm relation;
+- withdraw relation.
+
+PF-P052 must not implement `TurnoverLedgerWriteUnitOfWork`, migrate handlers, change repository semantics, change runtime queue behavior, or modify production configuration.
 
 ## Idempotency / Stale Write / Conflict Baseline
 
