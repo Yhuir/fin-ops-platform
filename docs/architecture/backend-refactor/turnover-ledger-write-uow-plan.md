@@ -822,3 +822,25 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 26 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.
+
+## PF-P069 Tag Selection Transaction-bound Repository Writer
+
+状态：`planned`
+
+目标：
+
+- 为 `app.app_settings` 增加 transaction-bound writer/repository seam，使 tag selection settings save 能通过 supplied transaction 执行。
+
+边界：
+
+- 新 writer 必须复用现有 `save_settings(...)` 的 upsert 语义。
+- 新 writer 必须使用 supplied `transaction.execute(...)`，不得使用 repository 自身连接。
+- 本轮不迁移 handler，不接入 production UoW，不改变当前 tag selection queue failure 行为。
+
+已知缺口：
+
+- durable audit persistence 尚未完成；PF-P069 可以传递 audit metadata，但不得宣称 audit 与 settings fact 已完成同事务落库，除非本轮明确实现并测试 durable audit repository。
+
+下一步：
+
+- 执行 PF-P069。

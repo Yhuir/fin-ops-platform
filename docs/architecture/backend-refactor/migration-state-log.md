@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton` 已执行并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer` planned |
 | 最近 verified prompt | `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
 | 最近验证 | PF-P068 增加 tag selection settings adapter skeleton；UoW contract 26 tests 通过，API 29 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer`；不得迁移 handler |
+| 下一条允许任务 | 执行 `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer`；只补 transaction-bound repository writer，不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -6241,6 +6241,35 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 - `git diff --check`: Pass。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，26 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
+
+#### Commit
+
+- `0920b5b1 feat(turnover-ledger): add tag selection settings adapter`
+
+### PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer
+
+状态：`planned`
+
+#### 范围
+
+- 为 `app.app_settings` 增加 transaction-bound writer/repository seam，供 PF-P068 adapter 使用。
+- 只允许修改 repository/writer 和 contract tests。
+- 不迁移 handler，不接入 production UoW，不改变当前 tag selection API 行为。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P069。
+
+#### 验收标准
+
+- 事务绑定 writer 使用 supplied transaction 执行 `app.app_settings` upsert。
+- 现有 `save_settings(...)` 行为不变。
+- 默认 Turnover API tests 保持绿色。
 
 ## 维护规则
 

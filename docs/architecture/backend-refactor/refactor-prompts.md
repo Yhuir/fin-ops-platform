@@ -16465,3 +16465,89 @@ Verification:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
 
 下一步建议：生成并审查 `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer`，只补真实 repository/writer 事务边界，不迁移 handler。
+
+## PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer
+
+```text
+/goal
+PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer
+
+Role:
+你是一位精通 Python 数据库 Repository、PostgreSQL 事务边界和遗留系统安全演进的后端架构师。
+
+Context:
+PF-P067 已建立 tag selection pure normalizer。PF-P068 已建立 `TurnoverLedgerTagSelectionSettingsAdapter` skeleton，并用 fake contract 锁定 settings port 与 dirty/outbox 共用同一 UoW transaction。目前真实缺口是 `PostgresOpsTaxEtcRepository.save_settings(...)` 只能通过 repository 自身连接写 `app.app_settings`，没有 supplied transaction seam。PF-P069 只补这个 transaction-bound writer/repository seam，不迁移 handler。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py 中 `save_settings`
+   - backend/src/fin_ops_platform/services/postgres_repositories/common.py 中 `serialize_value` / `jsonb`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树中没有 unrelated dirty changes 或 untracked 临时文件。
+
+Task:
+为 settings save 增加最小 transaction-bound writer seam，使 PF-P068 adapter 能通过 `repository_factory(transaction)` 或等价 repository method 在 supplied transaction 内 upsert `app.app_settings`。
+
+Required Implementation Work:
+1. 在 `PostgresOpsTaxEtcRepository` 或相邻 repository helper 中增加 transaction-bound settings save 方法，例如：
+   - `save_settings_in_transaction(settings_key, payload, *, transaction)`
+   - 或 `save_app_settings_in_transaction(payload, *, transaction)`，但命名必须清楚。
+2. 新方法必须：
+   - 复用现有 `save_settings(...)` 的 SQL 语义；
+   - 使用 supplied `transaction.execute(...)`，不得使用 `self._connection.execute(...)`；
+   - 保持 `settings_key` / payload normalization 与当前方法一致；
+   - 不 enqueue read model refresh；
+   - 不记录 HTTP response / cookie / auth context；
+   - 不访问真实外部服务。
+3. 保持现有 `save_settings(...)` 的 public behavior 不变；如可行，可让它复用同一私有 SQL helper，但不得改变调用方契约。
+4. 更新 PF-P068 adapter tests 或新增 tests，锁定 adapter 通过 transaction-bound writer 保存 settings。
+5. 如本轮不实现 durable audit 写入，必须在文档中明确：audit metadata 已被 port/adapter 传递，但 durable audit persistence 仍是后续缺口；不得假装已经完成 audit transaction consistency。
+
+Allowed Files:
+- backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得迁移 `GET/PUT /api/turnover-ledger/tag-selection` handler。
+- 不得修改 `AppSettingsService.update_turnover_ledger_tag_selection(...)` 当前生产行为。
+- 不得修改 schema/migration。
+- 不得接入 production UoW wiring。
+- 不得修改 queue/worker/read model refresh 行为。
+- 不得触碰 bank-row-tags、relation extra、confirm/withdraw 或其它业务模块。
+- 不得执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "save_settings_in_transaction|save_app_settings_in_transaction|TurnoverLedgerTagSelectionSettings|PF-P069|app_settings" backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P069 status = implemented / verified / blocked。
+   - 记录 transaction-bound writer、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P069 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 repository writer 状态、durable audit 缺口和下一步建议。
+4. PF-P069 后不要生成 MG；下一步应生成 PF-P070 tag selection UoW integration planning 或 production handler migration 前置测试。
+```
+
+### 审查结论
+
+- PF-P069 是 PF-P068 后正确的小步：补真实 repository transaction seam，但不迁移 handler。
+- Prompt 要求保留 `save_settings(...)` 现有行为，降低对其它 settings 调用方的风险。
+- Prompt 明确 durable audit 仍可作为缺口记录，不允许把 audit 一致性伪装为已完成。
