@@ -17152,3 +17152,96 @@ Verification on main:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
 
 下一步建议：`git push origin main` 后，从最新 `main` 新建 `codex/` 分支，再生成下一条 Turnover Ledger prompt。
+
+## PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests
+
+```text
+/goal
+PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests
+
+Role:
+你是一位负责遗留写路径测试锁定的后端工程师，熟悉 Python unittest、Clean Architecture 和事务/dirty-outbox 迁移。
+
+Context:
+PF-P057 到 PF-P064 已为 Turnover Ledger relation extra 建立 service-layer facade、normalizer adapter、repository adapter 和部分 handler wiring。当前 `server.py` 的 `_handle_api_turnover_ledger_relation_extra_update(...)` 在 PostgreSQL UoW facade 可用时走 facade；否则仍走 legacy best-effort path。PF-P073 已完成 tag selection 的 handler UoW wiring。PF-P074 只为 relation extra 的剩余 UoW completion 补测试，不修改 production code。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_relation_extra_update`、`_turnover_ledger_relation_extra_write_facade`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py relation extra tests
+   - tests/test_turnover_ledger_uow_contract.py relation extra tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Task:
+补强 relation extra UoW completion 的 API-level characterization / target tests。PF-P074 不迁移 handler、不改 production code、不改 repository/schema。目标是让 PF-P075 可以最小实现 local/dev/test relation extra UoW completion，并最终移除 legacy direct clear/enqueue。
+
+Required Test Work:
+1. 保留并明确当前 compatibility tests：
+   - relation extra GET/PUT response shape；
+   - invalid payload 400；
+   - readonly user 403；
+   - legacy fallback full snapshot behavior。
+2. 将 current legacy queue failure behavior 的测试命名/断言保持清晰：
+   - 当前 legacy path queue failure happens after extra update and read model clear。
+   - 该测试可以继续存在，直到 PF-P075 改变目标路径；不得删除历史事实。
+3. 新增 future target tests，若当前 production handler 尚未实现，必须用 `unittest.expectedFailure`：
+   - queue/outbox failure must roll back relation extra save;
+   - successful UoW path must not call `_clear_turnover_ledger_read_model_best_effort()` directly;
+   - successful UoW path must still return `{"extra": ..., "row": ...}` response shape.
+4. 新增或补强 handler -> facade boundary test：
+   - 使用 existing facade override/recorder pattern；
+   - 断言 handler 传递 `relation_id`、payload、actor_id、tenant_id、scope_keys；
+   - 不得用 mock facade 替代 rollback/no-clear target tests。
+5. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得修改 production service/repository/adapter code。
+- 不得迁移 relation extra handler。
+- 不得迁移 tag selection、bank row tags、confirm、withdraw 或任何其它 Turnover 写路径。
+- 不得修改 schema/migration。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+- 不得删除、弱化或跳过现有 tests；未实现目标语义必须用 `unittest.expectedFailure` 保存。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "relation_extra|turnover_relation_extra_changed|expectedFailure|PF-P074|_turnover_ledger_relation_extra_write_facade|clear_turnover_ledger_read_model" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P074 status = implemented / verified / blocked。
+   - 记录新增 tests、expectedFailure 数量、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P074 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 relation extra completion tests 状态。
+4. PF-P074 后不要生成 MG；下一步应生成 PF-P075 relation extra handler UoW completion implementation。
+```
+
+### 审查结论
+
+- PF-P074 是 PF-P073-MG 后正确的小步：relation extra 已有 facade/adapter 基础，但缺少像 tag selection 一样的 local completion target tests。
+- Prompt 明确 tests-only，不修改 production code，避免在没有测试锁定时直接改 handler。
+- Prompt 保留 legacy behavior 测试，同时用 `expectedFailure` 明确未来 rollback/no-clear/response-shape 目标。

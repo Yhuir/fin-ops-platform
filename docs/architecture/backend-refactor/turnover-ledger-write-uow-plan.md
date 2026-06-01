@@ -1094,3 +1094,24 @@ Verification:
 - PF-P065 到 PF-P073 的 tag selection UoW slice 已合入 `main`。
 - 合入前后 targeted tests 均通过。
 - 未执行 Traffic Gate、部署、Nginx 修改或生产访问。
+
+## PF-P074 Relation Extra UoW Completion Tests
+
+状态：`planned`
+
+目标：
+
+- 补强 relation extra UoW completion 前的 API-level characterization / target tests。
+- 保留 current legacy best-effort behavior 事实。
+- 增加 future rollback/no-clear/response-shape target tests，未实现目标用 `unittest.expectedFailure` 保持默认 CI 绿色。
+
+边界：
+
+- 不修改 production code。
+- 不迁移 handler。
+- 不进入 MG。
+
+下一步：
+
+- 执行 PF-P074。
+- PF-P074 通过后生成 PF-P075 relation extra handler UoW completion implementation。
