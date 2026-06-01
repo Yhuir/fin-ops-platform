@@ -1575,3 +1575,30 @@ Verification:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 39 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests.
 - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass.
+
+## PF-P086 Withdraw Relation Handler UoW Wiring Readiness
+
+状态：`planned`
+
+目标：
+
+- 在迁移真实 withdraw handler 前，先审计 `_handle_api_turnover_ledger_withdraw(...)` 的接入边界。
+- 只做 readiness 和下一步测试切片设计，不修改生产代码或测试。
+
+审查结论：
+
+- 当前真实 withdraw handler 的 legacy runtime sequence 是：
+  `auth/session -> load body -> get_relation -> source manual guard -> collect bank_row_ids -> routes.withdraw_relation -> relation_service.withdraw_relation -> affected_months -> _after_turnover_relation_mutation -> response`。
+- 当前 legacy 路径仍会在 relation facts/audit 已更新后才执行 `_after_turnover_relation_mutation(...)`，因此 queue/dirty-outbox failure 与 relation mutation 不在同一事务内。
+- PF-P085 已提供 `TurnoverLedgerWriteFacade.withdraw_relation(...)`，但真实 handler 接入前仍需确认 local transaction shim、relation repository wrapper、affected_months 计算和 legacy fallback。
+
+边界：
+
+- 必须保留 `source != "manual"` 的 `system_relation_cannot_withdraw` 保护。
+- 必须保留 unknown relation 404、`TurnoverRelationValidationError` -> 400、以及基于 withdraw 前 `bank_row_ids` 计算 `affected_months`。
+- PostgreSQL production path 仍不得猜测 relation SQL；应继续保留 legacy fallback，直到有明确 repository contract 和实现。
+
+下一步：
+
+- 执行 PF-P086，完成 readiness 文档。
+- 如果无 blocker，生成 PF-P087 withdraw handler UoW target tests；PF-P087 仍只做测试锁定，不直接迁移 handler。

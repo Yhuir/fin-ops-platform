@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness` 已生成并审查 |
+| 当前 active prompt | `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness` |
 | 最近 verified prompt | `PF-P085 - Turnover Ledger Withdraw Relation Facade Skeleton` |
 | 当前分支 | `codex/turnover-ledger-withdraw-relation-p084` |
 | 最近验证 | PF-P085 实现 withdraw relation facade skeleton；PF-P084 的 3 条 target tests 已转普通通过 |
-| 下一条允许任务 | 生成并审查 `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness` |
+| 下一条允许任务 | 执行 `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness` |
 
 ## Prompt 执行日志
 
@@ -6942,6 +6942,26 @@ push `origin/main` 后，从最新 main 新建 `codex/` 分支。下一条建议
 #### 下一条 Prompt 上下文
 
 PF-P084/PF-P085 完成了 withdraw relation facade-level contract 和 skeleton。下一步应生成 `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness`，先审计真实 withdraw handler 接入所需的 local transaction shim、relation repository/port、affected months、legacy fallback test 和 system-generated relation rejection；不得在没有 readiness 结论前直接迁移 handler。
+
+### PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness
+
+状态：`planned`
+
+#### 范围
+
+- 只做 withdraw relation handler 接入 UoW 前的 readiness 审计和文档回写。
+- 不修改 production code，不新增/修改测试，不迁移真实 handler。
+- 明确 local/dev/test wiring、PostgreSQL production fallback、manual/system relation guard、affected_months 计算、legacy compatibility tests 和下一条 handler target tests 的边界。
+
+#### 预期产物
+
+- `turnover-ledger-write-uow-plan.md` 增加 PF-P086 readiness 结论。
+- `refactor-prompts.md` 增加 PF-P086 prompt。
+- 本状态机记录 PF-P086 状态、范围、验证和下一步上下文。
+
+#### 下一条 Prompt 上下文
+
+PF-P086 执行后，如果 readiness 无 blocker，下一步应生成 `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests`：只为真实 `POST /api/turnover-ledger/relations/{id}/withdraw` handler 增加 local/dev/test UoW target tests，仍不直接迁移 handler。
 
 ## 维护规则
 
