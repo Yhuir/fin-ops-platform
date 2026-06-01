@@ -17382,3 +17382,93 @@ Verification:
 - `rg -n "relation_extra|turnover_relation_extra_changed|_turnover_ledger_relation_extra_write_facade|_local_turnover_ledger|clear_turnover_ledger_read_model|expectedFailure|PF-P075" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，统一覆盖 PF-P074 + PF-P075。
+
+## PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate
+
+```text
+/goal
+PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate
+
+Role:
+你是一位负责主干合入门禁的后端架构审查工程师。
+
+Context:
+当前分支 `codex/turnover-ledger-next-uow-slice-p074` 已完成 PF-P074 和 PF-P075 的 Turnover Ledger relation extra UoW completion slice。PF-P074 只增加 target tests；PF-P075 完成 local/dev/test relation extra handler UoW path，并让 target tests 转绿。PF-P075-MG 只负责合入门禁，不新增业务功能。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py relation extra diff
+   - tests/test_turnover_ledger_api.py relation extra tests
+   - tests/test_turnover_ledger_uow_contract.py relation extra tests
+2. 必须确认 PF-P074 和 PF-P075 均已 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+5. 本 MG 不执行 Traffic Gate、不部署、不访问生产、不修改 Nginx 或生产配置。
+
+Merge Gate Scope:
+只允许合并以下文件的累计 diff：
+- backend/src/fin_ops_platform/app/server.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Checks Before Merge:
+1. Scope / diff check:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only main...HEAD`
+   - `git diff --check main...HEAD`
+2. Exact changed files must stay inside Merge Gate Scope. If any unrelated file appears, stop.
+3. No untracked temporary files may exist.
+4. Run targeted verification on current branch:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+   - `rg -n "PF-P074|PF-P075|relation_extra|turnover_relation_extra_changed|_turnover_ledger_relation_extra_write_facade|_local_turnover_ledger|expectedFailure|clear_turnover_ledger_read_model" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`
+5. Review behavior:
+   - relation extra local/dev/test path uses facade/UoW when queue repository exposes `enqueue_read_model_refresh`;
+   - queue/outbox failure rolls back extra save;
+   - successful UoW path does not directly clear Turnover read model;
+   - PF-P074 target tests no longer use `unittest.expectedFailure`;
+   - legacy fallback behavior remains explicitly testable when facade is unavailable.
+
+Commit / Merge Rules:
+1. If there are uncommitted MG doc updates, use exact `git add <file...>` only. Never use `git add .` or `git add -A`.
+2. Before merging to `main`, sync with latest main:
+   - `git checkout main`
+   - `git pull origin main`
+   - `git checkout codex/turnover-ledger-next-uow-slice-p074`
+   - merge latest `main` into the feature branch if needed.
+3. If sync causes conflict, stop and report. Do not resolve by discarding changes.
+4. If sync changes the branch, rerun all Required Checks Before Merge.
+5. Merge to main only after checks pass.
+6. After merge, rerun targeted verification on `main`.
+7. If verification fails on `main`, stop and do not push.
+8. If verification passes on `main`, update migration-state-log.md to mark PF-P075-MG `verified`, commit if needed, then `git push origin main`.
+
+Post-Flight:
+1. Update migration-state-log.md:
+   - PF-P075-MG status = verified / blocked。
+   - Record merge result, main verification and push result.
+2. Update refactor-prompts.md:
+   - Record MG execution result.
+3. Do not start another module on `main`.
+4. After successful push, create a new branch from latest `main` before generating the next prompt.
+
+Stop Conditions:
+- Any test fails and cannot be fixed within MG scope.
+- Any untracked temp file appears.
+- Any diff outside Merge Gate Scope appears.
+- Merge/rebase conflict occurs.
+- Need for Traffic Gate, production access, deployment, Nginx or production config changes.
+- Any unrelated user changes are detected.
+```
+
+### 审查结论
+
+- PF-P075-MG 的范围只覆盖 PF-P074 + PF-P075 relation extra UoW completion slice。
+- MG 明确要求合入前后运行 Turnover Ledger targeted tests，并继续分离 Merge Gate 与 Traffic Gate。
+- MG 白名单只包含 `server.py`、relation extra API tests 和三份 backend-refactor 文档。
