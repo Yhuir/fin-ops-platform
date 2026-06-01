@@ -108,6 +108,52 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertEqual(queue.enqueued, [])
         self.assertEqual(legacy_calls, [])
 
+    def test_missing_required_sql_read_model_returns_empty_refreshing_payload_and_enqueues_miss(self) -> None:
+        queue = FakeQueue()
+        repository = FakeRepository(None)
+        service = TurnoverLedgerQueryService(
+            read_repository=repository,
+            refresh_queue_repository=queue,
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "expected"},
+            legacy_payload_builder=lambda **_kwargs: {"rows": [{"relation_id": "legacy"}]},
+            settings_provider=lambda: {"postgres_required": True},
+        )
+
+        payload = service.list_ledger(family="personal", direction="income", status="suggested", page=0, page_size=999)
+
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["refresh_reason"], "api_miss")
+        self.assertEqual(payload["source_versions"], {"turnover_ledger_schema_version": "expected"})
+        self.assertEqual(payload["filters"], {"family": "personal", "direction": "income", "status": "suggested"})
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 200, "total": 0})
+        self.assertEqual(queue.enqueued, [{"scope_type": "turnover_ledger", "scope_key": "all", "reason": "api_miss"}])
+
+    def test_missing_optional_sql_read_model_uses_legacy_builder_and_injects_source_versions(self) -> None:
+        queue = FakeQueue()
+        repository = FakeRepository(None)
+        legacy_calls: list[dict[str, object]] = []
+
+        def legacy_payload_builder(**kwargs: object) -> dict[str, object]:
+            legacy_calls.append(dict(kwargs))
+            return {"rows": [{"relation_id": "legacy_without_versions"}], "pagination": {"total": 1}}
+
+        service = TurnoverLedgerQueryService(
+            read_repository=repository,
+            refresh_queue_repository=queue,
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "expected"},
+            legacy_payload_builder=legacy_payload_builder,
+            settings_provider=lambda: {"postgres_required": False},
+        )
+
+        payload = service.list_ledger(family="company", direction="all", status=None, page=3, page_size=25)
+
+        self.assertEqual(legacy_calls, [{"family": "company", "direction": "all", "status": None, "page": 3, "page_size": 25}])
+        self.assertEqual(payload["source_versions"], {"turnover_ledger_schema_version": "expected"})
+        self.assertEqual(payload["rows"][0]["source_versions"], {"turnover_ledger_schema_version": "expected"})
+        self.assertEqual(queue.enqueued, [])
+
 
 if __name__ == "__main__":
     unittest.main()

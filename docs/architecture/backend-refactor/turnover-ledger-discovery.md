@@ -313,6 +313,34 @@ PF-P047 should add or extend tests without refactoring production code. Suggeste
    - changing relation snapshot, extras, tag selection, bank category snapshot or auto tag rules changes expected source versions.
    - Workbench turnover grouping tests remain in the verification set.
 
+## PF-P047 Characterization Test Results
+
+PF-P047 has been implemented as a test-only slice. It did not modify production code.
+
+Added/extended characterization coverage:
+
+- Query freshness:
+  - SQL read model miss with PostgreSQL-required returns empty refreshing payload and enqueues `api_miss`.
+  - SQL read model miss with PostgreSQL optional falls back to the legacy builder and injects current `source_versions`.
+- Grouped breakdown:
+  - Flat read model grouped conversion now asserts backend-only breakdown fields including `closed_amount`, `repaid_amount` and `collected_amount`.
+- Relation and extra writes:
+  - Confirm/withdraw currently clear Turnover read model rows and enqueue `turnover_relation_changed`.
+  - Non-manual/system withdraw returns the current error shape and does not enqueue refresh.
+  - Relation extra update clears Turnover read model rows and enqueues `turnover_relation_extra_changed`.
+  - The legacy full snapshot fallback path for extras is explicitly characterized through `legacy_turnover_ledger_extras_fallback_persist`.
+- Bank row tag batch:
+  - Non-turnover rows fail validation with no Turnover read model refresh side effect.
+- Export:
+  - Preview limit/totals and empty grouped payload shape are locked.
+- Source versions:
+  - `build_turnover_ledger_source_versions` now has a dedicated contract test covering relation snapshot, extras, tag selection, bank category snapshot, bank auto tag rules and OA projection sync inputs.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_ledger_source_versions -v`: Pass, 33 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions -v`: Pass, 79 tests.
+
 ## Risk Register
 
 | Risk | Severity | Evidence | Next action |

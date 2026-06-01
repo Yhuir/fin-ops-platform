@@ -27,6 +27,14 @@ class _QueueRecorder:
         self.enqueued.append((scope_type, scope_key, reason))
 
 
+class _TurnoverReadModelRecorder:
+    def __init__(self) -> None:
+        self.clear_calls = 0
+
+    def clear_turnover_ledger_rows(self) -> None:
+        self.clear_calls += 1
+
+
 class TurnoverLedgerApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -695,7 +703,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(group["pending_collection_amount"], "50000.00")
         self.assertEqual(group["repaid_amount"], "100000.00")
         self.assertEqual(group["collected_amount"], "25000.00")
+        self.assertEqual(group["closed_amount"], "0.00")
         self.assertEqual(group["summary_row"]["pending_repayment_amount"], "200000.00")
+        self.assertEqual(group["summary_row"]["pending_collection_amount"], "50000.00")
+        # TODO: PF-P048 verify whether these backend-only compatibility fields can be removed safely.
+        self.assertEqual(group["summary_row"]["repaid_amount"], "100000.00")
+        self.assertEqual(group["summary_row"]["collected_amount"], "25000.00")
 
     def test_get_turnover_ledger_grouped_view_applies_family_filter(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -720,6 +733,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             self._tag_rows(app, transaction_ids)
             ledger_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)
             relation_id = ledger_payload["rows"][0]["relation_id"]
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
 
             get_response = app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
             put_response = app.handle_request(
@@ -754,6 +771,46 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(restored_payload["extra"]["interest_paid_amount"], "120.50")
         self.assertEqual(reloaded_response.status_code, 200)
         self.assertEqual(reloaded_payload["extra"]["note"], "页面维护备注")
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertIn(("turnover_ledger", "all", "turnover_relation_extra_changed"), queue.enqueued)
+
+    def test_relation_extra_fallback_persists_full_snapshot_when_dedicated_store_method_is_missing(self) -> None:
+        class LegacyBootstrapRecorder:
+            def __init__(self) -> None:
+                self.reasons: list[str] = []
+
+            def load_full_snapshot(self, *, reason: str) -> dict[str, object]:
+                self.reasons.append(reason)
+                return {"existing": "payload"}
+
+        class LegacyStateStore:
+            def __init__(self) -> None:
+                self.saved_payload: dict[str, object] | None = None
+
+            def save(self, payload: dict[str, object]) -> None:
+                self.saved_payload = dict(payload)
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._turnover_ledger_api_routes.update_relation_extra = lambda *_args, **_kwargs: {}  # type: ignore[method-assign]
+            app._turnover_ledger_api_routes._extra_service.upsert(  # type: ignore[attr-defined]
+                "turnover_rel_legacy",
+                {"note": "legacy fallback"},
+                actor="tester",
+            )
+            legacy_bootstrap = LegacyBootstrapRecorder()
+            legacy_store = LegacyStateStore()
+            app._legacy_bootstrap = legacy_bootstrap  # type: ignore[assignment]
+            app._state_store = legacy_store  # type: ignore[assignment]
+
+            app._persist_turnover_ledger_extras_best_effort(operation="test_legacy_fallback")
+
+        self.assertEqual(legacy_bootstrap.reasons, ["legacy_turnover_ledger_extras_fallback_persist"])
+        self.assertIsNotNone(legacy_store.saved_payload)
+        self.assertEqual(legacy_store.saved_payload["existing"], "payload")  # type: ignore[index]
+        extras = legacy_store.saved_payload["turnover_ledger_extras"]["extras"]  # type: ignore[index]
+        self.assertEqual(extras[0]["relation_id"], "turnover_rel_legacy")
+        self.assertEqual(extras[0]["note"], "legacy fallback")
 
     def test_relation_extra_put_rejects_invalid_payload(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -911,6 +968,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._oa_identity_service.resolve_identity = lambda token: identities[str(token)]
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids, headers={"Authorization": "Bearer full-token"})
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
 
             denied = app.handle_request(
                 "POST",
@@ -932,12 +993,20 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 body=json.dumps({"note": "撤回测试"}),
                 headers={"Authorization": "Bearer full-token"},
             )
-            audit_log = app._state_store.load_turnover_relation_audit_log()
+            audit_log = app._turnover_relation_service.audit_log()
 
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(confirmed.status_code, 200)
         self.assertEqual(withdrawn.status_code, 200)
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
+        self.assertEqual(read_repository.clear_calls, 2)
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+            ],
+        )
 
     def test_withdraw_rejects_system_generated_relation(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -946,6 +1015,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             self._tag_rows(app, transaction_ids)
             ledger_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)
             relation_id = ledger_payload["rows"][0]["relation_id"]
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
 
             response = app.handle_request(
                 "POST",
@@ -956,6 +1029,62 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["error"], "system_relation_cannot_withdraw")
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertEqual(queue.enqueued, [])
+
+    def test_turnover_bank_row_tag_batch_rejects_non_turnover_rows_without_refresh_side_effects(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            preview = app._import_service.preview_import(
+                batch_type=BatchType.BANK_TRANSACTION,
+                source_name="non-turnover-bank.xlsx",
+                imported_by="YNSYLP005",
+                rows=[
+                    {
+                        "account_no": "6222000011118106",
+                        "account_name": "云南溯源科技有限公司基本户",
+                        "txn_date": "2026-02-04",
+                        "trade_time": "2026-02-04 13:23:17",
+                        "pay_receive_time": "2026-02-04 13:23:17",
+                        "counterparty_name": "银行",
+                        "debit_amount": "10.00",
+                        "credit_amount": "",
+                        "summary": "账户管理费",
+                        "remark": "手续费",
+                        "imported_bank_name": "建行",
+                        "imported_bank_last4": "8106",
+                    }
+                ],
+            )
+            app._import_service.confirm_import(preview.id)
+            transaction_id = app._import_service.list_transactions()[0].id
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_id,
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "not_turnover_bank_row")
+        self.assertEqual(payload["transaction_id"], transaction_id)
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertEqual(queue.enqueued, [])
 
     def test_disabled_category_save_leaves_turnover_relations_unchanged(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -313,6 +313,29 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
 
         self.assertEqual([row["row_type"] for row in preview["rows"]], ["summary"])
 
+    def test_preview_applies_limit_after_summary_and_flow_flattening_and_reports_totals(self) -> None:
+        service = TurnoverLedgerExportService(lambda **_: self._grouped_payload())
+
+        preview = service.preview(family="company", limit=2)
+
+        self.assertEqual([row["row_type"] for row in preview["rows"]], ["summary", "flow"])
+        self.assertEqual(preview["pagination"], {"preview_count": 2, "total": 4, "limit": 2})
+        self.assertEqual(preview["totals"]["row_count"], 4)
+        self.assertEqual(preview["totals"]["pending_repayment_amount"], "100000.00")
+        self.assertEqual(preview["totals"]["pending_collection_amount"], "0.00")
+
+    def test_preview_empty_grouped_payload_keeps_current_empty_shape(self) -> None:
+        service = TurnoverLedgerExportService(
+            lambda **_: {"summary": {}, "family_summaries": [], "filters": {}, "pagination": {"total": 0}, "groups": []}
+        )
+
+        preview = service.preview(family="all", limit=20)
+
+        self.assertEqual(preview["rows"], [])
+        self.assertEqual(preview["totals"]["row_count"], 0)
+        self.assertEqual(preview["pagination"], {"preview_count": 0, "total": 0, "limit": 20})
+        self.assertEqual(preview["filters"], {"family": "all"})
+
     def test_export_builds_xlsx_and_filename_for_family_scope(self) -> None:
         service = TurnoverLedgerExportService(lambda **_: self._grouped_payload())
 

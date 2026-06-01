@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P047 - Turnover Ledger Characterization Tests` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P047 - Turnover Ledger Characterization Tests` (`planned`) |
+| 当前阶段 | `PF-P047 - Turnover Ledger Characterization Tests` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P047 - Turnover Ledger Characterization Tests` (`implemented`) |
 | 最近 verified prompt | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` |
 | 当前分支 | `codex/turnover-ledger-discovery-p046` |
 | 最近验证 | 用户已确认 PF-P045-MG `verified`；`main` 已 push 到 `origin/main`，本地与远端对齐到 `de513774`；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 `PF-P047 - Turnover Ledger Characterization Tests`；只允许补 Turnover Ledger 特征测试和必要文档回写，不允许 production refactor |
+| 下一条允许任务 | 用户确认 PF-P047 后，将 PF-P047 标记为 verified；然后生成并审查 Turnover Ledger 下一条 extraction/refactor planning 或 cumulative MG |
 
 ## Prompt 执行日志
 
@@ -4991,7 +4991,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P047 - Turnover Ledger Characterization Tests
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -5046,8 +5046,23 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P047。
-- PF-P047 执行完成并由用户确认 verified 后，再根据测试结果生成下一条 Turnover Ledger extraction/refactor 或测试补强 prompt。
+- 等待用户确认 PF-P047。
+- 用户确认后，将 PF-P047 标记为 `verified`。
+- 下一条 prompt 建议：生成并审查 `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning`，或在用户希望先合入测试护栏时生成 cumulative MG 覆盖 PF-P046 + PF-P047。
+
+#### 执行结果
+
+- 已补充 Turnover Ledger characterization tests，只修改测试和重构文档，不修改 production code。
+- 新增/扩展测试覆盖：
+  - `tests/test_turnover_ledger_query_service.py`：SQL read model miss 时 PostgreSQL-required 返回 empty refreshing payload 并 enqueue `api_miss`；PostgreSQL optional 时走 legacy builder 并注入 `source_versions`。
+  - `tests/test_turnover_ledger_api.py`：flat read model grouped breakdown backend-only 字段、relation extra refresh side effects、legacy full snapshot fallback、confirm/withdraw read model clear/enqueue side effects、system withdraw no side effect、non-turnover bank-row-tags batch failure no side effect。
+  - `tests/test_turnover_ledger_export_service.py`：preview limit、totals、empty grouped payload shape。
+  - `tests/test_turnover_ledger_source_versions.py`：source_versions 包含所有 Turnover/cross-module inputs，并随 relation、extras、tag selection、bank category、auto tag rules、OA projection sync 变化。
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_ledger_source_versions -v`：Pass，33 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions -v`：Pass，79 tests。
+- 初始全量目标集曾暴露一个既有测试污染/读取 local pickle 的偶发问题；单测单独运行通过，后续通过改用 in-memory audit log 断言和更明确的 recorder 隔离规避了该 characterization 测试中的 state store 读污染。
+- 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
 
 ## 维护规则
 

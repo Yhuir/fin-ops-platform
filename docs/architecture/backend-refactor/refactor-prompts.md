@@ -13296,7 +13296,7 @@ Stop Conditions:
 
 ## PF-P047 - Turnover Ledger Characterization Tests
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -13454,3 +13454,31 @@ Stop Conditions:
 - PF-P047 边界正确：只允许测试和必要文档回写，不允许 production refactor、不允许事务语义变更、不允许 UoW 实现。
 - PF-P047 已覆盖 PF-P046 识别的核心风险：grouped breakdown、read model freshness/source_versions、relation side effects、extra legacy fallback、bank-row-tags 跨模块影响、export payload 和测试状态隔离。
 - PF-P047 不进入 Merge Gate；它执行完成后应标记为 `implemented`，等待用户确认后再 `verified`。
+
+### 执行结果
+
+状态：`implemented`
+
+- 已补充 Turnover Ledger characterization tests，只修改测试和重构文档，未修改 production code。
+- 变更文件：
+  - `tests/test_turnover_ledger_query_service.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_export_service.py`
+  - `tests/test_turnover_ledger_source_versions.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+- 新增/扩展测试覆盖：
+  - SQL read model miss 的 `api_miss` 和 optional legacy fallback。
+  - Flat read model grouped breakdown backend-only 字段保留。
+  - Relation extra update refresh side effects 和 legacy full snapshot fallback。
+  - Confirm/withdraw read model clear/enqueue side effects，以及失败路径不 enqueue。
+  - Non-turnover `bank-row-tags/batch` validation failure no side effects。
+  - Export preview limit/totals/empty payload shape。
+  - Turnover source_versions 的输入字段和变化契约。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_ledger_source_versions -v`：Pass，33 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions -v`：Pass，79 tests。
+- 未修改 production code、SQL migration、前端、部署或生产配置。
+- 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
+- 下一步建议：用户确认 PF-P047 后，将 PF-P047 标记为 `verified`；然后生成并审查 `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning`，或在用户希望先合入测试护栏时生成 cumulative MG 覆盖 PF-P046 + PF-P047。
