@@ -2337,3 +2337,19 @@ PF-P099 建议边界：
 - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
 - `git diff --check`：Pass。
 - `rg -n "PF-P098|Remaining Write Path Rebaseline|Next Slice Decision|Write Path Matrix|Residual Orchestration" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+## PF-P099 Withdraw Relation Stale/Duplicate Contract Tests
+
+状态：`planned`
+
+目标：
+
+- 保留当前 duplicate withdraw behavior characterization。
+- 新增 future target tests，锁定 duplicate/stale withdraw 不得二次 mutation、audit 或 refresh。
+- 锁定 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 未来应支持 expected_versions，并把 expected_versions 传入 UoW command。
+
+边界：
+
+- 只修改 tests 和文档。
+- 不修改 production code。
+- 不同时处理 relation extra stale write、fallback cleanup 或 local transaction shim extraction。

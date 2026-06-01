@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` 已执行并验证通过 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` |
 | 最近 verified prompt | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p098` |
 | 最近验证 | PF-P098 文档验证通过；下一条最小切片为 withdraw stale/duplicate contract tests |
-| 下一条允许任务 | 生成并审查 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` |
+| 下一条允许任务 | 执行 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -7577,6 +7577,33 @@ PF-P097-MG 已 verified，待 `git push origin main`。push 完成后，必须�
 #### 下一条 Prompt 上下文
 
 PF-P098 已 verified。下一条应生成并审查 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests`。PF-P099 只应新增/调整 tests，锁定 withdraw duplicate/stale write 的目标行为；不得修改 production code，不得同时处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
+
+### PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests
+
+状态：`planned`
+
+#### 范围
+
+- 新增/调整 tests，锁定 Turnover Ledger withdraw relation duplicate/stale write 目标行为。
+- 保留 current behavior characterization。
+- 用 `unittest.expectedFailure` 记录尚未实现的 future target behavior。
+
+#### 允许变更文件
+
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 禁止范围
+
+- 不得修改 production code。
+- 不得同时处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
+
+#### 下一条 Prompt 上下文
+
+PF-P099 planned。执行后若 target tests 已锁定，应生成最小 implementation prompt，让 withdraw expected_versions/stale guard target tests 转绿。
 
 ## 维护规则
 

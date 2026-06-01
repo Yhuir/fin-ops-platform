@@ -20588,3 +20588,87 @@ Post-Flight:
 ### 下一条 Prompt 上下文
 
 下一条应生成并审查 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests`。PF-P099 只应新增/调整 tests，锁定 withdraw duplicate/stale write 的目标行为；不得修改 production code，不得同时处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
+
+## PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests
+
+```text
+/goal
+PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须只新增/调整测试，锁定 Turnover Ledger withdraw relation 的 duplicate/stale write 目标行为。不得修改 production code。
+
+Context:
+PF-P098 已 verified。PF-P098 发现当前最大 correctness gap 是 withdraw duplicate/stale write：
+- `tests/test_turnover_ledger_api.py::test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` 明确记录当前第二次 withdraw 仍会二次 mutation/refresh。
+- `TurnoverLedgerWriteUnitOfWork` 已有 `expected_versions` / `stale_precondition_port` seam。
+- 真实 `TurnoverLedgerWriteFacade.withdraw_relation(...)` command 当前未携带 expected_versions，server composition 仍注入 no-op stale precondition port。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P098 已 verified。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Task:
+1. 在 `tests/test_turnover_ledger_api.py` 中保留 current behavior characterization：
+   - `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` 可以保留原名或标记为 legacy/current behavior；
+   - 不得删除该测试，除非新增等价 current behavior coverage。
+2. 在 `tests/test_turnover_ledger_api.py` 中新增 future target test，使用 `unittest.expectedFailure`：
+   - duplicate withdraw 应被拒绝；
+   - 第二次 withdraw 不得追加第二条 withdraw audit；
+   - 第二次 withdraw 不得 enqueue 第二次 turnover read model refresh；
+   - 响应应为 conflict/error，而不是 200 success。
+3. 在 `tests/test_turnover_ledger_uow_contract.py` 中新增 future target test，使用 `unittest.expectedFailure`：
+   - `TurnoverLedgerWriteFacade.withdraw_relation(...)` 应支持传入 expected_versions；
+   - expected_versions 应进入 `TurnoverLedgerWriteCommand.expected_versions`；
+   - stale precondition failure 时，不得调用 relation repository withdraw handler；
+   - transaction 必须 rollback，不得 dirty/outbox enqueue。
+4. 保持默认 CI 绿色。尚未实现目标语义必须使用 `unittest.expectedFailure`，不得 skip。
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 SQL migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+- 不得同时处理 relation extra stale write、fallback path cleanup 或 local transaction shim extraction。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "PF-P099|withdraw.*duplicate|expected_versions|expectedFailure|stale" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P099 status = implemented / verified / blocked。
+   - 记录新增 tests、expectedFailure 数量、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P099 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 withdraw stale/duplicate contract tests 状态。
+4. PF-P099 verified 后，下一条应实现最小 withdraw expected_versions/stale guard skeleton，让 PF-P099 target tests 转绿；不得顺手处理 relation extra 或 fallback cleanup。
+```
+
+### 审查结论
+
+- PF-P099 是 PF-P098 后的正确测试锁定步骤：先保留 current behavior，再用 expectedFailure 锁定目标行为。
+- prompt 明确禁止 production code 修改，因此不会提前改变 withdraw 线上行为。
