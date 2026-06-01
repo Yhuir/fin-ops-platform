@@ -16680,3 +16680,93 @@ Verification:
 - `rg -n "PF-P070|tag selection UoW integration|durable audit|PF-P071" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`: Pass。
 
 下一步建议：生成并审查 `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`，只补测试，不迁移 handler。
+
+## PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests
+
+```text
+/goal
+PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests
+
+Role:
+你是一位精通 characterization tests、目标契约测试和遗留 API 迁移门禁的后端测试架构师。
+
+Context:
+PF-P070 已明确 tag selection handler 迁移前必须先补测试。当前 legacy handler 在 settings save 后执行 read model clear 和 queue enqueue；queue failure 会发生在 settings save 之后。目标 UoW path 应让 settings fact 与 dirty/outbox 同 transaction，并避免 handler 直接 clear/enqueue。PF-P071 只补测试，不改 production code。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - tests/test_turnover_ledger_api.py 的 tag selection tests
+   - tests/test_turnover_ledger_uow_contract.py 的 tag selection / settings port tests
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_tag_selection_update`
+   - backend/src/fin_ops_platform/services/app_settings_service.py 中 tag selection normalizer/update
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树中没有 unrelated dirty changes 或 untracked 临时文件。
+
+Task:
+补充 tag selection UoW migration 前的 compatibility / target tests。默认 CI 必须保持绿色。尚未实现的目标 handler 语义可使用 `unittest.expectedFailure`，但不得使用 skip、条件 skip、删除测试或放宽现有断言。
+
+Required Test Work:
+1. 在 `tests/test_turnover_ledger_api.py` 补强现有 compatibility tests：
+   - success response shape 必须明确断言 `version`, `selected_tag_codes`, `active_tags` 的关键字段；
+   - version conflict 保持 `409` 和 `turnover_ledger_tag_selection_version_conflict`；
+   - invalid tag code 保持 `400`，并确认无新增 enqueue/clear side effect；
+   - current queue failure characterization 继续明确：legacy path settings save 已发生，read model clear 已发生，queue attempt 已发生。
+2. 增加 target tests（如果生产 handler 尚未实现，必须标记 `unittest.expectedFailure`）：
+   - future UoW path queue/outbox failure must roll back settings save；
+   - future UoW path must not call `_clear_turnover_ledger_read_model_best_effort` separately when dirty/outbox succeeds；
+   - future UoW path should still return the same success payload shape.
+3. 在 `tests/test_turnover_ledger_uow_contract.py` 补强 fake UoW test：
+   - tag selection settings port 保存、dirty/outbox enqueue 和 public payload return 都发生在同一 UoW run；
+   - outbox failure rollback semantics 已由 fake transaction counter 锁定；
+   - 不引入 HTTP response/cookie/header/auth coupling。
+4. 不得修改 production code。
+5. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得修改 production service/repository/adapter code。
+- 不得迁移 handler。
+- 不得接入 production UoW wiring。
+- 不得修改 schema/migration。
+- 不得修改 queue/worker/read model refresh 行为。
+- 不得删除或弱化现有 characterization tests。
+- 不得执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "tag_selection|expectedFailure|PF-P071|turnover_ledger_tag_selection_changed|clear_turnover_ledger_read_model" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P071 status = implemented / verified / blocked。
+   - 记录新增/补强 tests、expectedFailure 数量和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P071 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 tests 状态和下一步建议。
+4. PF-P071 后不要生成 MG；下一步应生成 PF-P072 tag selection facade skeleton。
+```
+
+### 审查结论
+
+- PF-P071 是 PF-P070 后正确的测试锁定步骤：先把 current compatibility 和 target UoW 语义分开记录。
+- Prompt 允许未实现目标语义使用 `unittest.expectedFailure`，保持默认 CI 绿色，同时保留 future contract。
+- Prompt 明确禁止 production code 和 handler 迁移。

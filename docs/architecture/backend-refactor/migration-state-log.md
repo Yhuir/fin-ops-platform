@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` 已执行并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` planned |
 | 最近 verified prompt | `PF-P070 - Turnover Ledger Tag Selection UoW Integration Planning` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
 | 最近验证 | PF-P070 完成 tag selection UoW integration plan；文档验证通过 |
-| 下一条允许任务 | 生成并审查 `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`；tests only，不迁移 handler |
+| 下一条允许任务 | 执行 `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests`；tests only，不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -6327,6 +6327,34 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 - `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
 - `git diff --check`: Pass。
 - `rg -n "PF-P070|tag selection UoW integration|durable audit|PF-P071" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`: Pass。
+
+#### Commit
+
+- `471c43aa docs(turnover-ledger): plan tag selection uow migration`
+
+### PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只补 tag selection UoW 迁移前的 compatibility / target tests。
+- 不修改 production code，不迁移 handler。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P071。
+
+#### 验收标准
+
+- 当前 API compatibility tests 继续绿色。
+- 未来 UoW target tests 明确区分普通通过和 `expectedFailure`。
+- 默认 test suite 绿色。
 
 ## 维护规则
 

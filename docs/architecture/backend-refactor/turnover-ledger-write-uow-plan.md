@@ -984,3 +984,17 @@ Decision for now:
    - Preserve response/error contract.
    - Remove direct post-save clear/enqueue only when target tests prove dirty/outbox path.
 4. `PF-P073-MG` or cumulative MG if PF-P071 to PF-P073 complete the tag selection slice.
+
+## PF-P071 Tag Selection UoW Compatibility and Target Tests
+
+状态：`planned`
+
+目标：
+
+- 补强 current API compatibility tests。
+- 增加 future UoW target tests，未实现语义用 `unittest.expectedFailure` 保持默认 CI 绿色。
+- 不修改 production code，不迁移 handler。
+
+下一步：
+
+- 执行 PF-P071。
