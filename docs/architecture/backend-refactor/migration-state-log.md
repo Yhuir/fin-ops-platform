@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` (`planned`) |
+| 当前阶段 | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` 已执行并合入本地 `main`，等待用户确认 |
+| 当前 active prompt | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P050 - Turnover Ledger Read Facade Handler Cleanup` |
-| 当前分支 | `codex/turnover-ledger-discovery-p046` |
-| 最近验证 | 用户已确认 PF-P050 `verified`；PF-P050 compileall、read facade 2 tests、Turnover related 81 tests、diff/untracked/backend-go checks 均已通过；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 `PF-P050-MG`；只允许做分支范围检查、验证、commit/merge gate 流程，不允许新增业务重构或 Traffic Gate |
+| 当前分支 | `main` |
+| 最近验证 | PF-P050-MG 已在分支和本地 `main` 上复验通过；`main` 当前 ahead `origin/main`，尚未 push；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
+| 下一条允许任务 | 等待用户确认 PF-P050-MG；确认后将 PF-P050-MG 标记为 `verified`，再按用户指令决定是否 `git push origin main` |
 
 ## Prompt 执行日志
 
@@ -5269,7 +5269,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -5315,8 +5315,47 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P050-MG。
-- PF-P050-MG 完成后，等待用户确认 `verified`，再按用户指令决定是否 `git push origin main`。
+- 等待用户确认 PF-P050-MG。
+- 用户确认后，将 PF-P050-MG 标记为 `verified`。
+- 用户确认后再按指令决定是否 `git push origin main`。
+
+#### 执行结果
+
+- 已执行 PF-P050-MG。
+- 已在 `codex/turnover-ledger-discovery-p046` 上完成 diff scope 检查和合并前验证。
+- 已确认 `origin/main...HEAD` diff 只包含 PF-P046 到 PF-P050 的 Turnover Ledger discovery、characterization tests、read-only facade extraction、read-only handler cleanup 和相关文档。
+- 已确认 expected changed files 白名单完全匹配，无额外文件。
+- 已确认无 untracked files，未夹带 `.pkl`、`.sqlite`、`__pycache__` 或测试输出。
+- 已确认 `main` 与 `origin/main` 在合并前 0/0 对齐。
+- 已将 `codex/turnover-ledger-discovery-p046` 合入本地 `main`，merge commit 为 `abd55c00`。
+- 本地 `main` 当前 ahead `origin/main`，尚未 push。
+- 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
+
+#### 合并前验证
+
+- `git status --short --branch`：Pass，当前分支 `codex/turnover-ledger-discovery-p046` 且工作区干净。
+- `git ls-files --others --exclude-standard`：Pass，无输出。
+- `git log --oneline origin/main..HEAD`：Pass，列出 PF-P046 到 PF-P050 分支提交。
+- `git diff --name-only origin/main...HEAD`：Pass，14 个文件均在白名单内。
+- `git diff --stat origin/main...HEAD`：Pass。
+- `git diff --check origin/main...HEAD`：Pass。
+- `test ! -e backend-go`：Pass。
+- expected changed files compare：Pass，无差异。
+- `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
+- `rg -n "PF-P046|PF-P047|PF-P048|PF-P049|PF-P050|PF-P050-MG|Turnover Ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`：Pass。
+
+#### main 上复验
+
+- `git status --short --branch`：Pass，`main...origin/main [ahead 12]`。
+- `git ls-files --others --exclude-standard`：Pass，无输出。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
+- `rg -n "PF-P046|PF-P047|PF-P048|PF-P049|PF-P050|PF-P050-MG|Turnover Ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`：Pass。
 
 ## 维护规则
 

@@ -14006,7 +14006,7 @@ Stop Conditions:
 
 ## PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -14138,3 +14138,28 @@ Stop Conditions:
 - MG 明确覆盖完整分支 diff，并把 expected changed files 白名单写入 prompt，防止无关改动混入。
 - MG 明确要求 upstream sync、合并前验证和 main 上复验；不自动 push，不执行 Traffic Gate。
 - MG 禁止继续业务重构，尤其是 mutation path、UoW、repository、worker、SQL migration、frontend 和 deployment。
+
+### 执行结果
+
+- PF-P050-MG 已执行，状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- 已确认 PF-P046 到 PF-P050 均为 `verified`。
+- 已确认 `origin/main...HEAD` diff 只包含 Turnover Ledger read-side cumulative slice 的允许文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`
+  - Turnover Ledger characterization/read-side tests
+  - backend-refactor docs
+- 已确认 expected changed files 白名单完全匹配，无额外文件。
+- 已确认无 untracked files，未夹带 `.pkl`、`.sqlite`、`__pycache__` 或测试输出。
+- 已确认合并前 `main` 与 `origin/main` 0/0 对齐。
+- 已将 `codex/turnover-ledger-discovery-p046` 合入本地 `main`，merge commit：`abd55c00`。
+- 本地 `main` 当前 ahead `origin/main`，尚未 push。
+- 合并前和 main 上复验均通过：
+  - `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
+  - `git diff --check` / `git diff --check origin/main...HEAD`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，无输出。
+  - `test ! -e backend-go`：Pass。
+  - `rg -n "PF-P046|PF-P047|PF-P048|PF-P049|PF-P050|PF-P050-MG|Turnover Ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`：Pass。
+- 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
+- 下一步建议：用户确认 PF-P050-MG `verified` 后，再按用户指令执行 `git push origin main`；push 完成后，从最新 `main` 新建分支生成下一条 prompt。

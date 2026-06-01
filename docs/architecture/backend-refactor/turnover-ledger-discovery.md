@@ -594,7 +594,7 @@ Next recommendation after user confirms PF-P050 verified:
 
 `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`
 
-PF-P050-MG has been generated and reviewed. It must be executed before starting the next unrelated module or Turnover mutation/UoW slice.
+PF-P050-MG has been executed and merged into local `main`. It is waiting for user confirmation before being marked `verified`; `origin/main` has not been pushed yet.
 
 ## Risk Register
 
@@ -616,4 +616,4 @@ Generate and review:
 
 PF-P050-MG should stay in the same branch and cover the full Turnover Ledger discovery/characterization/read-facade slice from PF-P046 through PF-P050. It must not start mutation refactoring, UoW design, repository changes, worker changes, frontend changes or Traffic Gate work.
 
-Status: generated/reviewed, waiting execution.
+Status: implemented, waiting user confirmation.
