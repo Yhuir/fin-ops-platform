@@ -20785,3 +20785,95 @@ Post-Flight:
 
 - PF-P100 是 PF-P099 后的最小实现步骤：只处理 withdraw duplicate/stale skeleton。
 - prompt 明确不处理 relation extra、fallback cleanup 或 local transaction shim，避免 scope creep。
+
+### 执行结果
+
+- 状态：`verified`。
+- `TurnoverLedgerWriteFacade.withdraw_relation(...)` 已增加 optional `expected_versions` 参数，并透传到 `TurnoverLedgerWriteCommand.expected_versions`。
+- withdraw handler 已对已 `withdrawn` relation 返回 409 `relation_already_withdrawn`，避免 duplicate submit 二次 mutation/audit/refresh。
+- withdraw handler 已从当前 relation `version` 构造 `relation:{relation_id}` expected version 后调用 facade。
+- PF-P099 的 2 条 target tests 已从 `unittest.expectedFailure` 转为普通通过。
+- 旧 duplicate-withdraw current behavior characterization 已收敛为当前新契约。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条应生成并执行 `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate`，统一覆盖 PF-P098 到 PF-P100 的完整 diff；不得直接进入下一实现切片。
+
+## PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端重构合并门禁的高级工程师。你必须只执行当前 Turnover Ledger withdraw stale/duplicate 切片的 cumulative Merge Gate，覆盖 PF-P098 到 PF-P100 的完整 diff。不得新增业务实现。
+
+Context:
+PF-P098 到 PF-P100 已在当前分支完成：
+- PF-P098：重新盘点 Turnover Ledger 剩余写路径，选择 withdraw duplicate/stale 为下一最小切片。
+- PF-P099：新增 withdraw duplicate/stale characterization/contract tests。
+- PF-P100：实现最小 withdraw expected_versions/stale guard skeleton，让 PF-P099 的 target tests 转为普通通过。
+
+Gate Scope:
+1. 只验证并合入 Turnover Ledger withdraw stale/duplicate 切片。
+2. 允许范围只包含：
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+3. 不执行 Traffic Gate，不部署，不访问生产，不修改 Nginx、生产配置或 feature flag。
+4. 不开始 relation extra stale write、fallback cleanup、local transaction shim 抽离或下一模块。
+
+Pre-Flight:
+1. 读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 确认 PF-P098、PF-P099、PF-P100 均为 verified。
+3. 确认当前分支不是 main。
+4. 确认当前分支只包含 PF-P098 到 PF-P100 的预期 diff。
+
+Mandatory Checks:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+
+Commit / Merge Rules:
+1. 严禁使用 `git add .` 或 `git add -A`。
+2. 必须精确 `git add` 允许范围内的具体文件。
+3. 严禁提交 untracked 临时文件、`.pkl`、`.sqlite`、缓存目录或测试产物。
+4. 如果用户授权自动 MG，则验证通过后可以 commit、merge 到 main、在 main 上重跑 Mandatory Checks，然后 `git push origin main`。
+5. 如果 main 上复验失败，必须停止，不得 push。
+6. 如果 merge/rebase 冲突，必须停止，不得丢弃任何一方改动。
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P100-MG status = verified / blocked。
+   - 记录 commit、merge、main 上复验结果和 push 结果。
+   - push 完成后，下一条允许任务必须写为从最新 main 新建分支后生成下一条 Turnover Ledger prompt。
+2. 更新 refactor-prompts.md 和 turnover-ledger-write-uow-plan.md：
+   - 记录 MG 结果。
+3. 不得执行 Traffic Gate。
+```
+
+### 审查结论
+
+- PF-P100-MG 是 PF-P098 到 PF-P100 的正确 cumulative Merge Gate。
+- MG 只做 scope audit、untracked audit、diff check、target tests、compileall、commit/merge/push；不得新增业务实现。

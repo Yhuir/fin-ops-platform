@@ -2374,7 +2374,7 @@ PF-P099 建议边界：
 
 ## PF-P100 Withdraw Relation Expected Versions Skeleton
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2388,3 +2388,31 @@ PF-P099 建议边界：
 - 不清理 fallback path。
 - 不抽离 local transaction shim。
 - 不新增 SQL migration。
+
+执行结果：
+
+- `TurnoverLedgerWriteFacade.withdraw_relation(...)` 已增加 optional `expected_versions` 参数，并透传到 `TurnoverLedgerWriteCommand.expected_versions`。
+- withdraw handler 已拒绝已 `withdrawn` relation 的 duplicate submit，返回 409 `relation_already_withdrawn`，不再二次 mutation/audit/refresh。
+- withdraw handler 已从当前 relation `version` 构造最小 expected version：`relation:{relation_id}`。
+- PF-P099 的 2 条 target tests 已转为普通通过。
+- 旧 duplicate-withdraw current behavior test 已收敛为当前契约：第二次 withdraw 返回 409，audit/refresh 不增加。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+剩余 gap：
+
+- relation extra stale write 尚未处理。
+- fallback cleanup 尚未处理。
+- local transaction shim 尚未抽离。
+- 当前 P100 只建立 withdraw duplicate/stale 最小骨架，不代表 Turnover Ledger 写路径全部完成。
+
+下一条：
+
+- 执行 `PF-P100-MG - Turnover Ledger Withdraw Stale/Duplicate Cumulative Merge Gate`，统一覆盖 PF-P098 到 PF-P100。

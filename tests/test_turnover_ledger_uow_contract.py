@@ -886,11 +886,14 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_target_withdraw_relation_facade_passes_expected_versions_before_repository(self) -> None:
         # PF-P099 target contract: facade should expose expected_versions and let UoW reject stale withdraw.
         stale_precondition = _StalePreconditionPort(stale=True)
-        uow, deps = self._build_uow(stale_precondition_port=stale_precondition)
+        relation_port = _RecordingWithdrawRelationPort()
+        uow, deps = self._build_uow(
+            relation_repository=relation_port,  # type: ignore[arg-type]
+            stale_precondition_port=stale_precondition,
+        )
         facade = self._write_facade_class()(uow=uow)
 
         with self.assertRaisesRegex(RuntimeError, "turnover_write_conflict"):
@@ -905,9 +908,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(
             stale_precondition.checked,
-            [{"expected_versions": {"relation:turnover_rel_1": 3}, "transaction": deps.connection.transactions[0]}],
+            [{"expected_versions": {"relation:turnover_rel_1": 3}, "transaction": deps.connection.transaction_obj}],
         )
-        self.assertEqual(deps.relation_repository.withdraw_calls, [])
+        self.assertEqual(relation_port.withdraw_calls, [])
         self.assertEqual(deps.dirty_outbox_writer.calls, [])
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)

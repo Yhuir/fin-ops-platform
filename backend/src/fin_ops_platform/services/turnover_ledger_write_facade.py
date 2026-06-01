@@ -178,6 +178,7 @@ class TurnoverLedgerWriteFacade:
         tenant_id: str,
         note: str | None,
         affected_months: list[str],
+        expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_relation_id = str(relation_id or "").strip()
         normalized_months = [
@@ -188,6 +189,7 @@ class TurnoverLedgerWriteFacade:
         command = TurnoverLedgerWriteCommand(
             action_name="withdraw_relation",
             scope_keys=["all"],
+            expected_versions=dict(expected_versions or {}),
             refresh_requests=[
                 {
                     "scope_type": "turnover_ledger",

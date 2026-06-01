@@ -1782,7 +1782,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual([item[:3] for item in queue.transactional], [("turnover_ledger", "all", "turnover_relation_changed")])
         self.assertEqual(queue.enqueued, [])
 
-    def test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues(self) -> None:
+    def test_withdraw_duplicate_submit_rejects_after_first_withdraw_without_second_refresh(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -1813,14 +1813,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(confirmed_response.status_code, 200)
         self.assertEqual(first_withdraw_response.status_code, 200)
-        self.assertEqual(second_withdraw_response.status_code, 200)
-        self.assertEqual(second_payload["relation"]["status"], "withdrawn")
-        self.assertEqual(second_payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(second_withdraw_response.status_code, 409)
+        self.assertEqual(second_payload["error"], "relation_already_withdrawn")
         self.assertEqual(
             [(entry["action"], entry["new_status"]) for entry in audit_log],
             [
                 ("confirm_relation", "confirmed"),
-                ("withdraw_relation", "withdrawn"),
                 ("withdraw_relation", "withdrawn"),
             ],
         )
@@ -1830,11 +1828,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [
                 ("turnover_ledger", "all", "turnover_relation_changed"),
                 ("turnover_ledger", "all", "turnover_relation_changed"),
-                ("turnover_ledger", "all", "turnover_relation_changed"),
             ],
         )
 
-    @unittest.expectedFailure
     def test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh(self) -> None:
         # PF-P099 target contract: duplicate withdraw should become a conflict, not a second mutation.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
