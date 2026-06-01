@@ -1284,7 +1284,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             adapter_class(application=object())
 
-    @unittest.expectedFailure
     def test_postgres_relation_repository_adapter_rejects_application_god_object(self) -> None:
         # PF-P090 PostgreSQL Write Port Contract: relation adapter must be a granular port.
         adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationRepositoryAdapter")
@@ -1292,7 +1291,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             adapter_class(application=object())
 
-    @unittest.expectedFailure
     def test_postgres_relation_repository_adapter_confirms_with_supplied_transaction(self) -> None:
         # PF-P090 PostgreSQL Write Port Contract: no SQL or Application dependency inside facade tests.
         adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationRepositoryAdapter")
@@ -1321,7 +1319,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(result["relation"]["status"], "confirmed")
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(result))
 
-    @unittest.expectedFailure
     def test_postgres_relation_repository_adapter_withdraws_with_supplied_transaction(self) -> None:
         # PF-P090 PostgreSQL Write Port Contract: withdraw relation must join the caller transaction.
         adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationRepositoryAdapter")
@@ -1350,7 +1347,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(result["relation"]["status"], "withdrawn")
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(result))
 
-    @unittest.expectedFailure
     def test_postgres_bankdetail_port_adapter_rejects_application_god_object(self) -> None:
         # PF-P090 PostgreSQL Write Port Contract: bankdetail adapter must not receive Application.
         adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerBankdetailPortAdapter")
@@ -1358,7 +1354,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             adapter_class(application=object())
 
-    @unittest.expectedFailure
     def test_postgres_bankdetail_port_adapter_applies_updates_with_supplied_transaction(self) -> None:
         # PF-P090 PostgreSQL Write Port Contract: category facts/audit must join the UoW transaction.
         adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerBankdetailPortAdapter")

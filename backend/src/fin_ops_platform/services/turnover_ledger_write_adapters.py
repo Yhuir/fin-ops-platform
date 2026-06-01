@@ -56,6 +56,78 @@ class TurnoverLedgerTagSelectionSettingsAdapter:
         if callable(append_audit):
             append_audit(dict(audit_event))
 
+
+class TurnoverLedgerRelationRepositoryAdapter:
+    def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
+        self._repository_factory = repository_factory
+
+    def confirm_relation(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        repository = self._repository_factory(transaction)
+        confirm = getattr(repository, "confirm_relation", None)
+        if not callable(confirm):
+            raise RuntimeError("turnover relation repository must expose confirm_relation.")
+        return dict(
+            confirm(
+                bank_row_ids=list(bank_row_ids or []),
+                actor_id=actor_id,
+                note=note,
+            )
+            or {}
+        )
+
+    def withdraw_relation(
+        self,
+        *,
+        relation_id: str,
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        repository = self._repository_factory(transaction)
+        withdraw = getattr(repository, "withdraw_relation", None)
+        if not callable(withdraw):
+            raise RuntimeError("turnover relation repository must expose withdraw_relation.")
+        return dict(
+            withdraw(
+                relation_id=relation_id,
+                actor_id=actor_id,
+                note=note,
+            )
+            or {}
+        )
+
+
+class TurnoverLedgerBankdetailPortAdapter:
+    def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
+        self._repository_factory = repository_factory
+
+    def apply_turnover_category_updates(
+        self,
+        updates: list[dict[str, object]],
+        *,
+        actor_id: str,
+        transaction: Any,
+    ) -> dict[str, object]:
+        repository = self._repository_factory(transaction)
+        apply_updates = getattr(repository, "apply_turnover_category_updates", None)
+        if not callable(apply_updates):
+            raise RuntimeError("bankdetail repository must expose apply_turnover_category_updates.")
+        return dict(
+            apply_updates(
+                [dict(update) for update in list(updates or [])],
+                actor_id=actor_id,
+            )
+            or {}
+        )
+
+
 class TurnoverLedgerDirtyOutboxWriter:
     def __init__(
         self,

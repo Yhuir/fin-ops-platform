@@ -1907,7 +1907,7 @@ Verification:
 
 ## PF-P091 PostgreSQL Write Port Adapter Skeleton
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1925,4 +1925,16 @@ Verification:
 
 下一步：
 
-- PF-P091 verified 后，先进入 PostgreSQL facade readiness / API target tests；不得直接 wiring handler。
+- PF-P091 已 verified。下一步先进入 PostgreSQL facade readiness / API target tests；不得直接 wiring handler。
+
+执行结果：
+
+- 已实现最小 `TurnoverLedgerRelationRepositoryAdapter` 和 `TurnoverLedgerBankdetailPortAdapter`。
+- PF-P090 的 5 条 adapter target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+- 未修改 `server.py`，未迁移 handler。
+
+Verification:
+
+- RED：移除 5 个 expectedFailure 后，UoW contract suite 因 adapter class 缺失失败。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 45 tests.
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass.

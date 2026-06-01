@@ -19618,3 +19618,25 @@ Post-Flight:
 - PF-P091 只让 PF-P090 target tests 转绿，范围受控。
 - Prompt 明确禁止迁移 handler 和访问真实 PostgreSQL。
 - 下一步应先规划/测试 PostgreSQL facade wiring，不应直接修改 server.py。
+
+### 执行结果
+
+- PF-P091 已执行并按自动工作流标记为 `verified`。
+- 新增最小 `TurnoverLedgerRelationRepositoryAdapter`：
+  - 只接收 `repository_factory`；
+  - `confirm_relation(...)` 和 `withdraw_relation(...)` 均通过 supplied transaction 创建 repository；
+  - 不直接 SQL，不接收 Application god object。
+- 新增最小 `TurnoverLedgerBankdetailPortAdapter`：
+  - 只接收 `repository_factory`；
+  - `apply_turnover_category_updates(...)` 通过 supplied transaction 创建 repository；
+  - 不 enqueue read model refresh，不接收 Application god object。
+- PF-P090 的 5 条 adapter target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+- 未修改 `server.py`，未迁移 PostgreSQL handler path，未访问真实外部服务。
+
+Verification:
+
+- RED：移除 PF-P090 5 个 expectedFailure 后，`tests.test_turnover_ledger_uow_contract` 因缺少 `TurnoverLedgerRelationRepositoryAdapter` 和 `TurnoverLedgerBankdetailPortAdapter` 失败 5 个 errors。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，45 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass。
+
+下一步建议：生成并审查 PostgreSQL facade readiness / API-level target tests prompt；不得直接迁移 handler。
