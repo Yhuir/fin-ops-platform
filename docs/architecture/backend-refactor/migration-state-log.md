@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate` 已 verified，正在推送 `origin/main` |
-| 当前 active prompt | `PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate` (`verified`) |
-| 最近 verified prompt | `PF-P044-MG - Workbench Durable Idempotency Rollout Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | 用户已确认 PF-P044-MG `verified`；本地 `main` 已完成 no-ff merge 和 main 复验；本次状态更新将随 `git push origin main` 推送；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | push 完成后，从最新 `main` 新建分支；下一条 prompt 应聚焦 cleanup/retention、real PostgreSQL concurrency 或 observability 中的一个 |
+| 当前阶段 | 已生成并审查 `PF-P045-MG - Main Delta Rebaseline Merge Gate`，等待执行 |
+| 当前 active prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` (`planned`) |
+| 最近 verified prompt | `PF-P045 - Main Delta Rebaseline / Refactor Plan Resync` |
+| 当前分支 | `codex/main-delta-rebaseline-p045` |
+| 最近验证 | 用户已确认 PF-P045 `verified`；PF-P045 只更新重构文档并提交 `02e75d9b`；未改业务代码、未执行 Traffic Gate、未部署 |
+| 下一条允许任务 | 执行 PF-P045-MG；未经用户确认不得将 PF-P045-MG 标记为 `verified` |
 
 ## Prompt 执行日志
 
@@ -4772,6 +4772,114 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - 执行 `git push origin main`。
 - push 完成后，从最新 `main` 新建分支。
 - 若继续拆 durable idempotency rollout blocker，下一条 prompt 应聚焦 cleanup/retention、real PostgreSQL concurrency 或 observability 中的一个。
+
+### PF-P045 - Main Delta Rebaseline / Refactor Plan Resync
+
+状态：`verified`
+
+#### 范围
+
+- 先将本地 `main` 推送到 `origin/main`，使基线对齐。
+- 从最新 `main` 新建 `codex/main-delta-rebaseline-p045`。
+- 对 `PF-P044-MG` 后进入 main 的后端 delta 做增量盘点。
+- 更新重构状态机、prompt 库、架构资产清单、模块计划和 AI 执行规则。
+- 不改业务代码，不执行 Traffic Gate，不部署，不访问生产。
+
+#### 关键发现
+
+- `main` 已推送并对齐 `origin/main`：`f68d2683 Preserve turnover ledger group breakdowns from flat read models`。
+- `ccbf7c2d..f68d2683` 包含 20 个后端/部署/测试/文档相关提交。
+- Delta 影响约 178 个后端相关文件，约 28k insertions / 4.5k deletions。
+- 新增/强化的重点模块：
+  - Turnover Ledger：query service、SQL projection、source versions、read model refresh、grouped payload breakdown。
+  - Bankdetail / No OA Batch：route facade、application service、tag semantics、No OA Batch read model/worker/selection。
+  - Invoices：Pending Invoice lifecycle、Output Invoice Collections、Input Invoice Usage OA reverse、OA Pending Payments read model。
+  - Tax / Cost / ETC：cost statistics runtime、ETC business batch、tax offset plans/query/runtime。
+  - Platform / Runtime：runtime worker registry、RabbitMQ/staging preflight、deploy worker env examples。
+  - Workbench：matching dirty scope worker 需要纳入后续 runtime boundary 事实源。
+- 未发现需要推翻 Python-first 计划或创建新语言后端的证据。
+
+#### 已固化的低耦合规则
+
+- 优先复用已有封装、service、repository、platform helper 和测试工具，不重复造轮子。
+- `server.py` / `routes_*` 只做路由、HTTP 映射、依赖组装和调用。
+- 不允许机械拆文件；不能把 `server.py` 函数原样搬到 service 就算完成。
+- service 不依赖整个 `Application` 对象，只接收明确依赖。
+- service 不直接读 HTTP cookie/header，不 import `app.auth`。
+- worker runner 不知道 HTTP response，不构造页面 payload。
+- repository 可以知道 SQL 表结构；业务 service 不散落 SQL。
+- 业务写操作继续遵守 facts、audit、dirty scope、outbox 同事务底线。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/ai-execution-rules.md`
+- `docs/architecture/backend-refactor/architecture-inventory.md`
+- `docs/architecture/backend-refactor/module-refactor-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 验证
+
+- `git push origin main`：Pass，`1736acca..f68d2683 main -> main`。
+- `git status --short --branch`：Pass，`main...origin/main` 对齐后新建分支。
+- `git rev-parse --short HEAD` 与 `git rev-parse --short origin/main`：Pass，均为 `f68d2683`。
+- `git log --oneline ccbf7c2d..HEAD -- backend/src/fin_ops_platform backend/README.md docs/architecture/backend-refactor docs/dev docs/operations docs/product-specs tests deploy/oa`：Pass，识别 20 个相关提交。
+- `git diff --name-status ccbf7c2d..HEAD -- backend/src/fin_ops_platform backend/README.md docs/architecture/backend-refactor docs/dev docs/operations docs/product-specs tests deploy/oa`：Pass，完成 delta 文件归属盘点。
+- CodeGraph context：Pass，确认 Turnover Ledger 和 app entry 仍为相关入口。
+- 未运行 Python 测试：本轮只做文档和重构计划再校准，不改业务代码。
+
+#### 下一步
+
+- 用户已确认 PF-P045 `verified`。
+- 已生成并审查 `PF-P045-MG - Main Delta Rebaseline Merge Gate`。
+- 下一条实际模块 prompt 必须读取 PF-P045 delta 事实，不能继续基于 PF-P044-MG 之前的旧状态生成。
+
+### PF-P045-MG - Main Delta Rebaseline Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 覆盖 PF-P045 的文档-only diff。
+- 当前分支：`codex/main-delta-rebaseline-p045`。
+- 当前分支相对 `main` 的预期提交：
+  - `02e75d9b docs(backend-refactor): rebaseline main delta for PF-P045`
+- 预期 diff 文件：
+  - `docs/architecture/backend-refactor/ai-execution-rules.md`
+  - `docs/architecture/backend-refactor/architecture-inventory.md`
+  - `docs/architecture/backend-refactor/module-refactor-plan.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 审查结论
+
+- PF-P045-MG 是文档分支的 Merge Gate，只决定是否把 main delta rebaseline 文档合入 `main`。
+- 本 MG 不执行 Traffic Gate、部署、生产访问、staging 访问或 feature flag 打开。
+- 本 MG 不执行任何模块业务重构，不生成下一条模块实现 prompt。
+- 合入后，后续模块 prompt 必须读取 PF-P045 的 delta 事实和低耦合规则。
+
+#### 验收标准
+
+- `refactor-prompts.md` 已包含完整 PF-P045-MG prompt，正文以 `/goal` 开头。
+- PF-P045-MG prompt 明确只允许文档 diff。
+- PF-P045-MG prompt 明确执行 branch/diff scope、untracked files、upstream sync、main 复验和状态机更新。
+- PF-P045-MG prompt 明确禁止 `git add .` / `git add -A`。
+- PF-P045-MG prompt 明确未经用户确认不得标记 `verified`。
+
+#### 变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，当前分支为 `codex/main-delta-rebaseline-p045`。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+
+#### 下一步
+
+- 执行 PF-P045-MG。
+- PF-P045-MG 成功后，应完成合入 `main`、main 复验和状态机更新；未经用户确认不得标记 `verified`。
 
 ## 维护规则
 

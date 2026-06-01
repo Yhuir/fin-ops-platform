@@ -12809,3 +12809,265 @@ Stop Conditions:
 - `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 仍不得视为可生产打开。
 - `cleanup/retention`、真实 PostgreSQL row-lock concurrency、observability/metrics/logging 和 migration apply/runbook 仍是后续 gate。
 - 用户已确认 PF-P044-MG 可标记为 `verified`；本次状态更新将随 `git push origin main` 推送到远端。
+
+## PF-P045 - Main Delta Rebaseline / Refactor Plan Resync
+
+状态：`verified`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P045 - Main Delta Rebaseline / Refactor Plan Resync。
+
+Role: 你是一位严格的 Python-first 后端架构重构审计工程师，熟悉本仓库的 AI 状态机、Micro-JIT 重构流程、模块 ownership、runtime/read model 边界和 Git 主干保护规则。
+
+Context:
+- 当前计划继续保持 Python-first 后端模块化重构。
+- 不引入 Go 或任何新语言后端。
+- PF-P044-MG 已 verified 并推送到 `origin/main`。
+- 用户随后在 `main` 上提交并推送了一批新功能；继续重构前必须把这些 main delta 纳入现有重构事实源。
+- 本 prompt 只做 rebaseline / documentation sync，不改业务代码，不执行 Traffic Gate，不部署，不访问生产。
+
+Pre-Flight:
+1. 必须确认：
+   - 当前分支从最新 `main` 创建，推荐分支名 `codex/main-delta-rebaseline-p045`。
+   - `main` 与 `origin/main` 已对齐。
+   - 工作区没有未提交业务代码改动。
+2. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/architecture-inventory.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/target-architecture.md`
+3. 必须检查 delta：
+   - `git log --oneline ccbf7c2d..HEAD -- backend/src/fin_ops_platform backend/README.md docs/architecture/backend-refactor docs/dev docs/operations docs/product-specs tests deploy/oa`
+   - `git diff --name-status ccbf7c2d..HEAD -- backend/src/fin_ops_platform backend/README.md docs/architecture/backend-refactor docs/dev docs/operations docs/product-specs tests deploy/oa`
+   - `git diff --stat ccbf7c2d..HEAD -- backend/src/fin_ops_platform backend/README.md docs/architecture/backend-refactor docs/dev docs/operations docs/product-specs tests deploy/oa`
+4. 应使用 CodeGraph 或等价静态分析确认至少 Turnover Ledger、No OA Batch、Pending Invoice、Tax、Runtime Worker 的入口和模块影响。
+
+Goal:
+把 PF-P044-MG 之后进入 `main` 的后端新增功能纳入现有 Python-first 重构事实源，避免后续 prompt 继续基于过期模块边界、过期状态机或旧 inventory 生成。
+
+Required Work:
+1. Main Baseline
+   - 如果 `main` 尚未与 `origin/main` 对齐，先停止并要求对齐；不得在未对齐 main 上继续生成后续 prompt。
+   - 记录当前 HEAD 和 delta commit 范围。
+2. Delta Ownership
+   - 识别新增/修改的 API route、service、repository、worker、migration、tests、deploy env 和 docs。
+   - 归属到现有模块：Platform / Runtime、Workbench、Turnover Ledger、Bankdetail / No OA Batch、Invoices、Tax / Cost / ETC、Search / Pending Query、Imports、Ops。
+   - 对无法明确归属的文件标记 `Review`，不得凭空创建新模块。
+3. Architecture Rule Lock
+   - 将以下规则固化为后续 prompt 硬约束：
+     - 优先复用已有封装、service、repository、platform helper 和测试工具，不重复造轮子。
+     - `server.py` / `routes_*` 只做路由、HTTP 映射、依赖组装和调用。
+     - 不允许机械拆文件；不能把 `server.py` 函数原样搬到 service 就算完成。
+     - service 不依赖整个 `Application` 对象，只接收明确依赖。
+     - service 不直接读 HTTP cookie/header，不 import `app.auth`。
+     - worker runner 不知道 HTTP response，不构造页面 payload。
+     - repository 可以知道 SQL 表结构；业务 service 不散落 SQL。
+     - 业务写操作继续遵守 facts、audit、dirty scope、outbox 同事务底线。
+4. Documentation Sync
+   - 更新 `architecture-inventory.md`：增加 PF-P045 main delta rebaseline 事实。
+   - 更新 `module-refactor-plan.md`：说明各模块后续 Micro-JIT 必须读取的新 delta 输入。
+   - 更新 `ai-execution-rules.md`：固化低耦合和 no mechanical extraction 规则。
+   - 更新 `migration-state-log.md`：记录 PF-P045 状态、发现、验证和下一步。
+   - 更新 `refactor-prompts.md`：记录本 prompt 和执行结果。
+
+Allowed Scope:
+- 只允许修改：
+  - `docs/architecture/backend-refactor/ai-execution-rules.md`
+  - `docs/architecture/backend-refactor/architecture-inventory.md`
+  - `docs/architecture/backend-refactor/module-refactor-plan.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+
+Forbidden Scope:
+- 不修改业务代码。
+- 不修改测试代码。
+- 不修改 SQL migration。
+- 不修改前端。
+- 不执行 Traffic Gate。
+- 不部署。
+- 不访问生产或 staging。
+- 不打开任何 feature flag。
+- 不生成或执行下一个模块实现 prompt。
+
+Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only`
+
+Post-Flight:
+- 将 PF-P045 标记为 `implemented`；未经用户确认不得标记 `verified`。
+- 最终回复必须说明：
+  - `main` 是否已与 `origin/main` 对齐。
+  - 新建分支名。
+  - 已归档的 main delta 范围。
+  - 更新了哪些文档。
+  - 下一步建议是什么。
+
+Stop Conditions:
+- 如果 `main` 未与 `origin/main` 对齐，停止。
+- 如果出现未跟踪临时文件，停止。
+- 如果需要改业务代码才能完成本 prompt，停止。
+- 如果发现新增后端文件无法归属到现有模块，标记 Review，不要猜测。
+- 如果用户未确认，不得将 PF-P045 标记为 `verified`。
+```
+
+### 审查结论
+
+- PF-P045 是继续重构前必要的 rebaseline，不是全量重做计划。
+- PF-P045 只处理 PF-P044-MG 后的 main delta 文档同步，不执行模块实现。
+- PF-P045 明确固化低耦合规则，避免后续 prompt 机械拆文件。
+
+### 执行结果
+
+状态：`verified`
+
+- 已先推送 `main`，`origin/main` 从 `1736acca` 更新到 `f68d2683`。
+- 已从最新 `main` 新建 `codex/main-delta-rebaseline-p045`。
+- 已扫描 `ccbf7c2d..f68d2683` 的后端/部署/测试/文档 delta：20 个相关提交，约 178 个后端相关文件。
+- 已把 Turnover Ledger、Bankdetail / No OA Batch、Invoices、Tax / Cost / ETC、Platform / Runtime、Workbench 的新增事实写入 `architecture-inventory.md` 和 `module-refactor-plan.md`。
+- 已将低耦合 / no mechanical extraction 规则写入 `ai-execution-rules.md`。
+- 未改业务代码，未执行 Traffic Gate，未部署，未访问生产。
+- 用户已确认 PF-P045 可标记为 `verified`。
+
+## PF-P045-MG - Main Delta Rebaseline Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P045-MG - Main Delta Rebaseline Merge Gate。
+
+Role: 你是一位严格的 Git Merge Gate 审核工程师，熟悉 Python-first 后端架构重构、文档-only merge gate、状态机维护和主干合入流程。你的任务是只处理 PF-P045 文档再校准分支的合入门禁。
+
+Context:
+- 当前重构方向是 Python-first，不引入 Go，不替换运行时。
+- 当前分支必须是 `codex/main-delta-rebaseline-p045`。
+- 用户已确认 `PF-P045 - Main Delta Rebaseline / Refactor Plan Resync` 为 `verified`。
+- PF-P045 只做 main delta rebaseline 文档同步，不改业务代码。
+- 本 MG 只允许完成 Merge Gate，不允许执行 Traffic Gate、部署、生产访问、feature flag 打开或任何业务模块迁移。
+- 合入 main 后，后续模块 prompt 必须读取 PF-P045 的 delta 事实和低耦合规则。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/architecture-inventory.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+2. 必须确认：
+   - 当前分支是 `codex/main-delta-rebaseline-p045`。
+   - PF-P045 已 `verified`。
+   - 当前 active prompt 是 PF-P045-MG planned。
+   - 工作区没有未提交变更；如果有，只能是 PF-P045-MG 文档状态更新，且必须先提交或纳入本 MG 明确范围。
+   - `git ls-files --others --exclude-standard` 为空；严禁临时文件、`.pkl`、`.sqlite`、`__pycache__` 或测试输出混入。
+3. 必须列出并确认分支相对 main 的 commit 范围：
+   - `git log --oneline main..HEAD`
+   - 当前预期至少包含：
+     - `02e75d9b docs(backend-refactor): rebaseline main delta for PF-P045`
+
+Gate Scope:
+- 这是 Merge Gate，只决定是否把 PF-P045 文档分支合入 main。
+- 不触发 Traffic Gate。
+- 不部署。
+- 不访问生产或 staging。
+- 不修改 Nginx、网关、worker routing、部署配置、环境变量或 feature flag。
+- 不修改业务代码、测试代码、SQL migration 或前端。
+- 不生成或执行下一条模块实现 prompt。
+
+Expected Changed Files:
+必须确认 `git diff --name-only main...HEAD` 只包含以下文件；如有额外文件，必须停止并解释，未经用户确认不得继续：
+
+- `docs/architecture/backend-refactor/ai-execution-rules.md`
+- `docs/architecture/backend-refactor/architecture-inventory.md`
+- `docs/architecture/backend-refactor/module-refactor-plan.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+Required Scope Review:
+1. 审查文档 diff，确认只包含：
+   - PF-P045 main delta rebaseline 事实。
+   - 后续 prompt 的低耦合硬规则。
+   - 状态机和 prompt 库状态更新。
+2. 必须确认未发生：
+   - production code 变更。
+   - test code 变更。
+   - SQL migration 变更。
+   - frontend 变更。
+   - deploy / gateway / worker routing 变更。
+   - Go/backend-go 相关恢复。
+3. 必须确认文档仍明确：
+   - 当前计划是 Python-first。
+   - 不需要重做整个后端重构计划。
+   - 后续模块 prompt 必须读取 PF-P045 delta 事实。
+   - 低耦合不是机械拆文件。
+
+Required Verification Before Merge:
+必须在当前分支执行并通过：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `rg -n "PF-P045|Main Delta Rebaseline|低耦合|不允许机械拆文件|server.py|routes_\\*" docs/architecture/backend-refactor`
+
+Upstream Sync / Merge Rules:
+1. 执行 merge 前必须同步 main：
+   - `git checkout main`
+   - `git pull origin main`
+2. 如果 main 有新提交，必须回到功能分支执行 rebase 或 merge main：
+   - `git checkout codex/main-delta-rebaseline-p045`
+   - `git rebase main` 或 `git merge main`
+   - 如有冲突，解决后必须重新执行 Required Verification Before Merge 全套检查。
+3. 只有当前分支包含最新 main 且验证通过，才允许合入 main。
+4. 合入 main 后必须在 main 上重新执行完整验证：
+   - `git status --short --branch`
+   - `git diff --check`
+   - `test ! -e backend-go`
+   - 上述 `rg` 检索
+5. 如果当前已经在 main 且 commit 已存在于 main，不做无意义 merge；只做范围检查、main 复验和状态机更新。
+
+Commit / Merge Rules:
+- 严禁使用 `git add .` 或 `git add -A`。
+- 如果需要更新 MG 状态文档，必须精准 stage 具体文件。
+- 如果需要创建 MG 文档提交，commit message 建议：
+  - `docs(backend-refactor): plan main delta rebaseline merge gate`
+- 合入 main 的 merge commit message 建议：
+  - `Merge branch 'codex/main-delta-rebaseline-p045': main delta rebaseline docs`
+- 不 push，除非用户明确要求。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P045-MG 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录 merge 前分支验证结果。
+  - 记录 main 复验结果。
+  - 记录是否已合入 main。
+  - 记录未执行 Traffic Gate、部署、生产访问、feature flag 打开或 push。
+  - 记录下一步建议：push origin main；push 后从最新 main 新建分支生成下一条实际模块 prompt。
+- 更新 `refactor-prompts.md` 的 PF-P045-MG 执行结果。
+- 若执行了 merge，确保最终工作区干净。
+
+Stop Conditions:
+- 如果存在未跟踪临时文件，停止。
+- 如果 changed files 超出 Expected Changed Files，停止并请求用户确认。
+- 如果任何验证失败，停止。
+- 如果需要修改业务代码、测试代码、SQL migration、前端、部署或网关才能完成，停止。
+- 如果 main 同步后出现冲突且无法在本轮安全解决，停止并记录 blocker。
+- 如果用户未确认，不得将 PF-P045-MG 标记为 verified。
+```
+
+### 审查结论
+
+- PF-P045-MG 范围合理：它只覆盖 PF-P045 文档再校准分支。
+- 本 MG 是 Merge Gate，不是 Traffic Gate；不部署、不访问生产、不改业务代码。
+- 本 MG 合入后，下一条实际模块 prompt 必须基于 PF-P045 delta 事实生成。

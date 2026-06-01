@@ -25,6 +25,36 @@
 - 当前计划仍是 Python-first 架构重构；本清单不建议创建新语言后端或修改生产路由。
 - `PF-P001-C1` 已补齐非 `services/` 核心目录覆盖：`domain/`、`app/main.py`、`app/auth.py`、PostgreSQL migration runtime、backfill jobs 和巨型测试门禁文件必须有明确 Primary Owner。
 
+## PF-P045 Main Delta Rebaseline
+
+PF-P045 重新校准了 `PF-P044-MG` 后进入 `main` 的新增后端事实。此次不是重做全量 inventory，而是把 `ccbf7c2d..f68d2683` 的 main delta 纳入现有 Python-first 重构事实源。
+
+基线状态：
+
+- `main` 已推送并与 `origin/main` 对齐到 `f68d2683 Preserve turnover ledger group breakdowns from flat read models`。
+- 重构工作分支：`codex/main-delta-rebaseline-p045`。
+- Delta 范围：20 个后端/部署/测试/文档相关提交，约 178 个后端相关文件，约 28k insertions / 4.5k deletions。
+- 本轮只做文档和重构计划再校准；不改业务代码，不执行 Traffic Gate，不部署。
+
+新增 / 强化的模块事实：
+
+| 模块 | 新增事实 | 重构影响 |
+| --- | --- | --- |
+| Turnover Ledger | 新增 `turnover_ledger_query_service.py`、`turnover_ledger_read_model_refresh.py`、`turnover_ledger_source_versions.py`、`turnover_ledger_sql_projection.py`，并强化 `routes_turnover_ledger.py` grouped read model breakdown | Turnover Ledger 已不只是 route/service 组合，后续 Micro-JIT 必须覆盖 query service、SQL projection、source version、read model refresh 和 grouped payload contract |
+| Bankdetail / No OA Batch | 新增 `routes_bank_details.py`、`routes_no_oa_bank_batches.py`、`bank_details_application_service.py`、`bank_detail_category_selection.py`、`bank_turnover_tag_semantics.py`、`no_oa_bank_batch_*` 服务和 route tests | Bankdetail 模块边界扩大到外部流水标签语义、免 OA 批次 read model/worker/selection；不能只按旧 `bank_details_service.py` 深挖 |
+| Invoices / Pending Query | 新增 `routes_pending_invoices.py`、`routes_output_invoice_collections.py`、`routes_oa_pending_payments.py`、pending/output/input invoice lifecycle、read model、status、OA reverse services 和 repository | Invoices 需要拆分 Pending Invoice、Output Invoice Collections、Input Invoice Usage、OA Pending Payments 子域，但仍归入 Invoices 顶层模块 |
+| Tax / Cost / ETC | 新增 `routes_cost_statistics.py`、`routes_etc.py`、`cost_statistics_*`、`etc_business_batch_application_service.py`、`tax_offset_*` query/runtime/plan services 和 migration 0050 | Tax / Cost / ETC 的 route facade 和 runtime service 已明显增多，后续 Micro-JIT 必须覆盖 route facade、query service、runtime refresh 和 repository |
+| Platform / Runtime Worker | 新增 `runtime_worker_registry.py`、`workbench_matching_dirty_scope_worker.py`、多个 deploy worker env example、RabbitMQ preflight 增强和 worker registry tests | Runtime worker 现在是跨模块 shared boundary；后续任何 worker 改动必须检查 registry、deploy env、RabbitMQ/staging preflight 和 App Health |
+| Workbench | Workbench durable idempotency 仍保留后续 gate，同时新增 `workbench_matching_dirty_scope_worker.py` 和 query facade 相关测试更新 | Workbench 下一步不能只看 idempotency blocker，也要纳入 matching dirty scope worker 的 runtime 边界 |
+
+PF-P045 没有发现需要创建新模块的证据；但确认以下模块计划必须以新 delta 为输入重新生成单模块 prompt：
+
+- Turnover Ledger Micro-JIT 必须覆盖新增 query/read-model/source-version 文件。
+- Bankdetail Micro-JIT 必须覆盖 No OA Batch 和 external turnover tag semantics。
+- Invoices Micro-JIT 必须覆盖 OA Pending Payments、Output Invoice Collections 和 Input Invoice Usage OA reverse。
+- Tax / Cost / ETC Micro-JIT 必须覆盖 cost statistics runtime、ETC business batch 和 tax offset plans。
+- Platform / Runtime Micro-JIT 必须覆盖 runtime worker registry 和 deploy env contract。
+
 模块遗漏 / 错归属审计：
 
 | 发现 | 判断 | 后续动作 |
