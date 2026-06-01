@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` (`implemented`) |
-| 最近 verified prompt | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` |
+| 当前阶段 | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` 已验证，准备生成 `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
+| 当前 active prompt | 无 active prompt；下一步生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
+| 最近 verified prompt | `PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
 | 最近验证 | PF-P051 只做 discovery/planning；已新增 `turnover-ledger-write-uow-plan.md`；已运行文档检查；未修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 等待用户确认 PF-P051；确认后将 PF-P051 标记为 `verified`，再生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
+| 下一条允许任务 | 生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests`；PF-P052 必须只补测试，锁定 duplicate/stale/failure 当前行为，不得实现 UoW 或迁移真实写路径 |
 
 ## Prompt 执行日志
 
@@ -5359,7 +5359,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -5385,8 +5385,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认 PF-P051。
-- 用户确认后，将 PF-P051 标记为 `verified`。
+- 已根据自动工作流授权和验证结果将 PF-P051 标记为 `verified`。
 - 下一条建议 prompt：`PF-P052 - Turnover Ledger Write Path Characterization Tests`。
 - PF-P052 应先锁定 duplicate/stale/failure 当前行为，不应直接实现 UoW。
 

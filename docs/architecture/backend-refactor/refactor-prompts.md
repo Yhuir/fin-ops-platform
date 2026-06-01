@@ -9609,7 +9609,7 @@ PF-P032 已由用户确认 `verified`。PF-P032-MG 不单独执行，明确延�
 
 ## PF-P033 - Workbench Cash Special Stale Guard Migration
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -14387,7 +14387,7 @@ Stop Conditions:
 
 ### 执行结果
 
-- PF-P051 已执行，状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- PF-P051 已执行，状态为 `verified`。根据自动工作流授权，已在验证满足 scope、无 unrelated changes、无 untracked 临时文件、文档回写完成后落锁。
 - 新增 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`。
 - 更新 `migration-state-log.md` 和 `turnover-ledger-discovery.md`。
 - 已完成 Turnover Ledger 写路径 API matrix、runtime sequence、UoW readiness assessment、transaction/outbox/dirty scope audit、idempotency/stale baseline、repository ownership audit 和 test gap matrix。
@@ -14404,4 +14404,4 @@ Stop Conditions:
   - `git ls-files --others --exclude-standard`：Pass，仅本轮新增计划文档。
   - `git diff --check`：Pass。
   - `rg -n "PF-P051|Turnover Ledger Write Path|UoW|_after_turnover_relation_mutation|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor`：Pass。
-- 下一步建议：用户确认 PF-P051 `verified` 后，生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests`。PF-P052 应只补测试，锁定 duplicate/stale/failure 当前行为，不直接实现 UoW。
+- 下一步建议：生成并审查 `PF-P052 - Turnover Ledger Write Path Characterization Tests`。PF-P052 应只补测试，锁定 duplicate/stale/failure 当前行为，不直接实现 UoW。
