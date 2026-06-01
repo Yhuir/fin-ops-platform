@@ -13485,7 +13485,7 @@ Stop Conditions:
 
 ## PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -13633,3 +13633,35 @@ Stop Conditions:
 - PF-P048 边界正确：只做 planning 和文档回写，不改 production code，不改 tests，不进入 Merge Gate。
 - PF-P048 明确排除了 mutation UoW、relation confirm/withdraw、bank-row-tags batch、extra PUT side effects 和 legacy fallback removal，避免把 query/read-only 抽取扩大成写路径重构。
 - PF-P048 的默认后续实现 prompt 是 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`，但只有 PF-P048 verified 后才能生成。
+
+### 执行结果
+
+状态：`implemented`
+
+- 已执行 PF-P048，只做 Turnover Ledger query/route facade extraction planning 和文档回写。
+- 变更文件：
+  - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 规划结论：
+  - PF-P049 目标应是 read-only query/route facade extraction，不是 mutation UoW。
+  - `server.py` 必须继续保留 HTTP dispatch、query/body parsing、auth/session、异常到 HTTP 映射、JSON/XLSX `Response` 构造。
+  - 新 helper/facade 只能接收 `TurnoverLedgerApiRoutes` 等细粒度依赖，禁止注入 `Application`、`state_store`、`RuntimeRepositories` 或其他 god object。
+  - `TurnoverLedgerApiRoutes` 当前同时承担 grouped compatibility normalization 和 export composition，PF-P049 不应拆深层职责，只应先显式化 HTTP read boundary。
+  - Extra GET 可纳入 read extraction；extra PUT、confirm、withdraw、bank-row-tags batch、tag-selection update 全部明确排除。
+  - Query legacy fallback 必须保留，不得在 PF-P049 删除或改变。
+- PF-P049 建议最小顺序：
+  1. 新增 read-only Turnover Ledger route/query facade helper；
+  2. 使用现有 `_turnover_ledger_api_routes` 委托；
+  3. 只替换 list、export-preview、export、relation GET、extra GET handler 的内部委托；
+  4. 保持 `server.py` response mapping；
+  5. 运行 PF-P047 79-test command。
+- 验证：
+  - `git status --short --branch`：Pass，仅文档变更。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `rg -n "PF-P048|Query/Route Facade Extraction|Turnover Ledger|server.py|TurnoverLedgerApiRoutes|PF-P049" docs/architecture/backend-refactor`：Pass。
+- 未修改 production code、tests、SQL migration、前端、部署、Nginx、Vite、worker routing、环境变量或生产配置。
+- 未执行 Merge Gate、Traffic Gate、部署、生产访问或 staging 访问。
+- 下一步建议：用户确认 PF-P048 `verified` 后，生成并审查 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`；如果用户希望先合入 PF-P046 到 PF-P048，则先生成 cumulative MG。

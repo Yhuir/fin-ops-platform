@@ -341,15 +341,173 @@ Verification:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_ledger_source_versions -v`: Pass, 33 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions -v`: Pass, 79 tests.
 
+## PF-P048 Query/Route Facade Extraction Planning
+
+PF-P048 is a planning-only slice. It does not modify production code, tests, SQL migrations, frontend code or deployment configuration.
+
+### Target Boundary
+
+The next implementation slice should extract only the Turnover Ledger query/read-only HTTP boundary. It must not introduce Turnover Unit of Work, stale write handling, durable idempotency, mutation orchestration or worker changes.
+
+Keep these responsibilities in `server.py`:
+
+- HTTP method/path dispatch.
+- Query/body parsing and simple scalar normalization, such as `page`, `page_size`, `family`, `direction`, `status` and `limit`.
+- Auth/session resolution where currently required.
+- Mapping domain/service exceptions to HTTP status and error payloads.
+- Constructing `Response`, including JSON responses and XLSX headers.
+
+Move or make explicit these read-only route responsibilities:
+
+- Calling `TurnoverLedgerApiRoutes.list_ledger` for list/grouped query payloads.
+- Calling `TurnoverLedgerApiRoutes.export_preview` and `TurnoverLedgerApiRoutes.export`.
+- Calling `TurnoverLedgerApiRoutes.get_relation` and `get_relation_extra` for read-only detail payloads.
+- Keeping grouped compatibility normalization in `TurnoverLedgerApiRoutes`, including:
+  - query service delegation;
+  - SQL flat read model -> grouped payload compatibility;
+  - native grouped payload normalization;
+  - extra fields merged into flat grouped rows;
+  - export grouped payload composition.
+
+The practical shape for PF-P049 should be a narrow read/query adapter around the existing `TurnoverLedgerApiRoutes`, not a new business service. A reasonable target is a small helper/facade near the app route boundary, for example `TurnoverLedgerReadHttpFacade` or equivalent, that accepts granular dependencies and returns plain Python payload objects or export tuples. It must not know `Response`, cookies, headers, or the whole `Application`.
+
+### File Touch Plan for PF-P049
+
+Allowed files for the next implementation prompt:
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`, only if a small read-only facade/helper is added there or a method is split without behavior changes.
+- Optionally a new focused app-boundary file such as `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`, if keeping the extraction out of the already-large route file is clearer.
+- Existing Turnover Ledger tests only if an import path or helper name changes require a mechanical update. Prefer no test edits unless necessary.
+- State/prompt docs after execution.
+
+Explicitly excluded files:
+
+- `backend/src/fin_ops_platform/services/turnover_relation_service.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_export_service.py`
+- `backend/src/fin_ops_platform/services/runtime_queue.py`
+- `backend/src/fin_ops_platform/app/worker.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/**`
+- SQL migrations.
+- Frontend code.
+- Deployment and gateway configuration.
+
+PF-P049 must not touch mutation handlers:
+
+- `_handle_api_turnover_ledger_tag_selection_update`
+- `_handle_api_turnover_ledger_bank_row_tags_batch`
+- `_handle_api_turnover_ledger_relation_extra_update`
+- `_handle_api_turnover_ledger_confirm`
+- `_handle_api_turnover_ledger_withdraw`
+
+### Dependency Injection Plan
+
+Do not inject `Application`, `state_store`, `RuntimeRepositories`, or other god objects into the new boundary helper.
+
+Allowed dependencies are granular and already exist:
+
+- `TurnoverLedgerApiRoutes` for route facade behavior.
+- `TurnoverLedgerQueryService` only through `TurnoverLedgerApiRoutes`, unless a method is split for clarity.
+- `TurnoverLedgerExportService` only through the existing route facade composition.
+- `TurnoverLedgerExtraService` only through `TurnoverLedgerApiRoutes.get_relation_extra` for GET.
+- Small formatting helpers for response headers may remain in `server.py`.
+
+Service-level code must not read HTTP headers, cookies, or import `app.auth`. Read-only facade code must not construct `Response`. It should return:
+
+- `dict[str, object]` for JSON payloads.
+- `(filename, bytes)` for XLSX export content.
+- It may raise the same current exceptions (`KeyError`, `TypeError`, `ValueError`) so `server.py` keeps HTTP mapping behavior.
+
+### Safe Slice Proposal
+
+PF-P049 should be a conservative extraction with this order:
+
+1. Introduce a read-only Turnover Ledger route/query facade helper that delegates to the current `TurnoverLedgerApiRoutes`.
+2. Wire the helper in application initialization using the existing `_turnover_ledger_api_routes` instance, not by passing the whole application.
+3. Replace only these handlers with helper calls while preserving HTTP response mapping:
+   - `_handle_api_turnover_ledger`
+   - `_handle_api_turnover_ledger_export_preview`
+   - `_handle_api_turnover_ledger_export`
+   - `_handle_api_turnover_ledger_relation`
+   - `_handle_api_turnover_ledger_relation_extra`
+4. Leave `_handle_api_turnover_ledger_relation_extra_update` untouched, except for reading it as a boundary reference.
+5. Run PF-P047 verification after each meaningful edit if the diff grows.
+
+PF-P047 guard coverage for this slice:
+
+- `tests/test_turnover_ledger_query_service.py` protects SQL freshness, stale/miss refresh enqueue and legacy fallback behavior.
+- `tests/test_turnover_ledger_api.py` protects grouped view response shape, family filtering, relation extra GET/PUT compatibility, export HTTP response headers and mutation side effects.
+- `tests/test_turnover_ledger_export_service.py` protects grouped payload flattening, limits, empty payload and XLSX generation.
+- `tests/test_turnover_ledger_extra_service.py` protects extra defaults and normalization used by GET extra responses.
+- `tests/test_workbench_turnover_grouping.py` remains in the set to catch cross-module source-version influence regressions.
+
+### Non-Goals
+
+PF-P049 must not:
+
+- introduce or design Turnover Unit of Work;
+- fix stale write behavior;
+- alter relation confirm/withdraw;
+- alter `/api/turnover-ledger/bank-row-tags/batch`;
+- alter tag-selection writes;
+- remove or weaken legacy read fallback;
+- remove extra legacy full snapshot fallback;
+- optimize read model cache or source version logic;
+- move SQL/repository code;
+- change worker refresh routing;
+- change frontend API contracts.
+
+### Test Gate for PF-P049
+
+Required targeted verification:
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions -v
+```
+
+Also run:
+
+```bash
+git status --short --branch
+git ls-files --others --exclude-standard
+git diff --check
+test ! -e backend-go
+```
+
+If PF-P049 changes import boundaries or adds a new file, run the smallest additional focused import/build smoke available through unittest discovery for the touched tests.
+
+### PF-P048 Risk Register
+
+| Risk | Severity | Planning decision |
+| --- | --- | --- |
+| `TurnoverLedgerApiRoutes` already mixes compatibility normalization and export composition | Medium | Do not split those responsibilities in PF-P049. First make the HTTP read boundary explicit; deeper route facade split can be a later prompt. |
+| Extra GET and PUT share route facade methods but different safety profiles | High | PF-P049 may touch `get_relation_extra` read path only. PUT remains a mutation side-effect path and is excluded. |
+| Query fallback is ugly but intentionally locked | High | PF-P049 must preserve legacy fallback exactly. Any fallback removal requires a later prompt with tests and rollout decision. |
+| Export returns bytes and needs headers | Medium | Keep `Response` construction and content-disposition header mapping in `server.py`; facade returns `(filename, content)` only. |
+| Relation detail GET reads relation state but is not a write | Medium | It can be included in read-only facade extraction, but must not pull in confirm/withdraw logic. |
+
+### PF-P049 Direction
+
+Default next prompt after PF-P048 is verified:
+
+`PF-P049 - Turnover Ledger Query/Route Facade Extraction`
+
+PF-P049 should implement the read-only facade extraction above. If review finds the implementation slice too broad, split it into:
+
+1. `PF-P049A - Turnover Ledger List/Grouped Read Facade Extraction`
+2. `PF-P049B - Turnover Ledger Export/Detail Read Facade Extraction`
+
 ## Risk Register
 
 | Risk | Severity | Evidence | Next action |
 | --- | --- | --- | --- |
-| Request path legacy rebuild fallback | High | `TurnoverLedgerQueryService` falls back to `legacy_payload_builder` when PostgreSQL read model is not required | PF-P047 characterize; later move rebuild out of request path where production requires SQL read model. |
-| Mutation side effects not under explicit UoW | High | Handler finalizer persists relation snapshot, runs derived lifecycle, clears read model and enqueues refresh separately | PF-P047 characterize exact side effects; later design Turnover write UoW. |
-| Extra write legacy full snapshot fallback | High | `_persist_turnover_ledger_extras_best_effort()` can call `legacy_turnover_ledger_extras_fallback_persist` | PF-P047 lock current path; later remove or gate fallback. |
+| Request path legacy rebuild fallback | High | `TurnoverLedgerQueryService` falls back to `legacy_payload_builder` when PostgreSQL read model is not required | Preserve in PF-P049; removal requires a later prompt and rollout decision. |
+| Mutation side effects not under explicit UoW | High | Handler finalizer persists relation snapshot, runs derived lifecycle, clears read model and enqueues refresh separately | Exclude from PF-P049; later design Turnover write UoW after read route extraction. |
+| Extra write legacy full snapshot fallback | High | `_persist_turnover_ledger_extras_best_effort()` can call `legacy_turnover_ledger_extras_fallback_persist` | Exclude from PF-P049; later remove or gate fallback after dedicated mutation tests. |
 | Turnover API writes Bankdetail facts | High | `/bank-row-tags/batch` calls `BankTransactionCategoryService.apply_turnover_updates()` | Define service port and transaction boundary before refactor. |
-| Grouped flat read model compatibility | Medium-high | PF-P045 preserved grouped breakdowns from flat read model rows | PF-P047 must lock response shape before route facade extraction. |
+| Grouped flat read model compatibility | Medium-high | PF-P045 preserved grouped breakdowns from flat read model rows | PF-P047 now locks response shape; PF-P049 must preserve it. |
 | Worker refresh scope granularity | Medium | projection supports scope key, query always uses `scope_key="all"` | Clarify if month scopes are intended before optimizing worker fanout. |
 | Repository ownership confusion | Medium | Turnover relation persistence is in `postgres_repositories/workbench.py` | Later introduce or alias Turnover repository port to avoid Workbench coupling. |
 
@@ -357,6 +515,6 @@ Verification:
 
 Generate and review:
 
-`PF-P047 - Turnover Ledger Characterization Tests`
+`PF-P049 - Turnover Ledger Query/Route Facade Extraction`
 
-PF-P047 should stay in the same branch unless the user chooses to merge this discovery-only prompt first. It should write tests only and avoid production refactor until the current behavior is mechanically locked.
+PF-P049 should stay in the same branch unless the user chooses a cumulative Merge Gate first. It should implement only the read-only query/route facade extraction planned in PF-P048 and must preserve the PF-P047 test contract.

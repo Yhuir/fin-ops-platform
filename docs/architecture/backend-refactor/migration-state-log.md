@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning` (`planned`) |
+| 当前阶段 | `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning` (`implemented`) |
 | 最近 verified prompt | `PF-P047 - Turnover Ledger Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-discovery-p046` |
 | 最近验证 | 用户已确认 PF-P045-MG `verified`；`main` 已 push 到 `origin/main`，本地与远端对齐到 `de513774`；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning`；只允许规划 query/route facade extraction，不允许 production refactor |
+| 下一条允许任务 | 用户确认 PF-P048 后，将 PF-P048 标记为 `verified`；然后生成并审查 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`，或如用户要求先合入则生成 cumulative MG |
 
 ## Prompt 执行日志
 
@@ -5066,7 +5066,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -5111,8 +5111,34 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P048。
-- PF-P048 verified 后，再生成实现 prompt，例如 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`，或如果 planning 暴露风险，则先补测试。
+- 等待用户确认 PF-P048。
+- 用户确认后，将 PF-P048 标记为 `verified`。
+- 下一条 prompt 建议：`PF-P049 - Turnover Ledger Query/Route Facade Extraction`。
+- 如果用户希望先合入 PF-P046 到 PF-P048 的 discovery/test/planning 基线，则先生成 cumulative MG。
+
+#### 执行结果
+
+- 已完成 Turnover Ledger query/route facade extraction planning，只更新重构文档，不修改 production code、tests、SQL migration、前端或部署。
+- 已在 `turnover-ledger-discovery.md` 新增 `PF-P048 Query/Route Facade Extraction Planning` 小节，明确：
+  - PF-P049 的目标是 read-only query/route facade extraction，不是 mutation UoW；
+  - `server.py` 保留 HTTP dispatch、参数解析、auth/session、异常到 HTTP 映射和 `Response` 构造；
+  - 新 helper/facade 只能依赖 `TurnoverLedgerApiRoutes` 等细粒度依赖，不允许注入 `Application` 或 runtime god object；
+  - PF-P049 允许触碰的文件和必须排除的 mutation/worker/repository/migration/frontend/deploy 文件；
+  - PF-P047 79-test command 作为下一步 implementation 的测试门禁；
+  - extra GET/PUT 边界、legacy fallback、export response header 和 grouped compatibility 风险。
+- 当前建议 PF-P049 最小实现顺序：
+  1. 引入 read-only Turnover Ledger route/query facade helper；
+  2. 复用现有 `_turnover_ledger_api_routes` 进行委托；
+  3. 只替换 list、export-preview、export、relation GET、extra GET handler 的内部委托；
+  4. 保持 `server.py` 的 HTTP response mapping；
+  5. 不触碰 extra PUT、confirm、withdraw、bank-row-tags batch 或 tag-selection write。
+- 验证：
+  - `git status --short --branch`：Pass，仅文档变更。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `rg -n "PF-P048|Query/Route Facade Extraction|Turnover Ledger|server.py|TurnoverLedgerApiRoutes|PF-P049" docs/architecture/backend-refactor`：Pass。
+- 未执行 Merge Gate、Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
 
 ## 维护规则
 
