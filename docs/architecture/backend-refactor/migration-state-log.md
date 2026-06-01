@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` 已验证并合入 main |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` 已生成并审查 |
+| 当前 active prompt | `PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
 | 最近 verified prompt | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P088-MG 已在 main 上复验通过；等待 push origin/main |
-| 下一条允许任务 | push `origin/main` 后，从最新 main 新建下一条 `codex/` 分支；下一模块/切片选择不明确时停止总结 |
+| 当前分支 | `codex/turnover-ledger-remaining-write-rebaseline-p089` |
+| 最近验证 | PF-P088-MG 已在 main 上复验通过并已 push；`main...origin/main` 已对齐 |
+| 下一条允许任务 | 执行 PF-P089，只做 Turnover Ledger 剩余写路径 discovery/planning 和文档回写，不修改业务代码 |
 
 ## Prompt 执行日志
 
@@ -7115,6 +7115,35 @@ PF-P088-MG 通过并 push `origin/main` 后，必须从最新 main 新建下一�
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，39 tests。
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
 - `rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|PF-P088|PF-P088-MG|turnover_relation_changed" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+### PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
+
+状态：`planned`
+
+#### 范围
+
+- 修正 PF-P088-MG 后状态机顶部的 stale push 记录：`main` 已 push 且与 `origin/main` 对齐。
+- 只读扫描 Turnover Ledger 现有 routes、handlers、write facade、UoW、API tests 和 UoW contract tests。
+- 输出 Turnover Ledger route matrix 和 write-path UoW status matrix。
+- 判断 Turnover Ledger 是否仍有未迁移到 UoW 的写路径；如果有，选择下一条最小 Micro-JIT slice；如果没有，明确 Turnover Ledger 写路径进入模块收口候选。
+- 不修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置。
+
+#### 允许变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验收标准
+
+- `git status --short --branch`：当前分支不是 `main`。
+- `git ls-files --others --exclude-standard`：无未跟踪临时文件。
+- `git diff --check`：通过。
+- `rg -n "PF-P089|Remaining Write Path Rebaseline|Route Matrix|UoW Status Matrix|Next Slice Decision|main...origin/main" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：通过。
+
+#### 下一条 Prompt 上下文
+
+PF-P089 还未执行。执行 PF-P089 后，必须根据代码事实决定下一条 prompt：若仍有 Turnover Ledger 写路径未纳入 UoW，则生成对应 characterization/contract tests；若 Turnover Ledger 写路径已完成，则生成模块收口或下一个模块选择 prompt。
 
 ## 维护规则
 

@@ -19314,3 +19314,100 @@ Verification on main:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，39 tests。
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass。
 - `rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|PF-P088|PF-P088-MG|turnover_relation_changed" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
+
+## PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
+
+```text
+/goal
+PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
+
+Role:
+你是一位负责 Python-first 后端模块化重构的后端架构工程师。你必须基于最新 main 的真实代码事实，重新校准 Turnover Ledger 剩余写路径，选择下一条最小 Micro-JIT slice。本轮只做 discovery/planning 和文档回写，不写业务代码。
+
+Context:
+PF-P088-MG 已完成并 push 到 origin/main。当前分支必须从最新 main 新建。PF-P089 的目的不是继续机械迁移代码，而是确认 Turnover Ledger 在 PF-P050 到 PF-P088 之后还剩哪些写路径没有纳入 facade/UoW，以及下一条 prompt 应该测试锁定哪个最小边界。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 `main...origin/main` 已对齐或当前分支起点来自最新 main。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+5. 应优先使用 CodeGraph 做结构扫描；用 `rg` 补充 literal route/path/method 搜索。
+
+Task:
+只读扫描 Turnover Ledger 的现有 HTTP routes、server handler、route facade、write facade、UoW contract tests 和 API tests，输出剩余写路径再校准结果。
+
+Required Discovery Output:
+1. Route Matrix:
+   - 列出所有 `/api/turnover-ledger*` 相关 handler/path/method；
+   - 标记 read-only / write / export / compatibility / review；
+   - 标记 owner：server handler、routes facade、read facade、write facade、repository/service。
+2. UoW Status Matrix:
+   - 对每个 write path 标记当前状态：
+     - already UoW-wired；
+     - has characterization tests only；
+     - has expectedFailure target tests only；
+     - legacy fallback only；
+     - unclear/review。
+   - 必须给出代码证据，例如 handler seam、facade method、contract test 名称。
+3. Remaining Gap Analysis:
+   - 识别仍直接在 `server.py` 编排 facts/audit/dirty scope/outbox 的 Turnover Ledger 写入口；
+   - 识别仍直接 clear read model 而不是通过 transaction-bound dirty/outbox 的入口；
+   - 识别仍缺少 stale write、durable idempotency 或 transaction rollback tests 的入口；
+   - 如果没有剩余写入口，必须明确说明，并列出为什么。
+4. Next Slice Decision:
+   - 只能选择一个最小下一条 prompt；
+   - 优先顺序：characterization/contract tests -> facade/UoW extraction -> cumulative MG；
+   - 不得跳过测试锁定直接实现；
+   - 如果下一步选择不明确，必须停止并记录 blocker，不得猜测。
+5. Documentation Corrections:
+   - 修正 migration-state-log.md 中 PF-P088-MG 已 push 后仍写“等待 push origin/main”的 stale 状态；
+   - 更新 turnover-ledger-write-uow-plan.md，记录 route matrix、UoW status matrix、gap analysis 和 next slice decision；
+   - 更新 refactor-prompts.md，记录 PF-P089 执行结果。
+
+Allowed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得修改 SQL migration、worker、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate。
+- 不得开始下一个模块。
+- 不得把未知 path 强行归类为完成；不确定必须标记 review。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P089|Remaining Write Path Rebaseline|Route Matrix|UoW Status Matrix|Remaining Gap Analysis|Next Slice Decision|main...origin/main" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P089 status = implemented / verified / blocked。
+   - 记录扫描证据、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P089 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 route matrix、UoW status matrix、gap analysis 和 next slice decision。
+4. 若 PF-P089 选择出下一条明确 prompt，下一步生成并审查该 prompt；不得在 PF-P089 中直接执行实现。
+```
+
+### 审查结论
+
+- PF-P089 是 PF-P088-MG push 后的正确恢复步骤：先校准剩余 Turnover Ledger 写路径，而不是盲目继续迁移。
+- 本轮只允许三份文档变更，禁止修改业务代码和测试。
+- PF-P089 要求用代码事实决定下一条最小 prompt，符合 Micro-JIT 工作流。

@@ -1780,3 +1780,29 @@ Verification on main:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 42 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 39 tests.
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass.
+
+## PF-P089 Remaining Write Path Rebaseline / Next Slice Selection
+
+状态：`planned`
+
+目标：
+
+- 在 PF-P088-MG 已 push 到 `origin/main` 后，从最新 `main` 重新扫描 Turnover Ledger 剩余写路径。
+- 输出 route matrix、UoW status matrix、remaining gap analysis 和 next slice decision。
+- 修正状态机中 PF-P088-MG 已 push 后仍显示“等待 push origin/main”的 stale 记录。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code、tests、SQL migration、worker、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不执行 Traffic Gate。
+
+必须回答：
+
+- `/api/turnover-ledger*` 现有 path 中哪些是 read-only、哪些是 write、哪些是 export/compatibility/review。
+- 每个 write path 当前是否已经接入 UoW，证据是什么。
+- 是否还有 handler 直接编排 facts/audit/dirty scope/outbox。
+- 是否还有 handler 直接 clear read model。
+- 是否还有 stale write、durable idempotency 或 transaction rollback tests 缺口。
+- 下一条最小 Micro-JIT prompt 是 characterization/contract tests、facade/UoW extraction、还是 cumulative MG。
