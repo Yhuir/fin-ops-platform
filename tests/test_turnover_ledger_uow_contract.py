@@ -613,7 +613,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             [("turnover_ledger", ["all"], "turnover_relation_changed")],
         )
 
-    @unittest.expectedFailure
     def test_target_withdraw_relation_facade_uses_relation_port_and_returns_service_payload(self) -> None:
         relation_port = _RecordingWithdrawRelationPort()
         uow, deps = self._build_uow(relation_repository=relation_port)  # type: ignore[arg-type]
@@ -641,7 +640,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
         self.assertEqual(deps.connection.commits, 1)
 
-    @unittest.expectedFailure
     def test_target_withdraw_relation_facade_rolls_back_when_dirty_outbox_fails(self) -> None:
         relation_port = _RecordingWithdrawRelationPort()
         uow, deps = self._build_uow(
@@ -663,7 +661,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_target_withdraw_relation_facade_enqueues_turnover_refresh(self) -> None:
         uow, deps = self._build_uow(
             relation_repository=_RecordingWithdrawRelationPort(),  # type: ignore[arg-type]

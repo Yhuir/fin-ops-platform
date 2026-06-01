@@ -18821,3 +18821,22 @@ Post-Flight:
 - PF-P085 是 PF-P084 后的最小实现步骤：只实现 facade skeleton，不碰真实 handler。
 - Prompt 复用现有 `TurnoverLedgerWriteCommand.refresh_requests` 和 UoW，不引入新框架。
 - Prompt 明确禁止 server.py、API tests、schema 和 production SQL 变更。
+
+### 执行结果
+
+- PF-P085 已执行并按自动工作流标记为 `verified`。
+- 新增 `TurnoverLedgerWriteFacade.withdraw_relation(...)`。
+- facade 使用现有 UoW、细粒度 `relation_repository.withdraw_relation(...)` 和 explicit refresh request `turnover_ledger` / `all` / `turnover_relation_changed`。
+- PF-P084 的 3 条 expectedFailure 已移除并转为普通通过。
+- 未修改 `server.py`，未迁移真实 handler。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P085 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，39 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，39 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass。
+
+下一步建议：生成并审查 `PF-P086 - Turnover Ledger Withdraw Relation Handler UoW Wiring Readiness`，先确认真实 handler 接入边界，再决定是否进入 handler target tests。
