@@ -594,7 +594,7 @@ Next recommendation after user confirms PF-P050 verified:
 
 `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`
 
-PF-P050-MG has been executed and merged into local `main`. It is waiting for user confirmation before being marked `verified`; `origin/main` has not been pushed yet.
+PF-P050-MG has been executed, merged into local `main`, and confirmed by the user as `verified`. This status update will be pushed with `git push origin main`.
 
 ## Risk Register
 
@@ -610,10 +610,10 @@ PF-P050-MG has been executed and merged into local `main`. It is waiting for use
 
 ## Next Prompt
 
-Generate and review:
+After `origin/main` is pushed, create a new branch from the latest `main`, then generate and review:
 
-`PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`
+`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
 
-PF-P050-MG should stay in the same branch and cover the full Turnover Ledger discovery/characterization/read-facade slice from PF-P046 through PF-P050. It must not start mutation refactoring, UoW design, repository changes, worker changes, frontend changes or Traffic Gate work.
+PF-P051 should only do write-path discovery/planning and document updates. It must not modify production code, implement UoW, migrate write handlers, change repository behavior, touch frontend, deploy, or execute Traffic Gate work.
 
-Status: implemented, waiting user confirmation.
+Status: verified.
