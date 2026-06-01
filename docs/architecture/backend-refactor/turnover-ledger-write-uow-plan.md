@@ -397,3 +397,19 @@ PF-P055 only plans the real API integration path. It does not modify production 
 `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`
 
 PF-P056 should be test-only or facade-test-only. It should add tests for a future `TurnoverLedgerWriteFacade.update_relation_extra()` using fake granular dependencies and the existing `TurnoverLedgerWriteUnitOfWork`. It should not change `server.py` or the real API.
+
+## PF-P056 Relation Extra Write Facade Test Plan
+
+状态：`planned`
+
+PF-P056 只锁定未来 `TurnoverLedgerWriteFacade.update_relation_extra()` 的目标契约，不迁移真实 handler。
+
+测试边界：
+
+- 使用 fake transaction connection、fake extra write port、fake dirty/outbox writer 和 fake stale precondition port。
+- 验证 facade 不接收 `Application` god object。
+- 验证 relation extra write 与 Turnover dirty/outbox enqueue 在同一 UoW transaction 内完成。
+- 验证 dirty/outbox failure 会回滚 extra write，而不是沿用当前 best-effort success。
+- 验证 command/result 不携带 HTTP cookie/header、HTTP response object 或 `app.auth` 依赖。
+
+如果 production facade 尚不存在，PF-P056 可以用 `unittest.expectedFailure` 保留目标契约并保持默认 CI 绿色；下一步 PF-P057 应实现最小 `TurnoverLedgerWriteFacade` 并将这些 tests 转绿。

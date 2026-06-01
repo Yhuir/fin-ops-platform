@@ -14960,3 +14960,91 @@ Post-Flight:
   - `git diff --check`：Pass。
   - `rg -n "Real API Integration Plan|Readiness Matrix|PF-P055|confirm|withdraw|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
 - 下一步建议：生成并审查 `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`。PF-P056 应优先补 facade-level tests，不迁移真实 handler。
+
+## PF-P056 - Turnover Ledger Relation Extra Write Facade Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P056 - Turnover Ledger Relation Extra Write Facade Tests
+
+Role:
+你是一位精通 Python Clean Architecture、TDD、Unit of Work 渐进接入和遗留 API 行为锁定的后端工程师。
+
+Context:
+PF-P055 已完成并验证。Turnover Ledger 写路径真实 API 接入规划已经确认：
+- `PUT /api/turnover-ledger/relations/{id}/extra` 是最低风险第一候选；
+- 当前已有 `TurnoverLedgerWriteUnitOfWork` minimal skeleton；
+- 真实 handler 仍在 `server.py`，本轮不得迁移真实 API；
+- 下一步先建立 facade-level tests，防止后续实现 `TurnoverLedgerWriteFacade.update_relation_extra()` 时重新引入 `Application` god object、HTTP coupling 或事务外 dirty/outbox。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-discovery.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - tests/test_turnover_ledger_api.py 中 relation extra 相关测试
+2. 必须用 CodeGraph 或源码确认 relation extra 当前 handler / service / repository 边界：
+   - `_handle_api_turnover_ledger_relation_extra_update`
+   - `TurnoverLedgerExtraService`
+   - `TurnoverLedgerWriteUnitOfWork`
+3. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+只新增 relation extra write facade 的测试边界，不迁移真实 API。
+
+Required Test Work:
+1. 新增或更新 `tests/test_turnover_ledger_uow_contract.py`，为未来 `TurnoverLedgerWriteFacade.update_relation_extra()` 增加 facade-level target tests。
+2. 测试必须使用 fake / in-memory granular dependencies：
+   - fake transaction connection；
+   - fake extra repository / extra service port；
+   - fake dirty/outbox writer；
+   - fake stale precondition port；
+   - 不允许使用 `Application`、真实 HTTP handler、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+3. 必须至少锁定以下目标契约：
+   - facade constructor 不接受 `Application` god object，只接受明确依赖。
+   - `update_relation_extra()` 在 UoW transaction 内调用 extra write port，并在同一 transaction 内 enqueue Turnover dirty/outbox。
+   - dirty/outbox failure 必须回滚 extra write；不得返回当前 best-effort success 语义。
+   - command/result 必须是 service 层结构，不包含 HTTP cookie/header、HTTP response object 或 `app.auth` 依赖。
+4. 如果 `TurnoverLedgerWriteFacade` 尚不存在，允许用 `unittest.expectedFailure` 或等价机制保留目标契约并保持默认 CI 绿色。
+   - expectedFailure 必须有注释说明：PF-P057 将实现 facade 并转绿。
+   - 不得删除或放宽现有 PF-P052/PF-P054 测试。
+5. 更新 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`，记录 PF-P056 测试锁定范围和 PF-P057 推荐实现方向。
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得迁移真实 `PUT /api/turnover-ledger/relations/{id}/extra` handler。
+- 不得修改 runtime queue、worker、real repository、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得访问真实外部服务。
+- 不得为了测试通过而放宽已存在的 characterization/contract tests。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "PF-P056|TurnoverLedgerWriteFacade|relation extra|update_relation_extra|expectedFailure" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P056 status = implemented / verified / blocked。
+   - 记录新增测试、expectedFailure 数量和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P056 执行结果。
+3. 不生成 MG，除非状态机确认 relation extra facade tests + implementation 已达到可合并边界。
+```
+
+### 审查结论
+
+- PF-P056 是 PF-P055 后合理的 Micro-JIT 下一步：先锁定最低风险 relation extra write facade 的目标契约，再进入实现。
+- Prompt 明确禁止真实 API migration、`server.py` diff 和真实外部服务访问。
+- Prompt 允许 `expectedFailure`，避免在 facade 尚未实现时破坏默认 CI，同时要求下一步 PF-P057 实现转绿。

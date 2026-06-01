@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra write facade tests |
+| 当前阶段 | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` planned |
 | 最近 verified prompt | `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P055 只更新 `turnover-ledger-write-uow-plan.md` 的 Real API Integration Plan；已运行文档检查；未修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置 |
-| 下一条允许任务 | 生成并审查 `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`；PF-P056 应优先补 facade-level tests，不迁移真实 handler |
+| 下一条允许任务 | 执行 `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`；只补 relation extra write facade tests，不迁移真实 handler |
 
 ## Prompt 执行日志
 
@@ -5628,6 +5628,32 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `git ls-files --others --exclude-standard`：Pass。
 - `git diff --check`：Pass。
 - `rg -n "Real API Integration Plan|Readiness Matrix|PF-P055|confirm|withdraw|bank-row-tags|tag selection|relation extra" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+### PF-P056 - Turnover Ledger Relation Extra Write Facade Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只为未来 `TurnoverLedgerWriteFacade.update_relation_extra()` 增加 facade-level tests。
+- 使用 fake granular dependencies 和现有 `TurnoverLedgerWriteUnitOfWork` skeleton 锁定 relation extra PUT 的目标边界。
+- 不迁移真实 handler，不修改 `server.py`，不改变真实 API 行为。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P056。
+- 如果测试锁定通过并保持默认 CI 绿色，按自动工作流标记为 `verified`。
+
+#### 验收标准
+
+- 新增或更新的测试只覆盖 relation extra write facade 目标契约。
+- 不接入真实 Turnover Ledger API，不修改 runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 如生产 facade 尚不存在，允许使用 `unittest.expectedFailure` 锁定目标契约，但不得通过放宽断言隐藏真实失败。
 
 ## 维护规则
 
