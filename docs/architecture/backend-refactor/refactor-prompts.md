@@ -19918,3 +19918,18 @@ Post-Flight:
 - PF-P093-MG 的变更白名单与当前 `main...HEAD` diff 一致。
 - 该 MG 只验证并合入 PF-P089 到 PF-P093，不执行 Traffic Gate。
 - 因为本切片已包含 production handler seam，当前应优先合入 main，而不是继续扩大功能分支。
+
+### 执行结果
+
+- PF-P093-MG 已执行并按自动工作流标记为 `verified`。
+- 分支侧 scope audit 通过，`main...HEAD` 只包含 Expected Changed Files。
+- 分支侧验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，45 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，45 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass。
+- 已 merge 到本地 `main`，merge commit `e0056963`。
+- main 上复验通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，45 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，45 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass。
+- `git push origin main` 将在本状态提交后执行；push 完成后必须从最新 main 新建下一条 `codex/` 分支。

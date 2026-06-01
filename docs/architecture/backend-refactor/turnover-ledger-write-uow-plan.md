@@ -2019,7 +2019,7 @@ Verification:
 
 ## PF-P093-MG PostgreSQL Write Path Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -2035,4 +2035,9 @@ Verification:
 
 下一步：
 
-- PF-P093-MG 通过后 merge 到 `main`，在 `main` 复验并 push `origin/main`。
+- PF-P093-MG 已通过并本地 merge 到 `main`，merge commit `e0056963`。
+- main 上复验通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 45 tests.
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 45 tests.
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass.
+- 下一步 push `origin/main`；push 后从最新 main 新建分支继续下一切片。

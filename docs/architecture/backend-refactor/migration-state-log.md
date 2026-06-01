@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring` |
-| 当前分支 | `codex/turnover-ledger-remaining-write-rebaseline-p089` |
-| 最近验证 | PF-P088-MG 已在 main 上复验通过并已 push；`main...origin/main` 已对齐 |
-| 下一条允许任务 | 执行 `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` |
+| 当前阶段 | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` 已验证，main 已本地合入并复验通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P093-MG 已在 main 上复验通过；本地 merge commit `e0056963`；等待记录状态后 push |
+| 下一条允许任务 | push `origin/main`；push 后从最新 `main` 新建下一条 `codex/` 分支 |
 
 ## Prompt 执行日志
 
@@ -7286,7 +7286,7 @@ PF-P093 已 verified。本分支从 PF-P089 到 PF-P093 已包含 discovery、co
 
 ### PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7306,17 +7306,23 @@ PF-P093 已 verified。本分支从 PF-P089 到 PF-P093 已包含 discovery、co
 
 #### 必须验证
 
-- `git status --short --branch`
-- `git ls-files --others --exclude-standard`
-- `git diff --check`
-- `git diff --name-only main...HEAD`
-- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
-- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
-- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `git status --short --branch`：Pass，分支侧无 dirty/untracked；main merge 后仅 ahead。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `git diff --name-only main...HEAD`：Pass，分支侧只包含预期 7 个文件。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，45 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，45 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+#### Merge / Push
+
+- 本地 merge 到 `main`：Pass，merge commit `e0056963`。
+- `main` 复验：Pass。
+- `git push origin main`：待本状态提交后执行。
 
 #### 下一条 Prompt 上下文
 
-PF-P093-MG planned。执行通过后允许 merge 到 `main`、在 `main` 上重跑验证并 `git push origin main`。push 后必须从最新 `main` 新建下一条 `codex/` 分支。
+PF-P093-MG 已 verified，main 已本地合入并复验通过。下一步先 push `origin/main`；push 后必须从最新 `main` 新建下一条 `codex/` 分支。Turnover Ledger 下一切片应基于当前专项计划重新选择，不得在 `main` 或旧分支继续开发。
 
 ## 维护规则
 
