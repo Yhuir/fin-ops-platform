@@ -11,9 +11,8 @@ from typing import Any, Callable
 PF-P053 target contract tests.
 
 These tests intentionally describe the Turnover Ledger write Unit of Work target
-state. They are marked expectedFailure until the minimal TurnoverLedgerWriteUnitOfWork
-skeleton exists. Keep them as explicit contracts rather than skip markers so an
-unexpected success signals that the target behavior has become implemented.
+state. They started as expectedFailure contracts in PF-P053 and were turned into
+ordinary passing tests by the minimal skeleton in PF-P054.
 """
 
 
@@ -183,7 +182,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             self.fail("TurnoverLedgerWriteUnitOfWork must expose run(command, handler).")
         return run(command, handler)
 
-    @unittest.expectedFailure
     def test_confirm_relation_commits_relation_audit_dirty_scope_and_outbox_in_one_transaction(self) -> None:
         uow, deps = self._build_uow()
 
@@ -208,7 +206,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_type"], "turnover_ledger")
         self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "confirm_relation")
 
-    @unittest.expectedFailure
     def test_confirm_relation_outbox_failure_rolls_back_relation_fact_and_audit(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
@@ -224,7 +221,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:
         uow, deps = self._build_uow(stale_precondition_port=_StalePreconditionPort(stale=True))
         handler_called = False
@@ -249,7 +245,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_relation_extra_outbox_failure_does_not_return_best_effort_success(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
@@ -266,7 +261,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_tag_selection_outbox_failure_rolls_back_settings_save_and_audit(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
@@ -282,7 +276,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_bank_row_tags_batch_uses_explicit_bankdetail_port_and_rolls_back_on_outbox_failure(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
@@ -299,10 +292,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_uow_constructor_requires_granular_ports_not_application_god_object(self) -> None:
         uow_class = self._uow_class()
 
         with self.assertRaises(TypeError):
             uow_class(application=object())
-

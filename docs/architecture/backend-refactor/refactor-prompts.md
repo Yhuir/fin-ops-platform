@@ -10334,7 +10334,7 @@ PF-P035 已按 TDD 执行：
 
 ## PF-P036 - Workbench Cancel Link UoW Integration Slice
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -14734,3 +14734,24 @@ Post-Flight:
 - PF-P054 是 PF-P053 后的正确下一步：先让 fake-port contract tests 转绿，建立 UoW 机制骨架。
 - Prompt 明确禁止真实 API migration，避免把 skeleton 与 handler 重构混在一起。
 - Prompt 明确 constructor granular dependency 和 Application god object 禁止线。
+
+### 执行结果
+
+- PF-P054 已执行并按自动工作流标记为 `verified`。
+- 新增 `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`。
+- 实现最小 `TurnoverLedgerWriteUnitOfWork` skeleton：
+  - constructor 接收 granular dependencies；
+  - `run(command, handler)` 打开 transaction；
+  - handler 前执行 stale precondition；
+  - handler context 暴露 transaction 和 Turnover/Extra/Settings/Bankdetail granular ports；
+  - handler 成功后调用 transaction-bound dirty/outbox writer；
+  - dirty/outbox failure 传播并触发 transaction rollback。
+- `tests/test_turnover_ledger_uow_contract.py` 中 7 个 PF-P053 expectedFailure tests 已转为普通通过。
+- 未迁移真实 Turnover Ledger 写 API，未修改 `server.py`、真实 repository、runtime queue、worker、SQL migration、frontend、deployment、生产配置或 feature flag。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+- 下一步建议：生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`，统一覆盖 PF-P051 到 PF-P054 的完整 diff。

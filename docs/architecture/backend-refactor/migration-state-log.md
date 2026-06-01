@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已生成并审查 `PF-P054 - Turnover Ledger Minimal UoW Skeleton` |
-| 当前 active prompt | `PF-P054 - Turnover Ledger Minimal UoW Skeleton` (`planned`) |
-| 最近 verified prompt | `PF-P053 - Turnover Ledger Write UoW Contract Tests` |
+| 当前阶段 | `PF-P054 - Turnover Ledger Minimal UoW Skeleton` 已执行并验证，准备 cumulative MG |
+| 当前 active prompt | 无 active prompt；下一步生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` |
+| 最近 verified prompt | `PF-P054 - Turnover Ledger Minimal UoW Skeleton` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
-| 最近验证 | PF-P053 新增 Turnover Ledger UoW 目标契约测试；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v` 通过，7 expected failures；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未修改 production code、SQL migration、worker、frontend、deployment 或生产配置 |
-| 下一条允许任务 | 执行 `PF-P054 - Turnover Ledger Minimal UoW Skeleton`；PF-P054 只建立最小 UoW skeleton 和 fake-port contract wiring，不迁移真实 Turnover Ledger 写 API |
+| 最近验证 | PF-P054 新增最小 Turnover Ledger write UoW skeleton；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v` 通过，7 tests 普通通过；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未迁移真实 API、未修改 server.py、SQL migration、worker、frontend、deployment 或生产配置 |
+| 下一条允许任务 | 生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`，覆盖 PF-P051 到 PF-P054 完整 diff |
 
 ## Prompt 执行日志
 
@@ -5503,7 +5503,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P054 - Turnover Ledger Minimal UoW Skeleton
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5524,7 +5524,28 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P054。
+- PF-P054 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`。
+- PF-P054-MG 应覆盖 PF-P051 到 PF-P054 的完整 diff。
+
+#### 执行结果
+
+- 已执行 PF-P054。
+- 新增 `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`。
+- 实现最小 `TurnoverLedgerWriteUnitOfWork.run(command, handler)` skeleton：
+  - 打开 `connection.transaction()`；
+  - 在 handler 前执行 stale precondition；
+  - 向 handler context 暴露 transaction 和 granular ports；
+  - handler 成功后调用 transaction-bound dirty/outbox writer；
+  - dirty/outbox failure 向外传播，交由 transaction context rollback；
+  - constructor 只接收 granular dependencies，不接收 `Application` god object。
+- `tests/test_turnover_ledger_uow_contract.py` 中 7 个目标测试已从 `expectedFailure` 转为普通通过。
+- 未接入真实 Turnover Ledger 写 API，未修改 `server.py`、真实 repository、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
 
 ## 维护规则
 

@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
 
-状态：PF-P051 `verified`；PF-P052 `verified`；PF-P053 `verified`；PF-P054 `planned`
+状态：PF-P051 `verified`；PF-P052 `verified`；PF-P053 `verified`；PF-P054 `verified`
 
 ## Scope
 
@@ -329,9 +329,9 @@ PF-P054 should introduce the smallest `TurnoverLedgerWriteUnitOfWork.run(command
 
 ## PF-P054 Minimal Skeleton Slice
 
-`PF-P054 - Turnover Ledger Minimal UoW Skeleton` has been generated and reviewed.
+`PF-P054 - Turnover Ledger Minimal UoW Skeleton` has been generated, reviewed and executed.
 
-PF-P054 may add only the minimal production skeleton needed by `tests/test_turnover_ledger_uow_contract.py`:
+PF-P054 added only the minimal production skeleton needed by `tests/test_turnover_ledger_uow_contract.py`:
 
 - `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`;
 - `TurnoverLedgerWriteUnitOfWork`;
@@ -342,4 +342,15 @@ PF-P054 may add only the minimal production skeleton needed by `tests/test_turno
 - transaction-bound dirty/outbox writer call after handler;
 - no `Application` god object constructor.
 
-PF-P054 must not connect the skeleton to `server.py` or any real Turnover Ledger API.
+PF-P054 did not connect the skeleton to `server.py` or any real Turnover Ledger API.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+
+Next slice recommendation:
+
+`PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`
+
+This MG should cover PF-P051 through PF-P054 before migrating real Turnover Ledger write APIs.
