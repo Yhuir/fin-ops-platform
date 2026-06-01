@@ -15894,3 +15894,99 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
 - 下一步建议：生成并审查 `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，覆盖 PF-P055 到 PF-P064 的完整 diff。
+
+## PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端重构合入门禁的资深工程师。你必须以生产级 Merge Gate 标准审查当前分支，不扩大业务范围，不执行 Traffic Gate。
+
+Context:
+当前分支 `codex/turnover-ledger-write-integration-p055` 包含 PF-P055 到 PF-P064：
+- Turnover Ledger write facade integration planning；
+- relation extra facade tests / implementation；
+- relation extra queue failure characterization；
+- relation extra wiring readiness audit；
+- relation extra repository/dirty-outbox adapter；
+- row provider contract；
+- normalization boundary；
+- pure normalizer adapter；
+- relation extra handler minimal wiring。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - 当前 branch diff：`git diff --name-status main...HEAD`
+   - 当前 commit list：`git log --oneline main..HEAD`
+2. 必须确认：
+   - 当前分支不是 `main`；
+   - 最近 verified prompt 是 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`；
+   - 当前 diff 只包含本 MG 白名单文件。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_extra_service.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得迁移 confirm、withdraw、tag selection、bank-row-tags 或其它 Turnover Ledger 写 API。
+- 不得修改 frontend、SQL migration、runtime queue、worker、deployment、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或访问真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+- 不得使用 destructive git 命令。
+
+Required Checks Before Merge:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-status main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v
+
+Merge Procedure:
+1. 如果存在 untracked 临时文件或 diff 超出白名单，必须停止。
+2. 精准 stage 状态机 / prompt / plan 的 MG 执行结果，提交到当前分支。
+3. 切到 `main` 前，确认 working tree clean。
+4. 更新 main：
+   - `git checkout main`
+   - `git pull --ff-only origin main`
+5. 合入当前分支：
+   - `git merge --no-ff codex/turnover-ledger-write-integration-p055 -m \"Merge branch 'codex/turnover-ledger-write-integration-p055': turnover ledger relation extra uow slice\"`
+6. 在 main 上复验：
+   - git status --short --branch
+   - git ls-files --others --exclude-standard
+   - git diff --check
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v
+7. main 复验失败时必须停止，不得 push。
+8. main 复验通过后，更新 migration-state-log.md / refactor-prompts.md 标记 PF-P064-MG verified，提交 post-merge 状态文档，然后 `git push origin main`。
+
+Post-Flight:
+- push 后必须从最新 main 新建下一条 `codex/` 分支，除非下一模块/切片选择不明确。
+- 不要执行 Traffic Gate。
+```
+
+### 审查结论
+
+- PF-P064-MG 是当前 relation extra UoW integration slice 的正确合并门禁。
+- MG 白名单只覆盖 Turnover relation extra UoW/facade/adapter/handler wiring、相关 tests 和文档。
+- MG 明确禁止 Traffic Gate、部署、生产访问和其它写 API migration。

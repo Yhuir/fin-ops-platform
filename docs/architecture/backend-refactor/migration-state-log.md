@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步应生成 cumulative MG |
+| 当前阶段 | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` planned |
 | 最近 verified prompt | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P064 最小接入 relation extra handler；API 29 tests、UoW contract 22 tests、Extra service 10 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，覆盖 PF-P055 到 PF-P064 的完整 diff |
+| 下一条允许任务 | 执行 `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，覆盖 PF-P055 到 PF-P064 的完整 diff |
 
 ## Prompt 执行日志
 
@@ -6019,6 +6019,32 @@ PF-P063 已补齐 handler wiring 前的 pure normalizer。PF-P064 可以只做 `
 #### 下一条 Prompt 上下文
 
 PF-P055 到 PF-P064 已形成可合并的 relation extra UoW integration slice。下一步生成 cumulative MG，必须检查完整 branch diff、untracked files、scope 白名单、文档状态，并在 main 上复验后再 push。
+
+### PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 覆盖当前分支中 PF-P055 到 PF-P064 的完整 diff。
+- 只允许 Turnover Ledger relation extra UoW/facade/adapter/handler wiring、相关 tests 和文档状态机改动。
+- 不触发 Traffic Gate，不部署，不访问生产，不修改 Nginx/生产配置。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P064-MG。
+
+#### 验收标准
+
+- branch scope 与白名单一致，无 untracked 临时文件。
+- targeted tests 在功能分支通过。
+- merge 到最新 main 后在 main 上复验通过。
+- main 验证失败则停止，不得 push。
 
 ## 维护规则
 
