@@ -14537,3 +14537,91 @@ Post-Flight:
   - `git ls-files --others --exclude-standard`：Pass。
   - `git diff --check`：Pass。
 - 下一步建议：生成并审查 `PF-P053 - Turnover Ledger Write UoW Contract Tests`。PF-P053 应先定义目标契约测试，不迁移真实 Turnover Ledger 写 API。
+
+## PF-P053 - Turnover Ledger Write UoW Contract Tests
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P053 - Turnover Ledger Write UoW Contract Tests
+
+Role:
+你是一位精通 Python unittest、契约测试、事务性 Outbox、CQRS Read Model freshness 和 Clean Architecture 的后端架构师。
+
+Context:
+PF-P051 已完成 Turnover Ledger 写路径 UoW 边界 discovery/planning。
+PF-P052 已完成 API-level characterization tests，锁定当前 duplicate/failure side effects：
+- tag selection PUT 队列失败发生在 settings save 和 read model clear 之后；
+- bank-row-tags batch 队列失败发生在 Bankdetail facts 保存和派生刷新尝试之后；
+- relation extra persistence failure 当前 best-effort success；
+- relation snapshot persistence failure 当前 best-effort success；
+- duplicate confirm 当前返回 relation_row_conflict；
+- duplicate withdraw 当前仍成功、重复 audit、重复 refresh。
+
+本轮只允许新增目标契约测试，用来描述未来 TurnoverLedgerWriteUnitOfWork 的目标语义。不得实现 UoW，不得迁移真实 API。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-discovery.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - docs/architecture/backend-refactor/ai-execution-rules.md
+2. 必须读取现有 Turnover Ledger tests：
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_relation_service.py
+3. 必须读取 Workbench UoW contract/expectedFailure 先例：
+   - tests/test_workbench_uow_contract.py
+   - docs/architecture/backend-refactor/workbench-write-uow-plan.md（如果存在）
+4. 执行前必须确认当前分支不是 main，且没有 unrelated dirty changes。
+
+Required Test Work:
+1. 新增 `tests/test_turnover_ledger_uow_contract.py`。
+2. 该测试文件必须是目标契约测试，不访问真实外部服务，不访问真实 PostgreSQL/Redis/RabbitMQ/OA/Mongo/MySQL。
+3. 测试必须能在默认 CI 中通过。如果目标 UoW 尚未实现，必须用 `unittest.expectedFailure` 或等价机制标记目标测试，保留 future contract 和 unexpected success 信号。
+4. 必须至少覆盖以下目标契约：
+   - confirm relation 在一个 UoW 中提交 relation facts、relation audit、dirty scope 和 outbox；outbox/dirty failure 必须回滚 relation facts/audit。
+   - withdraw relation 在一个 UoW 中提交 relation facts、relation audit、dirty scope 和 outbox；重复 withdraw 或 stale expected version 目标语义必须是 conflict，而不是当前重复成功。
+   - relation extra PUT 在一个 UoW 中提交 extra facts、dirty scope 和 outbox；extra persistence failure 或 outbox failure 不得返回 best-effort success。
+   - tag selection PUT 在一个 UoW 或明确 settings port transaction 中提交 settings facts/audit、dirty scope 和 outbox；queue failure 不得留下已保存 settings。
+   - bank-row-tags batch 必须通过显式 Bankdetail port 参与 UoW 或发出明确的 transaction-bound downstream event；queue/outbox failure 不得留下 Bankdetail category facts 与 Turnover refresh 分裂。
+   - UoW dependencies 必须是 granular ports，不得依赖 Application god object，不得读 HTTP cookie/header，不得 import app.auth。
+5. 测试命名必须清楚表达目标语义和当前 expectedFailure 原因。
+6. 如果已有 Workbench expectedFailure helper 可复用，优先复用现有模式；不要发明大型测试框架。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得新增真实 `TurnoverLedgerWriteUnitOfWork` 实现。
+- 不得迁移 server.py handler。
+- 不得修改 repository/runtime queue/worker/SQL migration/frontend/deployment/production config。
+- 不得访问真实外部服务。
+- 不得删除或放宽 PF-P052 characterization tests。
+- 不得把 expectedFailure 目标测试写成空测试；每个测试必须包含具体 import/调用/断言目标。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+
+Post-Flight:
+1. 更新 docs/architecture/backend-refactor/migration-state-log.md：
+   - PF-P053 status = implemented/verified/blocked。
+   - 记录新增 contract tests、expectedFailure 数量、验证命令和结果。
+2. 更新 docs/architecture/backend-refactor/refactor-prompts.md：
+   - 记录 PF-P053 执行结果。
+3. 更新 docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md：
+   - 记录哪些目标契约已固化，下一步是否进入 minimal UoW skeleton。
+4. 不执行 Traffic Gate，不部署，不访问生产。
+```
+
+### 审查结论
+
+- PF-P053 是 PF-P052 后的正确下一步：API 当前行为已锁定，下一步应定义目标 UoW 语义，而不是直接改 handler。
+- Prompt 明确 contract-test-only，允许 expectedFailure 承载尚未实现的目标语义，避免默认 CI 红。
+- Prompt 覆盖了 Turnover 写路径的核心一致性目标：facts/audit/dirty/outbox 同事务、duplicate/stale conflict、best-effort failure 收敛、Bankdetail port 边界和 granular dependency rule。

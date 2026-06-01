@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P052 - Turnover Ledger Write Path Characterization Tests` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger 写路径 UoW 前置切片 |
+| 当前阶段 | 已生成并审查 `PF-P053 - Turnover Ledger Write UoW Contract Tests` |
+| 当前 active prompt | `PF-P053 - Turnover Ledger Write UoW Contract Tests` (`planned`) |
 | 最近 verified prompt | `PF-P052 - Turnover Ledger Write Path Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
 | 最近验证 | PF-P052 只补 Turnover Ledger 写路径 characterization tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未修改 production code、SQL migration、worker、frontend、deployment 或生产配置；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 生成并审查下一条 Turnover Ledger 写路径 prompt；建议 `PF-P053 - Turnover Ledger Write UoW Contract Tests`，先写目标契约测试，不迁移真实写 API |
+| 下一条允许任务 | 执行 `PF-P053 - Turnover Ledger Write UoW Contract Tests`；PF-P053 只建立目标契约测试，不迁移真实写 API，不实现 UoW |
 
 ## Prompt 执行日志
 
@@ -5452,6 +5452,33 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 #### 验证
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+
+### PF-P053 - Turnover Ledger Write UoW Contract Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只新增 Turnover Ledger 写路径 UoW 目标契约测试。
+- 不实现 `TurnoverLedgerWriteUnitOfWork`。
+- 不迁移真实 Turnover Ledger 写 API。
+- 不修改 production code、repository、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+- prompt 要求执行前读取 PF-P051/PF-P052 事实源和现有 Workbench UoW expectedFailure 策略。
+
+#### 审查结论
+
+- PF-P053 是 PF-P052 后合理的下一条 prompt：当前行为已经被 API-level characterization tests 锁定，下一步应先定义目标 UoW 契约。
+- PF-P053 必须保持 contract-test-only，可以使用 `unittest.expectedFailure` 保存尚未实现的目标语义，默认 CI 不应失败。
+- PF-P053 不得通过引入 production skeleton 或修改 handler 来让契约测试转绿。
+
+#### 下一步
+
+- 执行 PF-P053。
 
 ## 维护规则
 

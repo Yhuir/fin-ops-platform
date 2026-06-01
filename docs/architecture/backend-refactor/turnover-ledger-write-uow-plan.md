@@ -2,7 +2,7 @@
 
 对应 prompt：`PF-P051 - Turnover Ledger Write Path Discovery and UoW Boundary Planning`
 
-状态：PF-P051 `verified`；PF-P052 `verified`
+状态：PF-P051 `verified`；PF-P052 `verified`；PF-P053 `planned`
 
 ## Scope
 
@@ -294,3 +294,19 @@ PF-P052 已完成。下一条 prompt 应该是：
 - PF-P053 应聚焦 contract tests / expected failures / fake repository ports，不改真实 handler 语义。
 
 不建议下一步直接实现 UoW。
+
+## PF-P053 Contract Test Slice
+
+`PF-P053 - Turnover Ledger Write UoW Contract Tests` has been generated and reviewed.
+
+PF-P053 must create target contract tests before any production UoW implementation. The contract tests should preserve future expectations for:
+
+- transaction-bound relation facts + relation audit + dirty scope + outbox;
+- rollback when dirty scope / outbox fails;
+- duplicate withdraw and stale expected version conflict target semantics;
+- relation extra write atomicity instead of best-effort success;
+- tag selection write atomicity instead of settings save before queue failure;
+- bank-row-tags batch explicit Bankdetail port / transaction-bound downstream event boundary;
+- granular UoW dependencies without `Application` god object, HTTP headers/cookies or `app.auth`.
+
+PF-P053 should use `unittest.expectedFailure` or an equivalent mechanism for target contracts that cannot pass before the minimal UoW skeleton exists. Default CI must remain green, while unexpected success should signal that a contract has become implemented.
