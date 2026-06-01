@@ -128,6 +128,137 @@ class TurnoverLedgerBankdetailPortAdapter:
         )
 
 
+class TurnoverLedgerRelationWritePort:
+    def __init__(
+        self,
+        *,
+        relation_service: Any,
+        routes: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        persistence_repository_factory: Callable[[Any], Any],
+    ) -> None:
+        self._relation_service = relation_service
+        self._routes = routes
+        self._bank_rows_provider = bank_rows_provider
+        self._persistence_repository_factory = persistence_repository_factory
+
+    def confirm_relation(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        self._rebuild_relation_snapshot()
+        confirm = getattr(self._routes, "confirm_relation", None)
+        if not callable(confirm):
+            raise RuntimeError("turnover relation routes must expose confirm_relation.")
+        result = dict(
+            confirm(
+                bank_row_ids=list(bank_row_ids or []),
+                actor=actor_id,
+                note=note,
+            )
+            or {}
+        )
+        self._save_relation_snapshot(transaction)
+        return result
+
+    def withdraw_relation(
+        self,
+        *,
+        relation_id: str,
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        withdraw = getattr(self._routes, "withdraw_relation", None)
+        if not callable(withdraw):
+            raise RuntimeError("turnover relation routes must expose withdraw_relation.")
+        result = dict(
+            withdraw(
+                relation_id=relation_id,
+                actor=actor_id,
+                note=note,
+            )
+            or {}
+        )
+        self._save_relation_snapshot(transaction)
+        return result
+
+    def _rebuild_relation_snapshot(self) -> None:
+        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
+        if not callable(rebuild):
+            raise RuntimeError("relation_service must expose rebuild_from_bank_rows.")
+        rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
+
+    def _save_relation_snapshot(self, transaction: Any) -> None:
+        snapshot = getattr(self._relation_service, "snapshot", None)
+        if not callable(snapshot):
+            raise RuntimeError("relation_service must expose snapshot.")
+        repository = self._persistence_repository_factory(transaction)
+        save = getattr(repository, "save_turnover_relations", None)
+        if not callable(save):
+            raise RuntimeError("turnover persistence repository must expose save_turnover_relations.")
+        save(dict(snapshot() or {}))
+
+
+class TurnoverLedgerBankdetailWritePort:
+    def __init__(
+        self,
+        *,
+        category_service: Any,
+        relation_service: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        persistence_repository_factory: Callable[[Any], Any],
+    ) -> None:
+        self._category_service = category_service
+        self._relation_service = relation_service
+        self._bank_rows_provider = bank_rows_provider
+        self._persistence_repository_factory = persistence_repository_factory
+
+    def apply_turnover_category_updates(
+        self,
+        updates: list[dict[str, object]],
+        *,
+        actor_id: str,
+        transaction: Any,
+    ) -> dict[str, object]:
+        apply_updates = getattr(self._category_service, "apply_turnover_updates", None)
+        if not callable(apply_updates):
+            raise RuntimeError("category_service must expose apply_turnover_updates.")
+        result = dict(
+            apply_updates(
+                [dict(update) for update in list(updates or [])],
+                actor=actor_id,
+            )
+            or {}
+        )
+        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
+        if not callable(rebuild):
+            raise RuntimeError("relation_service must expose rebuild_from_bank_rows.")
+        rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
+        repository = self._persistence_repository_factory(transaction)
+        save_categories = getattr(repository, "save_bank_transaction_categories", None)
+        if not callable(save_categories):
+            raise RuntimeError(
+                "turnover persistence repository must expose save_bank_transaction_categories."
+            )
+        category_snapshot = getattr(self._category_service, "snapshot", None)
+        if not callable(category_snapshot):
+            raise RuntimeError("category_service must expose snapshot.")
+        save_categories(dict(category_snapshot() or {}))
+        save_relations = getattr(repository, "save_turnover_relations", None)
+        if not callable(save_relations):
+            raise RuntimeError("turnover persistence repository must expose save_turnover_relations.")
+        relation_snapshot = getattr(self._relation_service, "snapshot", None)
+        if not callable(relation_snapshot):
+            raise RuntimeError("relation_service must expose snapshot.")
+        save_relations(dict(relation_snapshot() or {}))
+        return result
+
+
 class TurnoverLedgerDirtyOutboxWriter:
     def __init__(
         self,

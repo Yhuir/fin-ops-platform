@@ -2042,3 +2042,214 @@ Verification:
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass.
 - 已 push `origin/main`，远端已与当前 `main` 对齐。
 - 下一步从最新 main 新建分支继续下一切片。
+
+## PF-P094 PostgreSQL Repository Ownership Discovery
+
+状态：`verified`
+
+目标：
+
+- 盘点 PF-P093 后 PostgreSQL write seam 的 repository ownership。
+- 判断 `_postgres_turnover_ledger_relation_repository(...)` 和 `_postgres_turnover_ledger_bankdetail_repository(...)` 是否应继续停留在 `server.py`。
+- 为下一条最小 prompt 选择测试锁定或抽离边界。
+
+边界：
+
+- 只做 discovery/planning。
+- 不修改 production code、tests、SQL migration、前端、部署或生产配置。
+- 不访问真实外部服务。
+
+### Repository Ownership Audit
+
+PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repository-like helper 留在 `server.py`：
+
+| Helper | 当前职责 | 所属层判断 | 风险 |
+| --- | --- | --- | --- |
+| `_postgres_turnover_ledger_relation_repository(...)` | 创建 relation write port；执行 confirm/withdraw orchestration；调用 routes/relation service；用 supplied transaction 持久化 relation snapshot。 | 组合入口应在 app 层，但 confirm/withdraw orchestration 和 persistence decision 应进入 service-level port。 | `server.py` 仍知道 relation service rebuild、routes 调用和 persistence fallback，职责偏厚。 |
+| `_postgres_turnover_ledger_bankdetail_repository(...)` | 创建 bankdetail write port；执行 Bankdetail category update、Turnover relation rebuild；用 supplied transaction 持久化 category/relation snapshot。 | 跨模块 orchestration 应形成明确 Turnover write port / Bankdetail port 边界。 | `server.py` 仍协调 Bankdetail facts 与 Turnover relation facts，容易继续增长跨模块写逻辑。 |
+| `_local_turnover_ledger_*` helpers | local/dev/test fallback 的 snapshot rollback、state store save 和 queue adapter。 | 可暂留 app composition 层，后续单独清理。 | 仍是 legacy compatibility；不应与 Postgres extraction 同时重构。 |
+
+### Ownership Decision
+
+- 下一步不应直接把 nested helper 机械搬到新文件。
+- 应先用 tests 锁定两个 future service-level ports：
+  - `TurnoverLedgerRelationWritePort`
+  - `TurnoverLedgerBankdetailWritePort`
+- 这些 ports 应只接收细粒度依赖：
+  - relation service / routes 或 relation operation callable；
+  - category service；
+  - bank rows provider；
+  - persistence repository factory；
+  - optional local/fake persistence fallback for tests。
+- ports 不应接收 `Application`、RuntimeRepositories、state store god object、HTTP headers/cookies/Response。
+- `PostgresWorkbenchRepository.save_bank_transaction_categories(...)` 和 `save_turnover_relations(...)` 已能通过 `run_in_transaction` 使用 supplied transaction object；后续可以作为 persistence repository factory 的底层实现。
+
+### Next Slice Decision
+
+下一条最小 prompt：
+
+`PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests`
+
+边界：
+
+- 只新增/调整 tests，锁定 `TurnoverLedgerRelationWritePort` 与 `TurnoverLedgerBankdetailWritePort` 的接口契约。
+- 未实现目标类时使用 `unittest.expectedFailure`，保持默认 CI 绿色。
+- 不修改 production code，不抽离 `server.py` helper。
+- 测试必须断言 future ports：
+  - 不接收 `Application` god object；
+  - 用 supplied transaction 调用 persistence repository factory；
+  - 不知道 HTTP response/cookie/header/auth；
+  - relation port 可执行 confirm/withdraw 的 service orchestration；
+  - bankdetail port 可执行 category update + relation rebuild，并持久化 category/relation snapshot。
+
+## PF-P095 PostgreSQL Write Port Ownership Contract Tests
+
+状态：`verified`
+
+目标：
+
+- 用 tests 锁定 future `TurnoverLedgerRelationWritePort` 和 `TurnoverLedgerBankdetailWritePort`。
+- 保持默认 CI 绿色；尚未实现的 target tests 使用 `unittest.expectedFailure`。
+
+边界：
+
+- 只修改 tests 和文档。
+- 不实现 classes。
+- 不迁移 `server.py` helper。
+
+执行结果：
+
+- 新增 4 条 future target contract tests，覆盖 `TurnoverLedgerRelationWritePort` 与 `TurnoverLedgerBankdetailWritePort`。
+- 新增 tests 均使用 `unittest.expectedFailure`，因为目标 classes 尚未实现；这是默认 CI 隔离，不是 skip。
+- relation write port 契约锁定：
+  - 拒绝 `Application` god object；
+  - constructor 只接收细粒度依赖；
+  - confirm/withdraw 必须使用 supplied transaction 调用 persistence repository factory；
+  - 必须持久化 relation snapshot；
+  - 结果不暴露 HTTP response/cookie/header/auth。
+- bankdetail write port 契约锁定：
+  - 拒绝 `Application` god object；
+  - constructor 只接收 category service、relation service、bank rows provider、persistence repository factory 等细粒度依赖；
+  - category update 后必须 rebuild relation；
+  - 必须使用 supplied transaction 持久化 category snapshot 和 relation snapshot；
+  - 结果不暴露 HTTP response/cookie/header/auth。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests，4 expected failures。
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P096 - Turnover Ledger PostgreSQL Write Port Ownership Skeleton`。
+- PF-P096 只实现最小 write port classes 并让 PF-P095 的 4 条 expectedFailure tests 转为普通通过。
+- PF-P096 不迁移 `server.py` helper，不修改 API handler，不新增 SQL migration。
+
+## PF-P096 PostgreSQL Write Port Ownership Skeleton
+
+状态：`verified`
+
+目标：
+
+- 实现最小 `TurnoverLedgerRelationWritePort` 和 `TurnoverLedgerBankdetailWritePort` classes。
+- 将 PF-P095 的 4 条 expectedFailure target tests 转为普通通过。
+- 先建立 service-level write port ownership，不迁移 `server.py` PostgreSQL helper。
+
+边界：
+
+- relation write port 负责 confirm/withdraw 的 service orchestration 与 transaction-bound relation snapshot persistence。
+- bankdetail write port 负责 category update、relation rebuild、category snapshot persistence 和 relation snapshot persistence。
+- repository factory 只通过 supplied transaction 构造 persistence repository。
+- 不接收 `Application`、完整 runtime repositories、state store 或 HTTP request/response。
+
+禁止：
+
+- 不修改 `server.py`。
+- 不修改 API handler。
+- 不新增 SQL migration。
+- 不访问真实外部服务。
+
+执行结果：
+
+- 新增 `TurnoverLedgerRelationWritePort`，承接 relation confirm/withdraw service orchestration。
+- 新增 `TurnoverLedgerBankdetailWritePort`，承接 bankdetail category update + relation rebuild + persistence orchestration。
+- PF-P095 的 4 条 target tests 已从 `unittest.expectedFailure` 转为普通通过。
+- `server.py` 的 PostgreSQL nested helper 尚未迁移；下一步必须通过 PF-P097 做 composition wiring。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git diff --check`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring`。
+- PF-P097 只替换 `server.py` PostgreSQL nested helper 的 orchestration 到 new ports，不改变 API response contract，不新增 SQL migration。
+
+## PF-P097 PostgreSQL Write Port Server Composition Wiring
+
+状态：`verified`
+
+目标：
+
+- 在 PostgreSQL storage backend path 中使用 PF-P096 的 service-level write ports。
+- 让 `server.py` 只做 composition：提供 services、routes/provider 和 transaction-bound persistence repository factory。
+- 移除 `_postgres_turnover_ledger_relation_repository(...)` 与 `_postgres_turnover_ledger_bankdetail_repository(...)` 中的 nested service orchestration。
+
+边界：
+
+- 保留 local/dev/test fallback path。
+- 保持 API response contract 不变。
+- 不新增 SQL migration。
+- 不改 Turnover Ledger read/query code。
+
+Merge 边界：
+
+- 若 PF-P097 verified，当前分支已覆盖 repository ownership discovery、contract tests、skeleton 和 server composition wiring，应生成 cumulative MG 覆盖 PF-P094 到 PF-P097。
+
+执行结果：
+
+- PostgreSQL confirm/withdraw composition 已使用 `TurnoverLedgerRelationWritePort`。
+- PostgreSQL bank-row-tags composition 已使用 `TurnoverLedgerBankdetailWritePort`。
+- `server.py` 中旧 `_postgres_turnover_ledger_relation_repository(...)` 与 `_postgres_turnover_ledger_bankdetail_repository(...)` nested orchestration helper 已移除。
+- 保留薄 `_postgres_turnover_ledger_persistence_repository(...)`，只负责把 supplied transaction 映射为 `PostgresWorkbenchRepository(transaction)` 或 state store persistence target。
+- `TurnoverLedgerRelationWritePort.confirm_relation(...)` 调整为先 rebuild，再 confirm，再持久化，保持旧 helper 行为。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，45 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git diff --check`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate`。
+- MG 覆盖 PF-P094 到 PF-P097 的完整 diff，不新增业务实现。
+
+## PF-P097-MG Repository Ownership Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖当前分支从 PF-P094 到 PF-P097 的完整 diff。
+- 合入 repository ownership discovery、contract tests、write port skeleton 和 server composition wiring。
+
+预期变更文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证重点：
+
+- Turnover Ledger API tests。
+- Turnover Ledger UoW contract tests。
+- `server.py` 与 `turnover_ledger_write_adapters.py` compileall。
+- main 上复验通过后才允许 push。
