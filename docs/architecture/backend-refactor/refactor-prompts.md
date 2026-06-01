@@ -17719,3 +17719,105 @@ Verification:
 - `rg -n "update_bank_row_tags_batch|bankdetail_port|refresh_requests|bank_transaction_category_changed|workbench_scope_invalidated|PF-P077" backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring`，只迁移 bank-row-tags handler，并让 PF-P076 的 2 个 API target tests 转绿。
+
+## PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring
+
+```text
+/goal
+PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring
+
+Role:
+你是一位负责遗留 Python 写路径安全迁移的后端工程师，熟悉 Turnover Ledger、Bankdetail category service、local state store compatibility path、Unit of Work 和 Transactional Outbox。
+
+Context:
+PF-P076 已为 `POST /api/turnover-ledger/bank-row-tags/batch` 增加 API-level compatibility / target tests，其中 2 个 target tests 当前为 `unittest.expectedFailure`。PF-P077 已建立 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)`、`TurnoverLedgerWriteCommand.refresh_requests` 和 UoW multi-refresh skeleton。当前 handler 仍直接调用 `BankTransactionCategoryService.apply_turnover_updates(...)`、直接保存 category snapshot、重建 Turnover relation，并调用 `_after_turnover_relation_mutation(...)`，导致 queue/outbox failure 发生在事实写入之后。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_bank_row_tags_batch`、`_ensure_turnover_bank_row_tag_targets`、`_bank_transaction_category_affected_months`、`_after_turnover_relation_mutation`、relation extra local UoW helpers
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/bank_transaction_category_service.py 中 `from_snapshot`、`snapshot`、`apply_turnover_updates`
+   - backend/src/fin_ops_platform/services/turnover_relation_service.py 中 `from_snapshot`、`snapshot`、`rebuild_from_bank_rows`
+   - tests/test_turnover_ledger_api.py bank-row-tags tests
+   - tests/test_turnover_ledger_uow_contract.py bankdetail_port tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+4. 必须确认 PF-P076 和 PF-P077 已 verified。
+
+Task:
+只迁移 `POST /api/turnover-ledger/bank-row-tags/batch` 到 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)`。本轮不迁移 relation extra、tag selection、confirm/cancel、withdraw、No OA、Bankdetail 独立 API 或其它 Turnover 写路径。不得修改 schema/migration。
+
+Required Work:
+1. Handler wiring:
+   - `_handle_api_turnover_ledger_bank_row_tags_batch` 继续负责 session/auth、JSON parsing、transaction target validation、HTTP error mapping。
+   - actor / tenant context 必须由 handler 提取后传入 facade；service/facade 不得读取 cookie/header 或 import app.auth。
+   - affected months 必须在调用 facade 前计算并传入。
+2. Local/dev/test UoW compatibility path:
+   - 增加最小 `_turnover_ledger_bank_row_tags_write_facade()` 或等价 seam。
+   - 在 local state store path 中使用 local transaction shim，确保 queue/outbox failure 时恢复：
+     - in-memory `BankTransactionCategoryService` snapshot；
+     - local state store bank transaction categories snapshot；
+     - in-memory `TurnoverRelationService` snapshot；
+     - local state store turnover relations snapshot。
+   - 成功路径保存 category snapshot 和 relation snapshot，但不得直接调用 `_clear_turnover_ledger_read_model_best_effort()`。
+   - 成功路径的 refresh enqueue 必须通过 UoW dirty/outbox writer 的 explicit refresh requests 完成。
+3. PostgreSQL / production path:
+   - 如果当前仓库已有明确 transaction-bound Bankdetail category repository/adapter，则可以接入真实 UoW。
+   - 如果缺少明确 adapter，不得猜测 SQL 或生产事务契约；必须保留 production path legacy fallback，并在文档记录 blocker。不得为了本轮强行拼 SQL 或发明 repository。
+4. Tests:
+   - 将 PF-P076 的 2 个 bank-row-tags API target `expectedFailure` 转为普通通过测试。
+   - 保留当前 split-brain compatibility test，但应通过显式 forcing legacy fallback seam 覆盖旧路径，不得与新默认 UoW path 冲突。
+   - 保持 `test_turnover_bank_row_tag_batch_refreshes_all_required_scopes` 通过。
+   - 不得删除、放宽或弱化 bank-row-tags tests。
+5. 文档：
+   - 更新 migration-state-log.md。
+   - 更新 refactor-prompts.md。
+   - 更新 turnover-ledger-write-uow-plan.md。
+
+Allowed Files:
+- backend/src/fin_ops_platform/app/server.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`。
+- 不得修改 `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`。
+- 不得迁移 relation extra、tag selection、confirm/cancel、withdraw、No OA、Bankdetail 独立 API 或其它 Turnover 写路径。
+- 不得修改 schema/migration。
+- 不得引入 durable idempotency 或 stale write 新语义。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "update_bank_row_tags_batch|_turnover_ledger_bank_row_tags_write_facade|bank-row-tags|bank_row_tags|expectedFailure|PF-P078|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P078 status = implemented / verified / blocked。
+   - 记录 handler wiring、local rollback shim、是否保留 production fallback、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P078 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 bank-row-tags handler UoW wiring 状态。
+4. PF-P078 完成后应生成 cumulative MG，覆盖 PF-P076 到 PF-P078 的完整 diff。
+```
+
+### 审查结论
+
+- PF-P078 是 PF-P076/PF-P077 后的正确 wiring slice，只迁移 bank-row-tags handler，不扩大到其它 Turnover 写路径。
+- Prompt 要求 local/dev/test path 具备可回滚 snapshot shim，同时明确 production path 不能猜 SQL；如果缺少 transaction-bound adapter，应保留 legacy fallback 并记录 blocker。
+- Prompt 继续保持 handler/service/repository 责任边界：handler 提取 HTTP 上下文，facade 只处理 service-layer command，UoW/dirty writer 负责 refresh enqueue。

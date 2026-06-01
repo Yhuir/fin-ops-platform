@@ -1226,3 +1226,24 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 33 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests, 2 expectedFailure.
+
+## PF-P078 Bank Row Tags Handler UoW Wiring
+
+状态：`planned`
+
+目标：
+
+- 只迁移 `POST /api/turnover-ledger/bank-row-tags/batch` 到 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)`。
+- 将 PF-P076 的 2 个 bank-row-tags API target `expectedFailure` 转为普通通过测试。
+- 保持当前 legacy split-brain behavior test，但通过显式 fallback seam 覆盖旧路径。
+
+边界：
+
+- Handler 只做 session/auth、JSON parsing、target validation、affected months 计算、HTTP error mapping 和 facade 调用。
+- Local/dev/test path 使用最小 transaction shim，queue/outbox failure 必须恢复 bank category snapshot 和 turnover relation snapshot。
+- 成功路径不得直接调用 `_clear_turnover_ledger_read_model_best_effort()`；refresh enqueue 必须走 UoW dirty/outbox explicit refresh requests。
+- 如果缺少明确 transaction-bound Bankdetail category adapter，不得猜测生产 SQL；production path 可以保留 legacy fallback 并记录 blocker。
+
+下一步：
+
+- 执行 PF-P078。

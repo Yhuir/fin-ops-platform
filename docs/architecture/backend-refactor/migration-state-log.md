@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P077 - Turnover Ledger Bank Row Tags Facade / Port Skeleton` 已执行并通过验证 |
-| 当前 active prompt | 无 |
-| 最近 verified prompt | `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` 已生成并审查 |
+| 当前 active prompt | `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` planned |
+| 最近 verified prompt | `PF-P077 - Turnover Ledger Bank Row Tags Facade / Port Skeleton` |
 | 当前分支 | `codex/turnover-ledger-bank-row-tags-uow-p076` |
 | 最近验证 | PF-P077 增加 bank-row-tags facade 与 UoW multi-refresh skeleton；API 36 tests 通过（2 expectedFailure），UoW contract 33 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` |
+| 下一条允许任务 | 执行 `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` |
 
 ## Prompt 执行日志
 
