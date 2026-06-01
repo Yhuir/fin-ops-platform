@@ -1094,3 +1094,69 @@ Verification:
 - PF-P065 到 PF-P073 的 tag selection UoW slice 已合入 `main`。
 - 合入前后 targeted tests 均通过。
 - 未执行 Traffic Gate、部署、Nginx 修改或生产访问。
+
+## PF-P074 Relation Extra UoW Completion Tests
+
+状态：`verified`
+
+目标：
+
+- 补强 relation extra UoW completion 前的 API-level characterization / target tests。
+- 保留 current legacy best-effort behavior 事实。
+- 增加 future rollback/no-clear/response-shape target tests，未实现目标用 `unittest.expectedFailure` 保持默认 CI 绿色。
+
+边界：
+
+- 不修改 production code。
+- 不迁移 handler。
+- 不进入 MG。
+
+下一步：
+
+- PF-P074 通过后生成 PF-P075 relation extra handler UoW completion implementation。
+
+执行结果：
+
+- 新增 2 个 relation extra future target tests，当前为 `unittest.expectedFailure`：
+  - queue/outbox failure rolls back extra save；
+  - successful UoW path does not clear read model directly。
+- 补强 facade override response shape 断言。
+- 未修改 production code。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 33 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+
+## PF-P075 Relation Extra Handler UoW Completion
+
+状态：`verified`
+
+目标：
+
+- 最小完成 `PUT /api/turnover-ledger/relations/{id}/extra` 的 local/dev/test UoW path。
+- 让 PF-P074 的 2 个 relation extra target `expectedFailure` 转为普通通过。
+- 不迁移其它 Turnover 写路径，不引入 durable idempotency 或 stale write guard。
+
+边界：
+
+- PostgreSQL path 继续使用现有 transaction-bound queue writer。
+- local/dev/test path 必须使用 local connection shim、local extra repository/adapter、local dirty writer 和 existing normalizer/row provider。
+- queue/outbox failure 必须恢复 in-memory extra snapshot 和 local state store extras snapshot。
+- 成功路径不得直接调用 `_clear_turnover_ledger_read_model_best_effort()`。
+
+下一步：
+
+- 生成 cumulative MG，覆盖 PF-P074 + PF-P075。
+
+执行结果：
+
+- local/dev/test relation extra path 现在通过 `TurnoverLedgerWriteFacade.update_relation_extra(...)` 和 `TurnoverLedgerWriteUnitOfWork` 执行。
+- local transaction shim 在 queue/outbox failure 时恢复 in-memory extra snapshot 与 local state store extras snapshot。
+- 成功路径不再直接 clear read model，dirty/outbox writer 负责 enqueue `turnover_relation_extra_changed`。
+- PF-P074 的 2 个 target tests 已转为普通通过。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 33 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
