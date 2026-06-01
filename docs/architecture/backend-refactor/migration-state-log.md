@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` |
-| 最近 verified prompt | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` |
+| 当前阶段 | `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` 已验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` |
 | 当前分支 | `codex/turnover-ledger-repository-ownership-p094` |
 | 最近验证 | PF-P093-MG 已在 main 上复验通过；merge commit `e0056963`；`origin/main` 已与当前 `main` 对齐 |
-| 下一条允许任务 | 执行 `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` |
+| 下一条允许任务 | 生成并审查 `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -7326,7 +7326,7 @@ PF-P093-MG 已 verified，main 已合入、复验并 push 到 `origin/main`。�
 
 ### PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7337,14 +7337,20 @@ PF-P093-MG 已 verified，main 已合入、复验并 push 到 `origin/main`。�
 
 #### 必须回答
 
-- `_postgres_turnover_ledger_relation_repository(...)` 和 `_postgres_turnover_ledger_bankdetail_repository(...)` 当前是否仍让 `server.py` 承担过多 persistence orchestration。
-- 是否需要新增 dedicated service / repository class；如果需要，下一步应先写哪些 characterization/contract tests。
-- 如何继续遵守“不机械搬文件、service 不依赖 Application、repository 可知道 SQL、业务 service 不散落 SQL”。
-- 下一个最小 Micro-JIT prompt 是 tests、extraction/refactor，还是 MG。
+- `_postgres_turnover_ledger_relation_repository(...)` 和 `_postgres_turnover_ledger_bankdetail_repository(...)` 当前仍让 `server.py` 承担过多 persistence orchestration：它们捕获 service/routes/provider 并决定 Postgres transaction persistence 与 fake/local fallback。
+- 需要新增 dedicated service-level write ports，而不是把 nested helper 原样搬到另一个文件。
+- 下一步应先写 contract tests，锁定未来 ports 只接收细粒度依赖、不接收 `Application`，并用 supplied transaction 调用 persistence repository factory。
+- 下一个最小 Micro-JIT prompt 是 `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests`。
+
+#### 执行结果
+
+- CodeGraph 定位了 `TurnoverLedgerRelationRepositoryAdapter`、`TurnoverLedgerBankdetailPortAdapter`、`_turnover_ledger_confirm_write_facade` 和 `_turnover_ledger_withdraw_write_facade` 等关键符号。
+- 文件级审计确认 `PostgresWorkbenchRepository.save_bank_transaction_categories(...)` 与 `save_turnover_relations(...)` 已可在 supplied transaction object 上执行，但 relation/category service orchestration 仍由 `server.py` nested helper 负责。
+- 确认下一步不应继续扩大 handler，而应补 service-level port ownership contract tests。
 
 #### 下一条 Prompt 上下文
 
-PF-P094 planned。本轮只做文档事实校准，不得继续实现 repository extraction。
+PF-P094 已 verified。下一条应生成 `PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests`，只新增/调整 tests，锁定未来 `TurnoverLedgerRelationWritePort` 和 `TurnoverLedgerBankdetailWritePort` 的接口；不得直接抽离 production code。
 
 ## 维护规则
 

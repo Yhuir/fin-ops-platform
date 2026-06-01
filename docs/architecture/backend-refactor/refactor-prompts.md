@@ -20011,3 +20011,20 @@ Post-Flight:
 
 - PF-P094 是 PF-P093-MG 后的正确恢复步骤：先校准 PostgreSQL write seam 的 repository ownership，而不是继续在 `server.py` 增长 helper。
 - 本轮只改文档，适合快速执行并为下一条测试/抽离 prompt 提供事实源。
+
+### 执行结果
+
+- PF-P094 已执行并按自动工作流标记为 `verified`。
+- 审计结论：
+  - `_postgres_turnover_ledger_relation_repository(...)` 当前封装 confirm/withdraw service orchestration，并决定用 `PostgresWorkbenchRepository(transaction).save_turnover_relations(...)` 或 fake/local state store fallback 持久化。
+  - `_postgres_turnover_ledger_bankdetail_repository(...)` 当前封装 Bankdetail category update、Turnover relation rebuild，并决定 category/relation snapshot persistence。
+  - 这两个 helper 没有把 `Application` 注入 adapter/facade，但仍让 `server.py` 持有过多 write port ownership。
+  - `PostgresWorkbenchRepository.save_bank_transaction_categories(...)` 与 `save_turnover_relations(...)` 可在 supplied transaction object 上运行，适合作为 future persistence repository factory。
+- 下一条最小 prompt：`PF-P095 - Turnover Ledger PostgreSQL Write Port Ownership Contract Tests`。
+
+Verification:
+
+- `git status --short --branch`: Pass，当前分支不是 main，仅文档变更。
+- `git ls-files --others --exclude-standard`: Pass。
+- `git diff --check`: Pass。
+- `rg -n "PF-P094|Repository Ownership|_postgres_turnover_ledger_relation_repository|_postgres_turnover_ledger_bankdetail_repository|Next Slice Decision" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`: Pass。
