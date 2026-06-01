@@ -316,10 +316,42 @@ class TurnoverLedgerApiRoutes:
                     "flow_rows": [],
                     "allocation_lots": [],
                     "lot_rows": [],
+                    "_has_breakdown": False,
+                    "_pending_repayment_amount": ZERO,
+                    "_repaid_amount": ZERO,
+                    "_pending_collection_amount": ZERO,
+                    "_collected_amount": ZERO,
+                    "_closed_amount": ZERO,
                 },
             )
             group_rows = list(group.get("rows") or [])
             grouped_row = self._grouped_row_from_flat_row(row_with_extra)
+            breakdown_fields = (
+                "pending_repayment_amount",
+                "repaid_amount",
+                "pending_collection_amount",
+                "collected_amount",
+                "closed_amount",
+            )
+            has_breakdown = any(row_with_extra.get(field) is not None for field in breakdown_fields)
+            if has_breakdown:
+                grouped_row.update({field: row_with_extra.get(field) or "0.00" for field in breakdown_fields})
+                group["_has_breakdown"] = True
+                group["_pending_repayment_amount"] = self._money(group.get("_pending_repayment_amount")) + self._money(
+                    row_with_extra.get("pending_repayment_amount")
+                )
+                group["_repaid_amount"] = self._money(group.get("_repaid_amount")) + self._money(
+                    row_with_extra.get("repaid_amount")
+                )
+                group["_pending_collection_amount"] = self._money(group.get("_pending_collection_amount")) + self._money(
+                    row_with_extra.get("pending_collection_amount")
+                )
+                group["_collected_amount"] = self._money(group.get("_collected_amount")) + self._money(
+                    row_with_extra.get("collected_amount")
+                )
+                group["_closed_amount"] = self._money(group.get("_closed_amount")) + self._money(
+                    row_with_extra.get("closed_amount")
+                )
             group_rows.append(grouped_row)
             group["rows"] = group_rows
             flow_rows = list(group.get("flow_rows") or [])
@@ -344,6 +376,36 @@ class TurnoverLedgerApiRoutes:
                 self._money(group.get("pending_amount")) + self._money(row_with_extra.get("balance_amount"))
             )
         groups = list(groups_by_key.values())
+        for group in groups:
+            has_breakdown = bool(group.pop("_has_breakdown", False))
+            pending_repayment = self._money(group.pop("_pending_repayment_amount", ZERO))
+            repaid = self._money(group.pop("_repaid_amount", ZERO))
+            pending_collection = self._money(group.pop("_pending_collection_amount", ZERO))
+            collected = self._money(group.pop("_collected_amount", ZERO))
+            closed = self._money(group.pop("_closed_amount", ZERO))
+            if has_breakdown:
+                group["pending_repayment_amount"] = self._format_money(pending_repayment)
+                group["repaid_amount"] = self._format_money(repaid)
+                group["pending_collection_amount"] = self._format_money(pending_collection)
+                group["collected_amount"] = self._format_money(collected)
+                group["closed_amount"] = self._format_money(closed)
+                group["pending_amount"] = self._format_money(pending_repayment + pending_collection)
+                if pending_repayment > ZERO and pending_collection > ZERO:
+                    group["pending_direction"] = "mixed"
+                    group["pending_direction_label"] = "混合余额"
+                    group["group_tone"] = "warning"
+                elif pending_repayment > ZERO:
+                    group["pending_direction"] = "repayment"
+                    group["pending_direction_label"] = "待还款"
+                    group["group_tone"] = "warning"
+                elif pending_collection > ZERO:
+                    group["pending_direction"] = "collection"
+                    group["pending_direction_label"] = "待收款"
+                    group["group_tone"] = "success"
+                elif closed > ZERO:
+                    group["pending_direction"] = "closed"
+                    group["pending_direction_label"] = "已闭合"
+                    group["group_tone"] = "muted"
         return {
             "summary": payload.get("summary") or {},
             "family_summaries": list(payload.get("family_summaries") or []),

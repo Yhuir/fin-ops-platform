@@ -650,6 +650,53 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(group["row_span"], 1)
         self.assertNotIn("rows", group)
 
+    def test_grouped_view_preserves_flat_read_model_group_breakdowns(self) -> None:
+        class FakeQueryService:
+            def list_ledger(self, **_: object) -> dict[str, object]:
+                return {
+                    "summary": {},
+                    "family_summaries": [],
+                    "filters": {"family": "personal", "status": None},
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "read_model_status": "fresh",
+                    "rows": [
+                        {
+                            "relation_id": "turnover_rel_fang",
+                            "family": "personal",
+                            "family_label": "个人往来",
+                            "counterparty_name": "房克丽",
+                            "status": "suggested",
+                            "row_tone": "warning",
+                            "borrow_amount": "300000.00",
+                            "repayment_amount": "100000.00",
+                            "balance_amount": "200000.00",
+                            "pending_repayment_amount": "200000.00",
+                            "repaid_amount": "100000.00",
+                            "pending_collection_amount": "50000.00",
+                            "collected_amount": "25000.00",
+                            "closed_amount": "0.00",
+                        }
+                    ],
+                }
+
+        routes = TurnoverLedgerApiRoutes(
+            ledger_service=object(),  # type: ignore[arg-type]
+            relation_service=object(),  # type: ignore[arg-type]
+            query_service=FakeQueryService(),  # type: ignore[arg-type]
+        )
+
+        payload = routes.list_ledger(view="grouped", family="personal")
+        group = payload["groups"][0]
+
+        self.assertEqual(group["pending_direction"], "mixed")
+        self.assertEqual(group["pending_direction_label"], "混合余额")
+        self.assertEqual(group["pending_amount"], "250000.00")
+        self.assertEqual(group["pending_repayment_amount"], "200000.00")
+        self.assertEqual(group["pending_collection_amount"], "50000.00")
+        self.assertEqual(group["repaid_amount"], "100000.00")
+        self.assertEqual(group["collected_amount"], "25000.00")
+        self.assertEqual(group["summary_row"]["pending_repayment_amount"], "200000.00")
+
     def test_get_turnover_ledger_grouped_view_applies_family_filter(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
