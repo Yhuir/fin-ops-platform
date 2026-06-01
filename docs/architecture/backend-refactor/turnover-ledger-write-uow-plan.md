@@ -541,3 +541,20 @@ PF-P060 应只添加 fake/contract tests 和最小 adapter skeleton，验证：
 - relation extra repository 不依赖 `Application`；
 - row provider 可保持现有 response shape；
 - 不修改 `server.py`。
+
+## PF-P060 Relation Extra Adapter Contract Plan
+
+状态：`planned`
+
+PF-P060 should add minimal adapter contracts and skeletons:
+
+- `TurnoverLedgerExtraRepositoryAdapter.save_extra(extra, transaction=tx)`;
+- `TurnoverLedgerDirtyOutboxWriter.enqueue_refresh(transaction=tx, scope_type, scope_keys, reason, payload)`;
+- no `Application` injection;
+- no fake/no-op production transaction;
+- no `server.py` wiring.
+
+The adapter should reuse existing repository and runtime queue capabilities:
+
+- repository side should delegate to a transaction-bound repository factory, initially compatible with `PostgresWorkbenchRepository(transaction).save_turnover_ledger_extras(...)`;
+- dirty/outbox side should require `queue_repository.enqueue_read_model_refresh_in_transaction(...)` and must not fallback to non-transaction enqueue.

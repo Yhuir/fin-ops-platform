@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra adapter contracts |
+| 当前阶段 | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts` planned |
 | 最近 verified prompt | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P059 确认不能直接 wiring：缺少 Turnover-specific extra repository port、dirty/outbox writer adapter 和 row provider adapter；文档检查通过 |
-| 下一条允许任务 | 生成并审查 `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`；先补 adapter contracts/skeleton，不修改 `server.py` |
+| 下一条允许任务 | 执行 `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`；补 adapter contracts/skeleton，不修改 `server.py` |
 
 ## Prompt 执行日志
 
@@ -5799,6 +5799,31 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `git ls-files --others --exclude-standard`：Pass。
 - `git diff --check`：Pass。
 - `rg -n "Relation Extra Handler Wiring Readiness|PF-P059|no-op transaction|fake transaction|adapter" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+### PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts
+
+状态：`planned`
+
+#### 范围
+
+- 增加 relation extra repository adapter 与 Turnover dirty/outbox writer adapter 的 contract tests 和最小 skeleton。
+- 不修改 `server.py`，不接入真实 handler。
+- 不迁移 confirm、withdraw、tag selection 或 bank-row-tags。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P060。
+
+#### 验收标准
+
+- adapter 使用 transaction-bound dependency，不调用非事务 queue enqueue。
+- repository adapter 不依赖 `Application`。
+- 默认 targeted tests 通过。
 
 ## 维护规则
 

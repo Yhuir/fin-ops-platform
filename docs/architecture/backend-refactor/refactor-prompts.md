@@ -15363,3 +15363,91 @@ Post-Flight:
   - `git diff --check`：Pass。
   - `rg -n "Relation Extra Handler Wiring Readiness|PF-P059|no-op transaction|fake transaction|adapter" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
 - 下一步建议：生成并审查 `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`。PF-P060 应先补 adapter contract tests/skeleton，不修改 `server.py`。
+
+## PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts
+
+Role:
+你是一位精通 Python Clean Architecture、Repository Adapter、Transactional Outbox 和 TDD 的后端工程师。
+
+Context:
+PF-P059 已确认不能直接 wiring relation extra handler。缺口是：
+- 缺少 `save_extra(extra, *, transaction)` 细粒度 repository adapter；
+- 缺少 Turnover-specific dirty/outbox writer adapter；
+- 不能使用 fake/no-op production transaction；
+- 不能把 `Application` 注入 service/facade。
+
+本轮只补 adapter contract tests 和最小 skeleton，不修改 `server.py`，不接入真实 handler。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/workbench_uow.py 中 `RuntimeQueueReadModelRefreshWriter`
+   - backend/src/fin_ops_platform/services/postgres_repositories/workbench.py 中 `save_turnover_ledger_extras`
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+用 TDD 增加 Turnover Ledger relation extra adapters。
+
+Required Test Work:
+1. 在 `tests/test_turnover_ledger_uow_contract.py` 或新建 narrowly scoped test file 中添加 adapter contract tests。
+2. 测试必须覆盖：
+   - `TurnoverLedgerExtraRepositoryAdapter.save_extra(extra, transaction=tx)` 使用传入 transaction 构造/获取 repository，并调用 transaction-bound `save_turnover_ledger_extras` 或等价保存能力；
+   - repository adapter constructor 不接受 `Application`；
+   - `TurnoverLedgerDirtyOutboxWriter.enqueue_refresh(...)` 必须调用 `queue_repository.enqueue_read_model_refresh_in_transaction(...)`；
+   - dirty/outbox writer 不得 fallback 到非事务 `enqueue_read_model_refresh`；
+   - 多个 `scope_keys` 会逐个 transaction-bound enqueue；
+   - adapter 不读取 HTTP cookie/header，不 import `app.auth`。
+3. Tests 必须默认普通通过，不使用 `skip` 或 `expectedFailure`。
+
+Required Implementation Work:
+1. 新增或更新最小 service module，例如 `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`。
+2. 实现：
+   - `TurnoverLedgerExtraRepositoryAdapter`；
+   - `TurnoverLedgerDirtyOutboxWriter`。
+3. 实现必须复用现有 repository/queue 封装，不手写散落 SQL。
+4. 不得创建大型 generic adapter framework。
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得接入真实 relation extra handler。
+- 不得修改 runtime queue、worker、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得迁移 confirm、withdraw、tag selection 或 bank-row-tags。
+- 不得访问真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "TurnoverLedgerExtraRepositoryAdapter|TurnoverLedgerDirtyOutboxWriter|enqueue_read_model_refresh_in_transaction|PF-P060" backend/src/fin_ops_platform/services tests docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P060 status = implemented / verified / blocked。
+   - 记录 adapter tests 和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P060 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录已补齐的 adapter 边界和剩余 row provider / handler wiring 缺口。
+4. 不生成 MG，除非状态机确认当前 relation extra facade/adapter slice 已达到可合并边界。
+```
+
+### 审查结论
+
+- PF-P060 是 PF-P059 后正确的工程步骤：先补 adapter contract/skeleton，再考虑真实 handler wiring。
+- Prompt 明确禁止 `server.py` diff、真实 handler 接入和 fake/no-op production transaction。
