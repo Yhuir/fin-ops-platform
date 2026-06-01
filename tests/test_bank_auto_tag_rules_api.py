@@ -145,6 +145,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual({rule["priority"] for rule in payload["active_rules"]}, {2})
         self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
     def test_reapply_endpoint_enqueues_bank_detail_refresh_without_changing_rules(self) -> None:
         app = build_application()
@@ -712,6 +713,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             )
         )
         self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
     def test_put_external_turnover_rule_clears_legacy_third_label_and_persists_action_type(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1012,7 +1014,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertIn(("bank_detail", "2026-03", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
-    def test_bank_category_confirmation_enqueues_turnover_ledger_month_refresh(self) -> None:
+    def test_bank_category_confirmation_enqueues_turnover_ledger_all_refresh(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
@@ -1028,7 +1030,8 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         )
 
         self.assertIn(("bank_detail", "2026-03", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-03", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertNotIn(("turnover_ledger", "2026-03", "bank_detail_category_confirmation_changed"), queue.enqueued)
 
     def test_bank_detail_api_does_not_reenqueue_already_refreshing_scopes(self) -> None:
         app = build_application()

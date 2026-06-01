@@ -453,6 +453,7 @@ class TurnoverLedgerService:
             "repayment_direction": repayment_direction,
             "balance_amount": self._format_money(principal_amount - settled_amount),
             "counterparty_bank_name": self._counterparty_bank_name(all_rows),
+            "bank_account_labels": self._bank_account_labels(all_rows),
             "repayment_remark": self._summary_text(settlement_rows),
             "interest_rate_type": interest_rate_type,
             "interest_rate_value": self._format_rate(interest_rate_value),
@@ -578,6 +579,9 @@ class TurnoverLedgerService:
                     "counterparty_bank_name": self._counterparty_bank_name(
                         [principal_row, *allocated_settlement_rows]
                     ),
+                    "bank_account_labels": self._bank_account_labels(
+                        [principal_row, *allocated_settlement_rows]
+                    ),
                     "repayment_remark": self._summary_text(allocated_settlement_rows),
                     "interest_rate_type": interest_rate_type,
                     "interest_rate_value": self._format_rate(interest_rate_value),
@@ -605,6 +609,7 @@ class TurnoverLedgerService:
             for row_id in list(relation.get("bank_row_ids") or [])
             if str(row_id) in rows_by_id
         ]
+        borrow_direction, repayment_direction = self._money_directions(business_type)
         lot_ids_by_bank_row_id: dict[str, list[str]] = {}
         for lot in allocation_lots:
             lot_id = str(lot.get("lot_id") or "").strip()
@@ -632,8 +637,9 @@ class TurnoverLedgerService:
             flow_amount = self._row_amount(bank_row)
             transaction_at = self._transaction_at(bank_row)
             transaction_date = self._date_from_value(transaction_at)
-            borrow_amount = flow_amount if direction == "income" else ZERO
-            repayment_amount = flow_amount if direction == "expense" else ZERO
+            flow_side = self._flow_side(bank_row)
+            borrow_amount = flow_amount if flow_side == "principal" else ZERO
+            repayment_amount = flow_amount if flow_side == "settlement" else ZERO
             allocated_lot_ids = lot_ids_by_bank_row_id.get(bank_row_id, [])
             flow_rows.append(
                 {
@@ -646,9 +652,11 @@ class TurnoverLedgerService:
                     "flow_direction": direction,
                     "flow_amount": self._format_money(flow_amount),
                     "borrow_amount": self._format_money(borrow_amount),
-                    "borrow_date": transaction_date if direction == "income" else None,
+                    "borrow_date": transaction_date if flow_side == "principal" else None,
+                    "borrow_direction": borrow_direction,
                     "repayment_amount": self._format_money(repayment_amount),
-                    "repayment_date": transaction_date if direction == "expense" else None,
+                    "repayment_date": transaction_date if flow_side == "settlement" else None,
+                    "repayment_direction": repayment_direction,
                     "business_type": business_type,
                     "category_code": str(bank_row.get("category_code") or "").strip(),
                     "category_label": str(bank_row.get("category_label") or "").strip(),
@@ -658,7 +666,9 @@ class TurnoverLedgerService:
                     "category_label_path": list(bank_row.get("category_label_path") or []),
                     "category_version": int(bank_row.get("category_version") or 0),
                     "counterparty_bank_name": self._counterparty_bank_name([bank_row]),
+                    "bank_account_labels": self._bank_account_labels([bank_row]),
                     "summary_text": self._summary_text([bank_row]),
+                    "repayment_remark": self._summary_text([bank_row]) if flow_side == "settlement" else "",
                     "allocation_status": self._allocation_status(allocated_lot_ids),
                     "allocated_lot_ids": allocated_lot_ids,
                     "bank_row_ids": [bank_row_id],
@@ -697,7 +707,9 @@ class TurnoverLedgerService:
             "category_label_path": list(row.get("category_label_path") or []),
             "category_version": int(row.get("category_version") or 0),
             "counterparty_bank_name": self._counterparty_bank_name([row]),
+            "bank_account_labels": self._bank_account_labels([row]),
             "summary_text": self._summary_text([row]),
+            "repayment_remark": self._summary_text([row]) if direction == "expense" else "",
             "allocation_status": "unclassified",
             "allocated_lot_ids": [],
             "bank_row_ids": [row_id],
@@ -780,6 +792,9 @@ class TurnoverLedgerService:
                     "_items": [],
                     "_pending_repayment": ZERO,
                     "_pending_collection": ZERO,
+                    "_repaid": ZERO,
+                    "_collected": ZERO,
+                    "_closed": ZERO,
                 },
             )
             group["_items"].append(item)
@@ -793,13 +808,21 @@ class TurnoverLedgerService:
             business_type = str(item.get("business_type") or "")
             if business_type == "borrow_in":
                 group["_pending_repayment"] += balance_amount
+                group["_repaid"] += self._money((item.get("legacy") or {}).get("settled_amount") if isinstance(item.get("legacy"), dict) else None)
             elif business_type in {"borrow_out", "business_receivable"}:
                 group["_pending_collection"] += balance_amount
+                group["_collected"] += self._money((item.get("legacy") or {}).get("settled_amount") if isinstance(item.get("legacy"), dict) else None)
+            legacy = item.get("legacy") if isinstance(item.get("legacy"), dict) else {}
+            if balance_amount == ZERO and legacy.get("status") in {"deterministic", "confirmed"}:
+                group["_closed"] += self._money(legacy.get("principal_amount"))
 
         groups: list[dict[str, Any]] = []
         for group in groups_by_key.values():
             pending_repayment = group.pop("_pending_repayment")
             pending_collection = group.pop("_pending_collection")
+            repaid = group.pop("_repaid")
+            collected = group.pop("_collected")
+            closed = group.pop("_closed")
             group_items = group.pop("_items")
             flow_rows = sorted(
                 self._dedupe_flow_rows(list(group.get("flow_rows") or [])),
@@ -821,7 +844,16 @@ class TurnoverLedgerService:
             group["allocation_lots"] = allocation_lots
             group["lot_rows"] = allocation_lots
             summary_row = self._summary_row_payload(group_items, allocation_lots, flow_rows)
+            breakdown = self._group_amount_breakdown(
+                pending_repayment=pending_repayment,
+                repaid=repaid,
+                pending_collection=pending_collection,
+                collected=collected,
+                closed=closed,
+            )
             group.update(self._group_pending_payload(pending_repayment, pending_collection))
+            group.update(breakdown)
+            summary_row.update(breakdown)
             group["summary_row"] = summary_row
             group["rows"] = [summary_row]
             group["row_span"] = 1 + len(flow_rows)
@@ -854,6 +886,12 @@ class TurnoverLedgerService:
                 normalized = str(bank_row_id or "").strip()
                 if normalized and normalized not in bank_row_ids:
                     bank_row_ids.append(normalized)
+        bank_account_label_rows = [*(flow_rows or []), *relation_rows]
+        bank_account_labels = self._unique_texts(
+            label
+            for row in bank_account_label_rows
+            for label in list(row.get("bank_account_labels") or [])
+        )
         status = self._first_text(row.get("status") for row in relation_rows)
         interest_rate_type = self._first_text(row.get("interest_rate_type") for row in relation_rows) or "none"
         interest_rate_value = self._first_text(
@@ -876,6 +914,7 @@ class TurnoverLedgerService:
             "counterparty_bank_name": " / ".join(
                 self._unique_texts(row.get("counterparty_bank_name") for row in relation_rows)
             ),
+            "bank_account_labels": bank_account_labels,
             "repayment_remark": " / ".join(
                 self._unique_texts(row.get("repayment_remark") for row in relation_rows)
             ),
@@ -905,6 +944,15 @@ class TurnoverLedgerService:
         if amount == ZERO:
             amount = cls._money(row.get("amount"))
         return amount
+
+    @staticmethod
+    def _flow_side(row: dict[str, Any]) -> str:
+        action_type = str(row.get("turnover_action_type") or "").strip()
+        if action_type in {"pending_repayment", "pending_collection"}:
+            return "principal"
+        if action_type in {"repaid", "collected"}:
+            return "settlement"
+        return "principal" if TurnoverLedgerService._direction(row) == "inflow" else "settlement"
 
     @staticmethod
     def _row_id(row: dict[str, Any]) -> str:
@@ -958,6 +1006,24 @@ class TurnoverLedgerService:
             "pending_direction_label": "已闭合",
             "pending_amount": cls._format_money(ZERO),
             "group_tone": "muted",
+        }
+
+    @classmethod
+    def _group_amount_breakdown(
+        cls,
+        *,
+        pending_repayment: Decimal,
+        repaid: Decimal,
+        pending_collection: Decimal,
+        collected: Decimal,
+        closed: Decimal,
+    ) -> dict[str, str]:
+        return {
+            "pending_repayment_amount": cls._format_money(pending_repayment),
+            "repaid_amount": cls._format_money(repaid),
+            "pending_collection_amount": cls._format_money(pending_collection),
+            "collected_amount": cls._format_money(collected),
+            "closed_amount": cls._format_money(closed),
         }
 
     @staticmethod
@@ -1175,6 +1241,10 @@ class TurnoverLedgerService:
         return {
             "family": family,
             "label": TURNOVER_FAMILY_LABELS.get(family, family),
+            "pending_repayment_amount": summary["pending_repayment_amount"],
+            "repaid_amount": summary["repaid_amount"],
+            "pending_collection_amount": summary["pending_collection_amount"],
+            "collected_amount": summary["collected_amount"],
             "pending_amount": cls._format_money(pending_amount),
             "closed_amount": summary["closed_amount"],
             "row_count": summary["row_count"],

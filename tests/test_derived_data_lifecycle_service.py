@@ -145,7 +145,17 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
 
         domains = [domain["domain"] for domain in plan["domains"]]
         self.assertIn("bank_detail_read_model", domains)
+        self.assertIn("no_oa_bank_batch_read_model", domains)
         self.assertNotIn("bank_account_balance_read_model", domains)
+
+    def test_no_oa_bank_batch_changed_refreshes_no_oa_read_model(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("no_oa_bank_batch_changed", months=["2026-03"])
+
+        domains = [domain["domain"] for domain in plan["domains"]]
+        self.assertIn("no_oa_bank_batch_read_model", domains)
+        self.assertIn("workbench_read_model", domains)
 
     def test_oa_rebuilt_maps_oa_workbench_candidate_tax_cost_and_historical_reconcile_domains(self) -> None:
         service = DerivedDataLifecycleService()
@@ -282,6 +292,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "pending_invoice_read_model",
                 "bank_account_balance_read_model",
                 "bank_detail_read_model",
+                "no_oa_bank_batch_read_model",
                 "search_cache",
                 "oa_adapter_records_cache",
                 "file_import_sessions",

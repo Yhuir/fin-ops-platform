@@ -133,6 +133,18 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         heartbeat_stale_after_seconds=900,
     ),
     RuntimeWorkerRegistration(
+        instance_name="no-oa-bank-batch",
+        worker_kind="no-oa-bank-batch-read-model",
+        handler_flags=("--enable-no-oa-bank-batch-read-model-refresh",),
+        event_types=("no_oa_bank_batch.read_model.refresh",),
+        required=True,
+        rabbitmq_eligible=True,
+        env_example="fin-ops.worker.no-oa-bank-batch.env.example",
+        rabbitmq_env_example="fin-ops.worker.no-oa-bank-batch-rabbitmq.env.example",
+        read_model_key="no_oa_bank_batch",
+        read_model_scope_type="no_oa_bank_batch",
+    ),
+    RuntimeWorkerRegistration(
         instance_name="etc-business-oa-detection",
         worker_kind="etc-business-oa-detection",
         handler_flags=("--enable-etc-business-oa-detection",),

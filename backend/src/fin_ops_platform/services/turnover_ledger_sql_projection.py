@@ -96,6 +96,11 @@ class TurnoverLedgerSqlProjectionBuilder:
                 row.setdefault("pending_direction", group.get("pending_direction"))
                 row.setdefault("pending_direction_label", group.get("pending_direction_label"))
                 row.setdefault("pending_amount", group.get("pending_amount"))
+                row.setdefault("pending_repayment_amount", group.get("pending_repayment_amount"))
+                row.setdefault("repaid_amount", group.get("repaid_amount"))
+                row.setdefault("pending_collection_amount", group.get("pending_collection_amount"))
+                row.setdefault("collected_amount", group.get("collected_amount"))
+                row.setdefault("closed_amount", group.get("closed_amount"))
                 row["flow_rows"] = [dict(item) for item in list(group.get("flow_rows") or []) if isinstance(item, dict)]
                 row["allocation_lots"] = [
                     dict(item) for item in list(group.get("allocation_lots") or []) if isinstance(item, dict)

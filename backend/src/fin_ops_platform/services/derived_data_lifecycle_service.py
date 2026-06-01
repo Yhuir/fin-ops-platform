@@ -41,6 +41,7 @@ DERIVED_DATA_DOMAINS = (
     "pending_invoice_read_model",
     "bank_account_balance_read_model",
     "bank_detail_read_model",
+    "no_oa_bank_batch_read_model",
     "search_cache",
     "oa_adapter_records_cache",
     "file_import_sessions",
@@ -83,6 +84,7 @@ class DerivedDataLifecycleService:
         "pending_invoice_read_model": "invalidate",
         "bank_account_balance_read_model": "invalidate",
         "bank_detail_read_model": "invalidate",
+        "no_oa_bank_batch_read_model": "invalidate",
         "search_cache": "clear",
         "oa_adapter_records_cache": "clear",
         "file_import_sessions": "ttl_cleanup",
@@ -182,6 +184,7 @@ class DerivedDataLifecycleService:
         ),
         "bank_auto_tag_rules_changed": (
             "bank_detail_read_model",
+            "no_oa_bank_batch_read_model",
             "workbench_read_model",
             "workbench_candidate_matches",
             "workbench_matching_dirty_scopes",
@@ -214,6 +217,7 @@ class DerivedDataLifecycleService:
             "search_cache",
         ),
         "no_oa_bank_batch_changed": (
+            "no_oa_bank_batch_read_model",
             "workbench_read_model",
             "cost_statistics_read_model",
             "search_cache",

@@ -153,6 +153,41 @@
 - 成功后返回与 GET 相同结构，并写审计动作 `turnover_ledger_tag_selection_updated`。
 - 外部往来款管理列表只纳入 `effective_category_code` 位于 `selected_tag_codes`，且已经在银行明细确认 `个人往来`、`公司往来`、`银行往来` 或 `业务往来` 第三层分类的流水；未确认第三层分类的外部往来候选继续留在银行明细处理。
 
+`GET /api/turnover-ledger`
+
+查询外部往来款台账。常用查询参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `view` | `grouped` 返回按对方户名和往来类别归并的页面台账。未传时保持兼容的列表响应。 |
+| `family` | `all`、`personal`、`company`、`bank`、`business`。 |
+| `direction` | 兼容参数：`all`、`borrow_in`、`borrow_out`。主页面不再展示该筛选，但 API、导出和自动化测试仍可使用。 |
+| `page` / `page_size` | 分页参数。 |
+
+`summary` 至少包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `pending_repayment_amount` | 待还款总额，来自 `pending_repayment` 动作。 |
+| `repaid_amount` | 已还款总额，来自 `repaid` 动作。 |
+| `pending_collection_amount` | 待收款总额，来自 `pending_collection` 动作。 |
+| `collected_amount` | 已收款总额，来自 `collected` 动作。 |
+| `closed_amount` | 已闭合兼容金额；主页面不作为页头 block 展示。 |
+| `suggested_count` / `conflict_count` / `row_count` | 兼容计数字段。 |
+
+`family_summaries[*]` 每个类别都应稳定返回：
+
+| 字段 | 说明 |
+| --- | --- |
+| `family` / `label` | 类别 code 和展示名。 |
+| `pending_repayment_amount` | 该类别待还款金额。 |
+| `repaid_amount` | 该类别已还款金额。 |
+| `pending_collection_amount` | 该类别待收款金额。 |
+| `collected_amount` | 该类别已收款金额。 |
+| `pending_amount` / `closed_amount` / `row_count` | 兼容字段；`pending_amount` 等于待还款与待收款余额合计。 |
+
+`view=grouped` 响应中的 `groups[*]` 还应稳定输出 `pending_repayment_amount`、`repaid_amount`、`pending_collection_amount`、`collected_amount`、`closed_amount`。`summary_row` 和 `flow_rows[*]` 应携带 `bank_account_labels`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path` 和 `repayment_remark`。金额列归属以 `turnover_action_type` 归一后的 `borrow_amount` / `repayment_amount` 为准，不得仅按现金流入/流出判断。
+
 ## 银行明细自动标签规则 API
 
 `GET /api/bank-details/accounts`

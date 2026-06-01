@@ -5471,11 +5471,18 @@ class PostgresReadModelRepository:
         source_versions = _shared_source_versions(all_rows)
         ledger_rows = [_turnover_ledger_row_payload(row) for row in all_rows]
         if normalized_direction == "borrow_in":
-            ledger_rows = [row for row in ledger_rows if row.get("business_type") == "borrow_in"]
+            ledger_rows = [
+                row for row in ledger_rows
+                if row.get("business_type") == "borrow_in"
+                or _decimal_or_zero(row.get("pending_repayment_amount")) > Decimal("0")
+                or _decimal_or_zero(row.get("repaid_amount")) > Decimal("0")
+            ]
         elif normalized_direction == "borrow_out":
             ledger_rows = [
                 row for row in ledger_rows
                 if row.get("business_type") in {"borrow_out", "business_receivable"}
+                or _decimal_or_zero(row.get("pending_collection_amount")) > Decimal("0")
+                or _decimal_or_zero(row.get("collected_amount")) > Decimal("0")
             ]
         visible_rows = ledger_rows[(normalized_page - 1) * normalized_page_size : normalized_page * normalized_page_size]
         return {
@@ -6556,6 +6563,26 @@ def _turnover_ledger_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     suggested_count = 0
     conflict_count = 0
     for row in rows:
+        if any(
+            row.get(key) is not None
+            for key in (
+                "pending_repayment_amount",
+                "repaid_amount",
+                "pending_collection_amount",
+                "collected_amount",
+                "closed_amount",
+            )
+        ):
+            pending_repayment += _decimal_or_zero(row.get("pending_repayment_amount"))
+            repaid += _decimal_or_zero(row.get("repaid_amount"))
+            pending_collection += _decimal_or_zero(row.get("pending_collection_amount"))
+            collected += _decimal_or_zero(row.get("collected_amount"))
+            closed += _decimal_or_zero(row.get("closed_amount"))
+            if row.get("status") == "suggested":
+                suggested_count += 1
+            if row.get("status") == "conflict":
+                conflict_count += 1
+            continue
         principal = _decimal_or_zero(row.get("principal_amount"))
         settled = _decimal_or_zero(row.get("settled_amount"))
         balance = _decimal_or_zero(row.get("balance_amount"))
@@ -6593,6 +6620,10 @@ def _turnover_ledger_family_summary(family: str, rows: list[dict[str, Any]]) -> 
     return {
         "family": family,
         "label": labels.get(family, family),
+        "pending_repayment_amount": summary["pending_repayment_amount"],
+        "repaid_amount": summary["repaid_amount"],
+        "pending_collection_amount": summary["pending_collection_amount"],
+        "collected_amount": summary["collected_amount"],
         "pending_amount": _format_decimal(pending_amount),
         "closed_amount": summary["closed_amount"],
         "row_count": summary["row_count"],

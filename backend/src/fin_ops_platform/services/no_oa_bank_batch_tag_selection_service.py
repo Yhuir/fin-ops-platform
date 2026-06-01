@@ -10,11 +10,11 @@ class NoOaBankBatchTagSelectionApplicationService:
         self,
         *,
         app_settings_service: AppSettingsService,
-        refresh_no_oa_bank_batches: Callable[[], Any],
+        enqueue_no_oa_bank_batch_refresh: Callable[[list[str]], Any],
         after_no_oa_bank_batch_mutation: Callable[..., Any],
     ) -> None:
         self._app_settings_service = app_settings_service
-        self._refresh_no_oa_bank_batches = refresh_no_oa_bank_batches
+        self._enqueue_no_oa_bank_batch_refresh = enqueue_no_oa_bank_batch_refresh
         self._after_no_oa_bank_batch_mutation = after_no_oa_bank_batch_mutation
 
     def get_tag_selection_payload(self) -> dict[str, Any]:
@@ -35,4 +35,5 @@ class NoOaBankBatchTagSelectionApplicationService:
             changed_case_ids=[],
             persist=False,
         )
+        self._enqueue_no_oa_bank_batch_refresh(["all"])
         return result

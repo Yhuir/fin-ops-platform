@@ -676,7 +676,7 @@ class BankDetailsApplicationService:
         else:
             self._enqueue_read_model_refreshes(affected_months or ["all"], reason="bank_detail_category_confirmation_changed")
             self._enqueue_turnover_ledger_read_model_refreshes(
-                affected_months or ["all"],
+                ["all"],
                 reason="bank_detail_category_confirmation_changed",
             )
             self._invalidate_after_category_mutation(affected_months)

@@ -41,9 +41,9 @@ import {
 } from "../features/turnoverLedger/api";
 import type {
   TurnoverLedgerExportPreview,
-  TurnoverLedgerDirectionFilter,
   TurnoverLedgerExtra,
   TurnoverLedgerFamily,
+  TurnoverLedgerFamilySummary,
   TurnoverLedgerGroupedResponse,
   TurnoverLedgerGroupedRow,
   TurnoverLedgerSummary,
@@ -62,11 +62,10 @@ const FAMILY_TABS: Array<{ value: TurnoverLedgerFamily; label: string }> = [
   { value: "business", label: "业务往来" },
 ];
 
-const DIRECTION_FILTERS: Array<{ value: TurnoverLedgerDirectionFilter; label: string; ariaLabel: string }> = [
-  { value: "all", label: "全部", ariaLabel: "全部方向" },
-  { value: "borrow_out", label: "借出", ariaLabel: "借出" },
-  { value: "borrow_in", label: "借入", ariaLabel: "借入" },
-];
+const FAMILY_BREAKDOWN_ORDER = FAMILY_TABS.filter((tab) => tab.value !== "all") as Array<{
+  value: Exclude<TurnoverLedgerFamily, "all">;
+  label: string;
+}>;
 
 const DEFAULT_SUMMARY: TurnoverLedgerSummary = {
   pendingRepaymentAmount: "0.00",
@@ -107,20 +106,43 @@ function isAbortLikeError(caught: unknown) {
   return caught instanceof Error && (caught.name === "AbortError" || /aborted|abort/i.test(caught.message));
 }
 
-function SummaryCard({ label, value, helper }: { label: string; value: string | number; helper?: string }) {
+type SummaryBreakdownMetric =
+  | "pendingRepaymentAmount"
+  | "repaidAmount"
+  | "pendingCollectionAmount"
+  | "collectedAmount";
+
+function familySummaryAmount(summary: TurnoverLedgerFamilySummary | undefined, metric: SummaryBreakdownMetric) {
+  return formatMoney(summary?.[metric] ?? "0.00");
+}
+
+function SummaryCard({
+  label,
+  value,
+  breakdown,
+  testId,
+}: {
+  label: string;
+  value: string | number;
+  breakdown: Array<{ label: string; value: string }>;
+  testId: string;
+}) {
   return (
-    <Paper variant="outlined" sx={{ p: 1.5, minHeight: 92, borderRadius: 1 }}>
+    <Paper data-testid={testId} variant="outlined" sx={{ p: 1.25, minHeight: 112, borderRadius: 1 }}>
       <Typography variant="body2" color="text.secondary" fontWeight={800}>
         {label}
       </Typography>
-      <Typography variant="h6" fontWeight={900} sx={{ mt: 0.75 }}>
+      <Typography variant="h6" fontWeight={900} sx={{ mt: 0.5 }}>
         {value}
       </Typography>
-      {helper ? (
-        <Typography variant="caption" color="text.secondary">
-          {helper}
-        </Typography>
-      ) : null}
+      <Stack spacing={0.25} sx={{ mt: 0.75 }}>
+        {breakdown.map((item) => (
+          <Stack key={item.label} direction="row" justifyContent="space-between" spacing={1}>
+            <Typography variant="caption" color="text.secondary">{item.label}</Typography>
+            <Typography variant="caption" fontWeight={800}>{item.value}</Typography>
+          </Stack>
+        ))}
+      </Stack>
     </Paper>
   );
 }
@@ -157,7 +179,6 @@ function tagSubLabel(tag: TurnoverLedgerTagDefinition) {
 
 export default function TurnoverLedgerPage() {
   const { canMutateData } = useSessionPermissions();
-  const [direction, setDirection] = useState<TurnoverLedgerDirectionFilter>("all");
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
   const [tagSelection, setTagSelection] = useState<TurnoverLedgerTagSelection>(EMPTY_TAG_SELECTION);
@@ -185,6 +206,15 @@ export default function TurnoverLedgerPage() {
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
+  const familySummaryMap = useMemo(() => new Map((ledger?.familySummaries ?? []).map((item) => [item.family, item])), [
+    ledger?.familySummaries,
+  ]);
+  const summaryBreakdown = useCallback((metric: SummaryBreakdownMetric) => (
+    FAMILY_BREAKDOWN_ORDER.map((item) => ({
+      label: item.label,
+      value: familySummaryAmount(familySummaryMap.get(item.value), metric),
+    }))
+  ), [familySummaryMap]);
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -206,7 +236,7 @@ export default function TurnoverLedgerPage() {
     setError(null);
     fetchTurnoverLedgerGrouped({
       family,
-      direction,
+      direction: "all",
       page: 1,
       pageSize: DEFAULT_PAGE_SIZE,
       signal,
@@ -219,7 +249,7 @@ export default function TurnoverLedgerPage() {
         setError(caught instanceof Error ? caught.message : "往来款台账加载失败");
       })
       .finally(() => setLoading(false));
-  }, [direction, family]);
+  }, [family]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -267,12 +297,6 @@ export default function TurnoverLedgerPage() {
     setFamily(nextFamily);
   };
 
-  const availableFamilyTabs = useMemo(() => (
-    direction === "borrow_in"
-      ? FAMILY_TABS.filter((tab) => tab.value !== "business")
-      : FAMILY_TABS
-  ), [direction]);
-
   const drawerGroups = useMemo(() => {
     const grouped = new Map<string, TurnoverLedgerTagDefinition[]>();
     tagSelection.activeTags.forEach((tag) => {
@@ -281,13 +305,6 @@ export default function TurnoverLedgerPage() {
     });
     return Array.from(grouped.entries()).map(([primaryLabel, tags]) => ({ primaryLabel, tags }));
   }, [tagSelection.activeTags]);
-
-  const handleDirectionChange = (nextDirection: TurnoverLedgerDirectionFilter) => {
-    setDirection(nextDirection);
-    if (nextDirection === "borrow_in" && family === "business") {
-      setFamily("all");
-    }
-  };
 
   const handleOpenEditor = (row: TurnoverLedgerGroupedRow) => {
     const normalizedRow = { ...row, relationId: relationIdForRow(row) };
@@ -447,30 +464,37 @@ export default function TurnoverLedgerPage() {
             gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(4, minmax(0, 1fr))" },
           }}
         >
-          <SummaryCard label="待还款金额" value={formatMoney(summary.pendingRepaymentAmount)} />
-          <SummaryCard label="已还款金额" value={formatMoney(summary.repaidAmount)} />
-          <SummaryCard label="待收款金额" value={formatMoney(summary.pendingCollectionAmount)} />
-          <SummaryCard label="已收款金额" value={formatMoney(summary.collectedAmount)} />
+          <SummaryCard
+            label="待还款金额"
+            value={formatMoney(summary.pendingRepaymentAmount)}
+            breakdown={summaryBreakdown("pendingRepaymentAmount")}
+            testId="turnover-summary-pending-repayment"
+          />
+          <SummaryCard
+            label="已还款金额"
+            value={formatMoney(summary.repaidAmount)}
+            breakdown={summaryBreakdown("repaidAmount")}
+            testId="turnover-summary-repaid"
+          />
+          <SummaryCard
+            label="待收款金额"
+            value={formatMoney(summary.pendingCollectionAmount)}
+            breakdown={summaryBreakdown("pendingCollectionAmount")}
+            testId="turnover-summary-pending-collection"
+          />
+          <SummaryCard
+            label="已收款金额"
+            value={formatMoney(summary.collectedAmount)}
+            breakdown={summaryBreakdown("collectedAmount")}
+            testId="turnover-summary-collected"
+          />
         </Stack>
 
         <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
           <Stack spacing={1.5} sx={{ p: 1.5 }}>
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-              {DIRECTION_FILTERS.map((item) => (
-                <Button
-                  key={item.value}
-                  variant={direction === item.value ? "contained" : "outlined"}
-                  aria-pressed={direction === item.value}
-                  aria-label={item.ariaLabel}
-                  onClick={() => handleDirectionChange(item.value)}
-                >
-                  {item.label}
-                </Button>
-              ))}
-            </Stack>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between">
               <Tabs value={family} onChange={handleFamilyChange} aria-label="往来款账单范围" variant="scrollable" allowScrollButtonsMobile>
-                {availableFamilyTabs.map((tab) => (
+                {FAMILY_TABS.map((tab) => (
                   <Tab key={tab.value} value={tab.value} label={tab.label} />
                 ))}
               </Tabs>

@@ -709,7 +709,10 @@ class Application:
         )
         self._no_oa_bank_batch_tag_selection_service = NoOaBankBatchTagSelectionApplicationService(
             app_settings_service=self._app_settings_service,
-            refresh_no_oa_bank_batches=lambda: self._no_oa_bank_batch_application_service().refresh_batches(),
+            enqueue_no_oa_bank_batch_refresh=lambda scope_keys: self._enqueue_no_oa_bank_batch_read_model_refreshes(
+                scope_keys,
+                reason="no_oa_bank_batch_tag_selection_changed",
+            ),
             after_no_oa_bank_batch_mutation=lambda affected_months, **kwargs: self._no_oa_bank_batch_application_service().after_mutation(
                 affected_months,
                 changed_case_ids=list(kwargs.get("changed_case_ids") or []),
@@ -10868,7 +10871,7 @@ class Application:
         scope_keys = affected_months or ["all"]
         self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason="bank_detail_category_confirmation_changed")
         self._enqueue_turnover_ledger_read_model_refreshes(
-            scope_keys,
+            ["all"],
             reason="bank_detail_category_confirmation_changed",
         )
         self._invalidate_workbench_after_bank_transaction_categories(affected_months)
@@ -11382,6 +11385,24 @@ class Application:
         enqueued = False
         for scope_key in sorted(dict.fromkeys(normalized_scope_keys)):
             enqueue(scope_type="turnover_ledger", scope_key=scope_key, reason=reason)
+            enqueued = True
+        return enqueued
+
+    def _enqueue_no_oa_bank_batch_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        normalized_scope_keys = [
+            str(item).strip()
+            for item in list(scope_keys or [])
+            if str(item).strip() and (str(item).strip() == "all" or SEARCH_MONTH_RE.match(str(item).strip()))
+        ]
+        if not normalized_scope_keys:
+            normalized_scope_keys = ["all"]
+        enqueued = False
+        for scope_key in sorted(dict.fromkeys(normalized_scope_keys)):
+            enqueue(scope_type="no_oa_bank_batch", scope_key=scope_key, reason=reason)
             enqueued = True
         return enqueued
 
@@ -12287,7 +12308,7 @@ class Application:
         self._persist_turnover_relations_best_effort(operation="turnover_relation_mutation")
         self._clear_turnover_ledger_read_model_best_effort()
         self._enqueue_turnover_ledger_read_model_refreshes(
-            affected_months or ["all"],
+            ["all"],
             reason="turnover_relation_changed",
         )
 
@@ -17094,6 +17115,7 @@ class Application:
                 "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
                 "bank_account_balance_read_model": self._derived_lifecycle_bank_account_balance_executor,
                 "bank_detail_read_model": self._derived_lifecycle_bank_detail_executor,
+                "no_oa_bank_batch_read_model": self._derived_lifecycle_no_oa_bank_batch_executor,
                 "search_cache": self._derived_lifecycle_search_cache_executor,
                 "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
                 "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
@@ -17241,6 +17263,20 @@ class Application:
             "deleted_counts": {"bank_detail_read_models": 0},
             "invalidated_scopes": target_scope_keys,
             "enqueued_jobs": ["bank_detail.read_model.refresh"] if enqueued else [],
+        }
+
+    def _derived_lifecycle_no_oa_bank_batch_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        months = self._months_from_lifecycle_scope_keys(scope_keys)
+        target_scope_keys = months if months else ["all"]
+        enqueued = self._enqueue_no_oa_bank_batch_read_model_refreshes(
+            target_scope_keys,
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_no_oa_bank_batch"),
+        )
+        return {
+            "deleted_counts": {"no_oa_bank_batch_read_models": 0},
+            "invalidated_scopes": target_scope_keys,
+            "enqueued_jobs": ["no_oa_bank_batch.read_model.refresh"] if enqueued else [],
         }
 
     def _derived_lifecycle_bank_account_balance_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:

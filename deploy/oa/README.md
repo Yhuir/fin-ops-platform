@@ -206,6 +206,8 @@ sudo systemctl enable --now fin-ops-worker@oa-sync.service
 sudo systemctl enable --now fin-ops-worker@workbench.service
 sudo systemctl enable --now fin-ops-worker@workbench-matching.service
 sudo systemctl enable --now fin-ops-worker@bank-detail.service
+sudo systemctl enable --now fin-ops-worker@no-oa-bank-batch.service
+sudo systemctl enable --now fin-ops-worker@turnover-ledger.service
 sudo systemctl enable --now fin-ops-worker@search-pending.service
 sudo systemctl enable --now fin-ops-worker@invoice-usage-collection.service
 sudo systemctl enable --now fin-ops-worker@cost-tax.service

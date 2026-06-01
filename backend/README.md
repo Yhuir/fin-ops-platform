@@ -77,6 +77,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 - `worker-oa-sync`：`--enable-oa-sync --worker-kind oa-sync --event-type oa.sync`
 - `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`
 - `worker-bank-detail`：`--enable-bank-detail-read-model-refresh --worker-kind bank-detail-read-model --event-type bank_detail.read_model.refresh`
+- `worker-no-oa-bank-batch`：`--enable-no-oa-bank-batch-read-model-refresh --worker-kind no-oa-bank-batch-read-model --event-type no_oa_bank_batch.read_model.refresh`
 - `worker-search-pending`：`--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --worker-kind search-pending-read-model --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh`
 - `worker-invoice-usage-collection`：`--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --worker-kind invoice-usage-collection-read-model --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh`
 - `worker-cost-tax`：`--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh`

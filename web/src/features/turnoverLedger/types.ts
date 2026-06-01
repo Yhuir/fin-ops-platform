@@ -56,6 +56,10 @@ export type TurnoverLedgerSummary = {
 export type TurnoverLedgerFamilySummary = {
   family: Exclude<TurnoverLedgerFamily, "all"> | string;
   label: string;
+  pendingRepaymentAmount: string;
+  repaidAmount: string;
+  pendingCollectionAmount: string;
+  collectedAmount: string;
   pendingAmount: string;
   closedAmount: string;
   rowCount: number;
@@ -124,6 +128,7 @@ export type TurnoverLedgerGroupedRow = {
   categoryLabelPath: string[];
   categoryVersion: number;
   counterpartyBankName: string;
+  bankAccountLabels: string[];
   summaryText: string;
   allocationStatus: "allocated" | "partial" | "unallocated" | "not_applicable" | string;
   allocatedLotIds: string[];
@@ -156,7 +161,9 @@ export type TurnoverLedgerGroup = {
   pendingDirectionLabel: string;
   pendingAmount: string;
   pendingRepaymentAmount: string;
+  repaidAmount: string;
   pendingCollectionAmount: string;
+  collectedAmount: string;
   closedAmount: string;
   rowSpan: number;
   groupTone: TurnoverRowTone;

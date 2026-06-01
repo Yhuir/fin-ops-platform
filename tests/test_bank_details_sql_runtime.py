@@ -387,6 +387,48 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         ).hexdigest()
         self.assertEqual(cache_key, f"bank_detail:transactions:{expected_digest}")
 
+    def test_category_mutation_refreshes_turnover_ledger_all_scope(self) -> None:
+        class Queue:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        queue = Queue()
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(record_action=lambda **_kwargs: None),
+            state_store=None,
+            bank_detail_sql_read_repository=None,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: ["2026-04"],
+            invalidate_after_category_mutation=lambda _affected_months: False,
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_turnover_ledger_read_model=lambda: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-04"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+
+        affected_months = service._persist_category_mutation(
+            ["txn-apr"],
+            transaction_id="txn-apr",
+            actor_id="TESTFULL001",
+            action="bank_detail_category_manually_assigned",
+            metadata={},
+        )
+
+        self.assertEqual(affected_months, ["2026-04"])
+        self.assertIn(("bank_detail", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertNotIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
+
     def test_accounts_serve_previous_schema_rows_while_refreshing(self) -> None:
         connection = FakeConnection(
             rows=[

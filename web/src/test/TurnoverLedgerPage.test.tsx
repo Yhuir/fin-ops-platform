@@ -216,6 +216,7 @@ function groupedPayload(family: string) {
           repayment_date: null,
           repayment_direction: "expense",
           counterparty_bank_name: "建行通海支行",
+          bank_account_labels: ["建行 8106"],
           repayment_remark: "个人暂借款：待还款",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -246,6 +247,7 @@ function groupedPayload(family: string) {
           repayment_date: null,
           repayment_direction: "expense",
           counterparty_bank_name: "建行通海支行",
+          bank_account_labels: ["建行 8106"],
           repayment_remark: "个人暂借款：待还款",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -276,6 +278,7 @@ function groupedPayload(family: string) {
           repayment_date: "2026-03-04 15:24:58",
           repayment_direction: "expense",
           counterparty_bank_name: "建行通海支行",
+          bank_account_labels: ["建行 8106"],
           repayment_remark: "个人暂借款：已还款",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -391,8 +394,50 @@ function groupedPayload(family: string) {
       row_count: groups.length,
     },
     family_summaries: [
-      { family: "personal", label: "个人往来", pending_amount: "800.00", closed_amount: "300.00", row_count: 2 },
-      { family: "company", label: "公司往来", pending_amount: "2000.00", closed_amount: "0.00", row_count: 1 },
+      {
+        family: "personal",
+        label: "个人往来",
+        pending_repayment_amount: "800.00",
+        repaid_amount: "500.00",
+        pending_collection_amount: "0.00",
+        collected_amount: "0.00",
+        pending_amount: "800.00",
+        closed_amount: "300.00",
+        row_count: 2,
+      },
+      {
+        family: "company",
+        label: "公司往来",
+        pending_repayment_amount: "0.00",
+        repaid_amount: "0.00",
+        pending_collection_amount: "2000.00",
+        collected_amount: "1000.00",
+        pending_amount: "2000.00",
+        closed_amount: "0.00",
+        row_count: 1,
+      },
+      {
+        family: "bank",
+        label: "银行往来",
+        pending_repayment_amount: "0.00",
+        repaid_amount: "0.00",
+        pending_collection_amount: "0.00",
+        collected_amount: "0.00",
+        pending_amount: "0.00",
+        closed_amount: "0.00",
+        row_count: 0,
+      },
+      {
+        family: "business",
+        label: "业务往来",
+        pending_repayment_amount: "0.00",
+        repaid_amount: "0.00",
+        pending_collection_amount: "0.00",
+        collected_amount: "0.00",
+        pending_amount: "0.00",
+        closed_amount: "0.00",
+        row_count: 0,
+      },
     ],
     groups,
     pagination: {
@@ -631,11 +676,18 @@ describe("Turnover ledger page", () => {
     expect(within(page).queryByText("冲突/异常数量")).not.toBeInTheDocument();
     expect(within(page).queryByText("账单行数")).not.toBeInTheDocument();
     expect(within(page).queryByText("分组余额")).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "全部方向" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(page).getByRole("button", { name: "借出" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "借入" })).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "全部方向" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "借出" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "借入" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "下载表格" })).toBeInTheDocument();
+    const pendingRepaymentCard = within(page).getByTestId("turnover-summary-pending-repayment");
+    expect(within(pendingRepaymentCard).getByText("待还款金额")).toBeInTheDocument();
+    expect(within(pendingRepaymentCard).getAllByText("800.00")).toHaveLength(2);
+    expect(within(pendingRepaymentCard).getByText("个人往来")).toBeInTheDocument();
+    expect(within(pendingRepaymentCard).getByText("公司往来")).toBeInTheDocument();
+    expect(within(pendingRepaymentCard).getByText("银行往来")).toBeInTheDocument();
+    expect(within(pendingRepaymentCard).getByText("业务往来")).toBeInTheDocument();
 
     await waitFor(() => {
       const request = requestUrls(fetchMock, "/api/turnover-ledger")[0];
@@ -646,10 +698,10 @@ describe("Turnover ledger page", () => {
 
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     expect(within(table).getByRole("columnheader", { name: "对方户名" })).toHaveClass("turnover-sticky-left-header");
-    expect(within(table).getByRole("columnheader", { name: "银行明细标签" })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "银行明细标签" })).not.toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "借款金额 / 借款日" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "还款金额 / 还款日" })).toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: "开户机构" })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "开户机构" })).not.toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "还款备注" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "利息额 / 年息或月息" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "借款天数" })).toBeInTheDocument();
@@ -674,6 +726,8 @@ describe("Turnover ledger page", () => {
     expect(within(table).getByTestId("amount-income-rel-personal-1-borrow")).toHaveClass("turnover-amount-income");
     expect(within(table).getByTestId("amount-expense-rel-personal-1-repayment")).toHaveClass("turnover-amount-expense");
     expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-row-warning");
+    expect(within(table).queryByText("2026-05-01")).not.toBeInTheDocument();
+    expect(within(table).queryByText("2026-05-03")).not.toBeInTheDocument();
     expect(within(table).queryByText("待人工确认")).not.toBeInTheDocument();
   });
 
@@ -805,9 +859,16 @@ describe("Turnover ledger page", () => {
 
     expect(within(table).queryByRole("combobox", { name: /往来款子标签/ })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
-    expect(within(table).getAllByText("银行明细标签")).toHaveLength(4);
-    expect(within(table).getAllByText("外部往来款收款 / 借入款 / 个人往来")).toHaveLength(2);
-    expect(within(table).getByText("外部往来款付款 / 归还借款 / 个人往来")).toBeInTheDocument();
+    expect(within(table).queryByText("银行明细标签")).not.toBeInTheDocument();
+    const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
+    expect(within(flowRows[0]).getByText("外部往来款收款")).toBeInTheDocument();
+    expect(within(flowRows[0]).getByText("借入款")).toBeInTheDocument();
+    expect(within(flowRows[0]).getByText("个人往来")).toBeInTheDocument();
+    expect(within(flowRows[0]).getByText("建行 8106")).toBeInTheDocument();
+    expect(within(flowRows[2]).getByText("外部往来款付款")).toBeInTheDocument();
+    expect(within(flowRows[2]).getByText("归还借款")).toBeInTheDocument();
+    expect(within(flowRows[2]).getByText("个人往来")).toBeInTheDocument();
+    expect(within(flowRows[2]).getByText("建行 8106")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input, init]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/turnover-ledger/bank-row-tags/batch" && init?.method === "POST";

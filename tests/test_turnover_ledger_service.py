@@ -647,6 +647,140 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(flow_rows[0]["category_third_label"], "公司往来")
         self.assertEqual(payload["groups"][0]["pending_direction"], "collection")
 
+    def test_grouped_ledger_places_flow_amounts_by_turnover_action_type_and_exposes_breakdowns(self) -> None:
+        transactions = [
+            self._transaction(
+                "txn-in-principal",
+                direction=TransactionDirection.INFLOW,
+                amount="1200.00",
+                counterparty="李四",
+                trade_time="2026-04-01 09:00:00",
+                summary="收到暂借款",
+                remark="借入本金",
+                bank_name="建行",
+                last4="1001",
+            ),
+            self._transaction(
+                "txn-in-repaid",
+                direction=TransactionDirection.OUTFLOW,
+                amount="200.00",
+                counterparty="李四",
+                trade_time="2026-04-02 09:00:00",
+                summary="归还暂借款",
+                remark="还款备注只在还款流水",
+                bank_name="建行",
+                last4="1001",
+            ),
+            self._transaction(
+                "txn-out-principal",
+                direction=TransactionDirection.OUTFLOW,
+                amount="800.00",
+                counterparty="李四",
+                trade_time="2026-04-03 09:00:00",
+                summary="借出周转款",
+                remark="借出本金",
+                bank_name="工行",
+                last4="2002",
+            ),
+            self._transaction(
+                "txn-out-collected",
+                direction=TransactionDirection.INFLOW,
+                amount="300.00",
+                counterparty="李四",
+                trade_time="2026-04-04 09:00:00",
+                summary="收回周转款",
+                remark="收款备注只在收款流水",
+                bank_name="工行",
+                last4="2002",
+            ),
+        ]
+        ledger_service = TurnoverLedgerService(
+            import_service=_ImportServiceStub(transactions),
+            category_service=BankTransactionCategoryService.from_snapshot(None),
+            relation_service=TurnoverRelationService.from_snapshot(None),
+            category_provider=_EffectiveCategoryProviderStub(
+                {
+                    "txn-in-principal": {
+                        "category_code": "external_rule_borrow_in",
+                        "category_label": "借入款",
+                        "category_primary_label": "外部往来款收款",
+                        "category_sub_label": "借入款",
+                        "category_third_label": "个人往来",
+                        "category_label_path": ["外部往来款收款", "借入款", "个人往来"],
+                        "turnover_role": "external_turnover",
+                        "turnover_action_type": "pending_repayment",
+                        "turnover_family": "personal",
+                    },
+                    "txn-in-repaid": {
+                        "category_code": "external_rule_repaid",
+                        "category_label": "归还借款",
+                        "category_primary_label": "外部往来款付款",
+                        "category_sub_label": "归还借款",
+                        "category_third_label": "个人往来",
+                        "category_label_path": ["外部往来款付款", "归还借款", "个人往来"],
+                        "turnover_role": "external_turnover",
+                        "turnover_action_type": "repaid",
+                        "turnover_family": "personal",
+                    },
+                    "txn-out-principal": {
+                        "category_code": "external_rule_borrow_out",
+                        "category_label": "借出款",
+                        "category_primary_label": "外部往来款付款",
+                        "category_sub_label": "借出款",
+                        "category_third_label": "个人往来",
+                        "category_label_path": ["外部往来款付款", "借出款", "个人往来"],
+                        "turnover_role": "external_turnover",
+                        "turnover_action_type": "pending_collection",
+                        "turnover_family": "personal",
+                    },
+                    "txn-out-collected": {
+                        "category_code": "external_rule_collected",
+                        "category_label": "收回借款",
+                        "category_primary_label": "外部往来款收款",
+                        "category_sub_label": "收回借款",
+                        "category_third_label": "个人往来",
+                        "category_label_path": ["外部往来款收款", "收回借款", "个人往来"],
+                        "turnover_role": "external_turnover",
+                        "turnover_action_type": "collected",
+                        "turnover_family": "personal",
+                    },
+                }
+            ),
+            selected_tag_codes_provider=lambda: [
+                "external_rule_borrow_in",
+                "external_rule_repaid",
+                "external_rule_borrow_out",
+                "external_rule_collected",
+            ],
+            today_provider=lambda: date(2026, 4, 10),
+        )
+
+        payload = ledger_service.list_grouped_ledger(family="personal")
+
+        group = payload["groups"][0]
+        self.assertEqual(group["pending_repayment_amount"], "1000.00")
+        self.assertEqual(group["pending_collection_amount"], "500.00")
+        self.assertEqual(group["closed_amount"], "0.00")
+        self.assertEqual(group["pending_direction"], "mixed")
+        summary = group["summary_row"]
+        self.assertEqual(summary["borrow_amount"], "2000.00")
+        self.assertEqual(summary["repayment_amount"], "500.00")
+        self.assertEqual(summary["bank_account_labels"], ["建行 1001", "工行 2002"])
+        flow_by_id = {row["source_bank_row_id"]: row for row in group["flow_rows"]}
+        self.assertEqual(flow_by_id["txn-in-principal"]["borrow_amount"], "1200.00")
+        self.assertEqual(flow_by_id["txn-in-principal"]["repayment_amount"], "0.00")
+        self.assertEqual(flow_by_id["txn-out-principal"]["borrow_amount"], "800.00")
+        self.assertEqual(flow_by_id["txn-out-principal"]["repayment_amount"], "0.00")
+        self.assertEqual(flow_by_id["txn-in-repaid"]["borrow_amount"], "0.00")
+        self.assertEqual(flow_by_id["txn-in-repaid"]["repayment_amount"], "200.00")
+        self.assertEqual(flow_by_id["txn-out-collected"]["borrow_amount"], "0.00")
+        self.assertEqual(flow_by_id["txn-out-collected"]["repayment_amount"], "300.00")
+        self.assertEqual(flow_by_id["txn-in-repaid"]["repayment_remark"], "归还暂借款 / 还款备注只在还款流水")
+        self.assertEqual(flow_by_id["txn-out-collected"]["repayment_remark"], "收回周转款 / 收款备注只在收款流水")
+        self.assertEqual(flow_by_id["txn-in-principal"]["repayment_remark"], "")
+        self.assertEqual(flow_by_id["txn-out-principal"]["repayment_remark"], "")
+        self.assertEqual(flow_by_id["txn-out-collected"]["bank_account_labels"], ["工行 2002"])
+
     def test_grouped_ledger_reads_repository_backed_all_month_bank_rows(self) -> None:
         transaction = self._transaction(
             "txn-postgres-external-turnover",

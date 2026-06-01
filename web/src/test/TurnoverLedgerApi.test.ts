@@ -282,7 +282,12 @@ describe("turnover ledger API", () => {
 
     const ledger = await fetchTurnoverLedger({ family: "personal", status: "suggested", page: 2, pageSize: 50 });
     expect(ledger.summary.pendingRepaymentAmount).toBe("1000.00");
-    expect(ledger.familySummaries[0]).toMatchObject({ family: "personal", pendingAmount: "1300.00" });
+    expect(ledger.familySummaries[0]).toMatchObject({
+      family: "personal",
+      pendingRepaymentAmount: "1000.00",
+      pendingCollectionAmount: "300.00",
+      pendingAmount: "1300.00",
+    });
     expect(ledger.rows[0]).toMatchObject({
       relationId: "rel-001",
       rowTone: "warning",
@@ -341,7 +346,16 @@ describe("turnover ledger API", () => {
             row_count: 1,
           },
           family_summaries: [
-            { family: "company", label: "公司往来", pending_amount: "200000.00", row_count: 1 },
+            {
+              family: "company",
+              label: "公司往来",
+              pending_repayment_amount: "200000.00",
+              repaid_amount: "300000.00",
+              pending_collection_amount: "0.00",
+              collected_amount: "0.00",
+              pending_amount: "200000.00",
+              row_count: 1,
+            },
           ],
           groups: [
             {
@@ -352,6 +366,10 @@ describe("turnover ledger API", () => {
               pending_direction: "repayment",
               pending_direction_label: "待还款",
               pending_amount: "200000.00",
+              pending_repayment_amount: "200000.00",
+              repaid_amount: "300000.00",
+              pending_collection_amount: "0.00",
+              collected_amount: "0.00",
               row_span: 3,
               group_tone: "warning",
               summary_row: {
@@ -393,7 +411,9 @@ describe("turnover ledger API", () => {
                   repayment_direction: "expense",
                   business_type: "borrow_in",
                   category_label: "个人暂借款：待还款",
+                  category_label_path: ["外部往来款收款", "借入款", "个人往来"],
                   counterparty_bank_name: "中国建设银行",
+                  bank_account_labels: ["建行 8106"],
                   summary_text: "电子转账 / 暂借款",
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-001"],
@@ -415,7 +435,9 @@ describe("turnover ledger API", () => {
                   repayment_direction: "expense",
                   business_type: "borrow_in",
                   category_label: "个人暂借款：待还款",
+                  category_label_path: ["外部往来款收款", "借入款", "个人往来"],
                   counterparty_bank_name: "中国建设银行",
+                  bank_account_labels: ["建行 8106"],
                   summary_text: "电子转账 / 暂借款",
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-002"],
@@ -437,7 +459,9 @@ describe("turnover ledger API", () => {
                   repayment_direction: "expense",
                   business_type: "borrow_in",
                   category_label: "个人暂借款：已还款",
+                  category_label_path: ["外部往来款付款", "归还借款", "个人往来"],
                   counterparty_bank_name: "中国建设银行",
+                  bank_account_labels: ["建行 8106"],
                   summary_text: "电子转账 / 还暂借款",
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-001", "lot-002"],
@@ -551,11 +575,22 @@ describe("turnover ledger API", () => {
     const ledger = await fetchTurnoverLedgerGrouped({ family: "company" });
 
     expect(ledger.summary.pendingRepaymentAmount).toBe("200000.00");
+    expect(ledger.familySummaries[0]).toMatchObject({
+      family: "company",
+      pendingRepaymentAmount: "200000.00",
+      repaidAmount: "300000.00",
+      pendingCollectionAmount: "0.00",
+      collectedAmount: "0.00",
+    });
     expect(ledger.groups[0]).toMatchObject({
       groupId: "counterparty:company:梁希涛",
       counterpartyName: "梁希涛",
       pendingDirection: "repayment",
       pendingAmount: "200000.00",
+      pendingRepaymentAmount: "200000.00",
+      repaidAmount: "300000.00",
+      pendingCollectionAmount: "0.00",
+      collectedAmount: "0.00",
       rowSpan: 3,
       groupTone: "warning",
     });
@@ -577,6 +612,8 @@ describe("turnover ledger API", () => {
       flowAmount: "300000.00",
       repaymentAmount: "300000.00",
       categoryLabel: "个人暂借款：已还款",
+      categoryLabelPath: ["外部往来款付款", "归还借款", "个人往来"],
+      bankAccountLabels: ["建行 8106"],
       summaryText: "电子转账 / 还暂借款",
       allocationStatus: "allocated",
       allocatedLotIds: ["lot-001", "lot-002"],

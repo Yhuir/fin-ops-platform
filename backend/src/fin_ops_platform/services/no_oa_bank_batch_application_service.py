@@ -91,12 +91,16 @@ class NoOaBankBatchApplicationService:
             if summary_read_model_batches is not None and read_model_batches is not None:
                 stale_reasons = self.no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
                 if stale_reasons:
+                    refresh_enqueued = self.enqueue_background_refresh(["all"], reason="api_no_oa_source_versions_stale")
+                    self.refresh_batches()
+                    current_summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
+                    current_batches = self._no_oa_bank_batch_service.list_batches(filters)
                     return {
-                        "summary": self.summary(summary_read_model_batches),
-                        "batches": self.resolve_labels(read_model_batches),
+                        "summary": self.summary(current_summary_batches),
+                        "batches": self.resolve_labels(current_batches),
                         "read_model_status": "stale",
                         "read_model_stale_reasons": stale_reasons,
-                        "refresh_enqueued": self.enqueue_background_refresh(["all"], reason="api_no_oa_source_versions_stale"),
+                        "refresh_enqueued": refresh_enqueued,
                         "refresh_reason": "api_no_oa_source_versions_stale",
                     }
                 return {

@@ -1,5 +1,6 @@
 import json
 import unittest
+from types import SimpleNamespace
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
@@ -7,6 +8,14 @@ from fin_ops_platform.domain.enums import BatchType
 
 def _json(response):
     return json.loads(response.body)
+
+
+class _ReadModelQueue:
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+        self.enqueued.append((scope_type, scope_key, reason))
 
 
 class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
@@ -35,6 +44,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             [{"transaction_id": row_id, "category_code": "fee"}],
             actor="tester",
         )
+        queue = _ReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
 
         selection_response = app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection")
         selection_payload = _json(selection_response)
@@ -57,6 +68,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(save_response.status_code, 200)
         self.assertEqual(_json(save_response)["selected_tag_codes"], ["fee"])
         self.assertEqual([batch["batch_type"] for batch in enabled_batches["batches"]], ["fee"])
+        self.assertIn(("no_oa_bank_batch", "all", "no_oa_bank_batch_tag_selection_changed"), queue.enqueued)
 
     def test_new_auto_tag_rule_is_available_but_not_selected_by_default(self) -> None:
         app = build_application()

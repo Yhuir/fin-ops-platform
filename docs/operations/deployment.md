@@ -68,6 +68,8 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 | `worker-oa-sync` | `oa.sync` | `--enable-oa-sync --event-type oa.sync` |
 | `worker-workbench` | `workbench.read_model.refresh` | `--enable-workbench-read-model-refresh --event-type workbench.read_model.refresh` |
 | `worker-bank-detail` | `bank_detail.read_model.refresh` | `--enable-bank-detail-read-model-refresh --event-type bank_detail.read_model.refresh --max-events-per-iteration 24` |
+| `worker-no-oa-bank-batch` | `no_oa_bank_batch.read_model.refresh` | `--enable-no-oa-bank-batch-read-model-refresh --event-type no_oa_bank_batch.read_model.refresh --max-events-per-iteration 24` |
+| `worker-turnover-ledger` | `turnover_ledger.read_model.refresh` | `--enable-turnover-ledger-read-model-refresh --event-type turnover_ledger.read_model.refresh --max-events-per-iteration 12` |
 | `worker-search-pending` | `search.read_model.refresh`, `pending_invoice.read_model.refresh` | `--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh` |
 | `worker-invoice-usage-collection` | `input_invoice_usage.read_model.refresh`, `output_invoice_collection.read_model.refresh` | `--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh` |
 | `worker-cost-tax` | `cost_statistics.read_model.refresh`, `tax_offset.read_model.refresh` | `--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh` |
@@ -90,6 +92,8 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/env/fin-ops.worker.workbench.env.example`
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
 - `deploy/oa/env/fin-ops.worker.bank-detail.env.example`
+- `deploy/oa/env/fin-ops.worker.no-oa-bank-batch.env.example`
+- `deploy/oa/env/fin-ops.worker.turnover-ledger.env.example`
 - `deploy/oa/env/fin-ops.worker.search-pending.env.example`
 - `deploy/oa/env/fin-ops.worker.invoice-usage-collection.env.example`
 - `deploy/oa/env/fin-ops.worker.cost-tax.env.example`
@@ -126,6 +130,8 @@ fin-ops-worker@oa-sync.service
 fin-ops-worker@workbench.service
 fin-ops-worker@workbench-matching.service
 fin-ops-worker@bank-detail.service
+fin-ops-worker@no-oa-bank-batch.service
+fin-ops-worker@turnover-ledger.service
 fin-ops-worker@search-pending.service
 fin-ops-worker@invoice-usage-collection.service
 fin-ops-worker@cost-tax.service

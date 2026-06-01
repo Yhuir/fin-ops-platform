@@ -37,7 +37,7 @@ const AMOUNT_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
   neutral: "rgba(117, 117, 117, 0.10)",
 };
 
-const LEFT_COLUMN_WIDTH = 240;
+const LEFT_COLUMN_WIDTH = 220;
 const LEFT_HEADER_BACKGROUND = "#f5f7fa";
 const LEFT_CELL_BACKGROUND: Record<TurnoverRowTone, string> = {
   success: "#eef7ee",
@@ -103,6 +103,19 @@ function categoryPathText(row: TurnoverLedgerGroupedRow) {
     return labelPath.join(" / ");
   }
   return formatNullable(row.categoryLabel);
+}
+
+function categoryChipLabels(row: TurnoverLedgerGroupedRow) {
+  const path = row.categoryLabelPath.filter(Boolean);
+  if (path.length > 0) {
+    return path;
+  }
+  const labelPath = [row.categoryPrimaryLabel, row.categorySubLabel, row.categoryThirdLabel].filter(Boolean);
+  if (labelPath.length > 0) {
+    return labelPath;
+  }
+  const fallback = categoryPathText(row);
+  return fallback === "-" ? [] : [fallback];
 }
 
 function normalizedTone(tone: TurnoverRowTone | string | null | undefined): TurnoverRowTone {
@@ -238,11 +251,17 @@ function AmountBlock({
   date,
   direction,
   testId,
+  showDate = true,
+  categoryLabels = [],
+  bankAccountLabels = [],
 }: {
   amount: string;
   date: string | null;
   direction: TurnoverLedgerDirection;
   testId: string;
+  showDate?: boolean;
+  categoryLabels?: string[];
+  bankAccountLabels?: string[];
 }) {
   const tone = directionKey(direction);
   return (
@@ -254,9 +273,9 @@ function AmountBlock({
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "flex-end",
-          minWidth: 88,
+          minWidth: 78,
           px: 0.75,
-          py: 0.35,
+          py: 0.25,
           borderRadius: 0.75,
           fontWeight: 800,
           backgroundColor: AMOUNT_BACKGROUND[tone],
@@ -265,7 +284,33 @@ function AmountBlock({
       >
         {formatMoney(amount)}
       </Box>
-      <Chip size="small" variant="outlined" label={formatNullable(date)} />
+      {showDate ? <Chip size="small" variant="outlined" label={formatNullable(date)} sx={{ height: 22 }} /> : null}
+      {categoryLabels.length > 0 ? (
+        <Stack direction="row" spacing={0.35} useFlexGap flexWrap="wrap">
+          {categoryLabels.map((label) => (
+            <Chip
+              key={label}
+              size="small"
+              variant="outlined"
+              label={label}
+              sx={{ height: 20, "& .MuiChip-label": { px: 0.6, fontSize: 11 } }}
+            />
+          ))}
+        </Stack>
+      ) : null}
+      {bankAccountLabels.length > 0 ? (
+        <Stack direction="row" spacing={0.35} useFlexGap flexWrap="wrap">
+          {bankAccountLabels.map((label) => (
+            <Chip
+              key={label}
+              size="small"
+              variant="filled"
+              label={label}
+              sx={{ height: 20, "& .MuiChip-label": { px: 0.6, fontSize: 11 } }}
+            />
+          ))}
+        </Stack>
+      ) : null}
     </Stack>
   );
 }
@@ -280,9 +325,9 @@ function EmptyAmountBlock({ testId }: { testId: string }) {
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          minWidth: 88,
+          minWidth: 78,
           px: 0.75,
-          py: 0.35,
+          py: 0.25,
           borderRadius: 0.75,
           fontWeight: 800,
           backgroundColor: AMOUNT_BACKGROUND.neutral,
@@ -345,45 +390,50 @@ function RowCells({
   onEdit: (row: TurnoverLedgerGroupedRow) => void;
 }) {
   const isFlow = rowKind === "flow";
-  const flowDirection = isFlow ? flowDirectionKey(row) : "neutral";
+  const hasBorrowAmount = amountNumber(row.borrowAmount) > 0;
+  const hasRepaymentAmount = amountNumber(row.repaymentAmount) > 0;
+  const metadata = isFlow
+    ? {
+        categoryLabels: categoryChipLabels(row),
+        bankAccountLabels: row.bankAccountLabels,
+      }
+    : {
+        categoryLabels: [],
+        bankAccountLabels: [],
+      };
   return (
     <>
       <TableCell>
-        <Stack spacing={0.5} alignItems="flex-start">
-          <Typography variant="body2" fontWeight={800} sx={{ wordBreak: "break-word" }}>
-            {categoryPathText(row)}
-          </Typography>
-          {isFlow ? <Chip size="small" variant="outlined" label="银行明细标签" /> : null}
-        </Stack>
-      </TableCell>
-      <TableCell>
         <Stack spacing={0.75} alignItems="flex-start">
-          {isFlow ? <Chip size="small" label="流水" color="info" variant="outlined" /> : null}
-          {isFlow && flowDirection !== "income" ? (
+          {isFlow ? <Chip size="small" label="流水" color="info" variant="outlined" sx={{ height: 22 }} /> : null}
+          {isFlow && !hasBorrowAmount ? (
             <EmptyAmountBlock testId={`amount-empty-${row.relationId}-borrow`} />
           ) : (
             <AmountBlock
               amount={row.borrowAmount}
               date={row.borrowDate}
-              direction={isFlow ? "income" : row.borrowDirection}
-              testId={`amount-${directionKey(isFlow ? "income" : row.borrowDirection)}-${row.relationId}-borrow`}
+              direction={row.borrowDirection || "income"}
+              testId={`amount-${directionKey(row.borrowDirection || "income")}-${row.relationId}-borrow`}
+              showDate={isFlow}
+              {...(hasBorrowAmount ? metadata : {})}
             />
           )}
         </Stack>
       </TableCell>
       <TableCell>
-        {isFlow && flowDirection !== "expense" ? (
+        {isFlow && !hasRepaymentAmount ? (
           <EmptyAmountBlock testId={`amount-empty-${row.relationId}-repayment`} />
         ) : (
           <AmountBlock
             amount={row.repaymentAmount}
             date={row.repaymentDate}
-            direction={isFlow ? "expense" : row.repaymentDirection}
-            testId={`amount-${directionKey(isFlow ? "expense" : row.repaymentDirection)}-${row.relationId}-repayment`}
+            direction={row.repaymentDirection || "expense"}
+            testId={`amount-${directionKey(row.repaymentDirection || "expense")}-${row.relationId}-repayment`}
+            showDate={isFlow}
+            {...(hasRepaymentAmount ? metadata : {})}
           />
         )}
       </TableCell>
-      <TableCell>{formatNullable(row.counterpartyBankName)}</TableCell>
       <TableCell>{formatNullable(row.repaymentRemark)}</TableCell>
       <TableCell>
         <Stack spacing={0.5}>
@@ -431,7 +481,7 @@ export default function TurnoverLedgerGroupedTable({
   const hasRows = groups.some((group) => resolveRows(group).summaryRow !== null);
   return (
     <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 640, overflow: "auto", borderRadius: 1 }}>
-      <Table stickyHeader size="small" aria-label="往来款左右双栏台账" sx={{ minWidth: 1340, tableLayout: "fixed" }}>
+      <Table stickyHeader size="small" aria-label="往来款左右双栏台账" sx={{ minWidth: 1080, tableLayout: "fixed" }}>
         <TableHead>
           <TableRow>
             <TableCell
@@ -450,30 +500,28 @@ export default function TurnoverLedgerGroupedTable({
             >
               对方户名
             </TableCell>
-            <TableCell sx={{ width: 230, fontWeight: 900 }}>银行明细标签</TableCell>
-            <TableCell sx={{ width: 132, fontWeight: 900 }}>借款金额 / 借款日</TableCell>
-            <TableCell sx={{ width: 132, fontWeight: 900 }}>还款金额 / 还款日</TableCell>
-            <TableCell sx={{ width: 130, fontWeight: 900 }}>开户机构</TableCell>
-            <TableCell sx={{ width: 138, fontWeight: 900 }}>还款备注</TableCell>
-            <TableCell sx={{ width: 132, fontWeight: 900 }}>利息额 / 年息或月息</TableCell>
-            <TableCell sx={{ width: 86, fontWeight: 900 }}>借款天数</TableCell>
-            <TableCell sx={{ width: 104, fontWeight: 900 }}>应还利息</TableCell>
-            <TableCell sx={{ width: 132, fontWeight: 900 }}>还利息日期 / 方式</TableCell>
-            <TableCell sx={{ width: 150, fontWeight: 900 }}>备注</TableCell>
-            <TableCell sx={{ width: 78, fontWeight: 900 }}>操作</TableCell>
+            <TableCell sx={{ width: 150, fontWeight: 900 }}>借款金额 / 借款日</TableCell>
+            <TableCell sx={{ width: 150, fontWeight: 900 }}>还款金额 / 还款日</TableCell>
+            <TableCell sx={{ width: 118, fontWeight: 900 }}>还款备注</TableCell>
+            <TableCell sx={{ width: 122, fontWeight: 900 }}>利息额 / 年息或月息</TableCell>
+            <TableCell sx={{ width: 76, fontWeight: 900 }}>借款天数</TableCell>
+            <TableCell sx={{ width: 92, fontWeight: 900 }}>应还利息</TableCell>
+            <TableCell sx={{ width: 118, fontWeight: 900 }}>还利息日期 / 方式</TableCell>
+            <TableCell sx={{ width: 126, fontWeight: 900 }}>备注</TableCell>
+            <TableCell sx={{ width: 68, fontWeight: 900 }}>操作</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
           {loading ? (
             <TableRow>
-              <TableCell colSpan={12} align="center" sx={{ py: 8 }}>
+              <TableCell colSpan={10} align="center" sx={{ py: 8 }}>
                 正在加载往来款台账
               </TableCell>
             </TableRow>
           ) : null}
           {!loading && !hasRows ? (
             <TableRow>
-              <TableCell colSpan={12} align="center" sx={{ py: 8 }}>
+              <TableCell colSpan={10} align="center" sx={{ py: 8 }}>
                 暂无往来款台账
               </TableCell>
             </TableRow>

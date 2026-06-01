@@ -47,6 +47,10 @@ type ApiTurnoverLedgerSummary = {
 type ApiTurnoverLedgerFamilySummary = {
   family?: string | null;
   label?: string | null;
+  pending_repayment_amount?: string | null;
+  repaid_amount?: string | null;
+  pending_collection_amount?: string | null;
+  collected_amount?: string | null;
   pending_amount?: string | null;
   closed_amount?: string | null;
   row_count?: number | null;
@@ -120,6 +124,7 @@ type ApiTurnoverLedgerGroupedRow = {
   category_label_path?: string[];
   category_version?: number | null;
   counterparty_bank_name?: string | null;
+  bank_account_labels?: string[];
   summary_text?: string | null;
   allocation_status?: string | null;
   allocated_lot_ids?: string[];
@@ -163,7 +168,9 @@ type ApiTurnoverLedgerGroup = {
   pending_direction_label?: string | null;
   pending_amount?: string | null;
   pending_repayment_amount?: string | null;
+  repaid_amount?: string | null;
   pending_collection_amount?: string | null;
+  collected_amount?: string | null;
   closed_amount?: string | null;
   row_span?: number | null;
   group_tone?: string | null;
@@ -417,10 +424,21 @@ function mapSummary(summary: ApiTurnoverLedgerSummary | undefined): TurnoverLedg
 }
 
 function mapFamilySummary(summary: ApiTurnoverLedgerFamilySummary): TurnoverLedgerFamilySummary {
+  const pendingRepaymentAmount = text(summary.pending_repayment_amount, "0.00");
+  const pendingCollectionAmount = text(summary.pending_collection_amount, "0.00");
+  const fallbackPendingAmount = (() => {
+    const pendingAmount = Number(pendingRepaymentAmount.replace(/,/g, ""))
+      + Number(pendingCollectionAmount.replace(/,/g, ""));
+    return Number.isFinite(pendingAmount) ? pendingAmount.toFixed(2) : "0.00";
+  })();
   return {
     family: text(summary.family),
     label: text(summary.label),
-    pendingAmount: text(summary.pending_amount, "0.00"),
+    pendingRepaymentAmount,
+    repaidAmount: text(summary.repaid_amount, "0.00"),
+    pendingCollectionAmount,
+    collectedAmount: text(summary.collected_amount, "0.00"),
+    pendingAmount: text(summary.pending_amount, fallbackPendingAmount),
     closedAmount: text(summary.closed_amount, "0.00"),
     rowCount: numberValue(summary.row_count),
   };
@@ -441,6 +459,10 @@ function mapFamilySummaries(
     return {
       family,
       label: text(summary.label, family),
+      pendingRepaymentAmount: text(summary.pending_repayment_amount, "0.00"),
+      repaidAmount: text(summary.repaid_amount, "0.00"),
+      pendingCollectionAmount: text(summary.pending_collection_amount, "0.00"),
+      collectedAmount: text(summary.collected_amount, "0.00"),
       pendingAmount: Number.isFinite(pendingAmount) ? pendingAmount.toFixed(2) : "0.00",
       closedAmount: text(summary.closed_amount, "0.00"),
       rowCount: numberValue(summary.row_count),
@@ -532,6 +554,7 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     categoryLabelPath: stringList(row.category_label_path),
     categoryVersion: numberValue(row.category_version),
     counterpartyBankName: text(row.counterparty_bank_name),
+    bankAccountLabels: stringList(row.bank_account_labels),
     summaryText: text(row.summary_text),
     allocationStatus: text(row.allocation_status),
     allocatedLotIds: stringList(row.allocated_lot_ids),
@@ -571,7 +594,9 @@ function mapGroup(group: ApiTurnoverLedgerGroup): TurnoverLedgerGroup {
     pendingDirectionLabel: text(group.pending_direction_label, "已闭合"),
     pendingAmount,
     pendingRepaymentAmount: text(group.pending_repayment_amount, pendingDirection === "repayment" ? pendingAmount : "0.00"),
+    repaidAmount: text(group.repaid_amount, "0.00"),
     pendingCollectionAmount: text(group.pending_collection_amount, pendingDirection === "collection" ? pendingAmount : "0.00"),
+    collectedAmount: text(group.collected_amount, "0.00"),
     closedAmount: text(group.closed_amount, pendingDirection === "closed" ? pendingAmount : "0.00"),
     rowSpan: numberValue(group.row_span) || rows.length,
     groupTone: normalizeTone(group.group_tone),

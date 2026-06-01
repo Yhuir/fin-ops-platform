@@ -6,7 +6,7 @@ systemd_dir="${FINOPS_SYSTEMD_DIR:-/etc/systemd/system}"
 env_dir="${FINOPS_ENV_DIR:-/etc/fin-ops}"
 worker_template="$release_src/deploy/oa/systemd/fin-ops-worker@.service.example"
 worker_unit="$systemd_dir/fin-ops-worker@.service"
-required_workers="${FINOPS_REQUIRED_WORKERS:-oa-sync workbench workbench-matching bank-detail turnover-ledger search-pending invoice-usage-collection cost-tax import etc-business-oa-detection}"
+required_workers="${FINOPS_REQUIRED_WORKERS:-oa-sync workbench workbench-matching bank-detail turnover-ledger search-pending invoice-usage-collection cost-tax import no-oa-bank-batch etc-business-oa-detection}"
 optional_workers="${FINOPS_OPTIONAL_WORKERS:-}"
 
 fail() {
@@ -51,6 +51,7 @@ worker_env_example() {
     workbench-matching) printf '%s\n' "fin-ops.worker.workbench-matching.env.example" ;;
     bank-account-balance) printf '%s\n' "fin-ops.worker.bank-account-balance.env.example" ;;
     bank-detail) printf '%s\n' "fin-ops.worker.bank-detail.env.example" ;;
+    no-oa-bank-batch) printf '%s\n' "fin-ops.worker.no-oa-bank-batch.env.example" ;;
     turnover-ledger) printf '%s\n' "fin-ops.worker.turnover-ledger.env.example" ;;
     search-pending) printf '%s\n' "fin-ops.worker.search-pending.env.example" ;;
     invoice-usage-collection) printf '%s\n' "fin-ops.worker.invoice-usage-collection.env.example" ;;

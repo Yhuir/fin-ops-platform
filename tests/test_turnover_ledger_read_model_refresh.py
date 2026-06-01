@@ -4,6 +4,7 @@ import unittest
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
+from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLedgerSqlProjectionBuilder
 
 
 class FakeProjectionBuilder:
@@ -23,7 +24,86 @@ class FakeQueue:
         self.completed.append(dict(kwargs))
 
 
+class FakeTurnoverReadRepository:
+    def __init__(self) -> None:
+        self.saved_payload: dict[str, object] | None = None
+        self.saved_scope_key: str | None = None
+
+    def save_turnover_ledger_rows(self, payload: dict[str, object], *, scope_key: str | None = None) -> None:
+        self.saved_payload = payload
+        self.saved_scope_key = scope_key
+
+
+class FakeGroupedLedgerService:
+    def list_grouped_ledger(self, *, page: int = 1, page_size: int = 200, **_kwargs: object) -> dict[str, object]:
+        if page > 1:
+            return {"groups": [], "pagination": {"page": page, "page_size": page_size, "total": 1}}
+        return {
+            "groups": [
+                {
+                    "group_id": "counterparty:personal:李四",
+                    "counterparty_name": "李四",
+                    "family": "personal",
+                    "family_label": "个人往来",
+                    "pending_direction": "mixed",
+                    "pending_direction_label": "混合余额",
+                    "pending_amount": "1500.00",
+                    "pending_repayment_amount": "1000.00",
+                    "pending_collection_amount": "500.00",
+                    "closed_amount": "0.00",
+                    "summary_row": {
+                        "row_kind": "summary",
+                        "relation_id": "rel-personal-mixed",
+                        "borrow_amount": "2000.00",
+                        "repayment_amount": "500.00",
+                        "balance_amount": "1500.00",
+                        "bank_account_labels": ["建行 1001", "工行 2002"],
+                    },
+                    "flow_rows": [
+                        {
+                            "row_kind": "flow",
+                            "relation_id": "rel-personal-mixed",
+                            "flow_id": "bank:txn-out-collected",
+                            "source_bank_row_id": "txn-out-collected",
+                            "category_primary_label": "外部往来款收款",
+                            "category_sub_label": "收回借款",
+                            "category_third_label": "个人往来",
+                            "category_label_path": ["外部往来款收款", "收回借款", "个人往来"],
+                            "bank_account_labels": ["工行 2002"],
+                            "repayment_remark": "收回周转款 / 收款备注",
+                        }
+                    ],
+                    "allocation_lots": [],
+                    "lot_rows": [],
+                }
+            ],
+            "pagination": {"page": page, "page_size": page_size, "total": 1},
+        }
+
+
 class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
+    def test_projection_preserves_group_breakdowns_tags_and_bank_labels(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=FakeGroupedLedgerService(),  # type: ignore[arg-type]
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
+        )
+
+        result = builder.rebuild_turnover_ledger_read_model_scope("all", source_version=9)
+
+        self.assertEqual(result, {"scope_key": "all", "row_count": 1, "source_version": 9})
+        self.assertEqual(repository.saved_scope_key, "all")
+        rows = list((repository.saved_payload or {}).get("rows") or [])
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["pending_repayment_amount"], "1000.00")
+        self.assertEqual(row["pending_collection_amount"], "500.00")
+        self.assertEqual(row["bank_account_labels"], ["建行 1001", "工行 2002"])
+        self.assertEqual(row["flow_rows"][0]["category_label_path"], ["外部往来款收款", "收回借款", "个人往来"])
+        self.assertEqual(row["flow_rows"][0]["bank_account_labels"], ["工行 2002"])
+        self.assertEqual(row["flow_rows"][0]["repayment_remark"], "收回周转款 / 收款备注")
+
     def test_worker_handler_rebuilds_scope_and_completes_dirty_scope(self) -> None:
         builder = FakeProjectionBuilder()
         queue = FakeQueue()
