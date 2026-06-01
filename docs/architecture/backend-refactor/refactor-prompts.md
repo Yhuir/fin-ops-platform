@@ -21005,3 +21005,205 @@ Post-Flight:
 - `rg -n "PF-P101|Relation Extra Stale|turnover_relation_extra|expected_versions|idempotency" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
 
 下一条应生成并审查 `PF-P102 - Turnover Ledger Relation Extra Stale/Idempotency Characterization Tests`；PF-P102 只写 tests 和文档，不实现 stale guard。
+
+## PF-P102 - Turnover Ledger Relation Extra Stale/Idempotency Characterization Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P102 - Turnover Ledger Relation Extra Stale/Idempotency Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须只新增/调整 Turnover Ledger relation extra 的 current behavior characterization 和 future target contract tests。不得修改 production code。
+
+Context:
+PF-P101 已 verified。PF-P101 发现：
+- relation extra request 当前不携带 `expected_versions` 或 `idempotency_key`；
+- relation extra response 只有 `extra.updated_at` / `extra.updated_by`，没有 durable integer version；
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 当前没有 `expected_versions` 参数；
+- `TurnoverLedgerWriteUnitOfWork` 已有 command-level expected_versions / stale_precondition_port seam；
+- repeated same PUT 当前缺少 characterization，且根据 normalizer 会更新 `updated_at` 并再次 enqueue refresh。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P101 已 verified。
+
+Task:
+1. 在 `tests/test_turnover_ledger_api.py` 新增 current behavior characterization：
+   - 对同一个 relation extra 连续 PUT 两次相同 payload；
+   - 明确当前第二次 PUT 返回 200；
+   - 明确 `extra.updated_at` 或等价 marker 发生变化；
+   - 明确 Turnover refresh 被 enqueue 两次；
+   - 注释说明这是 current behavior，不是目标 durable idempotency。
+2. 在 `tests/test_turnover_ledger_api.py` 新增 future target expectedFailure：
+   - 先 GET/PUT 取得旧 `extra.updated_at`；
+   - 再让 extra 被更新到新 marker；
+   - 用旧 marker 作为 `expected_versions={"turnover_relation_extra:<relation_id>": <old_updated_at>}` 再次 PUT；
+   - 目标：返回 409，error code 建议 `turnover_relation_extra_conflict`；
+   - 目标：不得保存 stale payload，不得 enqueue 本次 stale refresh。
+3. 在 `tests/test_turnover_ledger_uow_contract.py` 新增 future target expectedFailure：
+   - `TurnoverLedgerWriteFacade.update_relation_extra(...)` 应接受 optional `expected_versions`；
+   - command.expected_versions 应收到 `turnover_relation_extra:<relation_id>`；
+   - stale precondition failure 时，extra repository 不得 save，dirty/outbox 不得 enqueue，transaction rollback。
+4. 不得修改 production code；target tests 当前无法通过时使用 `unittest.expectedFailure`，不得 skip。
+5. 更新文档：
+   - `migration-state-log.md`
+   - `refactor-prompts.md`
+   - `turnover-ledger-write-uow-plan.md`
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得实现 `expected_versions` 参数。
+- 不得实现 stale guard。
+- 不得实现 durable idempotency store/repository。
+- 不得处理 fallback cleanup 或 local transaction shim extraction。
+- 不得修改 SQL migration、部署、Nginx、生产配置或 feature flag。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "PF-P102|turnover_relation_extra|test_target_relation_extra|expected_versions|expectedFailure|same PUT|same payload" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P102 status = implemented / verified / blocked。
+   - 记录新增 tests、expectedFailure 数量、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md 和 turnover-ledger-write-uow-plan.md：
+   - 记录 PF-P102 执行结果。
+3. PF-P102 verified 后，下一条才可生成 relation extra stale guard skeleton；不得在本 prompt 中实现。
+```
+
+### 审查结论
+
+- PF-P102 是 PF-P101 后的正确测试锁定步骤。
+- prompt 明确 test-only，不允许 production code、stale guard 或 durable idempotency 实现。
+
+### 执行结果
+
+- 状态：`verified`。
+- 新增 ordinary characterization：重复相同 relation extra PUT 当前会更新 `updated_at` 并再次 enqueue `turnover_relation_extra_changed`。
+- 新增 API future target expectedFailure：旧 `turnover_relation_extra:<relation_id>` expected version 下 PUT 应 409，不保存 stale payload，不 enqueue stale refresh。
+- 新增 facade/UoW future target expectedFailure：facade 应接受 expected_versions 并让 UoW stale precondition 在 repository save 前执行。
+
+验证：
+
+- `git status --short --branch`：Pass，仅有 PF-P102 tests/docs 范围改动。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests，1 expected failure。
+- `rg -n "PF-P102|turnover_relation_extra|test_target_relation_extra|expected_versions|expectedFailure|same PUT|same payload" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+下一条应生成并审查 `PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton`，只让 PF-P102 的 2 条 target tests 转为普通通过；不得实现 durable idempotency store。
+
+## PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton
+
+状态：`planned`
+
+```text
+/goal
+PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须实现最小 relation extra expected_versions skeleton，让 PF-P102 的 2 条 target tests 转为普通通过，同时严格禁止扩大范围。
+
+Context:
+PF-P102 已 verified，新增 2 条 expectedFailure target tests：
+- API 层：旧 `turnover_relation_extra:<relation_id>` expected version 下 PUT 应 409，不保存 stale payload，不 enqueue stale refresh。
+- Facade/UoW 层：`TurnoverLedgerWriteFacade.update_relation_extra(...)` 应支持 expected_versions，并让 UoW stale precondition 在 repository save 前执行。
+
+现有事实：
+- relation extra response 有 `extra.updated_at`，无 durable integer version。
+- `TurnoverLedgerWriteUnitOfWork` 已支持 command.expected_versions 和 stale_precondition_port。
+- `server.py` relation extra handler 已可读取当前 extra via read facade / route service，但本轮只能做最小 skeleton。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P102 已 verified。
+4. 必须先运行 targeted tests，确认 PF-P102 的 2 条 expectedFailure 存在。
+
+Task:
+1. 更新 `TurnoverLedgerWriteFacade.update_relation_extra(...)`：
+   - 增加可选 `expected_versions: dict[str, object] | None = None` 参数；
+   - 将 normalized expected_versions 写入 `TurnoverLedgerWriteCommand.expected_versions`；
+   - 不改变现有 response payload shape。
+2. 更新 `server.py` relation extra handler 的最小 stale guard：
+   - 当 payload 携带 `expected_versions["turnover_relation_extra:<relation_id>"]` 时，读取当前 extra `updated_at`；
+   - 若当前 `updated_at` 与 expected 不一致，返回 409；
+   - error code 使用 `turnover_relation_extra_conflict`；
+   - 不执行 facade、extra save、dirty/outbox refresh。
+3. 在调用 facade update_relation_extra 时，透传 payload 中的 `expected_versions`；如果未携带，保持 legacy behavior。
+4. 移除 PF-P102 两条 target tests 的 `unittest.expectedFailure`，让它们转为普通通过。
+
+Allowed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得实现 durable idempotency store/repository。
+- 不得修改 SQL migration。
+- 不得处理 fallback cleanup。
+- 不得抽离 local transaction shim。
+- 不得修改 unrelated Turnover Ledger read/query/export code。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- rg -n "PF-P103|turnover_relation_extra_conflict|turnover_relation_extra:|expected_versions|test_target_relation_extra_facade|test_target_relation_extra_stale|expectedFailure" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P103 status = implemented / verified / blocked。
+   - 记录 expectedFailure 转绿、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md 和 turnover-ledger-write-uow-plan.md：
+   - 记录 PF-P103 执行结果。
+3. PF-P103 verified 后，评估是否生成 cumulative MG 覆盖 PF-P101 到 PF-P103；不得直接进入 durable idempotency。
+```
+
+### 审查结论
+
+- PF-P103 是 PF-P102 后的最小实现步骤：只处理 relation extra expected_versions skeleton。
+- prompt 明确不处理 durable idempotency、fallback cleanup 或 local transaction shim，避免 scope creep。

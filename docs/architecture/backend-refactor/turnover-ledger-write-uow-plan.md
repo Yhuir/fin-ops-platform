@@ -2495,3 +2495,53 @@ Relation extra 当前写路径：
   - Facade/UoW target：`update_relation_extra(..., expected_versions=...)` 把 expected_versions 写入 command，并在 stale precondition 前阻止 extra repository save。
 - 不实现 expected_versions 参数，不修改 production code。
 - 不做 durable idempotency repository/store。
+
+## PF-P102 Relation Extra Stale/Idempotency Characterization Tests
+
+状态：`verified`
+
+目标：
+
+- 用普通测试锁定 repeated same PUT 当前行为。
+- 用 `unittest.expectedFailure` 锁定 relation extra stale target behavior。
+- 用 `unittest.expectedFailure` 锁定 facade/UoW expected_versions target behavior。
+
+边界：
+
+- 只改 tests 和文档。
+- 不改 production code。
+- 不实现 stale guard 或 durable idempotency。
+
+执行结果：
+
+- 新增 ordinary characterization：重复相同 relation extra PUT 当前会更新 `updated_at` 并再次 enqueue `turnover_relation_extra_changed`。
+- 新增 API future target expectedFailure：旧 `turnover_relation_extra:<relation_id>` expected version 下 PUT 应 409，不保存 stale payload，不 enqueue stale refresh。
+- 新增 facade/UoW future target expectedFailure：facade 应接受 expected_versions 并让 UoW stale precondition 在 repository save 前执行。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests，1 expected failure。
+- `git diff --check`：Pass。
+
+下一条：
+
+- 生成并审查 `PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton`。
+- PF-P103 只应让 PF-P102 的 2 条 target tests 转为普通通过；不得实现 durable idempotency store。
+
+## PF-P103 Relation Extra Expected Versions Skeleton
+
+状态：`planned`
+
+目标：
+
+- 为 `TurnoverLedgerWriteFacade.update_relation_extra(...)` 增加 optional expected_versions 参数。
+- relation extra handler 在请求携带旧 `turnover_relation_extra:<relation_id>` expected version 时返回 409。
+- 将 PF-P102 的 2 条 target tests 转为普通通过。
+
+边界：
+
+- 不实现 durable idempotency store。
+- 不处理 fallback cleanup。
+- 不抽离 local transaction shim。
+- 不新增 SQL migration。

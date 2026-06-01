@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P101 - Turnover Ledger Relation Extra Stale/Idempotency Discovery and Planning` 已 verified |
-| 当前 active prompt | 无 |
-| 最近 verified prompt | `PF-P101 - Turnover Ledger Relation Extra Stale/Idempotency Discovery and Planning` |
+| 当前阶段 | `PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton` |
+| 最近 verified prompt | `PF-P102 - Turnover Ledger Relation Extra Stale/Idempotency Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p101` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P102 - Turnover Ledger Relation Extra Stale/Idempotency Characterization Tests` |
+| 下一条允许任务 | 执行 `PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton` |
 
 ## Prompt 执行日志
 
@@ -7739,6 +7739,55 @@ PF-P101 已 verified。执行结果：
 - `rg -n "PF-P101|Relation Extra Stale|turnover_relation_extra|expected_versions|idempotency" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
 
 下一条应生成并审查 `PF-P102 - Turnover Ledger Relation Extra Stale/Idempotency Characterization Tests`；PF-P102 只写 tests 和文档，不实现 stale guard。
+
+### PF-P102 - Turnover Ledger Relation Extra Stale/Idempotency Characterization Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只新增/调整 Turnover Ledger relation extra stale/idempotency tests 和必要文档回写。
+- 不修改 production code。
+- 不实现 stale guard 或 durable idempotency store。
+
+#### 测试目标
+
+- 新增 repeated same PUT current behavior characterization。
+- 新增 API future target expectedFailure：携带旧 `expected_versions={"turnover_relation_extra:<relation_id>": <old_updated_at>}` 时应返回 409，不保存、不 enqueue。
+- 新增 facade/UoW future target expectedFailure：`update_relation_extra(..., expected_versions=...)` 应把 expected_versions 写入 command，并在 stale precondition 前阻止 extra repository save。
+
+#### 下一条 Prompt 上下文
+
+PF-P102 已 verified。执行结果：
+
+- 新增 current behavior characterization：重复 PUT 相同 relation extra payload 当前会返回 200、更新 `extra.updated_at`，并 enqueue 两次 Turnover refresh。
+- 新增 API future target `expectedFailure`：旧 `expected_versions={"turnover_relation_extra:<relation_id>": <old_updated_at>}` 应返回 409 `turnover_relation_extra_conflict`，不保存 stale payload，不 enqueue stale refresh。
+- 新增 facade/UoW future target `expectedFailure`：`update_relation_extra(..., expected_versions=...)` 应把 expected_versions 写入 command，并在 stale precondition 前阻止 extra repository save。
+
+验证：
+
+- `git status --short --branch`：Pass，仅有 PF-P102 tests/docs 范围改动。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests，1 expected failure。
+- `rg -n "PF-P102|turnover_relation_extra|test_target_relation_extra|expected_versions|expectedFailure|same PUT|same payload" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+下一条应生成并审查 `PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton`，只让 PF-P102 的 2 条 target tests 转为普通通过；不得实现 durable idempotency store。
+
+### PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 只实现最小 relation extra expected_versions skeleton，让 PF-P102 的 2 条 target tests 转为普通通过。
+- 不实现 durable idempotency store。
+- 不处理 fallback cleanup 或 local transaction shim extraction。
+
+#### 下一条 Prompt 上下文
+
+PF-P103 planned。执行后若 target tests 转绿，应评估是否生成 cumulative MG 覆盖 PF-P101 到 PF-P103；不得直接进入 durable idempotency。
 
 ## 维护规则
 
