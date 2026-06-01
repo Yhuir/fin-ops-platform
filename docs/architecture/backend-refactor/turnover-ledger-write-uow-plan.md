@@ -1263,7 +1263,7 @@ Verification:
 
 ## PF-P078-MG Bank Row Tags UoW Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -1273,4 +1273,15 @@ Verification:
 
 下一步：
 
-- 执行 PF-P078-MG。
+- push `origin/main` 后，从最新 main 新建下一条 `codex/` 分支。
+
+执行结果：
+
+- PF-P076 到 PF-P078 的 bank-row-tags UoW slice 已合入 `main`。
+- 合入前后 targeted tests 均通过。
+- 未执行 Traffic Gate、部署、Nginx 修改或生产访问。
+
+Verification on main:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 33 tests.

@@ -17935,3 +17935,21 @@ Post-Flight:
 - PF-P078-MG 是当前分支的正确 cumulative Merge Gate，覆盖 PF-P076/PF-P077/PF-P078，粒度符合“一个可合并模块切片”。
 - MG 明确分离 Traffic Gate，不部署、不切流，只做代码与文档合入主干前后的验证。
 - MG 对 changed files、untracked files、production diff、main 复验和 push 前置条件都有硬门禁。
+
+### 执行结果
+
+- PF-P078-MG 已执行并按自动工作流标记为 `verified`。
+- `codex/turnover-ledger-bank-row-tags-uow-p076` 已通过 `--no-ff` merge 合入 `main`。
+- 合入前后均确认无 untracked files，`git diff --check` 通过。
+- main 上 targeted tests 全部通过。
+- 未执行 Traffic Gate、部署、Nginx 修改、生产配置修改或生产访问。
+
+Verification on main:
+
+- `git status --short --branch`: Pass，`main...origin/main [ahead 8]`。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，36 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，33 tests。
+
+下一步：执行 `git push origin main`，然后必须从最新 main 新建下一条 `codex/` 分支再生成下一条 prompt。
