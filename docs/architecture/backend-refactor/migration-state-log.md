@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` 已执行并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` 已生成并审查 |
+| 当前 active prompt | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` planned |
 | 最近 verified prompt | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
 | 最近验证 | PF-P079 增加 3 条 confirm relation facade target tests；UoW contract 36 tests 通过（3 expectedFailure），API 36 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` |
+| 下一条允许任务 | 执行 `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` |
 
 ## Prompt 执行日志
 

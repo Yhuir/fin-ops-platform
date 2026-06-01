@@ -1315,3 +1315,23 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests, 3 expectedFailure.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
+
+## PF-P080 Confirm Relation Facade Skeleton
+
+状态：`planned`
+
+目标：
+
+- 最小实现 `TurnoverLedgerWriteFacade.confirm_relation(...)`。
+- 将 PF-P079 的 3 条 confirm relation target tests 从 `unittest.expectedFailure` 转为普通通过。
+- 不迁移真实 HTTP handler。
+
+边界：
+
+- 只使用已有 `TurnoverLedgerWriteUnitOfWork` 和 `refresh_requests` 机制。
+- explicit refresh reason 必须是 `turnover_relation_changed`。
+- 不修改 `server.py`、schema/migration 或 API tests。
+
+下一步：
+
+- 执行 PF-P080。

@@ -18062,3 +18062,87 @@ Verification:
 - `rg -n "confirm_relation|confirm relation|expectedFailure|PF-P079|turnover_relation_changed|TurnoverLedgerWriteFacade" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton`，只实现最小 facade skeleton，让 PF-P079 的 3 条 target tests 转绿，不迁移真实 handler。
+
+## PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton
+
+```text
+/goal
+PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton
+
+Role:
+你是一位负责 Turnover Ledger service-layer UoW skeleton 的后端工程师。必须用最小代码让 PF-P079 的 confirm relation facade target tests 转绿，不得迁移真实 HTTP handler。
+
+Context:
+PF-P079 已新增 3 条 `TurnoverLedgerWriteFacade.confirm_relation(...)` target tests，当前为 `unittest.expectedFailure`。这些 tests 锁定 future facade 必须使用细粒度 relation port/repository、返回 service-layer payload、在 dirty/outbox failure 时 rollback，并 enqueue `turnover_ledger` / `all` / `turnover_relation_changed`。当前 `TurnoverLedgerWriteFacade` 尚无 `confirm_relation(...)`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_uow_contract.py 中 PF-P079 target tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+4. 必须确认 PF-P079 已 verified。
+
+Task:
+只实现 `TurnoverLedgerWriteFacade.confirm_relation(...)` 的最小 service-layer skeleton，并移除 PF-P079 三条 tests 的 `unittest.expectedFailure` 标记。不得修改 `server.py`，不得迁移真实 confirm handler。
+
+Required Work:
+1. 先运行目标 tests，确认 3 条 PF-P079 target tests 当前为 expectedFailure。
+2. 在 `TurnoverLedgerWriteFacade` 增加 `confirm_relation(...)`：
+   - 接收 `bank_row_ids`、`actor_id`、`tenant_id`、`note`、`affected_months`。
+   - 构造 `TurnoverLedgerWriteCommand`，`action_name` 可使用 `confirm_relation`，但 explicit refresh request 必须使用 reason `turnover_relation_changed`。
+   - 使用 `context.relation_repository.confirm_relation(..., transaction=context.transaction)`。
+   - 返回 relation port 的 service-layer payload，不包装 HTTP response。
+3. 不修改 `TurnoverLedgerWriteUnitOfWork` 除非现有 refresh_requests 机制无法满足；如需修改，必须保持 PF-P077 bank-row-tags 行为兼容。
+4. 移除 PF-P079 3 条 target tests 的 `unittest.expectedFailure`，让它们转为普通通过测试。
+5. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得迁移 `POST /api/turnover-ledger/relations/confirm` handler。
+- 不得修改 API tests，除非验证发现 target tests 需要只读注释更新；默认不修改。
+- 不得修改 withdraw、bank-row-tags、relation extra、tag selection 或其它写路径。
+- 不得修改 schema/migration。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "def confirm_relation|test_target_confirm_relation|expectedFailure|PF-P080|turnover_relation_changed" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P080 status = implemented / verified / blocked。
+   - 记录 confirm facade skeleton、转绿 tests、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P080 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 confirm relation facade skeleton 状态。
+4. PF-P080 后不要生成 MG；下一步应生成 PF-P081 confirm relation handler characterization/adapter readiness 或 handler wiring prompt，具体取决于真实 adapter 边界是否足够清晰。
+```
+
+### 审查结论
+
+- PF-P080 是 PF-P079 后的最小实现步骤：只补 facade skeleton，不碰真实 handler。
+- Prompt 明确使用已有 `refresh_requests` 机制，不为 confirm 单独扩展 UoW 框架。
+- Prompt 保持后续真实 API wiring 的门槛：只有 facade tests 转绿，不代表 handler 已迁移。
