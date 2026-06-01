@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` 已验证，已 push 到 `origin/main` |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` |
 | 最近 verified prompt | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-repository-ownership-p094` |
 | 最近验证 | PF-P093-MG 已在 main 上复验通过；merge commit `e0056963`；`origin/main` 已与当前 `main` 对齐 |
-| 下一条允许任务 | 从最新 `main` 新建下一条 `codex/` 分支，并生成下一条 Turnover Ledger prompt |
+| 下一条允许任务 | 执行 `PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning` |
 
 ## Prompt 执行日志
 
@@ -7323,6 +7323,28 @@ PF-P093 已 verified。本分支从 PF-P089 到 PF-P093 已包含 discovery、co
 #### 下一条 Prompt 上下文
 
 PF-P093-MG 已 verified，main 已合入、复验并 push 到 `origin/main`。下一步必须从最新 `main` 新建下一条 `codex/` 分支。Turnover Ledger 下一切片应基于当前专项计划重新选择，不得在 `main` 或旧分支继续开发。
+
+### PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning
+
+状态：`planned`
+
+#### 范围
+
+- 只做 discovery/planning 和文档回写。
+- 盘点 PF-P093 后新增的 PostgreSQL write seam 中，哪些 persistence helper / repository-like helper 仍在 `server.py`。
+- 明确哪些 helper 应下沉到 `services/` 或 `services/postgres_repositories/`，哪些可以保留在 app composition 层。
+- 不修改业务代码、测试、SQL migration、前端、部署或生产配置。
+
+#### 必须回答
+
+- `_postgres_turnover_ledger_relation_repository(...)` 和 `_postgres_turnover_ledger_bankdetail_repository(...)` 当前是否仍让 `server.py` 承担过多 persistence orchestration。
+- 是否需要新增 dedicated service / repository class；如果需要，下一步应先写哪些 characterization/contract tests。
+- 如何继续遵守“不机械搬文件、service 不依赖 Application、repository 可知道 SQL、业务 service 不散落 SQL”。
+- 下一个最小 Micro-JIT prompt 是 tests、extraction/refactor，还是 MG。
+
+#### 下一条 Prompt 上下文
+
+PF-P094 planned。本轮只做文档事实校准，不得继续实现 repository extraction。
 
 ## 维护规则
 

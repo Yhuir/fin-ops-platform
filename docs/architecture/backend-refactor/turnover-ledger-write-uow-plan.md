@@ -2042,3 +2042,19 @@ Verification:
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass.
 - 已 push `origin/main`，远端已与当前 `main` 对齐。
 - 下一步从最新 main 新建分支继续下一切片。
+
+## PF-P094 PostgreSQL Repository Ownership Discovery
+
+状态：`planned`
+
+目标：
+
+- 盘点 PF-P093 后 PostgreSQL write seam 的 repository ownership。
+- 判断 `_postgres_turnover_ledger_relation_repository(...)` 和 `_postgres_turnover_ledger_bankdetail_repository(...)` 是否应继续停留在 `server.py`。
+- 为下一条最小 prompt 选择测试锁定或抽离边界。
+
+边界：
+
+- 只做 discovery/planning。
+- 不修改 production code、tests、SQL migration、前端、部署或生产配置。
+- 不访问真实外部服务。

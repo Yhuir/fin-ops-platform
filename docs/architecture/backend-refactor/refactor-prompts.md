@@ -19934,3 +19934,80 @@ Post-Flight:
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass。
 - `git push origin main`: Pass，`origin/main` 已与当前 `main` 对齐。
 - push 完成后必须从最新 main 新建下一条 `codex/` 分支。
+
+## PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning
+
+```text
+/goal
+PF-P094 - Turnover Ledger PostgreSQL Repository Ownership Discovery and Cleanup Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构审计工程师。你必须只做 Turnover Ledger PostgreSQL write seam 的 repository ownership discovery/planning，不写业务代码。
+
+Context:
+PF-P093-MG 已 verified 并 push 到 `origin/main`。PF-P093 已让 PostgreSQL bank-row-tags batch、confirm relation、withdraw relation 进入 facade/UoW seam，但为了最小切片，`server.py` 里新增了 `_postgres_turnover_ledger_relation_repository(...)` 和 `_postgres_turnover_ledger_bankdetail_repository(...)` 两个 composition helper。现在需要判断下一步如何把 repository ownership 继续收敛到目标架构，而不是继续在 `server.py` 增长 helper。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/postgres_repositories/workbench.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P093-MG 已 verified 并已 push。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Task:
+只产出 discovery/planning：
+1. 输出 PF-P093 后的 server.py repository-like helper ownership audit：
+   - `_postgres_turnover_ledger_relation_repository(...)`
+   - `_postgres_turnover_ledger_bankdetail_repository(...)`
+   - 相关 `_local_turnover_ledger_*` helper。
+2. 判断哪些逻辑属于 app composition，哪些属于 service，哪些属于 repository。
+3. 识别下一步抽离的最小安全边界：
+   - 是否先写 contract tests；
+   - 是否先抽 `TurnoverLedgerPostgresRelationRepository` / `TurnoverLedgerPostgresBankdetailPort`；
+   - 是否需要调整 `PostgresWorkbenchRepository` 以暴露 transaction-bound methods；
+   - 是否存在跨模块 Bankdetail ownership blocker。
+4. 更新 `turnover-ledger-write-uow-plan.md`，给出下一条最小 prompt 的名称和边界。
+
+Allowed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `server.py` 或任何 production code。
+- 不得修改 tests。
+- 不得新增 SQL migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+- 不得开始下一模块。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P094|Repository Ownership|_postgres_turnover_ledger_relation_repository|_postgres_turnover_ledger_bankdetail_repository|Next Slice Decision" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P094 status = implemented / verified / blocked。
+   - 记录 ownership audit、下一条 prompt 和验证结果。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P094 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 repository ownership audit 和下一条最小 Micro-JIT prompt。
+```
+
+### 审查结论
+
+- PF-P094 是 PF-P093-MG 后的正确恢复步骤：先校准 PostgreSQL write seam 的 repository ownership，而不是继续在 `server.py` 增长 helper。
+- 本轮只改文档，适合快速执行并为下一条测试/抽离 prompt 提供事实源。
