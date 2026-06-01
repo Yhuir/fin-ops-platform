@@ -1868,7 +1868,7 @@ PF-P090 通过后，再进入 adapter skeleton / PostgreSQL facade wiring。
 
 ## PF-P090 PostgreSQL Write Port Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1888,4 +1888,19 @@ PF-P090 通过后，再进入 adapter skeleton / PostgreSQL facade wiring。
 
 下一步：
 
-- PF-P090 verified 后，生成 adapter skeleton prompt，使 target tests 转绿。
+- PF-P090 已 verified。下一步生成 adapter skeleton prompt，使 target tests 转绿。
+
+执行结果：
+
+- 新增 5 条 production write port target contract tests，当前为 `unittest.expectedFailure`：
+  - relation repository adapter god-object rejection；
+  - relation repository adapter confirm with supplied transaction；
+  - relation repository adapter withdraw with supplied transaction；
+  - bankdetail port adapter god-object rejection；
+  - bankdetail port adapter apply category updates with supplied transaction。
+- 新增 1 条普通通过 UoW rollback 测试，证明 adapter exception 不得成为 best-effort success。
+- 未修改 production code、handler、facade、UoW 或 SQL migration。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 45 tests, 5 expectedFailure.

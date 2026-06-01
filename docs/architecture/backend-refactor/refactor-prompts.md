@@ -19512,3 +19512,26 @@ Post-Flight:
 - PF-P090 的边界正确：只写 production write port target contracts，不实现 adapters，不改 handler。
 - 使用 `unittest.expectedFailure` 是合理的：这些 adapter 类当前尚不存在，contract tests 用于锁定下一步实现目标，同时保持默认 CI 绿色。
 - 下一步若 PF-P090 verified，应生成 adapter skeleton prompt，而不是直接迁移 PostgreSQL handler path。
+
+### 执行结果
+
+- PF-P090 已执行并按自动工作流标记为 `verified`。
+- 新增 5 条 `unittest.expectedFailure` target contract tests：
+  - `test_postgres_relation_repository_adapter_rejects_application_god_object`
+  - `test_postgres_relation_repository_adapter_confirms_with_supplied_transaction`
+  - `test_postgres_relation_repository_adapter_withdraws_with_supplied_transaction`
+  - `test_postgres_bankdetail_port_adapter_rejects_application_god_object`
+  - `test_postgres_bankdetail_port_adapter_applies_updates_with_supplied_transaction`
+- 新增 1 条普通通过测试：
+  - `test_adapter_raised_exception_rolls_back_turnover_uow`
+- 未修改 production code，未实现 adapters，未迁移 handler。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，45 tests，5 expectedFailure。
+- `git status --short --branch`: Pass，仅 PF-P090 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "PF-P090|PostgreSQL Write Port Contract|TurnoverLedgerRelationRepositoryAdapter|TurnoverLedgerBankdetailPortAdapter|expectedFailure" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton`，只实现最小 adapters 让 PF-P090 的 5 条 expectedFailure target tests 转绿；不得迁移 handler。

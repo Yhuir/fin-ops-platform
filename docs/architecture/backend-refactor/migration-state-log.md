@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests` 已生成并审查 |
-| 当前 active prompt | `PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests` |
+| 当前阶段 | `PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests` 已验证 |
+| 当前 active prompt | 无 |
 | 最近 verified prompt | `PF-P089 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
 | 当前分支 | `codex/turnover-ledger-remaining-write-rebaseline-p089` |
 | 最近验证 | PF-P088-MG 已在 main 上复验通过并已 push；`main...origin/main` 已对齐 |
-| 下一条允许任务 | 执行 PF-P090，只新增 Turnover Ledger PostgreSQL write port contract tests 和文档回写 |
+| 下一条允许任务 | 生成并审查 `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton`，只让 PF-P090 target tests 转绿，不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -7147,7 +7147,7 @@ PF-P089 已 verified。扫描结论：五条 Turnover Ledger 写 path 都已有 
 
 ### PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7165,15 +7165,15 @@ PF-P089 已 verified。扫描结论：五条 Turnover Ledger 写 path 都已有 
 
 #### 验收标准
 
-- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：必须通过；尚未实现的 target contract 可使用 `unittest.expectedFailure`，不得 skip。
-- `git status --short --branch`：当前分支不是 `main`。
-- `git ls-files --others --exclude-standard`：无未跟踪临时文件。
-- `git diff --check`：通过。
-- `rg -n "PF-P090|PostgreSQL Write Port Contract|TurnoverLedgerRelationRepositoryAdapter|TurnoverLedgerBankdetailPortAdapter|expectedFailure" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，45 tests，5 expectedFailure。
+- `git status --short --branch`：Pass，当前分支不是 `main`，仅允许文件变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪临时文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P090|PostgreSQL Write Port Contract|TurnoverLedgerRelationRepositoryAdapter|TurnoverLedgerBankdetailPortAdapter|expectedFailure" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
 
 #### 下一条 Prompt 上下文
 
-PF-P090 还未执行。执行后如果 contract tests verified，下一条应实现最小 adapter skeleton，使 expectedFailure tests 转绿，但仍不得迁移 handler 的 PostgreSQL path。
+PF-P090 已 verified。新增 5 条 expectedFailure target contract tests，锁定 `TurnoverLedgerRelationRepositoryAdapter` 和 `TurnoverLedgerBankdetailPortAdapter` 的未来生产级接口；新增 1 条普通通过测试，证明 adapter exception 会让 UoW rollback。下一条应生成 `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton`，只实现最小 adapter skeleton 让这 5 条 target tests 转绿，不迁移 handler 的 PostgreSQL path。
 
 ## 维护规则
 
