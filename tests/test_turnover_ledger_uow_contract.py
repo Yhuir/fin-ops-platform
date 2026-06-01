@@ -1451,7 +1451,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(result["updated_categories"][0]["transaction_id"], "bank_txn_1")
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(result))
 
-    @unittest.expectedFailure
     def test_target_relation_write_port_rejects_application_god_object(self) -> None:
         # PF-P095 Repository Ownership: future relation write port must receive granular dependencies.
         port_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationWritePort")
@@ -1459,7 +1458,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             port_class(application=object())
 
-    @unittest.expectedFailure
     def test_target_relation_write_port_confirms_and_withdraws_with_supplied_transaction(self) -> None:
         # PF-P095 Repository Ownership: service orchestration should leave server.py.
         port_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationWritePort")
@@ -1498,7 +1496,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(confirm_result))
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(withdraw_result))
 
-    @unittest.expectedFailure
     def test_target_bankdetail_write_port_rejects_application_god_object(self) -> None:
         # PF-P095 Repository Ownership: future bankdetail write port must receive granular dependencies.
         port_class = getattr(self._write_adapters_module(), "TurnoverLedgerBankdetailWritePort")
@@ -1506,7 +1503,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             port_class(application=object())
 
-    @unittest.expectedFailure
     def test_target_bankdetail_write_port_updates_category_rebuilds_relations_and_persists(self) -> None:
         # PF-P095 Repository Ownership: cross-module write orchestration should be an explicit port.
         port_class = getattr(self._write_adapters_module(), "TurnoverLedgerBankdetailWritePort")

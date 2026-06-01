@@ -20231,3 +20231,27 @@ Post-Flight:
 - PF-P096 是 PF-P095 的最小实现步骤：只让目标 classes 存在并满足已锁定契约。
 - prompt 明确禁止迁移 `server.py` helper，因此不会扩大到 API wiring 或事务模型变化。
 - 继续保持 repository ownership 方向：服务层 port 做 orchestration，repository factory 只负责 transaction-bound persistence。
+
+### 执行结果
+
+- 状态：`verified`。
+- 在 `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 中新增：
+  - `TurnoverLedgerRelationWritePort`
+  - `TurnoverLedgerBankdetailWritePort`
+- PF-P095 的 4 条 target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+- `TurnoverLedgerRelationWritePort` 只接收 relation service、routes、bank rows provider、persistence repository factory 等细粒度依赖；confirm/withdraw 使用 supplied transaction 持久化 relation snapshot。
+- `TurnoverLedgerBankdetailWritePort` 只接收 category service、relation service、bank rows provider、persistence repository factory 等细粒度依赖；category update 后重建 relation，并用 supplied transaction 持久化 category/relation snapshot。
+- 本轮未修改 `server.py`，未迁移 API handler。
+
+### 验证结果
+
+- `git status --short --branch`：Pass，仅有 PF-P096 范围内文件改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `rg -n "TurnoverLedgerRelationWritePort|TurnoverLedgerBankdetailWritePort|PF-P096|expectedFailure" backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring`。PF-P097 只允许把 `server.py` PostgreSQL nested helper 的 orchestration 替换为 PF-P096 的 new ports；不得改变 API response contract，不得新增 SQL migration，不得扩大到 unrelated Turnover Ledger paths。

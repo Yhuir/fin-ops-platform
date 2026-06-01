@@ -2148,7 +2148,7 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
 
 ## PF-P096 PostgreSQL Write Port Ownership Skeleton
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2169,3 +2169,21 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
 - 不修改 API handler。
 - 不新增 SQL migration。
 - 不访问真实外部服务。
+
+执行结果：
+
+- 新增 `TurnoverLedgerRelationWritePort`，承接 relation confirm/withdraw service orchestration。
+- 新增 `TurnoverLedgerBankdetailWritePort`，承接 bankdetail category update + relation rebuild + persistence orchestration。
+- PF-P095 的 4 条 target tests 已从 `unittest.expectedFailure` 转为普通通过。
+- `server.py` 的 PostgreSQL nested helper 尚未迁移；下一步必须通过 PF-P097 做 composition wiring。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git diff --check`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring`。
+- PF-P097 只替换 `server.py` PostgreSQL nested helper 的 orchestration 到 new ports，不改变 API response contract，不新增 SQL migration。
