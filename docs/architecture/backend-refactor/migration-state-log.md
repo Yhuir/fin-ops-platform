@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning` planned |
+| 当前阶段 | `PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步生成 tag selection tests/contract prompt |
 | 最近 verified prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
-| 最近验证 | PF-P064-MG 已在 main 复验：API 29 tests、UoW contract 22 tests、Extra service 10 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning`；只做 discovery/planning 和文档回写 |
+| 最近验证 | PF-P065 只读盘点 tag selection settings boundary；文档验证通过 |
+| 下一条允许任务 | 生成并审查 `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -6073,7 +6073,7 @@ Relation extra UoW integration slice 已合入 main。push 后必须从最新 ma
 
 ### PF-P065 - Turnover Ledger Tag Selection Settings Port Discovery and Planning
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -6089,12 +6089,33 @@ Relation extra UoW integration slice 已合入 main。push 后必须从最新 ma
 
 #### 下一步
 
-- 执行 PF-P065。
+- 生成并审查 `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests`。
 
 #### 验收标准
 
 - 文档明确 tag selection 当前调用链、事务断点、现有测试覆盖和下一步 characterization/contract test prompt。
 - 不产生 production code diff。
+
+#### 执行结果
+
+- 已盘点 handler -> AppSettingsService -> state_store/Postgres settings repository -> audit -> read model refresh 调用链。
+- 已确认当前事务断点：
+  - settings save 在 `AppSettingsService.update_turnover_ledger_tag_selection(...)` 内完成；
+  - read model clear/enqueue 在 handler 后置执行；
+  - PostgreSQL `PostgresOpsTaxEtcRepository.save_settings(...)` 没有 transaction 参数；
+  - queue failure 当前发生在 settings save 之后。
+- 已确认现有 tests 覆盖成功、version conflict、invalid tag 和 queue failure after save。
+- 未修改 production code 或 tests。
+
+#### 验证
+
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：Pass，无输出。
+- 文档 `rg` 检查：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P066 应先做 characterization / contract tests：锁定 tag selection 当前 API 行为，并增加 settings port / pure normalization target contracts。不得直接实现 production UoW 或迁移 handler。
 
 ## 维护规则
 

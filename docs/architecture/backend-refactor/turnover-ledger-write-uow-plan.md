@@ -665,3 +665,81 @@ Verification:
 Next step:
 
 - Generate cumulative MG `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`, covering PF-P055 through PF-P064.
+
+## PF-P065 Tag Selection Settings Port Discovery
+
+状态：`verified`
+
+### Runtime Call Chain
+
+`PUT /api/turnover-ledger/tag-selection` currently runs:
+
+1. `Application._handle_api_turnover_ledger_tag_selection_update(...)`
+   - resolves mutation session through `_turnover_mutation_session(headers)`;
+   - parses JSON body;
+   - derives `actor` from OA session identity.
+2. `AppSettingsService.update_turnover_ledger_tag_selection(payload, actor_id=actor)`
+   - refreshes settings snapshot from state store;
+   - reads current `turnover_ledger_tag_selection`;
+   - checks `expected_version` / `version`;
+   - validates selected tag codes through `_normalize_turnover_ledger_tag_selection(...)`;
+   - builds `next_snapshot`;
+   - calls `state_store.save_app_settings(next_snapshot)`;
+   - mutates in-memory `_snapshot`;
+   - reconfigures category service;
+   - records in-memory audit through `_record_turnover_ledger_tag_selection_audit(...)`;
+   - returns public payload.
+3. Handler post-write side effects:
+   - `_clear_turnover_ledger_read_model_best_effort()`;
+   - `_enqueue_turnover_ledger_read_model_refreshes(["all"], reason="turnover_ledger_tag_selection_changed")`;
+   - returns `200 OK`.
+
+### Transaction Breaks
+
+| Boundary | Current fact | Risk |
+| --- | --- | --- |
+| Settings fact save | `state_store.save_app_settings(next_snapshot)` happens inside `AppSettingsService`. PostgreSQL runtime delegates to `PostgresOpsTaxEtcRepository.save_settings(...)`, which writes `app.app_settings` through `self._connection.execute(...)` without an explicit transaction parameter. | Cannot yet join `TurnoverLedgerWriteUnitOfWork` transaction without an adapter/repository seam. |
+| Settings audit | `AuditTrailService.record_action(...)` is in-memory, not transaction-bound PostgreSQL audit. | Audit and settings fact can diverge from future dirty/outbox semantics. |
+| Read model dirty/outbox | Handler clears read model and enqueues refresh after settings update returns. | Queue failure currently happens after settings save; existing characterization test proves settings version changes despite queue failure. |
+| Optimistic version | `expected_version` mismatch raises `turnover_ledger_tag_selection_version_conflict` and maps to `409`. | Existing version contract is usable; future UoW must preserve this API shape. |
+
+### Existing Coverage
+
+- `test_turnover_ledger_tag_selection_get_put_and_version_conflict`
+  - locks GET/PUT success, selected tag code validation, queue enqueue and version conflict.
+- `test_turnover_ledger_tag_selection_queue_failure_happens_after_settings_save`
+  - locks current split-brain behavior: queue failure raises, but settings save/version still changed and read model clear already happened.
+- `test_tag_selection_outbox_failure_rolls_back_settings_save_and_audit`
+  - UoW target contract already exists at fake port level.
+
+### Reuse / Missing Ports
+
+Reusable:
+
+- `AppSettingsService._normalize_turnover_ledger_tag_selection(...)` for validation/defaulting.
+- Existing version contract in `update_turnover_ledger_tag_selection(...)`.
+- `TurnoverLedgerWriteUnitOfWork.settings_port` fake contract.
+- `TurnoverLedgerDirtyOutboxWriter` for transaction-bound Turnover dirty/outbox.
+
+Missing:
+
+- A pure `normalize_turnover_ledger_tag_selection_update(...)` method that validates and returns next selection + audit metadata without mutating `_snapshot` or saving settings.
+- A transaction-bound settings repository/port, for example `TurnoverLedgerTagSelectionSettingsPort.save_tag_selection(payload, transaction=...)`.
+- A transaction-bound audit persistence story. If durable audit is not currently available, the next slice must explicitly keep audit as current in-memory behavior or define a follow-up durable audit port.
+- A production adapter for `app.app_settings` that can save via the active transaction instead of `state_store.save_app_settings(...)`.
+
+### Next Prompt Recommendation
+
+Next prompt should be:
+
+`PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests`
+
+Scope:
+
+- Add/extend tests only.
+- Lock current API behavior around queue failure, version conflict, invalid tag code and no legacy side effects outside tag selection.
+- Add target contract tests for:
+  - pure settings update normalization without snapshot mutation;
+  - transaction-bound settings port save;
+  - outbox failure rolling back settings save/audit at fake UoW level.
+- Do not modify production code yet.

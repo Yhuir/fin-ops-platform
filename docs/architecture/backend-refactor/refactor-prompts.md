@@ -16114,3 +16114,20 @@ Post-Flight:
 - PF-P065 选 tag selection 作为 relation extra 后的下一写路径是合理的：它比 bank-row-tags 跨模块风险低，但仍需要先处理 Settings 事务边界。
 - Prompt 明确只做 discovery/planning，不修改 production code 或 tests。
 - Prompt 保持单一切片，不触碰 confirm、withdraw、bank-row-tags。
+
+### 执行结果
+
+- PF-P065 已执行并按自动工作流标记为 `verified`。
+- 已盘点 handler -> AppSettingsService -> state_store/Postgres settings repository -> audit -> read model refresh 调用链。
+- 已确认当前事务断点：
+  - settings save 在 `AppSettingsService.update_turnover_ledger_tag_selection(...)` 内完成；
+  - read model clear/enqueue 在 handler 后置执行；
+  - PostgreSQL `PostgresOpsTaxEtcRepository.save_settings(...)` 没有 transaction 参数；
+  - queue failure 当前发生在 settings save 之后。
+- 已确认现有 tests 覆盖成功、version conflict、invalid tag 和 queue failure after save。
+- 未修改 production code 或 tests。
+- 验证：
+  - `git diff --check`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，无输出。
+  - 文档 `rg` 检查：Pass。
+- 下一步建议：生成并审查 `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests`。
