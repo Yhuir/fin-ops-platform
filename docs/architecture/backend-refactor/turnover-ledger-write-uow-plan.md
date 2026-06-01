@@ -1709,7 +1709,7 @@ Verification:
 
 ## PF-P088 Withdraw Relation Handler UoW Wiring
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1726,5 +1726,22 @@ Verification:
 
 下一步：
 
-- 执行 PF-P088。
 - 如果验证通过，生成 PF-P088-MG，统一覆盖 PF-P084 到 PF-P088 的 withdraw relation UoW slice。
+
+执行结果：
+
+- 新增 withdraw relation 专用 facade seam 和 override：`_turnover_ledger_withdraw_write_facade()` / `_turnover_ledger_withdraw_write_facade_override`。
+- 新增 local transaction shim：`_local_turnover_ledger_withdraw_connection(...)`，dirty/outbox failure rollback relation snapshot，success 保存最新 snapshot。
+- 新增 local relation repository wrapper：`_local_turnover_ledger_withdraw_relation_repository()`，复用 `routes.withdraw_relation(...)`。
+- `_handle_api_turnover_ledger_withdraw(...)` 在 facade 可用时走 UoW；fallback path 保留 legacy `_after_turnover_relation_mutation(...)`。
+- PF-P087 的 2 条 withdraw handler target tests 已转为普通通过。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 42 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 39 tests.
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py`: Pass.
+- `git status --short --branch`: Pass，仅 PF-P088 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|expectedFailure|PF-P088|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。

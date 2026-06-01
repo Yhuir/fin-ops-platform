@@ -19194,3 +19194,23 @@ Post-Flight:
 - PF-P088 是 PF-P087 后的正确实现切片：只迁移 withdraw relation local/dev/test path。
 - Prompt 明确保留 PostgreSQL production legacy fallback，避免猜测 production relation SQL。
 - Prompt 要求 legacy split-brain characterization 通过 override/fallback seam 保留，避免丢失当前行为基线。
+
+### 执行结果
+
+- PF-P088 已执行并按自动工作流标记为 `verified`。
+- 新增 `_turnover_ledger_withdraw_write_facade()`、`_local_turnover_ledger_withdraw_connection(...)` 和 `_local_turnover_ledger_withdraw_relation_repository()`。
+- `_handle_api_turnover_ledger_withdraw(...)` 的 local/dev/test path 已接入 `TurnoverLedgerWriteFacade.withdraw_relation(...)`；PostgreSQL production path 仍 legacy fallback。
+- 只有 legacy fallback path 调用 `_after_turnover_relation_mutation(...)`；successful UoW path 不直接 clear Turnover read model。
+- PF-P087 的 2 条 target tests 已转为普通通过；legacy split-brain characterization 通过显式 override 保留。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，42 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，39 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py`: Pass。
+- `git status --short --branch`: Pass，仅 PF-P088 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|expectedFailure|PF-P088|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate`，统一覆盖 PF-P084 到 PF-P088 的完整 diff。

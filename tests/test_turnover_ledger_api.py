@@ -1545,7 +1545,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(confirmed.status_code, 200)
         self.assertEqual(withdrawn.status_code, 200)
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
-        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
@@ -1728,7 +1728,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ("withdraw_relation", "withdrawn"),
             ],
         )
-        self.assertEqual(read_repository.clear_calls, 2)
+        self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(
             [item for item in queue.enqueued if item[0] == "turnover_ledger"],
             [
@@ -1755,6 +1755,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
             failing_queue = _FailingQueueRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": failing_queue})()
+            app._turnover_ledger_withdraw_write_facade_override = None
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -1773,7 +1774,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [("turnover_ledger", "all", "turnover_relation_changed")],
         )
 
-    @unittest.expectedFailure
     def test_target_withdraw_relation_queue_failure_rolls_back_relation_withdraw(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1806,7 +1806,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [("turnover_ledger", "all", "turnover_relation_changed")],
         )
 
-    @unittest.expectedFailure
     def test_target_withdraw_relation_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

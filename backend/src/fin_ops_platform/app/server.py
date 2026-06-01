@@ -2705,6 +2705,30 @@ class Application:
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
+    def _turnover_ledger_withdraw_write_facade(self) -> TurnoverLedgerWriteFacade | None:
+        if hasattr(self, "_turnover_ledger_withdraw_write_facade_override"):
+            return getattr(self, "_turnover_ledger_withdraw_write_facade_override")
+        state_store = getattr(self, "_state_store", None)
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if state_store is None or queue_repository is None:
+            return None
+        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            return None
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return None
+        uow = TurnoverLedgerWriteUnitOfWork(
+            connection=self._local_turnover_ledger_withdraw_connection(state_store),
+            relation_repository=self._local_turnover_ledger_withdraw_relation_repository(),
+            extra_repository=SimpleNamespace(),
+            settings_port=SimpleNamespace(),
+            bankdetail_port=SimpleNamespace(),
+            dirty_outbox_writer=self._local_turnover_ledger_dirty_outbox_writer(queue_repository),
+            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+        )
+        return TurnoverLedgerWriteFacade(uow=uow)
+
     def _local_turnover_ledger_confirm_connection(self, state_store: object) -> object:
         application = self
 
@@ -2729,6 +2753,30 @@ class Application:
 
         return _LocalConfirmRelationConnection()
 
+    def _local_turnover_ledger_withdraw_connection(self, state_store: object) -> object:
+        application = self
+
+        class _LocalWithdrawRelationConnection:
+            @contextmanager
+            def transaction(self) -> Any:
+                previous_relation_snapshot = application._turnover_relation_service.snapshot()
+                try:
+                    yield SimpleNamespace()
+                except Exception:
+                    application._replace_local_turnover_relation_snapshot(previous_relation_snapshot)
+                    application._save_local_turnover_relations_snapshot(
+                        state_store,
+                        previous_relation_snapshot,
+                    )
+                    raise
+                else:
+                    application._save_local_turnover_relations_snapshot(
+                        state_store,
+                        application._turnover_relation_service.snapshot(),
+                    )
+
+        return _LocalWithdrawRelationConnection()
+
     def _local_turnover_ledger_confirm_relation_repository(self) -> object:
         routes = self._turnover_ledger_api_routes
         relation_service = self._turnover_relation_service
@@ -2751,6 +2799,26 @@ class Application:
                 )
 
         return _LocalConfirmRelationRepository()
+
+    def _local_turnover_ledger_withdraw_relation_repository(self) -> object:
+        routes = self._turnover_ledger_api_routes
+
+        class _LocalWithdrawRelationRepository:
+            def withdraw_relation(
+                self,
+                *,
+                relation_id: str,
+                actor_id: str,
+                note: str | None,
+                transaction: object,
+            ) -> dict[str, object]:
+                return routes.withdraw_relation(
+                    relation_id=relation_id,
+                    actor=actor_id,
+                    note=note,
+                )
+
+        return _LocalWithdrawRelationRepository()
 
     def _local_turnover_ledger_bank_row_tags_connection(self, state_store: object) -> object:
         application = self
@@ -12759,11 +12827,22 @@ class Application:
                     },
                 )
             bank_row_ids = list(relation.get("bank_row_ids") or [])
-            result = self._turnover_ledger_api_routes.withdraw_relation(
-                relation_id=relation_id,
-                actor=actor,
-                note=str(payload.get("note")) if payload.get("note") is not None else None,
-            )
+            affected_months = self._bank_transaction_category_affected_months([str(row_id) for row_id in bank_row_ids])
+            facade = self._turnover_ledger_withdraw_write_facade()
+            if facade is not None:
+                result = facade.withdraw_relation(
+                    relation_id=relation_id,
+                    actor_id=actor,
+                    tenant_id=tenant_id_for_session(session_response),
+                    note=str(payload.get("note")) if payload.get("note") is not None else None,
+                    affected_months=affected_months,
+                )
+            else:
+                result = self._turnover_ledger_api_routes.withdraw_relation(
+                    relation_id=relation_id,
+                    actor=actor,
+                    note=str(payload.get("note")) if payload.get("note") is not None else None,
+                )
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -12774,8 +12853,8 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": exc.error_code, "message": str(exc)},
             )
-        affected_months = self._bank_transaction_category_affected_months([str(row_id) for row_id in bank_row_ids])
-        self._after_turnover_relation_mutation(affected_months)
+        if facade is None:
+            self._after_turnover_relation_mutation(affected_months)
         result["affected_months"] = affected_months
         return self._json_response(HTTPStatus.OK, result)
 
