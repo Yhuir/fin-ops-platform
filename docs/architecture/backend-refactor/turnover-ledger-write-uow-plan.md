@@ -1348,3 +1348,17 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
+
+## PF-P081 Confirm Relation Handler UoW Wiring Readiness
+
+状态：`planned`
+
+目标：
+
+- 只审计 `POST /api/turnover-ledger/relations/confirm` 真实 handler 接入 UoW 的 readiness。
+- 不修改 production code，不新增测试，不迁移 handler。
+- 输出下一条 prompt 应该是 handler target tests、adapter skeleton 还是 handler wiring。
+
+下一步：
+
+- 执行 PF-P081。

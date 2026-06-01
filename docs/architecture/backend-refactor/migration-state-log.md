@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` 已执行并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` 已生成并审查 |
+| 当前 active prompt | `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` planned |
 | 最近 verified prompt | `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` |
 | 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
 | 最近验证 | PF-P080 实现 confirm relation facade skeleton；UoW contract 36 tests 通过，API 36 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` |
+| 下一条允许任务 | 执行 `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` |
 
 ## Prompt 执行日志
 

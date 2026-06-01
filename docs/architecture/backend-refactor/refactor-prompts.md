@@ -18165,3 +18165,97 @@ Verification:
 - `rg -n "def confirm_relation|test_target_confirm_relation|expectedFailure|PF-P080|turnover_relation_changed" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness`，先确认真实 handler 接入边界，再决定是否进入 handler wiring。
+
+## PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness
+
+```text
+/goal
+PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness
+
+Role:
+你是一位负责真实 handler 接入前风险审计的后端架构工程师。你必须基于代码事实判断 `POST /api/turnover-ledger/relations/confirm` 是否可以进入 UoW handler wiring，或是否需要先补 relation repository/adapter/port。
+
+Context:
+PF-P079/PF-P080 已完成 `TurnoverLedgerWriteFacade.confirm_relation(...)` 的 facade-level contract tests 与最小 skeleton。真实 `server.py` handler 尚未迁移：它仍 rebuild relations、调用 `TurnoverLedgerApiRoutes.confirm_relation(...)`，再执行 `_after_turnover_relation_mutation(...)`。PF-P081 只做 readiness / planning 和文档回写，不修改 production code，不新增测试实现，不迁移 handler。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - docs/architecture/backend-refactor/turnover-ledger-discovery.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_confirm`、`_after_turnover_relation_mutation`、relation extra/tag selection/bank-row-tags UoW helper patterns
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py 中 `confirm_relation`
+   - backend/src/fin_ops_platform/services/turnover_relation_service.py 中 `confirm_relation`、`snapshot`、`from_snapshot`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - tests/test_turnover_ledger_api.py confirm tests
+   - tests/test_turnover_ledger_uow_contract.py confirm tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+4. 必须确认 PF-P080 已 verified。
+
+Task:
+输出 confirm handler UoW wiring readiness 结论。PF-P081 不写 production code，不新增/修改 tests，不改 schema。它必须明确下一条 prompt 应该是 handler target tests、adapter skeleton、还是 handler wiring。
+
+Required Discovery Output:
+在 `turnover-ledger-write-uow-plan.md` 新增 PF-P081 章节，至少包含：
+1. Current Runtime Sequence:
+   - `server.py` confirm handler 当前调用链；
+   - relation facts/audit 当前在哪里改变；
+   - state store persistence 当前在哪里发生；
+   - Workbench invalidation、Turnover read model clear、refresh enqueue 当前在哪里发生。
+2. Existing Reusable Boundaries:
+   - relation extra / tag selection / bank-row-tags 已有 local transaction shim 是否可复用；
+   - `TurnoverLedgerWriteFacade.confirm_relation(...)` 当前能覆盖什么；
+   - 是否已有 transaction-bound relation repository/adapter 可用于 PostgreSQL path。
+3. Wiring Readiness Matrix:
+   - local/dev/test path readiness；
+   - PostgreSQL production path readiness；
+   - Workbench influence port readiness；
+   - affected months calculation readiness；
+   - legacy compatibility test readiness。
+4. Decision:
+   - 如果可以进入 handler wiring，下一条 prompt 必须限定为 local/dev/test handler UoW wiring，并保留 production fallback；
+   - 如果不能进入，下一条 prompt 必须先补 adapter/port skeleton 或 target tests。
+5. Risks / Blockers:
+   - 特别说明是否允许直接调用 `TurnoverLedgerApiRoutes.confirm_relation` 作为 facade port；
+   - 特别说明是否允许猜测 PostgreSQL relation SQL；
+   - 特别说明 Workbench influence 是否本轮必须实现或可先保留 legacy fallback。
+
+Allowed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得修改 production service/repository/adapter code。
+- 不得修改 tests。
+- 不得迁移 confirm handler、withdraw handler 或其它 Turnover 写路径。
+- 不得修改 schema/migration。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P081|Confirm Relation Handler UoW Wiring Readiness|Current Runtime Sequence|Wiring Readiness Matrix|Decision|Blockers" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P081 status = implemented / verified / blocked。
+   - 记录 readiness 结论、下一条 prompt 和是否需要先补 adapter/port。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P081 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 readiness 输出。
+4. PF-P081 后不要生成 MG；下一条 prompt 根据 Decision 生成。
+```
+
+### 审查结论
+
+- PF-P081 是 PF-P080 后必要的安全闸门：facade skeleton 已有，但真实 handler 牵涉 relation persistence、Workbench influence 和 legacy fallback，不能直接拍脑袋接入。
+- Prompt 明确只产出 readiness 文档，不修改生产代码或测试。
+- Prompt 要求给出下一条 prompt 类型，避免在 confirm handler wiring 前遗漏 adapter/port 或 target tests。
