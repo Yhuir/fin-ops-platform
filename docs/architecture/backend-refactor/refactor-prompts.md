@@ -15157,3 +15157,82 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
 - 下一步建议：生成并审查 `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization`。PF-P058 应先锁定真实 handler 接入 facade 前的兼容测试/边界，不扩大到 confirm、withdraw、tag selection 或 bank-row-tags。
+
+## PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization
+
+Role:
+你是一位精通 Python 遗留系统 characterization testing、HTTP handler 重构安全网和 Unit of Work 渐进接入的后端工程师。
+
+Context:
+PF-P057 已完成并验证。当前已有最小 `TurnoverLedgerWriteFacade.update_relation_extra()`，但真实 `PUT /api/turnover-ledger/relations/{id}/extra` handler 仍在 `server.py` 内直接编排：
+- session / body parsing；
+- `TurnoverLedgerApiRoutes.update_relation_extra()`；
+- best-effort extra persistence；
+- read model clear；
+- refresh enqueue；
+- response flag。
+
+在真实 handler 接入 facade 前，本轮只补 characterization tests，锁定当前行为和兼容边界。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_relation_extra_update`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - tests/test_turnover_ledger_api.py 中 relation extra、tag selection queue failure 相关测试
+2. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+只补 relation extra real handler 的 characterization tests，不迁移 handler。
+
+Required Test Work:
+1. 在 `tests/test_turnover_ledger_api.py` 中新增 targeted test，锁定当前 relation extra refresh queue failure 行为：
+   - 使用 `_FailingQueueRecorder`；
+   - 执行 `PUT /api/turnover-ledger/relations/{id}/extra`；
+   - 当前应抛出 `RuntimeError("queue unavailable")`；
+   - extra 已写入内存 service，后续 GET 能读到刚提交的 note；
+   - read model clear 已发生；
+   - queue attempts 精确为 `("turnover_ledger", "all", "turnover_relation_extra_changed")`。
+2. 不得修改已有 relation extra tests 的期望值。
+3. 更新 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`，记录 PF-P058 锁定的真实 handler 当前行为，以及 PF-P059 的推荐方向。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 `server.py`。
+- 不得接入 `TurnoverLedgerWriteFacade` 到真实 handler。
+- 不得迁移 confirm、withdraw、tag selection 或 bank-row-tags batch。
+- 不得修改 runtime queue、worker、real repository、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得访问真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "PF-P058|relation extra|queue unavailable|turnover_relation_extra_changed" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P058 status = implemented / verified / blocked。
+   - 记录新增测试和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P058 执行结果。
+3. 不生成 MG；下一步应生成 PF-P059 进行 relation extra handler 最小 wiring，除非 PF-P058 blocked。
+```
+
+### 审查结论
+
+- PF-P058 是 PF-P057 后必要的安全网补强：真实 handler 接入 facade 前，需要先锁定 queue failure 下当前已写入 extra、已 clear read model、已尝试 enqueue 的 observable 行为。
+- Prompt 明确 test-only，禁止 production code 和 `server.py` diff。

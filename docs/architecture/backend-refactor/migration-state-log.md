@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra real handler integration planning/tests |
+| 当前阶段 | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` planned |
 | 最近 verified prompt | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P057 新增最小 `TurnoverLedgerWriteFacade`，4 条 PF-P056 facade tests 已从 expectedFailure 转为普通通过；未修改 `server.py` 或真实 API |
-| 下一条允许任务 | 生成并审查 `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization`；先锁定真实 handler 接入 facade 前后的兼容范围，不直接扩大到 confirm/withdraw/tag selection/bank-row-tags |
+| 下一条允许任务 | 执行 `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization`；只补真实 handler 集成前 characterization，不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -5712,6 +5712,30 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+
+### PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization
+
+状态：`planned`
+
+#### 范围
+
+- 只补真实 `PUT /api/turnover-ledger/relations/{id}/extra` handler 接入 facade 前的 characterization。
+- 聚焦 queue/refresh failure、persistence side effect、response/error 当前行为。
+- 不迁移真实 handler，不修改 `server.py`。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P058。
+
+#### 验收标准
+
+- 新增测试只在 `tests/test_turnover_ledger_api.py` 锁定 relation extra handler 当前行为。
+- 不修改 production code、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
 
 ## 维护规则
 

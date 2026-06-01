@@ -455,3 +455,19 @@ PF-P058 recommended direction:
 
 - Characterize the real `PUT /api/turnover-ledger/relations/{id}/extra` handler integration boundary before wiring.
 - Keep scope limited to relation extra; do not migrate confirm, withdraw, tag selection or bank-row-tags.
+
+## PF-P058 Relation Extra Handler Integration Characterization Plan
+
+状态：`planned`
+
+PF-P058 should lock the current real handler behavior before `server.py` delegates relation extra writes to the new facade.
+
+The highest-risk missing characterization is refresh queue failure:
+
+- current handler writes relation extra through `TurnoverLedgerApiRoutes.update_relation_extra()`;
+- then persists extras best-effort;
+- then clears the Turnover read model;
+- then enqueues `turnover_relation_extra_changed`;
+- if enqueue fails, the exception propagates after the extra has already been updated in memory.
+
+PF-P058 should add a targeted API test for that behavior. It must not wire the facade into `server.py`.
