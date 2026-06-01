@@ -573,8 +573,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(sheet["I2"].value, "手续费")
         self.assertEqual(sheet["J2"].value, "费用")
         self.assertEqual(sheet["K2"].value, "手续费")
-        self.assertEqual(sheet["M2"].value, "无发票")
-        self.assertEqual(sheet["Q2"].value, transaction_id)
+        self.assertEqual(sheet["M2"].value, "有oa")
+        self.assertEqual(sheet["N2"].value, "无发票")
+        self.assertEqual(sheet["Q2"].value, "工行附言")
+        self.assertEqual(sheet["R2"].value, transaction_id)
         self.assertEqual(audit_entries[-1]["action"], "bank_detail_export_downloaded")
         self.assertEqual(audit_entries[-1]["entity_type"], "bank_detail_export")
         self.assertEqual(audit_entries[-1]["metadata"]["row_count"], 1)
@@ -605,18 +607,38 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_bank_details_export_api_uses_sql_read_model_refresh_contract_in_sql_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            class FakeBankDetailSqlReadRepository:
+                def __init__(self) -> None:
+                    self.called = False
+
+                def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
+                    return ["2026-04", "2026-05"]
+
+                def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+                    return {
+                        "read_model_status": "refreshing",
+                        "read_model_scope_keys": list(scope_keys),
+                        "read_model_generated_at": None,
+                        "read_model_scope_signatures": {},
+                    }
+
+                def list_bank_detail_transactions(self, **_kwargs: object) -> dict[str, object]:
+                    self.called = True
+                    return {
+                        "account_key": None,
+                        "date_from": "2026-04-01",
+                        "date_to": "2026-05-18",
+                        "rows": [],
+                        "category_counts": {"uncategorized": 0},
+                        "pagination": {"page": 1, "page_size": 100, "total": 0},
+                        "read_model_status": "refreshing",
+                        "cache_status": "bypass",
+                    }
+
+            sql_repository = FakeBankDetailSqlReadRepository()
             with (
                 patch.object(app, "_requires_sql_read_model_runtime", return_value=True),
-                patch.object(app, "_get_bank_detail_transactions_from_sql_read_model", return_value={
-                    "account_key": None,
-                    "date_from": "2026-04-01",
-                    "date_to": "2026-05-18",
-                    "rows": [],
-                    "category_counts": {"uncategorized": 0},
-                    "pagination": {"page": 1, "page_size": 100, "total": 0},
-                    "read_model_status": "refreshing",
-                    "cache_status": "bypass",
-                }) as sql_loader,
+                patch.object(app, "_bank_detail_sql_read_repository", sql_repository),
                 patch.object(app._bank_details_service, "list_transactions", side_effect=AssertionError("export should not bypass SQL read model")),
             ):
                 response = app.handle_request(
@@ -627,7 +649,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(json.loads(response.body)["read_model_status"], "refreshing")
-        self.assertTrue(sql_loader.called)
+        self.assertTrue(sql_repository.called)
         self.assertFalse(any(entry["action"] == "bank_detail_export_downloaded" for entry in audit_entries))
 
     def test_bank_details_api_projects_workbench_relation_tags(self) -> None:

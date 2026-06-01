@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+from types import SimpleNamespace
 import unittest
 
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
 from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
+from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
@@ -288,6 +292,100 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertIn("from read_model.bank_detail_rows", sql_text)
         self.assertNotIn("schema_version = %s", sql_text)
+
+    def test_transactions_treat_schema_six_as_mismatch_after_external_turnover_candidate_contract(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-05", schema_version=6)],
+                {"total": 1},
+                [{"category_code": "external_turnover", "count": 1}],
+                [
+                    {
+                        "payload": {
+                            "id": "txn-old-external-turnover-contract",
+                            "trade_time": "2026-05-01 10:00:00",
+                            "counterparty_name": "外部候选供应商",
+                            "direction": "expense",
+                            "direction_label": "支",
+                            "amount": "10.00",
+                            "balance": "90.00",
+                            "summary": "借出款",
+                            "purpose": "",
+                            "bank_name": "工商银行",
+                            "account_last4": "6386",
+                            "category_resolution_status": "needs_confirmation",
+                            "auto_candidate_categories": [
+                                {
+                                    "category_code": "external_payment",
+                                    "category_primary_label": "外部往来款付款",
+                                    "category_sub_label": "借出款",
+                                    "category_third_label": "公司往来",
+                                }
+                            ],
+                        },
+                        "raw_payload": {},
+                        "summary": "借出款",
+                        "purpose": "",
+                    }
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_transactions(
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            page=1,
+            page_size=100,
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["read_model_status"], "schema_mismatch")
+        self.assertEqual(payload["rows"][0]["id"], "txn-old-external-turnover-contract")
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertNotIn("schema_version = %s", sql_text)
+
+    def test_application_cache_key_includes_bank_detail_schema_version(self) -> None:
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(),
+            state_store=None,
+            bank_detail_sql_read_repository=None,
+            runtime_repositories=SimpleNamespace(),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: [],
+            invalidate_after_category_mutation=lambda _affected_months: False,
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_turnover_ledger_read_model=lambda: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-05"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+        scope_summary = {
+            "read_model_scope_signatures": {
+                "2026-05": {
+                    "schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                    "source_versions": {"bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION},
+                }
+            }
+        }
+
+        cache_key = service._redis_cache_key("transactions", {"page": 1}, scope_summary=scope_summary)
+
+        expected_signature = {
+            "kind": "transactions",
+            "query": {"page": 1},
+            "scope_signatures": scope_summary["read_model_scope_signatures"],
+            "schema": f"bank_detail:v{BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}",
+        }
+        expected_digest = hashlib.sha256(
+            json.dumps(expected_signature, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(cache_key, f"bank_detail:transactions:{expected_digest}")
 
     def test_accounts_serve_previous_schema_rows_while_refreshing(self) -> None:
         connection = FakeConnection(

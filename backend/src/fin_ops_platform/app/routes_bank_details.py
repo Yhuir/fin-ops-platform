@@ -7,11 +7,15 @@ from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.services.app_settings_service import (
     BankAutoTagRulesPersistenceError,
 )
+from fin_ops_platform.services.bank_details_application_service import (
+    BankDetailsApplicationService,
+    BankDetailsReadModelRefreshingError,
+)
+from fin_ops_platform.services.bank_details_export_service import BankDetailsExportError
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankAutoTagRulesValidationError,
     BankTransactionCategoryValidationError,
 )
-from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
 
 
 class BankDetailsApiRoutes:
@@ -52,6 +56,41 @@ class BankDetailsApiRoutes:
         except ValueError as exc:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid_bank_details_request", "message": str(exc)}
         return self._status_for_payload(payload, item_key="rows"), payload
+
+    def export_transactions(
+        self,
+        *,
+        mode: str,
+        account_key: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        keyword: str | None,
+        category_code: str | None,
+        category_primary_label: str | None,
+        category_sub_label: str | None,
+        category_third_label: str | None,
+        session: OARequestSession | None = None,
+    ) -> tuple[HTTPStatus, Any]:
+        try:
+            result = self._application_service.export_transactions(
+                mode=mode,
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                keyword=keyword,
+                category_code=category_code,
+                category_primary_label=category_primary_label,
+                category_sub_label=category_sub_label,
+                category_third_label=category_third_label,
+                actor_id=self._actor(session, "bank_detail_export"),
+            )
+        except BankDetailsReadModelRefreshingError as exc:
+            return HTTPStatus.ACCEPTED, exc.payload
+        except BankDetailsExportError as exc:
+            return HTTPStatus.BAD_REQUEST, {"error": exc.error_code, "message": str(exc)}
+        except ValueError as exc:
+            return HTTPStatus.BAD_REQUEST, {"error": "invalid_bank_details_request", "message": str(exc)}
+        return HTTPStatus.OK, result
 
     def auto_tag_rules(self, *, session: OARequestSession | None) -> tuple[HTTPStatus, dict[str, Any]]:
         can_save = True if session is None else bool(session.can_mutate_data)

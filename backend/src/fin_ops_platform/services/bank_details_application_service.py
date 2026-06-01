@@ -11,15 +11,26 @@ from typing import Any, Callable
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_detail_category_selection import confirmation_selection, manual_assignment_selection
+from fin_ops_platform.services.bank_details_export_service import (
+    BankDetailsExportResult,
+    BankDetailsExportService,
+)
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
     BankTransactionCategoryValidationError,
 )
+from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION
 
 
 SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+class BankDetailsReadModelRefreshingError(RuntimeError):
+    def __init__(self, payload: dict[str, object]) -> None:
+        super().__init__("bank detail read model refreshing")
+        self.payload = payload
 
 
 class BankDetailsApplicationService:
@@ -277,6 +288,59 @@ class BankDetailsApplicationService:
             metadata={"assignment_source": "manual"},
         )
         return {**result, "affected_months": affected_months}
+
+    def export_transactions(
+        self,
+        *,
+        mode: str,
+        account_key: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        keyword: str | None,
+        category_code: str | None,
+        category_primary_label: str | None,
+        category_sub_label: str | None,
+        category_third_label: str | None,
+        actor_id: str,
+    ) -> BankDetailsExportResult:
+        service = BankDetailsExportService(
+            transaction_page_loader=self._export_transaction_page,
+            account_loader=self._export_accounts,
+        )
+        result = service.export(
+            mode=mode,
+            account_key=account_key,
+            date_from=date_from,
+            date_to=date_to,
+            keyword=keyword,
+            category_code=category_code,
+            category_primary_label=category_primary_label,
+            category_sub_label=category_sub_label,
+            category_third_label=category_third_label,
+        )
+        self._audit_service.record_action(
+            actor_id=actor_id,
+            action="bank_detail_export_downloaded",
+            entity_type="bank_detail_export",
+            entity_id=result.filename,
+            metadata={
+                "mode": str(mode or "all"),
+                "filters": {
+                    "account_key": account_key,
+                    "date_from": date_from,
+                    "date_to": date_to,
+                    "keyword": keyword,
+                    "category_code": category_code,
+                    "category_primary_label": category_primary_label,
+                    "category_sub_label": category_sub_label,
+                    "category_third_label": category_third_label,
+                },
+                "row_count": result.row_count,
+                "sheet_names": result.sheet_names,
+                "filename": result.filename,
+            },
+        )
+        return result
 
     def finalize_auto_tag_rules_update(self, event: dict[str, object]) -> None:
         self._clear_relation_tag_projection_cache()
@@ -770,6 +834,42 @@ class BankDetailsApplicationService:
             payload.setdefault("bank_transaction_tags", tag_loader())
         return payload
 
+    def _export_accounts(self, *, date_from: str | None, date_to: str | None) -> dict[str, object]:
+        payload = self.accounts_payload(date_from=date_from, date_to=date_to)
+        if payload.get("read_model_status") == "refreshing":
+            raise BankDetailsReadModelRefreshingError(payload)
+        return payload
+
+    def _export_transaction_page(
+        self,
+        *,
+        account_key: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        keyword: str | None,
+        category_code: str | None,
+        category_primary_label: str | None,
+        category_sub_label: str | None,
+        category_third_label: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, object]:
+        payload = self.transactions_payload(
+            account_key=account_key,
+            date_from=date_from,
+            date_to=date_to,
+            keyword=keyword,
+            category_code=category_code,
+            category_primary_label=category_primary_label,
+            category_sub_label=category_sub_label,
+            category_third_label=category_third_label,
+            page=page,
+            page_size=page_size,
+        )
+        if payload.get("read_model_status") == "refreshing":
+            raise BankDetailsReadModelRefreshingError(payload)
+        return payload
+
     def _enqueue_read_model_refreshes_unless_refreshing(
         self,
         scope_keys: list[str],
@@ -817,7 +917,7 @@ class BankDetailsApplicationService:
             "kind": kind,
             "query": query,
             "scope_signatures": scope_summary.get("read_model_scope_signatures") or {},
-            "schema": "bank_detail:v1",
+            "schema": f"bank_detail:v{BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}",
         }
         digest = hashlib.sha256(json.dumps(signature, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
         return f"bank_detail:{kind}:{digest}"

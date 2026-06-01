@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from http import HTTPStatus
 import unittest
 
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
+
+
+@dataclass(slots=True)
+class FakeBankDetailsExportResult:
+    filename: str = "bank-details.xlsx"
+    content: bytes = b"xlsx"
+    row_count: int = 1
+    sheet_names: list[str] | None = None
 
 
 class FakeBankDetailsApplicationService:
@@ -37,6 +46,10 @@ class FakeBankDetailsApplicationService:
     def confirm_category(self, transaction_id: str, payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
         self.calls.append(("confirm_category", {"transaction_id": transaction_id, "payload": payload, "actor_id": actor_id}))
         return {"transaction_id": transaction_id, "affected_months": ["2026-05"]}
+
+    def export_transactions(self, **kwargs) -> FakeBankDetailsExportResult:
+        self.calls.append(("export_transactions", dict(kwargs)))
+        return FakeBankDetailsExportResult(sheet_names=["银行明细"])
 
 
 class BankDetailsRoutesTests(unittest.TestCase):
@@ -109,6 +122,45 @@ class BankDetailsRoutesTests(unittest.TestCase):
                         "actor_id": "bank_category_confirmation",
                     },
                 ),
+            ],
+        )
+
+    def test_routes_facade_delegates_export_to_application_service(self) -> None:
+        service = FakeBankDetailsApplicationService()
+        routes = BankDetailsApiRoutes(application_service=service)
+
+        status, result = routes.export_transactions(
+            mode="all",
+            account_key=None,
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            keyword="外部候选",
+            category_code="external_payment",
+            category_primary_label="外部往来款付款",
+            category_sub_label="借出款",
+            category_third_label="公司往来",
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(result.filename, "bank-details.xlsx")
+        self.assertEqual(
+            service.calls,
+            [
+                (
+                    "export_transactions",
+                    {
+                        "mode": "all",
+                        "account_key": None,
+                        "date_from": "2026-05-01",
+                        "date_to": "2026-05-31",
+                        "keyword": "外部候选",
+                        "category_code": "external_payment",
+                        "category_primary_label": "外部往来款付款",
+                        "category_sub_label": "借出款",
+                        "category_third_label": "公司往来",
+                        "actor_id": "bank_detail_export",
+                    },
+                )
             ],
         )
 

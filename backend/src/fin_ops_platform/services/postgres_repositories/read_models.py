@@ -26,7 +26,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
-BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 6
+BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 7
 BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)

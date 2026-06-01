@@ -26,7 +26,7 @@ BANK_DETAIL_EXPORT_COLUMNS = [
     "自动分类",
     "自动分类主标签",
     "自动分类子标签",
-    "自动分类子子标签",
+    "自动分类第三级业务",
     "OA 关系",
     "发票关系",
     "用途/交易用途",
@@ -190,7 +190,7 @@ class BankDetailsExportService:
                 or row.get("effective_category_sub_label")
                 or row.get("category_sub_label")
             ) or "-",
-            "自动分类子子标签": cls._text(
+            "自动分类第三级业务": cls._text(
                 row.get("auto_category_third_label")
                 or row.get("effective_category_third_label")
                 or row.get("category_third_label")
@@ -266,7 +266,7 @@ class BankDetailsExportService:
             "自动分类": 18,
             "自动分类主标签": 16,
             "自动分类子标签": 16,
-            "自动分类子子标签": 16,
+            "自动分类第三级业务": 16,
             "OA 关系": 10,
             "发票关系": 12,
             "用途/交易用途": 24,

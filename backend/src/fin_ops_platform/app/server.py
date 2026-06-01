@@ -71,10 +71,6 @@ from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
     BankDetailsRelationTagProjectionService,
 )
-from fin_ops_platform.services.bank_details_export_service import (
-    BankDetailsExportError,
-    BankDetailsExportService,
-)
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
@@ -310,6 +306,7 @@ from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as 
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.postgres_repositories.read_models import (
+    BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
     PostgresReadModelRepository,
 )
@@ -10896,67 +10893,6 @@ class Application:
         if auth_error is not None:
             return auth_error
 
-        class BankDetailReadModelRefreshing(RuntimeError):
-            def __init__(self, payload: dict[str, object]) -> None:
-                super().__init__("bank detail read model refreshing")
-                self.payload = payload
-
-        def load_accounts(*, date_from: str | None, date_to: str | None) -> dict[str, object]:
-            if self._requires_sql_read_model_runtime():
-                sql_payload = self._get_bank_detail_accounts_from_sql_read_model(date_from=date_from, date_to=date_to)
-                if sql_payload is not None:
-                    if sql_payload.get("read_model_status") == "refreshing":
-                        raise BankDetailReadModelRefreshing(sql_payload)
-                    return sql_payload
-            return self._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
-
-        def load_transactions(
-            *,
-            account_key: str | None,
-            date_from: str | None,
-            date_to: str | None,
-            keyword: str | None,
-            category_code: str | None,
-            category_primary_label: str | None,
-            category_sub_label: str | None,
-            category_third_label: str | None,
-            page: int,
-            page_size: int,
-        ) -> dict[str, object]:
-            if self._requires_sql_read_model_runtime():
-                sql_payload = self._get_bank_detail_transactions_from_sql_read_model(
-                    account_key=account_key,
-                    date_from=date_from,
-                    date_to=date_to,
-                    keyword=keyword,
-                    category_code=category_code,
-                    category_primary_label=category_primary_label,
-                    category_sub_label=category_sub_label,
-                    category_third_label=category_third_label,
-                    page=page,
-                    page_size=page_size,
-                )
-                if sql_payload is not None:
-                    if sql_payload.get("read_model_status") == "refreshing":
-                        raise BankDetailReadModelRefreshing(sql_payload)
-                    return sql_payload
-            return self._bank_details_service.list_transactions(
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                keyword=keyword,
-                category_code=category_code,
-                category_primary_label=category_primary_label,
-                category_sub_label=category_sub_label,
-                category_third_label=category_third_label,
-                page=page,
-                page_size=page_size,
-            )
-
-        service = BankDetailsExportService(
-            transaction_page_loader=load_transactions,
-            account_loader=load_accounts,
-        )
         mode = query.get("mode", ["all"])[0]
         account_key = query.get("account_key", [None])[0]
         date_from = query.get("date_from", [None])[0]
@@ -10966,55 +10902,22 @@ class Application:
         category_primary_label = query.get("category_primary_label", [None])[0]
         category_sub_label = query.get("category_sub_label", [None])[0]
         category_third_label = query.get("category_third_label", [None])[0]
-        try:
-            result = service.export(
-                mode=mode,
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                keyword=keyword,
-                category_code=category_code,
-                category_primary_label=category_primary_label,
-                category_sub_label=category_sub_label,
-                category_third_label=category_third_label,
-            )
-        except BankDetailReadModelRefreshing as exc:
-            return self._json_response(HTTPStatus.ACCEPTED, exc.payload)
-        except BankDetailsExportError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": exc.error_code, "message": str(exc)},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_bank_details_request", "message": str(exc)},
-            )
-
-        self._audit_service.record_action(
-            actor_id=str(session.identity.username or "bank_detail_export") if session is not None else "bank_detail_export",
-            action="bank_detail_export_downloaded",
-            entity_type="bank_detail_export",
-            entity_id=result.filename,
-            metadata={
-                "mode": str(mode or "all"),
-                "filters": {
-                    "account_key": account_key,
-                    "date_from": date_from,
-                    "date_to": date_to,
-                    "keyword": keyword,
-                    "category_code": category_code,
-                    "category_primary_label": category_primary_label,
-                    "category_sub_label": category_sub_label,
-                    "category_third_label": category_third_label,
-                },
-                "row_count": result.row_count,
-                "sheet_names": result.sheet_names,
-                "filename": result.filename,
-            },
+        status, result = self._bank_details_routes().export_transactions(
+            mode=mode,
+            account_key=account_key,
+            date_from=date_from,
+            date_to=date_to,
+            keyword=keyword,
+            category_code=category_code,
+            category_primary_label=category_primary_label,
+            category_sub_label=category_sub_label,
+            category_third_label=category_third_label,
+            session=session,
         )
+        if isinstance(result, dict):
+            return self._json_response(status, result)
         return Response(
-            status_code=int(HTTPStatus.OK),
+            status_code=int(status),
             body=result.content,
             headers={
                 "Content-Type": XLSX_MIME_TYPE,
@@ -11487,7 +11390,7 @@ class Application:
             "kind": kind,
             "query": query,
             "scope_signatures": scope_summary.get("read_model_scope_signatures") or {},
-            "schema": "bank_detail:v1",
+            "schema": f"bank_detail:v{BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}",
         }
         digest = hashlib.sha256(json.dumps(signature, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
         return f"bank_detail:{kind}:{digest}"

@@ -974,7 +974,7 @@ function TypeCell({
   const selectionGroups = confirmationGroups.length > 0 ? confirmationGroups : assignmentGroups;
   const selectionLabel = confirmationGroups.length > 0 ? "待确认" : "待分类";
   const childLabelSuffix = confirmationGroups.length > 0 ? "候选标签" : "可选标签";
-  const thirdLabelSuffix = confirmationGroups.length > 0 ? "候选子子标签" : "可选子子标签";
+  const thirdLabelSuffix = confirmationGroups.length > 0 ? "候选业务类型" : "可选业务类型";
   const [selectedPrimaryKey, setSelectedPrimaryKey] = useState("");
   const [selectedSubKey, setSelectedSubKey] = useState("");
   const selectedGroup = selectionGroups.find((group) => group.key === selectedPrimaryKey) ?? selectionGroups[0] ?? null;
