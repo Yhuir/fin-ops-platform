@@ -15775,3 +15775,106 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
 - 下一步建议：生成并审查 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`。
+
+## PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring
+
+Role:
+你是一位精通 Python Clean Architecture、遗留 handler 薄化、PostgreSQL transaction-bound outbox 和渐进式迁移的后端工程师。
+
+Context:
+PF-P056 到 PF-P063 已完成 relation extra write facade、UoW contract、repository adapter、dirty/outbox adapter、row provider boundary、extra_normalizer boundary 和 pure normalizer adapter。
+
+本轮只允许最小接入 `PUT /api/turnover-ledger/relations/{id}/extra`：
+- PostgreSQL runtime 且 queue 支持 transaction-bound enqueue 时走 `TurnoverLedgerWriteFacade`；
+- 非 PostgreSQL runtime 或依赖不齐时保持现有 legacy path；
+- 不迁移其它 Turnover Ledger 写 API。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 relation extra handler 和 Workbench UoW helper patterns
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py 中 `update_relation_extra` 和 `_row_extra_fields`
+   - tests/test_turnover_ledger_api.py relation extra tests
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+最小接入 relation extra handler 到 facade。
+
+Required Implementation Work:
+1. 在 `server.py` 引入必要 Turnover write 依赖：
+   - `TurnoverLedgerWriteUnitOfWork`
+   - `TurnoverLedgerWriteFacade`
+   - `TurnoverLedgerExtraRepositoryAdapter`
+   - `TurnoverLedgerDirtyOutboxWriter`
+   - `TurnoverLedgerExtraNormalizerAdapter`
+2. 在 `Application` 中新增 narrow helper，例如：
+   - `_turnover_ledger_relation_extra_write_facade()`
+   - `_turnover_ledger_relation_extra_row_provider(...)`
+3. Helper 必须：
+   - 支持 test override，例如 `_turnover_ledger_relation_extra_write_facade_override`；
+   - 只在 `state_store.storage_backend == "postgres"` 时尝试创建 facade；
+   - 需要真实 `state_store._connection`；
+   - 需要 `runtime_repositories.queue_repository` 且支持 `enqueue_read_model_refresh_in_transaction`；
+   - 缺任一依赖时返回 `None`，handler 保持 legacy path；
+   - 不创建 fake/no-op transaction；
+   - 不把 `Application` 注入 facade；
+   - 复用 `TurnoverLedgerExtraNormalizerAdapter(extra_service=self._turnover_ledger_extra_service)`；
+   - row provider 只能复用 read/detail route helper，不能读取 HTTP 或 auth。
+4. relation extra handler：
+   - session/body/error mapping 保留在 handler；
+   - 如果 helper 返回 facade，则调用 facade；
+   - facade result 后由 handler 加 `turnover_ledger_invalidated = True` 并返回 JSON；
+   - 如果 helper 返回 `None`，走现有 legacy path，保持测试兼容。
+5. 如新增测试，只能覆盖：
+   - PostgreSQL/facade override path 会调用 facade，并不会执行 legacy best-effort persistence/clear/enqueue；
+   - helper fallback 时 legacy tests 仍通过。
+6. 不得迁移 confirm、withdraw、tag selection、bank-row-tags。
+
+Forbidden Scope:
+- 不得迁移其它 Turnover Ledger 写 API。
+- 不得修改 runtime queue、worker、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得访问真实外部服务。
+- 不得用 fake/no-op transaction 接入 production path。
+- 不得绕过或放宽现有 relation extra validation/normalization。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v
+- rg -n "turnover_ledger_relation_extra_write_facade|TurnoverLedgerWriteFacade|TurnoverLedgerExtraRepositoryAdapter|TurnoverLedgerDirtyOutboxWriter|TurnoverLedgerExtraNormalizerAdapter|PF-P064" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services docs/architecture/backend-refactor tests/test_turnover_ledger_api.py
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P064 status = implemented / verified / blocked。
+   - 记录 handler wiring 和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P064 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 relation extra handler wiring 状态和剩余风险。
+4. PF-P064 后应生成 cumulative MG，覆盖 PF-P055 到 PF-P064 的完整 diff，除非测试失败或 scope 需要继续拆分。
+```
+
+### 审查结论
+
+- PF-P064 是当前 relation extra slice 的正确实现步：facade、adapter、row provider 和 pure normalizer 已齐备。
+- Prompt 明确保留非 PostgreSQL legacy path，避免本地/非生产 runtime 破坏。
+- Prompt 明确禁止 fake/no-op transaction 和其它写 API migration。

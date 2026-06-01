@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步可进入 relation extra handler minimal wiring |
+| 当前阶段 | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` planned |
 | 最近 verified prompt | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P063 增加 pure normalizer adapter；UoW contract 22 tests、Extra service 10 tests、API 28 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`；只最小接入 relation extra handler |
+| 下一条允许任务 | 执行 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`；只最小接入 relation extra handler |
 
 ## Prompt 执行日志
 
@@ -5975,6 +5975,30 @@ PF-P062 只建立 facade normalization boundary。真实 handler wiring 前还�
 #### 下一条 Prompt 上下文
 
 PF-P063 已补齐 handler wiring 前的 pure normalizer。PF-P064 可以只做 `PUT /api/turnover-ledger/relations/{id}/extra` 的最小 handler wiring：仅在 PostgreSQL runtime 且存在 transaction-bound queue 时创建 facade；非 PostgreSQL/依赖不齐继续 legacy path；不得迁移其它 Turnover Ledger 写 API。
+
+### PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring
+
+状态：`planned`
+
+#### 范围
+
+- 只让 `PUT /api/turnover-ledger/relations/{id}/extra` 在 PostgreSQL runtime 且依赖齐备时走 `TurnoverLedgerWriteFacade`。
+- 非 PostgreSQL runtime 或依赖不齐时保持 legacy path。
+- 不迁移 confirm、withdraw、tag selection 或 bank-row-tags。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P064。
+
+#### 验收标准
+
+- `server.py` diff 只限 relation extra handler wiring 和必要 helper/import。
+- 现有 28 条 Turnover API tests、UoW contract tests、Extra service tests 必须通过。
 
 ## 维护规则
 
