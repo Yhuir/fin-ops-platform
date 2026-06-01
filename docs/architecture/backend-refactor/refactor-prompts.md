@@ -20672,3 +20672,25 @@ Post-Flight:
 
 - PF-P099 是 PF-P098 后的正确测试锁定步骤：先保留 current behavior，再用 expectedFailure 锁定目标行为。
 - prompt 明确禁止 production code 修改，因此不会提前改变 withdraw 线上行为。
+
+### 执行结果
+
+- 状态：`verified`。
+- 保留 current behavior test `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues`。
+- 新增 API future target test `test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh`，使用 `unittest.expectedFailure`。
+- 新增 UoW/facade future target test `test_target_withdraw_relation_facade_passes_expected_versions_before_repository`，使用 `unittest.expectedFailure`。
+- 两条 target tests 锁定 duplicate/stale withdraw 目标行为：不得二次 mutation/audit/refresh，facade 应支持 expected_versions 并让 UoW 在 stale 时阻止 repository handler。
+- 未修改 production code。
+
+### 验证结果
+
+- `git status --short --branch`：Pass，仅有 PF-P099 范围内 tests 改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests，1 expected failure。
+- `rg -n "PF-P099|withdraw.*duplicate|expected_versions|expectedFailure|stale" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton`，只实现最小 expected_versions/stale guard skeleton，让 PF-P099 的 2 条 expectedFailure target tests 转为普通通过；不得处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。

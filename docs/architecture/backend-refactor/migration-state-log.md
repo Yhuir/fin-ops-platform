@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` |
-| 最近 verified prompt | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
+| 当前阶段 | `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` 已执行并验证通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p098` |
-| 最近验证 | PF-P098 文档验证通过；下一条最小切片为 withdraw stale/duplicate contract tests |
-| 下一条允许任务 | 执行 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests，1 expected failure；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests，1 expected failure |
+| 下一条允许任务 | 生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton` |
 
 ## Prompt 执行日志
 
@@ -7580,7 +7580,7 @@ PF-P098 已 verified。下一条应生成并审查 `PF-P099 - Turnover Ledger Wi
 
 ### PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7601,9 +7601,26 @@ PF-P098 已 verified。下一条应生成并审查 `PF-P099 - Turnover Ledger Wi
 - 不得修改 production code。
 - 不得同时处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
 
+#### 执行结果
+
+- 保留 current behavior test `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues`。
+- 新增 API future target test `test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh`，使用 `unittest.expectedFailure`。
+- 新增 UoW/facade future target test `test_target_withdraw_relation_facade_passes_expected_versions_before_repository`，使用 `unittest.expectedFailure`。
+- 两条 target tests 锁定：duplicate/stale withdraw 不得二次 mutation/audit/refresh，facade 应支持 expected_versions 并让 UoW 在 stale 时阻止 repository handler。
+- 未修改 production code。
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅有 PF-P099 范围内 tests 改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests，1 expected failure。
+- `rg -n "PF-P099|withdraw.*duplicate|expected_versions|expectedFailure|stale" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
 #### 下一条 Prompt 上下文
 
-PF-P099 planned。执行后若 target tests 已锁定，应生成最小 implementation prompt，让 withdraw expected_versions/stale guard target tests 转绿。
+PF-P099 已 verified。下一条应生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton`，只实现最小 expected_versions/stale guard skeleton，让 PF-P099 的 2 条 expectedFailure target tests 转为普通通过；不得处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
 
 ## 维护规则
 

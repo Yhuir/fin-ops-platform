@@ -1834,6 +1834,55 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
 
+    @unittest.expectedFailure
+    def test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh(self) -> None:
+        # PF-P099 target contract: duplicate withdraw should become a conflict, not a second mutation.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "first confirm"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+
+            first_withdraw_response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "first withdraw"}),
+            )
+            second_withdraw_response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "duplicate withdraw"}),
+            )
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(confirmed_response.status_code, 200)
+        self.assertEqual(first_withdraw_response.status_code, 200)
+        self.assertIn(second_withdraw_response.status_code, {400, 409})
+        self.assertEqual(
+            [(entry["action"], entry["new_status"]) for entry in audit_log],
+            [
+                ("confirm_relation", "confirmed"),
+                ("withdraw_relation", "withdrawn"),
+            ],
+        )
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+            ],
+        )
+
     def test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear(self) -> None:
         # PF-P092 PostgreSQL Facade Readiness: withdraw relation should not fall back on postgres.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

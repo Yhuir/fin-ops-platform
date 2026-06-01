@@ -2340,7 +2340,7 @@ PF-P099 建议边界：
 
 ## PF-P099 Withdraw Relation Stale/Duplicate Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2353,3 +2353,21 @@ PF-P099 建议边界：
 - 只修改 tests 和文档。
 - 不修改 production code。
 - 不同时处理 relation extra stale write、fallback cleanup 或 local transaction shim extraction。
+
+执行结果：
+
+- 保留 current behavior test `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues`。
+- 新增 API future target test `test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh`，当前为 `unittest.expectedFailure`。
+- 新增 UoW/facade future target test `test_target_withdraw_relation_facade_passes_expected_versions_before_repository`，当前为 `unittest.expectedFailure`。
+- 未修改 production code。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，46 tests，1 expected failure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，50 tests，1 expected failure。
+- `git diff --check`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P100 - Turnover Ledger Withdraw Relation Expected Versions Skeleton`。
+- PF-P100 只让 PF-P099 的 2 条 target tests 转为普通通过；不得扩大到 relation extra stale write 或 fallback cleanup。
