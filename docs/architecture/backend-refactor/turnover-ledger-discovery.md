@@ -594,7 +594,7 @@ Next recommendation after user confirms PF-P050 verified:
 
 `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`
 
-PF-P050-MG has been executed, merged into local `main`, and confirmed by the user as `verified`. This status update will be pushed with `git push origin main`.
+PF-P050-MG has been executed, merged into local `main`, confirmed by the user as `verified`, and pushed to `origin/main`; this state log records the completed push.
 
 ## Risk Register
 

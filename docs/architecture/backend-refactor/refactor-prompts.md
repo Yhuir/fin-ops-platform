@@ -14152,7 +14152,7 @@ Stop Conditions:
 - 已确认无 untracked files，未夹带 `.pkl`、`.sqlite`、`__pycache__` 或测试输出。
 - 已确认合并前 `main` 与 `origin/main` 0/0 对齐。
 - 已将 `codex/turnover-ledger-discovery-p046` 合入本地 `main`，merge commit：`abd55c00`。
-- 本地 `main` 当前 ahead `origin/main`，本次状态更新将随 `git push origin main` 推送。
+- `git push origin main` 已通过，`main` 与 `origin/main` 将在本状态收口提交推送后保持对齐。
 - 合并前和 main 上复验均通过：
   - `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
@@ -14162,4 +14162,4 @@ Stop Conditions:
   - `test ! -e backend-go`：Pass。
   - `rg -n "PF-P046|PF-P047|PF-P048|PF-P049|PF-P050|PF-P050-MG|Turnover Ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`：Pass。
 - 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
-- 下一步建议：执行 `git push origin main`；push 完成后，从最新 `main` 新建分支生成下一条 prompt。
+- 下一步建议：从最新 `main` 新建分支，生成并审查下一条 prompt。

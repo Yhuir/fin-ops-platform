@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` 已 verified，正在推送 `origin/main` |
+| 当前阶段 | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` 已 verified，且已推送 `origin/main` |
 | 当前 active prompt | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` (`verified`) |
 | 最近 verified prompt | `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate` |
 | 当前分支 | `main` |
-| 最近验证 | 用户已确认 PF-P050-MG `verified`；本地 `main` 已完成 merge 和 main 复验；本次状态更新将随 `git push origin main` 推送；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 `git push origin main`；push 完成后，从最新 `main` 新建分支生成下一条 prompt |
+| 最近验证 | 用户已确认 PF-P050-MG `verified`；本地 `main` 已完成 merge 和 main 复验；`git push origin main` 已通过，`main` 与 `origin/main` 将在本状态收口提交推送后保持对齐；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
+| 下一条允许任务 | 从最新 `main` 新建分支，生成并审查下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -5316,8 +5316,8 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 #### 下一步
 
 - 用户已确认 PF-P050-MG `verified`。
-- 执行 `git push origin main`。
-- push 完成后，从最新 `main` 新建分支生成下一条 prompt。
+- 已执行 `git push origin main`。
+- 下一步从最新 `main` 新建分支生成下一条 prompt。
 
 #### 执行结果
 
@@ -5328,7 +5328,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - 已确认无 untracked files，未夹带 `.pkl`、`.sqlite`、`__pycache__` 或测试输出。
 - 已确认 `main` 与 `origin/main` 在合并前 0/0 对齐。
 - 已将 `codex/turnover-ledger-discovery-p046` 合入本地 `main`，merge commit 为 `abd55c00`。
-- 本地 `main` 当前 ahead `origin/main`，本次状态更新将随 `git push origin main` 推送。
+- `git push origin main` 已通过，`main` 与 `origin/main` 将在本状态收口提交推送后保持对齐。
 - 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
 
 #### 合并前验证
