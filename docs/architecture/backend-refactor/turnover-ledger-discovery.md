@@ -540,9 +540,15 @@ Verification:
 - `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`: Pass.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`: Pass, 81 tests.
 
-Next recommendation after user confirms PF-P049 verified:
+User confirmed PF-P049 verified and chose one final narrow read-only cleanup before the cumulative Merge Gate.
 
-`PF-P049-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`
+Next prompt:
+
+`PF-P050 - Turnover Ledger Read Facade Handler Cleanup`
+
+PF-P050 must not expand the refactor scope. It may only thin the already-extracted read-only Turnover handlers if there is obvious duplication left in query parsing or export response construction. If the PF-P049 implementation is already thin enough, PF-P050 may be a documented no-op/block rather than forcing unnecessary code churn.
+
+After PF-P050, the next recommended prompt is a cumulative Merge Gate covering PF-P046 through PF-P050.
 
 ## Risk Register
 
@@ -560,6 +566,6 @@ Next recommendation after user confirms PF-P049 verified:
 
 Generate and review:
 
-`PF-P049 - Turnover Ledger Query/Route Facade Extraction`
+`PF-P050 - Turnover Ledger Read Facade Handler Cleanup`
 
-PF-P049 should stay in the same branch unless the user chooses a cumulative Merge Gate first. It should implement only the read-only query/route facade extraction planned in PF-P048 and must preserve the PF-P047 test contract.
+PF-P050 should stay in the same branch and remain the last narrow read-only cleanup before the cumulative Merge Gate. It must not start mutation refactoring, UoW design, repository changes, worker changes, frontend changes or Traffic Gate work. After PF-P050 is executed and verified, generate the cumulative Merge Gate for the Turnover Ledger discovery/characterization/read-facade slice.

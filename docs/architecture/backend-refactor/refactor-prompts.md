@@ -13668,7 +13668,7 @@ Stop Conditions:
 
 ## PF-P049 - Turnover Ledger Query/Route Facade Extraction
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -13863,4 +13863,126 @@ Stop Conditions:
   - `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
 - 未执行 Merge Gate、Traffic Gate、部署、生产访问或 staging 访问。
-- 下一步建议：用户确认 PF-P049 `verified` 后，生成 cumulative MG 覆盖 PF-P046 到 PF-P049；如果用户希望继续 read-only cleanup，则先生成更窄的 cleanup prompt。
+- 下一步建议：用户已确认 PF-P049 `verified`；已生成并审查 `PF-P050 - Turnover Ledger Read Facade Handler Cleanup`。
+
+## PF-P050 - Turnover Ledger Read Facade Handler Cleanup
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P050 - Turnover Ledger Read Facade Handler Cleanup。
+
+Role: 你是一位严格的 Python 后端重构工程师，熟悉低风险 handler cleanup、HTTP boundary、facade wiring、characterization tests 和小步重构。你的任务是在 PF-P049 已抽出 `TurnoverLedgerReadFacade` 的基础上，只整理 Turnover Ledger read-only handler 的重复边界代码。
+
+Context:
+- 当前重构方向是 Python-first 模块化重构，不引入 Go，不替换运行时。
+- PF-P046、PF-P047、PF-P048、PF-P049 均已 verified。
+- PF-P049 已新增 `TurnoverLedgerReadFacade`，并将 list、export-preview、export、relation GET、extra GET 这 5 个 read-only handler 的内部委托切到 facade。
+- 当前分支仍应是 `codex/turnover-ledger-discovery-p046`，因为 PF-P046 到 PF-P050 属于同一组 Turnover Ledger read-side cumulative task。
+- 本轮是可选的最后一个 read-only cleanup。PF-P050 完成后原则上应进入 cumulative MG，不应继续无限扩展。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+2. 必须确认：
+   - 当前分支是 `codex/turnover-ledger-discovery-p046`。
+   - PF-P049 已 `verified`。
+   - 当前 active prompt 是 PF-P050 planned。
+   - 工作区没有无关未提交变更。
+   - `git ls-files --others --exclude-standard` 不包含临时文件、`.pkl`、`.sqlite`、`__pycache__` 或测试输出。
+
+Required Code / Test Reading:
+- `backend/src/fin_ops_platform/app/server.py`
+  - `_handle_api_turnover_ledger`
+  - `_handle_api_turnover_ledger_export_preview`
+  - `_handle_api_turnover_ledger_export`
+  - `_handle_api_turnover_ledger_relation`
+  - `_handle_api_turnover_ledger_relation_extra`
+  - mutation handlers only as forbidden reference.
+- `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`
+- `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
+- `tests/test_turnover_ledger_read_facade.py`
+- `tests/test_turnover_ledger_api.py`
+- PF-P047 targeted tests as needed.
+
+Allowed Scope:
+- 允许修改 `backend/src/fin_ops_platform/app/server.py`，但只限 read-only Turnover handler cleanup。
+- 允许新增很小的 private helper，例如 query scalar extraction/helper，但必须保留 `server.py` 的 HTTP boundary 职责。
+- 允许修改 `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`，但只限方法命名/typed helper 等 read-only clarity cleanup，不改变语义。
+- 允许最小更新 `tests/test_turnover_ledger_read_facade.py` 或 `tests/test_turnover_ledger_api.py`，前提是 cleanup 增加了可观察边界或需要锁定 helper 行为。
+- 允许更新状态机和 prompt 文档。
+
+Forbidden Scope:
+- 不修改 mutation handlers：
+  - `_handle_api_turnover_ledger_tag_selection_update`
+  - `_handle_api_turnover_ledger_bank_row_tags_batch`
+  - `_handle_api_turnover_ledger_relation_extra_update`
+  - `_handle_api_turnover_ledger_confirm`
+  - `_handle_api_turnover_ledger_withdraw`
+- 不引入 Turnover Unit of Work。
+- 不修改 stale write、durable idempotency、dirty scope/outbox、source_version 或 read model freshness 语义。
+- 不删除、不弱化、不绕过 query legacy fallback。
+- 不修改 `TurnoverLedgerApiRoutes` grouped compatibility normalization 或 export composition。
+- 不修改 `TurnoverLedgerQueryService`、`TurnoverLedgerExportService`、`TurnoverLedgerExtraService`、`TurnoverLedgerService`、`TurnoverRelationService` 的业务逻辑。
+- 不修改 repository、worker、runtime queue、SQL migration、frontend、deployment、Nginx、Vite、environment variables 或 production config。
+- 不执行 Merge Gate。
+- 不执行 Traffic Gate、部署、生产访问或 staging 访问。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Implementation Work:
+1. Inspect the five read-only handlers and identify only low-risk duplication.
+2. If useful, introduce tiny private parsing helpers in `server.py` for repeated `query.get(...)[0]` / int parsing patterns.
+3. Keep all HTTP status codes, error codes, messages, JSON payloads and XLSX headers unchanged.
+4. Keep `TurnoverLedgerReadFacade` free from HTTP concepts and god-object dependencies.
+5. Do not create a generic router, decorator framework, broad adapter, registry, or cross-module abstraction.
+6. If cleanup would require touching mutation handlers or changing response contracts, stop and mark PF-P050 blocked instead.
+
+Recommended Direction:
+- Prefer one of these very small cleanups:
+  - extract `_turnover_ledger_query_value(query, key, default)` and/or `_turnover_ledger_query_int(query, key, default)`;
+  - extract a `_turnover_ledger_export_response(filename, content)` helper if it reduces handler noise without hiding HTTP mapping;
+  - otherwise, stop and document that PF-P049 is already thin enough and PF-P050 should be blocked/no-op.
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`
+- `rg -n "PF-P050|Turnover Ledger Read Facade Handler Cleanup|TurnoverLedgerReadFacade|_handle_api_turnover_ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`
+
+Post-Flight:
+- Update `migration-state-log.md`:
+  - PF-P050 status must be `implemented` or `blocked`;未经用户确认不得标记 `verified`。
+  - Record changed files, verification commands/results, risks, and next recommended prompt.
+- Update `refactor-prompts.md` with PF-P050 execution result.
+- Update `turnover-ledger-discovery.md` only if cleanup changes the documented boundary shape.
+- Final response must state:
+  - Which files changed.
+  - Whether targeted tests passed.
+  - That no mutation path, UoW, repository, worker, SQL migration, frontend, deploy, Traffic Gate or production access occurred.
+  - Suggested next prompt: cumulative MG for PF-P046 through PF-P050.
+
+Stop Conditions:
+- If current branch is not `codex/turnover-ledger-discovery-p046`, stop.
+- If PF-P049 is not verified, stop.
+- If unrelated uncommitted changes exist, stop.
+- If cleanup requires touching mutation handlers, stop and document blocker.
+- If handler cleanup would change response contracts, stop and document blocker.
+- If tests fail for behavior unrelated to this cleanup, stop and diagnose before further edits.
+```
+
+### 审查结论
+
+- PF-P050 可以作为 PF-P049 后的最后一个窄 read-only cleanup：它只允许处理 `server.py` 中 Turnover read-only handler 的重复 query parsing / response helper 形态。
+- PF-P050 明确禁止 mutation、UoW、repository、worker、SQL、frontend、deployment 和 Traffic Gate，避免从 read-side cleanup 滑向写路径重构。
+- PF-P050 允许 no-op/block：如果 PF-P049 后 read handlers 已足够薄，执行时应记录 blocked/no-op，而不是强行制造抽象。
+- PF-P050 完成后应进入 cumulative MG，不建议继续拖延合入。
