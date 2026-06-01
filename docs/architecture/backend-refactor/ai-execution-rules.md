@@ -15,6 +15,21 @@
 - 不把 merge 到 `main` 等同于生产切流。
 - 不记录 DB password、JWT secret、OA token、cookie 实值或生产 URL。
 
+## 低耦合架构硬规则
+
+后续所有模块重构 prompt 必须显式遵守以下规则，避免把 `server.py` 中的函数机械搬迁成新的大泥球：
+
+- 优先复用已有封装、service、repository、platform helper 和测试工具，不重复造轮子。
+- `server.py` 和 `routes_*` 只能做路由、HTTP request/response mapping、依赖组装和调用。
+- 不允许把 `server.py` 里的函数原样搬到另一个文件就声称完成低耦合重构。
+- service 不得依赖整个 `Application` 对象；构造函数必须接收明确、细粒度依赖。
+- service 允许依赖明确的 `queue_repository`、`decision_store`、`orchestrator`、`settings_provider` 等 port 或 service，不允许接收 god object。
+- service 不得直接读取 HTTP cookie/header，不得直接 import `app.auth`；auth/session 只能在 app boundary 解析为明确 auth context 后传入。
+- worker runner 不得知道 HTTP response，不得构造页面 payload。
+- repository 可以知道 SQL 表结构；业务 service 不得散落 SQL 或直接拼接 PostgreSQL 查询。
+- 写操作继续遵守 facts、audit、dirty scope、outbox 同一 PostgreSQL transaction 的底线。
+- 后续每个模块继续执行 Micro-JIT：discovery -> characterization tests -> extraction/refactor -> cumulative MG。
+
 ## Prompt 生成规则
 
 任何执行型 prompt 前，必须先生成并审查 prompt 本身。

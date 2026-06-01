@@ -31,6 +31,27 @@
 - Workbench Matching Engine 暂不升格为顶层模块，先作为 Workbench 内部 `matching/candidates` 子域推进；后续只有在输入输出、facts ownership、read model ownership 和事务边界进一步稳定后，才重新评估是否独立。
 - `/projects`、`/ledgers`、`/reminders`、`/reconciliation/cases`、`/matching/*` 当前标记为 Legacy / Review，后续必须在 Platform/Ops 或对应业务模块 Micro-JIT 中确认归属。
 
+`PF-P045` 执行后的增量事实源：
+
+- `main` 在 `PF-P044-MG` 后新增了大量已提交功能；当前重构计划不重做，但后续每个模块 prompt 必须读取 `architecture-inventory.md` 的 `PF-P045 Main Delta Rebaseline`。
+- Turnover Ledger 已新增 query service、SQL projection、source versions、read model refresh 和 grouped breakdown contract；后续 Turnover Micro-JIT 不得只围绕旧 `turnover_ledger_service.py`。
+- Bankdetail 已扩展到 route facade、application service、category selection、external turnover tag semantics 和 No OA Batch read model；后续 Bankdetail Micro-JIT 必须包含 No OA Batch 子域。
+- Invoices 已扩展到 Pending Invoice lifecycle、Output Invoice Collections lifecycle、Input Invoice Usage OA reverse、OA Pending Payments read model；后续 Invoices Micro-JIT 必须先分子域做 discovery，不得一次性改所有 invoice service。
+- Tax / Cost / ETC 已新增 cost statistics runtime、ETC business batch application service、tax offset plan/query/runtime；后续 Micro-JIT 必须覆盖 runtime refresh 和 SQL projection。
+- Platform / Runtime 已新增 runtime worker registry、deploy worker env examples 和 RabbitMQ/staging preflight 强化；后续 worker 相关改动必须同步 registry、deploy env、tests 和 App Health 观测。
+- 当前没有证据需要推翻 Python-first 计划或创建新语言后端。
+
+后续 prompt 的低耦合硬规则：
+
+- 优先复用已有封装、service、repository、platform helper 和测试工具，不重复造轮子。
+- `server.py` / `routes_*` 只做路由、HTTP 映射、依赖组装和调用。
+- 不允许机械拆文件；不能把 `server.py` 函数原样搬到 service 就算完成。
+- service 不依赖整个 `Application` 对象，只接收明确依赖。
+- service 不直接读 HTTP cookie/header，不 import `app.auth`。
+- worker runner 不知道 HTTP response，不构造页面 payload。
+- repository 可以知道 SQL 表结构；业务 service 不散落 SQL。
+- 业务写操作继续遵守 facts、audit、dirty scope、outbox 同事务底线。
+
 ## Platform / Infrastructure
 
 `platform` 不是业务模块，是所有模块共享的边界集合。
