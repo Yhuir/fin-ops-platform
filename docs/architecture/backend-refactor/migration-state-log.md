@@ -56,8 +56,8 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` planned |
+| 当前阶段 | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 功能分支预检通过，等待合入 main 复验 |
+| 当前 active prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` in_progress |
 | 最近 verified prompt | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P064 最小接入 relation extra handler；API 29 tests、UoW contract 22 tests、Extra service 10 tests 通过 |
@@ -6022,7 +6022,7 @@ PF-P055 到 PF-P064 已形成可合并的 relation extra UoW integration slice�
 
 ### PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate
 
-状态：`planned`
+状态：`in_progress`
 
 #### 范围
 
@@ -6045,6 +6045,16 @@ PF-P055 到 PF-P064 已形成可合并的 relation extra UoW integration slice�
 - targeted tests 在功能分支通过。
 - merge 到最新 main 后在 main 上复验通过。
 - main 验证失败则停止，不得 push。
+
+#### 分支预检结果
+
+- `git status --short --branch`：Pass，位于 `codex/turnover-ledger-write-integration-p055`。
+- `git ls-files --others --exclude-standard`：Pass，无输出。
+- `git diff --check`：Pass。
+- `git diff --name-status main...HEAD`：Pass，只包含 MG 白名单文件。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
 
 ## 维护规则
 

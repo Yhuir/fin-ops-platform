@@ -15990,3 +15990,15 @@ Post-Flight:
 - PF-P064-MG 是当前 relation extra UoW integration slice 的正确合并门禁。
 - MG 白名单只覆盖 Turnover relation extra UoW/facade/adapter/handler wiring、相关 tests 和文档。
 - MG 明确禁止 Traffic Gate、部署、生产访问和其它写 API migration。
+
+### 执行进度
+
+- PF-P064-MG 功能分支预检通过，状态为 `in_progress`，下一步是合入 main 并复验。
+- 分支预检：
+  - `git status --short --branch`：Pass，位于 `codex/turnover-ledger-write-integration-p055`。
+  - `git ls-files --others --exclude-standard`：Pass，无输出。
+  - `git diff --check`：Pass。
+  - `git diff --name-status main...HEAD`：Pass，只包含 MG 白名单文件。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
