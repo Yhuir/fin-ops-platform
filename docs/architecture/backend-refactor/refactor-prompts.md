@@ -19715,3 +19715,23 @@ Post-Flight:
 - PF-P092 正确地把 PostgreSQL handler wiring 前置为 API-level target tests。
 - 本轮禁止修改 production code，避免在没有测试门禁时直接接入 handler。
 - 使用 fake postgres state store / fake queue repository 足以锁定 handler seam，不需要真实数据库。
+
+### 执行结果
+
+- PF-P092 已执行并按自动工作流标记为 `verified`。
+- 新增 3 条 `unittest.expectedFailure` API-level target tests，锁定 PostgreSQL storage backend 下的 future facade/UoW path：
+  - `test_target_postgres_bank_row_tags_batch_uses_facade_without_direct_read_model_clear`
+  - `test_target_postgres_confirm_relation_uses_facade_without_direct_read_model_clear`
+  - `test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear`
+- 新增 fake postgres state store 和 fake queue recorder，只用于本地 API target tests，不访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo 或 MySQL。
+- 未修改 `server.py` 或任何 production code，未迁移 PostgreSQL handler path。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，45 tests，3 expectedFailure。
+- `git status --short --branch`: Pass，当前分支不是 `main`，仅 PF-P092 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪临时文件。
+- `git diff --check`: Pass。
+- `rg -n "PF-P092|PostgreSQL Facade Readiness|postgres.*facade|expectedFailure" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring`，只让 PF-P092 的 3 条 target tests 转绿；不得扩展到其它模块。

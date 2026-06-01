@@ -44,6 +44,41 @@ class _TurnoverReadModelRecorder:
         self.clear_calls += 1
 
 
+class _PostgresLikeStateStore:
+    storage_backend = "postgres"
+
+    def __init__(self, delegate: object) -> None:
+        self._delegate = delegate
+        self._connection = object()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._delegate, name)
+
+
+class _PostgresQueueRecorder:
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, str, str]] = []
+        self.transactional: list[tuple[str, str, str, object]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+        self.enqueued.append((scope_type, scope_key, reason))
+
+    def enqueue_read_model_refresh_in_transaction(
+        self,
+        *,
+        transaction: object,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+    ) -> dict[str, object]:
+        _ = tenant_id, priority, trace_id
+        self.transactional.append((scope_type, scope_key, reason, transaction))
+        return {"scope_type": scope_type, "scope_key": scope_key, "reason": reason}
+
+
 class _RelationExtraWriteFacadeRecorder:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -891,6 +926,39 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
 
+    @unittest.expectedFailure
+    def test_target_postgres_bank_row_tags_batch_uses_facade_without_direct_read_model_clear(self) -> None:
+        # PF-P092 PostgreSQL Facade Readiness: postgres storage should enter facade/UoW path.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _PostgresQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
+        self.assertEqual(queue.enqueued, [])
+
     def test_turnover_bank_row_tag_batch_refreshes_all_required_scopes(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1686,6 +1754,30 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
 
+    @unittest.expectedFailure
+    def test_target_postgres_confirm_relation_uses_facade_without_direct_read_model_clear(self) -> None:
+        # PF-P092 PostgreSQL Facade Readiness: confirm relation should not fall back on postgres.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _PostgresQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "postgres facade readiness"}),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertEqual([item[:3] for item in queue.transactional], [("turnover_ledger", "all", "turnover_relation_changed")])
+        self.assertEqual(queue.enqueued, [])
+
     def test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1737,6 +1829,37 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ("turnover_ledger", "all", "turnover_relation_changed"),
             ],
         )
+
+    @unittest.expectedFailure
+    def test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear(self) -> None:
+        # PF-P092 PostgreSQL Facade Readiness: withdraw relation should not fall back on postgres.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": _PostgresQueueRecorder()})()
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before postgres withdraw"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+            read_repository = _TurnoverReadModelRecorder()
+            queue = _PostgresQueueRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "postgres facade readiness"}),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertEqual([item[:3] for item in queue.transactional], [("turnover_ledger", "all", "turnover_relation_changed")])
+        self.assertEqual(queue.enqueued, [])
 
     def test_withdraw_relation_queue_failure_happens_after_relation_withdraw_and_read_model_clear(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

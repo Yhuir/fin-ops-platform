@@ -1941,7 +1941,7 @@ Verification:
 
 ## PF-P092 PostgreSQL Facade Readiness Target Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1960,4 +1960,17 @@ Verification:
 
 下一步：
 
-- PF-P092 verified 后，再决定是执行最小 PostgreSQL facade seam wiring，还是先做 cumulative MG。
+- PF-P092 已 verified。下一步生成并审查 `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring`，只让 PF-P092 的 3 条 PostgreSQL facade readiness target tests 转绿；不得扩展到其它模块。
+
+执行结果：
+
+- 新增 3 条 API-level target tests，当前为 `unittest.expectedFailure`：
+  - PostgreSQL bank-row-tags batch 应进入 facade/UoW path，不应 direct clear read model；
+  - PostgreSQL confirm relation 应进入 facade/UoW path，不应 direct clear read model；
+  - PostgreSQL withdraw relation 应进入 facade/UoW path，不应 direct clear read model。
+- 新增 fake postgres state store 和 fake queue recorder，用于锁定 handler seam，不访问真实数据库或外部服务。
+- 未修改 `server.py`、adapters、facade、UoW 或 SQL migration。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 45 tests, 3 expectedFailure.
