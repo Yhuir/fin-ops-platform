@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 已生成并审查 |
-| 当前 active prompt | `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` planned |
+| 当前阶段 | `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 已合入 main 并通过验证 |
+| 当前 active prompt | 无 |
 | 最近 verified prompt | `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` |
 | 当前分支 | `codex/turnover-ledger-next-uow-slice-p074` |
-| 最近验证 | PF-P075 完成 relation extra local/dev/test UoW path；API 33 tests 通过，UoW contract 30 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
+| 最近验证 | PF-P075-MG 已合入 main；main 上 API 33 tests 通过，UoW contract 30 tests 通过 |
+| 下一条允许任务 | push origin/main 后，从最新 main 新建分支并生成下一条 Turnover Ledger 写路径 prompt |
 
 ## Prompt 执行日志
 
@@ -6511,6 +6511,34 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 #### 下一步
 
 - 生成并审查 `PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，统一覆盖 PF-P074 + PF-P075。
+
+### PF-P075-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 覆盖 PF-P074 + PF-P075 的 relation extra UoW completion slice。
+- 只执行 Merge Gate，不执行 Traffic Gate、部署、Nginx 修改或生产访问。
+
+#### 执行结果
+
+- 分支 `codex/turnover-ledger-next-uow-slice-p074` 已合入 `main`。
+- 合入前后 Turnover Ledger targeted tests 均通过。
+- PF-P074 的 relation extra target tests 已转绿并进入 main。
+
+#### Verification on main
+
+- `git status --short --branch`: Pass，`main...origin/main [ahead 6]`（push 前）。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check HEAD~1..HEAD`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，33 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+
+#### 下一步
+
+- 执行 `git push origin main`。
+- push 后必须从最新 `main` 新建 `codex/` 分支，再生成下一条 Turnover Ledger 写路径 prompt。
 
 ## 维护规则
 

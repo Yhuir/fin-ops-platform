@@ -17472,3 +17472,20 @@ Stop Conditions:
 - PF-P075-MG 的范围只覆盖 PF-P074 + PF-P075 relation extra UoW completion slice。
 - MG 明确要求合入前后运行 Turnover Ledger targeted tests，并继续分离 Merge Gate 与 Traffic Gate。
 - MG 白名单只包含 `server.py`、relation extra API tests 和三份 backend-refactor 文档。
+
+### 执行结果
+
+- PF-P075-MG 已执行并按自动工作流标记为 `verified`。
+- 分支 `codex/turnover-ledger-next-uow-slice-p074` 已合入 `main`。
+- 合入前后 targeted tests 均通过。
+- 未执行 Traffic Gate、部署、Nginx 修改或生产访问。
+
+Verification on main:
+
+- `git status --short --branch`: Pass，`main...origin/main [ahead 6]`（push 前）。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check HEAD~1..HEAD`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，33 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+
+下一步建议：`git push origin main` 后，从最新 `main` 新建分支，再生成下一条 Turnover Ledger 写路径 prompt。
