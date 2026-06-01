@@ -18604,3 +18604,20 @@ Post-Flight:
 - PF-P083-MG 的范围只覆盖 confirm relation UoW slice，不把 withdraw、No OA、Bankdetail 独立 API 或 Workbench influence 混入。
 - Prompt 明确要求 untracked 检查、diff 白名单、targeted tests、compileall、main 合并后复验和失败不 push。
 - Prompt 明确 Merge Gate 不是 Traffic Gate，不执行部署或生产切流。
+
+### 执行结果
+
+- PF-P083-MG 已执行并按自动工作流标记为 `verified`。
+- 合并前 diff 仅包含 7 个白名单文件：`server.py`、`turnover_ledger_write_facade.py`、`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py` 和 backend-refactor 三份文档。
+- 当前分支合并前 targeted tests、compileall、diff-check 和 untracked 检查均通过。
+- 已合入本地 `main`，merge commit: `a1ba5532`。
+- `main` 上 targeted tests 与 compileall 已重新通过。
+- 未执行 Traffic Gate、部署、Nginx 修改、生产配置修改或生产访问。
+
+Verification on main:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，39 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，36 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass。
+
+下一步建议：push `origin/main` 后，从最新 `main` 新建分支并生成 `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests`。

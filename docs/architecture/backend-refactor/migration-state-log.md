@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` 已生成并审查 |
-| 当前 active prompt | `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` planned |
-| 最近 verified prompt | `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring` |
-| 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
-| 最近验证 | PF-P083 完成 confirm relation local/dev/test handler UoW wiring；PF-P082 的 2 条 target tests 已转普通通过，PostgreSQL production path 仍保留 legacy fallback |
-| 下一条允许任务 | 执行 `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` 已验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P079 到 PF-P083 confirm relation UoW slice 已合入本地 main；main 上 Turnover Ledger targeted tests 与 compileall 通过 |
+| 下一条允许任务 | `git push origin main` 后，从最新 main 新建 `codex/` 分支并生成 `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -6827,6 +6827,43 @@ PF-P079/PF-P080 完成了 confirm relation facade-level skeleton。下一步应�
 #### 下一条 Prompt 上下文
 
 PF-P079 到 PF-P083 构成 confirm relation UoW slice：facade contract、facade skeleton、handler readiness、API target tests、local/dev/test handler wiring 已完成。下一步应生成 `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate`，统一覆盖本分支自最新 main 以来的 PF-P079 到 PF-P083 完整 diff。MG 不执行 Traffic Gate，不部署，不访问生产。
+
+### PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 覆盖 PF-P079 到 PF-P083 的 confirm relation UoW slice 累计 diff。
+- 只执行 Merge Gate，不执行 Traffic Gate。
+- 合并前后运行 Turnover Ledger targeted tests 和 compileall。
+
+#### 执行摘要
+
+- 合并前 diff 仅包含白名单文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - backend-refactor 三份文档。
+- 当前分支已通过 no-untracked、diff-check、targeted tests 和 compileall。
+- 已合入本地 `main`，merge commit：`a1ba5532`。
+- `main` 上 targeted verification 已通过。
+- 未执行 Traffic Gate、部署、Nginx 修改、生产配置修改或生产访问。
+
+#### 验证
+
+- `git status --short --branch`：Pass，合并前分支干净；main 合并后 ahead origin/main。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `git diff --name-only main...HEAD`：Pass，仅 7 个白名单文件。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，39 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，36 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+#### 下一条 Prompt 上下文
+
+push `origin/main` 后，从最新 main 新建 `codex/` 分支。下一条建议 prompt 是 `PF-P084 - Turnover Ledger Withdraw Relation Facade Contract Tests`：只为 withdraw relation 建立 facade-level contract tests，不迁移 handler，不猜测 PostgreSQL relation SQL，不进入 Traffic Gate。
 
 ## 维护规则
 
