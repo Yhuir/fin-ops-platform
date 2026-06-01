@@ -1127,3 +1127,25 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 33 tests, 2 expectedFailure.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+
+## PF-P075 Relation Extra Handler UoW Completion
+
+状态：`planned`
+
+目标：
+
+- 最小完成 `PUT /api/turnover-ledger/relations/{id}/extra` 的 local/dev/test UoW path。
+- 让 PF-P074 的 2 个 relation extra target `expectedFailure` 转为普通通过。
+- 不迁移其它 Turnover 写路径，不引入 durable idempotency 或 stale write guard。
+
+边界：
+
+- PostgreSQL path 继续使用现有 transaction-bound queue writer。
+- local/dev/test path 必须使用 local connection shim、local extra repository/adapter、local dirty writer 和 existing normalizer/row provider。
+- queue/outbox failure 必须恢复 in-memory extra snapshot 和 local state store extras snapshot。
+- 成功路径不得直接调用 `_clear_turnover_ledger_read_model_best_effort()`。
+
+下一步：
+
+- 执行 PF-P075。
+- PF-P075 verified 后生成 cumulative MG，覆盖 PF-P074 + PF-P075。

@@ -17264,3 +17264,101 @@ Verification:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
 
 下一步建议：生成并审查 `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion`，只实现 relation extra local/dev/test UoW completion，不迁移其它写路径。
+
+## PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion
+
+```text
+/goal
+PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion
+
+Role:
+你是一位负责遗留写路径小步迁移的后端工程师，熟悉 Python Clean Architecture、事务边界、unittest characterization tests 和 Turnover Ledger read model dirty/outbox 机制。
+
+Context:
+PF-P074 已为 relation extra handler completion 增加 API-level target tests。当前 `PUT /api/turnover-ledger/relations/{id}/extra` 在 PostgreSQL path 可获得 transaction-bound queue 时会走 `TurnoverLedgerWriteFacade.update_relation_extra(...)`；local/dev/test path 仍返回 `None` 并走 legacy best-effort path，导致 queue failure 发生在 extra 保存和 read model clear 之后。PF-P075 的目标是只完成 relation extra handler 的 local/dev/test UoW completion，让 PF-P074 的 2 个 expectedFailure target tests 转为普通通过。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_relation_extra_update`、`_turnover_ledger_relation_extra_write_facade`、tag selection local transaction shim
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py 中 `InMemoryTurnoverLedgerExtraService`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py relation extra tests
+   - tests/test_turnover_ledger_uow_contract.py relation extra tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+4. 必须确认 PF-P074 已 verified。
+
+Task:
+最小实现 relation extra handler UoW completion。只允许让 `PUT /api/turnover-ledger/relations/{id}/extra` 在 local/dev/test path 也获得 `TurnoverLedgerWriteFacade`，并把 extra 保存与 dirty/outbox enqueue 放进同一个 local transaction shim。PostgreSQL production path 已存在，必须保持 transaction-bound queue writer，不得降级。
+
+Required Implementation Work:
+1. 在 `server.py` 中扩展 `_turnover_ledger_relation_extra_write_facade()`：
+   - PostgreSQL path 保持现有 `PostgresWorkbenchRepository(transaction)` + `TurnoverLedgerDirtyOutboxWriter`。
+   - local/dev/test path 在存在 `queue_repository.enqueue_read_model_refresh` 时返回 facade，而不是 fallback 到 legacy path。
+   - local path 必须使用细粒度依赖：local connection shim、local extra repository/adapter、local dirty writer、existing `TurnoverLedgerExtraNormalizerAdapter` 和 row provider。
+   - 不得把 `Application` god object、`RuntimeRepositories` 或完整 state store 注入 facade/service。
+2. local relation extra transaction shim 必须满足：
+   - queue/outbox failure 时恢复 relation extra in-memory snapshot；
+   - queue/outbox failure 时恢复 local state store 中的 turnover ledger extras snapshot；
+   - 成功提交后才持久化最新 extras snapshot 到 local state store；
+   - 不调用 `_clear_turnover_ledger_read_model_best_effort()`。
+3. 将 PF-P074 的 2 个 relation extra target tests 从 `unittest.expectedFailure` 转为普通通过：
+   - queue/outbox failure rolls back extra save；
+   - successful UoW path does not clear read model directly。
+4. 保持以下兼容：
+   - response shape 仍是 `{"extra": ..., "row": ..., "turnover_ledger_invalidated": true}`；
+   - invalid payload 仍返回 400；
+   - readonly user 仍返回 403；
+   - GET relation extra 不变；
+   - legacy fallback full snapshot helper test 仍通过。
+5. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- backend/src/fin_ops_platform/app/server.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `TurnoverLedgerWriteFacade.update_relation_extra(...)`，除非现有测试证明必须做兼容性 bugfix；如需修改，必须先停止并说明原因。
+- 不得修改 repository/schema/migration。
+- 不得迁移 tag selection、bank row tags、confirm、withdraw、relation confirm/cancel 或任何其它 Turnover 写路径。
+- 不得引入 durable idempotency、stale write guard 或新的 UoW 架构。
+- 不得删除 legacy behavior tests；若目标语义改变，只允许把 current legacy behavior test 调整为明确的 compatibility/fallback 测试。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "relation_extra|turnover_relation_extra_changed|_turnover_ledger_relation_extra_write_facade|_local_turnover_ledger|clear_turnover_ledger_read_model|expectedFailure|PF-P075" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P075 status = implemented / verified / blocked。
+   - 记录 handler completion、rollback/no-clear tests 是否转绿、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P075 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 relation extra handler UoW completion 状态。
+4. PF-P075 通过后，下一步应生成 cumulative MG，覆盖 PF-P074 + PF-P075 的完整 diff；不要直接进入其它 Turnover 写路径。
+```
+
+### 审查结论
+
+- PF-P075 是 PF-P074 后正确的最小实现：只完成 relation extra local/dev/test UoW path，并让 PF-P074 的两个目标测试转绿。
+- Prompt 明确保留 PostgreSQL transaction-bound path，不引入新事务架构、不迁移其它写路径。
+- Prompt 明确要求 local transaction shim 在 queue failure 时同时恢复 in-memory extra snapshot 和 local state store snapshot，避免只做表面回滚。

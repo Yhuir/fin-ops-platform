@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` 已执行并通过验证 |
-| 当前 active prompt | 无 |
-| 最近 verified prompt | `PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` 已生成并审查 |
+| 当前 active prompt | `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` planned |
+| 最近 verified prompt | `PF-P074 - Turnover Ledger Relation Extra UoW Completion Tests` |
 | 当前分支 | `codex/turnover-ledger-next-uow-slice-p074` |
 | 最近验证 | PF-P074 增加 relation extra UoW completion target tests；API 33 tests 通过（2 expectedFailure），UoW contract 30 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` |
+| 下一条允许任务 | 执行 `PF-P075 - Turnover Ledger Relation Extra Handler UoW Completion` |
 
 ## Prompt 执行日志
 
