@@ -90,6 +90,21 @@ class _RecordingSettingsPort:
     def save_tag_selection(self, payload: dict[str, object], *, transaction: object) -> None:
         self.saved.append({"payload": dict(payload), "transaction": transaction})
 
+    def save_tag_selection_settings(
+        self,
+        *,
+        next_snapshot: dict[str, object],
+        audit_event: dict[str, object],
+        transaction: object,
+    ) -> None:
+        self.saved.append(
+            {
+                "next_snapshot": dict(next_snapshot),
+                "audit_event": dict(audit_event),
+                "transaction": transaction,
+            }
+        )
+
     def append_audit(self, event: dict[str, object], *, transaction: object) -> None:
         self.audit.append({"event": dict(event), "transaction": transaction})
 
@@ -156,6 +171,30 @@ class _RecordingRepositoryFactory:
     def __call__(self, transaction: object) -> _RecordingTurnoverExtraSnapshotRepository:
         self.transactions.append(transaction)
         repository = _RecordingTurnoverExtraSnapshotRepository()
+        self.repositories.append(repository)
+        return repository
+
+
+class _RecordingSettingsRepository:
+    def __init__(self) -> None:
+        self.saved_settings: list[dict[str, object]] = []
+        self.audit_events: list[dict[str, object]] = []
+
+    def save_settings(self, payload: dict[str, object]) -> None:
+        self.saved_settings.append(dict(payload))
+
+    def append_audit(self, event: dict[str, object]) -> None:
+        self.audit_events.append(dict(event))
+
+
+class _RecordingSettingsRepositoryFactory:
+    def __init__(self) -> None:
+        self.transactions: list[object] = []
+        self.repositories: list[_RecordingSettingsRepository] = []
+
+    def __call__(self, transaction: object) -> _RecordingSettingsRepository:
+        self.transactions.append(transaction)
+        repository = _RecordingSettingsRepository()
         self.repositories.append(repository)
         return repository
 
@@ -455,6 +494,30 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
+    def test_tag_selection_settings_port_uses_uow_transaction_before_dirty_outbox(self) -> None:
+        uow, deps = self._build_uow()
+
+        def handler(context: object) -> dict[str, object]:
+            transaction = getattr(context, "transaction")
+            context.settings_port.save_tag_selection_settings(
+                next_snapshot={"turnover_ledger_tag_selection": {"version": 2}},
+                audit_event={"action": "turnover_ledger_tag_selection_changed"},
+                transaction=transaction,
+            )
+            return {"version": 2}
+
+        result = self._run_uow(
+            uow,
+            _Command(action_name="turnover_ledger_tag_selection_changed", scope_keys=["all"]),
+            handler,
+        )
+
+        self.assertEqual(result, {"version": 2})
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertIs(deps.settings_port.saved[0]["transaction"], deps.connection.transaction_obj)
+        self.assertIs(deps.dirty_outbox_writer.calls[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_ledger_tag_selection_changed")
+
     def test_tag_selection_pure_normalizer_returns_next_selection_without_mutating_settings_snapshot(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.app_settings_service")
         service_class = getattr(module, "AppSettingsService")
@@ -699,6 +762,31 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
     def test_relation_extra_repository_adapter_rejects_application_god_object(self) -> None:
         adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerExtraRepositoryAdapter")
+
+        with self.assertRaises(TypeError):
+            adapter_class(application=object())
+
+    def test_tag_selection_settings_adapter_saves_snapshot_and_audit_with_supplied_transaction(self) -> None:
+        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerTagSelectionSettingsAdapter")
+        factory = _RecordingSettingsRepositoryFactory()
+        transaction = _RecordingTransaction()
+        adapter = adapter_class(repository_factory=factory)
+
+        adapter.save_tag_selection_settings(
+            next_snapshot={"turnover_ledger_tag_selection": {"version": 2}},
+            audit_event={"actor_id": "finance-user", "new_version": 2},
+            transaction=transaction,
+        )
+
+        self.assertEqual(factory.transactions, [transaction])
+        self.assertEqual(
+            factory.repositories[0].saved_settings,
+            [{"turnover_ledger_tag_selection": {"version": 2}}],
+        )
+        self.assertEqual(factory.repositories[0].audit_events, [{"actor_id": "finance-user", "new_version": 2}])
+
+    def test_tag_selection_settings_adapter_rejects_application_god_object(self) -> None:
+        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerTagSelectionSettingsAdapter")
 
         with self.assertRaises(TypeError):
             adapter_class(application=object())

@@ -16447,3 +16447,21 @@ Post-Flight:
 - PF-P068 是 PF-P067 后正确的小步：先建立 settings port / adapter 边界，再考虑 handler/UoW wiring。
 - Prompt 明确允许 adapter skeleton 使用 `repository_factory(transaction)` 或 writer callable，避免在真实 SQL repository 尚未准备好时扩大 scope。
 - Prompt 明确禁止修改 `server.py`、生产 handler、queue/worker/read model refresh 和 schema。
+
+### 执行结果
+
+- PF-P068 已执行并按自动工作流标记为 `verified`。
+- 新增 `TurnoverLedgerTagSelectionSettingsAdapter` skeleton。
+- 新增 UoW contract，锁定 tag selection settings port 与 dirty/outbox 共用 supplied transaction。
+- 新增 adapter contract，锁定 `repository_factory(transaction)` 保存 settings snapshot 和 audit metadata，并拒绝 `Application` god object injection。
+- 未修改 `server.py`，未迁移 handler，未改变当前 tag selection 生产路径。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P068 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，26 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
+
+下一步建议：生成并审查 `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer`，只补真实 repository/writer 事务边界，不迁移 handler。

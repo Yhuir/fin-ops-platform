@@ -792,7 +792,7 @@ Next step:
 
 ## PF-P068 Tag Selection Settings Port / Adapter Skeleton
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -808,4 +808,17 @@ Next step:
 
 下一步：
 
-- 执行 PF-P068。
+- `PF-P069 - Turnover Ledger Tag Selection Transaction-bound Repository Writer`。
+- PF-P069 should close the real repository/writer gap so the adapter can save `app.app_settings` through the active transaction.
+- PF-P069 must still not migrate `server.py` or change current handler behavior.
+
+执行结果：
+
+- Added `TurnoverLedgerTagSelectionSettingsAdapter` in `turnover_ledger_write_adapters.py`.
+- Added contract tests proving `settings_port` and dirty/outbox share the same UoW transaction.
+- Added adapter tests proving `repository_factory(transaction)` is used and `Application` god object injection is rejected.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 26 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.

@@ -15,6 +15,44 @@ class TurnoverLedgerExtraRepositoryAdapter:
         repository.save_turnover_ledger_extras({"extras": {relation_id: dict(extra)}})
 
 
+class TurnoverLedgerTagSelectionSettingsAdapter:
+    def __init__(
+        self,
+        *,
+        repository_factory: Callable[[Any], Any] | None = None,
+        writer: Callable[..., Any] | None = None,
+    ) -> None:
+        if repository_factory is None and writer is None:
+            raise ValueError("repository_factory or writer is required.")
+        self._repository_factory = repository_factory
+        self._writer = writer
+
+    def save_tag_selection_settings(
+        self,
+        *,
+        next_snapshot: dict[str, object],
+        audit_event: dict[str, object],
+        transaction: Any,
+    ) -> None:
+        if self._writer is not None:
+            self._writer(
+                next_snapshot=dict(next_snapshot),
+                audit_event=dict(audit_event),
+                transaction=transaction,
+            )
+            return
+        if self._repository_factory is None:
+            raise RuntimeError("repository_factory is required.")
+        repository = self._repository_factory(transaction)
+        save_settings = getattr(repository, "save_settings", None)
+        if not callable(save_settings):
+            raise RuntimeError("settings repository must expose save_settings.")
+        save_settings(dict(next_snapshot))
+        append_audit = getattr(repository, "append_audit", None)
+        if callable(append_audit):
+            append_audit(dict(audit_event))
+
+
 class TurnoverLedgerDirtyOutboxWriter:
     def __init__(
         self,
