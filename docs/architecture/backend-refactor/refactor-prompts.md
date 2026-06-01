@@ -13485,7 +13485,7 @@ Stop Conditions:
 
 ## PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -13664,4 +13664,172 @@ Stop Conditions:
   - `rg -n "PF-P048|Query/Route Facade Extraction|Turnover Ledger|server.py|TurnoverLedgerApiRoutes|PF-P049" docs/architecture/backend-refactor`：Pass。
 - 未修改 production code、tests、SQL migration、前端、部署、Nginx、Vite、worker routing、环境变量或生产配置。
 - 未执行 Merge Gate、Traffic Gate、部署、生产访问或 staging 访问。
-- 下一步建议：用户确认 PF-P048 `verified` 后，生成并审查 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`；如果用户希望先合入 PF-P046 到 PF-P048，则先生成 cumulative MG。
+- 下一步建议：用户已确认 PF-P048 `verified`；已生成并审查 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`。
+
+## PF-P049 - Turnover Ledger Query/Route Facade Extraction
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P049 - Turnover Ledger Query/Route Facade Extraction。
+
+Role: 你是一位严格的 Python 后端重构工程师，熟悉遗留系统低风险 extraction、HTTP boundary、route facade、characterization tests、低耦合依赖注入和 Python unittest。你的任务是按 PF-P048 的规划实施 Turnover Ledger read-only query/route facade extraction。
+
+Context:
+- 当前重构方向是 Python-first 模块化重构，不引入 Go，不替换运行时。
+- `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` 已 verified。
+- `PF-P047 - Turnover Ledger Characterization Tests` 已 verified，79-test targeted suite 已通过。
+- `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning` 已 verified，并明确 PF-P049 只能做 read-only query/route facade extraction。
+- 当前分支仍应是 `codex/turnover-ledger-discovery-p046`，因为 PF-P046/PF-P047/PF-P048/PF-P049 属于同一个 Turnover Ledger 模块任务；本任务完成后再决定是否 cumulative MG。
+- 本轮允许修改少量 production code，但只限 read-only HTTP boundary extraction；不得修改业务语义、事务语义或 mutation path。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/runtime-call-chain.md`
+2. 必须确认：
+   - 当前分支是 `codex/turnover-ledger-discovery-p046`。
+   - PF-P048 已 `verified`。
+   - 当前 active prompt 是 PF-P049 planned。
+   - 工作区没有无关未提交变更。
+   - `git ls-files --others --exclude-standard` 不包含临时文件、`.pkl`、`.sqlite`、`__pycache__` 或测试输出。
+3. 必须先读取 PF-P048 planning 小节，尤其是：
+   - Target Boundary。
+   - File Touch Plan。
+   - Dependency Injection Plan。
+   - Safe Slice Proposal。
+   - Non-Goals。
+   - Test Gate。
+
+Required Code / Test Reading:
+- `backend/src/fin_ops_platform/app/server.py`
+  - `_handle_api_turnover_ledger`
+  - `_handle_api_turnover_ledger_export_preview`
+  - `_handle_api_turnover_ledger_export`
+  - `_handle_api_turnover_ledger_relation`
+  - `_handle_api_turnover_ledger_relation_extra`
+  - `_handle_api_turnover_ledger_relation_extra_update` 只读边界参考，不迁移。
+  - `_handle_api_turnover_ledger_confirm` / `_handle_api_turnover_ledger_withdraw` / `_handle_api_turnover_ledger_bank_row_tags_batch` 只读 forbidden mutation scope，不迁移。
+- `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
+- `tests/test_turnover_ledger_query_service.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_export_service.py`
+- `tests/test_turnover_ledger_source_versions.py`
+- `tests/test_turnover_relation_service.py`
+- `tests/test_turnover_ledger_extra_service.py`
+- `tests/test_workbench_turnover_grouping.py`
+
+Allowed Scope:
+- 允许修改 `backend/src/fin_ops_platform/app/server.py`，但只限 read-only Turnover handler 的内部委托和初始化 wiring。
+- 允许修改 `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`，但只限新增/调整 read-only facade/helper，不改变 `TurnoverLedgerApiRoutes` 的现有业务语义。
+- 允许新增一个小型 app-boundary helper 文件，例如：
+  - `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`
+  如果使用新文件，必须保持它只依赖细粒度对象并返回 plain Python payload。
+- 只有当 import path 或 helper 名称变化导致测试必须跟随时，才允许对 Turnover Ledger targeted tests 做最小机械更新。
+- 允许更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-discovery.md` 的执行结果。
+
+Forbidden Scope:
+- 不修改下列 mutation handlers 的行为或内部编排：
+  - `_handle_api_turnover_ledger_tag_selection_update`
+  - `_handle_api_turnover_ledger_bank_row_tags_batch`
+  - `_handle_api_turnover_ledger_relation_extra_update`
+  - `_handle_api_turnover_ledger_confirm`
+  - `_handle_api_turnover_ledger_withdraw`
+- 不引入 Turnover Unit of Work。
+- 不修改 stale write、durable idempotency、dirty scope/outbox、source_version 或 read model freshness 语义。
+- 不删除、不弱化、不绕过 query legacy fallback。
+- 不修改 `TurnoverLedgerQueryService`、`TurnoverLedgerExportService`、`TurnoverLedgerExtraService`、`TurnoverLedgerService`、`TurnoverRelationService` 的业务逻辑。
+- 不修改 repository、worker、runtime queue、SQL migration、frontend、deployment、Nginx、Vite、environment variables 或 production config。
+- 不执行 Merge Gate。
+- 不执行 Traffic Gate、部署、生产访问或 staging 访问。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Implementation Work:
+1. Extract a read-only HTTP boundary helper/facade
+   - Implement a tiny helper/facade for Turnover read routes.
+   - It must delegate to the existing `TurnoverLedgerApiRoutes`.
+   - It must return plain Python objects:
+     - `dict[str, object]` for JSON payloads.
+     - `(filename, bytes)` for XLSX export.
+   - It must allow current exceptions to propagate so `server.py` keeps HTTP mapping.
+2. Keep `server.py` as HTTP boundary
+   - `server.py` must continue to parse query params and construct `Response`.
+   - `server.py` must keep current error mapping:
+     - `TypeError` / `ValueError` -> current BAD_REQUEST payloads.
+     - `KeyError` -> current NOT_FOUND payloads for relation/detail reads.
+   - `server.py` must keep XLSX `Content-Type` and `Content-Disposition` header construction.
+3. Thin only these read-only handlers
+   - `_handle_api_turnover_ledger`
+   - `_handle_api_turnover_ledger_export_preview`
+   - `_handle_api_turnover_ledger_export`
+   - `_handle_api_turnover_ledger_relation`
+   - `_handle_api_turnover_ledger_relation_extra`
+4. Preserve route facade behavior
+   - Do not split grouped compatibility normalization in this prompt.
+   - Do not move export flattening or grouped payload composition into `server.py`.
+   - Keep `TurnoverLedgerApiRoutes` as the owner of grouped compatibility behavior for now.
+5. Dependency injection constraints
+   - Do not inject `Application`.
+   - Do not inject `state_store`.
+   - Do not inject `RuntimeRepositories`.
+   - Do not pass the entire route table or runtime container.
+   - The helper/facade should receive only `TurnoverLedgerApiRoutes` or similarly narrow dependencies.
+6. Tests and behavior
+   - Do not weaken tests.
+   - Do not patch out the helper/facade in a way that bypasses the real handler -> facade -> route facade path.
+   - Preserve PF-P047 characterization behavior exactly.
+
+Recommended Shape:
+- Prefer a simple class or function set named similarly to `TurnoverLedgerReadFacade` or `TurnoverLedgerReadHttpFacade`.
+- If placed in `routes_turnover_ledger.py`, keep the class clearly separate from mutation methods.
+- If placed in a new file, import it from `server.py` and initialize once near `_turnover_ledger_api_routes`.
+- Keep the implementation boring and explicit. Do not add generic routing frameworks, decorators, factories, adapters, registries or abstractions beyond this narrow need.
+
+Required Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/services`
+- Required targeted suite:
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions -v`
+- If a new helper file is added, include it in compileall or py_compile explicitly.
+- `rg -n "PF-P049|Turnover Ledger Query/Route Facade Extraction|TurnoverLedgerRead|TurnoverLedgerApiRoutes|server.py" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`
+
+Post-Flight:
+- Update `migration-state-log.md`:
+  - PF-P049 status must be `implemented` or `blocked`;未经用户确认不得标记 `verified`。
+  - Record changed files, verification commands/results, risks, and next recommended prompt.
+- Update `refactor-prompts.md` with PF-P049 execution result.
+- Update `turnover-ledger-discovery.md` with a brief PF-P049 result note if implementation changes the planned boundary shape.
+- Final response must state:
+  - Which files changed.
+  - Whether targeted tests passed.
+  - That no mutation path, UoW, repository, worker, SQL migration, frontend, deploy, Traffic Gate or production access occurred.
+  - Suggested next prompt: likely cumulative MG for PF-P046 through PF-P049, unless the user wants one more read-only cleanup slice first.
+
+Stop Conditions:
+- If current branch is not `codex/turnover-ledger-discovery-p046`, stop.
+- If PF-P048 is not verified, stop.
+- If unrelated uncommitted changes exist, stop.
+- If extraction requires touching mutation handlers, stop and document blocker.
+- If tests fail for behavior unrelated to this extraction, stop and diagnose before further edits.
+- If a new abstraction starts requiring `Application`, `state_store` or runtime god object injection, stop and redesign narrower.
+```
+
+### 审查结论
+
+- PF-P049 是 PF-P048 后合理的下一条 prompt：PF-P048 已经完成 read-only facade extraction 的边界设计，PF-P049 可以进入最小实现。
+- PF-P049 的修改范围足够窄：只允许 `server.py`、`routes_turnover_ledger.py` 或一个小型 read-only helper 文件；明确排除 mutation handlers、UoW、repository、worker、migration、frontend 和 deploy。
+- PF-P049 明确保留 `server.py` 的 HTTP response mapping，避免把 `Response`、headers/cookies 或 auth 依赖带入 service/facade。
+- PF-P049 保留 PF-P047 79-test command 作为硬门禁，能覆盖 query freshness、grouped compatibility、export、relation/extra read 和 cross-module source_versions。
