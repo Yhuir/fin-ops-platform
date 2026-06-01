@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P050 - Turnover Ledger Read Facade Handler Cleanup` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P050 - Turnover Ledger Read Facade Handler Cleanup` (`planned`) |
+| 当前阶段 | `PF-P050 - Turnover Ledger Read Facade Handler Cleanup` 已执行，等待用户确认 |
+| 当前 active prompt | `PF-P050 - Turnover Ledger Read Facade Handler Cleanup` (`implemented`) |
 | 最近 verified prompt | `PF-P049 - Turnover Ledger Query/Route Facade Extraction` |
 | 当前分支 | `codex/turnover-ledger-discovery-p046` |
 | 最近验证 | 用户已确认 PF-P045-MG `verified`；`main` 已 push 到 `origin/main`，本地与远端对齐到 `de513774`；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 执行 `PF-P050 - Turnover Ledger Read Facade Handler Cleanup`；只允许 read-only handler cleanup，不允许 mutation/UoW/repository/worker/Traffic Gate |
+| 下一条允许任务 | 等待用户确认 PF-P050；确认后将 PF-P050 标记为 `verified`，再生成 cumulative MG 覆盖 PF-P046 到 PF-P050 |
 
 ## Prompt 执行日志
 
@@ -5212,7 +5212,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P050 - Turnover Ledger Read Facade Handler Cleanup
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -5242,8 +5242,30 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P050。
-- PF-P050 后不应继续拖延 MG；建议生成 cumulative MG 覆盖 PF-P046 到 PF-P050。
+- 等待用户确认 PF-P050。
+- 用户确认后，将 PF-P050 标记为 `verified`。
+- 下一条建议 prompt：`PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`，覆盖 PF-P046 到 PF-P050 的完整 diff。
+
+#### 执行结果
+
+- `backend/src/fin_ops_platform/app/server.py` 新增 Turnover Ledger read-only 专用 query helper：
+  - `_turnover_ledger_query_value`
+  - `_turnover_ledger_query_int`
+- `backend/src/fin_ops_platform/app/server.py` 新增 `_turnover_ledger_export_response`，集中保留 XLSX HTTP response mapping。
+- `_handle_api_turnover_ledger`、`_handle_api_turnover_ledger_export_preview`、`_handle_api_turnover_ledger_export` 改用上述 helper，减少重复 `query.get(...)[0]` 和 export response 组装。
+- 未修改 read facade 业务委托语义；`TurnoverLedgerReadFacade` 仍只接收 route facade，不依赖 `Application`、`state_store`、`RuntimeRepositories`、HTTP headers/cookies 或 auth。
+- 未修改 mutation handlers、UoW、repository、worker、runtime queue、SQL migration、frontend、deployment、production config、Traffic Gate 或生产访问。
+
+#### 验证
+
+- `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
+- `git status --short --branch`：仅本轮允许文件有修改。
+- `git ls-files --others --exclude-standard`：无输出。
+- `git diff --check`：Pass。
+- `test ! -e backend-go`：Pass。
+- `rg -n "PF-P050|Turnover Ledger Read Facade Handler Cleanup|TurnoverLedgerReadFacade|_handle_api_turnover_ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`：Pass。
 
 ## 维护规则
 

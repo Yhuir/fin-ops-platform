@@ -11910,13 +11910,44 @@ class Application:
             return None
         return int(value)
 
+    @staticmethod
+    def _turnover_ledger_query_value(
+        query: dict[str, list[str]],
+        key: str,
+        default: str | None,
+    ) -> str | None:
+        return query.get(key, [default])[0]
+
+    @classmethod
+    def _turnover_ledger_query_int(
+        cls,
+        query: dict[str, list[str]],
+        key: str,
+        default: int,
+    ) -> int:
+        return int(cls._turnover_ledger_query_value(query, key, str(default)) or default)
+
+    @staticmethod
+    def _turnover_ledger_export_response(filename: str, content: bytes) -> Response:
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": XLSX_MIME_TYPE,
+                "Content-Disposition": _build_content_disposition(filename),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            },
+        )
+
     def _handle_api_turnover_ledger(self, query: dict[str, list[str]]) -> Response:
-        view = query.get("view", [None])[0]
-        family = query.get("family", ["all"])[0]
-        direction = query.get("direction", ["all"])[0]
-        status = query.get("status", [None])[0]
-        page = int(query.get("page", ["1"])[0] or 1)
-        page_size = int(query.get("page_size", ["50"])[0] or 50)
+        view = self._turnover_ledger_query_value(query, "view", None)
+        family = self._turnover_ledger_query_value(query, "family", "all")
+        direction = self._turnover_ledger_query_value(query, "direction", "all")
+        status = self._turnover_ledger_query_value(query, "status", None)
+        page = self._turnover_ledger_query_int(query, "page", 1)
+        page_size = self._turnover_ledger_query_int(query, "page_size", 50)
         try:
             payload = self._turnover_ledger_read_facade.list_ledger(
                 view=view,
@@ -12071,8 +12102,8 @@ class Application:
     def _handle_api_turnover_ledger_export_preview(self, query: dict[str, list[str]]) -> Response:
         try:
             payload = self._turnover_ledger_read_facade.export_preview(
-                family=query.get("family", ["all"])[0],
-                limit=int(query.get("limit", ["20"])[0] or 20),
+                family=self._turnover_ledger_query_value(query, "family", "all"),
+                limit=self._turnover_ledger_query_int(query, "limit", 20),
             )
         except (TypeError, ValueError) as exc:
             return self._json_response(
@@ -12084,24 +12115,14 @@ class Application:
     def _handle_api_turnover_ledger_export(self, query: dict[str, list[str]]) -> Response:
         try:
             filename, content = self._turnover_ledger_read_facade.export(
-                family=query.get("family", ["all"])[0],
+                family=self._turnover_ledger_query_value(query, "family", "all"),
             )
         except (TypeError, ValueError) as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_turnover_ledger_export_request", "message": str(exc)},
             )
-        return Response(
-            status_code=int(HTTPStatus.OK),
-            body=content,
-            headers={
-                "Content-Type": XLSX_MIME_TYPE,
-                "Content-Disposition": _build_content_disposition(filename),
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            },
-        )
+        return self._turnover_ledger_export_response(filename, content)
 
     def _handle_api_turnover_ledger_relation(self, relation_id: str) -> Response:
         try:

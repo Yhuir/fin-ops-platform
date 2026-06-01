@@ -13867,7 +13867,7 @@ Stop Conditions:
 
 ## PF-P050 - Turnover Ledger Read Facade Handler Cleanup
 
-状态：`planned`
+状态：`implemented`
 
 ### Prompt
 
@@ -13986,3 +13986,20 @@ Stop Conditions:
 - PF-P050 明确禁止 mutation、UoW、repository、worker、SQL、frontend、deployment 和 Traffic Gate，避免从 read-side cleanup 滑向写路径重构。
 - PF-P050 允许 no-op/block：如果 PF-P049 后 read handlers 已足够薄，执行时应记录 blocked/no-op，而不是强行制造抽象。
 - PF-P050 完成后应进入 cumulative MG，不建议继续拖延合入。
+
+### 执行结果
+
+- PF-P050 已执行，状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- `server.py` 新增 Turnover Ledger read-only 专用 helper：
+  - `_turnover_ledger_query_value`
+  - `_turnover_ledger_query_int`
+  - `_turnover_ledger_export_response`
+- `_handle_api_turnover_ledger`、`_handle_api_turnover_ledger_export_preview`、`_handle_api_turnover_ledger_export` 改用 helper，减少重复 query parsing 和 XLSX response construction。
+- `_handle_api_turnover_ledger_relation` 和 `_handle_api_turnover_ledger_relation_extra` 保持现状，因为 PF-P049 后已经足够薄。
+- 未修改 mutation handlers、UoW、repository、worker、runtime queue、SQL migration、frontend、deployment、production config 或 Traffic Gate。
+- 验证结果：
+  - `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
+  - `git status --short --branch`、`git ls-files --others --exclude-standard`、`git diff --check`、`test ! -e backend-go`、PF-P050 `rg` evidence check 均通过。
+- 下一步建议：用户确认 PF-P050 `verified` 后，生成 cumulative MG 覆盖 PF-P046 到 PF-P050。

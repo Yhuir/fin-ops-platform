@@ -550,6 +550,50 @@ PF-P050 must not expand the refactor scope. It may only thin the already-extract
 
 After PF-P050, the next recommended prompt is a cumulative Merge Gate covering PF-P046 through PF-P050.
 
+## PF-P050 Read Facade Handler Cleanup Result
+
+PF-P050 performed the final narrow read-only cleanup on top of `TurnoverLedgerReadFacade`.
+
+Changed read-only HTTP boundary shape:
+
+- `server.py` now uses `_turnover_ledger_query_value` and `_turnover_ledger_query_int` for Turnover Ledger read-only query parsing.
+- `server.py` now uses `_turnover_ledger_export_response` for Turnover Ledger XLSX download response construction.
+- `_handle_api_turnover_ledger`, `_handle_api_turnover_ledger_export_preview` and `_handle_api_turnover_ledger_export` are thinner and more consistent.
+- `_handle_api_turnover_ledger_relation` and `_handle_api_turnover_ledger_relation_extra` were left unchanged because PF-P049 already made them thin.
+
+Boundary intentionally kept in `server.py`:
+
+- HTTP query parsing;
+- BAD_REQUEST / NOT_FOUND mapping;
+- JSON `Response` construction;
+- XLSX `Content-Type`, `Content-Disposition` and CORS headers.
+
+Boundary unchanged behind `TurnoverLedgerReadFacade`:
+
+- route facade delegation;
+- grouped compatibility;
+- export composition;
+- relation detail GET;
+- relation extra GET.
+
+PF-P050 did not modify mutation paths:
+
+- tag-selection update;
+- bank-row-tags batch;
+- extra PUT;
+- confirm;
+- withdraw.
+
+Verification:
+
+- `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`: Pass.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`: Pass, 2 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`: Pass, 81 tests.
+
+Next recommendation after user confirms PF-P050 verified:
+
+`PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`
+
 ## Risk Register
 
 | Risk | Severity | Evidence | Next action |
@@ -566,6 +610,6 @@ After PF-P050, the next recommended prompt is a cumulative Merge Gate covering P
 
 Generate and review:
 
-`PF-P050 - Turnover Ledger Read Facade Handler Cleanup`
+`PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`
 
-PF-P050 should stay in the same branch and remain the last narrow read-only cleanup before the cumulative Merge Gate. It must not start mutation refactoring, UoW design, repository changes, worker changes, frontend changes or Traffic Gate work. After PF-P050 is executed and verified, generate the cumulative Merge Gate for the Turnover Ledger discovery/characterization/read-facade slice.
+PF-P050-MG should stay in the same branch and cover the full Turnover Ledger discovery/characterization/read-facade slice from PF-P046 through PF-P050. It must not start mutation refactoring, UoW design, repository changes, worker changes, frontend changes or Traffic Gate work.
