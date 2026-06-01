@@ -20568,3 +20568,23 @@ Post-Flight:
 
 - PF-P098 是 PF-P097-MG 后合理的再校准步骤，避免在已被 PF-P097 改写过的旧矩阵上继续执行。
 - prompt 只允许文档和发现，不修改业务代码或 tests，适合作为下一切片选择门。
+
+### 执行结果
+
+- 状态：`verified`。
+- 已基于 PF-P097-MG 后的最新 main 重新盘点 Turnover Ledger write path matrix。
+- 确认 tag selection、bank row tags batch、relation extra、confirm、withdraw 都已有 facade/UoW seam。
+- 确认 PostgreSQL bank row tags / confirm / withdraw 已接入 service-level write ports。
+- 确认最大剩余 correctness gap 是 withdraw duplicate/stale write：当前 `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` 仍记录第二次 withdraw 会二次 mutation/refresh。
+- 确认 UoW 已有 expected_versions / stale_precondition_port seam，但真实 relation write commands 尚未传 expected_versions，server composition 仍是 no-op stale precondition port。
+
+### 验证结果
+
+- `git status --short --branch`：Pass，仅有 PF-P098 文档范围改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P098|Remaining Write Path Rebaseline|Next Slice Decision|Write Path Matrix|Residual Orchestration" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests`。PF-P099 只应新增/调整 tests，锁定 withdraw duplicate/stale write 的目标行为；不得修改 production code，不得同时处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
-| 最近 verified prompt | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` |
+| 当前阶段 | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` 已执行并验证通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p098` |
-| 最近验证 | PF-P097-MG main 复验通过并 push 到 `origin/main`，最新 main `55a35ea7` |
-| 下一条允许任务 | 执行 `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
+| 最近验证 | PF-P098 文档验证通过；下一条最小切片为 withdraw stale/duplicate contract tests |
+| 下一条允许任务 | 生成并审查 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests` |
 
 ## Prompt 执行日志
 
@@ -7538,7 +7538,7 @@ PF-P097-MG 已 verified，待 `git push origin main`。push 完成后，必须�
 
 ### PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7559,9 +7559,24 @@ PF-P097-MG 已 verified，待 `git push origin main`。push 完成后，必须�
 - 不得新增 SQL migration。
 - 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
 
+#### 执行结果
+
+- 已基于 PF-P097-MG 后的最新 main 重新盘点 Turnover Ledger write paths。
+- 确认 tag selection、bank row tags batch、relation extra、confirm、withdraw 都已有 facade/UoW seam。
+- 确认 PostgreSQL bank row tags / confirm / withdraw 已接入 PF-P096/PF-P097 的 service-level write ports。
+- 确认当前最大剩余 correctness gap 是 withdraw duplicate/stale write：现有 `test_withdraw_duplicate_submit_currently_allows_second_withdraw_and_reenqueues` 明确记录第二次 withdraw 仍会二次 mutation/refresh。
+- 确认 `TurnoverLedgerWriteUnitOfWork` 已有 expected_versions / stale_precondition_port seam，但真实 relation write commands 尚未传 expected_versions，server composition 仍注入 no-op stale precondition port。
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅有 PF-P098 文档范围改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P098|Remaining Write Path Rebaseline|Next Slice Decision|Write Path Matrix|Residual Orchestration" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
 #### 下一条 Prompt 上下文
 
-PF-P098 planned。执行后必须根据真实代码事实只选择一条下一 prompt；不得一次性生成多个 prompt。
+PF-P098 已 verified。下一条应生成并审查 `PF-P099 - Turnover Ledger Withdraw Relation Stale/Duplicate Contract Tests`。PF-P099 只应新增/调整 tests，锁定 withdraw duplicate/stale write 的目标行为；不得修改 production code，不得同时处理 relation extra stale write、fallback cleanup 或 local transaction shim 抽离。
 
 ## 维护规则
 
