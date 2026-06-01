@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring` 已执行并验证通过 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` |
 | 最近 verified prompt | `PF-P097 - Turnover Ledger PostgreSQL Write Port Server Composition Wiring` |
 | 当前分支 | `codex/turnover-ledger-repository-ownership-p094` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，45 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests |
-| 下一条允许任务 | 生成并审查 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` |
+| 下一条允许任务 | 执行 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -7490,6 +7490,34 @@ PF-P096 已 verified。下一步应生成并审查 `PF-P097 - Turnover Ledger Po
 #### 下一条 Prompt 上下文
 
 PF-P097 已 verified。当前分支已覆盖 PF-P094 到 PF-P097：repository ownership discovery、write port contract tests、write port skeleton、server composition wiring。下一步应生成并审查 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate`，覆盖当前分支相对 main 的完整 diff；MG 不得新增业务实现。
+
+### PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 覆盖当前分支 `codex/turnover-ledger-repository-ownership-p094` 相对 `main` 的完整 diff。
+- 合并 PF-P094 到 PF-P097 的 repository ownership 切片。
+- 只做 scope audit、untracked audit、diff check、targeted tests、文档状态检查、commit/merge/push。
+
+#### 预期变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 禁止范围
+
+- 不得新增业务实现。
+- 不得执行 Traffic Gate、部署、生产配置、Nginx 或 feature flag 修改。
+
+#### 下一条 Prompt 上下文
+
+PF-P097-MG planned。执行后若 merge main、main 复验和 push 均通过，必须从最新 main 新建下一条 `codex/` 分支，再选择 Turnover Ledger 下一切片。
 
 ## 维护规则
 

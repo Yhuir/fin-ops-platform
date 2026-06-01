@@ -20373,3 +20373,80 @@ Post-Flight:
 ### 下一条 Prompt 上下文
 
 下一条应生成并审查 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate`，覆盖 PF-P094 到 PF-P097 的完整 diff。MG 只做 scope audit、untracked audit、diff check、target tests、文档状态检查、commit/merge/push；不得新增业务实现。
+
+## PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate
+
+```text
+/goal
+PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 merge gate 执行者。你必须只执行合并门禁，不得新增业务实现。
+
+Context:
+当前分支 `codex/turnover-ledger-repository-ownership-p094` 已完成 PF-P094 到 PF-P097：
+- PF-P094 repository ownership discovery/planning
+- PF-P095 write port ownership contract tests
+- PF-P096 write port ownership skeleton
+- PF-P097 PostgreSQL write port server composition wiring
+
+Gate Scope:
+本 MG 覆盖当前分支相对 `main` 的完整 diff。预期变更文件只能是：
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P097 已 verified。
+3. 必须确认当前分支不是 main。
+4. 必须确认工作树干净、无 untracked 临时文件。
+5. 必须确认 `git diff --name-only main...HEAD` 只包含 Gate Scope 中列出的文件。
+
+Mandatory Checks:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- rg -n "PF-P097-MG|PF-P097|TurnoverLedgerRelationWritePort|TurnoverLedgerBankdetailWritePort|_postgres_turnover_ledger_persistence_repository" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Merge Rules:
+1. 如果当前分支有未提交改动，必须先判断是否仅为 MG 文档状态更新；只允许精准 `git add` 具体文件，禁止 `git add .` 或 `git add -A`。
+2. 合入 main 前必须先确认 main 与 origin/main 对齐；如 main 落后，必须先同步最新 main。若发生冲突，停止。
+3. 将当前分支 merge 到 main 后，必须在 main 上重跑 Mandatory Checks 中的测试和 compileall。
+4. main 上验证失败则停止，不得 push。
+5. main 上验证通过后，允许 `git push origin main`。
+6. git push 只代表推送 Git 远端主干，不代表部署、切流或 Traffic Gate。
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得修改生产配置、部署、Nginx 或 feature flag。
+- 不得访问生产、staging 或真实外部服务。
+- 不得执行 Traffic Gate。
+- 不得使用 destructive git command，不得 force push。
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P097-MG status = verified / blocked。
+   - 记录 merge commit、main 验证结果、push 状态和下一步。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P097-MG 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 repository ownership slice 已合入 main。
+4. push 后必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt；不得在 main 或旧分支继续开发。
+```
+
+### 审查结论
+
+- PF-P097-MG 范围明确，只覆盖当前 repository ownership 分支的 6 个文件。
+- MG 明确禁止新增业务实现，并要求 main 上复验通过后才 push。
+- 本 MG 不执行 Traffic Gate，不部署，不修改生产配置。

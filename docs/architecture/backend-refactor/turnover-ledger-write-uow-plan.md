@@ -2228,3 +2228,28 @@ Merge 边界：
 
 - 生成并审查 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate`。
 - MG 覆盖 PF-P094 到 PF-P097 的完整 diff，不新增业务实现。
+
+## PF-P097-MG Repository Ownership Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖当前分支从 PF-P094 到 PF-P097 的完整 diff。
+- 合入 repository ownership discovery、contract tests、write port skeleton 和 server composition wiring。
+
+预期变更文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证重点：
+
+- Turnover Ledger API tests。
+- Turnover Ledger UoW contract tests。
+- `server.py` 与 `turnover_ledger_write_adapters.py` compileall。
+- main 上复验通过后才允许 push。
