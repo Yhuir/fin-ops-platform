@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` 已生成并审查 |
-| 当前 active prompt | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` planned |
-| 最近 verified prompt | `PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` |
 | 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
-| 最近验证 | PF-P078-MG 合入 main 后 API 36 tests 通过，UoW contract 33 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` |
+| 最近验证 | PF-P079 增加 3 条 confirm relation facade target tests；UoW contract 36 tests 通过（3 expectedFailure），API 36 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton` |
 
 ## Prompt 执行日志
 
@@ -6641,6 +6641,45 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 #### 下一条 Prompt 上下文
 
 PF-P076、PF-P077、PF-P078 构成 bank-row-tags UoW slice。下一步应生成并执行 `PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate`，覆盖当前分支自最新 main 以来的完整 diff。MG 必须确认 production code diff 只涉及 `server.py` 的 bank-row-tags handler/UoW seam，不执行 Traffic Gate，不部署，不访问生产。
+
+### PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只为未来 `TurnoverLedgerWriteFacade.confirm_relation(...)` 增加 facade-level target contract tests。
+- 不修改 production code。
+- 不迁移 confirm handler、withdraw handler 或其它 Turnover 写路径。
+
+#### 执行摘要
+
+- 新增 `_RecordingConfirmRelationPort` fake，作为细粒度 relation port/repository，不模拟 `Application`。
+- 新增 3 条 `unittest.expectedFailure` target tests：
+  - confirm facade 使用 relation port 并返回 service-layer payload；
+  - dirty/outbox failure 必须 rollback relation confirm；
+  - confirm facade 必须 enqueue `turnover_ledger` / `all` / `turnover_relation_changed`。
+- 当前 `TurnoverLedgerWriteFacade.confirm_relation(...)` 尚未实现，因此 expectedFailure 是默认 CI 隔离，不是 skip 或删除目标契约。
+
+#### 变更文件
+
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅 PF-P079 允许文件变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，36 tests，3 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，36 tests。
+- `rg -n "confirm_relation|confirm relation|expectedFailure|PF-P079|turnover_relation_changed|TurnoverLedgerWriteFacade" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P079 已锁定 confirm relation facade target contract。下一步应生成并执行 `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton`，只实现 `TurnoverLedgerWriteFacade.confirm_relation(...)` 的最小 service-layer skeleton，让 PF-P079 的 3 条 expectedFailure 转为普通通过；仍不得迁移真实 `server.py` handler。
 
 ## 维护规则
 

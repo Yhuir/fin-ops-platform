@@ -18041,3 +18041,24 @@ Post-Flight:
 - PF-P079 是 bank-row-tags slice 合入后的正确下一步：它不直接改 handler，而是先锁定 confirm relation 的 facade/UoW service-layer contract。
 - Prompt 明确保持 API characterization tests 不变，并用 `unittest.expectedFailure` 保存尚未实现的 facade 目标语义。
 - Prompt 暂不处理 withdraw，也不引入 Workbench influence port 实现；如需 Workbench influence，只作为后续 blocker/设计项记录。
+
+### 执行结果
+
+- PF-P079 已执行并按自动工作流标记为 `verified`。
+- 新增 `_RecordingConfirmRelationPort` 作为细粒度 relation port fake。
+- 新增 3 条 confirm relation facade target tests，当前均为 `unittest.expectedFailure`：
+  - future facade 应调用 relation port 并返回 service-layer payload；
+  - dirty/outbox failure 应 rollback；
+  - future facade 应 enqueue `turnover_ledger` / `all` / `turnover_relation_changed`。
+- 未修改 production code，未迁移真实 handler。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P079 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，36 tests，3 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，36 tests。
+- `rg -n "confirm_relation|confirm relation|expectedFailure|PF-P079|turnover_relation_changed|TurnoverLedgerWriteFacade" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P080 - Turnover Ledger Confirm Relation Facade Skeleton`，只实现最小 facade skeleton，让 PF-P079 的 3 条 target tests 转绿，不迁移真实 handler。
