@@ -16002,3 +16002,17 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
+
+### 最终执行结果
+
+- PF-P064-MG 已执行并按自动工作流标记为 `verified`。
+- 当前分支已通过 `--no-ff` merge 合入 `main`。
+- main 复验：
+  - `git status --short --branch`：Pass，`main...origin/main [ahead 23]`。
+  - `git ls-files --others --exclude-standard`：Pass，无输出。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
+- 未执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+- 下一步：push origin/main；push 后从最新 main 新建下一条 `codex/` 分支。

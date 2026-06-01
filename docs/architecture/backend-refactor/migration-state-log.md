@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 功能分支预检通过，等待合入 main 复验 |
-| 当前 active prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` in_progress |
-| 最近 verified prompt | `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring` |
-| 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P064 最小接入 relation extra handler；API 29 tests、UoW contract 22 tests、Extra service 10 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate`，覆盖 PF-P055 到 PF-P064 的完整 diff |
+| 当前阶段 | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` 已合入 main 并验证 |
+| 当前 active prompt | 无 active prompt；下一步必须从最新 main 新建分支 |
+| 最近 verified prompt | `PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P064-MG 已在 main 复验：API 29 tests、UoW contract 22 tests、Extra service 10 tests 通过 |
+| 下一条允许任务 | push origin/main；push 后从最新 main 新建下一条 codex/ 分支并生成 Turnover Ledger 下一写路径 prompt |
 
 ## Prompt 执行日志
 
@@ -6022,7 +6022,7 @@ PF-P055 到 PF-P064 已形成可合并的 relation extra UoW integration slice�
 
 ### PF-P064-MG - Turnover Ledger Relation Extra UoW Cumulative Merge Gate
 
-状态：`in_progress`
+状态：`verified`
 
 #### 范围
 
@@ -6055,6 +6055,21 @@ PF-P055 到 PF-P064 已形成可合并的 relation extra UoW integration slice�
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
+
+#### main 合入与复验结果
+
+- 已通过 `--no-ff` merge 合入 `main`。
+- `git status --short --branch`：Pass，`main...origin/main [ahead 23]`。
+- `git ls-files --others --exclude-standard`：Pass，无输出。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，22 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v`：Pass，10 tests。
+- 未执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+
+#### 下一条 Prompt 上下文
+
+Relation extra UoW integration slice 已合入 main。push 后必须从最新 main 新建下一条 `codex/` 分支。Turnover Ledger 写路径剩余候选包括 tag selection、bank-row-tags、confirm/withdraw 关系写路径的 UoW 收敛；下一条 prompt 应基于 `turnover-ledger-write-uow-plan.md` 选择下一个最小写路径切片。
 
 ## 维护规则
 
