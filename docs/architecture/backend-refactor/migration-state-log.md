@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` planned |
-| 最近 verified prompt | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` |
+| 当前阶段 | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra adapter contracts |
+| 最近 verified prompt | `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P058 新增 relation extra queue failure characterization；`tests.test_turnover_ledger_api` 28 tests 通过，UoW contract 11 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary`；先审计真实 transaction/repository/dirty-outbox adapter 可用性，不贸然改 `server.py` |
+| 最近验证 | PF-P059 确认不能直接 wiring：缺少 Turnover-specific extra repository port、dirty/outbox writer adapter 和 row provider adapter；文档检查通过 |
+| 下一条允许任务 | 生成并审查 `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`；先补 adapter contracts/skeleton，不修改 `server.py` |
 
 ## Prompt 执行日志
 
@@ -5755,7 +5755,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5770,12 +5770,35 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P059。
+- PF-P059 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`。
 
 #### 验收标准
 
 - 文档明确能否安全进行真实 handler wiring。
 - 如果缺少真实 transaction boundary，必须将下一步调整为 adapter/repository skeleton，而不是直接接入 handler。
+
+#### 执行结果
+
+- 已更新 `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`，新增 `Relation Extra Handler Wiring Readiness`。
+- 结论：不允许直接 wiring。
+- 已确认可复用：
+  - `PostgresConnection.transaction()`；
+  - Workbench UoW 的 runtime connection lookup 模式；
+  - `queue_repository.enqueue_read_model_refresh_in_transaction(...)`；
+  - `PostgresWorkbenchRepository(transaction)` 的现有 Turnover extras snapshot 能力。
+- 已确认缺口：
+  - 缺少细粒度 `save_extra(extra, *, transaction)` repository port；
+  - 缺少 Turnover-specific dirty/outbox writer adapter；
+  - 缺少保持当前 `row` response shape 的 relation row provider；
+  - 不得用 fake/no-op production transaction 假装完成 UoW 接入。
+
+#### 验证
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "Relation Extra Handler Wiring Readiness|PF-P059|no-op transaction|fake transaction|adapter" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
 
 ## 维护规则
 

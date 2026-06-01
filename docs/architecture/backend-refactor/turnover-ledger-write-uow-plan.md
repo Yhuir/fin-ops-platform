@@ -487,7 +487,7 @@ PF-P059 recommended direction:
 
 ## PF-P059 Relation Extra Handler Wiring Readiness Plan
 
-状态：`planned`
+状态：`verified`
 
 PF-P059 should verify that the runtime has real adapters before relation extra handler wiring:
 
@@ -497,3 +497,47 @@ PF-P059 should verify that the runtime has real adapters before relation extra h
 - row/detail provider for preserving `row` response shape.
 
 If any of these are missing, the next prompt should build the missing adapter or contract tests first. It must not introduce a fake/no-op production transaction just to wire the handler.
+
+## PF-P059 Relation Extra Handler Wiring Readiness
+
+状态：`verified`
+
+PF-P059 审计结论：**不允许下一步直接把真实 relation extra handler 接到 facade**。原因不是 facade 不可用，而是 production adapter 边界还不完整；直接 wiring 容易制造假的一致性边界或破坏当前 response shape。
+
+### Current Runtime Facts
+
+| Boundary | Current fact | Reuse status | Risk |
+| --- | --- | --- | --- |
+| PostgreSQL transaction connection | `Application` 已能从 PostgreSQL `state_store._connection` 获取 `PostgresConnection`；Workbench confirm/cancel UoW 已用同一模式在 `_workbench_confirm_link_unit_of_work()` / `_workbench_cancel_link_unit_of_work()` 中创建 UoW。 | 可复用模式。 | 仅在 PostgreSQL runtime 可用；非 PostgreSQL runtime 必须保持 legacy path 或返回 no UoW。 |
+| Transaction primitive | `PostgresConnection.transaction()` 返回 `PostgresTransaction`，可传给 repository。 | 可复用。 | 不能在 production path 使用 fake/no-op transaction。 |
+| Relation extra facts repository | `PostgresWorkbenchRepository(transaction)` 已有 `save_turnover_ledger_extras(snapshot)`，但没有 `save_extra(extra, transaction=...)` port。 | 部分可复用。 | 当前 API facade contract 需要细粒度 `save_extra` port；直接保存整份 snapshot 会继续耦合 legacy full snapshot shape。 |
+| Dirty/outbox writer | `services.workbench_uow.RuntimeQueueReadModelRefreshWriter` 已包装 `queue_repository.enqueue_read_model_refresh_in_transaction(...)`，但接口是 singular `scope_key`；`TurnoverLedgerWriteUnitOfWork` 当前需要 `enqueue_refresh(..., scope_keys=[...], payload=...)`。 | 可复用思想，不能直接注入。 | 需要 Turnover-specific writer adapter，把 scope_keys 展开为 transaction-bound queue rows，并保留 source_version/outbox 语义。 |
+| Existing runtime queue repository | `runtime_queue.py` 提供 `enqueue_read_model_refresh_in_transaction`。 | 可复用。 | 需要 adapter contract tests，避免回退到非 transaction `enqueue_read_model_refresh`。 |
+| Response row shape | `TurnoverLedgerApiRoutes.update_relation_extra()` 当前通过 `ledger_service.get_relation_detail()` 取 row，并合并 `_row_extra_fields(extra)` 后返回 `{"extra": extra, "row": row}`。 | 需要抽成 row/detail provider 或保留 routes helper。 | 直接使用当前 facade 会只返回 `{"extra": extra}`，破坏 API response。 |
+
+### Missing Adapter Checklist
+
+- `TurnoverLedgerExtraRepositoryPort.save_extra(extra, *, transaction)`：
+  - 应优先用 `PostgresWorkbenchRepository(transaction)` 或更窄的 Turnover repository adapter 实现；
+  - 不应要求业务 facade 保存整份 full snapshot。
+- `TurnoverLedgerDirtyOutboxWriter`：
+  - 应包装 `queue_repository.enqueue_read_model_refresh_in_transaction(...)`；
+  - 必须拒绝缺少 transaction-bound enqueue 的 queue repository；
+  - 不得调用非事务 `enqueue_read_model_refresh`。
+- `TurnoverLedgerRelationRowProvider`：
+  - 提供 `row_for_relation_extra(relation_id, extra)` 或等价方法，保持当前 `row` response shape；
+  - 不让 facade 读取 HTTP 或依赖 `Application`。
+
+### Wiring Decision
+
+下一步不应直接执行 `PF-P060 - Handler Minimal Wiring`。正确下一步是先建立 Turnover-specific adapter contract/skeleton：
+
+`PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`
+
+PF-P060 应只添加 fake/contract tests 和最小 adapter skeleton，验证：
+
+- adapter 只接受真实 transaction；
+- writer 调用 transaction-bound queue enqueue；
+- relation extra repository 不依赖 `Application`；
+- row provider 可保持现有 response shape；
+- 不修改 `server.py`。

@@ -15254,7 +15254,7 @@ Post-Flight:
 
 ## PF-P059 - Turnover Ledger Relation Extra Handler Wiring Readiness / Adapter Boundary
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -15342,3 +15342,24 @@ Post-Flight:
 
 - PF-P059 调整为 readiness/adapters 审计是必要的：当前尚未证明 `Application` 中存在可直接注入 Turnover Ledger 写 UoW 的真实 transaction connection。
 - Prompt 明确禁止 fake/no-op transaction，避免为了“接入 facade”制造假的一致性边界。
+
+### 执行结果
+
+- PF-P059 已执行并按自动工作流标记为 `verified`。
+- 结论：不能直接把真实 relation extra handler 接到 facade。
+- 可复用事实：
+  - `PostgresConnection.transaction()` 可作为真实 transaction primitive；
+  - Workbench confirm/cancel UoW 已有 PostgreSQL runtime lookup 模式；
+  - runtime queue repository 已有 `enqueue_read_model_refresh_in_transaction(...)`；
+  - `PostgresWorkbenchRepository(transaction)` 已有 Turnover extras snapshot 读写能力。
+- 缺失边界：
+  - 细粒度 relation extra repository port；
+  - Turnover-specific dirty/outbox writer adapter；
+  - 保持当前 `row` response shape 的 row provider；
+  - 不允许 fake/no-op production transaction。
+- 验证：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+  - `rg -n "Relation Extra Handler Wiring Readiness|PF-P059|no-op transaction|fake transaction|adapter" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+- 下一步建议：生成并审查 `PF-P060 - Turnover Ledger Relation Extra Repository and Dirty Outbox Adapter Contracts`。PF-P060 应先补 adapter contract tests/skeleton，不修改 `server.py`。
