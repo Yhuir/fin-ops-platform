@@ -19735,3 +19735,88 @@ Verification:
 - `rg -n "PF-P092|PostgreSQL Facade Readiness|postgres.*facade|expectedFailure" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring`，只让 PF-P092 的 3 条 target tests 转绿；不得扩展到其它模块。
+
+## PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring
+
+```text
+/goal
+PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须只接入 Turnover Ledger PostgreSQL storage backend 下的 write facade seam，让 PF-P092 的 3 条 target tests 转绿。不得扩大到其它模块，不得用非事务 fallback 假装完成。
+
+Context:
+PF-P092 已 verified，新增 3 条 `unittest.expectedFailure` API-level target tests，锁定 PostgreSQL storage backend 下：
+- `POST /api/turnover-ledger/bank-row-tags/batch`
+- `POST /api/turnover-ledger/relations/confirm`
+- `POST /api/turnover-ledger/relations/{id}/withdraw`
+
+当前 `server.py` 的 `_turnover_ledger_bank_row_tags_write_facade()`、`_turnover_ledger_confirm_write_facade()`、`_turnover_ledger_withdraw_write_facade()` 在 `storage_backend == "postgres"` 时仍返回 `None`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P092 已 verified。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Task:
+1. 为 PostgreSQL storage backend 接入最小 facade seam：
+   - bank-row-tags batch 使用 `TurnoverLedgerBankdetailPortAdapter`；
+   - confirm relation 使用 `TurnoverLedgerRelationRepositoryAdapter`；
+   - withdraw relation 使用 `TurnoverLedgerRelationRepositoryAdapter`；
+   - dirty/outbox 使用 `TurnoverLedgerDirtyOutboxWriter` 和 `enqueue_read_model_refresh_in_transaction`。
+2. PF-P092 的 3 条 target tests 必须移除 `unittest.expectedFailure` 并普通通过。
+3. 如测试 fake PostgreSQL connection 只是 `object()`，可以补强为本地 fake transaction connection；不得访问真实 PostgreSQL。
+4. 如果真实 production repository/port 无法支持 supplied transaction，必须停下并标记 PF-P093 blocked；不得改用 direct clear/read model fallback 或 non-transactional enqueue。
+
+Allowed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 Workbench、No OA、Bankdetail 独立 API 或其它业务模块。
+- 不得新增 SQL migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+- 不得删除 legacy fallback；只允许在 PostgreSQL facade seam 可用时优先使用 facade。
+- 不得把 `Application` / RuntimeRepositories / state store god object 注入 service/facade/adapter。
+- 不得让 handler 直接执行业务计算或散落 SQL。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- rg -n "PF-P093|_turnover_ledger_bank_row_tags_write_facade|_turnover_ledger_confirm_write_facade|_turnover_ledger_withdraw_write_facade|TurnoverLedgerRelationRepositoryAdapter|TurnoverLedgerBankdetailPortAdapter|expectedFailure" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P093 status = implemented / verified / blocked。
+   - 记录 3 条 target tests 是否转绿、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P093 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 PostgreSQL facade seam wiring 状态。
+4. PF-P093 verified 后，评估是否进入 cumulative MG；如果 diff 已包含 production handler seam，优先生成 cumulative MG，而不是继续扩大实现范围。
+```
+
+### 审查结论
+
+- PF-P093 只覆盖 PF-P092 已锁定的 3 条 PostgreSQL facade seam，不进入其它模块。
+- Prompt 明确禁止用 direct read-model clear 或 non-transactional enqueue 假装转绿。
+- 如果真实 transaction-bound repository/port 不足，PF-P093 必须 blocked；这是比扩大 scope 更安全的选择。

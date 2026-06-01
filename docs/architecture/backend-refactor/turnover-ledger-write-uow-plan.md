@@ -1974,3 +1974,26 @@ Verification:
 Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 45 tests, 3 expectedFailure.
+
+## PF-P093 PostgreSQL Facade Seam Wiring
+
+状态：`planned`
+
+目标：
+
+- 只让 PF-P092 的 3 条 PostgreSQL facade readiness target tests 转为普通通过。
+- PostgreSQL bank-row-tags batch、confirm relation、withdraw relation 在 seam 可用时进入 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork`。
+- 复用 PF-P091 的 `TurnoverLedgerRelationRepositoryAdapter` 和 `TurnoverLedgerBankdetailPortAdapter`。
+
+边界：
+
+- 不迁移其它 Turnover Ledger path。
+- 不改 Workbench、No OA、Bankdetail 独立 API。
+- 不新增 SQL migration。
+- 不访问真实外部服务。
+- 不删除 legacy fallback。
+
+执行注意：
+
+- `server.py` composition 层可以创建 granular adapters/ports，但不得把 `Application` god object 注入 service/facade/adapter。
+- 如果真实 Postgres repository/port 无法用 supplied transaction 完成 facts/audit 写入，PF-P093 必须 blocked，不能退回 direct clear/read model fallback。

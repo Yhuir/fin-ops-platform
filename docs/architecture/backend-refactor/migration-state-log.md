@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P092 - Turnover Ledger PostgreSQL Facade Readiness Target Tests` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring` |
 | 最近 verified prompt | `PF-P092 - Turnover Ledger PostgreSQL Facade Readiness Target Tests` |
 | 当前分支 | `codex/turnover-ledger-remaining-write-rebaseline-p089` |
 | 最近验证 | PF-P088-MG 已在 main 上复验通过并已 push；`main...origin/main` 已对齐 |
-| 下一条允许任务 | 生成并审查 `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring`，只让 PF-P092 target tests 转绿 |
+| 下一条允许任务 | 执行 `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring`，只让 PF-P092 target tests 转绿 |
 
 ## Prompt 执行日志
 
@@ -7234,6 +7234,40 @@ PF-P091 已 verified。已实现最小 `TurnoverLedgerRelationRepositoryAdapter`
 #### 下一条 Prompt 上下文
 
 PF-P092 已 verified。新增 3 条 PostgreSQL facade readiness target tests，当前为 `unittest.expectedFailure`，分别覆盖 bank-row-tags batch、confirm relation、withdraw relation 在 `storage_backend == "postgres"` 时应进入 facade/UoW path 且不 direct clear read model。下一条应生成 `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring`，只让这 3 条 target tests 转绿；不得扩展到其它模块。
+
+### PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring
+
+状态：`planned`
+
+#### 范围
+
+- 只接入 Turnover Ledger PostgreSQL storage backend 下的三个 write facade seam：
+  - `POST /api/turnover-ledger/bank-row-tags/batch`
+  - `POST /api/turnover-ledger/relations/confirm`
+  - `POST /api/turnover-ledger/relations/{id}/withdraw`
+- 只让 PF-P092 的 3 条 target tests 从 `unittest.expectedFailure` 转为普通通过。
+- 可以补强测试 fake PostgreSQL connection，使其具备 `.transaction()`，但不得连接真实 PostgreSQL。
+
+#### 允许变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验收标准
+
+- PF-P092 的 3 条 target tests 必须移除 `unittest.expectedFailure` 并普通通过。
+- PostgreSQL path 必须使用 `TurnoverLedgerWriteUnitOfWork`、`TurnoverLedgerDirtyOutboxWriter` 和 PF-P091 adapters。
+- 不得在 handler path 中直接调用 `_clear_turnover_ledger_read_model_best_effort`。
+- 不得用 non-transactional `enqueue_read_model_refresh` 代替 `enqueue_read_model_refresh_in_transaction`。
+- 不得注入 `Application` god object 到 service/facade/adapter。
+
+#### 下一条 Prompt 上下文
+
+PF-P093 planned。执行前必须确认真实 repository / port 方法是否足以支持 transaction-bound facts 写入；如果只能用非事务 fallback，必须标记 blocked，不得伪装转绿。
 
 ## 维护规则
 
