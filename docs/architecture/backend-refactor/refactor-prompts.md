@@ -16238,3 +16238,98 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，29 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，23 tests，1 expectedFailure。
 - 下一步建议：生成并审查 `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton`。
+
+## PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton
+
+Role:
+你是一位精通 Python Clean Architecture、AppSettings 服务解耦和 characterization-to-implementation 小切片的后端工程师。
+
+Context:
+PF-P066 已新增 `test_tag_selection_pure_normalizer_returns_next_selection_without_mutating_settings_snapshot` expectedFailure，用于锁定未来 pure settings normalizer target。本轮只实现这个 pure normalizer skeleton，让 expectedFailure 转为普通通过。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/app_settings_service.py 中 `update_turnover_ledger_tag_selection`
+   - tests/test_turnover_ledger_uow_contract.py 的 tag selection expectedFailure
+   - tests/test_turnover_ledger_api.py tag selection characterization tests
+2. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+实现最小 pure tag selection normalizer。
+
+Required Implementation Work:
+1. 在 `AppSettingsService` 中新增 pure 方法，例如：
+   - `normalize_turnover_ledger_tag_selection_update(payload, *, actor_id)`
+2. 该方法必须：
+   - refresh/read current snapshot exactly like current update path；
+   - apply existing expected version validation；
+   - reuse `_normalize_turnover_ledger_tag_selection(...)`；
+   - return a dict containing at least:
+     - `next_snapshot`
+     - `next_selection`
+     - `audit_event`
+     - `public_payload`
+   - not call `state_store.save_app_settings(...)`；
+   - not mutate `self._snapshot`；
+   - not call `_configure_category_service(...)`；
+   - not record audit；
+   - raise the same `AppSettingsValidationError` for version conflict / invalid tag.
+3. Refactor `update_turnover_ledger_tag_selection(...)` to reuse the pure method, while preserving current behavior.
+4. Update `tests/test_turnover_ledger_uow_contract.py`:
+   - remove `unittest.expectedFailure` from the PF-P066 test;
+   - assert `next_selection`, `audit_event`, `public_payload`;
+   - assert service snapshot remains unchanged after pure normalize;
+   - assert a real `update_turnover_ledger_tag_selection(...)` still mutates/saves as before.
+5. Keep API characterization tests green.
+
+Allowed Files:
+- backend/src/fin_ops_platform/services/app_settings_service.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得迁移 handler。
+- 不得实现 transaction-bound settings repository。
+- 不得接入 real UoW production path。
+- 不得触碰 bank-row-tags、confirm、withdraw 或其它模块。
+- 不得执行 Traffic Gate、部署、生产访问、Nginx 或生产配置修改。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n \"normalize_turnover_ledger_tag_selection_update|expectedFailure|PF-P067|turnover_ledger_tag_selection\" backend/src/fin_ops_platform/services/app_settings_service.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P067 status = implemented / verified / blocked。
+   - 记录 pure normalizer 和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P067 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 pure normalizer 状态和下一步 settings port skeleton 候选。
+4. PF-P067 后不要生成 MG；下一步应生成 PF-P068 settings port / adapter skeleton prompt。
+```
+
+### 审查结论
+
+- PF-P067 是 PF-P066 后正确的最小实现步：只让 expectedFailure 转绿，不进入 handler/UoW wiring。
+- Prompt 要求 update path 复用 pure method，避免未来 settings port 与当前 update 逻辑分叉。
+- Prompt 明确禁止修改 `server.py` 和 transaction-bound repository。
