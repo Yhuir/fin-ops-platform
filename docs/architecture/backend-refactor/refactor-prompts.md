@@ -15160,7 +15160,7 @@ Post-Flight:
 
 ## PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -15236,3 +15236,18 @@ Post-Flight:
 
 - PF-P058 是 PF-P057 后必要的安全网补强：真实 handler 接入 facade 前，需要先锁定 queue failure 下当前已写入 extra、已 clear read model、已尝试 enqueue 的 observable 行为。
 - Prompt 明确 test-only，禁止 production code 和 `server.py` diff。
+
+### 执行结果
+
+- PF-P058 已执行并按自动工作流标记为 `verified`。
+- 在 `tests/test_turnover_ledger_api.py` 新增 relation extra queue failure characterization。
+- 当前真实 handler 行为已锁定：
+  - queue failure 会向外抛出；
+  - extra 已写入，后续 GET 能读到；
+  - Turnover read model clear 已发生；
+  - refresh enqueue 已尝试 `turnover_relation_extra_changed`。
+- 未修改 production code、`server.py`、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests。
+- 下一步建议：生成并审查 `PF-P059 - Turnover Ledger Relation Extra Handler Minimal Wiring`。PF-P059 只允许把 relation extra handler 最小接入 facade，不得迁移 confirm、withdraw、tag selection 或 bank-row-tags。

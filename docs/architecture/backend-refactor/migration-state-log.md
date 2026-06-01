@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` planned |
-| 最近 verified prompt | `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation` |
+| 当前阶段 | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra handler minimal wiring |
+| 最近 verified prompt | `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P057 新增最小 `TurnoverLedgerWriteFacade`，4 条 PF-P056 facade tests 已从 expectedFailure 转为普通通过；未修改 `server.py` 或真实 API |
-| 下一条允许任务 | 执行 `PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization`；只补真实 handler 集成前 characterization，不迁移 handler |
+| 最近验证 | PF-P058 新增 relation extra queue failure characterization；`tests.test_turnover_ledger_api` 28 tests 通过，UoW contract 11 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P059 - Turnover Ledger Relation Extra Handler Minimal Wiring`；只把 relation extra handler 最小接入 facade，不迁移其他写 API |
 
 ## Prompt 执行日志
 
@@ -5715,7 +5715,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P058 - Turnover Ledger Relation Extra Handler Integration Characterization
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5730,12 +5730,28 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P058。
+- PF-P058 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P059 - Turnover Ledger Relation Extra Handler Minimal Wiring`。
 
 #### 验收标准
 
 - 新增测试只在 `tests/test_turnover_ledger_api.py` 锁定 relation extra handler 当前行为。
 - 不修改 production code、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 执行结果
+
+- 在 `tests/test_turnover_ledger_api.py` 新增 `test_relation_extra_queue_failure_happens_after_extra_update_and_read_model_clear`。
+- 已锁定当前真实 handler 行为：
+  - refresh queue failure 抛出 `RuntimeError("queue unavailable")`；
+  - extra 已写入内存 service，后续 GET 可读；
+  - read model clear 已发生；
+  - queue attempt 为 `("turnover_ledger", "all", "turnover_relation_extra_changed")`。
+- 未修改 production code、`server.py`、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests。
 
 ## 维护规则
 

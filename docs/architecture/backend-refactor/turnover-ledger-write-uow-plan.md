@@ -458,7 +458,7 @@ PF-P058 recommended direction:
 
 ## PF-P058 Relation Extra Handler Integration Characterization Plan
 
-状态：`planned`
+状态：`verified`
 
 PF-P058 should lock the current real handler behavior before `server.py` delegates relation extra writes to the new facade.
 
@@ -471,3 +471,15 @@ The highest-risk missing characterization is refresh queue failure:
 - if enqueue fails, the exception propagates after the extra has already been updated in memory.
 
 PF-P058 should add a targeted API test for that behavior. It must not wire the facade into `server.py`.
+
+PF-P058 execution result:
+
+- Added a targeted API characterization test for relation extra refresh queue failure.
+- Locked the current order: extra update, best-effort persistence, read model clear, enqueue attempt, then propagated queue failure.
+- Confirmed the extra remains readable after the queue failure, matching current non-atomic behavior.
+
+PF-P059 recommended direction:
+
+- Wire only `PUT /api/turnover-ledger/relations/{id}/extra` to the new facade.
+- Preserve current API response shape and existing characterization tests unless the prompt explicitly documents an intentional semantic change.
+- Do not migrate confirm, withdraw, tag selection or bank-row-tags.

@@ -945,6 +945,31 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
 
+    def test_relation_extra_queue_failure_happens_after_extra_update_and_read_model_clear(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
+            queue = _FailingQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "PUT",
+                    f"/api/turnover-ledger/relations/{relation_id}/extra",
+                    body=json.dumps({"note": "queue failure happens after update"}),
+                )
+            restored_response = app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
+            restored_payload = json.loads(restored_response.body)
+
+        self.assertEqual(restored_response.status_code, 200)
+        self.assertEqual(restored_payload["extra"]["note"], "queue failure happens after update")
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+
     def test_relation_extra_fallback_persists_full_snapshot_when_dedicated_store_method_is_missing(self) -> None:
         class LegacyBootstrapRecorder:
             def __init__(self) -> None:
