@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton` planned |
-| 最近 verified prompt | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` |
+| 当前阶段 | `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
-| 最近验证 | PF-P071 补强 tag selection compatibility/target tests；API 31 tests 通过（2 expectedFailure），UoW contract 27 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`；不迁移 handler |
+| 最近验证 | PF-P072 增加 tag selection facade skeleton；UoW contract 30 tests 通过，API 31 tests 通过（2 expectedFailure） |
+| 下一条允许任务 | 生成并审查 `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`；只迁移 tag selection handler |
 
 ## Prompt 执行日志
 
@@ -6379,7 +6379,7 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 ### PF-P072 - Turnover Ledger Tag Selection Facade Skeleton
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -6394,13 +6394,29 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 #### 下一步
 
-- 执行 PF-P072。
+- 生成并审查 `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`。
 
 #### 验收标准
 
 - UoW contract tests 覆盖 facade 使用 pure normalizer、settings port、dirty/outbox。
 - relation extra facade 现有 tests 保持绿色。
 - API handler expectedFailure 仍保留，直到 PF-P073 handler wiring。
+
+#### 执行结果
+
+- `TurnoverLedgerWriteFacade.update_tag_selection(...)` 已新增。
+- facade 使用 injected `tag_selection_normalizer` 或 `app_settings_service.normalize_turnover_ledger_tag_selection_update(...)`。
+- UoW handler 内调用 `context.settings_port.save_tag_selection_settings(...)` 并返回 service-layer `public_payload`。
+- 新增 facade success、outbox rollback、normalizer error prevents UoW side effects tests。
+- PF-P071 API handler target expectedFailure 仍保留，等待 PF-P073 handler wiring。
+
+#### Verification
+
+- `git status --short --branch`: Pass，仅 PF-P072 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，31 tests，2 expectedFailure。
 
 ## 维护规则
 

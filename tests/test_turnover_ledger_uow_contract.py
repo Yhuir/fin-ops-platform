@@ -351,6 +351,39 @@ class _RecordingRelationExtraNormalizer:
         }
 
 
+class _RecordingTagSelectionNormalizer:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, *, payload: dict[str, object], actor_id: str) -> dict[str, object]:
+        self.calls.append({"payload": dict(payload), "actor_id": actor_id})
+        if self.fail:
+            raise ValueError("invalid tag selection")
+        return {
+            "next_snapshot": {
+                "turnover_ledger_tag_selection": {
+                    "version": 2,
+                    "selected_tag_codes": ["external_rule_borrow_out"],
+                }
+            },
+            "next_selection": {
+                "version": 2,
+                "selected_tag_codes": ["external_rule_borrow_out"],
+            },
+            "audit_event": {
+                "actor_id": actor_id,
+                "old_version": 1,
+                "new_version": 2,
+            },
+            "public_payload": {
+                "version": 2,
+                "selected_tag_codes": ["external_rule_borrow_out"],
+                "active_tags": [{"code": "external_rule_borrow_out", "label": "借出款"}],
+            },
+        }
+
+
 class TurnoverLedgerUoWContractTests(unittest.TestCase):
     def _uow_class(self) -> type:
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_uow")
@@ -595,6 +628,83 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             facade_class(application=object())
+
+    def test_tag_selection_write_facade_commits_settings_and_dirty_outbox_in_one_uow(self) -> None:
+        uow, deps = self._build_uow()
+        normalizer = _RecordingTagSelectionNormalizer()
+        facade = self._write_facade_class()(uow=uow, tag_selection_normalizer=normalizer)
+
+        result = facade.update_tag_selection(
+            payload={"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(
+            normalizer.calls,
+            [
+                {
+                    "payload": {"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
+                    "actor_id": "finance-user",
+                }
+            ],
+        )
+        self.assertEqual(result["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(result["active_tags"][0]["code"], "external_rule_borrow_out")
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
+        self.assertIs(deps.settings_port.saved[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(
+            deps.settings_port.saved[0]["next_snapshot"],
+            {
+                "turnover_ledger_tag_selection": {
+                    "version": 2,
+                    "selected_tag_codes": ["external_rule_borrow_out"],
+                }
+            },
+        )
+        self.assertIs(deps.dirty_outbox_writer.calls[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_ledger_tag_selection_changed")
+        forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
+        self.assertTrue(forbidden_keys.isdisjoint(result))
+
+    def test_tag_selection_write_facade_rolls_back_settings_when_dirty_outbox_fails(self) -> None:
+        uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
+        facade = self._write_facade_class()(
+            uow=uow,
+            tag_selection_normalizer=_RecordingTagSelectionNormalizer(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
+            facade.update_tag_selection(
+                payload={"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+            )
+
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_tag_selection_write_facade_normalization_error_prevents_uow_side_effects(self) -> None:
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(
+            uow=uow,
+            tag_selection_normalizer=_RecordingTagSelectionNormalizer(fail=True),
+        )
+
+        with self.assertRaisesRegex(ValueError, "invalid tag selection"):
+            facade.update_tag_selection(
+                payload={"expected_version": 1, "selected_tag_codes": ["fee"]},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+            )
+
+        self.assertEqual(deps.connection.opened, 0)
+        self.assertEqual(deps.settings_port.saved, [])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_relation_extra_write_facade_commits_extra_and_dirty_outbox_in_one_uow(self) -> None:
         # PF-P056 target contract: facade must remain service-layer only and delegate transaction scope to UoW.

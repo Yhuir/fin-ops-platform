@@ -16887,3 +16887,23 @@ Post-Flight:
 - PF-P072 是 PF-P071 后正确的小步：先把 service-layer facade 跑通，再迁移 HTTP handler。
 - Prompt 明确禁止修改 `server.py` 和 API expectedFailure，避免提前改变真实 API 行为。
 - Prompt 要求 normalizer error 不打开 UoW，可防止无效输入产生事务/副作用。
+
+### 执行结果
+
+- PF-P072 已执行并按自动工作流标记为 `verified`。
+- `TurnoverLedgerWriteFacade.update_tag_selection(...)` 已新增。
+- Facade 使用 injected `tag_selection_normalizer` 或 `app_settings_service.normalize_turnover_ledger_tag_selection_update(...)`，在打开 UoW 前完成 normalization。
+- UoW handler 内通过 `context.settings_port.save_tag_selection_settings(...)` 保存 `next_snapshot`，并返回 service-layer `public_payload`。
+- 新增 facade success、outbox rollback、normalizer error prevents UoW side effects tests。
+- PF-P071 的 2 个 API handler target expectedFailure 仍保留，等待 PF-P073 handler wiring。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P072 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，31 tests，2 expectedFailure。
+- `rg -n "def update_tag_selection|turnover_ledger_tag_selection_changed|PF-P072|expectedFailure|save_tag_selection_settings" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`，只迁移 tag selection handler，并将 PF-P071 的 2 个 expectedFailure 转为普通通过。

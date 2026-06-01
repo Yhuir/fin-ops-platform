@@ -1015,7 +1015,7 @@ Verification:
 
 ## PF-P072 Tag Selection Facade Skeleton
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1025,4 +1025,17 @@ Verification:
 
 下一步：
 
-- 执行 PF-P072。
+- `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`。
+- PF-P073 should minimally wire `PUT /api/turnover-ledger/tag-selection` to the facade/UoW path and turn the 2 PF-P071 handler target expectedFailure tests into ordinary passing tests.
+
+执行结果：
+
+- Added `TurnoverLedgerWriteFacade.update_tag_selection(...)`.
+- Facade accepts `tag_selection_normalizer` or `app_settings_service`, calls pure normalizer before opening UoW, saves through `context.settings_port.save_tag_selection_settings(...)`, and returns service-layer `public_payload`.
+- Added facade success, outbox rollback and normalization-error tests.
+- PF-P071 API handler expectedFailure tests remain in place until PF-P073.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests, 2 expectedFailure.
