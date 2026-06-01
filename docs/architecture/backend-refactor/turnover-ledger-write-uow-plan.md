@@ -1260,3 +1260,17 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 33 tests.
+
+## PF-P078-MG Bank Row Tags UoW Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖 PF-P076 到 PF-P078 的 bank-row-tags UoW slice 累计 diff。
+- 只执行 Merge Gate，不执行 Traffic Gate。
+- 合并前后运行 Turnover Ledger targeted tests。
+
+下一步：
+
+- 执行 PF-P078-MG。

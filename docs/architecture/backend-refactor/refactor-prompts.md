@@ -17841,3 +17841,97 @@ Verification:
 - `rg -n "update_bank_row_tags_batch|_turnover_ledger_bank_row_tags_write_facade|bank-row-tags|bank_row_tags|expectedFailure|PF-P078|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate`，统一覆盖 PF-P076 到 PF-P078 的完整 diff。
+
+## PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate
+
+```text
+/goal
+PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate
+
+Role:
+你是一位负责主干合入门禁的后端工程师，必须以生产级合并标准审查 Turnover Ledger bank-row-tags UoW slice。
+
+Context:
+PF-P076、PF-P077、PF-P078 已在 `codex/turnover-ledger-bank-row-tags-uow-p076` 分支完成并通过 targeted verification。该累计切片为 `POST /api/turnover-ledger/bank-row-tags/batch` 建立 API target tests、facade/port skeleton、UoW multi-refresh、local/dev/test handler wiring，并保留 PostgreSQL production legacy fallback。PF-P078-MG 只执行 Merge Gate，不执行 Traffic Gate。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 相关 diff
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py 相关 diff
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py 相关 diff
+   - tests/test_turnover_ledger_api.py 相关 diff
+   - tests/test_turnover_ledger_uow_contract.py 相关 diff
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P076、PF-P077、PF-P078 均为 verified。
+4. 必须确认当前工作树无 unrelated dirty changes 和 untracked 临时文件。
+5. 必须确认本 MG 不执行部署、不访问生产、不切 Traffic Gate。
+
+Expected Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required MG Work:
+1. Branch and diff scope:
+   - 执行 `git status --short --branch`。
+   - 执行 `git ls-files --others --exclude-standard`，必须为空。
+   - 执行 `git diff --name-only main...HEAD`，确认只包含 Expected Changed Files。
+   - 执行 `git diff --check`。
+   - 严禁使用 `git add .` 或 `git add -A`。
+2. Scope audit:
+   - 确认 production code 只涉及 bank-row-tags UoW seam、facade/UoW multi-refresh skeleton。
+   - 确认没有迁移 relation extra、tag selection、confirm/cancel、withdraw、No OA、Bankdetail 独立 API 或其它 Turnover 写路径。
+   - 确认没有 schema/migration、Nginx、部署、feature flag 或 Traffic Gate 变更。
+   - 确认 PostgreSQL production path 未猜测 Bankdetail SQL，仍记录为 legacy fallback/blocker。
+3. Verification on feature branch:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+   - `rg -n "update_bank_row_tags_batch|_turnover_ledger_bank_row_tags_write_facade|bank-row-tags|bank_row_tags|expectedFailure|PF-P078|PF-P078-MG|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`
+4. Commit / merge:
+   - 若有未提交的 MG 文档更新，必须精确 `git add` 对应文档并 commit。
+   - 同步 `main`：`git checkout main`，`git pull origin main`。
+   - 合入当前分支：`git merge --no-ff codex/turnover-ledger-bank-row-tags-uow-p076 -m "Merge branch 'codex/turnover-ledger-bank-row-tags-uow-p076': turnover ledger bank row tags UoW"`。
+   - 如果 merge/rebase 出现冲突，必须停止并报告，不得自行丢弃任何一方改动。
+5. Verification on main:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --check`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+6. Post-merge:
+   - 只有 main 上 verification 全部通过后，才允许将 PF-P078-MG 标记为 verified。
+   - 精确提交 MG 状态机/文档更新。
+   - 执行 `git push origin main`。
+
+Forbidden Scope:
+- 不得执行 Traffic Gate、部署、Nginx、生产配置或 feature flag 修改。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得修改业务代码来“修测试”，除非是当前 MG 范围内发现的明显文档/状态机错误；生产代码变更必须停止报告。
+- 不得使用 destructive git 命令。
+- main 合入后如果 verification 失败，必须停止，不得 push origin/main。
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P078-MG status = verified / blocked。
+   - 记录合入 main、main 上验证命令和 push 结果。
+   - 下一条允许任务必须从最新 main 新建分支后生成。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P078-MG 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 bank-row-tags UoW slice 已合入 main。
+4. push 完成后，从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt；如果下一模块选择不明确，停止并总结。
+```
+
+### 审查结论
+
+- PF-P078-MG 是当前分支的正确 cumulative Merge Gate，覆盖 PF-P076/PF-P077/PF-P078，粒度符合“一个可合并模块切片”。
+- MG 明确分离 Traffic Gate，不部署、不切流，只做代码与文档合入主干前后的验证。
+- MG 对 changed files、untracked files、production diff、main 复验和 push 前置条件都有硬门禁。
