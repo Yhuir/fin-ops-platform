@@ -1780,3 +1780,259 @@ Verification on main:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 42 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 39 tests.
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass.
+
+## PF-P089 Remaining Write Path Rebaseline / Next Slice Selection
+
+状态：`verified`
+
+目标：
+
+- 在 PF-P088-MG 已 push 到 `origin/main` 后，从最新 `main` 重新扫描 Turnover Ledger 剩余写路径。
+- 输出 route matrix、UoW status matrix、remaining gap analysis 和 next slice decision。
+- 修正状态机中 PF-P088-MG 已 push 后仍显示“等待 push origin/main”的 stale 记录。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code、tests、SQL migration、worker、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不执行 Traffic Gate。
+
+必须回答：
+
+- `/api/turnover-ledger*` 现有 path 中哪些是 read-only、哪些是 write、哪些是 export/compatibility/review。
+- 每个 write path 当前是否已经接入 UoW，证据是什么。
+- 是否还有 handler 直接编排 facts/audit/dirty scope/outbox。
+- 是否还有 handler 直接 clear read model。
+- 是否还有 stale write、durable idempotency 或 transaction rollback tests 缺口。
+- 下一条最小 Micro-JIT prompt 是 characterization/contract tests、facade/UoW extraction、还是 cumulative MG。
+
+### Route Matrix
+
+| Path / Method | Handler | 分类 | 当前 Owner | 说明 |
+| --- | --- | --- | --- | --- |
+| `GET /api/turnover-ledger` | `_handle_api_turnover_ledger` | read-only | `TurnoverLedgerReadFacade.list_ledger` | PF-P046 到 PF-P050 已抽出 read facade。 |
+| `GET /api/turnover-ledger/export-preview` | `_handle_api_turnover_ledger_export_preview` | read/export preview | `TurnoverLedgerReadFacade.export_preview` | 只读导出预览。 |
+| `GET /api/turnover-ledger/export` | `_handle_api_turnover_ledger_export` | read/export | `TurnoverLedgerReadFacade.export` | 只读 XLSX 响应组装仍在 handler 边界。 |
+| `GET /api/turnover-ledger/tag-selection` | `_handle_api_turnover_ledger_tag_selection` | read/settings | `AppSettingsService` | 读取设置，不属于 write UoW。 |
+| `PUT /api/turnover-ledger/tag-selection` | `_handle_api_turnover_ledger_tag_selection_update` | write | `TurnoverLedgerWriteFacade.update_tag_selection` | Facade 可用时走 UoW；fallback path 保留 direct clear/enqueue。 |
+| `POST /api/turnover-ledger/bank-row-tags/batch` | `_handle_api_turnover_ledger_bank_row_tags_batch` | write / cross-module | `TurnoverLedgerWriteFacade.update_bank_row_tags_batch` | local/dev/test path 已走 UoW；PostgreSQL storage backend 仍 fallback。 |
+| `GET /api/turnover-ledger/relations/{id}` | `_handle_api_turnover_ledger_relation` | read-only | `TurnoverLedgerReadFacade.get_relation` | 只读 relation detail。 |
+| `GET /api/turnover-ledger/relations/{id}/extra` | `_handle_api_turnover_ledger_relation_extra` | read-only | `TurnoverLedgerReadFacade.get_relation_extra` | 只读 relation extra。 |
+| `PUT /api/turnover-ledger/relations/{id}/extra` | `_handle_api_turnover_ledger_relation_extra_update` | write | `TurnoverLedgerWriteFacade.update_relation_extra` | Facade 可用时走 UoW；PostgreSQL path 已有 extra repository adapter。 |
+| `POST /api/turnover-ledger/relations/confirm` | `_handle_api_turnover_ledger_confirm` | write | `TurnoverLedgerWriteFacade.confirm_relation` | local/dev/test path 已走 UoW；PostgreSQL storage backend 仍 fallback。 |
+| `POST /api/turnover-ledger/relations/{id}/withdraw` | `_handle_api_turnover_ledger_withdraw` | write | `TurnoverLedgerWriteFacade.withdraw_relation` | local/dev/test path 已走 UoW；PostgreSQL storage backend 仍 fallback。 |
+
+### UoW Status Matrix
+
+| Write path | UoW status | Evidence | Remaining production gap |
+| --- | --- | --- | --- |
+| Tag selection PUT | 已接入 facade/UoW，包含 PostgreSQL adapter path | `server.py` `_turnover_ledger_tag_selection_write_facade()` builds `TurnoverLedgerTagSelectionSettingsAdapter` and `TurnoverLedgerDirtyOutboxWriter`; tests cover rollback/no direct clear. | 仍需后续评估 stale/idempotency 是否要进入 settings command expected_versions；不是下一条最小 blocker。 |
+| Bank row tags batch | local/dev/test 已接入 facade/UoW | `server.py` `_turnover_ledger_bank_row_tags_write_facade()` returns UoW for non-Postgres; `TurnoverLedgerWriteFacade.update_bank_row_tags_batch`; contract tests cover bankdetail/workbench/turnover refreshes. | PostgreSQL storage backend returns `None`；缺少 transaction-aware Bankdetail port adapter。 |
+| Relation extra PUT | 已接入 facade/UoW，包含 PostgreSQL adapter path | `_turnover_ledger_relation_extra_write_facade()` uses `TurnoverLedgerExtraRepositoryAdapter` for Postgres; tests cover rollback/no direct clear/normalizer adapter. | 生产 path 已有 adapter，但仍可后续补 source version/stale contract；非当前最大 gap。 |
+| Confirm relation | local/dev/test 已接入 facade/UoW | `_turnover_ledger_confirm_write_facade()` local UoW；`TurnoverLedgerWriteFacade.confirm_relation`; API tests cover rollback/no direct clear. | PostgreSQL storage backend returns `None`；缺少 transaction-aware relation repository adapter。 |
+| Withdraw relation | local/dev/test 已接入 facade/UoW | `_turnover_ledger_withdraw_write_facade()` local UoW；`TurnoverLedgerWriteFacade.withdraw_relation`; API tests cover rollback/no direct clear. | PostgreSQL storage backend returns `None`；缺少 transaction-aware relation repository adapter。 |
+
+### Remaining Gap Analysis
+
+- `server.py` 的五条 Turnover Ledger 写 handler 都已经具备 facade seam，并在 facade 可用时不再直接 clear read model。
+- legacy fallback 仍存在，并且 fallback path 仍会调用 direct read-model clear / non-transactional enqueue；这是兼容路径，不应在没有 production port contract 的情况下直接删除。
+- `services/turnover_ledger_write_adapters.py` 目前只有 `TurnoverLedgerExtraRepositoryAdapter`、`TurnoverLedgerTagSelectionSettingsAdapter`、`TurnoverLedgerDirtyOutboxWriter` 和 `TurnoverLedgerExtraNormalizerAdapter`。
+- 尚缺两个关键 production ports：
+  - `TurnoverLedgerRelationRepositoryAdapter`：用于 PostgreSQL confirm/withdraw relation facts/audit 写入，并接受外层 transaction。
+  - `TurnoverLedgerBankdetailPortAdapter`：用于 PostgreSQL bank-row-tags batch 写入 Bankdetail category facts/audit、relation rebuild influence，并接受外层 transaction。
+- 因为 relation/bankdetail production adapters 不存在，`_turnover_ledger_bank_row_tags_write_facade()`、`_turnover_ledger_confirm_write_facade()` 和 `_turnover_ledger_withdraw_write_facade()` 在 `storage_backend == "postgres"` 时仍返回 `None`。
+- 下一步不能直接迁移 handler 的 PostgreSQL path；必须先用 contract tests 固化 adapter 期望，避免猜测 repository SQL 或跨模块事务边界。
+
+### Next Slice Decision
+
+下一条最小 prompt：
+
+`PF-P090 - Turnover Ledger PostgreSQL Write Port Contract Tests`
+
+边界：
+
+- 只新增/调整 contract tests，锁定 relation repository adapter 和 Bankdetail port adapter 的生产级接口。
+- 不实现 adapters。
+- 不修改 handler，不改变 production path，不删除 fallback。
+- 不访问真实 PostgreSQL 或外部服务；使用 fake repository factory / fake transaction。
+- 测试应覆盖：
+  - relation adapter 使用 supplied transaction；
+  - relation adapter 不接收 `Application` god object；
+  - confirm/withdraw relation adapter 复用现有 relation service/repository 语义或明确 repository contract，不散落 SQL；
+  - bankdetail port adapter 使用 supplied transaction；
+  - bankdetail port adapter 不知道 HTTP response/cookie/header；
+  - adapter failure 必须让 UoW rollback，而不是 best-effort success。
+
+PF-P090 通过后，再进入 adapter skeleton / PostgreSQL facade wiring。
+
+## PF-P090 PostgreSQL Write Port Contract Tests
+
+状态：`verified`
+
+目标：
+
+- 先用 contract tests 锁定 Turnover Ledger PostgreSQL write port 的生产级接口。
+- 目标 ports：
+  - `TurnoverLedgerRelationRepositoryAdapter`
+  - `TurnoverLedgerBankdetailPortAdapter`
+- 本轮不实现 adapters，不迁移 handler，不修改 production code。
+
+测试原则：
+
+- 使用 fake repository factory / fake transaction。
+- 尚未实现的 adapter target tests 使用 `unittest.expectedFailure`，保持默认 CI 绿色。
+- 不允许 skip。
+- 不访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo 或 MySQL。
+- 必须断言 adapters 不接收 `Application` god object，不知道 HTTP response/cookie/header/status/auth。
+
+下一步：
+
+- PF-P090 已 verified。下一步生成 adapter skeleton prompt，使 target tests 转绿。
+
+执行结果：
+
+- 新增 5 条 production write port target contract tests，当前为 `unittest.expectedFailure`：
+  - relation repository adapter god-object rejection；
+  - relation repository adapter confirm with supplied transaction；
+  - relation repository adapter withdraw with supplied transaction；
+  - bankdetail port adapter god-object rejection；
+  - bankdetail port adapter apply category updates with supplied transaction。
+- 新增 1 条普通通过 UoW rollback 测试，证明 adapter exception 不得成为 best-effort success。
+- 未修改 production code、handler、facade、UoW 或 SQL migration。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 45 tests, 5 expectedFailure.
+
+## PF-P091 PostgreSQL Write Port Adapter Skeleton
+
+状态：`verified`
+
+目标：
+
+- 实现最小 `TurnoverLedgerRelationRepositoryAdapter`。
+- 实现最小 `TurnoverLedgerBankdetailPortAdapter`。
+- 移除 PF-P090 5 条 adapter target tests 的 `unittest.expectedFailure`，使其转为普通通过。
+
+边界：
+
+- 不修改 `server.py`。
+- 不迁移 PostgreSQL handler path。
+- 不新增 SQL migration。
+- 不访问真实外部服务。
+- 不执行 Traffic Gate。
+
+下一步：
+
+- PF-P091 已 verified。下一步先进入 PostgreSQL facade readiness / API target tests；不得直接 wiring handler。
+
+执行结果：
+
+- 已实现最小 `TurnoverLedgerRelationRepositoryAdapter` 和 `TurnoverLedgerBankdetailPortAdapter`。
+- PF-P090 的 5 条 adapter target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+- 未修改 `server.py`，未迁移 handler。
+
+Verification:
+
+- RED：移除 5 个 expectedFailure 后，UoW contract suite 因 adapter class 缺失失败。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 45 tests.
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass.
+
+## PF-P092 PostgreSQL Facade Readiness Target Tests
+
+状态：`verified`
+
+目标：
+
+- 用 API-level target tests 锁定 PostgreSQL storage backend 下的 facade readiness。
+- 覆盖：
+  - bank-row-tags batch；
+  - confirm relation；
+  - withdraw relation。
+
+边界：
+
+- 本轮只改测试和文档。
+- 不修改 `server.py`。
+- 不迁移 PostgreSQL handler path。
+- 使用 fake postgres state store / fake queue repository，不访问真实数据库。
+
+下一步：
+
+- PF-P092 已 verified。下一步生成并审查 `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring`，只让 PF-P092 的 3 条 PostgreSQL facade readiness target tests 转绿；不得扩展到其它模块。
+
+执行结果：
+
+- 新增 3 条 API-level target tests，当前为 `unittest.expectedFailure`：
+  - PostgreSQL bank-row-tags batch 应进入 facade/UoW path，不应 direct clear read model；
+  - PostgreSQL confirm relation 应进入 facade/UoW path，不应 direct clear read model；
+  - PostgreSQL withdraw relation 应进入 facade/UoW path，不应 direct clear read model。
+- 新增 fake postgres state store 和 fake queue recorder，用于锁定 handler seam，不访问真实数据库或外部服务。
+- 未修改 `server.py`、adapters、facade、UoW 或 SQL migration。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 45 tests, 3 expectedFailure.
+
+## PF-P093 PostgreSQL Facade Seam Wiring
+
+状态：`verified`
+
+目标：
+
+- 只让 PF-P092 的 3 条 PostgreSQL facade readiness target tests 转为普通通过。
+- PostgreSQL bank-row-tags batch、confirm relation、withdraw relation 在 seam 可用时进入 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork`。
+- 复用 PF-P091 的 `TurnoverLedgerRelationRepositoryAdapter` 和 `TurnoverLedgerBankdetailPortAdapter`。
+
+边界：
+
+- 不迁移其它 Turnover Ledger path。
+- 不改 Workbench、No OA、Bankdetail 独立 API。
+- 不新增 SQL migration。
+- 不访问真实外部服务。
+- 不删除 legacy fallback。
+
+执行注意：
+
+- `server.py` composition 层可以创建 granular adapters/ports，但不得把 `Application` god object 注入 service/facade/adapter。
+- 如果真实 Postgres repository/port 无法用 supplied transaction 完成 facts/audit 写入，PF-P093 必须 blocked，不能退回 direct clear/read model fallback。
+
+执行结果：
+
+- PostgreSQL bank-row-tags batch、confirm relation、withdraw relation 已接入 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork` seam。
+- PostgreSQL seam 复用 PF-P091 adapters 和 `TurnoverLedgerDirtyOutboxWriter`。
+- PF-P092 的 3 条 target tests 已移除 `unittest.expectedFailure` 并普通通过。
+- 新增 server composition helper 捕获 routes、services、provider 和 state store persistence function 等细粒度依赖；不向 service/facade/adapter 注入 `Application` god object。
+- local/dev/test legacy path 保持原有 UoW 行为；legacy fallback 未删除。
+
+Verification:
+
+- RED：移除 3 个 expectedFailure 后，PF-P092 target tests 因 direct read-model clear 失败。
+- GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 45 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 45 tests.
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass.
+
+下一步：
+
+- 生成并审查 `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate`，统一覆盖 PF-P089 到 PF-P093 的完整 diff。
+
+## PF-P093-MG PostgreSQL Write Path Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖 PF-P089 到 PF-P093 的完整 diff。
+- 只做 merge gate，不继续业务实现。
+- 不执行 Traffic Gate。
+
+预期变更：
+
+- Turnover Ledger PostgreSQL write port contracts 和 adapter skeleton。
+- PostgreSQL bank-row-tags batch、confirm relation、withdraw relation facade seam。
+- 对应 API/UoW tests 和状态文档。
+
+下一步：
+
+- PF-P093-MG 通过后 merge 到 `main`，在 `main` 复验并 push `origin/main`。

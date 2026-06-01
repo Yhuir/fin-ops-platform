@@ -271,9 +271,11 @@ from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SC
 from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_TYPE
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
+    TurnoverLedgerBankdetailPortAdapter,
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
+    TurnoverLedgerRelationRepositoryAdapter,
     TurnoverLedgerTagSelectionSettingsAdapter,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
@@ -2666,17 +2668,34 @@ class Application:
             return None
         storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
-            return None
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
-            return None
+            connection = getattr(state_store, "_connection", None)
+            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            bankdetail_port = TurnoverLedgerBankdetailPortAdapter(
+                repository_factory=lambda transaction: self._postgres_turnover_ledger_bankdetail_repository(
+                    transaction,
+                    state_store=state_store,
+                )
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+        else:
+            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+            if not callable(enqueue):
+                return None
+            connection = self._local_turnover_ledger_bank_row_tags_connection(state_store)
+            bankdetail_port = self._local_turnover_ledger_bankdetail_port()
+            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
-            connection=self._local_turnover_ledger_bank_row_tags_connection(state_store),
+            connection=connection,
             relation_repository=SimpleNamespace(),
             extra_repository=SimpleNamespace(),
             settings_port=SimpleNamespace(),
-            bankdetail_port=self._local_turnover_ledger_bankdetail_port(),
-            dirty_outbox_writer=self._local_turnover_ledger_dirty_outbox_writer(queue_repository),
+            bankdetail_port=bankdetail_port,
+            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
         )
         return TurnoverLedgerWriteFacade(uow=uow)
@@ -2690,17 +2709,34 @@ class Application:
             return None
         storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
-            return None
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
-            return None
+            connection = getattr(state_store, "_connection", None)
+            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            relation_repository = TurnoverLedgerRelationRepositoryAdapter(
+                repository_factory=lambda transaction: self._postgres_turnover_ledger_relation_repository(
+                    transaction,
+                    state_store=state_store,
+                )
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+        else:
+            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+            if not callable(enqueue):
+                return None
+            connection = self._local_turnover_ledger_confirm_connection(state_store)
+            relation_repository = self._local_turnover_ledger_confirm_relation_repository()
+            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
-            connection=self._local_turnover_ledger_confirm_connection(state_store),
-            relation_repository=self._local_turnover_ledger_confirm_relation_repository(),
+            connection=connection,
+            relation_repository=relation_repository,
             extra_repository=SimpleNamespace(),
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=self._local_turnover_ledger_dirty_outbox_writer(queue_repository),
+            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
         )
         return TurnoverLedgerWriteFacade(uow=uow)
@@ -2714,20 +2750,135 @@ class Application:
             return None
         storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
-            return None
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
-            return None
+            connection = getattr(state_store, "_connection", None)
+            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            relation_repository = TurnoverLedgerRelationRepositoryAdapter(
+                repository_factory=lambda transaction: self._postgres_turnover_ledger_relation_repository(
+                    transaction,
+                    state_store=state_store,
+                )
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+        else:
+            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+            if not callable(enqueue):
+                return None
+            connection = self._local_turnover_ledger_withdraw_connection(state_store)
+            relation_repository = self._local_turnover_ledger_withdraw_relation_repository()
+            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
-            connection=self._local_turnover_ledger_withdraw_connection(state_store),
-            relation_repository=self._local_turnover_ledger_withdraw_relation_repository(),
+            connection=connection,
+            relation_repository=relation_repository,
             extra_repository=SimpleNamespace(),
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=self._local_turnover_ledger_dirty_outbox_writer(queue_repository),
+            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
         )
         return TurnoverLedgerWriteFacade(uow=uow)
+
+    def _postgres_turnover_ledger_relation_repository(
+        self,
+        transaction: object,
+        *,
+        state_store: object,
+    ) -> object:
+        relation_service = self._turnover_relation_service
+        routes = self._turnover_ledger_api_routes
+        bank_rows = self._turnover_bank_transaction_rows
+
+        def persist_relations() -> None:
+            snapshot = relation_service.snapshot()
+            if callable(getattr(transaction, "execute", None)):
+                PostgresWorkbenchRepository(transaction).save_turnover_relations(snapshot)
+                return
+            save_relations = getattr(state_store, "save_turnover_relations", None)
+            if not callable(save_relations):
+                raise RuntimeError("state store must expose save_turnover_relations.")
+            save_relations(dict(snapshot))
+
+        class _PostgresTurnoverLedgerRelationRepository:
+            def confirm_relation(
+                self,
+                *,
+                bank_row_ids: list[str],
+                actor_id: str,
+                note: str | None,
+            ) -> dict[str, object]:
+                relation_service.rebuild_from_bank_rows(bank_rows())
+                result = routes.confirm_relation(
+                    bank_row_ids=list(bank_row_ids),
+                    actor=actor_id,
+                    note=note,
+                )
+                persist_relations()
+                return dict(result or {})
+
+            def withdraw_relation(
+                self,
+                *,
+                relation_id: str,
+                actor_id: str,
+                note: str | None,
+            ) -> dict[str, object]:
+                result = routes.withdraw_relation(
+                    relation_id=relation_id,
+                    actor=actor_id,
+                    note=note,
+                )
+                persist_relations()
+                return dict(result or {})
+
+        return _PostgresTurnoverLedgerRelationRepository()
+
+    def _postgres_turnover_ledger_bankdetail_repository(
+        self,
+        transaction: object,
+        *,
+        state_store: object,
+    ) -> object:
+        category_service = self._bank_transaction_category_service
+        relation_service = self._turnover_relation_service
+        bank_rows = self._turnover_bank_transaction_rows
+
+        def persist_category_and_relations() -> None:
+            category_snapshot = category_service.snapshot()
+            relation_snapshot = relation_service.snapshot()
+            if callable(getattr(transaction, "execute", None)):
+                repository = PostgresWorkbenchRepository(transaction)
+                repository.save_bank_transaction_categories(category_snapshot)
+                repository.save_turnover_relations(relation_snapshot)
+                return
+            save_categories = getattr(state_store, "save_bank_transaction_categories", None)
+            save_relations = getattr(state_store, "save_turnover_relations", None)
+            if not callable(save_categories) or not callable(save_relations):
+                raise RuntimeError(
+                    "state store must expose save_bank_transaction_categories and save_turnover_relations."
+                )
+            save_categories(dict(category_snapshot))
+            save_relations(dict(relation_snapshot))
+
+        class _PostgresTurnoverLedgerBankdetailRepository:
+            def apply_turnover_category_updates(
+                self,
+                updates: list[dict[str, object]],
+                *,
+                actor_id: str,
+            ) -> dict[str, object]:
+                result = category_service.apply_turnover_updates(
+                    list(updates or []),
+                    actor=actor_id,
+                )
+                relation_service.rebuild_from_bank_rows(bank_rows())
+                persist_category_and_relations()
+                return dict(result or {})
+
+        return _PostgresTurnoverLedgerBankdetailRepository()
 
     def _local_turnover_ledger_confirm_connection(self, state_store: object) -> object:
         application = self
