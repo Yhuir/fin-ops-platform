@@ -13867,7 +13867,7 @@ Stop Conditions:
 
 ## PF-P050 - Turnover Ledger Read Facade Handler Cleanup
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -13989,7 +13989,7 @@ Stop Conditions:
 
 ### 执行结果
 
-- PF-P050 已执行，状态为 `implemented`，等待用户确认后才能标记 `verified`。
+- PF-P050 已执行并由用户确认，状态为 `verified`。
 - `server.py` 新增 Turnover Ledger read-only 专用 helper：
   - `_turnover_ledger_query_value`
   - `_turnover_ledger_query_int`
@@ -14002,4 +14002,139 @@ Stop Conditions:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`：Pass，2 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`：Pass，81 tests。
   - `git status --short --branch`、`git ls-files --others --exclude-standard`、`git diff --check`、`test ! -e backend-go`、PF-P050 `rg` evidence check 均通过。
-- 下一步建议：用户确认 PF-P050 `verified` 后，生成 cumulative MG 覆盖 PF-P046 到 PF-P050。
+- 下一步建议：已生成并审查 `PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate`，覆盖 PF-P046 到 PF-P050。
+
+## PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P050-MG - Turnover Ledger Discovery / Characterization / Read Facade Cumulative Merge Gate。
+
+Role: 你是一位严格的 Git Merge Gate 审查工程师和 Python 后端架构守门人。你的任务不是继续重构，而是对 Turnover Ledger read-side 分支做正式合入 main 前后的范围检查、验证、提交、合并和状态机回写。
+
+Context:
+- 当前重构方向是 Python-first 模块化重构，不引入 Go，不替换运行时。
+- 本 Merge Gate 统一覆盖 PF-P046、PF-P047、PF-P048、PF-P049、PF-P050 的完整 diff。
+- PF-P046: Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan。
+- PF-P047: Turnover Ledger Characterization Tests。
+- PF-P048: Turnover Ledger Query/Route Facade Extraction Planning。
+- PF-P049: Turnover Ledger Query/Route Facade Extraction。
+- PF-P050: Turnover Ledger Read Facade Handler Cleanup。
+- PF-P046 到 PF-P050 均已 verified。
+- 当前分支应为 `codex/turnover-ledger-discovery-p046`。
+- 本轮是 Merge Gate，不是 Traffic Gate。不得部署，不访问生产，不修改网关，不打开 feature flag。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/runtime-call-chain.md`
+2. 必须确认：
+   - 当前分支是 `codex/turnover-ledger-discovery-p046`。
+   - 当前 active prompt 是 PF-P050-MG planned。
+   - PF-P046、PF-P047、PF-P048、PF-P049、PF-P050 均为 `verified`。
+   - `git ls-files --others --exclude-standard` 无临时文件、`.pkl`、`.sqlite`、`__pycache__` 或测试输出。
+   - 不存在 unrelated uncommitted changes。
+
+Gate Scope:
+- 这是 Turnover Ledger read-side cumulative Merge Gate。
+- 允许：范围检查、上游同步、验证、精确暂存、commit、merge 到 `main`、main 上复验、状态机和 prompt 回写。
+- 不允许：继续实现业务重构、补新功能、修改 mutation path、设计或引入 UoW、修改 repository、worker、runtime queue、SQL migration、frontend、deployment、Nginx、Vite、environment variables 或 production config。
+- 不允许执行 Traffic Gate、staging/prod traffic switch、部署、生产访问或 feature flag 打开。
+
+Expected Changed Files:
+以下是 `origin/main...HEAD` 允许出现的文件集合。若出现额外业务文件，必须停止并解释。
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_export_service.py`
+- `tests/test_turnover_ledger_query_service.py`
+- `tests/test_turnover_ledger_read_facade.py`
+- `tests/test_turnover_ledger_source_versions.py`
+- `docs/architecture/backend-refactor/README.md`
+- `docs/architecture/backend-refactor/architecture-inventory.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/module-refactor-plan.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/runtime-call-chain.md`
+- `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+
+Required Scope Checks:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git log --oneline origin/main..HEAD`
+- `git diff --name-only origin/main...HEAD`
+- `git diff --stat origin/main...HEAD`
+- `git diff --check origin/main...HEAD`
+- `test ! -e backend-go`
+- Manually inspect `git diff origin/main...HEAD -- backend/src/fin_ops_platform/app/server.py` and confirm:
+  - only Turnover Ledger read-only handler/facade cleanup changed;
+  - mutation handlers remain semantically unchanged;
+  - no UoW/stale write/idempotency/dirty scope/outbox behavior was introduced;
+  - HTTP response contracts remain compatible.
+- Manually inspect `git diff origin/main...HEAD -- tests` and confirm tests are Turnover Ledger characterization/read-side tests only.
+- Manually inspect docs diff and confirm it only records Turnover Ledger discovery/planning/read-side facts and Merge Gate state.
+
+Required Verification Before Merge:
+- `python3 -m compileall -q backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py backend/src/fin_ops_platform/services`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade -v`
+- `rg -n "PF-P046|PF-P047|PF-P048|PF-P049|PF-P050|PF-P050-MG|Turnover Ledger" docs/architecture/backend-refactor backend/src/fin_ops_platform/app tests`
+
+Commit / Merge Preparation:
+- 必须精准暂存具体文件，严禁 `git add .` 或 `git add -A`。
+- 必须排查 untracked files，严禁把临时文件、`.pkl`、`.sqlite`、测试输出或 `__pycache__` 带入提交。
+- 如果存在尚未提交的 PF-P050-MG 文档状态更新，使用明确文件列表暂存并提交。
+- 建议 commit message：`chore(turnover-ledger): merge read facade slice gate` 或更贴合实际 diff 的同级语义 message。
+
+Upstream Sync Lock:
+- 合入 main 前必须同步最新主干：
+  - `git fetch origin`
+  - 确认 `main` 与 `origin/main` 的关系。
+  - 若远端 main 有新提交，必须先让当前分支包含最新 main（通过 merge main 或 rebase main，选择非破坏性方式）。
+  - 若发生冲突，停止并报告，不得自行丢弃用户改动。
+  - 同步 main 后必须重新执行 Required Verification Before Merge。
+
+Merge To Main:
+- 只有在用户明确要求执行 PF-P050-MG 时，才允许执行 merge。
+- 如果当前分支已经包含最新 main 且验证通过：
+  - checkout `main`；
+  - pull/ff-only 到最新 `origin/main`；
+  - merge 当前分支；
+  - 在 `main` 上重新执行 Required Verification Before Merge；
+  - 更新 `migration-state-log.md` 和 `refactor-prompts.md`，将 PF-P050-MG 标记为 `implemented`，等待用户确认后才能标记 `verified`。
+- 如果当前已经在 main 且没有可合并 diff，不做无意义 merge；只完成范围检查、验证、必要提交和状态机更新。
+- 不自动 push `origin/main`，除非用户明确要求。
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P050-MG status must be `implemented` or `blocked`；未经用户确认不得标记 `verified`。
+  - 记录 changed files、verification commands/results、merge result、remaining risks、next recommended task。
+- 更新 `refactor-prompts.md` with PF-P050-MG execution result。
+- 如果已合入 main，最终回复必须说明 main 上复验结果和是否尚未 push。
+- 最终回复必须明确：没有 Traffic Gate、没有部署、没有生产访问、没有业务流量切换。
+
+Stop Conditions:
+- 当前分支不是 `codex/turnover-ledger-discovery-p046` 且未处于明确 merge/main 复验步骤时，停止。
+- PF-P046 到 PF-P050 任一未 verified，停止。
+- diff 出现 expected changed files 以外的未解释业务文件，停止。
+- untracked files 包含临时文件或测试输出，停止。
+- 需要触碰 mutation/UoW/repository/worker/runtime queue/SQL migration/frontend/deploy 时，停止。
+- 任一测试失败，停止并报告失败命令与输出。
+- 上游同步出现冲突，停止并报告。
+```
+
+### 审查结论
+
+- PF-P050-MG 是当前合理下一步：PF-P046 到 PF-P050 已形成一个完整 Turnover Ledger read-side 可合并切片。
+- MG 明确覆盖完整分支 diff，并把 expected changed files 白名单写入 prompt，防止无关改动混入。
+- MG 明确要求 upstream sync、合并前验证和 main 上复验；不自动 push，不执行 Traffic Gate。
+- MG 禁止继续业务重构，尤其是 mutation path、UoW、repository、worker、SQL migration、frontend 和 deployment。
