@@ -20348,3 +20348,28 @@ Post-Flight:
 - PF-P097 是 PF-P096 之后合理的 wiring 步骤：把 service-level ports 接入 PostgreSQL composition，但不改变 API contract。
 - prompt 明确要求 local/dev/test fallback path 保持不动，降低对 legacy state path 的影响。
 - prompt 的 merge 边界可在 PF-P097 verified 后评估，倾向生成 cumulative MG 覆盖 PF-P094 到 PF-P097。
+
+### 执行结果
+
+- 状态：`verified`。
+- `server.py` PostgreSQL storage backend composition 已接入：
+  - `TurnoverLedgerRelationWritePort`
+  - `TurnoverLedgerBankdetailWritePort`
+- `_postgres_turnover_ledger_relation_repository(...)` 与 `_postgres_turnover_ledger_bankdetail_repository(...)` 的 nested service orchestration 已移除。
+- 新的 `_postgres_turnover_ledger_persistence_repository(...)` 只做 transaction-bound persistence repository factory：PostgreSQL transaction 使用 `PostgresWorkbenchRepository(transaction)`，非 SQL transaction fallback 使用 state store。
+- `TurnoverLedgerRelationWritePort.confirm_relation(...)` 保持旧行为顺序：先 rebuild relation snapshot，再执行 confirm operation，再持久化 snapshot。
+- 本轮未修改 API response contract，未新增 SQL migration。
+
+### 验证结果
+
+- `git status --short --branch`：Pass，仅有 PF-P097 范围内文件改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，45 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `rg -n "TurnoverLedgerRelationWritePort|TurnoverLedgerBankdetailWritePort|_postgres_turnover_ledger_relation_repository|_postgres_turnover_ledger_bankdetail_repository|PF-P097" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate`，覆盖 PF-P094 到 PF-P097 的完整 diff。MG 只做 scope audit、untracked audit、diff check、target tests、文档状态检查、commit/merge/push；不得新增业务实现。

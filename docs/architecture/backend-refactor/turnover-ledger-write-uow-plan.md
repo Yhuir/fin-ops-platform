@@ -2190,7 +2190,7 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
 
 ## PF-P097 PostgreSQL Write Port Server Composition Wiring
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2208,3 +2208,23 @@ PF-P093 已把 PostgreSQL write path 接入 UoW seam，但仍有两个 repositor
 Merge 边界：
 
 - 若 PF-P097 verified，当前分支已覆盖 repository ownership discovery、contract tests、skeleton 和 server composition wiring，应生成 cumulative MG 覆盖 PF-P094 到 PF-P097。
+
+执行结果：
+
+- PostgreSQL confirm/withdraw composition 已使用 `TurnoverLedgerRelationWritePort`。
+- PostgreSQL bank-row-tags composition 已使用 `TurnoverLedgerBankdetailWritePort`。
+- `server.py` 中旧 `_postgres_turnover_ledger_relation_repository(...)` 与 `_postgres_turnover_ledger_bankdetail_repository(...)` nested orchestration helper 已移除。
+- 保留薄 `_postgres_turnover_ledger_persistence_repository(...)`，只负责把 supplied transaction 映射为 `PostgresWorkbenchRepository(transaction)` 或 state store persistence target。
+- `TurnoverLedgerRelationWritePort.confirm_relation(...)` 调整为先 rebuild，再 confirm，再持久化，保持旧 helper 行为。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，45 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，49 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git diff --check`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate`。
+- MG 覆盖 PF-P094 到 PF-P097 的完整 diff，不新增业务实现。

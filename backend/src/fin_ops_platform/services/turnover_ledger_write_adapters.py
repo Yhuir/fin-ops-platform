@@ -150,6 +150,7 @@ class TurnoverLedgerRelationWritePort:
         note: str | None,
         transaction: Any,
     ) -> dict[str, object]:
+        self._rebuild_relation_snapshot()
         confirm = getattr(self._routes, "confirm_relation", None)
         if not callable(confirm):
             raise RuntimeError("turnover relation routes must expose confirm_relation.")
@@ -161,10 +162,6 @@ class TurnoverLedgerRelationWritePort:
             )
             or {}
         )
-        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
-        if not callable(rebuild):
-            raise RuntimeError("relation_service must expose rebuild_from_bank_rows.")
-        rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
         self._save_relation_snapshot(transaction)
         return result
 
@@ -189,6 +186,12 @@ class TurnoverLedgerRelationWritePort:
         )
         self._save_relation_snapshot(transaction)
         return result
+
+    def _rebuild_relation_snapshot(self) -> None:
+        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
+        if not callable(rebuild):
+            raise RuntimeError("relation_service must expose rebuild_from_bank_rows.")
+        rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
 
     def _save_relation_snapshot(self, transaction: Any) -> None:
         snapshot = getattr(self._relation_service, "snapshot", None)
