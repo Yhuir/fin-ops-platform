@@ -14963,7 +14963,7 @@ Post-Flight:
 
 ## PF-P056 - Turnover Ledger Relation Extra Write Facade Tests
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -15048,3 +15048,18 @@ Post-Flight:
 - PF-P056 是 PF-P055 后合理的 Micro-JIT 下一步：先锁定最低风险 relation extra write facade 的目标契约，再进入实现。
 - Prompt 明确禁止真实 API migration、`server.py` diff 和真实外部服务访问。
 - Prompt 允许 `expectedFailure`，避免在 facade 尚未实现时破坏默认 CI，同时要求下一步 PF-P057 实现转绿。
+
+### 执行结果
+
+- PF-P056 已执行并按自动工作流标记为 `verified`。
+- 在 `tests/test_turnover_ledger_uow_contract.py` 中新增 4 条 relation extra write facade target contract tests。
+- 4 条新增 tests 当前为 `unittest.expectedFailure`：
+  - constructor rejects `Application` god object；
+  - `update_relation_extra()` 在 UoW transaction 内调用 extra write port 并 enqueue dirty/outbox；
+  - dirty/outbox failure 回滚 extra write；
+  - command/result 不携带 HTTP coupling。
+- 未修改 `server.py`、真实 API handler、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests，4 expected failures。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+- 下一步建议：生成并审查 `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation`。PF-P057 应只实现最小 `TurnoverLedgerWriteFacade` 并将 PF-P056 新增 tests 转为普通通过；仍不得迁移真实 handler。

@@ -400,7 +400,7 @@ PF-P056 should be test-only or facade-test-only. It should add tests for a futur
 
 ## PF-P056 Relation Extra Write Facade Test Plan
 
-状态：`planned`
+状态：`verified`
 
 PF-P056 只锁定未来 `TurnoverLedgerWriteFacade.update_relation_extra()` 的目标契约，不迁移真实 handler。
 
@@ -413,3 +413,18 @@ PF-P056 只锁定未来 `TurnoverLedgerWriteFacade.update_relation_extra()` 的�
 - 验证 command/result 不携带 HTTP cookie/header、HTTP response object 或 `app.auth` 依赖。
 
 如果 production facade 尚不存在，PF-P056 可以用 `unittest.expectedFailure` 保留目标契约并保持默认 CI 绿色；下一步 PF-P057 应实现最小 `TurnoverLedgerWriteFacade` 并将这些 tests 转绿。
+
+PF-P056 execution result:
+
+- Added 4 target contract tests for future `TurnoverLedgerWriteFacade.update_relation_extra()`.
+- The 4 tests are explicit `unittest.expectedFailure` because the production facade does not exist yet.
+- Default targeted CI remains green:
+  - `tests.test_turnover_ledger_uow_contract` passes with 4 expected failures.
+  - `tests.test_turnover_ledger_api` still passes.
+
+PF-P057 recommended implementation:
+
+- Add the smallest `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`.
+- Implement `TurnoverLedgerWriteFacade.update_relation_extra()` against the existing `TurnoverLedgerWriteUnitOfWork`.
+- Remove the 4 PF-P056 `expectedFailure` decorators only when the facade implementation makes them pass as ordinary tests.
+- Do not wire the facade into `server.py` yet.

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` planned |
-| 最近 verified prompt | `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning` |
+| 当前阶段 | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` 已执行并验证 |
+| 当前 active prompt | 无 active prompt；下一步继续 Turnover Ledger relation extra write facade implementation |
+| 最近 verified prompt | `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
-| 最近验证 | PF-P055 只更新 `turnover-ledger-write-uow-plan.md` 的 Real API Integration Plan；已运行文档检查；未修改 production code、tests、SQL migration、worker、frontend、deployment 或生产配置 |
-| 下一条允许任务 | 执行 `PF-P056 - Turnover Ledger Relation Extra Write Facade Tests`；只补 relation extra write facade tests，不迁移真实 handler |
+| 最近验证 | PF-P056 新增 4 条 relation extra write facade target contract tests，默认 CI 绿色；未修改 `server.py` 或真实 API |
+| 下一条允许任务 | 生成并审查 `PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation`；只实现最小 facade 并转绿 PF-P056 tests，不迁移真实 handler |
 
 ## Prompt 执行日志
 
@@ -5631,7 +5631,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P056 - Turnover Ledger Relation Extra Write Facade Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5646,14 +5646,29 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P056。
-- 如果测试锁定通过并保持默认 CI 绿色，按自动工作流标记为 `verified`。
+- PF-P056 已按自动工作流标记为 `verified`。
+- 下一条建议 prompt：`PF-P057 - Turnover Ledger Relation Extra Write Facade Implementation`。
 
 #### 验收标准
 
 - 新增或更新的测试只覆盖 relation extra write facade 目标契约。
 - 不接入真实 Turnover Ledger API，不修改 runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
 - 如生产 facade 尚不存在，允许使用 `unittest.expectedFailure` 锁定目标契约，但不得通过放宽断言隐藏真实失败。
+
+#### 执行结果
+
+- 已在 `tests/test_turnover_ledger_uow_contract.py` 增加 4 条 `TurnoverLedgerWriteFacade.update_relation_extra()` target contract tests。
+- 4 条新增 tests 均为 `unittest.expectedFailure`，用于锁定未来 PF-P057 实现目标：
+  - facade constructor 拒绝 `Application` god object；
+  - relation extra write 与 dirty/outbox 在同一 UoW transaction；
+  - dirty/outbox failure 回滚 extra write，不返回 best-effort success；
+  - command/result 不携带 HTTP cookie/header/response/auth coupling。
+- 未修改 `server.py`、真实 API、runtime queue、worker、SQL migration、frontend、deployment 或生产配置。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，11 tests，4 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
 
 ## 维护规则
 

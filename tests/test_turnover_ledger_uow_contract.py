@@ -145,6 +145,10 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_uow")
         return getattr(module, "TurnoverLedgerWriteUnitOfWork")
 
+    def _write_facade_class(self) -> type:
+        module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_facade")
+        return getattr(module, "TurnoverLedgerWriteFacade")
+
     def _build_uow(
         self,
         *,
@@ -297,3 +301,73 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             uow_class(application=object())
+
+    @unittest.expectedFailure
+    def test_relation_extra_write_facade_constructor_rejects_application_god_object(self) -> None:
+        # PF-P056 target contract: PF-P057 should implement the facade and remove this expectedFailure.
+        facade_class = self._write_facade_class()
+
+        with self.assertRaises(TypeError):
+            facade_class(application=object())
+
+    @unittest.expectedFailure
+    def test_relation_extra_write_facade_commits_extra_and_dirty_outbox_in_one_uow(self) -> None:
+        # PF-P056 target contract: facade must remain service-layer only and delegate transaction scope to UoW.
+        uow, deps = self._build_uow()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "facade note"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertEqual(deps.connection.opened, 1)
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
+        self.assertEqual(len(deps.extra_repository.extras), 1)
+        self.assertIs(deps.extra_repository.extras[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(deps.extra_repository.extras[0]["extra"]["relation_id"], "turnover_rel_1")
+        self.assertEqual(deps.extra_repository.extras[0]["extra"]["note"], "facade note")
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_type"], "turnover_ledger")
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "relation_extra_update")
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_keys"], ["all"])
+        self.assertEqual(result["extra"]["relation_id"], "turnover_rel_1")
+
+    @unittest.expectedFailure
+    def test_relation_extra_write_facade_rolls_back_extra_when_dirty_outbox_fails(self) -> None:
+        # PF-P056 target contract: target semantics must not preserve current best-effort success behavior.
+        uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
+        facade = self._write_facade_class()(uow=uow)
+
+        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
+            facade.update_relation_extra(
+                relation_id="turnover_rel_1",
+                payload={"note": "must roll back"},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+            )
+
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
+    @unittest.expectedFailure
+    def test_relation_extra_write_facade_command_result_are_not_http_coupled(self) -> None:
+        # PF-P056 target contract: command/result must not carry HTTP response or auth module dependencies.
+        uow, _deps = self._build_uow()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "service-layer payload"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
+
+        self.assertIsInstance(result, dict)
+        forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
+        self.assertTrue(forbidden_keys.isdisjoint(result))
