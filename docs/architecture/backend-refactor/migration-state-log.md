@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P054 - Turnover Ledger Minimal UoW Skeleton` 已执行并验证，准备 cumulative MG |
-| 当前 active prompt | 无 active prompt；下一步生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` |
+| 当前阶段 | 已生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` |
+| 当前 active prompt | `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` (`planned`) |
 | 最近 verified prompt | `PF-P054 - Turnover Ledger Minimal UoW Skeleton` |
 | 当前分支 | `codex/turnover-ledger-write-uow-p051` |
 | 最近验证 | PF-P054 新增最小 Turnover Ledger write UoW skeleton；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v` 通过，7 tests 普通通过；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未迁移真实 API、未修改 server.py、SQL migration、worker、frontend、deployment 或生产配置 |
-| 下一条允许任务 | 生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`，覆盖 PF-P051 到 PF-P054 完整 diff |
+| 下一条允许任务 | 执行 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`，覆盖 PF-P051 到 PF-P054 完整 diff |
 
 ## Prompt 执行日志
 
@@ -5546,6 +5546,25 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，7 tests。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，27 tests。
+
+### PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- Cumulative Merge Gate，覆盖 PF-P051 到 PF-P054 的完整 diff。
+- 验证 Turnover Ledger 写路径 discovery、characterization tests、UoW contract tests 和 minimal skeleton 可以安全合入 `main`。
+- 不执行 Traffic Gate，不部署，不访问生产，不修改真实外部服务或生产配置。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P054-MG。
 
 ## 维护规则
 

@@ -14755,3 +14755,75 @@ Post-Flight:
   - `git ls-files --others --exclude-standard`：Pass。
   - `git diff --check`：Pass。
 - 下一步建议：生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`，统一覆盖 PF-P051 到 PF-P054 的完整 diff。
+
+## PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate
+
+Role:
+你是一位负责合入主干前门禁的资深后端工程师。
+
+Context:
+当前分支为 `codex/turnover-ledger-write-uow-p051`，本 Merge Gate 统一覆盖 PF-P051 到 PF-P054：
+- PF-P051：Turnover Ledger 写路径 discovery/planning。
+- PF-P052：Turnover Ledger 写路径 characterization tests。
+- PF-P053：Turnover Ledger UoW contract tests。
+- PF-P054：Turnover Ledger minimal write UoW skeleton。
+
+Gate Scope:
+- 这是 Merge Gate，只验证和合入 main。
+- 不执行 Traffic Gate。
+- 不部署，不访问生产/staging，不修改 Nginx、生产配置、feature flag 或真实外部服务。
+- 不迁移真实 Turnover Ledger 写 API。
+
+Required Checks:
+1. 分支和工作区：
+   - git status --short --branch
+   - git ls-files --others --exclude-standard
+   - git diff --check
+2. Scope 检查：
+   - 确认 diff 只包含：
+     - docs/architecture/backend-refactor/migration-state-log.md
+     - docs/architecture/backend-refactor/refactor-prompts.md
+     - docs/architecture/backend-refactor/turnover-ledger-discovery.md
+     - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+     - tests/test_turnover_ledger_api.py
+     - tests/test_turnover_ledger_uow_contract.py
+     - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - 如果出现 production code diff，必须确认只限 `turnover_ledger_write_uow.py` minimal skeleton。
+   - 禁止 `server.py`、real repository、runtime queue、worker、SQL migration、frontend、deployment、Nginx 或生产配置 diff。
+3. Verification：
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_relation_service -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_extra_service -v
+4. Commit / merge safety：
+   - 严禁 `git add .` 或 `git add -A`。
+   - 如有 untracked 临时文件，停止。
+   - 合入 main 前必须先确认当前分支包含最新 main；如需要同步 main 且产生冲突，停止。
+   - merge 到 main 后必须在 main 上重跑上述 Verification。
+   - 如果 main 上验证失败，停止，不得 push origin/main。
+5. Push：
+   - main 上验证通过后，才允许 `git push origin main`。
+   - push 只代表 Git 远端主干，不代表部署或切流。
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P054-MG status = verified / blocked。
+   - 记录 merge commit、main verification 和 push 结果。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P054-MG 执行结果。
+3. 如果 push 成功，从最新 main 新建下一条 `codex/` 分支后再生成下一 prompt。
+```
+
+### 审查结论
+
+- PF-P054-MG 是当前分支的正确合并边界：PF-P051 到 PF-P054 共同形成 Turnover Ledger write UoW foundation。
+- Gate 明确禁止 Traffic Gate 和真实 API migration，只允许合入文档、测试和最小 UoW skeleton。
+- Gate 要求 main 合入后复验，失败则停止且不得 push。
