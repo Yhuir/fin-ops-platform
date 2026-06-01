@@ -13081,5 +13081,185 @@ Stop Conditions:
 - 已将功能分支 no-ff merge 到本地 `main`。
 - Merge commit：`8f98f8ec`。
 - 已在 `main` 上完成 PF-P045-MG 要求的 diff check、backend-go absence check 和 keyword boundary scan。
-- 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改、feature flag 打开或 push。
-- 用户已确认 PF-P045-MG 可标记为 `verified`；本次状态更新将随 `git push origin main` 推送到远端。
+- 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
+- 用户已确认 PF-P045-MG `verified`。
+- 已执行 `git push origin main`，`main` 与 `origin/main` 对齐到 `de513774`。
+
+## PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan。
+
+Role: 你是一位严格的 Python 后端架构师，熟悉遗留系统模块化重构、Read Model、Transactional Outbox、source_version、低耦合边界和 CodeGraph 调用链分析。你的任务是只对 Turnover Ledger 做 Micro-JIT discovery/planning，不修改业务代码。
+
+Context:
+- 当前重构方向是 Python-first 模块化重构，不引入 Go，不替换运行时。
+- `PF-P045-MG` 已由用户确认 `verified`，并已 push 到 `origin/main`。
+- 当前分支必须是从最新 `main` 创建的 `codex/turnover-ledger-discovery-p046`。
+- PF-P045 已确认 Turnover Ledger 是独立业务模块，并新增/强化了 query service、SQL projection、source versions、read model refresh 和 grouped breakdown contract。
+- 本轮只做发现、规划和文档回写；不得修改业务代码，不得新增测试实现，不得进入 Merge Gate。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/architecture-inventory.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/runtime-call-chain.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+   - `docs/architecture/backend-refactor/migration-roadmap.md`
+2. 必须确认：
+   - 当前分支是 `codex/turnover-ledger-discovery-p046`。
+   - 当前计划仍是 Python-first。
+   - PF-P045-MG 已 `verified` 且已 push 到 `origin/main`。
+   - 当前 active prompt 是 PF-P046 planned。
+   - 工作区没有无关未提交变更。
+   - `git ls-files --others --exclude-standard` 不包含临时文件、`.pkl`、`.sqlite`、`__pycache__` 或测试输出。
+3. 必须使用 CodeGraph 或等价结构化分析优先梳理调用链。对于 CodeGraph 索引过期提示中列出的文件，必须读取对应文件确认最新内容。
+
+Allowed Scope:
+- 只允许读取代码、测试、SQL migration、文档。
+- 只允许新增或更新 Turnover Ledger discovery/planning 相关文档。
+- 允许更新：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/architecture-inventory.md`
+  - `docs/architecture/backend-refactor/module-refactor-plan.md`
+  - `docs/architecture/backend-refactor/runtime-call-chain.md`
+  - 新增 `docs/architecture/backend-refactor/turnover-ledger-discovery.md` 或等价 Turnover Ledger 专项文档。
+- 允许用 `rg`、CodeGraph、只读 git diff/log 命令做发现。
+
+Forbidden Scope:
+- 不修改 Python 业务代码。
+- 不修改 tests。
+- 不修改 SQL migration。
+- 不修改前端。
+- 不修改部署、Nginx、Vite、worker routing、环境变量或生产配置。
+- 不执行 Traffic Gate。
+- 不部署。
+- 不访问生产或 staging。
+- 不打开任何 feature flag。
+- 不进入 Merge Gate。
+- 不开始 extraction/refactor。
+- 不把 `server.py` 函数机械搬迁到 service。
+- 不创建新语言后端。
+
+Required Files / Symbols To Cover:
+- API / app entry:
+  - `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
+  - `backend/src/fin_ops_platform/app/server.py` 中 `_handle_api_turnover_ledger*`、`_turnover_ledger_source_versions`、`_turnover_ledger_stale_reasons`、`_persist_turnover_ledger_extras_best_effort` 等 Turnover 相关入口。
+- Turnover services:
+  - `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_read_model_refresh.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_source_versions.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_sql_projection.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_service.py`
+  - `backend/src/fin_ops_platform/services/turnover_relation_service.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_export_service.py`
+  - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
+  - `backend/src/fin_ops_platform/services/bank_transaction_category_service.py` 中 Turnover tag/category influence。
+- Repository / platform influence:
+  - Turnover 相关 PostgreSQL repository、read model repository、dirty scope、outbox、source version、runtime worker registry 入口。
+- Tests:
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_service.py`
+  - `tests/test_turnover_relation_service.py`
+  - `tests/test_turnover_ledger_export_service.py`
+  - `tests/test_workbench_turnover_grouping.py`
+  - PF-P045 后新增或修改的 Turnover / grouped breakdown 相关 tests。
+- SQL / migrations:
+  - Turnover Ledger facts、relations、extras、read model、source version、dirty scope、outbox 相关 migration。
+
+Required Discovery Output:
+1. API / Action Matrix
+   - 列出所有 Turnover Ledger endpoint、HTTP method、handler、service/usecase、repository、read model、external influence、test coverage。
+   - 必须覆盖：
+     - `/api/turnover-ledger`
+     - `/api/turnover-ledger/export-preview`
+     - `/api/turnover-ledger/export`
+     - `/api/turnover-ledger/bank-row-tags/batch`
+     - `/api/turnover-ledger/relations/*`
+2. File Ownership Matrix
+   - 每个 Turnover 相关 app/service/repository/test/migration 文件必须标注 primary owner、secondary influence、是否可安全进入后续 refactor。
+   - 如果发现 orphan 或边界不清文件，标记为 Review，不得猜测归属。
+3. Static Call Chain
+   - 使用 CodeGraph 输出从 route/server handler 到 query service、relation service、read model refresh、repository、dirty scope/outbox 的静态调用链。
+   - 对 CodeGraph 无法覆盖的动态 dispatch / handler map，必须用文件阅读补充说明。
+4. Dynamic Runtime Sequence
+   - 至少输出 Mermaid sequence diagram 或等价文本，覆盖：
+     - Turnover list/grouped query。
+     - Turnover export preview/export。
+     - Turnover relation confirm/withdraw。
+     - Bank row tag batch update。
+     - Read model refresh / source version update。
+     - Workbench projection impact。
+5. Read Model Freshness / Source Version Audit
+   - 明确 source_version 来源、递增点、expected version 计算、stale reason、grouped breakdown contract。
+   - 审计是否存在 request path 同步 rebuild、legacy fallback、full snapshot/local state、best-effort extras persist。
+   - 明确 versioned cache key 是否存在或是否需要后续测试锁定。
+6. Transaction / Dirty Scope / Outbox Audit
+   - 审计 relation confirm/withdraw、bank tag batch、extras persist 是否在同一 PostgreSQL transaction 内提交 facts、audit、dirty scope、outbox。
+   - 标记事务外写、best-effort 写、双写不一致风险。
+7. Cross-Module Influence
+   - 明确 Turnover 与 Workbench、Bankdetail、Batch Accounting 的交互边界。
+   - 必须说明哪些影响应通过 relation facts、source_version、dirty scope/outbox、read model projection 协作，哪些直接调用必须禁止。
+8. Low-Coupling Refactor Targets
+   - 基于现有封装提出后续最小切片，不允许机械拆文件。
+   - 明确 `server.py` / `routes_*` 应保留的职责，以及 service/repository/worker 应承担的职责。
+9. Characterization Test Plan
+   - 给出下一条 prompt 的测试锁定计划：`PF-P047 - Turnover Ledger Characterization Tests`。
+   - 明确需要先锁定哪些行为，特别是 grouped breakdown、source version/freshness、relation write side effects、export payload、Bankdetail/Workbench influence。
+10. Risk Register
+   - 列出高风险点、当前证据、建议处理顺序、是否阻塞后续 extraction/refactor。
+
+Required Docs Update:
+- 必须新增或更新 Turnover Ledger 专项 discovery 文档，建议路径：
+  - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+- 必须按真实发现更新：
+  - `architecture-inventory.md`
+  - `module-refactor-plan.md`
+  - `runtime-call-chain.md`
+  - `migration-state-log.md`
+  - `refactor-prompts.md`
+- 不得为了“看起来完整”修改无关模块文档。
+
+Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `rg -n "PF-P046|Turnover Ledger|turnover_ledger|grouped breakdown|source_version|dirty scope|outbox|Workbench projection|Bankdetail" docs/architecture/backend-refactor`
+- 如果新增 `turnover-ledger-discovery.md`，必须执行：
+  - `test -f docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+
+Post-Flight:
+- 更新 `migration-state-log.md`：
+  - PF-P046 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录发现摘要、变更文件、验证命令、未解决风险和下一条建议。
+- 更新 `refactor-prompts.md` 的 PF-P046 执行结果。
+- 最终回复必须说明：
+  - 本轮只做了 discovery/planning。
+  - 没有修改业务代码、测试实现、SQL migration、前端或部署。
+  - 下一条建议 prompt，默认应为 `PF-P047 - Turnover Ledger Characterization Tests`，除非 PF-P046 发现阻断。
+
+Stop Conditions:
+- 如果当前分支不是 `codex/turnover-ledger-discovery-p046`，停止。
+- 如果工作区存在无关未提交变更，停止。
+- 如果发现需要修改业务代码才能完成 discovery，停止并记录 blocker。
+- 如果 Turnover Ledger 文件归属或 API 合约无法从代码/测试/文档确认，标记 Review，不猜测。
+- 如果任何验证失败，停止。
+```
+
+### 审查结论
+
+- PF-P046 是 PF-P045 之后合理的下一条 Micro-JIT prompt：Turnover Ledger 是独立模块，且 PF-P045 delta 明确新增 query service、SQL projection、source versions、read model refresh 和 grouped breakdown contract。
+- PF-P046 边界正确：只做 discovery/planning 和文档回写，不修改业务代码，不新增测试实现，不进入 Merge Gate。
+- PF-P046 明确要求 CodeGraph / 静态调用链和动态运行时序，符合“每个模块先梳理调用链”的全局规则。
+- PF-P046 的下一步不应直接 extraction/refactor，应先生成 `PF-P047 - Turnover Ledger Characterization Tests` 锁定行为。

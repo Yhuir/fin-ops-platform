@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P045-MG - Main Delta Rebaseline Merge Gate` 已 verified，正在推送 `origin/main` |
-| 当前 active prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` (`verified`) |
+| 当前阶段 | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` (`planned`) |
 | 最近 verified prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | 用户已确认 PF-P045-MG `verified`；本地 `main` 已完成 no-ff merge 和 main 复验；本次状态更新将随 `git push origin main` 推送；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | push 完成后，从最新 `main` 新建分支；下一条实际模块 prompt 必须读取 PF-P045 delta 事实 |
+| 当前分支 | `codex/turnover-ledger-discovery-p046` |
+| 最近验证 | 用户已确认 PF-P045-MG `verified`；`main` 已 push 到 `origin/main`，本地与远端对齐到 `de513774`；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
+| 下一条允许任务 | 执行 PF-P046；PF-P046 只做 Turnover Ledger discovery/planning 和文档回写，不修改业务代码、不执行测试实现、不进入 Merge Gate |
 
 ## Prompt 执行日志
 
@@ -4897,14 +4897,56 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
   - `git diff --check`：Pass。
   - `test ! -e backend-go`：Pass。
   - `rg -n "PF-P045|Main Delta Rebaseline|低耦合|不允许机械拆文件|server.py|routes_\\*" docs/architecture/backend-refactor`：Pass。
-- 未执行：Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改、feature flag 打开、push。
-- 用户已确认 PF-P045-MG 可标记为 `verified`；本次状态更新将随 `git push origin main` 推送到远端。
+- 未执行：Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改、feature flag 打开。
+- 用户已确认 PF-P045-MG `verified`。
+- 已执行 `git push origin main`，`main` 与 `origin/main` 对齐到 `de513774`。
 
 #### 下一步
 
-- 执行 `git push origin main`。
-- push 完成后，从最新 `main` 新建分支生成下一条实际模块 prompt。
-- 下一条 prompt 必须读取 PF-P045 delta 事实。
+- 已从最新 `main` 新建 `codex/turnover-ledger-discovery-p046`。
+- 下一条 prompt 已生成并审查：`PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan`。
+- PF-P046 必须读取 PF-P045 delta 事实，只做 discovery/planning 和文档回写，不修改业务代码。
+
+### PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan
+
+状态：`planned`
+
+#### 范围
+
+- 从 PF-P045 main delta 事实出发，深挖 Turnover Ledger 模块边界。
+- 梳理 API/action matrix、文件 ownership、静态调用链、动态运行时序、read model freshness、source version、dirty scope、outbox、Workbench/Bankdetail 影响链。
+- 生成或更新 Turnover Ledger 专项 discovery/planning 文档。
+- 只做文档回写，不修改业务代码，不新增测试实现，不进入 Merge Gate。
+
+#### 必须覆盖
+
+- `/api/turnover-ledger`
+- `/api/turnover-ledger/export-preview`
+- `/api/turnover-ledger/export`
+- `/api/turnover-ledger/bank-row-tags/batch`
+- `/api/turnover-ledger/relations/*`
+- `app/routes_turnover_ledger.py`
+- `app/server.py` 中 Turnover Ledger handler/source version/stale reason/extras 相关入口。
+- `services/turnover_ledger_query_service.py`
+- `services/turnover_ledger_read_model_refresh.py`
+- `services/turnover_ledger_source_versions.py`
+- `services/turnover_ledger_sql_projection.py`
+- `services/turnover_ledger_service.py`
+- `services/turnover_relation_service.py`
+- `services/turnover_ledger_extra_service.py`
+- `services/turnover_ledger_export_service.py`
+- 相关 PostgreSQL repository、dirty scope/outbox/derived lifecycle、tests 和 migration。
+
+#### 生成结果要求
+
+- `refactor-prompts.md` 已包含完整 PF-P046 prompt，正文以 `/goal` 开头。
+- PF-P046 明确禁止修改业务代码、测试实现、SQL migration、前端、部署和生产配置。
+- PF-P046 明确不执行 Traffic Gate、不部署、不访问生产、不进入 Merge Gate。
+- PF-P046 明确后续下一步应是 Turnover Ledger characterization tests prompt，而不是直接 extraction/refactor。
+
+#### 下一步
+
+- 等待用户执行 PF-P046。
 
 ## 维护规则
 
