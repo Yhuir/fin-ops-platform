@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate` 已合入 main 并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` 已生成并审查 |
+| 当前 active prompt | `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` planned |
 | 最近 verified prompt | `PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
 | 最近验证 | PF-P078-MG 合入 main 后 API 36 tests 通过，UoW contract 33 tests 通过 |
-| 下一条允许任务 | push `origin/main` 后，从最新 main 新建下一条 `codex/` 分支并生成下一条 prompt |
+| 下一条允许任务 | 执行 `PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests` |
 
 ## Prompt 执行日志
 

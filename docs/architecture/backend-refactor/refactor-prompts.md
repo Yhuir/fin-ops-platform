@@ -17953,3 +17953,91 @@ Verification on main:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，33 tests。
 
 下一步：执行 `git push origin main`，然后必须从最新 main 新建下一条 `codex/` 分支再生成下一条 prompt。
+
+## PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests
+
+```text
+/goal
+PF-P079 - Turnover Ledger Confirm Relation Facade Contract Tests
+
+Role:
+你是一位负责 Turnover Ledger 写路径测试锁定的后端工程师，必须先用 contract tests 锁定 confirm relation 的目标 facade/UoW 边界，不得直接迁移真实 handler。
+
+Context:
+PF-P078-MG 已合入 main 并 push。Turnover Ledger 写路径中 relation extra、tag selection、bank-row-tags 已完成可合并 UoW slices。剩余核心写路径是 `POST /api/turnover-ledger/relations/confirm` 和 `POST /api/turnover-ledger/relations/{id}/withdraw`。当前 confirm handler 仍在 `server.py` 内直接 rebuild relations、调用 `TurnoverLedgerApiRoutes.confirm_relation(...)`，然后执行 `_after_turnover_relation_mutation(...)`，其中包含 best-effort persistence、Workbench invalidation、read model clear 和 refresh enqueue。已有 UoW contract 覆盖 generic relation repository + dirty/outbox 原子性，但缺少 `TurnoverLedgerWriteFacade.confirm_relation(...)` 的 service-layer contract。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_confirm`、`_after_turnover_relation_mutation`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py confirm tests
+   - tests/test_turnover_ledger_uow_contract.py relation repository / UoW tests
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+4. 必须确认 PF-P078-MG 已 verified 且当前分支从最新 main 创建。
+
+Task:
+只新增 confirm relation 的 facade-level contract tests。PF-P079 不修改 production code，不迁移 handler，不新增 schema/migration。若目标 facade 方法尚未实现，必须使用 `unittest.expectedFailure` 保持默认 CI 绿色，同时保留未来 unexpected success 信号。
+
+Required Test Work:
+1. 在 `tests/test_turnover_ledger_uow_contract.py` 增加 target tests，覆盖未来 `TurnoverLedgerWriteFacade.confirm_relation(...)`：
+   - 使用 explicit relation port/repository，不接收 `Application` god object。
+   - facade 接收 `bank_row_ids`、`actor_id`、`tenant_id`、`note`、`affected_months`。
+   - handler 内部目标应调用 relation port 的 confirm 方法或等价 repository/service boundary，并使用 UoW transaction。
+   - result 必须是 service-layer payload，不包含 HTTP `Response`。
+   - dirty/outbox failure 必须 rollback relation facts/audit。
+   - refresh requests 至少包含 `turnover_ledger` / `all` / `turnover_relation_changed`；如本轮只锁定 Turnover scope，应在注释中标记 Workbench influence port 仍待后续 prompt 设计。
+2. 如果需要新增 test fake：
+   - 只能放在 `tests/test_turnover_ledger_uow_contract.py`。
+   - fake 必须是细粒度 relation port/repository，不得模拟整个 Application。
+3. 不得修改 `tests/test_turnover_ledger_api.py` 的当前 confirm characterization tests，除非只增加注释或更明确的 test name；默认不修改 API tests。
+4. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得修改 production service/repository/adapter code。
+- 不得实现 `TurnoverLedgerWriteFacade.confirm_relation(...)`。
+- 不得迁移 confirm handler、withdraw handler 或其它 Turnover 写路径。
+- 不得修改 schema/migration。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+- 不得删除、放宽或跳过现有 tests；未实现目标语义必须用 `unittest.expectedFailure` 保存。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "confirm_relation|confirm relation|expectedFailure|PF-P079|turnover_relation_changed|TurnoverLedgerWriteFacade" tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P079 status = implemented / verified / blocked。
+   - 记录新增 target tests、expectedFailure 数量、验证结果和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P079 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 confirm relation facade contract test 状态。
+4. PF-P079 后不要生成 MG；下一步应生成 PF-P080 confirm relation facade skeleton。
+```
+
+### 审查结论
+
+- PF-P079 是 bank-row-tags slice 合入后的正确下一步：它不直接改 handler，而是先锁定 confirm relation 的 facade/UoW service-layer contract。
+- Prompt 明确保持 API characterization tests 不变，并用 `unittest.expectedFailure` 保存尚未实现的 facade 目标语义。
+- Prompt 暂不处理 withdraw，也不引入 Workbench influence port 实现；如需 Workbench influence，只作为后续 blocker/设计项记录。

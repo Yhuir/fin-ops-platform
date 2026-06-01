@@ -1285,3 +1285,22 @@ Verification on main:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 33 tests.
+
+## PF-P079 Confirm Relation Facade Contract Tests
+
+状态：`planned`
+
+目标：
+
+- 只补 `POST /api/turnover-ledger/relations/confirm` 未来 facade/UoW contract tests。
+- 不修改 production code，不迁移 handler。
+- 若 `TurnoverLedgerWriteFacade.confirm_relation(...)` 尚未实现，用 `unittest.expectedFailure` 保留目标语义并保持默认 CI 绿色。
+
+边界：
+
+- 测试必须使用细粒度 relation port/repository fake，不得模拟整个 `Application`。
+- 目标 contract 先锁定 Turnover scope dirty/outbox；Workbench influence port 仍作为后续设计项。
+
+下一步：
+
+- 执行 PF-P079。
