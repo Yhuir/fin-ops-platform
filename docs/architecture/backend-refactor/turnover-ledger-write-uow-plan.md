@@ -2265,3 +2265,21 @@ Merge 边界：
 
 - `git push origin main`。
 - push 完成后，从最新 main 新建下一条 `codex/` 分支，再选择 Turnover Ledger 下一切片。
+
+## PF-P098 Remaining Write Path Rebaseline / Next Slice Selection
+
+状态：`planned`
+
+目标：
+
+- 基于 PF-P097-MG 后的最新 main，重新盘点 Turnover Ledger 剩余写路径。
+- 输出最新 write path matrix、residual orchestration、service/repository ownership、test gaps。
+- 选择下一条最小 Micro-JIT prompt。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code。
+- 不修改 tests。
+- 不新增 SQL migration。
+- 不执行 Traffic Gate。

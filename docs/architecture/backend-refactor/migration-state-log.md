@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` 已合入 main 并通过 main 复验 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
 | 最近 verified prompt | `PF-P097-MG - Turnover Ledger Repository Ownership Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P097-MG main 复验通过；merge commit `014b72e0` |
-| 下一条允许任务 | `git push origin main` 后，从最新 main 新建下一条 `codex/` 分支并生成 Turnover Ledger 下一切片 prompt |
+| 当前分支 | `codex/turnover-ledger-next-slice-p098` |
+| 最近验证 | PF-P097-MG main 复验通过并 push 到 `origin/main`，最新 main `55a35ea7` |
+| 下一条允许任务 | 执行 `PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection` |
 
 ## Prompt 执行日志
 
@@ -7535,6 +7535,33 @@ PF-P097 已 verified。当前分支已覆盖 PF-P094 到 PF-P097：repository ow
 #### 下一条 Prompt 上下文
 
 PF-P097-MG 已 verified，待 `git push origin main`。push 完成后，必须从最新 main 新建下一条 `codex/` 分支。Turnover Ledger 下一切片应继续沿写路径收敛，优先选择 remaining PostgreSQL write ownership cleanup 或下一组 write path UoW/repository ownership，不得在 main 或旧分支继续开发。
+
+### PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
+
+状态：`planned`
+
+#### 范围
+
+- 基于 PF-P097-MG 后的最新 main，重新盘点 Turnover Ledger 剩余写路径。
+- 更新 write path matrix、residual orchestration、service/repository ownership、test gaps 和 next slice decision。
+- 只做 discovery/planning 和文档回写。
+
+#### 允许变更文件
+
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 禁止范围
+
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 SQL migration。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+
+#### 下一条 Prompt 上下文
+
+PF-P098 planned。执行后必须根据真实代码事实只选择一条下一 prompt；不得一次性生成多个 prompt。
 
 ## 维护规则
 

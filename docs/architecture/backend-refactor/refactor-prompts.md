@@ -20472,3 +20472,99 @@ Post-Flight:
 ### 下一条 Prompt 上下文
 
 PF-P097-MG 已 verified，待 `git push origin main`。push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 Turnover Ledger prompt；不得在 main 或旧分支继续开发。
+
+## PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
+
+```text
+/goal
+PF-P098 - Turnover Ledger Remaining Write Path Rebaseline / Next Slice Selection
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构审计工程师。你必须只做 discovery/planning 和文档回写，基于 PF-P097-MG 后的最新 main，重新盘点 Turnover Ledger 剩余写路径，并选择下一条最小可执行切片。
+
+Context:
+PF-P097-MG 已 verified 并已 push 到 `origin/main`。当前分支必须从最新 main 新建。Turnover Ledger 已完成：
+- read facade 初步抽离；
+- tag selection UoW；
+- relation extra UoW；
+- bank row tags batch / confirm / withdraw PostgreSQL path 接入 UoW seam；
+- PostgreSQL write port ownership skeleton 和 server composition wiring。
+
+PF-P098 的目标不是写代码，而是校准剩余工作，避免在 stale plan 上继续执行。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - docs/architecture/backend-refactor/module-refactor-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P097-MG 已 verified。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+5. 如使用 CodeGraph，优先用 `codegraph_context` / `codegraph_explore` 盘点 Turnover Ledger write handlers 和 facade methods。
+
+Task:
+1. 更新 Turnover Ledger write path matrix：
+   - 列出所有 Turnover Ledger write/read-like mutation endpoints；
+   - 标明 handler、facade method、UoW status、PostgreSQL path status、local/dev/test path status、remaining gap。
+2. 盘点 `server.py` 中仍属于 Turnover Ledger 的 orchestration 残留：
+   - handler 内是否仍直接做业务计算；
+   - handler 是否仍直接调用 state store persistence；
+   - handler 是否仍直接 clear read model；
+   - handler 是否仍组合 facts/audit/dirty/outbox。
+3. 盘点 service/repository ownership：
+   - business service 是否仍散落 SQL；
+   - repository 是否承担业务规则；
+   - write ports 是否仍依赖 Application 或 HTTP context。
+4. 盘点 tests：
+   - 当前哪些 write paths 有 API characterization tests；
+   - 哪些 write paths 有 UoW contract tests；
+   - 哪些路径仍缺 rollback、idempotency、stale write、dirty/outbox tests。
+5. 输出下一条最小 Micro-JIT prompt 决策：
+   - 如果下一步应写 characterization/contract tests，说明测试目标；
+   - 如果下一步应做 extraction/refactor，说明具体文件和函数；
+   - 如果当前 Turnover Ledger 已到可合并/完成边界，说明需要 completion/MG。
+6. 更新 `turnover-ledger-write-uow-plan.md`，写入 PF-P098 rebaseline 结果和下一条 prompt 建议。
+
+Allowed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 SQL migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate、部署、生产配置或 Nginx 修改。
+- 不得进入其它业务模块。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P098|Remaining Write Path Rebaseline|Next Slice Decision|Write Path Matrix|Residual Orchestration" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P098 status = implemented / verified / blocked。
+   - 记录 rebaseline 结论、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P098 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 remaining write path matrix、residual orchestration、test gaps、next slice decision。
+4. PF-P098 verified 后，只生成一条下一 prompt，不得一次性生成多个。
+```
+
+### 审查结论
+
+- PF-P098 是 PF-P097-MG 后合理的再校准步骤，避免在已被 PF-P097 改写过的旧矩阵上继续执行。
+- prompt 只允许文档和发现，不修改业务代码或 tests，适合作为下一切片选择门。
