@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已生成并审查 `PF-P045-MG - Main Delta Rebaseline Merge Gate`，等待执行 |
-| 当前 active prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` (`planned`) |
+| 当前阶段 | 已执行 `PF-P045-MG - Main Delta Rebaseline Merge Gate`，已本地合入 `main` 并完成 main 复验，等待用户确认 verified |
+| 当前 active prompt | `PF-P045-MG - Main Delta Rebaseline Merge Gate` (`implemented`) |
 | 最近 verified prompt | `PF-P045 - Main Delta Rebaseline / Refactor Plan Resync` |
-| 当前分支 | `codex/main-delta-rebaseline-p045` |
-| 最近验证 | 用户已确认 PF-P045 `verified`；PF-P045 只更新重构文档并提交 `02e75d9b`；未改业务代码、未执行 Traffic Gate、未部署 |
-| 下一条允许任务 | 执行 PF-P045-MG；未经用户确认不得将 PF-P045-MG 标记为 `verified` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P045-MG 已在本地 `main` 完成 no-ff merge；main 复验通过；未执行 Traffic Gate、部署、生产访问、feature flag 打开或 push |
+| 下一条允许任务 | 用户确认 PF-P045-MG `verified`；之后可执行 `git push origin main`，push 后从最新 `main` 新建分支生成下一条实际模块 prompt |
 
 ## Prompt 执行日志
 
@@ -4836,7 +4836,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P045-MG - Main Delta Rebaseline Merge Gate
 
-状态：`planned`
+状态：`implemented`
 
 #### 范围
 
@@ -4876,10 +4876,34 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 - `git status --short --branch`：Pass，当前分支为 `codex/main-delta-rebaseline-p045`。
 - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
 
+#### 执行结果
+
+- Feature branch pre-flight：Pass。
+  - 当前分支为 `codex/main-delta-rebaseline-p045`。
+  - `git status --short --branch`：Pass，工作区干净。
+  - `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `git diff --name-only main...HEAD`：Pass，只包含 PF-P045-MG expected changed files。
+  - `git log --oneline main..HEAD`：Pass，包含 `2272cabd` 和 `02e75d9b`。
+  - `rg -n "PF-P045|Main Delta Rebaseline|低耦合|不允许机械拆文件|server.py|routes_\\*" docs/architecture/backend-refactor`：Pass。
+- Upstream sync / merge：Pass。
+  - `git checkout main`：Pass。
+  - `git pull origin main`：Pass，`main` 已是最新 `origin/main`。
+  - `git merge --no-ff codex/main-delta-rebaseline-p045 -m "Merge branch 'codex/main-delta-rebaseline-p045': main delta rebaseline docs"`：Pass。
+  - Merge commit：`8f98f8ec`。
+- Main post-merge verification：Pass。
+  - `git status --short --branch`：Pass，`main...origin/main [ahead 3]`。
+  - `git diff --check`：Pass。
+  - `test ! -e backend-go`：Pass。
+  - `rg -n "PF-P045|Main Delta Rebaseline|低耦合|不允许机械拆文件|server.py|routes_\\*" docs/architecture/backend-refactor`：Pass。
+- 未执行：Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改、feature flag 打开、push。
+
 #### 下一步
 
-- 执行 PF-P045-MG。
-- PF-P045-MG 成功后，应完成合入 `main`、main 复验和状态机更新；未经用户确认不得标记 `verified`。
+- 用户确认 PF-P045-MG `verified`。
+- 确认后可执行 `git push origin main`。
+- push 后从最新 `main` 新建分支生成下一条实际模块 prompt；下一条 prompt 必须读取 PF-P045 delta 事实。
 
 ## 维护规则
 
