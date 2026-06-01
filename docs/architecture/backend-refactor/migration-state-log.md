@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P088 - Turnover Ledger Withdraw Relation Handler UoW Wiring` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` 已生成并审查 |
+| 当前 active prompt | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` |
 | 最近 verified prompt | `PF-P088 - Turnover Ledger Withdraw Relation Handler UoW Wiring` |
 | 当前分支 | `codex/turnover-ledger-withdraw-relation-p084` |
 | 最近验证 | PF-P088 将 withdraw handler local/dev/test path 接入 UoW；API suite 42 tests 全绿 |
-| 下一条允许任务 | 生成并审查 `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` |
+| 下一条允许任务 | 执行 `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -7077,6 +7077,30 @@ PF-P084/PF-P085 完成了 withdraw relation facade-level contract 和 skeleton�
 #### 下一条 Prompt 上下文
 
 下一步应生成 `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate`，统一覆盖 PF-P084 到 PF-P088 的完整 diff；不得继续迁移其它 Turnover 写路径。
+
+### PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 统一覆盖 PF-P084、PF-P085、PF-P086、PF-P087、PF-P088 的完整 diff。
+- 只执行 Merge Gate，不执行 Traffic Gate、部署、生产访问或配置变更。
+- 合并前后验证 Turnover Ledger targeted suites 和 compileall。
+
+#### 预期变更文件白名单
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+PF-P088-MG 通过并 push `origin/main` 后，必须从最新 main 新建下一条 `codex/` 分支。下一条候选任务应继续 Turnover Ledger 写路径中尚未迁移到 UoW 的剩余 relation/ledger 写入口；如果选择不明确，应停止并总结。
 
 ## 维护规则
 

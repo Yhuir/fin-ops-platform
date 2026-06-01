@@ -1745,3 +1745,25 @@ Verification:
 - `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
 - `git diff --check`: Pass。
 - `rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|expectedFailure|PF-P088|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+## PF-P088-MG Withdraw Relation UoW Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一覆盖 PF-P084 到 PF-P088 的 withdraw relation UoW slice。
+- 预期 diff 仅包含：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+门禁：
+
+- 合并前后都必须运行 Turnover Ledger API suite、UoW contract suite 和 compileall。
+- 只执行 Merge Gate，不执行 Traffic Gate。
+- main 上复验失败则停止，不得 push。

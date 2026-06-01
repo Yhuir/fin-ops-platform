@@ -19214,3 +19214,88 @@ Verification:
 - `rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|expectedFailure|PF-P088|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate`，统一覆盖 PF-P084 到 PF-P088 的完整 diff。
+
+## PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate
+
+```text
+/goal
+PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate
+
+Role:
+你是一位负责合入主干前最终门禁的后端工程师。你必须严格执行 scope、diff、测试、文档和 git 安全检查。PF-P088-MG 只做 Merge Gate，不做 Traffic Gate。
+
+Context:
+PF-P084 到 PF-P088 已在当前分支完成 Turnover Ledger withdraw relation UoW slice：
+- PF-P084: withdraw facade contract tests；
+- PF-P085: withdraw facade skeleton；
+- PF-P086: withdraw handler wiring readiness；
+- PF-P087: withdraw handler API target tests；
+- PF-P088: withdraw handler local/dev/test UoW wiring。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P084、PF-P085、PF-P086、PF-P087、PF-P088 均为 `verified`。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认工作树干净，没有 unrelated dirty changes。
+5. 必须执行并检查：
+   - git status --short --branch
+   - git ls-files --others --exclude-standard
+   - git diff --name-only main...HEAD
+   - git diff --stat main...HEAD
+   - git diff --check main...HEAD
+
+Expected Changed Files:
+只允许以下文件出现在 `git diff --name-only main...HEAD`：
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Verification Before Merge:
+必须在当前分支执行：
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|PF-P088|PF-P088-MG|turnover_relation_changed" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Merge Procedure:
+1. 如果当前分支有未提交变更，必须先停止；不得在 MG 中把未验证文件顺手加入。
+2. 切换到 `main`。
+3. 执行 `git pull origin main`。
+4. 如果 pull 带来新提交，必须返回当前分支执行 `git merge main` 或等价安全同步；如有冲突，停止并报告。
+5. 合并当前分支到 `main`，建议 commit message：
+   - `Merge branch 'codex/turnover-ledger-withdraw-relation-p084': turnover ledger withdraw relation uow`
+6. 在 `main` 上重新执行 Required Verification Before Merge 的全部命令。
+7. 只有 main 上验证全部通过，才允许 `git push origin main`。
+8. push 后更新状态机和 prompt 库，把 PF-P088-MG 标记为 `verified`。
+9. push 后从最新 main 新建下一条 `codex/` 分支；如果下一模块选择不明确，停止并总结。
+
+Forbidden Scope:
+- 不得执行 Traffic Gate、部署、Nginx、生产配置或 feature flag 修改。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得使用 `git add .` 或 `git add -A`。
+- 不得使用 `git reset --hard`、`git clean`、force push 或丢弃用户改动。
+- 如果 main 合并后验证失败，必须停止，不得 push origin/main。
+- 如果 push 后发现问题，不得 reset/force push，必须生成 revert plan。
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P088-MG status = verified / blocked。
+   - 记录 merge commit、main verification、push 状态和下一步分支。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P088-MG 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 withdraw relation UoW slice 已合入 main。
+```
+
+### 审查结论
+
+- PF-P088-MG 的范围正确：统一覆盖 PF-P084 到 PF-P088，不进入其它 Turnover 写路径。
+- MG 明确只允许 7 个文件变更，包含生产代码、facade、两套 targeted tests 和三份重构文档。
+- MG 明确要求 main 合并后复验通过才 push，且不执行 Traffic Gate。
