@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate` 已生成并审查 |
-| 当前 active prompt | `PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate` planned |
-| 最近 verified prompt | `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring` |
-| 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
-| 最近验证 | PF-P073 迁移 tag selection handler；UoW contract 30 tests 通过，API 31 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P073-MG 已合入 main；Turnover Ledger API 31 tests 通过，UoW contract 30 tests 通过 |
+| 下一条允许任务 | 从最新 `main` 新建 `codex/` 分支，并生成下一条 Turnover Ledger prompt |
 
 ## Prompt 执行日志
 

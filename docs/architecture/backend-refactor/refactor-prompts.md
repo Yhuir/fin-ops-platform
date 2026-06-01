@@ -17135,3 +17135,20 @@ Stop Conditions:
 - PF-P073-MG 的范围只覆盖 tag selection UoW slice 的累计 diff，不新增功能。
 - MG 明确分离 Merge Gate 与 Traffic Gate；本轮不部署、不切流。
 - MG 继承了精确 `git add`、untracked 检查、main 上复验、失败不 push 的保险规则。
+
+### 执行结果
+
+- PF-P073-MG 已执行并按自动工作流标记为 `verified`。
+- 当前分支 `codex/turnover-ledger-tag-selection-uow-p065` 已合入 `main`。
+- 合入前后均通过 Turnover Ledger targeted tests。
+- 未执行 Traffic Gate、部署、Nginx 修改或生产访问。
+
+Verification on main:
+
+- `git status --short --branch`: Pass，`main...origin/main [ahead 20]`（push 前）。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check HEAD~1..HEAD`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，31 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
+
+下一步建议：`git push origin main` 后，从最新 `main` 新建 `codex/` 分支，再生成下一条 Turnover Ledger prompt。

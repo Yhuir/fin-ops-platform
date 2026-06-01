@@ -1076,7 +1076,7 @@ Verification:
 
 ## PF-P073-MG Tag Selection UoW Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -1086,5 +1086,11 @@ Verification:
 
 下一步：
 
-- 执行 PF-P073-MG。
-- MG 通过并 push `origin/main` 后，必须从最新 `main` 新建分支，再生成下一条 prompt。
+- MG 已通过并合入 `main`。
+- push `origin/main` 后，必须从最新 `main` 新建分支，再生成下一条 prompt。
+
+执行结果：
+
+- PF-P065 到 PF-P073 的 tag selection UoW slice 已合入 `main`。
+- 合入前后 targeted tests 均通过。
+- 未执行 Traffic Gate、部署、Nginx 修改或生产访问。
