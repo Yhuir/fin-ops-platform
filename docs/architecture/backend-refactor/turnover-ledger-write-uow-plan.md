@@ -1073,3 +1073,18 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
+
+## PF-P073-MG Tag Selection UoW Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice 累计 diff。
+- 只执行 Merge Gate，不执行 Traffic Gate。
+- 合并前后运行 Turnover Ledger targeted tests。
+
+下一步：
+
+- 执行 PF-P073-MG。
+- MG 通过并 push `origin/main` 后，必须从最新 `main` 新建分支，再生成下一条 prompt。

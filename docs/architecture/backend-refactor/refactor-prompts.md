@@ -17036,3 +17036,102 @@ Verification:
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，30 tests。
 
 下一步建议：生成并审查 cumulative MG，覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。
+
+## PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate
+
+```text
+/goal
+PF-P073-MG - Turnover Ledger Tag Selection UoW Cumulative Merge Gate
+
+Role:
+你是一位负责主干合入门禁的后端架构审查工程师。
+
+Context:
+当前分支 `codex/turnover-ledger-tag-selection-uow-p065` 已完成 PF-P065 到 PF-P073 的 Turnover Ledger tag selection UoW slice。该 slice 包含 pure normalizer、settings port/adapter、transaction-bound settings writer、facade skeleton、handler wiring、compatibility/target tests 和状态文档回写。PF-P073-MG 只负责合入门禁，不新增业务功能。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py tag selection handler diff
+   - backend/src/fin_ops_platform/services/app_settings_service.py tag selection normalizer diff
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py settings writer diff
+   - tests/test_turnover_ledger_api.py tag selection tests
+   - tests/test_turnover_ledger_uow_contract.py tag selection/UoW tests
+2. 必须确认 PF-P065 到 PF-P073 均已 `verified` 或已被状态机记录为完成。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+5. 必须确认本 MG 不执行 Traffic Gate、不部署、不访问生产、不修改 Nginx 或生产配置。
+
+Merge Gate Scope:
+只允许合并以下文件的累计 diff：
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/app_settings_service.py
+- backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Checks Before Merge:
+1. Scope / diff check:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only main...HEAD`
+   - `git diff --check main...HEAD`
+2. Exact changed files must stay inside Merge Gate Scope. If any unrelated file appears, stop.
+3. No untracked temporary files may exist.
+4. Run targeted verification on current branch:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+   - `rg -n "normalize_turnover_ledger_tag_selection_update|TurnoverLedgerTagSelectionSettingsAdapter|save_app_settings_in_transaction|def update_tag_selection|_turnover_ledger_tag_selection_write_facade|turnover_ledger_tag_selection_changed|expectedFailure" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/app_settings_service.py backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`
+5. Review behavior:
+   - `PUT /api/turnover-ledger/tag-selection` handler is thin and calls facade/UoW.
+   - settings save and dirty/outbox enqueue are inside one UoW boundary.
+   - local state store compatibility rollback exists only for local/dev/test path.
+   - successful UoW path no longer directly clears turnover read model.
+   - PF-P071 target tests no longer use `unittest.expectedFailure`.
+
+Commit / Merge Rules:
+1. If there are uncommitted MG doc updates, use exact `git add <file...>` only. Never use `git add .` or `git add -A`.
+2. Before merging to `main`, sync with latest main:
+   - `git checkout main`
+   - `git pull origin main`
+   - `git checkout codex/turnover-ledger-tag-selection-uow-p065`
+   - merge or rebase latest `main` into the feature branch if needed.
+3. If sync causes conflict, stop and report. Do not resolve by discarding changes.
+4. If sync changes the branch, rerun all Required Checks Before Merge.
+5. Merge to main only after checks pass.
+6. After merge, rerun targeted verification on `main`.
+7. If verification fails on `main`, stop and do not push.
+8. If verification passes on `main`, update migration-state-log.md to mark PF-P073-MG `verified`, commit if needed, then `git push origin main`.
+
+Post-Flight:
+1. Update migration-state-log.md:
+   - PF-P073-MG status = verified / blocked。
+   - Record merge commit, main verification, push result.
+2. Update refactor-prompts.md:
+   - Record MG execution result.
+3. Do not start another module on `main`.
+4. After successful push, create a new branch from latest `main` before generating the next prompt.
+
+Stop Conditions:
+- Any test fails and cannot be fixed within MG scope.
+- Any untracked temp file appears.
+- Any diff outside Merge Gate Scope appears.
+- Merge/rebase conflict occurs.
+- Need for Traffic Gate, production access, deployment, Nginx or production config changes.
+- Any unrelated user changes are detected.
+```
+
+### 审查结论
+
+- PF-P073-MG 的范围只覆盖 tag selection UoW slice 的累计 diff，不新增功能。
+- MG 明确分离 Merge Gate 与 Traffic Gate；本轮不部署、不切流。
+- MG 继承了精确 `git add`、untracked 检查、main 上复验、失败不 push 的保险规则。
