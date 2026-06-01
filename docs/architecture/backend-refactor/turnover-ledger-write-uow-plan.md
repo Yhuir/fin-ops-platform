@@ -1578,7 +1578,7 @@ Verification:
 
 ## PF-P086 Withdraw Relation Handler UoW Wiring Readiness
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1592,6 +1592,62 @@ Verification:
 - 当前 legacy 路径仍会在 relation facts/audit 已更新后才执行 `_after_turnover_relation_mutation(...)`，因此 queue/dirty-outbox failure 与 relation mutation 不在同一事务内。
 - PF-P085 已提供 `TurnoverLedgerWriteFacade.withdraw_relation(...)`，但真实 handler 接入前仍需确认 local transaction shim、relation repository wrapper、affected_months 计算和 legacy fallback。
 
+### Current Runtime Sequence
+
+1. `_handle_api_turnover_ledger_withdraw(...)` 调用 `_turnover_mutation_session(headers)`，由 OA session 和 access control 决定是否允许 mutation。
+2. Handler 解析 request body；无效 JSON 直接返回 `_load_json_body(...)` 的错误 response。
+3. Handler 调用 `self._turnover_ledger_api_routes.get_relation(relation_id)`，读取 withdraw 前 relation detail。
+4. Handler 将 `detail["relation"]` 转为 dict，并执行 `source != "manual"` guard；非 manual relation 返回 `system_relation_cannot_withdraw`。
+5. Handler 在 withdraw 前从 relation 读取 `bank_row_ids`，这是后续 `affected_months` 的唯一稳定来源。
+6. Handler 调用 `self._turnover_ledger_api_routes.withdraw_relation(relation_id=..., actor=..., note=...)`。
+7. `TurnoverLedgerApiRoutes.withdraw_relation(...)` 调用 `TurnoverRelationService.withdraw_relation(...)`，后者在内存 relation snapshot 中更新 relation status、`sync_to_workbench`、audit 和 version。
+8. Handler 在 withdraw 后用 withdraw 前记录的 `bank_row_ids` 调用 `_bank_transaction_category_affected_months(...)`。
+9. Handler 调用 `_after_turnover_relation_mutation(affected_months)`：
+   - best-effort persist relation snapshot；
+   - `_invalidate_workbench_after_bank_transaction_categories(affected_months)`；
+   - 再次 best-effort persist relation snapshot；
+   - `_clear_turnover_ledger_read_model_best_effort()`；
+   - `_enqueue_turnover_ledger_read_model_refreshes(["all"], reason="turnover_relation_changed")`。
+10. Handler 追加 `result["affected_months"] = affected_months` 并返回 200 JSON。
+
+当前风险：
+
+- relation facts/audit 的 mutation 发生在 dirty/outbox refresh enqueue 之前；如果后者失败，当前 legacy 路径可能留下 split-brain。
+- `_after_turnover_relation_mutation(...)` 同时包含 Workbench invalidation、read model direct clear 和 refresh enqueue。withdraw UoW local wiring 应只在 successful UoW path 跳过 direct clear，并保留必要的 Workbench invalidation边界，直到 Workbench influence port 单独设计。
+
+### Wiring Readiness Matrix
+
+| 项目 | 结论 | 说明 |
+| --- | --- | --- |
+| `_turnover_ledger_withdraw_write_facade()` seam | Ready | 可仿照 confirm seam；测试可通过 override 强制 legacy fallback，生产 PostgreSQL 继续 fallback。 |
+| local/dev/test transaction shim | Ready with care | 可复用 confirm 的 snapshot/restore/save 模式；异常时必须 restore withdraw 前 relation snapshot 并保存，成功时保存 UoW 后 snapshot。 |
+| local relation repository wrapper | Ready | 需要新增 `withdraw_relation(relation_id, actor_id, note, transaction)`，内部应复用 `routes.withdraw_relation(...)`，避免重新实现 service 规则。 |
+| manual/system relation guard | Ready | guard 必须留在 handler 层，在调用 facade 前完成；system-generated relation rejection 不应触发 facade/UoW。 |
+| affected_months | Ready | 必须在调用 facade 前从 withdraw 前 relation `bank_row_ids` 计算并传入 facade，response shape 继续包含 `affected_months`。 |
+| queue repository fallback | Ready | 缺少 runtime queue repository 或 `enqueue_read_model_refresh` 不可调用时，应保留 legacy path，避免本轮扩大启动依赖。 |
+| PostgreSQL production path | Blocked for production wiring | `state_store.storage_backend == "postgres"` 仍应返回 `None`，保留 legacy fallback；不得猜测 relation SQL 或 repository contract。 |
+| Workbench influence port | Deferred | `_after_turnover_relation_mutation(...)` 仍包含 Workbench invalidation；withdraw handler local UoW wiring 不应迁移该 port。 |
+
+### Compatibility / Behavior Locks
+
+- `source != "manual"` 必须继续返回 400 `system_relation_cannot_withdraw`，且不能触发 facade/UoW、relation mutation 或 refresh enqueue。
+- `get_relation(...)` 抛出 `KeyError` 必须继续返回 404 `unknown_relation_id`。
+- `TurnoverRelationValidationError` 必须继续映射为 400，并保留原有 `error_code`。
+- `affected_months` 必须基于 withdraw 前 relation 的 `bank_row_ids` 计算；不能在 withdraw 后从已修改 relation 状态重新推断。
+- 当前 duplicate withdraw characterization 仍保留，直到有明确 stale/idempotency prompt 处理；PF-P087/PF-P088 不应顺手改变 duplicate semantics。
+
+### Next Test Slice Proposal
+
+下一条 prompt 应是 `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests`，只新增/调整 API 层 target tests，不迁移 handler。测试边界：
+
+- 保留 legacy split-brain compatibility test：queue failure 当前发生在 relation withdraw 与 read model clear 之后。
+- 新增 future target test：dirty/outbox failure 必须 rollback withdraw relation facts/audit。
+- 新增 future target test：successful UoW path 不直接调用 `_clear_turnover_ledger_read_model_best_effort()`。
+- 新增 guard test：system-generated relation rejection 不触发 facade/UoW。
+- 新增 compatibility assertion：`affected_months` 仍来自 withdraw 前 bank rows，并进入 response payload。
+
+这些 target tests 如果当前语义尚未实现，应使用 `unittest.expectedFailure` 保持默认 CI 绿色；不得 skip、不得放宽断言。
+
 边界：
 
 - 必须保留 `source != "manual"` 的 `system_relation_cannot_withdraw` 保护。
@@ -1600,5 +1656,11 @@ Verification:
 
 下一步：
 
-- 执行 PF-P086，完成 readiness 文档。
-- 如果无 blocker，生成 PF-P087 withdraw handler UoW target tests；PF-P087 仍只做测试锁定，不直接迁移 handler。
+- 生成 PF-P087 withdraw handler UoW target tests；PF-P087 仍只做测试锁定，不直接迁移 handler。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P086 允许文档变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "PF-P086|Withdraw Relation Handler UoW Wiring Readiness|Current Runtime Sequence|Wiring Readiness Matrix|Compatibility|PF-P087|system_relation_cannot_withdraw|affected_months" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`: Pass。

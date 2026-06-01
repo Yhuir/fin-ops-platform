@@ -18952,3 +18952,19 @@ Post-Flight:
 - PF-P086 是 PF-P085 后的正确下一步：它只审计真实 withdraw handler 接入边界，不直接改代码。
 - Prompt 明确要求保留 manual/system relation guard、unknown 404、validation 400、affected_months 计算和 production legacy fallback。
 - Prompt 明确下一步先做 PF-P087 handler target tests，不跳过测试锁定进入 handler migration。
+
+### 执行结果
+
+- PF-P086 已执行并按自动工作流标记为 `verified`。
+- 已在 `turnover-ledger-write-uow-plan.md` 记录真实 withdraw handler runtime sequence、wiring readiness matrix、compatibility locks 和 PF-P087 测试边界。
+- 结论：local/dev/test path 可仿照 confirm relation seam 接入 withdraw facade；PostgreSQL production path 仍必须 legacy fallback；`source != "manual"` guard、unknown 404、validation 400 和 withdraw 前 `affected_months` 计算必须保留。
+- 未修改 production code，未修改 tests。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P086 允许文档变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `rg -n "PF-P086|Withdraw Relation Handler UoW Wiring Readiness|Current Runtime Sequence|Wiring Readiness Matrix|Compatibility|PF-P087|system_relation_cannot_withdraw|affected_months" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`: Pass。
+
+下一步建议：生成并审查 `PF-P087 - Turnover Ledger Withdraw Relation Handler UoW Target Tests`，只补 API target tests，不迁移 handler。
