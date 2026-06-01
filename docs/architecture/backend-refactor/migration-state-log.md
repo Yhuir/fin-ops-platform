@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` 已生成并审查 |
-| 当前 active prompt | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P088 - Turnover Ledger Withdraw Relation Handler UoW Wiring` |
-| 当前分支 | `codex/turnover-ledger-withdraw-relation-p084` |
-| 最近验证 | PF-P088 将 withdraw handler local/dev/test path 接入 UoW；API suite 42 tests 全绿 |
-| 下一条允许任务 | 执行 `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` |
+| 当前阶段 | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` 已验证并合入 main |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P088-MG 已在 main 上复验通过；等待 push origin/main |
+| 下一条允许任务 | push `origin/main` 后，从最新 main 新建下一条 `codex/` 分支；下一模块/切片选择不明确时停止总结 |
 
 ## Prompt 执行日志
 
@@ -7080,7 +7080,7 @@ PF-P084/PF-P085 完成了 withdraw relation facade-level contract 和 skeleton�
 
 ### PF-P088-MG - Turnover Ledger Withdraw Relation UoW Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7101,6 +7101,20 @@ PF-P084/PF-P085 完成了 withdraw relation facade-level contract 和 skeleton�
 #### 下一条 Prompt 上下文
 
 PF-P088-MG 通过并 push `origin/main` 后，必须从最新 main 新建下一条 `codex/` 分支。下一条候选任务应继续 Turnover Ledger 写路径中尚未迁移到 UoW 的剩余 relation/ledger 写入口；如果选择不明确，应停止并总结。
+
+#### 执行摘要
+
+- PF-P084 到 PF-P088 的 withdraw relation UoW slice 已合入本地 `main`。
+- Merge commit: `30eb3192`。
+- 合并前和 main 上均完成 Turnover Ledger targeted verification。
+- 未执行 Traffic Gate、部署、Nginx 修改、生产配置修改或生产访问。
+
+#### Verification on main
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，42 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，39 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+- `rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|PF-P088|PF-P088-MG|turnover_relation_changed" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
 
 ## 维护规则
 

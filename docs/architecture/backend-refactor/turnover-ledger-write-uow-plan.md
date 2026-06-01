@@ -1748,7 +1748,7 @@ Verification:
 
 ## PF-P088-MG Withdraw Relation UoW Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -1767,3 +1767,16 @@ Verification:
 - 合并前后都必须运行 Turnover Ledger API suite、UoW contract suite 和 compileall。
 - 只执行 Merge Gate，不执行 Traffic Gate。
 - main 上复验失败则停止，不得 push。
+
+执行结果：
+
+- PF-P084 到 PF-P088 的 withdraw relation UoW slice 已合入本地 `main`。
+- Merge commit: `30eb3192`。
+- main 上 Turnover Ledger targeted tests、UoW contract tests 和 compileall 已通过。
+- 未执行 Traffic Gate、部署或生产访问。
+
+Verification on main:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 42 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 39 tests.
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass.

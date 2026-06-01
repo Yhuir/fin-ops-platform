@@ -19299,3 +19299,18 @@ Post-Flight:
 - PF-P088-MG 的范围正确：统一覆盖 PF-P084 到 PF-P088，不进入其它 Turnover 写路径。
 - MG 明确只允许 7 个文件变更，包含生产代码、facade、两套 targeted tests 和三份重构文档。
 - MG 明确要求 main 合并后复验通过才 push，且不执行 Traffic Gate。
+
+### 执行结果
+
+- PF-P088-MG 已执行并按自动工作流标记为 `verified`。
+- PF-P084 到 PF-P088 的 withdraw relation UoW slice 已合入本地 `main`。
+- Merge commit: `30eb3192`。
+- main 上 targeted verification 已通过。
+- 未执行 Traffic Gate、部署、Nginx、生产配置或生产访问。
+
+Verification on main:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，42 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，39 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`: Pass。
+- `rg -n "_turnover_ledger_withdraw_write_facade|_local_turnover_ledger_withdraw|test_target_withdraw_relation|PF-P088|PF-P088-MG|turnover_relation_changed" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
