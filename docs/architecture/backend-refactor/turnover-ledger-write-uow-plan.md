@@ -1012,3 +1012,17 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests, 2 expectedFailure.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 27 tests.
+
+## PF-P072 Tag Selection Facade Skeleton
+
+状态：`planned`
+
+目标：
+
+- 在 `TurnoverLedgerWriteFacade` 中新增 `update_tag_selection(...)` service-layer method。
+- 使用 pure normalizer、UoW 和 settings port。
+- 不迁移 `server.py` handler。
+
+下一步：
+
+- 执行 PF-P072。

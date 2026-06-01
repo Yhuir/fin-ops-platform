@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` 已执行并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton` planned |
 | 最近 verified prompt | `PF-P071 - Turnover Ledger Tag Selection UoW Compatibility and Target Tests` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
 | 最近验证 | PF-P071 补强 tag selection compatibility/target tests；API 31 tests 通过（2 expectedFailure），UoW contract 27 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`；不迁移 handler |
+| 下一条允许任务 | 执行 `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton`；不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -6372,6 +6372,35 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 - `git diff --check`: Pass。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，31 tests，2 expectedFailure。
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，27 tests。
+
+#### Commit
+
+- `051f7476 test(turnover-ledger): lock tag selection uow targets`
+
+### PF-P072 - Turnover Ledger Tag Selection Facade Skeleton
+
+状态：`planned`
+
+#### 范围
+
+- 在 `TurnoverLedgerWriteFacade` 中新增 tag selection service-layer method。
+- 使用 PF-P067 pure normalizer 和 UoW `settings_port`。
+- 不迁移 `server.py` handler。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P072。
+
+#### 验收标准
+
+- UoW contract tests 覆盖 facade 使用 pure normalizer、settings port、dirty/outbox。
+- relation extra facade 现有 tests 保持绿色。
+- API handler expectedFailure 仍保留，直到 PF-P073 handler wiring。
 
 ## 维护规则
 
