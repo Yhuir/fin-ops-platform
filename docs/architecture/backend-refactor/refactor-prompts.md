@@ -13296,7 +13296,7 @@ Stop Conditions:
 
 ## PF-P047 - Turnover Ledger Characterization Tests
 
-状态：`implemented`
+状态：`verified`
 
 ### Prompt
 
@@ -13481,4 +13481,155 @@ Stop Conditions:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions -v`：Pass，79 tests。
 - 未修改 production code、SQL migration、前端、部署或生产配置。
 - 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
-- 下一步建议：用户确认 PF-P047 后，将 PF-P047 标记为 `verified`；然后生成并审查 `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning`，或在用户希望先合入测试护栏时生成 cumulative MG 覆盖 PF-P046 + PF-P047。
+- 下一步建议：用户已确认 PF-P047 `verified`；已生成并审查 `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning`。
+
+## PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+请执行 PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning。
+
+Role: 你是一位严格的 Python 后端架构师，熟悉遗留系统低风险抽取、route facade、service boundary、Read Model、characterization tests 和低耦合模块化重构。你的任务是为 Turnover Ledger query/route facade extraction 制定可执行计划，不写 production code。
+
+Context:
+- 当前重构方向是 Python-first 模块化重构，不引入 Go，不替换运行时。
+- `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` 已 verified。
+- `PF-P047 - Turnover Ledger Characterization Tests` 已 verified，已经锁定 Turnover query freshness、grouped breakdown、relation/extra side effects、bank-row-tags 失败路径、export payload 和 source_versions。
+- 当前分支仍应是 `codex/turnover-ledger-discovery-p046`，因为 PF-P046/PF-P047/PF-P048 属于同一个 Turnover Ledger 模块任务；本任务完成后再决定是否 cumulative MG。
+- 本轮只做 planning 和文档回写；不得修改 production code，不得新增测试实现，不得进入 Merge Gate。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/ai-execution-rules.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+   - `docs/architecture/backend-refactor/architecture-inventory.md`
+   - `docs/architecture/backend-refactor/module-refactor-plan.md`
+   - `docs/architecture/backend-refactor/runtime-call-chain.md`
+   - `docs/architecture/backend-refactor/read-model-and-external-services.md`
+2. 必须确认：
+   - 当前分支是 `codex/turnover-ledger-discovery-p046`。
+   - PF-P047 已 `verified`。
+   - 当前 active prompt 是 PF-P048 planned。
+   - 工作区没有无关未提交变更。
+   - `git ls-files --others --exclude-standard` 不包含临时文件、`.pkl`、`.sqlite`、`__pycache__` 或测试输出。
+3. 必须读取 PF-P047 新增/修改测试，明确哪些测试是下一步 extraction 的机械护栏。
+
+Required Code / Test Reading:
+- `backend/src/fin_ops_platform/app/server.py`
+  - `_handle_api_turnover_ledger`
+  - `_handle_api_turnover_ledger_export_preview`
+  - `_handle_api_turnover_ledger_export`
+  - `_handle_api_turnover_ledger_relation`
+  - `_handle_api_turnover_ledger_relation_extra`
+  - `_handle_api_turnover_ledger_relation_extra_update` 只作为边界参考，不规划本轮迁移实现。
+  - `_handle_api_turnover_ledger_confirm` / `_handle_api_turnover_ledger_withdraw` / `_handle_api_turnover_ledger_bank_row_tags_batch` 只作为 forbidden mutation scope 参考。
+- `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_query_service.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_export_service.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_service.py`
+- `backend/src/fin_ops_platform/services/turnover_relation_service.py`
+- PF-P047 tests:
+  - `tests/test_turnover_ledger_query_service.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_export_service.py`
+  - `tests/test_turnover_ledger_source_versions.py`
+  - relevant existing `tests/test_turnover_relation_service.py`
+  - relevant existing `tests/test_turnover_ledger_extra_service.py`
+  - relevant existing `tests/test_workbench_turnover_grouping.py`
+
+Allowed Scope:
+- 只允许读取代码、测试和文档。
+- 只允许更新 Turnover Ledger extraction planning 文档和状态文档。
+- 允许更新：
+  - `docs/architecture/backend-refactor/turnover-ledger-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - 如确有必要，小范围更新 `module-refactor-plan.md` 或 `runtime-call-chain.md`。
+
+Forbidden Scope:
+- 不修改 `backend/src/fin_ops_platform/**` production code。
+- 不修改 tests。
+- 不修改 SQL migration。
+- 不修改前端。
+- 不修改部署、Nginx、Vite、worker routing、环境变量或生产配置。
+- 不引入 Turnover Unit of Work。
+- 不迁移 relation confirm/withdraw。
+- 不迁移 `/api/turnover-ledger/bank-row-tags/batch`。
+- 不改变 extra write persistence 或 legacy fallback。
+- 不删除 legacy fallback。
+- 不执行 Merge Gate。
+- 不执行 Traffic Gate、部署、生产访问或 staging 访问。
+
+Required Planning Output:
+1. Target Boundary
+   - 明确下一步 extraction 的目标是 query/read-only route facade 边界，而不是 mutation UoW。
+   - 明确 `server.py` 保留职责：HTTP method/path dispatch、query/body parsing、auth/session、status/header mapping、Response construction。
+   - 明确新/既有 facade/service 应承担职责：调用 `TurnoverLedgerApiRoutes`、query service、export service、extra read facade，并返回标准 Python dict/tuple，不知道 HTTP Response。
+2. File Touch Plan
+   - 列出下一条 implementation prompt 允许修改的文件。
+   - 必须将 mutation handlers、worker、repository、SQL migration 明确排除。
+3. Dependency Injection Plan
+   - 不允许注入整个 `Application`。
+   - 不允许 service 读取 HTTP headers/cookies。
+   - 只允许细粒度依赖：route facade、query service、export service、extra service/reader、settings/source version provider 等现有封装。
+4. Safe Slice Proposal
+   - 建议最小实现顺序，例如：
+     1. Extract read/list/export/detail/extra GET helper/facade call path.
+     2. Keep current handler response mapping in `server.py`.
+     3. Leave extra PUT and relation mutation handlers untouched.
+   - 必须说明每一步可由 PF-P047 哪些 tests 覆盖。
+5. Non-Goals
+   - 明确本阶段不处理 UoW、stale write、bank-row-tags batch ownership、legacy full snapshot fallback removal、read model cache optimization。
+6. Test Gate
+   - 明确 implementation prompt 必须先跑哪些 targeted tests。
+   - 必须包含 PF-P047 79-test command 或等价 targeted command。
+7. Risk Register
+   - 标记 route facade 目前同时承担 compatibility normalization 和 export composition 的风险。
+   - 标记 extra GET/PUT 边界不同：GET 可以规划 read extraction，PUT 属 mutation side-effect path，不能混入。
+   - 标记 query fallback 不能在本阶段删除。
+8. Next Prompt Draft Direction
+   - 给出下一条建议 prompt 名称和边界，默认：`PF-P049 - Turnover Ledger Query/Route Facade Extraction`。
+   - 如果发现计划风险太高，下一条应改为测试补强或更窄 planning prompt。
+
+Required Docs Update:
+- 必须在 `turnover-ledger-discovery.md` 增加 `PF-P048 Query/Route Facade Extraction Planning` 小节。
+- 必须更新 `migration-state-log.md`：
+  - PF-P048 状态只能是 `implemented` 或 `blocked`；未经用户确认不得标记 `verified`。
+  - 记录规划摘要、变更文件、验证命令、风险和下一条建议。
+- 必须更新 `refactor-prompts.md` 的 PF-P048 执行结果。
+
+Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `test ! -e backend-go`
+- `rg -n "PF-P048|Query/Route Facade Extraction|Turnover Ledger|server.py|TurnoverLedgerApiRoutes|PF-P049" docs/architecture/backend-refactor`
+
+Post-Flight:
+- 最终回复必须说明：
+  - 本轮只做 planning 和文档回写。
+  - 没有修改 production code、tests、SQL migration、前端或部署。
+  - 没有 Traffic Gate、部署或生产访问。
+  - 下一条建议 prompt。
+
+Stop Conditions:
+- 如果当前分支不是 `codex/turnover-ledger-discovery-p046`，停止。
+- 如果 PF-P047 未 verified，停止。
+- 如果工作区有无关未提交变更，停止。
+- 如果 planning 发现必须先补测试，停止并记录 blocker，不生成实现计划。
+- 如果需要修改 production code 才能完成 planning，停止并记录 blocker。
+```
+
+### 审查结论
+
+- PF-P048 是 PF-P047 后合理的下一条 prompt：已有 Turnover tests 护栏，下一步应先设计 query/read-only route facade extraction 的最小切片。
+- PF-P048 边界正确：只做 planning 和文档回写，不改 production code，不改 tests，不进入 Merge Gate。
+- PF-P048 明确排除了 mutation UoW、relation confirm/withdraw、bank-row-tags batch、extra PUT side effects 和 legacy fallback removal，避免把 query/read-only 抽取扩大成写路径重构。
+- PF-P048 的默认后续实现 prompt 是 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`，但只有 PF-P048 verified 后才能生成。

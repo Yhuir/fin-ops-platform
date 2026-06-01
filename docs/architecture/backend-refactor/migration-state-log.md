@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P047 - Turnover Ledger Characterization Tests` 已执行，等待用户确认 |
-| 当前 active prompt | `PF-P047 - Turnover Ledger Characterization Tests` (`implemented`) |
-| 最近 verified prompt | `PF-P046 - Turnover Ledger Discovery and Planning / Main Delta-Aware Boundary Scan` |
+| 当前阶段 | `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning` (`planned`) |
+| 最近 verified prompt | `PF-P047 - Turnover Ledger Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-discovery-p046` |
 | 最近验证 | 用户已确认 PF-P045-MG `verified`；`main` 已 push 到 `origin/main`，本地与远端对齐到 `de513774`；未执行 Traffic Gate、部署、生产访问或 feature flag 打开 |
-| 下一条允许任务 | 用户确认 PF-P047 后，将 PF-P047 标记为 verified；然后生成并审查 Turnover Ledger 下一条 extraction/refactor planning 或 cumulative MG |
+| 下一条允许任务 | 执行 `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning`；只允许规划 query/route facade extraction，不允许 production refactor |
 
 ## Prompt 执行日志
 
@@ -4991,7 +4991,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P047 - Turnover Ledger Characterization Tests
 
-状态：`implemented`
+状态：`verified`
 
 #### 范围
 
@@ -5046,9 +5046,9 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 等待用户确认 PF-P047。
-- 用户确认后，将 PF-P047 标记为 `verified`。
-- 下一条 prompt 建议：生成并审查 `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning`，或在用户希望先合入测试护栏时生成 cumulative MG 覆盖 PF-P046 + PF-P047。
+- 用户已确认 PF-P047 `verified`。
+- 已生成并审查 `PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning`。
+- 下一步允许执行 PF-P048；PF-P048 只做 query/route facade extraction planning，不做 production refactor。
 
 #### 执行结果
 
@@ -5063,6 +5063,56 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions -v`：Pass，79 tests。
 - 初始全量目标集曾暴露一个既有测试污染/读取 local pickle 的偶发问题；单测单独运行通过，后续通过改用 in-memory audit log 断言和更明确的 recorder 隔离规避了该 characterization 测试中的 state store 读污染。
 - 未执行 Traffic Gate、部署、生产访问、staging 访问、网关/worker routing 修改、环境变量修改或 feature flag 打开。
+
+### PF-P048 - Turnover Ledger Query/Route Facade Extraction Planning
+
+状态：`planned`
+
+#### 范围
+
+- 基于 PF-P046 discovery 和 PF-P047 characterization tests，规划 Turnover Ledger query/route facade extraction 的最小安全切片。
+- 只允许读取代码、测试和文档，并更新 Turnover Ledger planning 文档、状态机和 prompt 库。
+- 不允许修改 production code，不允许新增测试实现，不允许开始 extraction/refactor。
+
+#### 必须覆盖
+
+- `server.py` 中 Turnover query/export/detail/extra GET 相关 handler 的保留职责和可迁移职责。
+- `routes_turnover_ledger.py` 中 route facade 当前职责：
+  - query service delegation；
+  - grouped normalization；
+  - flat read model -> grouped compatibility；
+  - export service composition；
+  - relation detail/extra read mapping。
+- `TurnoverLedgerQueryService`、`TurnoverLedgerExportService`、`TurnoverLedgerExtraService` 的依赖边界。
+- PF-P047 新增测试如何作为下一步 extraction/refactor 的护栏。
+
+#### 禁止范围
+
+- 不修改 `backend/src/fin_ops_platform/**` production code。
+- 不修改 tests。
+- 不修改 SQL migration。
+- 不修改前端、部署、Nginx、worker routing、环境变量或生产配置。
+- 不引入 Turnover Unit of Work。
+- 不迁移 relation confirm/withdraw、bank-row-tags batch 或 mutation side effects。
+- 不执行 Merge Gate。
+- 不执行 Traffic Gate、部署、生产访问或 staging 访问。
+
+#### 预期产物
+
+- 更新 `turnover-ledger-discovery.md` 或新增专项 planning 小节，明确：
+  - Query/route facade extraction target shape；
+  - dependencies to inject；
+  - files to touch in the next implementation prompt；
+  - tests to run；
+  - exact stop conditions；
+  - what must remain in `server.py`；
+  - what must not be moved yet。
+- 更新 `migration-state-log.md` 和 `refactor-prompts.md`。
+
+#### 下一步
+
+- 执行 PF-P048。
+- PF-P048 verified 后，再生成实现 prompt，例如 `PF-P049 - Turnover Ledger Query/Route Facade Extraction`，或如果 planning 暴露风险，则先补测试。
 
 ## 维护规则
 
