@@ -15672,3 +15672,92 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，19 tests。
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，28 tests。
 - 下一步建议：生成并审查 `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`，因为真实 handler wiring 前必须复用现有 validation/defaulting 规则且不能引入事务外内存副作用。
+
+## PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter
+
+状态：`planned`
+
+### Prompt
+
+```text
+/goal
+PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter
+
+Role:
+你是一位精通 Python Clean Architecture、遗留服务解耦和事务边界迁移的后端工程师。
+
+Context:
+PF-P062 已为 `TurnoverLedgerWriteFacade` 增加 `extra_normalizer` boundary，但真实 handler wiring 仍不能开始，因为现有可复用规则在 `TurnoverLedgerExtraService.upsert()` 内，而 `upsert()` 会修改内存状态。
+
+本轮只允许建立 pure normalizer adapter：复用现有 relation extra validation/defaulting/formatting 规则，但不得持久化、不得修改内存状态、不得 enqueue。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_extra_service.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py 中 `InMemoryTurnoverLedgerExtraService`
+   - tests/test_turnover_ledger_api.py relation extra tests
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`，且没有 unrelated dirty changes。
+
+Task:
+建立 relation extra pure normalizer，使未来 handler wiring 可以把 normalized extra 交给 transaction-bound UoW，而不提前产生内存状态副作用。
+
+Required Implementation Work:
+1. 在 `TurnoverLedgerExtraService` 中新增或提取 pure normalize 能力，例如 `normalize_update(relation_id, payload, actor=...)`：
+   - 必须复用现有 `_normalize_relation_id`、`_normalize_actor`、`_normalize_extra`、默认值合并、金额/日期/文本规则；
+   - 必须读取当前 existing extra 作为 merge base；
+   - 必须返回 deepcopy 或新的 dict；
+   - 不得修改 `self._extras`；
+   - `upsert()` 应继续保持现有行为，并可复用该 pure normalize 内部逻辑。
+2. 在 `turnover_ledger_write_adapters.py` 中新增 narrow adapter，例如 `TurnoverLedgerExtraNormalizerAdapter`：
+   - 只接收明确 `extra_service` 依赖；
+   - 暴露 callable 或 `normalize(...)`，可直接作为 `TurnoverLedgerWriteFacade(extra_normalizer=...)` 的依赖；
+   - 不接收 `Application`；
+   - 不读取 HTTP header/cookie，不 import `app.auth`。
+3. 更新 `tests/test_turnover_ledger_uow_contract.py`：
+   - pure normalizer 返回值必须与 legacy `upsert()` 的 normalization shape 一致；
+   - pure normalizer 调用后，service `snapshot()` 不应变化；
+   - adapter 可被传入 `TurnoverLedgerWriteFacade`，facade 保存 normalized extra；
+   - invalid payload 仍按现有 validation error 失败，且不保存、不 enqueue。
+4. 保持 `tests/test_turnover_ledger_api.py` 全量通过，证明 legacy handler 行为未变。
+5. 更新 `turnover-ledger-write-uow-plan.md`，记录 PF-P063 结果和 PF-P064 handler wiring 前置条件。
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得接入真实 handler。
+- 不得迁移 confirm、withdraw、tag selection、bank-row-tags。
+- 不得修改 runtime queue、worker、SQL migration、frontend、deployment、Nginx、生产配置或 feature flag。
+- 不得访问真实外部服务。
+- 不得使用 fake/no-op transaction 接入 production path。
+- 不得绕过或放宽现有 relation extra validation/normalization。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "normalize_update|TurnoverLedgerExtraNormalizerAdapter|PF-P063|extra_normalizer" backend/src/fin_ops_platform/services tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P063 status = implemented / verified / blocked。
+   - 记录 pure normalizer adapter 和下一步 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P063 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 relation extra pure normalizer adapter 状态和剩余风险。
+4. PF-P063 后应生成 `PF-P064 - Turnover Ledger Relation Extra Handler Minimal Wiring`，除非测试失败或仍存在 wiring blocker。
+```
+
+### 审查结论
+
+- PF-P063 是 PF-P062 后必须补齐的生产级边界：不能用会修改内存状态的 `upsert()` 作为未来 UoW normalizer。
+- Prompt 明确禁止 `server.py` diff 和真实 handler wiring，只建立可复用的纯归一化 adapter。
+- Prompt 继续保持单一切片，不迁移其它 Turnover Ledger 写 API。

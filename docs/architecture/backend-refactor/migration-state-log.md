@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` 已执行并验证 |
-| 当前 active prompt | 无 active prompt；下一步需补齐 relation extra pure normalizer adapter 后才能接 handler |
+| 当前阶段 | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` 已生成并审查，等待执行 |
+| 当前 active prompt | `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter` planned |
 | 最近 verified prompt | `PF-P062 - Turnover Ledger Relation Extra Normalization Boundary Contract` |
 | 当前分支 | `codex/turnover-ledger-write-integration-p055` |
 | 最近验证 | PF-P062 为 relation extra facade 增加 `extra_normalizer` boundary；UoW contract 19 tests 通过，API 28 tests 通过 |
-| 下一条允许任务 | 生成并审查 `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`；不直接接 handler，除非 prompt 同时证明不会产生事务外内存副作用 |
+| 下一条允许任务 | 执行 `PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter`；只补纯 normalizer，不接真实 handler |
 
 ## Prompt 执行日志
 
@@ -5931,6 +5931,32 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 #### 下一条 Prompt 上下文
 
 PF-P062 只建立 facade normalization boundary。真实 handler wiring 前还缺一个 pure normalizer adapter：必须复用现有 `TurnoverLedgerExtraService` 的 validation/defaulting 规则，但不能调用会提前修改内存状态的 `upsert()` 作为 facade normalizer。PF-P063 应先建立该 pure normalizer adapter 或明确等价方案，然后再考虑 handler minimal wiring。
+
+### PF-P063 - Turnover Ledger Relation Extra Pure Normalizer Adapter
+
+状态：`planned`
+
+#### 范围
+
+- 为 relation extra 建立可复用现有 validation/defaulting 规则的 pure normalizer。
+- normalizer 不得修改内存状态，不得持久化，不得 enqueue。
+- 不修改 `server.py`，不接真实 handler。
+- 不迁移 confirm、withdraw、tag selection 或 bank-row-tags。
+
+#### 已生成 Prompt
+
+- 已写入 `docs/architecture/backend-refactor/refactor-prompts.md`。
+- prompt 正文以 `/goal` 开头。
+
+#### 下一步
+
+- 执行 PF-P063。
+
+#### 验收标准
+
+- `TurnoverLedgerExtraService` 或 adapter 暴露 pure normalize 能力，行为与现有 `upsert()` 归一化一致但无状态副作用。
+- `TurnoverLedgerWriteFacade(extra_normalizer=...)` 可使用该 adapter 保存 normalized extra。
+- UoW contract tests、Turnover API tests 必须通过。
 
 ## 维护规则
 
