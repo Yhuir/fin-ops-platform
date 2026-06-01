@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P092 - Turnover Ledger PostgreSQL Facade Readiness Target Tests` 已生成并审查 |
+| 当前 active prompt | `PF-P092 - Turnover Ledger PostgreSQL Facade Readiness Target Tests` |
 | 最近 verified prompt | `PF-P091 - Turnover Ledger PostgreSQL Write Port Adapter Skeleton` |
 | 当前分支 | `codex/turnover-ledger-remaining-write-rebaseline-p089` |
 | 最近验证 | PF-P088-MG 已在 main 上复验通过并已 push；`main...origin/main` 已对齐 |
-| 下一条允许任务 | 生成并审查 PostgreSQL facade readiness / API-level target tests prompt；不得直接迁移 handler |
+| 下一条允许任务 | 执行 PF-P092，只新增 PostgreSQL facade readiness target tests，不迁移 handler |
 
 ## Prompt 执行日志
 
@@ -7205,6 +7205,35 @@ PF-P090 已 verified。新增 5 条 expectedFailure target contract tests，锁�
 #### 下一条 Prompt 上下文
 
 PF-P091 已 verified。已实现最小 `TurnoverLedgerRelationRepositoryAdapter` 与 `TurnoverLedgerBankdetailPortAdapter`，PF-P090 的 5 条 adapter target tests 已转为普通通过。下一条应生成 PostgreSQL facade readiness / API-level target tests prompt；不得直接迁移 handler，除非先补测试锁定。
+
+### PF-P092 - Turnover Ledger PostgreSQL Facade Readiness Target Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只新增 API-level target tests，锁定 PostgreSQL storage backend 下 bank-row-tags、confirm relation、withdraw relation 应该进入 facade/UoW path。
+- 当前 production handler 尚未 wiring，目标测试可使用 `unittest.expectedFailure` 保持默认 CI 绿色。
+- 不修改 production code，不迁移 handler。
+
+#### 允许变更文件
+
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验收标准
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：必须通过；新增 PostgreSQL readiness target tests 可为 expectedFailure，不得 skip。
+- `git status --short --branch`：当前分支不是 `main`。
+- `git ls-files --others --exclude-standard`：无未跟踪临时文件。
+- `git diff --check`：通过。
+- `rg -n "PF-P092|PostgreSQL Facade Readiness|postgres.*facade|expectedFailure" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`：通过。
+
+#### 下一条 Prompt 上下文
+
+PF-P092 还未执行。执行后如 verified，下一条应最小接入 PostgreSQL facade seam 或生成 MG，取决于 diff 风险；不得跳过 target tests。
 
 ## 维护规则
 

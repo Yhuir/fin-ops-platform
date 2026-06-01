@@ -1938,3 +1938,26 @@ Verification:
 - RED：移除 5 个 expectedFailure 后，UoW contract suite 因 adapter class 缺失失败。
 - GREEN：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 45 tests.
 - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass.
+
+## PF-P092 PostgreSQL Facade Readiness Target Tests
+
+状态：`planned`
+
+目标：
+
+- 用 API-level target tests 锁定 PostgreSQL storage backend 下的 facade readiness。
+- 覆盖：
+  - bank-row-tags batch；
+  - confirm relation；
+  - withdraw relation。
+
+边界：
+
+- 本轮只改测试和文档。
+- 不修改 `server.py`。
+- 不迁移 PostgreSQL handler path。
+- 使用 fake postgres state store / fake queue repository，不访问真实数据库。
+
+下一步：
+
+- PF-P092 verified 后，再决定是执行最小 PostgreSQL facade seam wiring，还是先做 cumulative MG。

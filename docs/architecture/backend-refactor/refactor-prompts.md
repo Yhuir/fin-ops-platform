@@ -19640,3 +19640,78 @@ Verification:
 - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`: Pass。
 
 下一步建议：生成并审查 PostgreSQL facade readiness / API-level target tests prompt；不得直接迁移 handler。
+
+## PF-P092 - Turnover Ledger PostgreSQL Facade Readiness Target Tests
+
+```text
+/goal
+PF-P092 - Turnover Ledger PostgreSQL Facade Readiness Target Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的测试驱动后端工程师。你必须只补 PostgreSQL storage backend 下的 API-level target tests，用来锁定下一步 handler wiring 的边界。不得修改 production code。
+
+Context:
+PF-P091 已 verified，已有最小 `TurnoverLedgerRelationRepositoryAdapter` 与 `TurnoverLedgerBankdetailPortAdapter`。当前 `server.py` 中 bank-row-tags batch、confirm relation、withdraw relation 在 `storage_backend == "postgres"` 时仍 fallback，尚未进入 facade/UoW path。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - tests/test_turnover_ledger_api.py
+   - backend/src/fin_ops_platform/app/server.py 中 `_turnover_ledger_bank_row_tags_write_facade`、`_turnover_ledger_confirm_write_facade`、`_turnover_ledger_withdraw_write_facade`
+2. 必须确认当前分支不是 main。
+3. 必须确认 PF-P091 已 verified。
+4. 必须确认工作树无 unrelated dirty changes 和 untracked 临时文件。
+
+Task:
+在 `tests/test_turnover_ledger_api.py` 中新增 PostgreSQL facade readiness target tests，锁定以下目标行为：
+1. PostgreSQL `POST /api/turnover-ledger/bank-row-tags/batch` 应使用 facade/UoW path，不应 fallback 到 direct read-model clear。
+2. PostgreSQL `POST /api/turnover-ledger/relations/confirm` 应使用 facade/UoW path，不应 fallback 到 direct read-model clear。
+3. PostgreSQL `POST /api/turnover-ledger/relations/{id}/withdraw` 应使用 facade/UoW path，不应 fallback 到 direct read-model clear。
+
+Test Rules:
+- 当前 handler 未 wiring 前，这些 target tests 应使用 `unittest.expectedFailure`，不得 skip。
+- 测试必须使用 fake postgres state store / fake connection / fake queue repository，不得连接真实 PostgreSQL。
+- 测试不应依赖真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 测试必须验证 `storage_backend == "postgres"` 且 queue repository 具备 `enqueue_read_model_refresh_in_transaction` 时，目标 path 未来应可进入 facade。
+- 不得删除或弱化现有 local/dev/test UoW tests。
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `server.py` 或任何 production code。
+- 不得实现 PostgreSQL handler wiring。
+- 不得修改 adapters/facade/UoW。
+- 不得新增 SQL migration。
+- 不得访问真实外部服务。
+- 不得执行 Traffic Gate。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- rg -n "PF-P092|PostgreSQL Facade Readiness|postgres.*facade|expectedFailure" tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P092 status = implemented / verified / blocked。
+   - 记录新增 tests、expectedFailure 数量、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P092 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 PostgreSQL facade readiness target tests 状态。
+4. PF-P092 verified 后，下一条可以实现最小 PostgreSQL facade seam wiring，或在 diff 较大时生成 cumulative MG。
+```
+
+### 审查结论
+
+- PF-P092 正确地把 PostgreSQL handler wiring 前置为 API-level target tests。
+- 本轮禁止修改 production code，避免在没有测试门禁时直接接入 handler。
+- 使用 fake postgres state store / fake queue repository 足以锁定 handler seam，不需要真实数据库。
