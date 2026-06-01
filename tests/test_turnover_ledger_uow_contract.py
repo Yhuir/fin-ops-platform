@@ -196,6 +196,83 @@ class _NonTransactionalQueueRepository:
         return None
 
 
+class _AppSettingsStateStore:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = dict(payload)
+        self.saved_payloads: list[dict[str, object]] = []
+
+    def load_app_settings(self) -> dict[str, object]:
+        return dict(self.payload)
+
+    def save_app_settings(self, payload: dict[str, object]) -> None:
+        self.payload = dict(payload)
+        self.saved_payloads.append(dict(payload))
+
+
+class _ProjectCostingStub:
+    def restore_manual_projects(self, _projects: list[object]) -> None:
+        return None
+
+    def list_projects(self) -> list[object]:
+        return []
+
+
+def _tag_selection_settings_payload() -> dict[str, object]:
+    return {
+        "bank_transaction_tags": {
+            "version": 1,
+            "definitions": [
+                {
+                    "code": "external_rule_borrow_out",
+                    "label": "借出款",
+                    "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "外部往来款付款",
+                    "output_sub_label": "借出款",
+                    "turnover_role": "external_turnover",
+                    "turnover_action_type": "pending_collection",
+                    "direction": "any",
+                    "account_scope": {"type": "any", "values": []},
+                    "rules": {
+                        "match_fields": ["all_text"],
+                        "contains_any": ["借出"],
+                        "contains_all": [],
+                        "exact_any": [],
+                        "regex_any": [],
+                        "none_of": [],
+                    },
+                },
+                {
+                    "code": "external_rule_repaid",
+                    "label": "归还借款",
+                    "path": ["银行明细自动标签规则", "外部往来款付款", "归还借款"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "外部往来款付款",
+                    "output_sub_label": "归还借款",
+                    "turnover_role": "external_turnover",
+                    "turnover_action_type": "repaid",
+                    "direction": "any",
+                    "account_scope": {"type": "any", "values": []},
+                    "rules": {
+                        "match_fields": ["all_text"],
+                        "contains_any": ["归还"],
+                        "contains_all": [],
+                        "exact_any": [],
+                        "regex_any": [],
+                        "none_of": [],
+                    },
+                },
+            ],
+        },
+        "turnover_ledger_tag_selection": {
+            "version": 1,
+            "selected_tag_codes": ["external_rule_borrow_out", "external_rule_repaid"],
+        },
+    }
+
+
 class _RecordingRelationExtraRowProvider:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -378,13 +455,42 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_tag_selection_pure_normalizer_returns_next_selection_without_mutating_settings_snapshot(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.app_settings_service")
         service_class = getattr(module, "AppSettingsService")
-        normalize = getattr(service_class, "normalize_turnover_ledger_tag_selection_update", None)
+        state_store = _AppSettingsStateStore(_tag_selection_settings_payload())
+        service = service_class(
+            state_store=state_store,
+            project_costing_service=_ProjectCostingStub(),
+        )
 
-        self.assertTrue(callable(normalize))
+        before_payload = service.get_turnover_ledger_tag_selection_payload()
+        normalized = service.normalize_turnover_ledger_tag_selection_update(
+            {
+                "expected_version": before_payload["version"],
+                "selected_tag_codes": ["external_rule_borrow_out"],
+            },
+            actor_id="finance-user",
+        )
+
+        self.assertEqual(normalized["next_selection"]["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(normalized["audit_event"]["actor_id"], "finance-user")
+        self.assertEqual(normalized["audit_event"]["old_version"], before_payload["version"])
+        self.assertEqual(normalized["audit_event"]["new_version"], before_payload["version"] + 1)
+        self.assertEqual(normalized["public_payload"]["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(state_store.saved_payloads, [])
+        self.assertEqual(service.get_turnover_ledger_tag_selection_payload(), before_payload)
+
+        updated = service.update_turnover_ledger_tag_selection(
+            {
+                "expected_version": before_payload["version"],
+                "selected_tag_codes": ["external_rule_borrow_out"],
+            },
+            actor_id="finance-user",
+        )
+
+        self.assertEqual(updated["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(len(state_store.saved_payloads), 1)
 
     def test_bank_row_tags_batch_uses_explicit_bankdetail_port_and_rolls_back_on_outbox_failure(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))

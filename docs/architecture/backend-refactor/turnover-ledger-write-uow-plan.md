@@ -764,3 +764,28 @@ Next step:
 - `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton`.
 - PF-P067 should only implement the pure normalizer target and turn the expectedFailure into an ordinary passing test.
 - PF-P067 must not migrate handler/UoW production wiring.
+
+## PF-P067 Tag Selection Pure Settings Normalizer Skeleton
+
+状态：`verified`
+
+PF-P067 implemented the first production seam for tag selection settings updates without moving the HTTP handler or changing transaction semantics.
+
+Implemented:
+
+- `AppSettingsService.normalize_turnover_ledger_tag_selection_update(payload, *, actor_id)` now performs current snapshot refresh, expected version validation and existing tag selection normalization.
+- The pure method returns `next_snapshot`, `next_selection`, `audit_event` and `public_payload`.
+- The pure method does not call `save_app_settings`, does not mutate `_snapshot`, does not configure category services and does not record audit.
+- `update_turnover_ledger_tag_selection(...)` now reuses the pure method while preserving current save/configure/audit behavior.
+- The PF-P066 expectedFailure target test is now a normal passing test.
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 23 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 29 tests.
+
+Next step:
+
+- `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`.
+- PF-P068 should introduce the minimal settings port / adapter contract needed by future UoW integration.
+- PF-P068 must not migrate `server.py`, must not wire production UoW, and must not change the current queue-failure split-brain behavior yet.

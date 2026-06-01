@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton` 已生成并审查，等待执行 |
-| 当前 active prompt | `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton` planned |
-| 最近 verified prompt | `PF-P066 - Turnover Ledger Tag Selection Characterization and Settings Port Contract Tests` |
+| 当前阶段 | `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
-| 最近验证 | PF-P066 增强 tag selection tests；API 29 tests 通过，UoW contract 23 tests 通过（1 expectedFailure） |
-| 下一条允许任务 | 执行 `PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton`；只实现 pure normalizer，不迁移 handler |
+| 最近验证 | PF-P067 增加 pure tag selection normalizer；UoW contract 23 tests 通过，API 29 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`；不得迁移 handler，不得接入 production UoW |
 
 ## Prompt 执行日志
 
@@ -6162,7 +6162,7 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 ### PF-P067 - Turnover Ledger Tag Selection Pure Settings Normalizer Skeleton
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -6177,12 +6177,26 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 
 #### 下一步
 
-- 执行 PF-P067。
+- 生成并审查 `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`。
 
 #### 验收标准
 
 - pure normalizer 复用现有 validation/version 规则，返回 next selection/audit metadata，不保存、不 mutate `_snapshot`。
 - 默认 tests 绿色，不再有本 slice 的 expectedFailure。
+
+#### 执行结果
+
+- `AppSettingsService.normalize_turnover_ledger_tag_selection_update(...)` 已实现。
+- `update_turnover_ledger_tag_selection(...)` 已复用 pure normalizer，同时保留当前 save/configure/audit 行为。
+- PF-P066 expectedFailure 已转为普通通过测试，并补强 next selection、audit metadata、public payload、snapshot 不变和真实 update 保存行为断言。
+
+#### Verification
+
+- `git status --short --branch`: Pass，仅 PF-P067 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，23 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
 
 ## 维护规则
 

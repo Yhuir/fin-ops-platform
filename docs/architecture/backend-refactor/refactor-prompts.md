@@ -16333,3 +16333,21 @@ Post-Flight:
 - PF-P067 是 PF-P066 后正确的最小实现步：只让 expectedFailure 转绿，不进入 handler/UoW wiring。
 - Prompt 要求 update path 复用 pure method，避免未来 settings port 与当前 update 逻辑分叉。
 - Prompt 明确禁止修改 `server.py` 和 transaction-bound repository。
+
+### 执行结果
+
+- PF-P067 已执行并按自动工作流标记为 `verified`。
+- `AppSettingsService.normalize_turnover_ledger_tag_selection_update(...)` 已实现为 pure normalizer。
+- `update_turnover_ledger_tag_selection(...)` 已复用 pure normalizer，同时保留当前保存、配置 category service 和 audit 行为。
+- PF-P066 expectedFailure 已转为普通通过测试。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P067 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，23 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，29 tests。
+- `rg -n "normalize_turnover_ledger_tag_selection_update|expectedFailure|PF-P067|turnover_ledger_tag_selection" backend/src/fin_ops_platform/services/app_settings_service.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P068 - Turnover Ledger Tag Selection Settings Port / Adapter Skeleton`，只建立 settings port / adapter skeleton，不迁移 handler，不接入 production UoW。
