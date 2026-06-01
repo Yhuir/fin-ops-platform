@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` 已生成并审查 |
-| 当前 active prompt | `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` planned |
-| 最近 verified prompt | `PF-P077 - Turnover Ledger Bank Row Tags Facade / Port Skeleton` |
+| 当前阶段 | `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` 已执行并通过验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` |
 | 当前分支 | `codex/turnover-ledger-bank-row-tags-uow-p076` |
-| 最近验证 | PF-P077 增加 bank-row-tags facade 与 UoW multi-refresh skeleton；API 36 tests 通过（2 expectedFailure），UoW contract 33 tests 通过 |
-| 下一条允许任务 | 执行 `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring` |
+| 最近验证 | PF-P078 迁移 local/dev/test bank-row-tags handler UoW path；API 36 tests 通过，UoW contract 33 tests 通过 |
+| 下一条允许任务 | 生成并审查 `PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -6601,6 +6601,46 @@ PF-P067 应实现最小 pure settings normalizer skeleton，让 PF-P066 的 expe
 #### 下一步
 
 - 生成并审查 `PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring`，只迁移 bank-row-tags handler。
+
+### PF-P078 - Turnover Ledger Bank Row Tags Handler UoW Wiring
+
+状态：`verified`
+
+#### 范围
+
+- 只迁移 `POST /api/turnover-ledger/bank-row-tags/batch` 的 local/dev/test path 到 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)`。
+- 将 PF-P076 的 2 个 bank-row-tags API target tests 从 `unittest.expectedFailure` 转为普通通过。
+- 保留 legacy split-brain behavior test，并通过显式 facade fallback seam 覆盖旧路径。
+- 不迁移 relation extra、tag selection、confirm/cancel、withdraw、No OA、Bankdetail 独立 API 或其它 Turnover 写路径。
+
+#### 执行摘要
+
+- 新增 `_turnover_ledger_bank_row_tags_write_facade()`，默认 local/dev/test path 使用 `TurnoverLedgerWriteFacade` + `TurnoverLedgerWriteUnitOfWork`。
+- 新增 local transaction shim，queue/outbox failure 时恢复 bank transaction categories snapshot 与 turnover relations snapshot，并回写 local state store。
+- 新增 local bankdetail port，内部只调用既有 `BankTransactionCategoryService.apply_turnover_updates(...)` 并重建 Turnover relation。
+- 成功路径不再直接调用 `_clear_turnover_ledger_read_model_best_effort()`；Bankdetail、Workbench、Turnover Ledger refresh enqueue 由 UoW explicit refresh requests 执行。
+- PostgreSQL production path 暂保留 legacy fallback：当前缺少明确 transaction-bound Bankdetail category adapter，PF-P078 未猜测 SQL 或生产事务契约。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅 PF-P078 允许文件变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，36 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，33 tests。
+- `rg -n "update_bank_row_tags_batch|_turnover_ledger_bank_row_tags_write_facade|bank-row-tags|bank_row_tags|expectedFailure|PF-P078|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P076、PF-P077、PF-P078 构成 bank-row-tags UoW slice。下一步应生成并执行 `PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate`，覆盖当前分支自最新 main 以来的完整 diff。MG 必须确认 production code diff 只涉及 `server.py` 的 bank-row-tags handler/UoW seam，不执行 Traffic Gate，不部署，不访问生产。
 
 ## 维护规则
 

@@ -1229,7 +1229,7 @@ Verification:
 
 ## PF-P078 Bank Row Tags Handler UoW Wiring
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1246,4 +1246,17 @@ Verification:
 
 下一步：
 
-- 执行 PF-P078。
+- 生成 cumulative MG，覆盖 PF-P076 到 PF-P078。
+
+执行结果：
+
+- `POST /api/turnover-ledger/bank-row-tags/batch` 的 local/dev/test path 已迁移到 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)`。
+- local transaction shim 在 queue/outbox failure 时恢复 bank transaction categories snapshot 与 turnover relations snapshot。
+- 成功路径不再直接 clear Turnover Ledger read model，refresh enqueue 由 UoW explicit refresh requests 负责。
+- PF-P076 的 2 个 target tests 已转为普通通过。
+- PostgreSQL production path 暂保留 legacy fallback；当前缺少明确 transaction-bound Bankdetail category adapter，未猜测 SQL。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 36 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 33 tests.

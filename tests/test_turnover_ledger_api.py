@@ -794,6 +794,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository = _TurnoverReadModelRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_bank_row_tags_write_facade = lambda: None  # type: ignore[method-assign]
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -829,7 +830,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(details_payload["rows"][0]["id"], transaction_ids[0])
         self.assertEqual(details_payload["rows"][0]["category_code"], "borrow_in_company_pending_repayment")
 
-    @unittest.expectedFailure
     def test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -863,7 +863,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(details_payload["pagination"]["total"], 0)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.attempts)
 
-    @unittest.expectedFailure
     def test_target_turnover_bank_row_tag_batch_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

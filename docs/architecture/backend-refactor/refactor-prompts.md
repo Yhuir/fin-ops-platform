@@ -17821,3 +17821,23 @@ Post-Flight:
 - PF-P078 是 PF-P076/PF-P077 后的正确 wiring slice，只迁移 bank-row-tags handler，不扩大到其它 Turnover 写路径。
 - Prompt 要求 local/dev/test path 具备可回滚 snapshot shim，同时明确 production path 不能猜 SQL；如果缺少 transaction-bound adapter，应保留 legacy fallback 并记录 blocker。
 - Prompt 继续保持 handler/service/repository 责任边界：handler 提取 HTTP 上下文，facade 只处理 service-layer command，UoW/dirty writer 负责 refresh enqueue。
+
+### 执行结果
+
+- PF-P078 已执行并按自动工作流标记为 `verified`。
+- `POST /api/turnover-ledger/bank-row-tags/batch` 的 local/dev/test 默认路径现在通过 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 与 `TurnoverLedgerWriteUnitOfWork` 执行。
+- 新增 local transaction shim，queue/outbox failure 时恢复 bank transaction categories snapshot 与 turnover relations snapshot，并回写 local state store。
+- 成功路径不再直接调用 `_clear_turnover_ledger_read_model_best_effort()`；refresh enqueue 由 PF-P077 的 explicit refresh requests 驱动。
+- PF-P076 的 2 个 API target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+- PostgreSQL production path 暂保留 legacy fallback：当前缺少明确 transaction-bound Bankdetail category adapter，PF-P078 未猜测 SQL。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P078 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，36 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，33 tests。
+- `rg -n "update_bank_row_tags_batch|_turnover_ledger_bank_row_tags_write_facade|bank-row-tags|bank_row_tags|expectedFailure|PF-P078|_clear_turnover_ledger_read_model_best_effort" backend/src/fin_ops_platform/app/server.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
+
+下一步建议：生成并审查 `PF-P078-MG - Turnover Ledger Bank Row Tags UoW Cumulative Merge Gate`，统一覆盖 PF-P076 到 PF-P078 的完整 diff。
