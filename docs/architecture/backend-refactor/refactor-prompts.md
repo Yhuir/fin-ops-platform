@@ -10552,7 +10552,7 @@ PF-P036 已按 TDD 执行：
 
 ## PF-P036-MG - Workbench Pair Relation UoW Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -14827,3 +14827,21 @@ Post-Flight:
 - PF-P054-MG 是当前分支的正确合并边界：PF-P051 到 PF-P054 共同形成 Turnover Ledger write UoW foundation。
 - Gate 明确禁止 Traffic Gate 和真实 API migration，只允许合入文档、测试和最小 UoW skeleton。
 - Gate 要求 main 合入后复验，失败则停止且不得 push。
+
+### 执行结果
+
+- PF-P054-MG 已执行并按自动工作流标记为 `verified`。
+- 已合入 `main`，merge commit：`1b03b1ed`。
+- 已执行 `git push origin main`。
+- Scope 检查通过，完整 diff 只包含：
+  - backend-refactor 文档；
+  - `tests/test_turnover_ledger_api.py`；
+  - `tests/test_turnover_ledger_uow_contract.py`；
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`。
+- 未包含 `server.py`、real repository、runtime queue、worker、SQL migration、frontend、deployment、Nginx 或生产配置 diff。
+- 未执行 Traffic Gate、部署、生产访问、feature flag 或真实外部服务访问。
+- `main` 复验：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract tests.test_turnover_ledger_api tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service -v`：Pass，70 tests。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+- 下一步建议：从最新 `main` 新建分支，生成并审查 `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning`。PF-P055 只做真实 API 接入规划，不直接迁移 handler。

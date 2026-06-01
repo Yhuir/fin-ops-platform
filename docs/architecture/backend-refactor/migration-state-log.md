@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | 已生成并审查 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` |
-| 当前 active prompt | `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` (`planned`) |
-| 最近 verified prompt | `PF-P054 - Turnover Ledger Minimal UoW Skeleton` |
-| 当前分支 | `codex/turnover-ledger-write-uow-p051` |
-| 最近验证 | PF-P054 新增最小 Turnover Ledger write UoW skeleton；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v` 通过，7 tests 普通通过；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 通过；未迁移真实 API、未修改 server.py、SQL migration、worker、frontend、deployment 或生产配置 |
-| 下一条允许任务 | 执行 `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate`，覆盖 PF-P051 到 PF-P054 完整 diff |
+| 当前阶段 | `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` 已合入并推送 `origin/main` |
+| 当前 active prompt | 无 active prompt；下一步从最新 `main` 新建分支，生成并审查下一条 Turnover Ledger 写路径 prompt |
+| 最近 verified prompt | `PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P054-MG 已在功能分支和 `main` 上通过；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract tests.test_turnover_ledger_api tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service -v` 通过，70 tests；merge commit `1b03b1ed` 已 push 到 `origin/main` |
+| 下一条允许任务 | 从最新 `main` 新建 `codex/` 分支，生成并审查 `PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning`；PF-P055 只做真实 API 接入规划，不直接迁移 handler |
 
 ## Prompt 执行日志
 
@@ -5549,7 +5549,7 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 ### PF-P054-MG - Turnover Ledger Write UoW Foundation Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -5564,7 +5564,30 @@ PF-P036-MG 执行时必须先检查 branch/diff scope、untracked files 和 chan
 
 #### 下一步
 
-- 执行 PF-P054-MG。
+- PF-P054-MG 已按自动工作流标记为 `verified`。
+- Merge commit：`1b03b1ed`。
+- 已执行 `git push origin main`。
+- 下一条建议 prompt：`PF-P055 - Turnover Ledger Write Facade / UoW Integration Planning`。
+
+#### 执行结果
+
+- 已在功能分支 `codex/turnover-ledger-write-uow-p051` 执行 scope、untracked、diff 和 targeted tests 检查。
+- 已确认 diff 只包含 PF-P051 到 PF-P054 允许范围：
+  - backend-refactor 文档；
+  - `tests/test_turnover_ledger_api.py`；
+  - `tests/test_turnover_ledger_uow_contract.py`；
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`。
+- 已确认没有 `server.py`、real repository、runtime queue、worker、SQL migration、frontend、deployment、Nginx 或生产配置 diff。
+- 已合入 `main`。
+- 已在 `main` 上复验。
+- 已 push `origin/main`。
+
+#### 验证
+
+- `git status --short --branch`：Pass，合入前功能分支干净；合入后 `main` ahead 并已 push。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract tests.test_turnover_ledger_api tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service -v`：Pass，70 tests。
 
 ## 维护规则
 
