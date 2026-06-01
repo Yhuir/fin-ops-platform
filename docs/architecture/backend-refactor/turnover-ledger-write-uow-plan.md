@@ -2016,3 +2016,23 @@ Verification:
 下一步：
 
 - 生成并审查 `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate`，统一覆盖 PF-P089 到 PF-P093 的完整 diff。
+
+## PF-P093-MG PostgreSQL Write Path Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 覆盖 PF-P089 到 PF-P093 的完整 diff。
+- 只做 merge gate，不继续业务实现。
+- 不执行 Traffic Gate。
+
+预期变更：
+
+- Turnover Ledger PostgreSQL write port contracts 和 adapter skeleton。
+- PostgreSQL bank-row-tags batch、confirm relation、withdraw relation facade seam。
+- 对应 API/UoW tests 和状态文档。
+
+下一步：
+
+- PF-P093-MG 通过后 merge 到 `main`，在 `main` 复验并 push `origin/main`。

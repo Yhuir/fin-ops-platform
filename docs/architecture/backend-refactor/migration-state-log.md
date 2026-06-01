@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring` 已验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` |
 | 最近 verified prompt | `PF-P093 - Turnover Ledger PostgreSQL Facade Seam Wiring` |
 | 当前分支 | `codex/turnover-ledger-remaining-write-rebaseline-p089` |
 | 最近验证 | PF-P088-MG 已在 main 上复验通过并已 push；`main...origin/main` 已对齐 |
-| 下一条允许任务 | 生成并审查 `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate`，覆盖 PF-P089 到 PF-P093 的完整 diff |
+| 下一条允许任务 | 执行 `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -7283,6 +7283,40 @@ PF-P092 已 verified。新增 3 条 PostgreSQL facade readiness target tests，�
 #### 下一条 Prompt 上下文
 
 PF-P093 已 verified。本分支从 PF-P089 到 PF-P093 已包含 discovery、contract tests、adapter skeleton、API target tests 和 production handler seam。下一步应生成并审查 `PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate`，不要继续扩大 Turnover Ledger 实现范围。
+
+### PF-P093-MG - Turnover Ledger PostgreSQL Write Path Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 覆盖当前分支 `codex/turnover-ledger-remaining-write-rebaseline-p089` 从 PF-P089 到 PF-P093 的完整 diff。
+- 只做 merge gate：scope audit、untracked audit、diff check、target tests、文档状态检查、commit/merge/push。
+- 不新增业务实现，不修改生产配置，不执行 Traffic Gate。
+
+#### 预期变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 必须验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P093-MG planned。执行通过后允许 merge 到 `main`、在 `main` 上重跑验证并 `git push origin main`。push 后必须从最新 `main` 新建下一条 `codex/` 分支。
 
 ## 维护规则
 
