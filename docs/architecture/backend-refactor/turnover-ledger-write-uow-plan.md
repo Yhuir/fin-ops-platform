@@ -1039,3 +1039,25 @@ Verification:
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 30 tests.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 31 tests, 2 expectedFailure.
+
+## PF-P073 Tag Selection Handler UoW Wiring
+
+状态：`planned`
+
+目标：
+
+- 只迁移 `PUT /api/turnover-ledger/tag-selection` 到 `TurnoverLedgerWriteFacade.update_tag_selection(...)`。
+- 将 PF-P071 的 2 个 handler target `expectedFailure` 转为普通通过测试。
+- 保持 `GET /api/turnover-ledger/tag-selection`、No OA tag selection、relation extra、bank row tags 和其它 Turnover 写路径不变。
+
+边界：
+
+- Handler 只做 session/auth、JSON parsing、HTTP error mapping 和调用 facade。
+- Production PostgreSQL path 必须使用 `PostgresConnection.transaction()`、`TurnoverLedgerTagSelectionSettingsAdapter` 和 `TurnoverLedgerDirtyOutboxWriter`。
+- Local state store compatibility path 可以使用最小本地 transaction shim，以便 queue/outbox failure 时恢复 app settings snapshot；该 shim 只用于 local/dev/test state store，不得替代 PostgreSQL transaction-bound path。
+- 成功路径不得再直接调用 `_clear_turnover_ledger_read_model_best_effort()`。
+
+下一步：
+
+- 执行 PF-P073。
+- PF-P073 通过后，生成 cumulative MG 覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。

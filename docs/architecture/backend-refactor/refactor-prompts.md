@@ -16907,3 +16907,113 @@ Verification:
 - `rg -n "def update_tag_selection|turnover_ledger_tag_selection_changed|PF-P072|expectedFailure|save_tag_selection_settings" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor`: Pass。
 
 下一步建议：生成并审查 `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`，只迁移 tag selection handler，并将 PF-P071 的 2 个 expectedFailure 转为普通通过。
+
+## PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring
+
+```text
+/goal
+PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring
+
+Role:
+你是一位精通 Python Clean Architecture、HTTP handler 瘦身、事务边界和遗留系统兼容迁移的后端工程师。
+
+Context:
+PF-P067 已实现 tag selection pure normalizer。PF-P068/PF-P069 已建立 settings port / adapter / transaction-bound repository seam。PF-P071 已增加 2 个 handler target expectedFailure tests。PF-P072 已新增 `TurnoverLedgerWriteFacade.update_tag_selection(...)`，但尚未迁移 `server.py` handler。PF-P073 只迁移 `PUT /api/turnover-ledger/tag-selection` 到 facade/UoW path。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py 中 `_handle_api_turnover_ledger_tag_selection_update` 和 `_turnover_ledger_relation_extra_write_facade`
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/app_settings_service.py 的 tag selection normalizer / legacy update
+   - backend/src/fin_ops_platform/services/postgres_connection.py 的 transaction contract
+   - backend/src/fin_ops_platform/services/postgres_repositories/ops_tax_etc.py 的 app settings transaction writer
+   - tests/test_turnover_ledger_api.py 中 tag selection tests
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认工作树中没有 unrelated dirty changes 或 untracked 临时文件。
+4. 必须先运行当前 tests，确认 PF-P071 的 2 个 handler target tests 仍是 expectedFailure 基线：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+Task:
+将 `PUT /api/turnover-ledger/tag-selection` handler 迁移到 `TurnoverLedgerWriteFacade.update_tag_selection(...)`。迁移后 settings save 与 dirty/outbox enqueue 必须在同一个 UoW 边界内完成；queue/outbox failure 不得留下 settings save；成功路径不得直接 clear read model。不得迁移任何其它 endpoint。
+
+Required Implementation Work:
+1. 在 `server.py` 增加最小 tag selection facade builder，例如 `_turnover_ledger_tag_selection_write_facade(...)`：
+   - 可以复用 `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、`TurnoverLedgerTagSelectionSettingsAdapter`、`TurnoverLedgerDirtyOutboxWriter`；
+   - production PostgreSQL path 必须使用真实 `PostgresConnection.transaction()`；
+   - production PostgreSQL path 必须使用 transaction-bound settings writer 和 queue `enqueue_read_model_refresh_in_transaction(...)`；
+   - 不得把 `Application`、`RuntimeRepositories` 或完整 `state_store` 作为 god object 注入 facade/service；
+   - 不得在 service/facade 中读取 HTTP header/cookie；
+   - 不得 import `app.auth`。
+2. 为 local/dev/test `ApplicationStateStore` path 提供最小兼容事务边界：
+   - 只允许用于非-PostgreSQL local state store；
+   - queue failure 时必须恢复原始 app settings snapshot；
+   - 成功时必须更新 `AppSettingsService` 可见 snapshot，使后续 GET 返回新 payload；
+   - 该兼容路径不得访问真实外部服务。
+3. 修改 `_handle_api_turnover_ledger_tag_selection_update(...)`：
+   - 保留 `_turnover_mutation_session(headers)`、JSON parsing 和 HTTP response mapping；
+   - 调用 facade 的 `update_tag_selection(payload=..., actor_id=..., tenant_id=..., scope_keys=["all"])`；
+   - `AppSettingsValidationError("turnover_ledger_tag_selection_version_conflict")` 仍映射到 `409`；
+   - 其它 `AppSettingsValidationError` 仍映射到 `400`；
+   - queue/outbox failure 可以继续向上抛出，target tests 会断言 rollback；
+   - 不再直接调用 `_clear_turnover_ledger_read_model_best_effort()`；
+   - 不再直接调用 `_enqueue_turnover_ledger_read_model_refreshes(...)`。
+4. 更新 `tests/test_turnover_ledger_api.py`：
+   - 移除 PF-P071 2 个 handler target tests 的 `unittest.expectedFailure`；
+   - 不得删除、弱化或跳过这些 tests；
+   - 保持现有 current compatibility tests 通过，必要时将其期望更新到新 UoW 语义；
+   - 如需添加 facade override/recorder，只能用于断言 handler -> facade 的 HTTP boundary，不得绕过真实 rollback/no-clear tests。
+5. 更新 docs：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `GET /api/turnover-ledger/tag-selection` 行为。
+- 不得迁移 No OA tag selection、relation extra、bank row tags、relation confirm/withdraw 或其它 Turnover 写路径。
+- 不得修改 schema/migration。
+- 不得修改 worker/read model builder。
+- 不得引入 durable audit 新机制；durable audit gap 继续记录为后续任务。
+- 不得访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置修改。
+- 不得使用 destructive git 命令。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "def _handle_api_turnover_ledger_tag_selection_update|_turnover_ledger_tag_selection_write_facade|update_tag_selection|turnover_ledger_tag_selection_changed|expectedFailure|clear_turnover_ledger_read_model" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P073 status = implemented / verified / blocked。
+   - 记录 handler wiring、rollback/no-clear tests、expectedFailure 转绿情况和验证结果。
+2. 更新 refactor-prompts.md：
+   - 记录 PF-P073 执行结果。
+3. 更新 turnover-ledger-write-uow-plan.md：
+   - 记录 tag selection slice 当前完成度。
+4. PF-P073 通过后不要进入其它业务模块；下一步应生成 cumulative MG，覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。
+```
+
+### 审查结论
+
+- PF-P073 是 PF-P072 后正确的最小 handler migration：只迁移 `PUT /api/turnover-ledger/tag-selection`，不扩大到其它 Turnover 写路径。
+- Prompt 明确要求 Postgres production path 使用真实 transaction-bound writer，同时要求 local state store compatibility path 具备 rollback 语义，能让 PF-P071 target tests 从 expectedFailure 转为普通通过。
+- Prompt 明确禁止直接 clear read model 和直接 enqueue legacy queue，从而把 settings fact 与 dirty/outbox 收敛到 UoW 边界。

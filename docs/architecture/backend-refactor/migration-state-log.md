@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton` 已执行并通过验证 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring` 已生成并审查 |
+| 当前 active prompt | `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring` planned |
 | 最近 verified prompt | `PF-P072 - Turnover Ledger Tag Selection Facade Skeleton` |
 | 当前分支 | `codex/turnover-ledger-tag-selection-uow-p065` |
 | 最近验证 | PF-P072 增加 tag selection facade skeleton；UoW contract 30 tests 通过，API 31 tests 通过（2 expectedFailure） |
-| 下一条允许任务 | 生成并审查 `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`；只迁移 tag selection handler |
+| 下一条允许任务 | 执行 `PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring`；只迁移 tag selection handler |
 
 ## Prompt 执行日志
 
@@ -138,6 +138,28 @@ PF-P000 建立了 fresh 的 Python-first 重构文档体系，并补充了 AI �
 - 生成 `docs/architecture/backend-refactor/architecture-inventory.md`。
 - 输出 API path ownership、file ownership、external dependency matrix、read model ownership、runtime sequence candidates 和 risk register。
 - 覆盖 Turnover Ledger、Batch Accounting、Workbench 全量大文件和 Workbench Matching Engine 候选模块评估。
+
+### PF-P073 - Turnover Ledger Tag Selection Handler UoW Wiring
+
+状态：`planned`
+
+#### 范围
+
+- 只迁移 `PUT /api/turnover-ledger/tag-selection` 到 `TurnoverLedgerWriteFacade.update_tag_selection(...)`。
+- 将 PF-P071 的 2 个 handler target `expectedFailure` 转为普通通过测试。
+- 不迁移其它 Turnover Ledger 写路径，不执行 Traffic Gate。
+
+#### 验收标准
+
+- Handler 只做 session/auth、JSON parsing、HTTP error mapping 和 facade 调用。
+- Settings save 与 dirty/outbox enqueue 收敛到 UoW 边界。
+- Queue/outbox failure 不留下 settings save。
+- 成功路径不直接 clear read model。
+- `tests.test_turnover_ledger_api` 和 `tests.test_turnover_ledger_uow_contract` 通过。
+
+#### 下一步上下文
+
+PF-P073 执行通过后，应生成 cumulative MG，覆盖 PF-P065 到 PF-P073 的 tag selection UoW slice。
 - 只允许小范围修订模块计划、调用链文档和状态机中的事实性归属。
 
 #### 禁止范围
