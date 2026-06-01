@@ -1419,7 +1419,7 @@ Verification:
 
 ## PF-P082 Confirm Relation Handler UoW Target Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1435,4 +1435,15 @@ Verification:
 
 下一步：
 
-- 执行 PF-P082。
+- 生成 PF-P083 confirm relation local handler UoW wiring。
+
+执行结果：
+
+- 新增 current compatibility test，锁定 legacy queue failure 发生在 relation confirm/audit 和 Turnover read model clear 之后。
+- 新增 2 条 `unittest.expectedFailure` future target tests，分别锁定 future rollback 和 no-direct-clear 行为。
+- 未修改 production code，未迁移 handler。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests, 2 expectedFailure.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests` 已生成并审查 |
-| 当前 active prompt | `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests` planned |
-| 最近 verified prompt | `PF-P081 - Turnover Ledger Confirm Relation Handler UoW Wiring Readiness` |
+| 当前阶段 | `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests` 已验证 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests` |
 | 当前分支 | `codex/turnover-ledger-post-bank-tags-p079` |
-| 最近验证 | PF-P081 完成 confirm handler readiness；local/dev/test 可进入 target tests，PostgreSQL production 需保留 legacy fallback |
-| 下一条允许任务 | 执行 `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests` |
+| 最近验证 | PF-P082 完成 confirm handler API-level characterization / target tests；当前 legacy queue failure split-brain 已锁定，future rollback/no-direct-clear 以 2 条 expectedFailure 保留目标契约 |
+| 下一条允许任务 | 生成并审查 `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring` |
 
 ## Prompt 执行日志
 
@@ -6751,6 +6751,43 @@ PF-P079/PF-P080 完成了 confirm relation facade-level skeleton。下一步应�
 #### 下一条 Prompt 上下文
 
 下一步应生成 `PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests`，只补 API-level target tests，锁定 local/dev/test UoW rollback/no-direct-clear 行为；不得直接进行 handler wiring。
+
+### PF-P082 - Turnover Ledger Confirm Relation Handler UoW Target Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只为 `POST /api/turnover-ledger/relations/confirm` 增加 API-level compatibility / target tests。
+- 不修改 production code，不迁移 handler，不改 service/facade。
+- 保留 legacy split-brain 行为测试，并用 `unittest.expectedFailure` 锁定 future UoW target behavior。
+
+#### 执行摘要
+
+- 新增当前行为 characterization：queue failure 当前发生在 relation confirm/audit 和 Turnover read model clear 之后，记录现有 split-brain 风险。
+- 新增 2 条 future target tests，当前用 `unittest.expectedFailure` 隔离默认 CI：
+  - queue/outbox failure must roll back relation confirm/audit；
+  - successful UoW path must not call `_clear_turnover_ledger_read_model_best_effort()` directly。
+- 未修改 `server.py` 或任何 production code。
+
+#### 变更文件
+
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅 PF-P082 允许文件变更。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，39 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，36 tests。
+
+#### 下一条 Prompt 上下文
+
+下一步应生成 `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring`。PF-P083 只能迁移 local/dev/test confirm handler path 到 UoW；必须保留 PostgreSQL production legacy fallback；必须让 PF-P082 的 2 条 expectedFailure 转为普通通过；不得迁移 withdraw、cancel、No OA、Bankdetail 独立 API 或 Workbench influence port。
 
 ## 维护规则
 

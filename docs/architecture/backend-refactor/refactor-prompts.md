@@ -18359,3 +18359,22 @@ Post-Flight:
 - PF-P082 符合 PF-P081 的 decision：先锁定 API-level target behavior，再进入 handler wiring。
 - Prompt 明确同时保留 current split-brain compatibility test 和 future target expectedFailure，后续 PF-P083 可以用 seam 保留 legacy 测试。
 - Prompt 禁止改 production code，避免在测试锁定阶段提前迁移 handler。
+
+### 执行结果
+
+- PF-P082 已执行并按自动工作流标记为 `verified`。
+- 在 `tests/test_turnover_ledger_api.py` 新增 confirm relation API-level current compatibility test：queue failure 当前发生在 relation confirm/audit 和 Turnover read model clear 之后。
+- 新增 2 条 `unittest.expectedFailure` future target tests：
+  - queue/outbox failure must roll back relation confirm/audit；
+  - successful UoW path must not call `_clear_turnover_ledger_read_model_best_effort()` directly。
+- 未修改 `server.py` 或任何 production code。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P082 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，39 tests，2 expectedFailure。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，36 tests。
+
+下一步建议：生成并审查 `PF-P083 - Turnover Ledger Confirm Relation Local Handler UoW Wiring`，只迁移 local/dev/test confirm handler path，并保留 PostgreSQL production legacy fallback。
