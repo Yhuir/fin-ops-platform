@@ -1450,7 +1450,7 @@ Verification:
 
 ## PF-P083 Confirm Relation Local Handler UoW Wiring
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -1466,4 +1466,18 @@ Verification:
 
 下一步：
 
-- 执行 PF-P083。
+- 生成 PF-P083-MG，统一覆盖 PF-P079 到 PF-P083 的 confirm relation UoW slice。
+
+执行结果：
+
+- `POST /api/turnover-ledger/relations/confirm` 的 local/dev/test path 已接入 `TurnoverLedgerWriteFacade.confirm_relation(...)`。
+- 新增 confirm 专用 facade seam，测试可显式强制 legacy fallback 来保留当前 split-brain characterization。
+- 新增 local transaction shim，dirty/outbox failure 时恢复并保存上一版 relation snapshot；成功时保存最新 relation snapshot。
+- PostgreSQL production path 仍保留 legacy fallback；未猜测 relation SQL。
+- PF-P082 的 2 条 target `expectedFailure` 已转为普通通过。
+
+Verification:
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass, 39 tests.
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass, 36 tests.
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py`: Pass.

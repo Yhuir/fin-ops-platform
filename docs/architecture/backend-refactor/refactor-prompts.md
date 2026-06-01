@@ -18489,3 +18489,24 @@ Post-Flight:
 - PF-P083 是 PF-P082 后的最小实现步骤：只让 confirm relation 的 local/dev/test path 进入已存在的 facade/UoW，不扩大到 withdraw 或 production SQL。
 - Prompt 明确保留 PostgreSQL production legacy fallback，避免猜测 relation repository。
 - Prompt 要求 current compatibility test 通过显式 seam 强制 legacy path，避免因为默认 local path 改为 UoW 而丢失当前 split-brain 行为基线。
+
+### 执行结果
+
+- PF-P083 已执行并按自动工作流标记为 `verified`。
+- 新增 `_turnover_ledger_confirm_write_facade()`，local/dev/test path 使用 `TurnoverLedgerWriteFacade.confirm_relation(...)` + `TurnoverLedgerWriteUnitOfWork`。
+- 新增 local confirm transaction shim，dirty/outbox failure 时恢复 relation snapshot 并回写 local state store。
+- 新增 local confirm relation repository，复用 `TurnoverLedgerApiRoutes.confirm_relation(...)` 和既有 relation rebuild 规则。
+- `POST /api/turnover-ledger/relations/confirm` 成功路径在 facade 存在时不再直接 clear Turnover read model。
+- PF-P082 的 2 条 confirm handler target tests 已从 `unittest.expectedFailure` 转为普通通过；legacy split-brain compatibility test 通过显式 fallback seam 保留。
+- PostgreSQL production path 仍返回 `None` 并走 legacy fallback；未猜测 relation SQL，未迁移 Workbench influence port。
+
+Verification:
+
+- `git status --short --branch`: Pass，仅 PF-P083 允许文件变更。
+- `git ls-files --others --exclude-standard`: Pass，无未跟踪文件。
+- `git diff --check`: Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`: Pass，39 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`: Pass，36 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py`: Pass。
+
+下一步建议：生成并审查 `PF-P083-MG - Turnover Ledger Confirm Relation UoW Cumulative Merge Gate`，统一覆盖 PF-P079 到 PF-P083 的完整 diff。
