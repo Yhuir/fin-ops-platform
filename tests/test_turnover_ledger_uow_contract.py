@@ -1223,6 +1223,38 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
+    def test_target_relation_extra_facade_passes_expected_versions_before_repository(self) -> None:
+        # PF-P102 target contract: stale relation extra checks must run before repository save.
+        stale_precondition = _StalePreconditionPort(stale=True)
+        uow, deps = self._build_uow(stale_precondition_port=stale_precondition)
+        facade = self._write_facade_class()(uow=uow)
+
+        with self.assertRaisesRegex(RuntimeError, "turnover_write_conflict"):
+            facade.update_relation_extra(
+                relation_id="turnover_rel_1",
+                payload={"note": "stale extra"},
+                actor_id="finance-user",
+                tenant_id="default",
+                scope_keys=["all"],
+                expected_versions={"turnover_relation_extra:turnover_rel_1": "2026-06-02T00:00:00+00:00"},
+            )
+
+        self.assertEqual(
+            stale_precondition.checked,
+            [
+                {
+                    "expected_versions": {
+                        "turnover_relation_extra:turnover_rel_1": "2026-06-02T00:00:00+00:00"
+                    },
+                    "transaction": deps.connection.transaction_obj,
+                }
+            ],
+        )
+        self.assertEqual(deps.extra_repository.extras, [])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
     def test_relation_extra_write_facade_command_result_are_not_http_coupled(self) -> None:
         # PF-P056 target contract: command/result must not carry HTTP response or auth module dependencies.
         uow, _deps = self._build_uow()

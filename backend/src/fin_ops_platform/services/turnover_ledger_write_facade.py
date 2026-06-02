@@ -44,6 +44,7 @@ class TurnoverLedgerWriteFacade:
         actor_id: str,
         tenant_id: str,
         scope_keys: list[str] | None = None,
+        expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         extra = self._extra_normalizer(
             relation_id=relation_id,
@@ -53,6 +54,7 @@ class TurnoverLedgerWriteFacade:
         command = TurnoverLedgerWriteCommand(
             action_name="relation_extra_update",
             scope_keys=list(scope_keys or ["all"]),
+            expected_versions=dict(expected_versions or {}),
             actor_id=actor_id,
             tenant_id=tenant_id,
             payload={"relation_id": relation_id, "extra": dict(extra)},

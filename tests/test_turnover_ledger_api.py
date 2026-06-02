@@ -97,6 +97,7 @@ class _RelationExtraWriteFacadeRecorder:
         actor_id: str,
         tenant_id: str,
         scope_keys: list[str],
+        expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -105,6 +106,7 @@ class _RelationExtraWriteFacadeRecorder:
                 "actor_id": actor_id,
                 "tenant_id": tenant_id,
                 "scope_keys": list(scope_keys),
+                "expected_versions": dict(expected_versions or {}),
             }
         )
         return {
@@ -1248,6 +1250,89 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertIn(("turnover_ledger", "all", "turnover_relation_extra_changed"), queue.enqueued)
 
+    def test_relation_extra_same_payload_put_currently_updates_marker_and_reenqueues(self) -> None:
+        # PF-P102 current behavior: repeated same payload is not durable-idempotent yet.
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            payload = {"note": "same payload", "interest_rate_type": "none"}
+
+            first_response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps(payload),
+            )
+            first_payload = json.loads(first_response.body)
+            second_response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps(payload),
+            )
+            second_payload = json.loads(second_response.body)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(first_payload["extra"]["note"], "same payload")
+        self.assertEqual(second_payload["extra"]["note"], "same payload")
+        self.assertNotEqual(first_payload["extra"]["updated_at"], second_payload["extra"]["updated_at"])
+        self.assertEqual(
+            queue.enqueued,
+            [
+                ("turnover_ledger", "all", "turnover_relation_extra_changed"),
+                ("turnover_ledger", "all", "turnover_relation_extra_changed"),
+            ],
+        )
+
+    def test_target_relation_extra_stale_expected_version_rejects_without_save_or_refresh(self) -> None:
+        # PF-P102 target contract: stale relation extra writes should become conflict-safe.
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            first_response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps({"note": "first version"}),
+            )
+            old_updated_at = json.loads(first_response.body)["extra"]["updated_at"]
+            app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps({"note": "newer version"}),
+            )
+
+            stale_response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps(
+                    {
+                        "note": "stale overwrite",
+                        "expected_versions": {f"turnover_relation_extra:{relation_id}": old_updated_at},
+                    }
+                ),
+            )
+            restored_payload = json.loads(
+                app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra").body
+            )
+
+        self.assertEqual(stale_response.status_code, 409)
+        self.assertEqual(json.loads(stale_response.body)["error"], "turnover_relation_extra_conflict")
+        self.assertEqual(restored_payload["extra"]["note"], "newer version")
+        self.assertEqual(
+            queue.enqueued,
+            [
+                ("turnover_ledger", "all", "turnover_relation_extra_changed"),
+                ("turnover_ledger", "all", "turnover_relation_extra_changed"),
+            ],
+        )
+
     def test_relation_extra_persistence_failure_is_best_effort_success_and_refreshes(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1389,6 +1474,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "actor_id": "test_finops_user",
                     "tenant_id": "default",
                     "scope_keys": ["all"],
+                    "expected_versions": {},
                 }
             ],
         )
