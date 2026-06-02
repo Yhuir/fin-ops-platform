@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` 已执行并验证通过 |
 | 当前 active prompt | `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` |
-| 最近 verified prompt | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
+| 最近 verified prompt | `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` |
 | 当前分支 | `codex/turnover-ledger-remaining-boundary-p120` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，61 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests |
-| 下一条允许任务 | 执行 `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` |
+| 下一条允许任务 | 生成并审查 `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction` |
 
 ## Prompt 执行日志
 
@@ -8617,7 +8617,7 @@ Verification：
 
 ### PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8641,7 +8641,46 @@ Verification：
 
 #### 下一条 Prompt 上下文
 
-TBD。
+Cleanup Candidate Matrix：
+
+| 写入口 | 删除 fallback 可行性 | 前置条件 | 推荐下一步 |
+| --- | --- | --- | --- |
+| tag selection update | 不建议直接删除；适合先抽成显式 legacy fallback facade。 | PF-P121 已锁定 direct update/clear/enqueue；需要保留 queue missing 时的 local compatibility。 | 第一优先级：抽出 `TurnoverLedgerTagSelectionLegacyFallbackFacade` 或等价 adapter，使 handler 不再直接调用 settings/clear/enqueue。 |
+| relation extra update | 可作为第二批；比 tag selection 多了 row provider、extra persistence 和 idempotency/stale 逻辑。 | 已有 fallback success/queue failure/target rollback tests；仍需避免误伤 expected_versions/idempotency precheck。 | 第二优先级：抽 legacy fallback facade，但不要和 tag selection 同一 prompt。 |
+| bank row tags batch | 不建议先处理；跨 Bankdetail、Workbench invalidation、relation rebuild。 | PF-P118/PF-P121 已覆盖显式 override None 和 dependency-missing fallback；但 side effects 最复杂。 | 等 simple fallback adapter 模式跑通后再处理。 |
+| confirm relation | 暂不直接删除；涉及 relation rebuild、route confirm、after-mutation。 | 已有 success/queue failure/rollback tests；需要明确 `_after_turnover_relation_mutation` 长期归属。 | 与 withdraw 作为 relation mutation family 一起规划，但分 prompt 实现。 |
+| withdraw relation | 暂不直接删除；涉及 relation detail precheck、expected_versions 构造、after-mutation。 | 已有 success/queue failure/rollback tests；需避免破坏 stale/duplicate submit 行为。 | confirm cleanup 后再处理，或与 confirm 使用同一 fallback adapter 抽象但分步落地。 |
+
+Minimal Cleanup Order：
+
+1. PF-P123：tag selection legacy fallback facade extraction，只处理 tag selection。
+2. PF-P124：relation extra legacy fallback facade extraction，只处理 relation extra。
+3. PF-P125：confirm/withdraw relation fallback cleanup planning，先决定 relation mutation family 的 `_after_turnover_relation_mutation` 归属。
+4. PF-P126+：bank row tags fallback cleanup，最后处理跨模块 side effects。
+
+Handler Thinness Target：
+
+- handler 仍保留 session/auth、JSON body parsing、HTTP status mapping、response packaging。
+- handler 不应直接调用 `AppSettingsService.update_turnover_ledger_tag_selection(...)`、`_clear_turnover_ledger_read_model_best_effort()`、`_enqueue_turnover_ledger_read_model_refreshes(...)`、`_turnover_ledger_api_routes.update_relation_extra(...)`、`_after_turnover_relation_mutation(...)` 等业务/刷新编排。
+
+Risk Register：
+
+- local/dev/test compatibility：缺少 runtime queue 时历史行为是允许写入但刷新可能 best-effort；抽 adapter 必须保持该行为或显式收紧并更新测试。
+- dependency missing：不应让 handler 用 `None` 分支承载业务逻辑；应由 construction 层返回明确 fallback object 或显式失败。
+- Postgres readiness：Postgres path 必须继续使用 transaction-bound dirty/outbox，不能退回 legacy fallback。
+- read model refresh side effects：fallback adapter 迁移时必须保留 PF-P121 中锁定的 clear/enqueue 次数。
+- Workbench/Bankdetail invalidation：bank row tags 和 relation mutation family 后续处理时必须额外谨慎，不能复用 tag selection 的简单模式一把梭。
+
+Verification：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P122|Cleanup Candidate Matrix|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
+
+#### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction`。PF-P123 只处理 tag selection fallback：先更新/调整测试表达目标 handler thinness，再把 direct settings update/read model clear/enqueue 从 handler 移入显式 legacy fallback facade/adapter；不得处理 relation extra、bank row tags、confirm、withdraw。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

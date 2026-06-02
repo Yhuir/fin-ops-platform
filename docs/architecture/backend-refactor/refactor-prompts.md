@@ -23666,7 +23666,7 @@ Verification：
 
 ## PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning
 
-状态：`planned`
+状态：`verified`
 
 ```text
 /goal
@@ -23752,6 +23752,32 @@ Post-Flight:
 
 - PF-P122 边界正确：只做 fallback cleanup planning 和文档回写。
 - PF-P122 不修改 production code、不修改 tests、不删除 fallback。
+
+### PF-P122 执行结果
+
+Cleanup Candidate Matrix：
+
+- tag selection update：优先处理，但不直接删除 compatibility；先抽显式 legacy fallback facade/adapter，移出 handler direct settings update / clear / enqueue。
+- relation extra update：第二批处理，需保留 expected_versions / idempotency precheck，不与 tag selection 同 prompt。
+- bank row tags batch：跨 Bankdetail、Workbench invalidation、relation rebuild，暂缓到 simple fallback 模式跑通后。
+- confirm relation：暂缓；需先明确 `_after_turnover_relation_mutation(...)` 的长期归属。
+- withdraw relation：暂缓；需保护 relation detail precheck、expected_versions、stale/duplicate submit 行为。
+
+Minimal Cleanup Order：
+
+1. `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction`
+2. `PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction`
+3. `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`
+4. 后续再处理 bank row tags fallback cleanup。
+
+Verification：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P122|Cleanup Candidate Matrix|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
+
+下一条最小 prompt：`PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction`，只处理 tag selection fallback，不处理其它入口。
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 

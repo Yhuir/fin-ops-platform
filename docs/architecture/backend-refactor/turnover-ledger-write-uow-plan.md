@@ -3605,7 +3605,7 @@ PF-P110 边界：
 
 ## PF-P122 Facade None Fallback Cleanup Planning
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3632,6 +3632,38 @@ PF-P110 边界：
 - `git ls-files --others --exclude-standard`
 - `git diff --check`
 - `rg -n "PF-P122|Cleanup Candidate Matrix|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+### Cleanup Candidate Matrix
+
+| 写入口 | 判断 | 下一步 |
+| --- | --- | --- |
+| tag selection update | 最小、最适合先处理；不直接删除 compatibility。 | 抽显式 legacy fallback facade/adapter，handler 不再直接 settings update / clear / enqueue。 |
+| relation extra update | 可第二批处理；涉及 row provider、extra persistence、expected_versions/idempotency precheck。 | 单独 prompt，不与 tag selection 混合。 |
+| bank row tags batch | 跨 Bankdetail、Workbench invalidation、relation rebuild。 | 暂缓，等简单 fallback adapter 模式跑通后再处理。 |
+| confirm relation | 涉及 relation rebuild 和 `_after_turnover_relation_mutation(...)`。 | 先做 relation mutation family planning。 |
+| withdraw relation | 涉及 relation detail precheck、expected_versions、stale/duplicate submit。 | 在 confirm 后处理，避免破坏并发写保护。 |
+
+### Minimal Cleanup Order
+
+1. `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction`
+2. `PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction`
+3. `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`
+4. 后续再处理 bank row tags fallback cleanup。
+
+### Handler Thinness Target
+
+- handler 保留 HTTP mapping、session/auth、body parsing、response packaging。
+- handler 不直接做 settings update、read model clear/enqueue、relation extra update、relation rebuild 或跨模块 invalidation orchestration。
+
+### Risk Register
+
+- local/dev/test compatibility 必须被保留或显式收紧。
+- dependency missing fallback 不应继续散落在 handler。
+- Postgres path 必须继续使用 transaction-bound dirty/outbox。
+- read model clear/enqueue 次数必须保持 PF-P121 tests 锁定的行为。
+- Bankdetail/Workbench invalidation side effects 后续单独处理。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
