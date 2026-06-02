@@ -275,6 +275,8 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
+    TurnoverLedgerLocalBankdetailPort,
+    TurnoverLedgerLocalBankRowTagsConnection,
     TurnoverLedgerLocalDirtyOutboxWriter,
     TurnoverLedgerLocalExtraRepository,
     TurnoverLedgerLocalRelationConnection,
@@ -2720,8 +2722,25 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return None
-            connection = self._local_turnover_ledger_bank_row_tags_connection(state_store)
-            bankdetail_port = self._local_turnover_ledger_bankdetail_port()
+            connection = TurnoverLedgerLocalBankRowTagsConnection(
+                category_snapshot_provider=self._bank_transaction_category_service.snapshot,
+                relation_snapshot_provider=self._turnover_relation_service.snapshot,
+                replace_category_snapshot=self._replace_local_bank_transaction_category_snapshot,
+                replace_relation_snapshot=self._replace_local_turnover_relation_snapshot,
+                save_category_snapshot=lambda snapshot: self._save_local_bank_transaction_categories_snapshot(
+                    state_store,
+                    snapshot,
+                ),
+                save_relation_snapshot=lambda snapshot: self._save_local_turnover_relations_snapshot(
+                    state_store,
+                    snapshot,
+                ),
+            )
+            bankdetail_port = TurnoverLedgerLocalBankdetailPort(
+                category_service=self._bank_transaction_category_service,
+                relation_service=self._turnover_relation_service,
+                bank_rows_provider=self._turnover_bank_transaction_rows,
+            )
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
@@ -2852,62 +2871,6 @@ class Application:
         if callable(getattr(transaction, "execute", None)):
             return PostgresWorkbenchRepository(transaction)
         return state_store
-
-    def _local_turnover_ledger_bank_row_tags_connection(self, state_store: object) -> object:
-        application = self
-
-        class _LocalBankRowTagsConnection:
-            @contextmanager
-            def transaction(self) -> Any:
-                previous_category_snapshot = application._bank_transaction_category_service.snapshot()
-                previous_relation_snapshot = application._turnover_relation_service.snapshot()
-                try:
-                    yield SimpleNamespace()
-                except Exception:
-                    application._replace_local_bank_transaction_category_snapshot(previous_category_snapshot)
-                    application._replace_local_turnover_relation_snapshot(previous_relation_snapshot)
-                    application._save_local_bank_transaction_categories_snapshot(
-                        state_store,
-                        previous_category_snapshot,
-                    )
-                    application._save_local_turnover_relations_snapshot(
-                        state_store,
-                        previous_relation_snapshot,
-                    )
-                    raise
-                else:
-                    application._save_local_bank_transaction_categories_snapshot(
-                        state_store,
-                        application._bank_transaction_category_service.snapshot(),
-                    )
-                    application._save_local_turnover_relations_snapshot(
-                        state_store,
-                        application._turnover_relation_service.snapshot(),
-                    )
-
-        return _LocalBankRowTagsConnection()
-
-    def _local_turnover_ledger_bankdetail_port(self) -> object:
-        application = self
-
-        class _LocalTurnoverLedgerBankdetailPort:
-            def apply_turnover_category_updates(
-                self,
-                updates: list[dict[str, object]],
-                *,
-                actor_id: str,
-                transaction: object,
-            ) -> dict[str, object]:
-                result = application._bank_transaction_category_service.apply_turnover_updates(
-                    list(updates or []),
-                    actor=actor_id,
-                )
-                application._turnover_relation_service.rebuild_from_bank_rows(
-                    application._turnover_bank_transaction_rows()
-                )
-                return dict(result or {})
-
-        return _LocalTurnoverLedgerBankdetailPort()
 
     def _replace_local_bank_transaction_category_snapshot(self, snapshot: dict[str, object]) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(

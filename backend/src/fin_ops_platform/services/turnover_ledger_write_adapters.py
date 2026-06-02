@@ -514,6 +514,69 @@ class TurnoverLedgerLocalRelationRepository:
         )
 
 
+class TurnoverLedgerLocalBankRowTagsConnection:
+    def __init__(
+        self,
+        *,
+        category_snapshot_provider: Callable[[], dict[str, object]],
+        relation_snapshot_provider: Callable[[], dict[str, object]],
+        replace_category_snapshot: Callable[[dict[str, object]], None],
+        replace_relation_snapshot: Callable[[dict[str, object]], None],
+        save_category_snapshot: Callable[[dict[str, object]], None],
+        save_relation_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._category_snapshot_provider = category_snapshot_provider
+        self._relation_snapshot_provider = relation_snapshot_provider
+        self._replace_category_snapshot = replace_category_snapshot
+        self._replace_relation_snapshot = replace_relation_snapshot
+        self._save_category_snapshot = save_category_snapshot
+        self._save_relation_snapshot = save_relation_snapshot
+
+    @contextmanager
+    def transaction(self) -> Any:
+        previous_category_snapshot = dict(self._category_snapshot_provider() or {})
+        previous_relation_snapshot = dict(self._relation_snapshot_provider() or {})
+        try:
+            yield SimpleNamespace()
+        except Exception:
+            self._replace_category_snapshot(dict(previous_category_snapshot))
+            self._replace_relation_snapshot(dict(previous_relation_snapshot))
+            self._save_category_snapshot(dict(previous_category_snapshot))
+            self._save_relation_snapshot(dict(previous_relation_snapshot))
+            raise
+        else:
+            self._save_category_snapshot(dict(self._category_snapshot_provider() or {}))
+            self._save_relation_snapshot(dict(self._relation_snapshot_provider() or {}))
+
+
+class TurnoverLedgerLocalBankdetailPort:
+    def __init__(
+        self,
+        *,
+        category_service: Any,
+        relation_service: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+    ) -> None:
+        self._category_service = category_service
+        self._relation_service = relation_service
+        self._bank_rows_provider = bank_rows_provider
+
+    def apply_turnover_category_updates(
+        self,
+        updates: list[dict[str, object]],
+        *,
+        actor_id: str,
+        transaction: Any,
+    ) -> dict[str, object]:
+        _ = transaction
+        result = self._category_service.apply_turnover_updates(
+            list(updates or []),
+            actor=actor_id,
+        )
+        self._relation_service.rebuild_from_bank_rows(self._bank_rows_provider())
+        return dict(result or {})
+
+
 class TurnoverLedgerExtraNormalizerAdapter:
     def __init__(self, *, extra_service: Any) -> None:
         self._extra_service = extra_service

@@ -3212,7 +3212,7 @@ PF-P110 边界：
 
 ## PF-P116 Tag Selection Local Adapter Extraction
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3252,7 +3252,7 @@ PF-P110 边界：
 
 ## PF-P116-MG Local Relation and Tag Selection Adapter Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -3293,6 +3293,176 @@ PF-P110 边界：
 
 - 执行 `git push origin main`。
 - push 后从最新 main 新建分支，生成 Turnover Ledger bank row tags local shim discovery/characterization prompt；该路径跨 Bankdetail/category/relation，应先 discovery/characterization，不直接实现。
+
+## PF-P117 Bank Row Tags Local Shim Discovery and Characterization Planning
+
+状态：`verified`
+
+目标：
+
+- 盘点 bank row tags local connection、local bankdetail port、handler direct fallback 和现有测试覆盖。
+- 输出 characterization test gap、风险清单和下一条最小测试 prompt。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests。
+- 不抽离 adapter，不修改 facade/UoW 语义。
+- 不新增 SQL migration，不执行 Traffic Gate。
+
+必须输出：
+
+- Bank Row Tags Local Shim Inventory。
+- Runtime Sequence：facade path、local facade path、facade None fallback path、queue/outbox failure rollback path。
+- Characterization Test Gap。
+- Extraction Risk。
+- 下一条最小 prompt，优先 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P117|Bank Row Tags Local Shim|bank row tags local" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+- Bank Row Tags Local Shim Inventory：
+  - `_turnover_ledger_bank_row_tags_write_facade(...)` 的 local path 仍在 `server.py` 组装 local connection、local bankdetail port 和 local dirty/outbox writer。
+  - `_local_turnover_ledger_bank_row_tags_connection(...)` 捕获 bank category snapshot 与 turnover relation snapshot；failure path restore/save previous snapshots；success path save current snapshots。
+  - `_local_turnover_ledger_bankdetail_port(...)` 直接调用 category service apply，再调用 relation rebuild。
+  - handler facade None fallback 仍直接 apply category、save category snapshot、rebuild relation、clear/enqueue read model，是 legacy/local compatibility。
+- 已有测试覆盖：
+  - facade None queue failure currently happens after category save；
+  - target facade queue failure rolls back category save；
+  - target facade path does not directly clear read model；
+  - UoW/facade bankdetail port contract。
+- 测试缺口：
+  - local facade queue failure 未显式断言 relation snapshot rollback/save previous；
+  - local facade success 未显式断言 category/relation snapshots 都保存；
+  - local bankdetail port apply -> relation rebuild 顺序未锁定；
+  - facade None fallback direct side effects 需作为 legacy compatibility 明确锁定。
+
+下一步：
+
+- 生成 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`。
+- PF-P118 只补 tests 和文档，不修改 production code。
+
+## PF-P118 Bank Row Tags Local Shim Characterization Tests
+
+状态：`planned`
+
+目标：
+
+- 补齐 bank row tags local shim 抽离前的 behavior locks。
+- 覆盖 local facade rollback、success save、apply/rebuild 顺序和 facade None fallback legacy behavior。
+
+边界：
+
+- 只修改 tests 和 backend-refactor 文档。
+- 不修改 production code。
+- 不抽离 adapter，不修改 facade/UoW 语义。
+
+测试要求：
+
+- local facade queue failure 同时 rollback category 和 relation snapshot。
+- local facade success 保存 category 和 relation snapshots。
+- local bankdetail port 先 apply category update，再 relation rebuild。
+- facade None fallback 保持 direct category save、relation rebuild、direct read model clear/enqueue 的 legacy behavior。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+执行结果：
+
+- 新增 3 个 API-level characterization tests：
+  - queue failure rolls back relation snapshot；
+  - local facade success saves category/relation snapshots and rebuilds after apply；
+  - facade None keeps legacy direct side effects。
+- `tests.test_turnover_ledger_api` 从 53 增至 56 tests。
+- 未修改 production code。
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+下一步：
+
+- 生成 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction`。
+- PF-P119 只抽离 `_local_turnover_ledger_bank_row_tags_connection(...)` 和 `_local_turnover_ledger_bankdetail_port(...)`，不得改 handler facade None fallback。
+
+## PF-P119 Bank Row Tags Local Adapter Extraction
+
+状态：`planned`
+
+目标：
+
+- 把 bank row tags local transaction/port 逻辑从 `server.py` 迁入 adapter module。
+- 保持 PF-P118 锁定的 rollback/save/order/fallback 行为不变。
+
+边界：
+
+- 只处理 bank row tags local connection 和 local bankdetail port。
+- 不修改 handler facade None fallback。
+- 不修改 facade/UoW 语义。
+- 不新增 SQL migration，不执行 Traffic Gate。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- `TurnoverLedgerLocalBankRowTagsConnection` 已迁入 `turnover_ledger_write_adapters.py`，通过明确依赖保留 category/relation snapshot rollback/save 行为。
+- `TurnoverLedgerLocalBankdetailPort` 已迁入 `turnover_ledger_write_adapters.py`，保留 category apply -> relation rebuild 顺序。
+- `server.py` 删除 bank row tags local connection/port helper，只保留 adapter 组装。
+- handler facade None fallback 未修改。
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一步：
+
+- 生成 `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate`，统一覆盖 PF-P117/PF-P118/PF-P119 完整 diff。
+
+## PF-P119-MG Bank Row Tags Local Adapter Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一覆盖 PF-P117、PF-P118、PF-P119。
+- 只包含 bank row tags local shim discovery、characterization tests 和 local adapter extraction。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

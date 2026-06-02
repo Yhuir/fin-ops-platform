@@ -968,6 +968,167 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(details_payload["pagination"]["total"], 0)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.attempts)
 
+    def test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_relation_snapshot(self) -> None:
+        # PF-P118 characterization: local facade rollback must restore both category and relation snapshots.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _FailingQueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            initial_category_snapshot = app._bank_transaction_category_service.snapshot()
+            initial_relation_snapshot = app._turnover_relation_service.snapshot()
+            saved_categories: list[dict[str, object]] = []
+            saved_relations: list[dict[str, object]] = []
+            original_save_categories = app._state_store.save_bank_transaction_categories
+            original_save_relations = app._state_store.save_turnover_relations
+
+            def record_save_categories(snapshot: dict[str, object]) -> None:
+                saved_categories.append(dict(snapshot))
+                original_save_categories(snapshot)
+
+            def record_save_relations(snapshot: dict[str, object]) -> None:
+                saved_relations.append(dict(snapshot))
+                original_save_relations(snapshot)
+
+            app._state_store.save_bank_transaction_categories = record_save_categories  # type: ignore[method-assign]
+            app._state_store.save_turnover_relations = record_save_relations  # type: ignore[method-assign]
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "POST",
+                    "/api/turnover-ledger/bank-row-tags/batch",
+                    body=json.dumps(
+                        {
+                            "updates": [
+                                {
+                                    "transaction_id": transaction_ids[0],
+                                    "category_code": "borrow_in_company_pending_repayment",
+                                    "expected_version": 0,
+                                }
+                            ]
+                        }
+                    ),
+                )
+
+        self.assertEqual(app._bank_transaction_category_service.snapshot(), initial_category_snapshot)
+        self.assertEqual(app._turnover_relation_service.snapshot(), initial_relation_snapshot)
+        self.assertEqual(saved_categories[-1], initial_category_snapshot)
+        self.assertEqual(saved_relations[-1], initial_relation_snapshot)
+
+    def test_target_turnover_bank_row_tag_batch_local_facade_saves_snapshots_and_rebuilds_after_apply(self) -> None:
+        # PF-P118 characterization: local facade success saves category/relation snapshots and preserves apply -> rebuild order.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            saved_categories: list[dict[str, object]] = []
+            saved_relations: list[dict[str, object]] = []
+            call_order: list[str] = []
+            original_save_categories = app._state_store.save_bank_transaction_categories
+            original_save_relations = app._state_store.save_turnover_relations
+            original_apply = app._bank_transaction_category_service.apply_turnover_updates
+            original_rebuild = app._turnover_relation_service.rebuild_from_bank_rows
+
+            def record_save_categories(snapshot: dict[str, object]) -> None:
+                saved_categories.append(dict(snapshot))
+                original_save_categories(snapshot)
+
+            def record_save_relations(snapshot: dict[str, object]) -> None:
+                saved_relations.append(dict(snapshot))
+                original_save_relations(snapshot)
+
+            def record_apply(updates: list[dict[str, object]], *, actor: str) -> dict[str, object]:
+                call_order.append("apply")
+                return original_apply(updates, actor=actor)
+
+            def record_rebuild(rows: list[dict[str, object]]) -> None:
+                call_order.append("rebuild")
+                original_rebuild(rows)
+
+            app._state_store.save_bank_transaction_categories = record_save_categories  # type: ignore[method-assign]
+            app._state_store.save_turnover_relations = record_save_relations  # type: ignore[method-assign]
+            app._bank_transaction_category_service.apply_turnover_updates = record_apply  # type: ignore[method-assign]
+            app._turnover_relation_service.rebuild_from_bank_rows = record_rebuild  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(call_order, ["apply", "rebuild"])
+        self.assertGreaterEqual(len(saved_categories), 1)
+        self.assertGreaterEqual(len(saved_relations), 1)
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
+
+    def test_turnover_bank_row_tag_batch_facade_none_keeps_legacy_direct_side_effects(self) -> None:
+        # PF-P118 characterization: facade None fallback remains a legacy direct-save/direct-invalidation path.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            app._turnover_ledger_bank_row_tags_write_facade = lambda: None  # type: ignore[method-assign]
+            saved_categories: list[dict[str, object]] = []
+            call_order: list[str] = []
+            original_save_categories = app._state_store.save_bank_transaction_categories
+            original_rebuild = app._turnover_relation_service.rebuild_from_bank_rows
+
+            def record_save_categories(snapshot: dict[str, object]) -> None:
+                call_order.append("save_categories")
+                saved_categories.append(dict(snapshot))
+                original_save_categories(snapshot)
+
+            def record_rebuild(rows: list[dict[str, object]]) -> None:
+                call_order.append("rebuild")
+                original_rebuild(rows)
+
+            app._state_store.save_bank_transaction_categories = record_save_categories  # type: ignore[method-assign]
+            app._turnover_relation_service.rebuild_from_bank_rows = record_rebuild  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(call_order, ["save_categories", "rebuild"])
+        self.assertGreaterEqual(len(saved_categories), 1)
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
+
     def test_target_turnover_bank_row_tag_batch_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
