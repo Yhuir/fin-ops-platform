@@ -3173,7 +3173,7 @@ PF-P110 边界：
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3199,3 +3199,33 @@ PF-P110 边界：
 - `git ls-files --others --exclude-standard`
 - `git diff --check`
 - `rg -n "PF-P112|Local Shim Extraction|local shim inventory|Extraction target" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+- `_local_turnover_ledger_dirty_outbox_writer` 是最低风险抽离点：无 Application 依赖，只依赖 queue repository。
+- tag selection / relation extra / confirm / withdraw / bank row tags local transaction shim 仍通过闭包捕获 `Application`，需要后续按明确依赖逐步拆。
+- 下一条最小 prompt：`PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction`。
+
+## PF-P113 Local Dirty Outbox Writer Extraction
+
+状态：`planned`
+
+目标：
+
+- 把 `_local_turnover_ledger_dirty_outbox_writer(...)` 从 `server.py` 抽为 `TurnoverLedgerLocalDirtyOutboxWriter` adapter。
+- 保持 local queue enqueue 和 reason mapping 行为不变。
+
+边界：
+
+- 只修改 `server.py`、`turnover_ledger_write_adapters.py` 和 backend-refactor 文档。
+- 不修改 local transaction shim。
+- 不修改 facade/UoW 行为。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`

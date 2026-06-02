@@ -22311,6 +22311,113 @@ Post-Flight:
 - PF-P112 边界正确：只做 local shim extraction discovery/planning。
 - 该 prompt 不修改代码、不修改 tests，适合作为 PF-P111-MG 后的下一步。
 
+### PF-P112 执行结果
+
+状态：`verified`
+
+Local shim inventory：
+
+| Helper | 职责 | 依赖 | 副作用 | 当前测试覆盖 | 抽离判断 |
+| --- | --- | --- | --- | --- | --- |
+| `_local_turnover_ledger_dirty_outbox_writer` | local queue refresh adapter | `queue_repository.enqueue_read_model_refresh` | enqueue refresh events，兼容 `relation_extra_update` reason mapping | API queue assertions | 最优先抽离；无 `Application` god object 依赖。 |
+| `_local_turnover_ledger_tag_selection_connection` | local settings rollback transaction | `state_store`、`_app_settings_service` | rollback/save app settings snapshot | tag selection queue failure tests | 可抽，但需要先定义 settings snapshot port。 |
+| `_local_turnover_ledger_bank_row_tags_connection` | local category + relation rollback transaction | category/relation services、state store | rollback/save category 与 relation snapshot | bank row tags rollback tests | 高风险，依赖多组 Application services，暂缓。 |
+| `_local_turnover_ledger_relation_extra_connection` | local extra rollback transaction | routes extra snapshot、state store | rollback/save extras snapshot | relation extra rollback tests | 中等风险，dirty outbox 后可处理。 |
+| `_local_turnover_ledger_confirm_connection` / `_local_turnover_ledger_withdraw_connection` | local relation rollback transaction | relation service、state store | rollback/save relation snapshot | confirm/withdraw rollback tests | 可抽为 relation snapshot local transaction adapter，但需连同 relation repository 处理。 |
+| local relation/bankdetail/extra repository helpers | local service/routes 到 UoW ports 的适配 | routes/services/bank rows provider | 触发 local mutation/rebuild | API/UoW tests | 应迁入 adapter module，构造函数接收细粒度依赖。 |
+
+结论：
+
+- 下一条最小实现应抽离 `TurnoverLedgerLocalDirtyOutboxWriter`。
+- 该 adapter 不需要新增行为，只把当前 static helper 迁到 `turnover_ledger_write_adapters.py`，并复用现有 API/UoW tests 验证。
+- 不应同时抽离 local transaction shim 或 local repositories。
+
+验证：
+
+- `git status --short --branch`：Pass，仅包含 PF-P112 文档变更。
+- `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P112|Local Shim Extraction|local shim inventory|Extraction target" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
+
+下一条建议：
+
+- 生成并执行 `PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction`。
+
+## PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须以最小范围把 Turnover Ledger local dirty/outbox writer 从 `server.py` 抽到 adapter module，不改变行为。
+
+Context:
+PF-P112 已 verified。盘点结论：`_local_turnover_ledger_dirty_outbox_writer(...)` 是最低风险抽离点，因为它不依赖 `Application`，只依赖 `queue_repository.enqueue_read_model_refresh(...)`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P112 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+新增 `TurnoverLedgerLocalDirtyOutboxWriter` adapter，并让 `server.py` 使用它替代 `_local_turnover_ledger_dirty_outbox_writer(...)` static helper。
+
+Required Implementation Work:
+1. 在 `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 中新增 `TurnoverLedgerLocalDirtyOutboxWriter`。
+   - 构造函数只接收 `queue_repository`。
+   - `enqueue_refresh(...)` 行为必须与旧 helper 完全一致。
+   - 保留 `reason == "relation_extra_update"` 映射为 `"turnover_relation_extra_changed"`。
+   - 继续返回 enqueue 结果列表。
+2. 修改 `backend/src/fin_ops_platform/app/server.py`：
+   - import 新 adapter。
+   - 用新 adapter 替代 `_local_turnover_ledger_dirty_outbox_writer(...)`。
+   - 删除旧 static helper。
+3. 不修改其它 local transaction shim。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 tests，除非现有测试暴露与旧行为不一致。
+- 不得抽离 local transaction shim。
+- 不得修改 facade/UoW 行为。
+- 不得新增 SQL migration。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 changed files 和 verification results。
+3. 如验证通过，可标记 PF-P113 verified。
+```
+
+### 审查结论
+
+- PF-P113 边界正确：只抽离无 Application 依赖的 local dirty/outbox writer。
+- 该 prompt 不触碰 local transaction shim，风险可控。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
