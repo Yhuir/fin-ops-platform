@@ -24858,6 +24858,95 @@ Post-Flight:
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
 - 下一条最小 prompt：`PF-P130-MG - Turnover Ledger Bank Row Tags Fallback Cleanup Cumulative Merge Gate`，统一覆盖 PF-P128、PF-P129、PF-P130。
 
+## PF-P130-MG - Turnover Ledger Bank Row Tags Fallback Cleanup Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P130-MG - Turnover Ledger Bank Row Tags Fallback Cleanup Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger bank row tags fallback cleanup 切片，不新增业务实现。
+
+Context:
+PF-P128、PF-P129、PF-P130 均已 verified。当前分支应为 `codex/turnover-ledger-bank-row-tags-fallback-p128`。本 MG 统一覆盖：
+- PF-P128 bank row tags legacy fallback cleanup discovery/planning；
+- PF-P129 bank row tags fallback characterization tests；
+- PF-P130 bank row tags legacy fallback facade extraction。
+
+Gate Scope:
+只处理 bank row tags fallback cleanup 的 Merge Gate：
+- 验证 handler direct fallback side effects 已移入显式 adapter；
+- 验证 characterization tests 与 UoW contract tests 全部通过；
+- 合入 main 并在 main 上重跑验证；
+- 不执行 Traffic Gate，不部署，不访问生产。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得修改 UoW primary path、idempotency、stale write 或 schema。
+- 不得修改 Workbench、Bank Details query/read path 或其它 Turnover 写路径。
+- 不得新增 SQL migration。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P128、PF-P129、PF-P130 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认 `git diff --name-only main...HEAD` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Commit / Merge Rules:
+1. 如果 MG prompt/状态机文档有变更，必须只用精确文件路径 `git add`。
+2. 允许提交 MG 文档变更，commit message 建议：
+   - `docs(turnover-ledger): add bank row tags fallback merge gate`
+3. 合入 main 前必须同步最新 `origin/main`：checkout main 后 `git pull --ff-only origin main`。
+4. 如果 pull/merge 出现冲突，停止并报告。
+5. 将当前分支 merge 到 main。
+6. 在 main 上重新执行完整 Verification 中的测试命令。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P130-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一条 prompt 分支。
+9. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P130-MG 执行结果。
+2. push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt。
+3. 不得在 main 或旧分支继续开发下一切片。
+```
+
+### 审查结论
+
+- PF-P130-MG 边界正确：只覆盖 PF-P128/PF-P129/PF-P130 bank row tags fallback cleanup 切片。
+- 允许文件白名单与本切片实际涉及文件一致。
+- MG 明确不执行 Traffic Gate、不部署、不访问生产。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

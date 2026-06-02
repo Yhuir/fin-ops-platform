@@ -4139,6 +4139,27 @@ PF-P110 边界：
 - `PF-P130-MG - Turnover Ledger Bank Row Tags Fallback Cleanup Cumulative Merge Gate`
 - 统一覆盖 PF-P128、PF-P129、PF-P130。
 
+## PF-P130-MG Bank Row Tags Fallback Cleanup Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一覆盖 PF-P128/PF-P129/PF-P130。
+- 只合入 bank row tags fallback cleanup discovery、tests 和 adapter extraction。
+- 不执行 Traffic Gate。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
