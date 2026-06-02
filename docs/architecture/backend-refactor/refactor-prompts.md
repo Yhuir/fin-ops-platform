@@ -22874,6 +22874,207 @@ Post-Flight:
 - Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
 - 下一步：push `origin/main`；push 后从最新 main 新建下一条 `codex/` 分支。
 
+## PF-P188 - Turnover Ledger Module Completion Readiness Audit
+
+状态：`planned`
+
+```text
+/goal
+PF-P188 - Turnover Ledger Module Completion Readiness Audit
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构收口审计工程师。你必须只审计 Turnover Ledger 模块是否达到当前重构目标，不修改生产代码或测试。
+
+Context:
+- PF-P187-MG 已 verified、合入并 push `origin/main`。
+- 当前分支为 `codex/turnover-ledger-completion-readiness-p188`，从最新 main 创建。
+- Turnover Ledger 已完成：
+  - query/read facade 和 handler cleanup；
+  - write discovery/characterization；
+  - relation extra、confirm、withdraw、bank row tags、tag selection 的 request boundary / facade / builder / UoW 主要 seam；
+  - confirm、withdraw、relation extra 的 stale precondition；
+  - relation extra、confirm、withdraw、bank row tags、tag selection 的 durable idempotency；
+  - transaction-bound dirty/outbox writer；
+  - local adapter/fallback 兼容路径分离。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - docs/architecture/backend-refactor/module-refactor-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/app/routes_turnover_ledger.py
+   - backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P187-MG 为 verified。
+
+Allowed Scope:
+- 只允许修改：
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+- 只读扫描代码和测试。
+
+Required Audit Work:
+1. Module completion readiness matrix:
+   - read/query route boundary；
+   - write request boundaries；
+   - write facades；
+   - UoW transaction / dirty-outbox；
+   - stale precondition；
+   - durable idempotency；
+   - repository ownership / SQL ownership；
+   - server.py remaining composition responsibilities；
+   - local/fallback compatibility paths；
+   - tests and characterization coverage。
+2. Remaining seam classification:
+   - 必须继续在 Turnover Ledger 内处理；
+   - 应移交 Bankdetail/Settings/Platform 等后续模块；
+   - 当前可接受的 legacy/local fallback 兼容路径。
+3. Production risk assessment:
+   - 标出是否仍存在 Application god object 泄漏、service HTTP/auth 泄漏、业务 service SQL 散落、worker/HTTP 耦合、direct dirty/outbox SQL。
+4. Exit decision:
+   - 如果 Turnover Ledger 达到当前模块完成标准，下一条唯一 prompt 应是 `PF-P188-MG - Turnover Ledger Module Completion Merge Gate`。
+   - 如果未达到，下一条唯一 prompt 必须是一个明确、最小、Turnover-only 的修复 prompt。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 SQL migration、schema、deploy、Nginx、feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得开始下一个业务模块。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P188|Module Completion Readiness|completion readiness matrix|Exit decision" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 如果验证通过，将 PF-P188 标记为 verified。
+3. 根据 exit decision 生成并审查下一条唯一 prompt。
+```
+
+### 审查结论
+
+- PF-P188 边界正确：只做模块完成度审计，不改生产代码或测试。
+- 这是 Turnover Ledger 进入模块 completion MG 前必要的收口检查。
+- 本轮不执行 Traffic Gate，不开始下一个业务模块。
+
+### PF-P188 执行结果
+
+- 状态：`verified`
+- 变更范围：
+  - 只更新 backend-refactor 文档。
+  - 未修改 production code。
+  - 未修改 tests。
+- Completion readiness matrix：
+  - read/query route boundary：已由 `TurnoverLedgerReadFacade` 和 `tests/test_turnover_ledger_read_facade.py` 覆盖。
+  - write request boundaries：relation extra、confirm、withdraw、bank row tags、tag selection 均已有 request boundary/facade seam。
+  - write facades：核心写路径均通过 `TurnoverLedgerWriteFacade` 或 legacy fallback facade 进入服务边界。
+  - UoW transaction / dirty-outbox：primary write paths 均通过 `TurnoverLedgerWriteUnitOfWork` 和 transaction-bound dirty/outbox writer。
+  - stale precondition：confirm、withdraw、relation extra 已进入 UoW；bank row tags/tag selection 的 version 语义留在 Bankdetail/Settings 业务边界。
+  - durable idempotency：relation extra、confirm、withdraw、bank row tags、tag selection 均已接入。
+  - repository / SQL ownership：Turnover 写服务未发现业务 SQL 散落；PostgreSQL 写入通过 repository adapter/port。
+  - server.py remaining responsibilities：保留路由、HTTP mapping、session/tenant 提取、composition root 和 fallback 选择。
+  - local/fallback compatibility paths：保留为兼容路径；不作为当前模块 blocker。
+- Exit decision：
+  - Turnover Ledger 达到当前 Python-first 模块化重构目标状态。
+  - 下一条唯一 prompt：`PF-P188-MG - Turnover Ledger Module Completion Merge Gate`。
+- 验证：
+  - `git status --short --branch`：Pass
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+
+## PF-P188-MG - Turnover Ledger Module Completion Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P188-MG - Turnover Ledger Module Completion Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger module completion readiness 文档，不新增业务实现。
+
+Context:
+- PF-P188 已 verified。
+- 当前分支为 `codex/turnover-ledger-completion-readiness-p188`。
+- PF-P188 判定 Turnover Ledger 已达到当前 Python-first 模块化重构目标状态。
+
+Gate Scope:
+- 只覆盖 PF-P188 module completion readiness audit 和文档回写。
+- 不包含 production code。
+- 不包含 tests。
+
+Allowed Changed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得开始下一个业务模块。
+- 不得修改 schema、SQL migration、deploy、Nginx、feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P188 为 verified。
+4. 必须确认 `git diff --name-only main...HEAD` 和 `git diff --name-only` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git diff --name-only
+- rg -n "PF-P188|Module Completion Readiness|completion readiness matrix|Exit decision|PF-P188-MG" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Commit / Merge Rules:
+1. 只允许用精确文件路径 `git add`。
+2. Commit message 建议：
+   - `docs(turnover-ledger): record module completion readiness`
+3. 合入 main 前必须同步最新 `origin/main`：checkout main 后 `git pull --ff-only origin main`。
+4. 如果 pull/merge 出现冲突，停止并报告。
+5. 将当前分支 merge 到 main。
+6. 在 main 上重新执行 Verification。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P188-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 当前 Turnover Ledger 模块完成；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一模块 prompt 分支。
+9. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P188-MG 执行结果。
+2. push 完成后，从最新 main 新建下一条 `codex/` 分支。
+3. 不得在 main 或旧分支继续开发下一模块。
+```
+
+### 审查结论
+
+- PF-P188-MG 边界正确：只合入 Turnover Ledger module completion readiness 文档。
+- 文件白名单仅包含 backend-refactor 文档。
+- 该 MG 不执行 Traffic Gate，不部署，不访问生产或真实外部服务。
+
 ## PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
 状态：`planned`

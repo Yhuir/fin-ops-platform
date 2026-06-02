@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | PF-P187-MG verified；等待 push `origin/main` 后从最新 main 新建下一条 prompt 分支 |
-| 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P187-MG 已合入 main；merge commit `bfbdca80`；main 复验 `tests.test_turnover_ledger_api` Pass（129 tests）；`tests.test_turnover_ledger_uow_contract` Pass（62 tests）；`compileall` Pass；`git diff --check` Pass |
-| 下一条允许任务 | push `origin/main`；push 完成后从最新 main 新建下一条 `codex/` 分支，再根据状态机生成下一条 Turnover Ledger prompt |
+| 当前阶段 | `PF-P188-MG - Turnover Ledger Module Completion Merge Gate` planned |
+| 当前 active prompt | `PF-P188-MG - Turnover Ledger Module Completion Merge Gate` |
+| 最近 verified prompt | `PF-P188 - Turnover Ledger Module Completion Readiness Audit` |
+| 当前分支 | `codex/turnover-ledger-completion-readiness-p188` |
+| 最近验证 | PF-P188 completion audit：`git status --short --branch` Pass；`git ls-files --others --exclude-standard` empty；`git diff --check` Pass；CodeGraph/static scan completed |
+| 下一条允许任务 | 执行 PF-P188-MG；只合入 Turnover Ledger module completion readiness 文档，不修改生产代码或测试，不执行 Traffic Gate |
 
 ## Prompt 执行日志
 
@@ -203,6 +203,74 @@
 
 - push `origin/main`。
 - push 完成后从最新 main 新建下一条 `codex/` 分支。
+
+### PF-P188 - Turnover Ledger Module Completion Readiness Audit
+
+状态：`verified`
+
+范围：
+
+- 盘点 Turnover Ledger 模块是否已达到当前重构目标架构。
+- 明确剩余 seam 是否属于：
+  - Turnover Ledger 必须继续处理；
+  - 跨模块依赖，应该转入 Bankdetail/Settings/Platform 后续模块；
+  - legacy/local fallback 兼容路径，当前允许保留。
+- 不修改 production code，不修改 tests。
+
+验收：
+
+- 输出 module completion readiness matrix。
+- 输出 remaining risk / ownership handoff。
+- 给出唯一下一条 prompt：模块 completion MG，或继续处理一个明确 Turnover Ledger seam。
+
+执行结果：
+
+- Completion readiness matrix：
+  - read/query route boundary：已通过 `TurnoverLedgerReadFacade` 与 read facade tests 覆盖。
+  - write request boundaries：relation extra、confirm、withdraw、bank row tags、tag selection 均已有 request boundary/facade seam。
+  - write facades：核心写路径均通过 `TurnoverLedgerWriteFacade` 或 legacy fallback facade 进入服务边界。
+  - UoW transaction / dirty-outbox：primary write paths 均通过 `TurnoverLedgerWriteUnitOfWork` 和 transaction-bound dirty/outbox writer。
+  - stale precondition：confirm、withdraw、relation extra 已进入 UoW；bank row tags/tag selection 的 version 语义留在 Bankdetail/Settings 业务边界。
+  - durable idempotency：relation extra、confirm、withdraw、bank row tags、tag selection 均已接入。
+  - repository / SQL ownership：Turnover 写服务未发现业务 SQL 散落；PostgreSQL 写入通过 repository adapter/port。
+  - server.py remaining responsibilities：保留路由、HTTP mapping、session/tenant 提取、composition root 和 fallback 选择，属于允许范围。
+  - local/fallback compatibility paths：保留为兼容路径；不作为当前模块 blocker。
+  - tests：`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_ledger_read_facade.py` 覆盖当前目标。
+- Remaining seam classification：
+  - 必须继续在 Turnover Ledger 内处理：无当前 blocker。
+  - 移交后续模块：Bankdetail expected-version ownership；Settings/tag-selection version ownership；Platform/global fallback retirement strategy。
+  - 当前允许保留：legacy/local fallback compatibility paths。
+- Production risk assessment：
+  - 未发现 Turnover service 读取 HTTP cookie/header、直接 import `app.auth` 或依赖 `Application` god object 的新增风险。
+  - 未发现 Turnover service 直写 `job.outbox_events` / `job.read_model_dirty_scopes`。
+  - server.py 仍有其它模块的 enqueue / SQL 命中，不属于 Turnover Ledger 本模块 completion blocker。
+
+Exit decision：
+
+- Turnover Ledger 达到当前 Python-first 模块化重构目标状态。
+- 下一条唯一 prompt：`PF-P188-MG - Turnover Ledger Module Completion Merge Gate`。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+
+### PF-P188-MG - Turnover Ledger Module Completion Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 只合入 PF-P188 module completion readiness 文档。
+- 不修改 production code，不修改 tests。
+- 不执行 Traffic Gate。
+
+验收：
+
+- PF-P188 已 verified。
+- diff 只包含 backend-refactor 文档。
+- main 上文档验证通过后 push `origin/main`。
 
 ### PF-P000 - Fresh Documentation Baseline
 
