@@ -3170,3 +3170,32 @@ PF-P110 边界：
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
 - Traffic Gate 未执行。
+
+## PF-P112 Local Shim Extraction Discovery and Planning
+
+状态：`planned`
+
+目标：
+
+- 盘点 Turnover Ledger local transaction shim、local port、local repository helper。
+- 设计抽离边界，避免继续让 `server.py` 承担 local adapter 细节。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests。
+- 不抽离 helper。
+
+必须输出：
+
+- Local shim inventory。
+- Extraction target recommendation。
+- Risk/blocker。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P112|Local Shim Extraction|local shim inventory|Extraction target" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`

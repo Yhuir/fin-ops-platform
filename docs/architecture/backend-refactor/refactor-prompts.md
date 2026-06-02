@@ -22222,6 +22222,95 @@ Main merge：
 - 提交 PF-P111-MG post-flight 文档后执行 `git push origin main`。
 - push 后从最新 `main` 新建下一条 `codex/` 分支。
 
+## PF-P112 - Turnover Ledger Local Shim Extraction Discovery and Planning
+
+状态：`planned`
+
+```text
+/goal
+PF-P112 - Turnover Ledger Local Shim Extraction Discovery and Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构审计工程师。你必须盘点 Turnover Ledger local transaction shim / local port / local repository helper 的抽离边界，不写业务代码。
+
+Context:
+PF-P111-MG 已 verified、merge 并 push 到 origin/main。当前 Turnover Ledger 已完成 relation extra legacy full snapshot fallback cleanup；`server.py` 中仍保留多组 local/dev/test shim：
+- `_local_turnover_ledger_tag_selection_connection`
+- `_local_turnover_ledger_bank_row_tags_connection`
+- `_local_turnover_ledger_relation_extra_connection`
+- `_local_turnover_ledger_confirm_connection`
+- `_local_turnover_ledger_withdraw_connection`
+- `_local_turnover_ledger_dirty_outbox_writer`
+- local bankdetail/extra/relation repository helpers
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P111-MG 为 verified。
+3. 必须确认当前分支不是 `main`，且从最新 `main` 新建。
+
+Goal:
+输出 local shim extraction 计划，明确哪些 helper 可以迁出 `server.py`，哪些 helper 仍应保留在 composition layer，下一条最小 prompt 应该是什么。
+
+Required Discovery Output:
+1. Local Shim Inventory:
+   - helper 名称；
+   - 现有职责；
+   - 输入依赖；
+   - 输出/副作用；
+   - 当前测试覆盖；
+   - 是否依赖 `Application` god object。
+2. Extraction Boundary:
+   - 建议目标模块或文件；
+   - 应采用的依赖注入形态；
+   - 哪些逻辑属于 local adapter，哪些仍属于 handler composition。
+3. Risk / Blocker:
+   - 缺少哪些 characterization tests；
+   - 哪些 helper 抽离会影响 local state store rollback；
+   - 哪些 helper 不能在当前切片抽。
+4. Next Prompt Recommendation:
+   - 只推荐一条下一 prompt；
+   - 说明它是 test-only、implementation 还是 MG。
+
+Allowed Scope:
+- 只更新：
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 SQL migration。
+- 不得抽离 local shim。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得生成多个后续 prompt。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P112|Local Shim Extraction|local shim inventory|Extraction target" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P112 status、changed files、verification commands/results。
+3. 下一条 prompt 必须基于 PF-P112 的实际盘点结果生成。
+```
+
+### 审查结论
+
+- PF-P112 边界正确：只做 local shim extraction discovery/planning。
+- 该 prompt 不修改代码、不修改 tests，适合作为 PF-P111-MG 后的下一步。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

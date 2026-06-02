@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` 已 verified 并合入 main |
-| 当前 active prompt | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` |
+| 当前阶段 | `PF-P112 - Turnover Ledger Local Shim Extraction Discovery and Planning` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P112 - Turnover Ledger Local Shim Extraction Discovery and Planning` |
 | 最近 verified prompt | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-next-slice-p112` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass |
-| 下一条允许任务 | 提交 PF-P111-MG post-flight 文档并 `git push origin main`；push 后从最新 main 新建下一条 codex 分支 |
+| 下一条允许任务 | 执行 `PF-P112 - Turnover Ledger Local Shim Extraction Discovery and Planning` |
 
 ## Prompt 执行日志
 
@@ -8299,6 +8299,38 @@ PF-P111-MG 已 verified：
 - Traffic Gate：未执行；本切片不部署、不切流、不访问生产。
 
 下一步：提交本次 post-flight 文档并 `git push origin main`。push 后从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 prompt。
+
+### PF-P112 - Turnover Ledger Local Shim Extraction Discovery and Planning
+
+状态：`planned`
+
+#### 范围
+
+- 盘点 `server.py` 中 Turnover Ledger local transaction shim / local port / local repository helper 的抽离边界。
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests，不抽离 helper。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+#### 必须输出
+
+- Local shim inventory：每个 `_local_turnover_ledger_*` helper 的职责、输入依赖、输出副作用、测试覆盖。
+- Extraction target recommendation：应新建/复用哪个 service/adapter 模块，哪些 helper 先抽，哪些暂留。
+- Risk and blocker：是否存在必须先补 tests 的行为。
+- 下一条 prompt 推荐：只能推荐一条，优先 tests 或最小 extraction。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P112|Local Shim Extraction|local shim inventory|Extraction target" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
 
 ## 维护规则
 
