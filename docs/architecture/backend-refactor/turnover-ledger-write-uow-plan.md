@@ -4097,6 +4097,32 @@ PF-P110 边界：
 - `PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction`
 - 允许修改 production code，将 handler 中的 bank row tags legacy fallback side effects 移入显式 fallback adapter，并把 PF-P129 expectedFailure target 转为普通通过。
 
+## PF-P130 Bank Row Tags Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+目标：
+
+- 新增显式 bank row tags legacy fallback adapter。
+- handler 不再直接执行 category apply/save、relation rebuild、after-mutation。
+- PF-P129 handler-thinness target 从 expectedFailure 转为普通通过。
+
+边界：
+
+- 只处理 bank row tags legacy fallback adapter extraction。
+- 不修改 UoW primary path、idempotency、stale write、schema 或其它 Turnover 写路径。
+- 不执行 MG 或 Traffic Gate。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- targeted bank row tags fallback tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

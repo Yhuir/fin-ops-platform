@@ -9175,6 +9175,40 @@ PF-P129 已完成 bank row tags fallback cleanup 前的测试锁定：
 
 下一条最小 prompt：`PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction`。PF-P130 可以修改 production code，把 bank row tags legacy fallback side effects 从 handler 移入显式 fallback adapter，并将 PF-P129 的 expectedFailure target 转为普通通过；不得改变 UoW 主路径语义。
 
+### PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 将 bank row tags legacy fallback side effects 从 `_handle_api_turnover_ledger_bank_row_tags_batch(...)` 移入显式 fallback adapter。
+- 将 PF-P129 handler-thinness target test 从 expectedFailure 转为普通通过。
+- 不改变 UoW primary path、idempotency、stale write、schema 或其它模块。
+- 不执行 Merge Gate 或 Traffic Gate。
+
+#### 允许文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- targeted bank row tags fallback tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 下一条 Prompt 上下文
+
+TBD。
+
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
 状态：`verified`
