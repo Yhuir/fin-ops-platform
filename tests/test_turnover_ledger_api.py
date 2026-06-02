@@ -2262,6 +2262,13 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [("turnover_ledger", "all", "turnover_relation_changed")],
         )
 
+    def test_confirm_relation_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_confirm)
+
+        self.assertNotIn("if facade is not None", source)
+        self.assertNotIn("rebuild_from_bank_rows(", source)
+        self.assertNotIn("_after_turnover_relation_mutation(", source)
+
     def test_confirm_relation_queue_failure_happens_after_relation_confirm_and_read_model_clear(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -2269,9 +2276,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             self._tag_rows(app, transaction_ids)
             queue = _FailingQueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
-            app._turnover_ledger_confirm_write_facade_override = None
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -2310,17 +2317,17 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [("turnover_ledger", "all", "turnover_relation_changed")],
         )
 
-    def test_confirm_relation_facade_none_keeps_legacy_rebuild_confirm_and_after_mutation(self) -> None:
-        # PF-P121 characterization: facade None fallback still runs direct rebuild/confirm/after-mutation.
+    def test_confirm_relation_fallback_adapter_keeps_legacy_rebuild_confirm_and_after_mutation(self) -> None:
+        # PF-P126 target: unsupported postgres queue API uses explicit confirm fallback adapter.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
             queue = _QueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
-            app._turnover_ledger_confirm_write_facade_override = None
             call_order: list[str] = []
             after_mutation_months: list[list[str]] = []
             original_rebuild = app._turnover_relation_service.rebuild_from_bank_rows
@@ -2598,6 +2605,13 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(facade.withdraw_calls[0]["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(facade.withdraw_calls[0]["expected_versions"], {f"relation:{relation_id}": 1})
 
+    def test_withdraw_relation_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_withdraw)
+
+        self.assertNotIn("if facade is not None", source)
+        self.assertNotIn("self._turnover_ledger_api_routes.withdraw_relation", source)
+        self.assertNotIn("_after_turnover_relation_mutation(", source)
+
     def test_withdraw_relation_queue_failure_happens_after_relation_withdraw_and_read_model_clear(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -2615,7 +2629,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
             failing_queue = _FailingQueueRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": failing_queue})()
-            app._turnover_ledger_withdraw_write_facade_override = None
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -2634,8 +2648,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [("turnover_ledger", "all", "turnover_relation_changed")],
         )
 
-    def test_withdraw_relation_facade_none_keeps_legacy_withdraw_and_after_mutation(self) -> None:
-        # PF-P121 characterization: facade None fallback still runs direct withdraw/after-mutation.
+    def test_withdraw_relation_fallback_adapter_keeps_legacy_withdraw_and_after_mutation(self) -> None:
+        # PF-P127 characterization: fallback adapter still runs legacy withdraw/after-mutation.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -2652,7 +2666,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
             queue.enqueued.clear()
             read_repository.clear_calls = 0
-            app._turnover_ledger_withdraw_write_facade_override = None
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             after_mutation_months: list[list[str]] = []
             original_after_mutation = app._after_turnover_relation_mutation
 

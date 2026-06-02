@@ -172,6 +172,68 @@ class TurnoverLedgerRelationExtraLegacyFallbackFacade:
         return result
 
 
+class TurnoverLedgerConfirmLegacyFallbackFacade:
+    def __init__(
+        self,
+        *,
+        relation_rebuild: Callable[[], None],
+        routes: Any,
+        after_mutation: Callable[[list[str]], None],
+    ) -> None:
+        self._relation_rebuild = relation_rebuild
+        self._routes = routes
+        self._after_mutation = after_mutation
+
+    def confirm_relation(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        affected_months: list[str],
+    ) -> dict[str, object]:
+        _ = tenant_id
+        self._relation_rebuild()
+        result = self._routes.confirm_relation(
+            bank_row_ids=list(bank_row_ids or []),
+            actor=actor_id,
+            note=note,
+        )
+        self._after_mutation(list(affected_months or []))
+        return dict(result or {})
+
+
+class TurnoverLedgerWithdrawLegacyFallbackFacade:
+    def __init__(
+        self,
+        *,
+        routes: Any,
+        after_mutation: Callable[[list[str]], None],
+    ) -> None:
+        self._routes = routes
+        self._after_mutation = after_mutation
+
+    def withdraw_relation(
+        self,
+        *,
+        relation_id: str,
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        affected_months: list[str],
+        expected_versions: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        _ = tenant_id, expected_versions
+        result = self._routes.withdraw_relation(
+            relation_id=relation_id,
+            actor=actor_id,
+            note=note,
+        )
+        self._after_mutation(list(affected_months or []))
+        return dict(result or {})
+
+
 class TurnoverLedgerRelationRepositoryAdapter:
     def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
         self._repository_factory = repository_factory

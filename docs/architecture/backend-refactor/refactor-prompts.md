@@ -24071,6 +24071,422 @@ Post-Flight:
 
 下一步：提交 post-flight 文档并 `git push origin main`；push 后从最新 main 新建分支，建议生成 `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`。
 
+## PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning
+
+状态：`verified`
+
+```text
+/goal
+PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning
+
+Role:
+你是一位负责 Python-first 后端架构重构的资深工程师。你必须只规划 Turnover Ledger confirm/withdraw relation mutation fallback cleanup，不修改 production code。
+
+Context:
+PF-P124-MG 已 verified、merge 并 push 到 origin/main。tag selection 和 relation extra 的 legacy fallback direct side effects 已迁入显式 fallback adapter。剩余较复杂的 fallback 是 confirm relation 与 withdraw relation，它们共用 `_after_turnover_relation_mutation(...)`，涉及 relation persistence、Workbench invalidation、read model clear/enqueue。
+
+Goal:
+梳理 confirm/withdraw relation mutation fallback 的 side effects、测试覆盖、风险和最小 cleanup 顺序，决定下一条应先补 tests、抽 relation mutation fallback adapter，还是先拆 `_after_turnover_relation_mutation(...)`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P124-MG 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Required Discovery Work:
+1. Relation Mutation Side Effect Matrix：
+   - confirm relation fallback；
+   - withdraw relation fallback；
+   - `_after_turnover_relation_mutation(...)`。
+   对每项说明 direct side effects、外部/跨模块影响、当前 tests、目标边界。
+2. Confirm vs Withdraw Boundary:
+   - confirm 特有：relation rebuild、route confirm、bank_row_ids 输入。
+   - withdraw 特有：relation detail precheck、manual-only check、already-withdrawn conflict、expected_versions 构造。
+   - 共同点：relation mutation result、affected_months、after-mutation invalidation。
+3. Handler Thinness Gap:
+   - handler 中哪些仍可保留；
+   - 哪些 side effects 应进入 relation mutation fallback adapter 或 application service。
+4. Risk Register:
+   - stale/duplicate submit 行为；
+   - relation rebuild ordering；
+   - Workbench/Bankdetail invalidation；
+   - relation persistence best-effort；
+   - queue failure current behavior vs UoW target rollback。
+5. 下一条最小 prompt：
+   - 如果 tests 足够，建议 relation mutation fallback adapter extraction；
+   - 如果 tests 不足，建议 confirm/withdraw fallback characterization tests；
+   - 不得处理 bank row tags。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得处理 bank row tags。
+- 不得修改 database migration。
+- 不得执行 Traffic Gate、部署、访问生产。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P125|Relation Mutation Side Effect Matrix|after_turnover_relation_mutation" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 side effect matrix、risk register、下一条 prompt。
+3. 如验证通过，可标记 PF-P125 verified。
+```
+
+### 审查结论
+
+- PF-P125 边界正确：只做 confirm/withdraw relation mutation fallback planning。
+- PF-P125 不修改 production code、不修改 tests、不处理 bank row tags、不执行 Traffic Gate。
+
+### PF-P125 执行结果
+
+Relation Mutation Side Effect Matrix：
+
+- confirm relation fallback：direct rebuild、route confirm、`_after_turnover_relation_mutation(...)`；测试已覆盖 success fallback、queue failure、target rollback、facade override skip after-mutation、Postgres facade readiness。
+- withdraw relation fallback：manual-only/already-withdrawn precheck、expected_versions 构造、route withdraw、`_after_turnover_relation_mutation(...)`；测试已覆盖 success fallback、queue failure、target rollback、duplicate submit、Postgres facade readiness。
+- `_after_turnover_relation_mutation(...)`：relation persistence、Workbench/Bankdetail invalidation、Turnover Ledger read model clear/enqueue；长期不应作为 handler helper，但不能一次性迁移全部入口。
+
+Minimal order：
+
+1. `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`
+2. 后续再处理 withdraw relation fallback。
+3. bank row tags fallback cleanup 继续暂缓。
+
+Verification：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P125|Relation Mutation Side Effect Matrix|after_turnover_relation_mutation" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
+
+下一条最小 prompt：`PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`，只处理 confirm fallback。
+
+## PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction
+
+Role:
+你是一位负责 Python-first 后端架构重构的资深工程师。你必须只处理 Turnover Ledger confirm relation legacy fallback，把 handler 中的 direct rebuild / route confirm / after-mutation 迁入显式 fallback facade/adapter。
+
+Context:
+PF-P125 已 verified。confirm relation fallback 是 relation mutation family 中风险较低的一半；withdraw 仍有 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 边界，本轮不得处理。
+
+Goal:
+让 `_handle_api_turnover_ledger_confirm(...)` 不再直接 rebuild relation，不再直接调用 route confirm，不再直接调用 `_after_turnover_relation_mutation(...)`。handler 应只做 session/body parsing、bank_row_ids shape validation、actor/affected_months 计算、调用 facade-like object 和 response packaging。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P125 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Required Implementation Work:
+1. Test first:
+   - 新增/调整 confirm handler-thinness test，证明 handler 不再内联 `rebuild_from_bank_rows(...)` 或 `_after_turnover_relation_mutation(...)`。
+   - 更新 confirm legacy fallback success/queue-failure tests，使其通过 unsupported postgres queue API 触发 fallback adapter，而不是依赖 override `None`。
+2. Adapter extraction:
+   - 在 `turnover_ledger_write_adapters.py` 新增 confirm relation legacy fallback facade/adapter。
+   - adapter 构造函数只能接收细粒度依赖，例如 `relation_rebuild` callable、`routes`、`after_mutation` callable。
+   - adapter 不得接收 `Application` god object。
+   - adapter 暴露 `confirm_relation(...)`，与 `TurnoverLedgerWriteFacade.confirm_relation(...)` 调用形态兼容。
+3. Handler cleanup:
+   - `_turnover_ledger_confirm_write_facade()` 应在 primary UoW facade 不可用时返回 confirm legacy fallback adapter。
+   - `_handle_api_turnover_ledger_confirm(...)` 不应保留 `if facade is not None/else` direct rebuild/route confirm 分支。
+   - handler 可以继续计算 `affected_months` 并将其写回 response。
+4. Scope discipline:
+   - 不处理 withdraw、bank row tags、tag selection、relation extra。
+   - 不改变 queue reason、response payload、validation error behavior。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 withdraw、bank row tags、tag selection、relation extra 行为。
+- 不得修改 database migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得接入真实外部服务。
+- 不得执行 Traffic Gate、部署、访问生产。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录新增/调整的 tests、adapter、handler cleanup、验证结果。
+3. 判断下一条最小 prompt：优先生成 withdraw relation fallback extraction，除非 P126 暴露 blocker。
+```
+
+### 审查结论
+
+- PF-P126 边界正确：只处理 confirm relation fallback handler thinness。
+- PF-P126 允许 production code，但只限 `server.py` 和 `turnover_ledger_write_adapters.py`。
+- PF-P126 不处理 withdraw、bank row tags、tag selection、relation extra，不执行 Traffic Gate。
+
+### PF-P126 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 `TurnoverLedgerConfirmLegacyFallbackFacade`，使用明确依赖封装 confirm legacy fallback 的 relation rebuild、route confirm 和 after-mutation。
+  - `_turnover_ledger_confirm_write_facade()` 在 primary UoW facade 不可用时返回 fallback adapter。
+  - `_handle_api_turnover_ledger_confirm(...)` 不再内联 direct relation rebuild、route confirm 或 `_after_turnover_relation_mutation(...)`。
+  - confirm fallback characterization tests 改为通过 unsupported postgres queue API 触发 fallback adapter。
+- 验证：
+  - targeted confirm tests：先 RED，后 Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，64 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+- 下一条最小 prompt：`PF-P127 - Turnover Ledger Withdraw Relation Legacy Fallback Facade Extraction`。PF-P127 只处理 withdraw relation fallback，不处理 bank row tags，不改变 withdraw 的 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 行为。
+
+## PF-P127 - Turnover Ledger Withdraw Relation Legacy Fallback Facade Extraction
+
+```text
+/goal
+PF-P127 - Turnover Ledger Withdraw Relation Legacy Fallback Facade Extraction
+
+Role:
+你是一位负责 Python-first 后端架构重构的资深工程师。你必须只处理 Turnover Ledger withdraw relation legacy fallback，把 handler 中的 legacy route withdraw / after-mutation 迁入显式 fallback facade/adapter。
+
+Context:
+PF-P126 已 verified。confirm relation fallback 已抽到 `TurnoverLedgerConfirmLegacyFallbackFacade`，confirm handler 不再内联 rebuild / route confirm / after-mutation。withdraw 仍有 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 边界，本轮必须保持这些行为不变，只移动 legacy fallback 边界。
+
+Goal:
+让 `_handle_api_turnover_ledger_withdraw(...)` 不再直接调用 route withdraw，不再直接调用 `_after_turnover_relation_mutation(...)`。handler 应只做 session/body parsing、relation precheck、actor/affected_months/expected_versions 计算、调用 facade-like object 和 response packaging。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P126 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Required Implementation Work:
+1. Test first:
+   - 新增/调整 withdraw handler-thinness test，证明 handler 不再内联 `withdraw_relation(...)` route call 或 `_after_turnover_relation_mutation(...)`。
+   - 更新 withdraw legacy fallback success/queue-failure tests，使其通过 unsupported postgres queue API 触发 fallback adapter，而不是依赖 override `None`。
+   - 测试必须保留 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 当前行为，不得放宽断言。
+2. Adapter extraction:
+   - 在 `turnover_ledger_write_adapters.py` 新增 withdraw relation legacy fallback facade/adapter。
+   - adapter 构造函数只能接收细粒度依赖，例如 `routes` 和 `after_mutation` callable。
+   - adapter 不得接收 `Application` god object。
+   - adapter 暴露 `withdraw_relation(...)`，与 `TurnoverLedgerWriteFacade.withdraw_relation(...)` 调用形态兼容。
+3. Handler cleanup:
+   - `_turnover_ledger_withdraw_write_facade()` 应在 primary UoW facade 不可用时返回 withdraw legacy fallback adapter。
+   - `_handle_api_turnover_ledger_withdraw(...)` 不应保留 `if facade is not None/else` direct route withdraw 分支。
+   - handler 可以继续做 relation precheck、计算 `affected_months` / `expected_versions`，并将 `affected_months` 写回 response。
+4. Scope discipline:
+   - 不处理 bank row tags、tag selection、relation extra、confirm。
+   - 不改变 queue reason、response payload、validation error behavior。
+   - 不改变 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 行为。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 bank row tags、tag selection、relation extra、confirm 行为。
+- 不得修改 database migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得接入真实外部服务。
+- 不得执行 Traffic Gate、部署、访问生产。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录新增/调整的 tests、adapter、handler cleanup、验证结果。
+3. 判断下一条最小 prompt：如果 relation mutation fallback family 已完成，下一步应生成 cumulative MG，覆盖 PF-P125 到 PF-P127；不得直接进入 bank row tags。
+```
+
+### 审查结论
+
+- PF-P127 边界正确：只处理 withdraw relation fallback handler thinness。
+- PF-P127 允许 production code，但只限 `server.py` 和 `turnover_ledger_write_adapters.py`。
+- PF-P127 明确保留 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 行为，不处理 bank row tags 或其它 Turnover 写路径，不执行 Traffic Gate。
+
+### PF-P127 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 `TurnoverLedgerWithdrawLegacyFallbackFacade`，使用明确依赖封装 withdraw legacy fallback 的 route withdraw 和 after-mutation。
+  - `_turnover_ledger_withdraw_write_facade()` 在 primary UoW facade 不可用时返回 fallback adapter。
+  - `_handle_api_turnover_ledger_withdraw(...)` 不再内联 direct route withdraw 或 `_after_turnover_relation_mutation(...)`。
+  - withdraw fallback characterization tests 改为通过 unsupported postgres queue API 触发 fallback adapter。
+- 验证：
+  - targeted withdraw tests：先 RED，后 Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+- 下一条最小 prompt：`PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate`。该 MG 必须统一覆盖 PF-P125 到 PF-P127 的完整 diff；不得直接进入 bank row tags。
+
+## PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate
+
+```text
+/goal
+PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger relation mutation fallback 切片，不新增业务实现。
+
+Context:
+PF-P125、PF-P126、PF-P127 均已 verified。当前分支应为 `codex/turnover-ledger-relation-mutation-fallback-p125`，相对 `main` 的提交应包含：
+- `docs(turnover-ledger): plan relation mutation fallback cleanup`
+- `docs(turnover-ledger): add confirm fallback extraction prompt`
+- `refactor(turnover-ledger): extract confirm fallback adapter`
+- `docs(turnover-ledger): add withdraw fallback extraction prompt`
+- `refactor(turnover-ledger): extract withdraw fallback adapter`
+
+Gate Scope:
+本 MG 只覆盖 PF-P125 到 PF-P127 的完整 diff：
+- relation mutation fallback planning；
+- confirm legacy fallback adapter extraction；
+- withdraw legacy fallback adapter extraction；
+- confirm/withdraw handler-thinness characterization tests；
+- 文档回写。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得处理 bank row tags。
+- 不得修改 tag selection、relation extra、Workbench、Bankdetail 或其它模块行为。
+- 不得新增 SQL migration。
+- 不得修改部署、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或访问真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P125、PF-P126、PF-P127 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认 `git diff --name-only main...HEAD` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Commit / Merge Rules:
+1. 如果 MG prompt/状态机文档有变更，必须只用精确文件路径 `git add`。
+2. 允许提交 MG 文档变更，commit message 建议：
+   - `docs(turnover-ledger): add relation mutation fallback merge gate`
+3. 合入 main 前必须同步最新 `origin/main`：checkout main 后 `git pull --ff-only origin main`。
+4. 如果 pull/merge 出现冲突，停止并报告。
+5. 将当前分支 merge 到 main。
+6. 在 main 上重新执行完整 Verification 中的测试命令。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P127-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一条 prompt 分支。
+9. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P127-MG 执行结果。
+2. push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt。
+3. 不得在 main 或旧分支继续开发下一切片。
+```
+
+### 审查结论
+
+- PF-P127-MG 边界正确：只覆盖 relation mutation fallback family 的 planning、confirm fallback adapter、withdraw fallback adapter。
+- MG 明确不执行 Traffic Gate，不处理 bank row tags，不新增 migration，不修改其它模块。
+- 允许文件白名单与当前 `main...HEAD` diff 一致。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

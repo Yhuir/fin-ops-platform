@@ -3397,7 +3397,7 @@ PF-P110 边界：
 
 ## PF-P119 Bank Row Tags Local Adapter Extraction
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3800,6 +3800,179 @@ PF-P110 边界：
 
 - `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`
 - 只规划 confirm/withdraw relation fallback 和 `_after_turnover_relation_mutation(...)` 归属，不直接处理 bank row tags。
+
+## PF-P125 Relation Mutation Fallback Cleanup Planning
+
+状态：`verified`
+
+目标：
+
+- 只规划 confirm/withdraw relation mutation fallback cleanup。
+- 梳理 `_after_turnover_relation_mutation(...)` 的 side effects、测试覆盖和长期归属。
+- 决定下一条最小 prompt 是补 tests 还是抽 adapter。
+
+边界：
+
+- 只做文档和状态机回写。
+- 不修改 production code，不修改 tests。
+- 不处理 bank row tags。
+
+必须输出：
+
+- Relation Mutation Side Effect Matrix。
+- Confirm vs Withdraw Boundary。
+- Handler Thinness Gap。
+- Risk Register。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P125|Relation Mutation Side Effect Matrix|after_turnover_relation_mutation" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+### Relation Mutation Side Effect Matrix
+
+| 入口 / helper | side effects | 当前测试 | 目标边界 |
+| --- | --- | --- | --- |
+| confirm relation fallback | rebuild relation、route confirm、after-mutation。 | success fallback、queue failure、target rollback、facade override、Postgres readiness。 | 先抽 confirm legacy fallback adapter。 |
+| withdraw relation fallback | relation detail precheck、manual-only/already-withdrawn、expected_versions、route withdraw、after-mutation。 | success fallback、queue failure、target rollback、duplicate submit、Postgres readiness。 | confirm 后再单独处理 withdraw。 |
+| `_after_turnover_relation_mutation(...)` | persist relations、Workbench/Bankdetail invalidation、Turnover Ledger clear/enqueue。 | 通过 API tests 间接覆盖。 | 长期迁入 relation mutation adapter/invalidation adapter，短期由 fallback adapter 接收 callable。 |
+
+### Confirm vs Withdraw Boundary
+
+- confirm 特有：rebuild before route confirm。
+- withdraw 特有：manual-only / already-withdrawn precheck 与 expected_versions。
+- 共同点：affected_months 与 after-mutation side effects。
+
+### Risk Register
+
+- withdraw stale/duplicate submit 不能在 confirm cleanup 中被碰。
+- confirm rebuild ordering 必须保留。
+- `_after_turnover_relation_mutation(...)` 的跨模块副作用不能一次性全局迁移。
+- legacy fallback queue failure 当前是 mutation 后失败；本阶段只移动边界，不改语义。
+
+下一条最小 prompt：
+
+- `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`
+- 只处理 confirm fallback；不处理 withdraw、bank row tags 或全局 after-mutation 重构。
+
+## PF-P126 Confirm Relation Legacy Fallback Facade Extraction
+
+状态：`verified`
+
+目标：
+
+- 只处理 confirm relation fallback。
+- 将 direct relation rebuild、route confirm、after-mutation 从 handler 移入显式 fallback facade/adapter。
+- 不处理 withdraw、bank row tags 或全局 `_after_turnover_relation_mutation(...)` 重构。
+
+边界：
+
+- 允许修改 `server.py`、`turnover_ledger_write_adapters.py`、Turnover Ledger tests 和 backend-refactor 文档。
+- 不改变 queue reason、response payload、validation error behavior。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- `TurnoverLedgerConfirmLegacyFallbackFacade` 已迁入 `turnover_ledger_write_adapters.py`。
+- `_turnover_ledger_confirm_write_facade()` 在 primary UoW facade 不可用时返回 confirm fallback adapter。
+- `_handle_api_turnover_ledger_confirm(...)` 不再直接 rebuild relation、不再直接调用 route confirm、不再直接调用 `_after_turnover_relation_mutation(...)`。
+- 新增 confirm handler-thinness guard，并将 confirm fallback characterization tests 改为通过 unsupported postgres queue API 触发 fallback adapter。
+- 验证通过：
+  - targeted confirm tests：先 RED，后 Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，64 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条最小 prompt：
+
+- `PF-P127 - Turnover Ledger Withdraw Relation Legacy Fallback Facade Extraction`
+- 只处理 withdraw relation fallback；不处理 bank row tags、不改变 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 行为。
+
+## PF-P127 Withdraw Relation Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+目标：
+
+- 只处理 withdraw relation fallback。
+- 将 route withdraw、after-mutation 从 handler 移入显式 fallback facade/adapter。
+- 不处理 bank row tags 或全局 `_after_turnover_relation_mutation(...)` 重构。
+- 不改变 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 行为。
+
+边界：
+
+- 允许修改 `server.py`、`turnover_ledger_write_adapters.py`、Turnover Ledger tests 和 backend-refactor 文档。
+- 不改变 queue reason、response payload、validation error behavior。
+- 不处理 confirm、tag selection、relation extra 或 bank row tags。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- `TurnoverLedgerWithdrawLegacyFallbackFacade` 已迁入 `turnover_ledger_write_adapters.py`。
+- `_turnover_ledger_withdraw_write_facade()` 在 primary UoW facade 不可用时返回 withdraw fallback adapter。
+- `_handle_api_turnover_ledger_withdraw(...)` 不再直接调用 route withdraw、不再直接调用 `_after_turnover_relation_mutation(...)`。
+- 新增 withdraw handler-thinness guard，并将 withdraw fallback characterization tests 改为通过 unsupported postgres queue API 触发 fallback adapter。
+- 验证通过：
+  - targeted withdraw tests：先 RED，后 Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条最小 prompt：
+
+- `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate`
+- 统一覆盖 PF-P125、PF-P126、PF-P127；不得直接进入 bank row tags。
+
+## PF-P127-MG Relation Mutation Fallback Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一覆盖 PF-P125、PF-P126、PF-P127。
+- 只合并 relation mutation fallback planning、confirm fallback adapter、withdraw fallback adapter。
+- 不处理 bank row tags，不新增业务实现。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
