@@ -27909,7 +27909,7 @@ Verification:
 
 ## PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 ```text
 /goal
@@ -27958,6 +27958,28 @@ Post-Flight:
 ### 审查结论
 
 - PF-P163-MG 边界正确：它只覆盖 tag selection request boundary 这一个明确切片组。
+
+### PF-P163-MG 执行结果
+
+- PF-P163-MG 已完成并验证。
+- 已确认 MG 覆盖范围只包含：
+  - `PF-P162 - Turnover Ledger Remaining Write Seam Rebaseline`
+  - `PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction`
+- 已确认生产代码 diff 白名单仅为：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - backend-refactor 文档三件套
+- 已完成功能提交：
+  - `8ea65da5 refactor(turnover-ledger): extract tag selection request boundary`
+- 已 merge 到 `main`，并在 `main` 上复验：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，98 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一步：
+  - push `origin/main`
+  - 从最新 `main` 新建分支
+  - 生成并审查 `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline`
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 

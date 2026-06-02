@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction` 已完成并验证 |
-| 当前 active prompt | 空；下一步可生成并审查 `PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate` |
-| 最近 verified prompt | `PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction` |
-| 当前分支 | `codex/turnover-ledger-write-rebaseline-p162` |
-| 最近验证 | `git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（98 tests）；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate` |
+| 当前阶段 | `PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate` 已完成并验证 |
+| 当前 active prompt | 空；push `origin/main` 后必须从最新 `main` 新建分支，再生成并审查 `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline` |
+| 最近 verified prompt | `PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | `git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（98 tests）；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；merge 后 `main` 复验通过 |
+| 下一条允许任务 | push `origin/main`；随后从最新 `main` 新建 `codex/` 分支，生成并审查 `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline` |
 
 ## Prompt 执行日志
 
@@ -617,6 +617,50 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
   - `PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction`
 - 下一步应进入 MG：
   - `PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate`
+
+### PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 只覆盖：
+  - `PF-P162 - Turnover Ledger Remaining Write Seam Rebaseline`
+  - `PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction`
+- 允许 merge 到 `main`、在 `main` 上复验、并 push 到 `origin/main`。
+
+#### 执行摘要
+
+- 已在 `codex/turnover-ledger-write-rebaseline-p162` 上完成 MG scope 审核。
+- 已确认 diff 白名单只包含：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 已提交功能分支实现：
+  - `8ea65da5 refactor(turnover-ledger): extract tag selection request boundary`
+- 已 merge 到 `main`：
+  - `Merge branch 'codex/turnover-ledger-write-rebaseline-p162': turnover tag selection request boundary`
+- merge 后已在 `main` 上复验通过。
+
+#### 验证
+
+- `git status --short --branch`：Pass
+- `git ls-files --others --exclude-standard`：Pass
+- `git diff --check`：Pass
+- `git diff --name-only main...HEAD`：Pass
+- `git log --oneline main..HEAD`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，98 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+#### 下一条 Prompt 上下文
+
+- `tag_selection_update` request boundary 已合入主干。
+- push `origin/main` 完成后，必须从最新 `main` 新建分支。
+- 下一条应先做 rebaseline，而不是直接进入新的实现切片：
+  - `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline`
 
 ### PF-P002 - Platform / Ops / Runtime Boundary Deep Dive
 
