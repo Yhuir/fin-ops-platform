@@ -5376,6 +5376,40 @@ Remaining seam matrix：
 
 - 生成并审查 `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate`。
 
+## PF-P159-MG Write Handler Boundary Cumulative Merge Gate
+
+状态：
+
+- verified
+
+范围：
+
+- 累计覆盖：
+  - PF-P156 tests lock
+  - PF-P157 confirm handler boundary
+  - PF-P158 withdraw handler boundary
+  - PF-P159 bank row tags handler boundary
+
+执行结果：
+
+- 已完成分支 scope / 白名单 / verification 检查。
+- 已 merge 到 `main`。
+- 已在 `main` 上重跑：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- 复验仍通过，允许 push `origin/main`。
+
+结论：
+
+- Turnover Ledger write handler boundary 这一整组切片已达到可合并状态并完成 MG。
+- 下一阶段不应继续在本分支扩大范围，而应从最新 `main` 开新分支。
+
+下一步：
+
+- push `origin/main`
+- 从最新 `main` 新建分支
+- 生成并审查 `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P159 - Turnover Ledger Bank Row Tags Handler Boundary Extraction` 已完成并验证 |
-| 当前 active prompt | 空；下一步可生成并审查 `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P159 - Turnover Ledger Bank Row Tags Handler Boundary Extraction` |
-| 当前分支 | `codex/turnover-ledger-post-builder-rebaseline-p155` |
+| 当前阶段 | `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate` 已完成并验证 |
+| 当前 active prompt | 空；push 后需从最新 `main` 新建分支，生成并审查 `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline` |
+| 最近 verified prompt | `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（96 tests）；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate` |
+| 下一条允许任务 | push `origin/main`；然后从最新 `main` 新建分支，生成并审查 `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline` |
 
 ## Prompt 执行日志
 
