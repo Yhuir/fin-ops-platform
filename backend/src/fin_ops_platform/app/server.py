@@ -276,8 +276,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
-    TurnoverLedgerLocalBankdetailPort,
-    TurnoverLedgerLocalBankRowTagsConnection,
+    TurnoverLedgerLocalBankRowTagsAdapterSet,
     TurnoverLedgerLocalConfirmRelationAdapterSet,
     TurnoverLedgerLocalDirtyOutboxWriter,
     TurnoverLedgerLocalRelationConnection,
@@ -2747,25 +2746,17 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
-            connection = TurnoverLedgerLocalBankRowTagsConnection(
-                category_snapshot_provider=self._bank_transaction_category_service.snapshot,
-                relation_snapshot_provider=self._turnover_relation_service.snapshot,
-                replace_category_snapshot=self._replace_local_bank_transaction_category_snapshot,
-                replace_relation_snapshot=self._replace_local_turnover_relation_snapshot,
-                save_category_snapshot=lambda snapshot: self._save_local_bank_transaction_categories_snapshot(
-                    state_store,
-                    snapshot,
-                ),
-                save_relation_snapshot=lambda snapshot: self._save_local_turnover_relations_snapshot(
-                    state_store,
-                    snapshot,
-                ),
-            )
-            bankdetail_port = TurnoverLedgerLocalBankdetailPort(
+            local_adapters = TurnoverLedgerLocalBankRowTagsAdapterSet(
+                state_store=state_store,
                 category_service=self._bank_transaction_category_service,
                 relation_service=self._turnover_relation_service,
                 bank_rows_provider=self._turnover_bank_transaction_rows,
+                replace_category_snapshot=self._replace_local_bank_transaction_category_snapshot,
+                replace_relation_snapshot=self._replace_local_turnover_relation_snapshot,
+                emit_persistence_warning=self._emit_workbench_persistence_warning,
             )
+            connection = local_adapters.connection()
+            bankdetail_port = local_adapters.bankdetail_port()
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,

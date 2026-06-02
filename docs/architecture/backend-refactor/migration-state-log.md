@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P140-MG - Turnover Ledger Local Adapter Group Cumulative Merge Gate` 已完成并验证 |
-| 当前 active prompt | push `origin/main` 后，从最新 `main` 新建 `codex/` 分支并生成下一条 Turnover Ledger prompt |
-| 最近 verified prompt | `PF-P140-MG - Turnover Ledger Local Adapter Group Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，75 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass；`git diff --name-only main...HEAD`：白名单通过 |
-| 下一条允许任务 | push `origin/main` 后，从最新 `main` 新建 `codex/` 分支，生成并审查下一条 Turnover Ledger prompt |
+| 当前阶段 | `PF-P141 - Turnover Ledger Bank Row Tags Local Adapter Set Extraction` 已完成并验证 |
+| 当前 active prompt | `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate` 已生成并审查，待执行 |
+| 最近 verified prompt | `PF-P141 - Turnover Ledger Bank Row Tags Local Adapter Set Extraction` |
+| 当前分支 | `codex/turnover-ledger-bank-row-tags-p141` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，76 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
+| 下一条允许任务 | 执行 `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate` |
 
 ## Prompt 执行日志
 

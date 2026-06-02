@@ -1267,6 +1267,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("rebuild_from_bank_rows(", source)
         self.assertNotIn("_after_turnover_relation_mutation(", source)
 
+    def test_turnover_bank_row_tags_write_facade_does_not_inline_local_snapshot_closures(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_bank_row_tags_write_facade)
+
+        self.assertNotIn("save_category_snapshot=lambda", source)
+        self.assertNotIn("save_relation_snapshot=lambda", source)
+
     def test_after_turnover_relation_mutation_keeps_legacy_side_effect_order(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

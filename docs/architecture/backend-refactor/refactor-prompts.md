@@ -26016,9 +26016,159 @@ Post-Flight:
 - 已将 `codex/turnover-ledger-next-slice-p136` fast-forward 合入 `main`。
 - main 验证再次通过：
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，75 tests
-  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
 - Traffic Gate 未执行。
 - 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建分支，决定下一条 Turnover Ledger prompt。
+
+## PF-P141 - Turnover Ledger Bank Row Tags Local Adapter Set Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P141 - Turnover Ledger Bank Row Tags Local Adapter Set Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在不改变 bank row tags batch API contract、queue failure rollback 语义、legacy fallback 语义与 no-direct-clear 合同的前提下，抽离 Turnover Ledger bank row tags local path 的 adapter set seam。
+
+Context:
+PF-P140-MG 已 verified 并合入 main。当前 bank row tags 写路径已经具备：
+- primary UoW path；
+- explicit legacy fallback facade；
+- local connection / local bankdetail port 已在 adapter module 中；
+- queue failure rollback、fallback、no direct clear、scope refresh 护栏。
+
+但 local path 仍由 `server.py` 直接组装：
+- `TurnoverLedgerLocalBankRowTagsConnection(...)`
+- `save_category_snapshot=lambda ...`
+- `save_relation_snapshot=lambda ...`
+- `TurnoverLedgerLocalBankdetailPort(...)`
+
+这仍然让 `server.py` 持有 bank row tags local adapter 细节。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+2. 必须确认当前分支是 `codex/turnover-ledger-bank-row-tags-p141`，不是 `main`。
+3. 必须确认 PF-P140-MG 已 verified 且 `origin/main` 已同步。
+
+Goal:
+把 bank row tags local path 的 local adapter 组装迁入 adapter module，减少 `server.py` 中的 inline snapshot-save wiring。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Implementation Work:
+1. 抽离 bank row tags local path 所需的 adapter set，减少 `server.py` 中的 inline snapshot save closure。
+2. 保持 `TurnoverLedgerLocalBankRowTagsConnection` / `TurnoverLedgerLocalBankdetailPort` 语义不变。
+3. category snapshot save 与 relation snapshot save 必须继续保持现有 best-effort warning 合同。
+4. 不得把 `Application` 整体注入 adapter。
+5. 如需要，新增 source-level guard test，锁定 `server.py` 不再内联 bank row tags local snapshot-save closure。
+
+Behavior Constraints:
+- queue failure rollback 行为不变；
+- fallback facade 仍能工作；
+- no direct clear 行为不变；
+- refresh scopes 行为不变；
+- 不新增 schema / worker / deploy 改动。
+
+Forbidden Scope:
+- 不得修改下一模块。
+- 不得修改 MG / deploy / Traffic Gate。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P141 status、变更文件、验证结果与 residual risk。
+3. 完成后再决定是否生成 PF-P141-MG，或继续同模块剩余 seam。
+```
+
+### 审查结论
+
+- PF-P141 的边界正确：它只处理 bank row tags local adapter set seam，不扩大到其它模块。
+- 这一步延续 PF-P137/PF-P138/PF-P139 的收束模式，收益明确，风险可控。
+
+### PF-P141 执行结果
+
+- PF-P141 已完成并验证。
+- 新增 `TurnoverLedgerLocalBankRowTagsAdapterSet`，将 bank row tags local path 的 category/relation snapshot save 组装迁入 adapter module。
+- `server.py` 不再内联 `save_category_snapshot=lambda ...` 与 `save_relation_snapshot=lambda ...`。
+- 新增 source-level guard test，锁定该约束。
+- adapter 保持现有 best-effort warning 合同：
+  - `save_bank_transaction_categories(...)` 失败仍然只记 warning；
+  - `save_turnover_relations(...)` 失败仍然只记 warning。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，76 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 下一步应进入 `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate`。
+
+## PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须对 PF-P141 组成的 Turnover Ledger bank row tags local adapter set 切片做正式 Merge Gate。
+
+Context:
+以下 prompt 已 verified：
+- PF-P141 - Turnover Ledger Bank Row Tags Local Adapter Set Extraction
+
+当前分支应为 `codex/turnover-ledger-bank-row-tags-p141`。本 MG 只覆盖 PF-P141 的完整 diff。
+
+Expected Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Mandatory Checks:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Merge Rules:
+- 只允许精确 `git add`；
+- 如果 `git diff --name-only main...HEAD` 超出白名单，必须停止；
+- merge 后必须在 `main` 上重跑同一组验证，成功后才能 push `origin/main`。
+
+Forbidden Scope:
+- 不得混入其它模块改动。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 若 merge 成功并 push 完成，下一条 prompt 必须从最新 `main` 新建分支后生成。
+```
+
+### 审查结论
+
+- PF-P141-MG 的边界正确：它只覆盖 PF-P141 的 bank row tags local adapter set 小切片。
+- 当前 diff 范围集中，测试充分，适合直接进入 MG。
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 

@@ -881,6 +881,80 @@ class TurnoverLedgerLocalWithdrawRelationAdapterSet:
             )
 
 
+class TurnoverLedgerLocalBankRowTagsAdapterSet:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        category_service: Any,
+        relation_service: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        replace_category_snapshot: Callable[[dict[str, object]], None],
+        replace_relation_snapshot: Callable[[dict[str, object]], None],
+        emit_persistence_warning: Callable[..., None],
+    ) -> None:
+        self._state_store = state_store
+        self._category_service = category_service
+        self._relation_service = relation_service
+        self._bank_rows_provider = bank_rows_provider
+        self._replace_category_snapshot = replace_category_snapshot
+        self._replace_relation_snapshot = replace_relation_snapshot
+        self._emit_persistence_warning = emit_persistence_warning
+
+    def connection(self) -> TurnoverLedgerLocalBankRowTagsConnection:
+        return TurnoverLedgerLocalBankRowTagsConnection(
+            category_snapshot_provider=self.category_snapshot,
+            relation_snapshot_provider=self.relation_snapshot,
+            replace_category_snapshot=self._replace_category_snapshot,
+            replace_relation_snapshot=self._replace_relation_snapshot,
+            save_category_snapshot=self.save_category_snapshot,
+            save_relation_snapshot=self.save_relation_snapshot,
+        )
+
+    def bankdetail_port(self) -> TurnoverLedgerLocalBankdetailPort:
+        return TurnoverLedgerLocalBankdetailPort(
+            category_service=self._category_service,
+            relation_service=self._relation_service,
+            bank_rows_provider=self._bank_rows_provider,
+        )
+
+    def category_snapshot(self) -> dict[str, object]:
+        snapshot = getattr(self._category_service, "snapshot", None)
+        if callable(snapshot):
+            return dict(snapshot() or {})
+        return {}
+
+    def relation_snapshot(self) -> dict[str, object]:
+        snapshot = getattr(self._relation_service, "snapshot", None)
+        if callable(snapshot):
+            return dict(snapshot() or {})
+        return {}
+
+    def save_category_snapshot(self, snapshot: dict[str, object]) -> None:
+        save_categories = getattr(self._state_store, "save_bank_transaction_categories", None)
+        if not callable(save_categories):
+            raise RuntimeError("state store must expose save_bank_transaction_categories.")
+        try:
+            save_categories(dict(snapshot))
+        except Exception as exc:
+            self._emit_persistence_warning(
+                operation="bank_transaction_categories_updated",
+                detail=str(exc),
+            )
+
+    def save_relation_snapshot(self, snapshot: dict[str, object]) -> None:
+        save_relations = getattr(self._state_store, "save_turnover_relations", None)
+        if not callable(save_relations):
+            raise RuntimeError("state store must expose save_turnover_relations.")
+        try:
+            save_relations(dict(snapshot))
+        except Exception as exc:
+            self._emit_persistence_warning(
+                operation="turnover_relations_updated",
+                detail=str(exc),
+            )
+
+
 class TurnoverLedgerLocalBankRowTagsConnection:
     def __init__(
         self,
