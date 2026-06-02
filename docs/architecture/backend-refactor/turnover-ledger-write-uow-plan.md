@@ -3991,6 +3991,31 @@ PF-P110 边界：
 - `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning`
 - 只做 bank row tags fallback cleanup discovery/planning，不直接改 production code。
 
+## PF-P128 Bank Row Tags Legacy Fallback Cleanup Discovery and Planning
+
+状态：`planned`
+
+目标：
+
+- 只做 bank row tags legacy fallback cleanup discovery/planning。
+- 盘点 handler direct side effects、fallback 触发条件、现有测试覆盖和 adapter readiness。
+- 不修改 production code，不修改 tests。
+
+必须输出：
+
+- Bank Row Tags Fallback Inventory。
+- Handler Direct Side Effects Matrix。
+- Existing Characterization Coverage Matrix。
+- Adapter Extraction Readiness。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P128|Bank Row Tags Legacy Fallback Cleanup|bank row tags fallback inventory|Handler Direct Side Effects Matrix" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

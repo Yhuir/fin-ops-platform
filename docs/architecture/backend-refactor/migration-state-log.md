@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` 已合入本地 `main` 并验证通过，待 push |
-| 当前 active prompt | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` |
+| 当前阶段 | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
 | 最近 verified prompt | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-bank-row-tags-fallback-p128` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 提交本次 post-flight 文档并执行 `git push origin main`；push 后从最新 `main` 新建下一条 `codex/` 分支 |
+| 下一条允许任务 | 执行 `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
 
 ## Prompt 执行日志
 
@@ -9048,6 +9048,44 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 #### 下一条 Prompt 上下文
 
 下一步先提交本次 post-flight 文档并执行 `git push origin main`。push 完成后必须从最新 `main` 新建下一条 `codex/` 分支。建议下一条 prompt：`PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning`，只做 bank row tags fallback cleanup discovery/planning，不直接改 production code。
+
+### PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning
+
+状态：`planned`
+
+#### 范围
+
+- 只做 bank row tags legacy fallback cleanup 的 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests。
+- 不执行 Merge Gate 或 Traffic Gate。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+#### 必须输出
+
+- Bank row tags fallback inventory。
+- Handler direct side effects matrix。
+- Existing characterization coverage matrix。
+- Adapter extraction readiness and blockers。
+- 下一条最小 prompt 建议。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P128|Bank Row Tags Legacy Fallback Cleanup|bank row tags fallback inventory|Handler Direct Side Effects Matrix" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+TBD。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

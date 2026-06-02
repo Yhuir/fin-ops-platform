@@ -24508,6 +24508,99 @@ Post-Flight:
 - Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
 - 下一步：提交本次 post-flight 文档并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。建议下一条 prompt：`PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning`。
 
+## PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning
+
+```text
+/goal
+PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只做 Turnover Ledger bank row tags legacy fallback cleanup 的 discovery/planning 和文档回写，不修改业务代码。
+
+Context:
+PF-P127-MG 已 verified 并已合入 main/push origin/main。当前已完成：
+- tag selection fallback adapter；
+- relation extra fallback adapter；
+- confirm relation fallback adapter；
+- withdraw relation fallback adapter；
+- bank row tags 已有 facade/UoW seam 与 local adapter，但 handler 中仍保留 dependency-missing / override None direct side effects fallback。
+
+Goal:
+为 bank row tags legacy fallback cleanup 建立准确事实清单、风险矩阵和下一条最小实现 prompt。由于该路径跨 Bankdetail category service、Turnover Relation rebuild、Workbench invalidation、Turnover Ledger read model refresh，本轮不得直接实现抽离。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P127-MG 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Required Discovery Output:
+1. Bank Row Tags Fallback Inventory:
+   - `_handle_api_turnover_ledger_bank_row_tags_batch(...)` 中仍存在的 direct fallback side effects；
+   - `_turnover_ledger_bank_row_tags_write_facade(...)` 哪些条件会返回 `None`；
+   - override `None` 与 dependency-missing fallback 的差异。
+2. Handler Direct Side Effects Matrix:
+   - target validation；
+   - category apply/save；
+   - relation rebuild/save；
+   - Workbench invalidation；
+   - Turnover Ledger read model clear/enqueue；
+   - queue failure 当前发生在 mutation 之后还是事务内。
+3. Existing Characterization Coverage Matrix:
+   - 列出现有 tests 覆盖了哪些 fallback 行为；
+   - 明确是否还缺 handler-thinness guard；
+   - 明确是否还缺 unsupported postgres queue API fallback adapter 测试。
+4. Adapter Extraction Readiness:
+   - 判断是否可按 confirm/withdraw 模式新增 bank row tags fallback adapter；
+   - 列出 adapter 需要接收的细粒度依赖，不得接收 `Application`；
+   - 判断是否需要先补测试，再实现 adapter。
+5. Next Prompt Recommendation:
+   - 只生成一个下一条最小 prompt；
+   - 如果缺测试，应优先建议 characterization tests；
+   - 如果测试已足够，应建议 fallback adapter extraction；
+   - 不得建议直接进入 MG。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得处理 tag selection、relation extra、confirm、withdraw。
+- 不得修改 database migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得接入真实外部服务。
+- 不得执行 Merge Gate、Traffic Gate、部署、访问生产。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P128|Bank Row Tags Legacy Fallback Cleanup|bank row tags fallback inventory|Handler Direct Side Effects Matrix" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P128 status、changed files、verification commands/results。
+3. 明确下一条最小 prompt。
+```
+
+### 审查结论
+
+- PF-P128 边界正确：只做 bank row tags fallback cleanup discovery/planning 和文档回写。
+- PF-P128 明确不修改 production code、不修改 tests、不执行 MG 或 Traffic Gate。
+- 该 prompt 避免直接照搬 confirm/withdraw 模式，先盘点 Bankdetail、relation rebuild、Workbench invalidation 和 read model refresh 的跨模块副作用。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
