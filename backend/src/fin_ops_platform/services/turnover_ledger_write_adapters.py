@@ -167,6 +167,32 @@ class TurnoverLedgerTagSelectionLegacyFallbackFacade:
         return result
 
 
+class TurnoverLedgerTagSelectionLegacyFallbackAdapterSet:
+    def __init__(
+        self,
+        *,
+        app_settings_service: Any,
+        clear_read_model: Callable[[], None],
+        enqueue_refresh: Callable[..., None],
+    ) -> None:
+        self._app_settings_service = app_settings_service
+        self._clear_read_model = clear_read_model
+        self._enqueue_refresh = enqueue_refresh
+
+    def facade(self) -> TurnoverLedgerTagSelectionLegacyFallbackFacade:
+        return TurnoverLedgerTagSelectionLegacyFallbackFacade(
+            app_settings_service=self._app_settings_service,
+            clear_read_model=self._clear_read_model,
+            enqueue_refresh=self.enqueue_refresh,
+        )
+
+    def enqueue_refresh(self, scope_keys: list[str]) -> None:
+        self._enqueue_refresh(
+            list(scope_keys or []),
+            reason="turnover_ledger_tag_selection_changed",
+        )
+
+
 class TurnoverLedgerLocalRelationExtraAdapterSet:
     def __init__(
         self,
@@ -250,6 +276,38 @@ class TurnoverLedgerRelationExtraLegacyFallbackFacade:
         return result
 
 
+class TurnoverLedgerRelationExtraLegacyFallbackAdapterSet:
+    def __init__(
+        self,
+        *,
+        routes: Any,
+        persist_extra_best_effort: Callable[..., None],
+        clear_read_model: Callable[[], None],
+        enqueue_refresh: Callable[..., None],
+    ) -> None:
+        self._routes = routes
+        self._persist_extra_best_effort = persist_extra_best_effort
+        self._clear_read_model = clear_read_model
+        self._enqueue_refresh = enqueue_refresh
+
+    def facade(self) -> TurnoverLedgerRelationExtraLegacyFallbackFacade:
+        return TurnoverLedgerRelationExtraLegacyFallbackFacade(
+            routes=self._routes,
+            persist_extra=self.persist_extra,
+            clear_read_model=self._clear_read_model,
+            enqueue_refresh=self.enqueue_refresh,
+        )
+
+    def persist_extra(self) -> None:
+        self._persist_extra_best_effort(operation="turnover_ledger_extra_updated")
+
+    def enqueue_refresh(self, scope_keys: list[str]) -> None:
+        self._enqueue_refresh(
+            list(scope_keys or []),
+            reason="turnover_relation_extra_changed",
+        )
+
+
 class TurnoverLedgerRelationMutationInvalidationLegacyAdapter:
     def __init__(
         self,
@@ -305,6 +363,33 @@ class TurnoverLedgerConfirmLegacyFallbackFacade:
         )
         self._after_mutation(list(affected_months or []))
         return dict(result or {})
+
+
+class TurnoverLedgerConfirmLegacyFallbackAdapterSet:
+    def __init__(
+        self,
+        *,
+        relation_service: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        routes: Any,
+        after_mutation: Callable[[list[str]], None],
+    ) -> None:
+        self._relation_service = relation_service
+        self._bank_rows_provider = bank_rows_provider
+        self._routes = routes
+        self._after_mutation = after_mutation
+
+    def facade(self) -> TurnoverLedgerConfirmLegacyFallbackFacade:
+        return TurnoverLedgerConfirmLegacyFallbackFacade(
+            relation_rebuild=self.relation_rebuild,
+            routes=self._routes,
+            after_mutation=self._after_mutation,
+        )
+
+    def relation_rebuild(self) -> None:
+        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
+        if callable(rebuild):
+            rebuild(self._bank_rows_provider())
 
 
 class TurnoverLedgerWithdrawLegacyFallbackFacade:
@@ -370,6 +455,35 @@ class TurnoverLedgerBankRowTagsLegacyFallbackFacade:
         self._relation_rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
         self._after_mutation(list(affected_months or []))
         return dict(result or {})
+
+
+class TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        category_service: Any,
+        relation_rebuild: Callable[[list[dict[str, object]]], None],
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        after_mutation: Callable[[list[str]], None],
+    ) -> None:
+        self._state_store = state_store
+        self._category_service = category_service
+        self._relation_rebuild = relation_rebuild
+        self._bank_rows_provider = bank_rows_provider
+        self._after_mutation = after_mutation
+
+    def facade(self) -> TurnoverLedgerBankRowTagsLegacyFallbackFacade:
+        return TurnoverLedgerBankRowTagsLegacyFallbackFacade(
+            category_service=self._category_service,
+            save_category_snapshot=self.save_category_snapshot,
+            relation_rebuild=self._relation_rebuild,
+            bank_rows_provider=self._bank_rows_provider,
+            after_mutation=self._after_mutation,
+        )
+
+    def save_category_snapshot(self, snapshot: dict[str, object]) -> None:
+        self._state_store.save_bank_transaction_categories(dict(snapshot))
 
 
 class TurnoverLedgerRelationRepositoryAdapter:

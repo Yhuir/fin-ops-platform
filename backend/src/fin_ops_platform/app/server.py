@@ -272,6 +272,7 @@ from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_T
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankdetailWritePort,
+    TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet,
     TurnoverLedgerBankRowTagsLegacyFallbackFacade,
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
@@ -284,11 +285,14 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationExtraAdapterSet,
     TurnoverLedgerLocalTagSelectionAdapterSet,
     TurnoverLedgerLocalWithdrawRelationAdapterSet,
+    TurnoverLedgerConfirmLegacyFallbackAdapterSet,
     TurnoverLedgerConfirmLegacyFallbackFacade,
     TurnoverLedgerRelationMutationInvalidationLegacyAdapter,
+    TurnoverLedgerRelationExtraLegacyFallbackAdapterSet,
     TurnoverLedgerRelationExtraLegacyFallbackFacade,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionLegacyFallbackFacade,
+    TurnoverLedgerTagSelectionLegacyFallbackAdapterSet,
     TurnoverLedgerTagSelectionSettingsAdapter,
     TurnoverLedgerWithdrawLegacyFallbackFacade,
 )
@@ -2703,17 +2707,12 @@ class Application:
         )
 
     def _turnover_ledger_relation_extra_legacy_fallback_facade(self) -> TurnoverLedgerRelationExtraLegacyFallbackFacade:
-        return TurnoverLedgerRelationExtraLegacyFallbackFacade(
+        return TurnoverLedgerRelationExtraLegacyFallbackAdapterSet(
             routes=self._turnover_ledger_api_routes,
-            persist_extra=lambda: self._persist_turnover_ledger_extras_best_effort(
-                operation="turnover_ledger_extra_updated",
-            ),
+            persist_extra_best_effort=self._persist_turnover_ledger_extras_best_effort,
             clear_read_model=self._clear_turnover_ledger_read_model_best_effort,
-            enqueue_refresh=lambda scope_keys: self._enqueue_turnover_ledger_read_model_refreshes(
-                scope_keys,
-                reason="turnover_relation_extra_changed",
-            ),
-        )
+            enqueue_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
+        ).facade()
 
     def _turnover_ledger_bank_row_tags_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerBankRowTagsLegacyFallbackFacade | None:
         override = getattr(self, "_turnover_ledger_bank_row_tags_write_facade_override", None)
@@ -2772,13 +2771,13 @@ class Application:
     def _turnover_ledger_bank_row_tags_legacy_fallback_facade(self) -> TurnoverLedgerBankRowTagsLegacyFallbackFacade:
         state_store = getattr(self, "_state_store", None)
         invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
-        return TurnoverLedgerBankRowTagsLegacyFallbackFacade(
+        return TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet(
+            state_store=state_store,
             category_service=self._bank_transaction_category_service,
-            save_category_snapshot=lambda snapshot: state_store.save_bank_transaction_categories(dict(snapshot)),
             relation_rebuild=self._turnover_relation_service.rebuild_from_bank_rows,
             bank_rows_provider=self._turnover_bank_transaction_rows,
             after_mutation=invalidation_adapter.after_relation_mutation,
-        )
+        ).facade()
 
     def _turnover_ledger_confirm_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerConfirmLegacyFallbackFacade:
         override = getattr(self, "_turnover_ledger_confirm_write_facade_override", None)
@@ -2835,13 +2834,12 @@ class Application:
 
     def _turnover_ledger_confirm_legacy_fallback_facade(self) -> TurnoverLedgerConfirmLegacyFallbackFacade:
         invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
-        return TurnoverLedgerConfirmLegacyFallbackFacade(
-            relation_rebuild=lambda: self._turnover_relation_service.rebuild_from_bank_rows(
-                self._turnover_bank_transaction_rows()
-            ),
+        return TurnoverLedgerConfirmLegacyFallbackAdapterSet(
+            relation_service=self._turnover_relation_service,
+            bank_rows_provider=self._turnover_bank_transaction_rows,
             routes=self._turnover_ledger_api_routes,
             after_mutation=invalidation_adapter.after_relation_mutation,
-        )
+        ).facade()
 
     def _turnover_ledger_withdraw_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerWithdrawLegacyFallbackFacade:
         override = getattr(self, "_turnover_ledger_withdraw_write_facade_override", None)
@@ -3049,14 +3047,11 @@ class Application:
         )
 
     def _turnover_ledger_tag_selection_legacy_fallback_facade(self) -> TurnoverLedgerTagSelectionLegacyFallbackFacade:
-        return TurnoverLedgerTagSelectionLegacyFallbackFacade(
+        return TurnoverLedgerTagSelectionLegacyFallbackAdapterSet(
             app_settings_service=self._app_settings_service,
             clear_read_model=self._clear_turnover_ledger_read_model_best_effort,
-            enqueue_refresh=lambda scope_keys: self._enqueue_turnover_ledger_read_model_refreshes(
-                scope_keys,
-                reason="turnover_ledger_tag_selection_changed",
-            ),
-        )
+            enqueue_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
+        ).facade()
 
     def _refresh_local_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
         setattr(self._app_settings_service, "_snapshot", dict(snapshot))
