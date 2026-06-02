@@ -26006,6 +26006,20 @@ Post-Flight:
 - PF-P140-MG 的边界正确：它只覆盖 PF-P136 / PF-P137 / PF-P138 / PF-P139 的 local adapter group 小切片。
 - 当前 diff 已形成完整闭环，适合现在进入 cumulative MG。
 
+### PF-P140-MG 执行结果
+
+- PF-P140-MG 已完成并验证。
+- `git diff --name-only main...HEAD`：只包含白名单文件。
+- branch 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，75 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 已将 `codex/turnover-ledger-next-slice-p136` fast-forward 合入 `main`。
+- main 验证再次通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，75 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- Traffic Gate 未执行。
+- 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建分支，决定下一条 Turnover Ledger prompt。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

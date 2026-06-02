@@ -4534,6 +4534,27 @@ Remaining write path matrix：
 - 进入 `PF-P140-MG - Turnover Ledger Local Adapter Group Cumulative Merge Gate`。
 - 本组切片统一覆盖 PF-P136 / PF-P137 / PF-P138 / PF-P139。
 
+## PF-P140-MG Local Adapter Group Cumulative Merge Gate
+
+状态：
+
+- verified
+
+结果：
+
+- PF-P136 / PF-P137 / PF-P138 / PF-P139 已通过 cumulative MG，并已合入 `main`。
+- branch 与 main 验证均通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，75 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 该组切片完成后：
+  - relation extra local path 不再由 `server.py` 内联 snapshot/save closure 组装；
+  - confirm local path 不再由 `server.py` 内联 snapshot/save/rebuild closure 组装；
+  - withdraw local path 不再由 `server.py` 内联 snapshot/save closure 组装。
+
+后续方向：
+
+- 下一条 prompt 必须从最新 `main` 新建分支后重新做 Turnover Ledger discovery/planning 或直接进入 bank row tags local seam。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
