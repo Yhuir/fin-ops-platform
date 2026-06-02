@@ -5469,6 +5469,30 @@ Remaining seam matrix：
 
 - 生成并审查 `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate`
 
+## PF-P161-MG Relation Extra Request Boundary Merge Gate
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已 merge 到 `main`
+- 已在 `main` 上重跑：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- 复验仍通过，允许 push `origin/main`
+
+结论：
+
+- relation extra request boundary 切片已完成并可视为稳定主干基线的一部分。
+
+下一步：
+
+- push `origin/main`
+- 从最新 `main` 新建分支
+- 重新盘点 Turnover Ledger 写路径剩余 seam，再生成下一条 prompt
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

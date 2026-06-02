@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction` 已完成并验证 |
-| 当前 active prompt | 空；下一步可生成并审查 `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate` |
-| 最近 verified prompt | `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction` |
-| 当前分支 | `codex/turnover-ledger-relation-extra-boundary-p160` |
+| 当前阶段 | `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate` 已完成并验证 |
+| 当前 active prompt | 空；push 后需从最新 `main` 新建分支，生成并审查下一条 Turnover Ledger prompt |
+| 最近 verified prompt | `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（97 tests）；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate` |
+| 下一条允许任务 | push `origin/main`；然后从最新 `main` 新建分支，生成并审查下一条 Turnover Ledger prompt |
 
 ## Prompt 执行日志
 
@@ -518,6 +518,33 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
   - `PF-P161` relation extra request boundary extraction
 - 下一步应进入这一组的 MG：
   - `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate`
+
+### PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 覆盖：
+  - `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline`
+  - `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction`
+
+#### 执行摘要
+
+- 已完成 scope / 白名单检查。
+- 已完成分支验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+  - `python3 -m compileall ...`
+- 已 merge 到 `main` 并在 `main` 上复验，结果仍为绿。
+- 允许 push `origin/main`。
+
+#### 下一条 Prompt 上下文
+
+- relation extra request boundary 已完成并达到可合并状态。
+- 当前 Turnover Ledger 写路径剩余工作已从 handler 级别进一步下沉，下一条需要重新盘点：
+  - 是否还存在 local shim / legacy fallback / builder consolidation 剩余 seam
+  - 或是否可以转入 Turnover Ledger write 模块的更大一组 cumulative MG / completion audit
+- push 后应从最新 `main` 新建分支，再生成下一条 prompt。
 
 ### PF-P002 - Platform / Ops / Runtime Boundary Deep Dive
 
