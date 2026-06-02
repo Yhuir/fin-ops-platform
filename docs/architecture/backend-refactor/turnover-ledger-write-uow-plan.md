@@ -5163,6 +5163,46 @@ Remaining seam matrix：
 
 - 生成并审查 `PF-P154-MG - Turnover Ledger Primary Write Builder Cumulative Merge Gate`。
 
+## PF-P154-MG Primary Write Builder Cumulative Merge Gate
+
+状态：
+
+- verified
+
+范围：
+
+- 统一覆盖 PF-P150 到 PF-P154 的 primary write builder extraction 全量 diff。
+
+执行结果：
+
+- tag selection / withdraw / confirm / bank row tags / relation extra 五条 primary write path 已全部完成 builder extraction。
+- `server.py` 不再直接构造 Turnover Ledger primary write path 的 `TurnoverLedgerWriteUnitOfWork(...)`。
+- relation extra 的 idempotency store handler-level inline assembly 也已进入 builder/helper boundary。
+- 组级 source characterization 已更新为：
+  - `test_turnover_ledger_primary_write_facades_no_longer_construct_uow_in_server`
+  - `test_turnover_ledger_primary_write_facades_no_longer_inline_placeholder_ports_or_default_stale_precondition`
+
+验证：
+
+- 分支验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，87 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- merge：
+  - 已 merge 到 `main`
+- `main` 复验：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，87 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+结论：
+
+- Turnover Ledger primary write builder 组已完成。
+- 下一阶段不应再回到 primary builder 组，而应重新盘点 write UoW deeper boundary 与剩余写路径所有权。
+
+下一步：
+
+- `git push origin main`
+- 然后从最新 `main` 新建分支，生成并审查 `PF-P155 - Turnover Ledger Write UoW Post-Builder Rebaseline`。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

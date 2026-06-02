@@ -27176,6 +27176,28 @@ Post-Flight:
 - PF-P154-MG 的边界正确：它只覆盖 PF-P150 到 PF-P154 的 primary write builder 累积切片。
 - 这组 MG 完成后，Turnover Ledger 的下一阶段应转向 write UoW deeper boundary 或者剩余 write contract cleanup，而不是再回到 primary builder 组。
 
+### PF-P154-MG 执行结果
+
+- PF-P154-MG 已完成并验证。
+- MG 覆盖了以下完整 diff：
+  - PF-P150 - tag selection primary write builder extraction
+  - PF-P151 - withdraw primary write builder extraction
+  - PF-P152 - confirm primary write builder extraction
+  - PF-P153 - bank row tags primary write builder extraction
+  - PF-P154 - relation extra primary write builder extraction
+- 结果：
+  - Turnover Ledger 五条 primary write path 已全部离开 `server.py` 的 inline `TurnoverLedgerWriteUnitOfWork(...)` 组装
+  - 组级 source characterization 已翻面为 “no longer construct UoW / no longer inline placeholder ports”
+- merge 结果：
+  - 已 merge 到 `main`
+  - 已在 `main` 上重跑 targeted verification，通过
+- main 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，87 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：
+  - `PF-P155 - Turnover Ledger Write UoW Post-Builder Rebaseline`
+  - 该 prompt 只做 rebaseline / planning，盘点 primary builder 清空之后剩余的 write UoW seam、transaction ownership、remaining handler assembly 和下一组最小切片，不直接改实现。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

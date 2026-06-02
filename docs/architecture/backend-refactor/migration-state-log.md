@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P154 - Turnover Ledger Relation Extra Primary Write Builder Extraction` 已完成并验证 |
-| 当前 active prompt | 空；下一步可生成并审查 `PF-P154-MG - Turnover Ledger Primary Write Builder Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P154 - Turnover Ledger Relation Extra Primary Write Builder Extraction` |
-| 当前分支 | `codex/turnover-ledger-builder-rebaseline-p148` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，87 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P154-MG - Turnover Ledger Primary Write Builder Cumulative Merge Gate` |
+| 当前阶段 | `PF-P154-MG - Turnover Ledger Primary Write Builder Cumulative Merge Gate` 已完成并在 `main` 上复验通过 |
+| 当前 active prompt | 空；下一步可从最新 `main` 新建分支并生成 `PF-P155 - Turnover Ledger Write UoW Post-Builder Rebaseline` |
+| 最近 verified prompt | `PF-P154-MG - Turnover Ledger Primary Write Builder Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，87 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass；`main` merge 后复验：Pass |
+| 下一条允许任务 | `git push origin main` 后，从最新 `main` 新建分支，生成并审查 `PF-P155 - Turnover Ledger Write UoW Post-Builder Rebaseline` |
 
 ## Prompt 执行日志
 
