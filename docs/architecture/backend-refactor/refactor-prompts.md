@@ -21228,3 +21228,96 @@ Post-Flight:
 - `rg -n "PF-P103|turnover_relation_extra_conflict|turnover_relation_extra:|expected_versions|test_target_relation_extra_facade|test_target_relation_extra_stale|expectedFailure" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
 
 下一条必须生成并执行 `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate`，统一覆盖 PF-P101 到 PF-P103 的完整 diff；不得直接进入 durable idempotency、fallback cleanup、local transaction shim extraction 或下一模块。
+
+## PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger relation extra expected_versions 切片，不新增业务实现。
+
+Context:
+PF-P101、PF-P102、PF-P103 均已 verified。当前分支应为 `codex/turnover-ledger-next-slice-p101`，相对 `main` 的提交应为：
+- `docs(turnover-ledger): plan relation extra stale contracts`
+- `test(turnover-ledger): lock relation extra stale contracts`
+- `feat(turnover-ledger): reject stale relation extra writes`
+
+Gate Scope:
+本 MG 只覆盖 PF-P101 到 PF-P103 的完整 diff：
+- relation extra stale/idempotency discovery 文档；
+- repeated same PUT characterization 和 relation extra stale/facade target tests；
+- 最小 relation extra expected_versions skeleton；
+- PF-P103 文档回写。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得开始 durable idempotency store/repository。
+- 不得处理 fallback cleanup。
+- 不得抽离 local transaction shim。
+- 不得修改 SQL migration。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或访问真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P101、PF-P102、PF-P103 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认 `git diff --name-only main...HEAD` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空；不得把临时文件带入仓库。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+
+Commit / Merge Rules:
+1. 如果 MG prompt/状态机文档有变更，必须只用精确文件路径 `git add`。
+2. 允许提交 MG 文档变更，commit message 建议：
+   - `docs(turnover-ledger): add relation extra expected versions merge gate`
+3. 合入 main 前必须同步最新 `origin/main`：
+   - checkout main；
+   - `git pull --ff-only origin main`；
+   - 如果 pull/merge 出现冲突，停止并报告。
+4. 将当前分支 merge 到 main。
+5. 在 main 上重新执行完整 Verification 中的测试命令。
+6. 如果 main 上验证失败，必须停止，不得 push。
+7. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P103-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一条 prompt 分支。
+8. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P103-MG 执行结果。
+2. push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt。
+3. 不得在 main 或旧分支继续开发下一切片。
+```
+
+### 审查结论
+
+- PF-P103-MG 的边界正确：只覆盖 PF-P101 到 PF-P103 的 relation extra expected_versions 切片。
+- MG 明确不执行 Traffic Gate，不处理 durable idempotency、fallback cleanup 或 local transaction shim。
+- 允许文件白名单与当前 `main...HEAD` diff 一致。

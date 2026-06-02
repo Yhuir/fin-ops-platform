@@ -2572,3 +2572,30 @@ Relation extra 当前写路径：
 下一条：
 
 - 生成并执行 `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate`，统一覆盖 PF-P101 到 PF-P103 的完整 diff。
+
+## PF-P103-MG Relation Extra Expected Versions Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 只执行 relation extra expected_versions 切片的 cumulative Merge Gate。
+- 统一覆盖 PF-P101、PF-P102、PF-P103 的完整 diff。
+- 不新增业务实现，不开始 durable idempotency、fallback cleanup 或 local transaction shim extraction。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+下一步：
+
+- 执行 PF-P103-MG。
+- MG 通过后合入 main、复验、push origin/main。
+- push 后必须从最新 main 新建下一条 prompt 分支。
