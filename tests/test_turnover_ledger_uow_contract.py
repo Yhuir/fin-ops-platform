@@ -1123,6 +1123,62 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
+    def test_target_confirm_relation_facade_passes_idempotency_before_repository(self) -> None:
+        # PF-P177 target contract: confirm should reserve/replay/conflict by durable idempotency before repository save.
+        class _CommandCapturingUoW:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+                self.confirm_calls: list[dict[str, object]] = []
+
+            def run(self, command: object, handler: Callable[[object], object]) -> object:
+                self.commands.append(command)
+                assert getattr(command, "idempotency_key") == "confirm-idem-1"
+                assert getattr(command, "actor_id") == "finance-user"
+                assert getattr(command, "tenant_id") == "default"
+                assert getattr(command, "action_name") == "turnover_relation_confirm"
+                assert getattr(command, "request_fingerprint")
+                return handler(
+                    SimpleNamespace(
+                        transaction=object(),
+                        relation_repository=SimpleNamespace(confirm_relation=self.confirm_relation),
+                    )
+                )
+
+            def confirm_relation(
+                self,
+                *,
+                bank_row_ids: list[str],
+                actor_id: str,
+                note: str | None,
+                transaction: object,
+            ) -> dict[str, object]:
+                self.confirm_calls.append(
+                    {
+                        "bank_row_ids": list(bank_row_ids),
+                        "actor_id": actor_id,
+                        "note": note,
+                        "transaction": transaction,
+                    }
+                )
+                return {"relation_id": "turnover_rel_confirm_idem"}
+
+        uow = _CommandCapturingUoW()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.confirm_relation(
+            bank_row_ids=["bank_txn_1", "bank_txn_2"],
+            actor_id="finance-user",
+            tenant_id="default",
+            note="idempotent confirm",
+            affected_months=["2026-02"],
+            expected_versions={"turnover_bank_row:bank_txn_1": 1},
+            idempotency_key="confirm-idem-1",
+        )
+
+        self.assertEqual(result["relation_id"], "turnover_rel_confirm_idem")
+        self.assertEqual(len(uow.commands), 1)
+        self.assertEqual(len(uow.confirm_calls), 1)
+
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:
         uow, deps = self._build_uow(stale_precondition_port=_StalePreconditionPort(stale=True))
         handler_called = False

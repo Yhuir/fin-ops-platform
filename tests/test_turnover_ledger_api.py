@@ -1194,6 +1194,83 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.action_name, "confirm_relation")
         self.assertEqual(command.expected_versions, expected_versions)
 
+    def test_target_confirm_idempotency_key_replays_without_duplicate_confirm_or_refresh(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            request_body = {
+                "bank_row_ids": transaction_ids,
+                "note": "idempotent confirm",
+                "idempotency_key": "confirm-idem-1",
+            }
+
+            first_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps(request_body),
+            )
+            second_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps(request_body),
+            )
+            first_payload = json.loads(first_response.body)
+            second_payload = json.loads(second_response.body)
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_payload["relation"]["relation_id"], first_payload["relation"]["relation_id"])
+        self.assertEqual(
+            [(entry["action"], entry["new_status"]) for entry in audit_log],
+            [("confirm_relation", "confirmed")],
+        )
+        self.assertEqual(len(queue.enqueued), 1)
+
+    def test_target_confirm_idempotency_key_conflict_rejects_different_payload(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+
+            first_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps(
+                    {
+                        "bank_row_ids": transaction_ids,
+                        "note": "first idempotent confirm",
+                        "idempotency_key": "confirm-idem-conflict",
+                    }
+                ),
+            )
+            conflict_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps(
+                    {
+                        "bank_row_ids": transaction_ids,
+                        "note": "different idempotent confirm",
+                        "idempotency_key": "confirm-idem-conflict",
+                    }
+                ),
+            )
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
+        self.assertEqual(
+            [(entry["action"], entry["new_status"]) for entry in audit_log],
+            [("confirm_relation", "confirmed")],
+        )
+        self.assertEqual(len(queue.enqueued), 1)
+
     def test_bank_row_tags_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract(self) -> None:
         uow = _RecordingTurnoverLedgerUow()
         facade = TurnoverLedgerWriteFacade(uow=uow)
