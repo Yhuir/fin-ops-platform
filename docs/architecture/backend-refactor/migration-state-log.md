@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate` 已合入 main 并 verified，待 push origin/main |
-| 当前 active prompt | `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton` |
-| 当前分支 | `codex/turnover-ledger-next-slice-p101` |
-| 最近验证 | main 上 `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests；main 上 `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests；main 上 `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | push `origin/main`；push 后从最新 main 新建 `codex/` 分支，再生成下一条 Turnover Ledger prompt |
+| 当前阶段 | `PF-P104 - Turnover Ledger Relation Extra Durable Idempotency Discovery and Planning` 已执行并 verified |
+| 当前 active prompt | `PF-P104 - Turnover Ledger Relation Extra Durable Idempotency Discovery and Planning` |
+| 最近 verified prompt | `PF-P104 - Turnover Ledger Relation Extra Durable Idempotency Discovery and Planning` |
+| 当前分支 | `codex/turnover-ledger-next-slice-p104` |
+| 最近验证 | `git diff --check`：Pass；`rg -n "PF-P104|durable idempotency|idempotency_key|Idempotency-Key|workbench_idempotency|fingerprint|PF-P105" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass |
+| 下一条允许任务 | 生成并审查 `PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -7845,6 +7845,35 @@ PF-P103 已 verified。下一条必须生成并执行 `PF-P103-MG - Turnover Led
 #### 下一条 Prompt 上下文
 
 PF-P103-MG 已 verified。下一步必须先执行 `git push origin main`。push 完成后，必须从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 Turnover Ledger prompt；不得在 `main` 或旧分支继续开发。
+
+### PF-P104 - Turnover Ledger Relation Extra Durable Idempotency Discovery and Planning
+
+状态：`verified`
+
+#### 范围
+
+- 只做 relation extra durable idempotency discovery/planning。
+- 优先评估复用 Workbench durable idempotency primitive 和 PostgreSQL repository。
+- 不修改 production code、tests、SQL migration、前端或部署配置。
+
+#### 执行结果
+
+- 已确认 relation extra HTTP contract 当前不读取 body `idempotency_key` / `idempotencyKey`，也不读取 `Idempotency-Key` header。
+- 已确认 PF-P103 stale guard 使用 `expected_versions["turnover_relation_extra:<relation_id>"]` 和当前 `extra.updated_at`。
+- 已确认 Workbench `WorkbenchIdempotencyRecord`、`workbench_request_fingerprint`、`WorkbenchIdempotencyKeyConflict/InProgress/Failed`、`InMemoryWorkbenchIdempotencyRepository` 和 `PostgresWorkbenchIdempotencyRepository` 可作为 Turnover Ledger durable idempotency 的复用候选。
+- 已确认 `TurnoverLedgerWriteUnitOfWork` 当前没有 `idempotency_store` seam，也没有 command-level `idempotency_key` / `request_fingerprint`，后续需要小切片引入，不能复制整个 Workbench UoW。
+- 已在 `turnover-ledger-write-uow-plan.md` 写入 durable idempotency contract 草案和 PF-P105 测试边界。
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅有 PF-P104 文档范围改动。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P104|durable idempotency|idempotency_key|Idempotency-Key|workbench_idempotency|fingerprint|PF-P105" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P104 已 verified。下一条应生成并审查 `PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests`。PF-P105 只应新增 tests 和文档，先锁定 durable idempotency target behavior；不得直接实现 production idempotency store、UoW seam 或 repository 接线。
 
 ## 维护规则
 
