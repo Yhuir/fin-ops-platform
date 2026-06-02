@@ -27812,6 +27812,153 @@ Post-Flight:
   - push 完成后，从最新 `main` 新建分支
   - 重新盘点 Turnover Ledger 写路径剩余 seam，再生成下一条 prompt
 
+## PF-P162 - Turnover Ledger Remaining Write Seam Rebaseline
+
+状态：`verified`
+
+```text
+/goal
+PF-P162 - Turnover Ledger Remaining Write Seam Rebaseline
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 relation extra request boundary 合入主干后，重新盘点 Turnover Ledger 剩余写 seam，决定下一条最小切片。
+
+Context:
+- PF-P161-MG 已 verified 并 push。
+- confirm / withdraw / bank row tags / relation extra request boundary 都已抽离完成。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 盘点 Turnover Ledger 剩余写 seam。
+2. 决定下一条最小 prompt。
+3. 不改生产代码、不改 tests、不进入 MG。
+```
+
+### 审查结论
+
+- PF-P162 边界正确：这是继续推进前必要的 seam rebaseline。
+
+### PF-P162 执行结果
+
+- PF-P162 已完成并验证。
+- 已确认当前剩余最小 write seam 为 `tag_selection_update` handler。
+- 下一条最小切片应为：
+  - `PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction`
+
+## PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger tag selection handler 中剩余的 request orchestration 收到显式 boundary 对象，但不能扩大到其它写路径或更高层 completion audit。
+
+Context:
+- PF-P162 已 verified。
+- `tag_selection_update` handler 仍直接持有：
+  - `payload` 透传
+  - `scope_keys=["all"]` 组装
+  - facade 调用
+  - `AppSettingsValidationError` 到 HTTP status 的映射前数据准备
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 引入显式 request boundary/facade，承接 tag selection handler 的 request orchestration。
+2. handler 仅保留：
+   - auth/session
+   - body 读取
+   - boundary 调用
+   - HTTP error mapping
+3. 不得修改 settings/UoW/schema，不得进入 MG。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P163 边界正确：这是 Turnover Ledger 剩余最小 handler seam。
+
+### PF-P163 执行结果
+
+- PF-P163 已完成并验证。
+- 新增 `TurnoverLedgerTagSelectionRequestBoundaryFacade`。
+- `Application._handle_api_turnover_ledger_tag_selection_update(...)` 不再直接持有 `scope_keys=["all"]` 与直接 facade 调用。
+- 验证：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，98 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议：
+  - `PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate`
+
+## PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须对 tag selection request boundary 这一组切片做 merge gate，确认 scope、验证和文档状态都满足合入要求。
+
+Context:
+- 当前分支：`codex/turnover-ledger-write-rebaseline-p162`
+- 本次 MG 覆盖：
+  - `PF-P162 - Turnover Ledger Remaining Write Seam Rebaseline`
+  - `PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction`
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+- 允许 merge 到 `main`、在 `main` 上复验、以及 `git push origin main`
+
+Required MG Checks:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+Forbidden Scope:
+- 不得顺手扩大到其它 Turnover Ledger 模块级 completion audit
+- 不得改 schema / UoW / deployment / Traffic Gate
+
+Post-Flight:
+1. 若 MG 通过：
+   - 标记 PF-P163-MG 为 verified
+   - 更新 backend-refactor 文档
+2. push 完成后：
+   - 从最新 `main` 新建分支
+   - 再决定 Turnover Ledger 的下一条 prompt
+```
+
+### 审查结论
+
+- PF-P163-MG 边界正确：它只覆盖 tag selection request boundary 这一个明确切片组。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

@@ -918,6 +918,29 @@ class TurnoverLedgerRelationExtraRequestBoundaryFacade:
         return response_payload
 
 
+class TurnoverLedgerTagSelectionRequestBoundaryFacade:
+    def __init__(self, *, facade_provider: Callable[[], Any]) -> None:
+        self._facade_provider = facade_provider
+
+    def update_tag_selection_from_request(
+        self,
+        *,
+        payload: dict[str, object],
+        actor_id: str,
+        tenant_id: str,
+    ) -> dict[str, object]:
+        facade = self._facade_provider()
+        return dict(
+            facade.update_tag_selection(
+                payload=dict(payload or {}),
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                scope_keys=["all"],
+            )
+            or {}
+        )
+
+
 class TurnoverLedgerConfirmLegacyFallbackAdapterSet:
     def __init__(
         self,
