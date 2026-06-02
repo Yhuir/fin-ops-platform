@@ -4338,6 +4338,50 @@ PF-P110 边界：
 - `git diff --check`
 - `rg -n "PF-P134|Remaining Write Path Rebaseline|Remaining write path matrix|Next minimal prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
 
+执行结果：
+
+- 已确认 relation mutation invalidation 主链切片已完成，不应立即重复返工。
+- 已确认 relation extra primary path 与 local extra adapter 处于稳定状态。
+- 已确认 tag selection local path 仍是最小剩余 seam：风险小、测试完整、仍有 `server.py` 闭包组装问题。
+
+Remaining write path matrix：
+
+| 写路径 | 当前状态 | 剩余问题 | 优先级 |
+| --- | --- | --- | --- |
+| tag selection | primary UoW + fallback 已稳定 | local path 闭包组装仍在 `server.py` | P1 |
+| relation extra | primary UoW + local extra adapter 已稳定 | legacy best-effort helper 仍在，但优先级次于 tag selection | P2 |
+| confirm relation | fallback facade + invalidation adapter 已稳定 | local relation wiring 仍在 `server.py`，但复杂度高 | P3 |
+| withdraw relation | fallback facade + invalidation adapter 已稳定 | local relation wiring 仍在 `server.py`，并受 stale/duplicate 约束 | P4 |
+| bank row tags batch | fallback facade + invalidation adapter 已稳定 | 跨 Bankdetail/Workbench，复杂度最高 | P5 |
+
+下一条最小 prompt：
+
+- `PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction`
+- 理由：这是当前最小、最稳定、最不易引入跨模块回归的剩余切片。
+
+## PF-P135 Turnover Ledger Tag Selection Local Adapter Extraction
+
+状态：`planned`
+
+目标：
+
+- 继续减少 `server.py` 中 tag selection local path 的 Application-capturing 闭包。
+- 把 local adapter 组装进一步收束到 adapter module。
+
+边界：
+
+- 只处理 tag selection local path。
+- 不改 relation extra、confirm、withdraw、bank row tags。
+- 不进入 MG。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

@@ -25420,6 +25420,97 @@ Post-Flight:
 - PF-P134 边界正确：它只做 rebaseline/discovery，不碰实现。
 - 在 PF-P133-MG 刚合入 main 后先做这一步，可以避免沿用过期假设继续推进 Turnover Ledger 写路径。
 
+### PF-P134 执行结果
+
+- PF-P134 已完成并验证。
+- 已确认 confirm / withdraw / bank-row-tags 的 relation mutation invalidation 主链已足够稳定，不应立即重复返工。
+- 已确认 relation extra primary UoW path、explicit fallback facade 和 local extra adapter 已形成稳定基线。
+- 已确认当前最小且高价值的剩余目标是 tag selection local adapter seam：
+  - 该路径仍由 `server.py` 通过 `save_snapshot` / `settings_snapshot_provider` / `refresh_snapshot` 闭包组装；
+  - 但它不涉及 Workbench invalidation、relation rebuild 或 Bankdetail 跨模块写影响。
+- 下一条最小 prompt：`PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction`。
+
+## PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在不改变 tag selection API contract 与 queue failure 语义的前提下，抽离 Turnover Ledger tag selection local path 的 adapter seam。
+
+Context:
+PF-P134 已 verified。当前 tag selection 写路径已经具备：
+- primary UoW path；
+- explicit legacy fallback facade；
+- queue rollback、handler-thinness、no direct clear 等测试护栏。
+
+但 local path 仍由 `server.py` 通过闭包组装：
+- `settings_snapshot_provider`
+- `save_snapshot`
+- `refresh_snapshot`
+
+这仍然让 `server.py` 持有过多 local adapter 细节。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+2. 必须确认当前分支是 `codex/turnover-ledger-rebaseline-p134`，不是 `main`。
+3. 必须确认 PF-P134 已 verified。
+
+Goal:
+把 tag selection local path 的 local adapter 组装进一步迁入 adapter module，减少 `server.py` 中的 Application-capturing 闭包。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Implementation Work:
+1. 抽离 tag selection local path 所需的 local adapter seam，尽量减少 `server.py` 中的 inline closure。
+2. 保持 `TurnoverLedgerLocalTagSelectionConnection` / writer 语义不变。
+3. 不得把 `Application` 整体注入 adapter。
+4. handler 与 facade contract 不得变化。
+
+Behavior Constraints:
+- queue failure rollback 行为不变；
+- version conflict 行为不变；
+- handler-thinness 测试保持通过；
+- fallback facade 仍能工作；
+- 不新增 schema / worker / deploy 改动。
+
+Forbidden Scope:
+- 不得修改 relation extra、confirm、withdraw、bank row tags。
+- 不得修改 MG / deploy / Traffic Gate。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P135 status、变更文件、验证结果与 residual risk。
+3. 完成后再决定是否继续同组 local adapter 切片，或进入 cumulative MG。
+```
+
+### 审查结论
+
+- PF-P135 边界正确：它只处理 tag selection local adapter seam，不碰更复杂的 confirm/withdraw/bank-row-tags 主链。
+- 这一步可以继续减少 `server.py` 中的 local wiring，同时保持当前稳定测试基线。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
