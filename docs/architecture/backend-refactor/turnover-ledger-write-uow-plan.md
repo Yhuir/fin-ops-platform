@@ -3862,7 +3862,7 @@ PF-P110 边界：
 
 ## PF-P126 Confirm Relation Legacy Fallback Facade Extraction
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3926,6 +3926,23 @@ PF-P110 边界：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- `TurnoverLedgerWithdrawLegacyFallbackFacade` 已迁入 `turnover_ledger_write_adapters.py`。
+- `_turnover_ledger_withdraw_write_facade()` 在 primary UoW facade 不可用时返回 withdraw fallback adapter。
+- `_handle_api_turnover_ledger_withdraw(...)` 不再直接调用 route withdraw、不再直接调用 `_after_turnover_relation_mutation(...)`。
+- 新增 withdraw handler-thinness guard，并将 withdraw fallback characterization tests 改为通过 unsupported postgres queue API 触发 fallback adapter。
+- 验证通过：
+  - targeted withdraw tests：先 RED，后 Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条最小 prompt：
+
+- `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate`
+- 统一覆盖 PF-P125、PF-P126、PF-P127；不得直接进入 bank row tags。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

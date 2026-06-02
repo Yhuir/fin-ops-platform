@@ -24373,6 +24373,30 @@ Post-Flight:
 - PF-P127 允许 production code，但只限 `server.py` 和 `turnover_ledger_write_adapters.py`。
 - PF-P127 明确保留 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 行为，不处理 bank row tags 或其它 Turnover 写路径，不执行 Traffic Gate。
 
+### PF-P127 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 `TurnoverLedgerWithdrawLegacyFallbackFacade`，使用明确依赖封装 withdraw legacy fallback 的 route withdraw 和 after-mutation。
+  - `_turnover_ledger_withdraw_write_facade()` 在 primary UoW facade 不可用时返回 fallback adapter。
+  - `_handle_api_turnover_ledger_withdraw(...)` 不再内联 direct route withdraw 或 `_after_turnover_relation_mutation(...)`。
+  - withdraw fallback characterization tests 改为通过 unsupported postgres queue API 触发 fallback adapter。
+- 验证：
+  - targeted withdraw tests：先 RED，后 Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+- 下一条最小 prompt：`PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate`。该 MG 必须统一覆盖 PF-P125 到 PF-P127 的完整 diff；不得直接进入 bank row tags。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
