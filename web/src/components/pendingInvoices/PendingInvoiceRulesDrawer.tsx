@@ -1,4 +1,5 @@
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Checkbox from "@mui/material/Checkbox";
@@ -15,6 +16,7 @@ type PendingInvoiceRulesDrawerProps = {
   open: boolean;
   loadRules: () => Promise<PendingInvoiceRulesPayload>;
   saveRules: (payload: PendingInvoiceRulesPayload) => Promise<PendingInvoiceRulesPayload>;
+  title?: string;
   refreshToken?: number;
   onSaved: () => void;
   onClose: () => void;
@@ -30,6 +32,7 @@ export default function PendingInvoiceRulesDrawer({
   open,
   loadRules,
   saveRules,
+  title = "待找发票规则设置",
   refreshToken = 0,
   onSaved,
   onClose,
@@ -156,10 +159,10 @@ export default function PendingInvoiceRulesDrawer({
   return (
     <PendingInvoiceDrawerFrame
       open={open}
-      title="待找发票规则设置"
+      title={title}
       subtitle={payload ? `版本 ${payload.version}` : undefined}
       closeLabel="关闭规则抽屉"
-      width={560}
+      width={1040}
       onClose={onClose}
       footer={(
         <Stack direction="row" spacing={1} justifyContent="flex-end">
@@ -180,7 +183,15 @@ export default function PendingInvoiceRulesDrawer({
       {refreshNotice ? <Alert severity="info">{refreshNotice}</Alert> : null}
       {payload && !payload.permissions.canSave ? <Alert severity="info">当前账号只能查看规则，不能保存。</Alert> : null}
       {payload && requiresInvoiceGroup ? (
-        <Stack spacing={1}>
+        <Box
+          data-testid="pending-invoice-rules-grid"
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(220px, 1fr))" },
+            gap: 1,
+            alignItems: "start",
+          }}
+        >
           {editableGroupKeys(payload).map((key) => (
             <HierarchicalRuleBlock
               key={key}
@@ -200,7 +211,7 @@ export default function PendingInvoiceRulesDrawer({
             disabled
             readonly
           />
-        </Stack>
+        </Box>
       ) : null}
     </PendingInvoiceDrawerFrame>
   );
@@ -376,26 +387,26 @@ function HierarchicalRuleBlock({
 }) {
   const tree = tagTree(tags);
   return (
-    <Paper role="group" aria-label={group.label} variant="outlined" sx={{ borderRadius: 1, p: 1.25 }}>
-      <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 0.75 }}>
+    <Paper role="group" aria-label={group.label} variant="outlined" sx={{ borderRadius: 1, p: 0.85, minWidth: 0 }}>
+      <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 0.55, fontSize: 13, lineHeight: 1.25 }}>
         {group.label}
       </Typography>
       {tree.length === 0 ? (
         <Typography variant="body2" color="text.secondary">暂无标签。</Typography>
       ) : (
-        <Stack spacing={0.5} sx={{ maxHeight: readonly ? 180 : 220, overflowY: "auto", pr: 0.5 }}>
+        <Stack spacing={0.4} sx={{ maxHeight: readonly ? 170 : 210, overflowY: "auto", pr: 0.4 }}>
           {tree.map(({ primary, items }) => (
-            <Stack key={primary} spacing={0.25}>
-              <Typography variant="caption" color="text.secondary" fontWeight={800}>
+            <Stack key={primary} spacing={0.2}>
+              <Typography variant="caption" color="text.secondary" fontWeight={800} sx={{ fontSize: 11, lineHeight: 1.25 }}>
                 {primary}
               </Typography>
-              <Stack spacing={0.15} sx={{ pl: 1.5 }}>
+              <Stack spacing={0.1} sx={{ pl: 1 }}>
                 {items.map((tag) => {
                   const childLabel = tagChildLabel(tag);
                   const checked = selectedCodes.has(tag.code);
                   if (readonly) {
                     return (
-                      <Typography key={tag.code} variant="body2" sx={{ lineHeight: 1.65 }}>
+                      <Typography key={tag.code} variant="body2" sx={{ fontSize: 12, lineHeight: 1.45 }}>
                         {childLabel}
                       </Typography>
                     );
@@ -405,8 +416,8 @@ function HierarchicalRuleBlock({
                       key={tag.code}
                       sx={{
                         m: 0,
-                        minHeight: 28,
-                        "& .MuiFormControlLabel-label": { fontSize: 13 },
+                        minHeight: 24,
+                        "& .MuiFormControlLabel-label": { fontSize: 12, lineHeight: 1.25 },
                       }}
                       control={(
                         <Checkbox

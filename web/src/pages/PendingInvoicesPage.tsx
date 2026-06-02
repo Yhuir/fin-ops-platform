@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import KeyboardArrowDownOutlinedIcon from "@mui/icons-material/KeyboardArrowDownOutlined";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import LinearProgress from "@mui/material/LinearProgress";
@@ -130,6 +131,7 @@ export default function PendingInvoicesPage() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
   const [dialogRow, setDialogRow] = useState<PendingInvoiceRow | null>(null);
+  const [pendingIncomeStatusRows, setPendingIncomeStatusRows] = useState<Set<string>>(() => new Set());
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
 
   const filterOpen = Boolean(filterAnchorEl);
@@ -236,7 +238,7 @@ export default function PendingInvoicesPage() {
     sortField,
     sortDirection,
   }), [sortDirection, sortField]);
-  const actionsDisabled = Boolean(readModelStatus && readModelStatus !== "fresh");
+  const exportDisabled = Boolean(readModelStatus && readModelStatus !== "fresh");
 
   const handleSortChange = useCallback((field: PendingInvoiceSortField) => {
     setPage(1);
@@ -333,6 +335,7 @@ export default function PendingInvoicesPage() {
   }, []);
 
   const handleMarkIncomeStatus = useCallback((row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => {
+    setPendingIncomeStatusRows((current) => new Set(current).add(row.id));
     savePendingInvoiceIncomeStatus(row.id, statusCode)
       .then((result) => {
         if (result.row) {
@@ -342,6 +345,13 @@ export default function PendingInvoicesPage() {
       })
       .catch((caught) => {
         setError(caught instanceof Error ? caught.message : "收入流水状态保存失败。");
+      })
+      .finally(() => {
+        setPendingIncomeStatusRows((current) => {
+          const next = new Set(current);
+          next.delete(row.id);
+          return next;
+        });
       });
   }, []);
 
@@ -365,16 +375,22 @@ export default function PendingInvoicesPage() {
       size="small"
       aria-haspopup="menu"
       aria-label={`筛选发票获取状态：${filterLabel(direction, filter)}`}
+      aria-expanded={filterOpen ? "true" : undefined}
       onClick={(event) => setFilterAnchorEl(event.currentTarget)}
+      endIcon={<KeyboardArrowDownOutlinedIcon fontSize="small" />}
       sx={{
         minHeight: 24,
         height: 24,
-        px: 0.8,
+        px: 0.75,
         py: 0,
         fontSize: 11,
         lineHeight: 1,
         borderRadius: 1,
         whiteSpace: "nowrap",
+        "& .MuiButton-endIcon": {
+          ml: 0.25,
+          mr: -0.25,
+        },
       }}
     >
       {filterLabel(direction, filter)}
@@ -443,7 +459,7 @@ export default function PendingInvoicesPage() {
               <Button size="small" variant="outlined" onClick={() => handleOpenRules("income")} sx={{ whiteSpace: "nowrap" }}>
                 收入待找发票规则设置
               </Button>
-              <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => setActiveDrawer("export")} sx={{ whiteSpace: "nowrap" }}>
+              <Button size="small" variant="contained" disabled={exportDisabled} onClick={() => setActiveDrawer("export")} sx={{ whiteSpace: "nowrap" }}>
                 筛选内容导出
               </Button>
               <TextField
@@ -474,7 +490,7 @@ export default function PendingInvoicesPage() {
           onMarkIncomeStatus={handleMarkIncomeStatus}
           direction={direction}
           statusFilterControl={statusFilterControl}
-          actionsDisabled={actionsDisabled}
+          pendingActionRowIds={pendingIncomeStatusRows}
         />
         <TablePagination
           component="div"
@@ -495,6 +511,7 @@ export default function PendingInvoicesPage() {
         open={activeDrawer === "rules"}
         loadRules={loadRules}
         saveRules={saveRules}
+        title={rulesDirection === "income" ? "收入待找发票规则设置" : "支出待找发票规则设置"}
         refreshToken={rulesTagRefreshToken}
         onSaved={() => setRefreshToken((current) => current + 1)}
         onClose={closeDrawer}

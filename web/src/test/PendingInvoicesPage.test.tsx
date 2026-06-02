@@ -305,6 +305,7 @@ function pendingRuleClosureRow(id: string, counterpartyName: string, statusLabel
 function installPendingInvoiceFetch(options: {
   rulesPayload?: () => ReturnType<typeof pendingInvoiceRulesPayload>;
   rowsPayload?: (url: URL) => Array<Record<string, unknown>>;
+  readModelStatus?: string;
   onRulesSaved?: () => void;
 } = {}) {
   const baseFetch = installMockApiFetch();
@@ -331,7 +332,7 @@ function installPendingInvoiceFetch(options: {
             excluded_direction_rows: direction === "income" ? 356 : 75,
           },
         },
-        read_model_status: "fresh",
+        read_model_status: options.readModelStatus ?? "fresh",
         tag_dictionary: { version: 1, tags: [] },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -556,7 +557,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "对方 / 时间" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "摘要 / 凭证" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "状态" })).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "状态" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选发票获取状态：全部" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "发票号码 / 开票日期" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "销方 / 识别号" })).toBeInTheDocument();
@@ -585,8 +586,13 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText("命中无需开票规则：工资")).not.toBeInTheDocument();
     expect(within(page).queryByText("发票价税合计大于已付合计")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /打开规则设置/ })).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: /云南开票供应商 选择发票/ })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: /云南开票供应商 补票/ })).toBeInTheDocument();
+    const pendingRow = within(page).getByRole("row", { name: /云南开票供应商/ });
+    expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 选择发票/ })).not.toBeInTheDocument();
+    expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 补票/ })).not.toBeInTheDocument();
+    await userEvent.setup().click(within(pendingRow).getByRole("button", { name: "云南开票供应商 发票获取操作" }));
+    expect(await screen.findByRole("menuitem", { name: "选择发票" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "补票" })).toBeInTheDocument();
+    await userEvent.setup().keyboard("{Escape}");
     expect(within(page).getByText("DIG-001")).toBeInTheDocument();
     expect(within(page).getAllByText("+1").length).toBeGreaterThanOrEqual(2);
     expect(within(page).getByText("已付 1,200.00")).toBeInTheDocument();
@@ -667,7 +673,8 @@ describe("Pending invoices page", () => {
 
     const page = await screen.findByTestId("pending-invoices-page");
     const relationRow = await within(page).findByRole("row", { name: /分期供应商/ });
-    await user.click(within(relationRow).getByRole("button", { name: /分期供应商 查看支付明细/ }));
+    await user.click(within(relationRow).getByRole("button", { name: "分期供应商 发票获取操作" }));
+    await user.click(await screen.findByRole("menuitem", { name: "查看支付明细" }));
     expect(await screen.findByText("关系与支付明细")).toBeInTheDocument();
     expect(await screen.findByText("已付合计")).toBeInTheDocument();
     expect(screen.getByText("1,500.00")).toBeInTheDocument();
@@ -688,7 +695,7 @@ describe("Pending invoices page", () => {
     await user.click(within(oaDialog).getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
-    expect(await screen.findByRole("heading", { name: "待找发票规则设置" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "支出待找发票规则设置" })).toBeInTheDocument();
     expect(screen.getByText("需要开票")).toBeInTheDocument();
     expect(screen.getAllByText("手续费").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "保存规则" }));
@@ -702,7 +709,7 @@ describe("Pending invoices page", () => {
     await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "收入待找发票规则设置" }));
-    expect(await screen.findByRole("heading", { name: "待找发票规则设置" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "收入待找发票规则设置" })).toBeInTheDocument();
     await waitFor(() => {
       const latestRulesGet = pendingInvoiceRulesRequests(fetchMock).at(-1);
       const url = new URL(typeof latestRulesGet?.[0] === "string" ? latestRulesGet[0] : latestRulesGet?.[0] instanceof URL ? latestRulesGet[0].toString() : latestRulesGet?.[0]?.url ?? "", "http://localhost");
@@ -741,6 +748,7 @@ describe("Pending invoices page", () => {
     const page = await screen.findByTestId("pending-invoices-page");
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
 
+    expect(await screen.findByTestId("pending-invoice-rules-grid")).toBeInTheDocument();
     const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
     const noInvoiceBlock = screen.getByRole("group", { name: "无需开票" });
     const requiresInvoiceBlock = screen.getByRole("group", { name: "需要开票" });
@@ -908,7 +916,8 @@ describe("Pending invoices page", () => {
     const page = await screen.findByTestId("pending-invoices-page");
     const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
     const pendingRow = await within(page).findByRole("row", { name: /云南开票供应商/ });
-    await user.click(within(pendingRow).getByRole("button", { name: /云南开票供应商 选择发票/ }));
+    await user.click(within(pendingRow).getByRole("button", { name: "云南开票供应商 发票获取操作" }));
+    await user.click(await screen.findByRole("menuitem", { name: "选择发票" }));
 
     expect(await screen.findByRole("heading", { name: "选择已有进项发票" })).toBeInTheDocument();
     expect(await screen.findByText("DIG-CAND-001")).toBeInTheDocument();
@@ -941,7 +950,8 @@ describe("Pending invoices page", () => {
 
     const page = await screen.findByTestId("pending-invoices-page");
     const pendingRow = await within(page).findByRole("row", { name: /云南开票供应商/ });
-    await user.click(within(pendingRow).getByRole("button", { name: /云南开票供应商 补票/ }));
+    await user.click(within(pendingRow).getByRole("button", { name: "云南开票供应商 发票获取操作" }));
+    await user.click(await screen.findByRole("menuitem", { name: "补票" }));
     const dialog = await screen.findByRole("dialog", { name: "手工补录发票" });
     await user.type(within(dialog).getByLabelText("发票号码"), "INV-MANUAL");
     await user.type(within(dialog).getByLabelText("开票日期"), "2026-05-06");
@@ -974,6 +984,24 @@ describe("Pending invoices page", () => {
     await waitFor(() => {
       expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
     });
+  });
+
+  test("keeps row status actions available while the list read model is refreshing", async () => {
+    const user = userEvent.setup();
+    installPendingInvoiceFetch({ readModelStatus: "refreshing" });
+    renderAppAt("/pending-invoices");
+
+    const page = await screen.findByTestId("pending-invoices-page");
+    expect(await within(page).findByText("数据刷新中")).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
+
+    const pendingRow = await within(page).findByRole("row", { name: /云南开票供应商/ });
+    const actionButton = within(pendingRow).getByRole("button", { name: "云南开票供应商 发票获取操作" });
+    expect(actionButton).toBeEnabled();
+
+    await user.click(actionButton);
+    expect(await screen.findByRole("menuitem", { name: "选择发票" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "补票" })).toBeEnabled();
   });
 
   test("refetches rows on focus as bank detail tag update fallback", async () => {

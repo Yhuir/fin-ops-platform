@@ -1,8 +1,11 @@
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import MoreVertOutlinedIcon from "@mui/icons-material/MoreVertOutlined";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import IconButton from "@mui/material/IconButton";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -13,7 +16,7 @@ import TableSortLabel from "@mui/material/TableSortLabel";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import type { SxProps, Theme } from "@mui/material/styles";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type {
   PendingInvoiceObjectDetailTarget,
@@ -41,7 +44,7 @@ type PendingInvoicesTableProps = {
   onMarkIncomeStatus: (row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => void;
   direction: PendingInvoiceDirection;
   statusFilterControl: ReactNode;
-  actionsDisabled?: boolean;
+  pendingActionRowIds?: Set<string>;
 };
 
 const GROUP_BORDER = "2px solid";
@@ -151,14 +154,15 @@ function canOpenOaDetail(row: PendingInvoiceRow) {
   return Boolean(primaryOa?.id?.startsWith("oa-") && primaryOa.detailAvailable && row.oa.detailAvailable);
 }
 
-function ActionButtons({
+function RowActionMenu({
   row,
   onOpenRelation,
   onOpenInvoicePicker,
   onOpenManualInvoice,
   onMarkIncomeStatus,
-  actionsDisabled = false,
-}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onMarkIncomeStatus" | "actionsDisabled"> & { row: PendingInvoiceRow }) {
+  disabled = false,
+}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onMarkIncomeStatus"> & { row: PendingInvoiceRow; disabled?: boolean }) {
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const action = row.invoiceAcquisitionStatus.primaryAction;
   const prefix = row.bankTransaction.counterpartyName;
   const available = new Set(row.availableActions);
@@ -166,53 +170,75 @@ function ActionButtons({
   const canManual = available.has("manual_invoice");
   const canMarkIncome = available.has("mark_income_status");
   const canViewRelation = available.has("view_relation");
+  const menuItems: Array<{ key: string; label: string; onClick: () => void }> = [];
 
   if (action === "mark_income_status" && canMarkIncome) {
-    return (
-      <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-        <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onMarkIncomeStatus(row, "income_no_invoice_required")} aria-label={`${prefix} 标记无需开票`} sx={compactActionButtonSx}>
-          无需开票
-        </Button>
-        <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onMarkIncomeStatus(row, "cash_income")} aria-label={`${prefix} 标记现金收入`} sx={compactActionButtonSx}>
-          现金收入
-        </Button>
-      </Stack>
+    menuItems.push(
+      { key: "income_no_invoice_required", label: "无需开票", onClick: () => onMarkIncomeStatus(row, "income_no_invoice_required") },
+      { key: "cash_income", label: "现金收入", onClick: () => onMarkIncomeStatus(row, "cash_income") },
     );
   }
   if (action === "attach_or_create_invoice" && (canAttach || canManual)) {
-    return (
-      <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-        {canAttach ? <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`} sx={compactActionButtonSx}>
-          选择发票
-        </Button> : null}
-        {canManual ? <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`} sx={compactActionButtonSx}>
-          补票
-        </Button> : null}
-      </Stack>
-    );
+    if (canAttach) {
+      menuItems.push({ key: "attach_existing_invoice", label: "选择发票", onClick: () => onOpenInvoicePicker(row) });
+    }
+    if (canManual) {
+      menuItems.push({ key: "manual_invoice", label: "补票", onClick: () => onOpenManualInvoice(row) });
+    }
   }
   if (shouldOpenRelation(action) && canViewRelation) {
-    return (
-      <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${prefix} 查看支付明细`} sx={compactActionButtonSx}>
-        查看支付明细
-      </Button>
-    );
+    menuItems.push({ key: "view_relation", label: "查看支付明细", onClick: () => onOpenRelation(row) });
   }
   if (shouldOpenInvoicePicker(action) && canAttach) {
-    return (
-      <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`} sx={compactActionButtonSx}>
-        选择发票
-      </Button>
-    );
+    menuItems.push({ key: "choose_invoice", label: "选择发票", onClick: () => onOpenInvoicePicker(row) });
   }
   if (shouldOpenManualInvoice(action) && canManual) {
-    return (
-      <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`} sx={compactActionButtonSx}>
-        补票
-      </Button>
-    );
+    menuItems.push({ key: "create_invoice", label: "补票", onClick: () => onOpenManualInvoice(row) });
   }
-  return null;
+  if (menuItems.length === 0) {
+    return null;
+  }
+  const open = Boolean(anchorEl);
+  return (
+    <>
+      <Tooltip title="发票获取操作">
+        <IconButton
+          size="small"
+          aria-label={`${prefix} 发票获取操作`}
+          aria-haspopup="menu"
+          aria-expanded={open ? "true" : undefined}
+          onClick={(event) => setAnchorEl(event.currentTarget)}
+          sx={{
+            width: 24,
+            height: 24,
+            justifySelf: "end",
+            color: "text.secondary",
+          }}
+        >
+          <MoreVertOutlinedIcon fontSize="inherit" />
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={() => setAnchorEl(null)}
+        MenuListProps={{ "aria-label": `${prefix} 发票获取操作菜单` }}
+      >
+        {menuItems.map((item) => (
+          <MenuItem
+            key={item.key}
+            disabled={disabled}
+            onClick={() => {
+              setAnchorEl(null);
+              item.onClick();
+            }}
+          >
+            {item.label}
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
 }
 
 export default function PendingInvoicesTable({
@@ -226,7 +252,7 @@ export default function PendingInvoicesTable({
   onMarkIncomeStatus,
   direction,
   statusFilterControl,
-  actionsDisabled = false,
+  pendingActionRowIds,
 }: PendingInvoicesTableProps) {
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
   const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
@@ -237,19 +263,19 @@ export default function PendingInvoicesTable({
         sx={{
           overflowX: "hidden",
           overflowY: "auto",
-          maxHeight: { xs: "calc(100vh - 255px)", md: "calc(100vh - 220px)" },
-          minHeight: 280,
+          maxHeight: { xs: "calc(100vh - 220px)", md: "calc(100vh - 185px)" },
+          minHeight: 322,
           overscrollBehavior: "contain",
         }}
       >
         <Table stickyHeader aria-label="待找发票四区表" size="small" sx={{ width: "100%", tableLayout: "fixed" }}>
           <colgroup>
             <col style={{ width: "16%" }} />
-            <col style={{ width: "12%" }} />
-            <col style={{ width: "14%" }} />
             <col style={{ width: "13%" }} />
-            <col style={{ width: "10%" }} />
+            <col style={{ width: "15%" }} />
             <col style={{ width: "11%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "10%" }} />
             <col style={{ width: "7%" }} />
             <col style={{ width: "8%" }} />
             <col style={{ width: "9%" }} />
@@ -270,8 +296,7 @@ export default function PendingInvoicesTable({
               </TableCell>
               <TableCell scope="col" sx={subHeaderSx("#f6faff")}>摘要 / 凭证</TableCell>
               <TableCell scope="col" sx={subHeaderSx("#fffaf0", true)}>
-                <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between" sx={{ minWidth: 0 }}>
-                  {sortableLabel("状态", "status_code", config, onSortChange)}
+                <Stack alignItems="center" justifyContent="center" sx={{ minWidth: 0 }}>
                   {statusFilterControl}
                 </Stack>
               </TableCell>
@@ -307,7 +332,7 @@ export default function PendingInvoicesTable({
               onOpenManualInvoice,
               onOpenObjectDetail,
               onMarkIncomeStatus,
-              actionsDisabled,
+              actionPending: pendingActionRowIds?.has(row.id) ?? false,
             }))}
           </TableBody>
         </Table>
@@ -359,17 +384,19 @@ function dataCellSx(leftBorder = false): SxProps<Theme> {
   };
 }
 
-const compactActionButtonSx: SxProps<Theme> = {
-  minHeight: 24,
-  height: 24,
-  px: 0.85,
-  py: 0,
-  fontSize: 11,
-  lineHeight: 1,
-  borderRadius: 1,
-  boxShadow: "none",
-  whiteSpace: "nowrap",
-};
+function amountCellSx(): SxProps<Theme> {
+  return {
+    ...dataCellSx(),
+    pr: 1.35,
+  };
+}
+
+function summaryCellSx(): SxProps<Theme> {
+  return {
+    ...dataCellSx(),
+    pl: 1.35,
+  };
+}
 
 const denseChipSx: SxProps<Theme> = {
   height: 20,
@@ -401,8 +428,8 @@ function renderRow({
   onOpenManualInvoice,
   onOpenObjectDetail,
   onMarkIncomeStatus,
-  actionsDisabled = false,
-}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl"> & { row: PendingInvoiceRow }) {
+  actionPending = false,
+}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "pendingActionRowIds"> & { row: PendingInvoiceRow; actionPending?: boolean }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
   const invoiceExtraCount = Math.max(0, row.inputInvoices.relationCount - 1);
@@ -438,7 +465,7 @@ function renderRow({
           />
         </Stack>
       </TableCell>
-      <TableCell align="right" sx={dataCellSx()}>
+      <TableCell align="right" sx={amountCellSx()}>
         <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
           <Chip
             size="small"
@@ -455,7 +482,7 @@ function renderRow({
           {bankAccountLabel(row.bankTransaction)}
         </Typography>
       </TableCell>
-      <TableCell sx={dataCellSx()}>
+      <TableCell sx={summaryCellSx()}>
         <Stack spacing={0.35}>
           <Typography sx={[overflowText(false), { fontSize: 12, lineHeight: 1.3 }]}>
             {row.bankTransaction.summary || "-"}
@@ -466,23 +493,32 @@ function renderRow({
         </Stack>
       </TableCell>
       <TableCell sx={dataCellSx(true)}>
-        <Stack spacing={0.4} alignItems="flex-start">
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: "24px minmax(0, 1fr) 24px",
+            alignItems: "center",
+            columnGap: 0.35,
+            minHeight: 24,
+          }}
+        >
+          <Box aria-hidden="true" />
           <Chip
             size="small"
             color={chipColor(row.invoiceAcquisitionStatus.severity)}
             variant={row.invoiceAcquisitionStatus.severity === "default" ? "outlined" : "filled"}
             label={row.invoiceAcquisitionStatus.label}
-            sx={denseChipSx}
+            sx={{ ...denseChipSx, justifySelf: "center" }}
           />
-          <ActionButtons
+          <RowActionMenu
             row={row}
             onOpenRelation={onOpenRelation}
             onOpenInvoicePicker={onOpenInvoicePicker}
             onOpenManualInvoice={onOpenManualInvoice}
             onMarkIncomeStatus={onMarkIncomeStatus}
-            actionsDisabled={actionsDisabled}
+            disabled={actionPending}
           />
-        </Stack>
+        </Box>
       </TableCell>
       <TableCell sx={dataCellSx(true)}>
         {primaryInvoice ? (
