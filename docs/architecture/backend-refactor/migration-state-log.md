@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup` |
-| 最近 verified prompt | `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests` |
+| 当前阶段 | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` |
+| 最近 verified prompt | `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p109` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup` |
+| 下一条允许任务 | 执行 `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -8218,7 +8218,7 @@ Verification：
 
 ### PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8237,7 +8237,48 @@ Verification：
 
 #### 下一条 Prompt 上下文
 
-PF-P111 planned。执行后如范围保持最小，下一条可继续针对 local shim extraction 做 discovery/tests，或进入 PF-P111/PF-P110 cumulative MG，视 diff 大小决定。
+PF-P111 已移除 relation extra 缺少 dedicated persistence method 时的 legacy full snapshot fallback。`_persist_turnover_ledger_extras_best_effort(...)` 现在只调用 `save_turnover_ledger_extras(...)`；缺少该方法时只发出 best-effort warning，不再调用 `legacy_bootstrap.load_full_snapshot(...)`，也不再写 full snapshot。
+
+Verification：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
+
+下一条应执行 `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate`，统一覆盖 PF-P109/PF-P110/PF-P111 的完整 diff。
+
+### PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 统一验证并合入 PF-P109、PF-P110、PF-P111 的完整 diff。
+- 只覆盖 Turnover Ledger fallback/local shim rebaseline、characterization tests、relation extra legacy full snapshot fallback cleanup。
+- 不执行 Traffic Gate，不部署，不访问生产。
+
+#### 允许文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P111-MG planned。MG 通过后合入 main、在 main 重跑验证、push origin/main，然后从最新 main 新建下一条 codex 分支。
 
 ## 维护规则
 

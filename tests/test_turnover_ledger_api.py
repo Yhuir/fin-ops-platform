@@ -1609,7 +1609,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
 
-    def test_relation_extra_fallback_persists_full_snapshot_when_dedicated_store_method_is_missing(self) -> None:
+    def test_relation_extra_missing_dedicated_store_method_does_not_load_full_snapshot(self) -> None:
         class LegacyBootstrapRecorder:
             def __init__(self) -> None:
                 self.reasons: list[str] = []
@@ -1640,12 +1640,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
             app._persist_turnover_ledger_extras_best_effort(operation="test_legacy_fallback")
 
-        self.assertEqual(legacy_bootstrap.reasons, ["legacy_turnover_ledger_extras_fallback_persist"])
-        self.assertIsNotNone(legacy_store.saved_payload)
-        self.assertEqual(legacy_store.saved_payload["existing"], "payload")  # type: ignore[index]
-        extras = legacy_store.saved_payload["turnover_ledger_extras"]["extras"]  # type: ignore[index]
-        self.assertEqual(extras[0]["relation_id"], "turnover_rel_legacy")
-        self.assertEqual(extras[0]["note"], "legacy fallback")
+        self.assertEqual(legacy_bootstrap.reasons, [])
+        self.assertIsNone(legacy_store.saved_payload)
 
     def test_relation_extra_best_effort_uses_dedicated_store_without_full_snapshot_fallback(self) -> None:
         # PF-P110 characterization: dedicated extras persistence must not hit legacy full snapshot fallback.

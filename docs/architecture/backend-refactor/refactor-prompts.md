@@ -22098,6 +22098,99 @@ Post-Flight:
 - PF-P111 边界正确：只清理 relation extra 的 legacy full snapshot fallback。
 - 该 prompt 明确不扩大到其它 fallback/local shim，适合在 PF-P110 测试护栏后执行。
 
+### PF-P111 执行结果
+
+状态：`verified`
+
+变更：
+
+- `backend/src/fin_ops_platform/app/server.py`：
+  - `_persist_turnover_ledger_extras_best_effort(...)` 不再调用 `legacy_bootstrap.load_full_snapshot(...)`。
+  - 缺少 `save_turnover_ledger_extras(...)` 时仅发出 best-effort warning，不再保存 full snapshot。
+- `tests/test_turnover_ledger_api.py`：
+  - 更新 legacy fallback test 为 no-full-snapshot 断言。
+  - 保留 dedicated store path 测试。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
+
+下一条建议：
+
+- 生成并执行 `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate`。
+- 该 MG 统一覆盖 PF-P109、PF-P110、PF-P111。
+
+## PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 merge gate 审核工程师。你必须严格验证 PF-P109 到 PF-P111 的完整 diff，确认范围、测试和文档状态后再合入 main。
+
+Context:
+PF-P109、PF-P110、PF-P111 均已 verified。当前分支应为 `codex/turnover-ledger-next-slice-p109`。本 MG 覆盖：
+- PF-P109：remaining write path rebaseline / fallback cleanup decision。
+- PF-P110：fallback/local shim characterization tests。
+- PF-P111：relation extra legacy full snapshot fallback cleanup。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P109、PF-P110、PF-P111 均为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Gate Scope:
+只允许以下文件出现在 `main...HEAD` diff：
+- backend/src/fin_ops_platform/app/server.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Mandatory Checks:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+
+Merge Rules:
+- 严禁 `git add .` 或 `git add -A`。
+- 如有 untracked 临时文件，必须停止。
+- 如 main 已有远端更新，合入 main 前必须先同步并重新验证。
+- 合入 main 后必须在 main 重跑 mandatory tests；若失败，停止且不得 push。
+- push origin/main 只代表 Git 推送，不代表部署、切流或 Traffic Gate。
+
+Forbidden Scope:
+- 不执行 Traffic Gate。
+- 不部署，不访问生产，不修改 Nginx/配置/feature flag。
+- 不开始下一业务模块。
+- 不继续清理其它 fallback/local shim。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P111-MG 结果。
+2. 将 PF-P111-MG 标记为 verified。
+3. 合入 main 并在 main 重跑验证。
+4. 验证通过后执行 git push origin main。
+5. push 后从最新 main 新建下一条 codex 分支。
+```
+
+### 审查结论
+
+- PF-P111-MG 边界正确：只覆盖 PF-P109/PF-P110/PF-P111 的 cumulative diff。
+- 该 MG 明确不执行 Traffic Gate，不扩大 fallback cleanup。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

@@ -3099,7 +3099,7 @@ PF-P110 边界：
 
 ## PF-P111 Relation Extra Legacy Full Snapshot Fallback Cleanup
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3118,6 +3118,44 @@ PF-P110 边界：
 - `git status --short --branch`
 - `git ls-files --others --exclude-standard`
 - `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+
+执行结果：
+
+- `_persist_turnover_ledger_extras_best_effort(...)` 不再读取 legacy full snapshot。
+- 缺少 dedicated `save_turnover_ledger_extras(...)` 时仅发出 best-effort warning。
+- 对应 API tests 已更新为 no-full-snapshot 行为。
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
+
+## PF-P111-MG Fallback Cleanup Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一覆盖 PF-P109、PF-P110、PF-P111。
+- 只包含 rebaseline docs、fallback/local shim characterization tests、relation extra full snapshot fallback cleanup。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
