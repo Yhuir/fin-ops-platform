@@ -21906,3 +21906,97 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures
   - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - 下一条建议：生成并审查 `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping`，只处理 handler 读取 body idempotency key、注入 facade/UoW、HTTP replay/conflict/in-progress mapping。
+
+## PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping
+
+状态：`planned`
+
+```text
+/goal
+PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在不扩大业务范围的前提下，把 Turnover Ledger relation extra 的 durable idempotency 从 UoW seam 接到 HTTP boundary。
+
+Context:
+PF-P107 已 verified。当前状态：
+- `TurnoverLedgerWriteUnitOfWork` 已支持 optional `idempotency_store`。
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 已支持 optional `idempotency_key` 并生成 request fingerprint。
+- `tests/test_turnover_ledger_api.py` 中两个 relation extra API-level idempotency tests 仍为 `unittest.expectedFailure`：
+  - same key/fingerprint replay without duplicate save/enqueue；
+  - same key/different payload returns 409 `idempotency_key_conflict`。
+- `Application._workbench_write_idempotency_store(...)` 已能基于 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY` 返回 PostgreSQL 或 in-memory idempotency store。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/workbench_idempotency.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P107 已 verified。
+
+Goal:
+让 relation extra HTTP endpoint 支持 request body 中的 `idempotency_key` / `idempotencyKey`，并通过 facade/UoW 使用 PF-P107 的 idempotency store seam。让 PF-P105 的两个 API-level relation extra idempotency target tests 从 expectedFailure 转为普通通过。
+
+Allowed Scope:
+- `backend/src/fin_ops_platform/app/server.py`
+- `tests/test_turnover_ledger_api.py`
+- 必要时小幅调整：
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- 文档：
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Implementation Work:
+1. HTTP body extraction:
+   - 在 `_handle_api_turnover_ledger_relation_extra_update(...)` 中读取 `payload.get("idempotency_key")` 或 `payload.get("idempotencyKey")`。
+   - Handler 只做 HTTP mapping，不在 handler 内实现 idempotency 状态机。
+   - 将 normalized idempotency key 传给 `facade.update_relation_extra(...)`。
+2. UoW store injection:
+   - 在 `_turnover_ledger_relation_extra_write_facade(...)` 的 postgres path 中复用 `_workbench_write_idempotency_store(...)`。
+   - 将 idempotency store 注入 `TurnoverLedgerWriteUnitOfWork`。
+   - local/fallback path 不得伪造 durable idempotency；保持现有 fallback 行为。
+3. Error mapping:
+   - 捕获 `WorkbenchIdempotencyKeyConflict`、`WorkbenchIdempotencyInProgress`、`WorkbenchIdempotencyFailed` 或其共同 response payload 行为。
+   - 返回 HTTP 409 JSON，payload 必须保留 `error` code，例如 `idempotency_key_conflict`。
+4. Tests:
+   - 移除两个 relation extra API-level idempotency tests 的 `@unittest.expectedFailure`。
+   - 不允许通过放宽断言或删除断言来转绿。
+
+Forbidden Scope:
+- 不得新增 SQL migration。
+- 不得修改 PostgreSQL idempotency schema。
+- 不得修改 Workbench 写路径。
+- 不得迁移 confirm/withdraw/bank row tags/tag selection 等其它 Turnover 写路径。
+- 不得新增 fallback/local transaction shim。
+- 不得修改部署、Nginx、生产配置、feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P108 status、changed files、verification commands/results。
+3. 如果 PF-P107/PF-P108 diff 已达到可合并边界，下一条生成 cumulative MG，统一覆盖 relation extra idempotency UoW seam + HTTP boundary。
+```
+
+### 审查结论
+
+- PF-P108 边界正确：只把 PF-P107 的 UoW/store seam 接到 relation extra HTTP boundary。
+- 该 prompt 允许 `server.py` 的最小 HTTP mapping 变更，但禁止 handler 内实现 idempotency 状态机。
+- 不新增 migration、不改 schema、不迁移其它 Turnover 写路径，适合作为 PF-P107 后的同切片实现。

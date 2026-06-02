@@ -2876,3 +2876,32 @@ Relation extra 当前写路径：
 
 - 生成并审查 `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping`。
 - PF-P108 只处理 handler 读取 body idempotency key、注入 facade/UoW、HTTP replay/conflict/in-progress mapping；不得新增 SQL migration、不得迁移其它 Turnover 写路径。
+
+## PF-P108 Relation Extra Idempotency HTTP Boundary and Error Mapping
+
+状态：`planned`
+
+目标：
+
+- 将 PF-P107 的 relation extra idempotency UoW seam 接到 HTTP boundary。
+- Handler 从 JSON body 读取 `idempotency_key` / `idempotencyKey` 并传给 facade。
+- postgres relation extra facade construction 复用 `_workbench_write_idempotency_store(...)` 注入 UoW。
+- 捕获 Workbench idempotency conflict/in-progress/failed 并返回 HTTP 409 JSON。
+- 让两个 relation extra API-level idempotency expectedFailure 转为普通通过。
+
+边界：
+
+- 可修改 `server.py` 的 relation extra handler 和 relation extra facade construction。
+- 可修改 `tests/test_turnover_ledger_api.py` 移除对应 expectedFailure。
+- 不新增 SQL migration，不修改 idempotency schema。
+- 不迁移其它 Turnover 写路径。
+- 不执行 Traffic Gate、部署、生产访问或真实外部服务访问。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
