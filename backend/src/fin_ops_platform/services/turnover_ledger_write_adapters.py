@@ -105,6 +105,36 @@ class TurnoverLedgerLocalTagSelectionSettingsWriter:
         self._refresh_snapshot(snapshot)
 
 
+class TurnoverLedgerTagSelectionLegacyFallbackFacade:
+    def __init__(
+        self,
+        *,
+        app_settings_service: Any,
+        clear_read_model: Callable[[], None],
+        enqueue_refresh: Callable[[list[str]], None],
+    ) -> None:
+        self._app_settings_service = app_settings_service
+        self._clear_read_model = clear_read_model
+        self._enqueue_refresh = enqueue_refresh
+
+    def update_tag_selection(
+        self,
+        *,
+        payload: dict[str, object],
+        actor_id: str,
+        tenant_id: str,
+        scope_keys: list[str],
+    ) -> dict[str, object]:
+        _ = tenant_id
+        result = self._app_settings_service.update_turnover_ledger_tag_selection(
+            payload,
+            actor_id=actor_id,
+        )
+        self._clear_read_model()
+        self._enqueue_refresh(list(scope_keys or ["all"]))
+        return result
+
+
 class TurnoverLedgerRelationRepositoryAdapter:
     def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
         self._repository_factory = repository_factory

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction` 已执行并验证通过 |
 | 当前 active prompt | `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction` |
-| 最近 verified prompt | `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` |
+| 最近 verified prompt | `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction` |
 | 当前分支 | `codex/turnover-ledger-remaining-boundary-p120` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，61 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests |
-| 下一条允许任务 | 执行 `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，62 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
+| 下一条允许任务 | 生成并审查 `PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction` |
 
 ## Prompt 执行日志
 
@@ -8684,7 +8684,7 @@ Verification：
 
 ### PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8713,7 +8713,24 @@ Verification：
 
 #### 下一条 Prompt 上下文
 
-TBD。
+执行结果：
+
+- 在 `turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerTagSelectionLegacyFallbackFacade`。
+- `_turnover_ledger_tag_selection_write_facade()` 在 `state_store` / `queue_repository` 缺失，或 PostgreSQL path 缺失 transactional queue API 时，返回显式 legacy fallback adapter，而不是让 handler 处理 `None`。
+- `_handle_api_turnover_ledger_tag_selection_update(...)` 已删除 `facade is None` direct settings update / read model clear / enqueue 分支；handler 只解析 session/body、调用 facade-like object、处理 validation error 和返回 response。
+- 更新 tag selection fallback tests：
+  - 新增 handler thinness 静态门禁，禁止 handler 内联 legacy fallback side effects。
+  - 将 fallback 行为测试改为 unsupported postgres queue API 触发 fallback adapter，保持 legacy update/clear/enqueue 行为。
+
+Verification：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，62 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P123 已完成 tag selection fallback handler thinness cleanup。下一条应生成并审查 `PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction`：只处理 relation extra fallback，不处理 bank row tags、confirm、withdraw；必须保护 expected_versions/idempotency precheck 和 PF-P121 锁定的 direct update/persist/clear/enqueue 行为。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

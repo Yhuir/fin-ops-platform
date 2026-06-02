@@ -23781,7 +23781,7 @@ Verification：
 
 ## PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction
 
-状态：`planned`
+状态：`verified`
 
 ```text
 /goal
@@ -23867,6 +23867,21 @@ Post-Flight:
 - PF-P123 边界正确：只处理 tag selection fallback handler thinness。
 - PF-P123 允许 production code，但只限 `server.py` 和 `turnover_ledger_write_adapters.py`。
 - PF-P123 不处理其它 Turnover Ledger 写入口，不执行 Traffic Gate。
+
+### PF-P123 执行结果
+
+- 新增 `TurnoverLedgerTagSelectionLegacyFallbackFacade`，封装 legacy direct settings update、read model clear、refresh enqueue。
+- `_turnover_ledger_tag_selection_write_facade()` 在 primary UoW facade 不可用时返回 legacy fallback adapter，不再把 `None` 交给 handler。
+- `_handle_api_turnover_ledger_tag_selection_update(...)` 已删除 `facade is None` direct fallback 分支。
+- 新增/调整 tag selection tests，锁定 handler thinness 和 unsupported postgres queue API fallback adapter 行为。
+
+Verification：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，62 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条最小 prompt：`PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction`，只处理 relation extra fallback。
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 

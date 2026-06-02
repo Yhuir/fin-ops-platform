@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import pickle
+import inspect
 from io import BytesIO
 from contextlib import contextmanager
 from pathlib import Path
@@ -856,8 +857,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
         self.assertEqual(read_repository.clear_calls, 0)
 
-    def test_turnover_ledger_tag_selection_facade_none_keeps_legacy_direct_update_and_refresh(self) -> None:
-        # PF-P121 characterization: facade None fallback remains a legacy direct-update/direct-refresh path.
+    def test_turnover_ledger_tag_selection_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_tag_selection_update)
+
+        self.assertNotIn("update_turnover_ledger_tag_selection(", source)
+        self.assertNotIn("_clear_turnover_ledger_read_model_best_effort(", source)
+        self.assertNotIn("_enqueue_turnover_ledger_read_model_refreshes(", source)
+
+    def test_turnover_ledger_tag_selection_fallback_adapter_keeps_legacy_update_and_refresh(self) -> None:
+        # PF-P123 target: unsupported postgres queue API uses explicit fallback adapter, not handler direct side effects.
         with TemporaryDirectory() as temp_dir:
             ApplicationStateStore(Path(temp_dir)).save_app_settings(
                 {
@@ -896,9 +904,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             queue = _QueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
-            app._turnover_ledger_tag_selection_write_facade = lambda: None  # type: ignore[method-assign]
             initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
             response = app.handle_request(
