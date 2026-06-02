@@ -5865,6 +5865,167 @@ Remaining seam matrix：
 - 下一条建议：`PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning`。
 - PF-P172 应先定义 confirm expected_versions API/contract，不得直接实现 confirm stale guard。
 
+## PF-P172 Confirm Expected Versions Contract Planning
+
+状态：
+
+- verified
+
+范围：
+
+- docs-only planning。
+- 不修改 production code、frontend code、tests、schema、deploy 或 Traffic Gate。
+
+当前事实：
+
+- Backend handler：`_handle_api_turnover_ledger_confirm(...)` 只读取 `bank_row_ids` 和 `note`。
+- Request boundary：`TurnoverLedgerConfirmRequestBoundaryFacade.confirm_relation_from_request(...)` 不接收 `expected_versions`。
+- Write facade：`TurnoverLedgerWriteFacade.confirm_relation(...)` 当前不接受 `expected_versions`。
+- Frontend type：`ConfirmTurnoverRelationRequest` 只有 `bankRowIds` / `note` / `signal`。
+- Frontend API：`confirmTurnoverRelation(...)` 只发送 `bank_row_ids` 和可选 `note`。
+- Page usage：`TurnoverLedgerPage` 只调用 `confirmTurnoverRelation({ bankRowIds: selectedRow.bankRowIds })`。
+- PF-P171 已用测试证明：即使 HTTP body 携带 `expected_versions`，当前 command 层仍为空。
+
+目标 contract 草案：
+
+- Frontend request 增加可选 `expectedVersions?: Record<string, unknown>`。
+- HTTP payload 增加可选 `expected_versions?: Record<string, unknown>`。
+- Backend request boundary 兼容读取该字段并透传到 write facade command。
+- Confirm stale precondition 不应直接复用 withdraw 的 `relation:{id}` key，因为 confirm 是基于 bank rows 创建/替换 relation。
+- 最小可行 key 应以 bank row 为单位，例如：
+  - `turnover_bank_row:{transaction_id}`；
+  - 或后续 discovery 确认的等价稳定 row/version key。
+- Stale precondition port 应验证提交时的 bank rows 仍未被其它 syncable relation 占用，且状态/版本与提交时一致。
+
+下一步：
+
+- `PF-P173 - Turnover Ledger Confirm Expected Versions Contract Tests`
+- PF-P173 只补 target / compatibility tests：
+  - frontend API 可以携带 `expectedVersions`；
+  - backend handler 可以接受 `expected_versions` 且 legacy payload 不破坏；
+  - facade command 可以携带 `expected_versions`；
+  - 不实现 stale guard。
+
+## PF-P173 Confirm Expected Versions Contract Tests
+
+状态：
+
+- verified
+
+范围：
+
+- 只补 target / compatibility tests。
+- 不修改 production code、frontend code、schema、deploy 或 Traffic Gate。
+
+执行结果：
+
+- 新增 API-level target expectedFailure：
+  - `test_target_confirm_request_expected_versions_reach_write_command`
+- 新增 facade/UoW-level target expectedFailure：
+  - `test_target_confirm_relation_facade_passes_expected_versions_before_repository`
+- 两个 expectedFailure 是后续转绿目标，不表示失败：
+  - API target：HTTP payload `expected_versions` 应进入 command；
+  - Facade target：`confirm_relation(..., expected_versions=...)` 应先走 stale precondition，再进入 repository。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_target_confirm_relation_facade_passes_expected_versions_before_repository -v`：Pass（expected failures=1）
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_confirm_request_expected_versions_reach_write_command -v`：Pass（expected failures=1）
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（118 tests，expected failures=1）
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests，expected failures=1）
+- `git diff --check`：Pass
+
+下一步：
+
+- `PF-P174 - Turnover Ledger Confirm Expected Versions Propagation`
+- 只实现 expected_versions 从 HTTP request -> request boundary -> write facade -> command 的透传。
+- 转绿 PF-P173 的两个 expectedFailure tests。
+- 不接入真实 confirm stale precondition port；真实 stale guard wiring 在下一条 prompt 处理。
+
+## PF-P174 Confirm Expected Versions Propagation
+
+状态：
+
+- verified
+
+范围：
+
+- 只实现 confirm `expected_versions` 从 HTTP request -> request boundary -> write facade -> command 的透传。
+- 不接入真实 confirm stale precondition port。
+- 不修改 schema、deploy、Traffic Gate 或外部服务配置。
+
+执行结果：
+
+- 已移除 PF-P173 两个 target tests 的 `unittest.expectedFailure` 并确认 RED。
+- `_handle_api_turnover_ledger_confirm(...)` 兼容读取 dict `expected_versions`。
+- `TurnoverLedgerConfirmRequestBoundaryFacade.confirm_relation_from_request(...)` 接收并透传 `expected_versions`。
+- `TurnoverLedgerWriteFacade.confirm_relation(...)` 接收 optional `expected_versions`，并写入 `TurnoverLedgerWriteCommand.expected_versions`。
+- legacy confirm fallback / recorder 兼容无 `expected_versions` 请求，默认传入 `{}`。
+
+验证：
+
+- PF-P174 RED before implementation：Pass。
+- PF-P174 targeted tests：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（118 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests）。
+- `git diff --check`：Pass。
+
+下一步：
+
+- `PF-P175 - Turnover Ledger Confirm Stale Precondition Port Wiring`
+- PF-P175 只接入 confirm stale precondition port，不迁移 tags、relation extra、withdraw 或其它写路径。
+
+## PF-P175 Confirm Stale Precondition Port Wiring
+
+状态：
+
+- verified
+
+范围：
+
+- 只将 confirm `expected_versions` 接入真实 stale precondition port。
+- confirm 使用 bank-row 版本 key，例如 `turnover_bank_row:<transaction_id>`。
+- 不迁移 withdraw、bank row tags、tag selection、relation extra。
+- 不实现 durable idempotency。
+- 不修改 schema、deploy、Traffic Gate 或真实外部服务配置。
+
+设计判断：
+
+- withdraw 的 `TurnoverLedgerRelationStalePreconditionPort` 只识别 `relation:<relation_id>`，不能保护 confirm。
+- confirm 应基于 bank row 当前版本做 stale guard，版本事实源来自现有 bank rows provider 暴露的 category version。
+- 如 `_turnover_bank_transaction_rows()` 未暴露 category version，本轮只允许把已有 category payload 的 `category_version` / `manual_category_version` / `version` 映射到 row，不新增查询或 schema。
+
+验收：
+
+- stale bank-row expected version 必须在 confirm mutation / refresh enqueue 前返回 409。
+- confirm builder 不再使用 no-op stale precondition port。
+- 其它 Turnover write builders 的 no-op/stale 状态不得顺手改变。
+
+执行结果：
+
+- 新增并转绿 `test_confirm_stale_bank_row_precondition_rejects_before_mutation_or_refresh`。
+- 新增并转绿 `test_turnover_ledger_confirm_builder_uses_bank_row_stale_precondition_port`。
+- 新增 `TurnoverLedgerBankRowStalePreconditionPort`：
+  - 仅处理 `turnover_bank_row:<transaction_id>` key。
+  - 使用 `category_version` / `manual_category_version` / `version` 比较。
+  - mismatch / missing row 返回 `turnover_relation_conflict`。
+- `TurnoverLedgerConfirmPrimaryWriteFacadeBuilder` 已接入该 port。
+- confirm handler 已映射 stale precondition error 为 409 JSON。
+- `_turnover_bank_transaction_rows()` 暴露已有 category version 字段。
+
+验证：
+
+- PF-P175 RED before implementation：Pass。
+- PF-P175 targeted tests：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（120 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests）。
+- `git diff --check`：Pass。
+
+下一步：
+
+- `PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate`
+- MG 统一覆盖 PF-P172、PF-P173、PF-P174、PF-P175。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

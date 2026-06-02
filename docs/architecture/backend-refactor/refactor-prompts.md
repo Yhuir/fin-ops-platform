@@ -28675,6 +28675,397 @@ Verification:
 - 下一条建议 prompt：
   - `PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning`
 
+## PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning
+
+```text
+/goal
+PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端架构师。你必须只规划 Turnover Ledger confirm expected_versions contract，不写业务代码。
+
+Context:
+- PF-P171-MG 已 verified，并已 push 到 origin/main。
+- 当前分支必须从最新 main 新建。
+- PF-P171 已证明 confirm request body 中的 `expected_versions` 当前不会进入 command 层。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- web/src/**
+- tests/**
+- 不得实现 confirm stale precondition integration
+- 不得修改 schema、deploy、Traffic Gate、真实外部服务配置
+
+Required Work:
+1. 扫描 backend confirm handler、request boundary、write facade command、frontend API/types/page 调用。
+2. 明确当前 confirm expected_versions contract 是否存在。
+3. 设计后续最小兼容 contract：
+   - request shape；
+   - frontend payload；
+   - backend command；
+   - expected version key 语义；
+   - stale precondition port 的验证对象。
+4. 给出下一条最小测试 prompt，必须先写 contract tests，不直接实现 stale guard。
+
+Verification:
+- rg source scan for confirm path and expected_versions
+- git diff --check
+- git status --short --branch
+- git ls-files --others --exclude-standard
+```
+
+### 审查结论
+
+- PF-P172 边界正确：confirm 还没有 expected_versions request/frontend contract，必须先规划。
+- 本轮不得修改 production code、frontend code 或 tests。
+
+### PF-P172 执行结果
+
+- PF-P172 已完成并验证。
+- 已确认当前事实：
+  - 后端 confirm handler 只读取 `bank_row_ids` / `note`；
+  - `TurnoverLedgerConfirmRequestBoundaryFacade.confirm_relation_from_request(...)` 没有 `expected_versions` 参数；
+  - `TurnoverLedgerWriteFacade.confirm_relation(...)` 当前不接受 `expected_versions`；
+  - 前端 `ConfirmTurnoverRelationRequest` 只有 `bankRowIds` / `note` / `signal`；
+  - `confirmTurnoverRelation(...)` 只提交 `bank_row_ids` 和可选 `note`；
+  - 页面调用不携带 relation identity/version。
+- 目标建议：
+  - 先通过 contract tests 增加兼容 `expectedVersions` / `expected_versions`；
+  - confirm 不能机械复用 withdraw 的 `relation:{id}`，应先定义 bank row level precondition key，例如 `turnover_bank_row:{transaction_id}` 或等价稳定 key；
+  - stale port 应验证提交的 bank rows 仍未被其它 syncable relation 占用，且版本/状态与提交时一致。
+- 验证：
+  - CodeGraph/source scan：Pass
+  - `rg -n "/api/turnover-ledger/relations/confirm|ConfirmTurnoverRelationRequest|confirmTurnoverRelation|expected_versions|expectedVersions" web backend/src tests docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass
+  - `git diff --check`：Pass
+  - `git status --short --branch`：Pass
+  - `git ls-files --others --exclude-standard`：Pass
+
+下一条建议：
+
+- `PF-P173 - Turnover Ledger Confirm Expected Versions Contract Tests`
+- PF-P173 只补 target / compatibility tests，不实现 stale guard。
+
+## PF-P173 - Turnover Ledger Confirm Expected Versions Contract Tests
+
+```text
+/goal
+PF-P173 - Turnover Ledger Confirm Expected Versions Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的测试工程师。你必须只为 Turnover Ledger confirm expected_versions 增加 target / compatibility tests，不实现生产逻辑。
+
+Context:
+- PF-P172 已 verified。
+- PF-P172 确认前端和后端当前都没有 confirm expected_versions contract。
+- PF-P171 已有 characterization test 证明 confirm request body 的 `expected_versions` 当前不会进入 command 层。
+
+Allowed Scope:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/**
+- web/src/**
+- SQL/schema/deploy/Traffic Gate/真实外部服务配置
+- 不得实现 confirm stale precondition integration
+
+Required Work:
+1. 新增 API-level target test，表达未来 confirm handler 应把 request body 的 `expected_versions` 透传到 command。
+2. 新增 facade/UoW target test，表达未来 `TurnoverLedgerWriteFacade.confirm_relation(..., expected_versions=...)` 应在 repository 前执行 stale precondition。
+3. 因目标行为尚未实现，target tests 必须显式标记为 `unittest.expectedFailure` 或等价机制，默认 CI 必须保持绿色。
+4. 保留 PF-P171 的当前行为 characterization test，不删除、不放宽。
+5. 更新状态机和 Turnover 专项计划，记录这些 expectedFailure 是下一步实现的转绿目标。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_target_confirm_relation_facade_passes_expected_versions_before_repository -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_confirm_request_expected_versions_reach_write_command -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+```
+
+### 审查结论
+
+- PF-P173 边界正确：只补目标契约测试，不改生产逻辑。
+- 使用 expectedFailure 是必要的，因为 confirm expected_versions contract 尚未实现；这保留目标信号，同时不破坏默认 CI。
+
+### PF-P173 执行结果
+
+- PF-P173 已完成并验证。
+- 已新增 API-level target expectedFailure：
+  - `test_target_confirm_request_expected_versions_reach_write_command`
+- 已新增 facade/UoW-level target expectedFailure：
+  - `test_target_confirm_relation_facade_passes_expected_versions_before_repository`
+- 两个 target tests 分别证明后续目标：
+  - confirm HTTP body 的 `expected_versions` 应进入 command；
+  - `TurnoverLedgerWriteFacade.confirm_relation(..., expected_versions=...)` 应在 repository 前触发 stale precondition。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_target_confirm_relation_facade_passes_expected_versions_before_repository -v`：Pass（expected failures=1）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_confirm_request_expected_versions_reach_write_command -v`：Pass（expected failures=1）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（118 tests，expected failures=1）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests，expected failures=1）
+  - `git diff --check`：Pass
+
+下一条建议：
+
+- `PF-P174 - Turnover Ledger Confirm Expected Versions Propagation`
+- PF-P174 只应让 expected_versions 在 request boundary / facade / command 中透传并转绿 PF-P173 expectedFailure tests；不得接入真实 stale precondition port。
+
+## PF-P174 - Turnover Ledger Confirm Expected Versions Propagation
+
+```text
+/goal
+PF-P174 - Turnover Ledger Confirm Expected Versions Propagation
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只把 Turnover Ledger confirm 的 `expected_versions` 从 HTTP request 透传到 write command，不接入真实 stale precondition port。
+
+Context:
+- PF-P173 已 verified。
+- PF-P173 新增了两个 expectedFailure target tests：
+  - API body expected_versions reaches command；
+  - facade confirm_relation expected_versions runs stale precondition before repository。
+- 当前 UoW 已有 generic stale precondition seam。
+- 当前 confirm primary builder 仍使用 no-op stale precondition port，本轮不得改变。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- backend/src/fin_ops_platform/services/workbench_*.py
+- web/src/**
+- SQL/schema/deploy/Traffic Gate/真实外部服务配置
+- 不得接入真实 confirm stale precondition port
+- 不得迁移 bank row tags、tag selection、relation extra 或 withdraw 的其它能力
+
+Required Work:
+1. 先移除 PF-P173 两个 target tests 的 `unittest.expectedFailure`，确认它们 RED。
+2. 在 confirm handler 中兼容读取 request body 的 dict `expected_versions`。
+3. 在 `TurnoverLedgerConfirmRequestBoundaryFacade.confirm_relation_from_request(...)` 中接收并透传 `expected_versions`。
+4. 在 `TurnoverLedgerWriteFacade.confirm_relation(...)` 中增加 optional `expected_versions` 参数，并写入 `TurnoverLedgerWriteCommand.expected_versions`。
+5. 保持 legacy confirm payload 不携带 expected_versions 时行为不变。
+6. 不改 confirm primary builder 的 no-op stale precondition port。
+7. 更新状态机和 Turnover 专项计划。
+
+Verification:
+- RED before implementation for the two PF-P173 target tests after removing expectedFailure.
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_confirm_request_expected_versions_reach_write_command tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_confirm_request_body_expected_versions_are_currently_not_forwarded_to_write_command -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_target_confirm_relation_facade_passes_expected_versions_before_repository -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+```
+
+### 审查结论
+
+- PF-P174 边界正确：它只转绿 PF-P173 的 expected_versions propagation tests。
+- 本轮不接真实 confirm stale precondition port，因此不会改变当前生产 confirm 的 stale guard 语义。
+
+### PF-P174 执行结果
+
+- PF-P174 已完成并验证。
+- 已移除两个 PF-P173 target tests 的 `unittest.expectedFailure` 并确认 RED：
+  - API target 证明 `expected_versions` 尚未进入 command；
+  - UoW target 证明 `confirm_relation(...)` 尚不接受 `expected_versions`。
+- 已实现 `expected_versions` 从 HTTP request -> request boundary -> write facade -> `TurnoverLedgerWriteCommand.expected_versions` 的最小透传。
+- legacy confirm payload 不携带 `expected_versions` 时继续使用 `{}`，旧路径兼容性已由完整 API suite 覆盖。
+- 未接入真实 confirm stale precondition port，未修改 schema、deploy、Traffic Gate 或外部服务配置。
+- 验证：
+  - PF-P174 RED before implementation：Pass。
+  - PF-P174 targeted tests：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（118 tests）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests）。
+  - `git diff --check`：Pass。
+
+下一条建议：
+
+- `PF-P175 - Turnover Ledger Confirm Stale Precondition Port Wiring`
+- PF-P175 只将 confirm expected_versions 接入真实 stale precondition port；不得迁移 tags、relation extra、withdraw 或其它写路径。
+
+## PF-P175 - Turnover Ledger Confirm Stale Precondition Port Wiring
+
+```text
+/goal
+PF-P175 - Turnover Ledger Confirm Stale Precondition Port Wiring
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只把 Turnover Ledger confirm 的 `expected_versions` 接入真实 stale precondition port，不能扩大到其它写路径。
+
+Context:
+- PF-P174 已 verified。
+- PF-P174 已实现 confirm `expected_versions` 从 HTTP request -> request boundary -> write facade -> command 的透传。
+- 当前 withdraw 已通过 `TurnoverLedgerRelationStalePreconditionPort` 拒绝 stale relation version。
+- confirm 不能直接复用 withdraw 的 `relation:<relation_id>` stale key，因为 confirm 基于 bank rows 创建/替换 relation。
+- PF-P172/PF-P174 已确认 confirm 的目标 key 应使用 bank-row 版本，例如 `turnover_bank_row:<transaction_id>`。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py，除非测试证明必须调整 command contract。
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- backend/src/fin_ops_platform/services/workbench_*.py
+- web/src/**
+- SQL/schema/deploy/Traffic Gate/真实外部服务配置
+- 不得迁移 withdraw、bank row tags、tag selection、relation extra。
+- 不得实现 durable idempotency。
+
+Required Work:
+1. 先写/调整 characterization test，确认当前 confirm stale precondition 仍是 RED：
+   - confirm body 携带 `expected_versions={"turnover_bank_row:<transaction_id>": <stale_version>}` 时，当前 no-op confirm builder 会成功；
+   - target behavior 是返回 409 `turnover_relation_conflict`；
+   - 失败时不得执行 relation confirm mutation，不得 enqueue read model refresh。
+2. 新增或复用 confirm 专用 stale precondition port：
+   - 推荐命名：`TurnoverLedgerBankRowStalePreconditionPort`。
+   - 构造函数必须接收明确的 `bank_rows_provider`，不得接收 `Application`。
+   - 只识别 `turnover_bank_row:<transaction_id>` key；其它 key 不应影响本轮 confirm。
+   - 使用 bank row 当前版本比较 expected value。优先使用 row 的 `category_version`，必要时兼容 `version`，但不得猜测数据库 schema。
+   - mismatch / missing row 必须抛 `TurnoverLedgerWritePreconditionError(error_code="turnover_relation_conflict", ...)`。
+3. 将 `TurnoverLedgerConfirmPrimaryWriteFacadeBuilder.build()` 的 no-op stale precondition 替换为 confirm bank-row stale precondition port。
+4. 如 `_turnover_bank_transaction_rows()` 当前没有暴露 category version，可只补充来自已有 category payload 的 `category_version` / `manual_category_version` / `version` 字段映射；不得新增查询或 schema。
+5. 更新 builder guard tests：
+   - confirm builder 不再包含 `stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)`；
+   - confirm builder 应包含 `TurnoverLedgerBankRowStalePreconditionPort(` 和 `bank_rows_provider=self._bank_rows_provider`；
+   - 保持 bank row tags / tag selection / relation extra 的 no-op stale port 现状不变。
+6. 更新状态机和 Turnover 专项计划。
+
+Verification:
+- RED before implementation for the new confirm stale precondition API/builder tests.
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_confirm_stale_bank_row_precondition_rejects_before_mutation_or_refresh tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_ledger_confirm_builder_uses_bank_row_stale_precondition_port -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- git status --short --branch
+- git ls-files --others --exclude-standard
+```
+
+### 审查结论
+
+- PF-P175 边界正确：它只把 confirm 的 expected_versions 接到真实 stale guard。
+- confirm 使用 bank-row version key 是必要的；直接接 withdraw relation stale port 会静默忽略 `turnover_bank_row:*`，属于无效接线。
+- 本轮不做 durable idempotency，也不改前端请求生成逻辑。
+
+### PF-P175 执行结果
+
+- PF-P175 已完成并验证。
+- 新增并转绿 confirm stale precondition API / builder guard tests。
+- 新增 `TurnoverLedgerBankRowStalePreconditionPort`，只识别 `turnover_bank_row:<transaction_id>` expected version。
+- `TurnoverLedgerConfirmPrimaryWriteFacadeBuilder` 已接入 bank-row stale precondition port，不再使用 no-op stale precondition。
+- `_turnover_bank_transaction_rows()` 只暴露已有 category version 数据，不新增查询或 schema。
+- confirm handler 已将 stale precondition error 映射为 409 JSON。
+- 验证：
+  - PF-P175 RED before implementation：Pass。
+  - PF-P175 targeted tests：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（120 tests）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests）。
+  - `git diff --check`：Pass。
+
+下一条建议：
+
+- `PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate`
+- MG 统一覆盖 PF-P172/PF-P173/PF-P174/PF-P175。
+
+## PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate
+
+```text
+/goal
+PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger confirm expected_versions + stale guard 切片，不新增业务实现。
+
+Context:
+- PF-P172 已 verified：confirm expected_versions contract planning。
+- PF-P173 已 verified：confirm expected_versions target/compatibility tests。
+- PF-P174 已 verified：confirm expected_versions propagation。
+- PF-P175 已 verified：confirm bank-row stale precondition port wiring。
+- 当前分支：codex/turnover-ledger-confirm-versions-p172。
+- 当前切片不包含 Traffic Gate、deploy、schema 或真实外部服务变更。
+
+Gate Scope:
+- Merge Gate 只覆盖 PF-P172 到 PF-P175 的完整 diff。
+- 允许文件：
+  - backend/src/fin_ops_platform/app/server.py
+  - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+  - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+  - tests/test_turnover_ledger_api.py
+  - tests/test_turnover_ledger_uow_contract.py
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不新增 production code。
+- 不执行 PF-P176 或其它 prompt。
+- 不修改 schema/deploy/Nginx/Traffic Gate/外部服务配置。
+- 不访问生产、staging 或真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不使用 `git add .` 或 `git add -A`。
+
+Required Gate Work:
+1. 检查 branch scope：
+   - git status --short --branch
+   - git ls-files --others --exclude-standard
+   - git diff --check
+   - git diff --name-only main...HEAD
+   - git log --oneline main..HEAD
+2. 确认 diff 只包含 Gate Scope 允许文件。
+3. 执行 verification：
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+   - python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+4. 精确 stage 允许文件并 commit，建议：
+   - test(turnover-ledger): enforce confirm stale precondition baseline
+5. 同步 main：
+   - checkout main
+   - 确认 main 与 origin/main 对齐；如有 behind，先停止或按用户授权只做非破坏同步。
+6. merge 当前分支到 main。
+7. 在 main 上重跑 verification。
+8. 如果 main verification 失败，停止，不得 push。
+9. 如果 main verification 通过，更新状态机为 PF-P175-MG verified，commit post-flight docs（如有），然后 git push origin main。
+10. push 后从最新 main 新建下一条 codex/ 分支。
+
+Post-Flight:
+- 更新 migration-state-log.md：
+  - PF-P175-MG verified；
+  - 最近 verified prompt = PF-P175-MG；
+  - active prompt = 无；
+  - 下一条允许任务根据 Turnover Ledger 写路径状态选择，不要自动跨模块。
+- 更新 turnover-ledger-write-uow-plan.md，记录 merge gate 结果。
+
+Verification:
+- 所有 Required Gate Work 通过。
+- main 上 verification 通过后才允许 push origin main。
+```
+
+### 审查结论
+
+- PF-P175-MG 是当前切片的合理收口点：PF-P172 到 PF-P175 已形成完整 confirm expected_versions + stale guard baseline。
+- MG 不触发 Traffic Gate，不部署，不访问真实外部服务。
+
 ## PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate
 
 状态：`planned`
