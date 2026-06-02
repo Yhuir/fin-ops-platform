@@ -3603,6 +3603,36 @@ PF-P110 边界：
 - `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning`
 - 只规划最小 cleanup 顺序和风险，不直接修改 production code。
 
+## PF-P122 Facade None Fallback Cleanup Planning
+
+状态：`planned`
+
+目标：
+
+- 基于 PF-P120/PF-P121 的发现和测试，规划 facade None fallback cleanup 顺序。
+- 判断每个 fallback 是可删除、需暂留，还是应先稳定 facade construction。
+
+边界：
+
+- 只做文档和状态机回写。
+- 不修改 production code，不修改 tests。
+- 不删除 fallback，不改变 UoW/facade 语义。
+
+必须输出：
+
+- Cleanup Candidate Matrix。
+- Minimal Cleanup Order。
+- Handler Thinness Target。
+- Risk Register。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P122|Cleanup Candidate Matrix|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

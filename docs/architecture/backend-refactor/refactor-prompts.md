@@ -23664,6 +23664,95 @@ Verification：
 
 下一条最小 prompt：`PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning`，只做 cleanup 顺序和风险规划，不直接修改 production code。
 
+## PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning
+
+状态：`planned`
+
+```text
+/goal
+PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning
+
+Role:
+你是一位负责 Python-first 后端架构重构的资深后端工程师。你必须基于已通过的 characterization tests 规划 Turnover Ledger facade None fallback cleanup 顺序，本轮不修改 production code。
+
+Context:
+PF-P120 已 verified，输出了 Facade None Fallback Matrix 和 Handler Thinness Gap。PF-P121 已 verified，新增了 5 个 fallback characterization tests。当前 fallback 行为已被锁定，但不能一次性清理所有入口。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P121 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+输出下一步最小 cleanup 策略，决定应先移除哪个 fallback、稳定哪类 facade construction，或继续补更窄测试。
+
+Required Discovery Work:
+1. Cleanup Candidate Matrix：
+   - tag selection update；
+   - bank row tags batch；
+   - relation extra update；
+   - confirm relation；
+   - withdraw relation。
+   对每项说明：现有测试、production/local dependency、能否删除 fallback、删除前置条件、推荐下一步。
+2. Minimal Cleanup Order：
+   - 每一步只处理一个入口或一类同构入口。
+   - 不允许“一次性删除所有 fallback”。
+   - 必须说明为什么该顺序风险最低。
+3. Handler Thinness Target：
+   - 明确 cleanup 后 handler 仍允许保留的 HTTP mapping。
+   - 明确哪些 side effects 应迁入 facade/application service 或 adapter。
+4. Risk Register：
+   - local/dev/test compatibility；
+   - dependency missing / queue API unsupported；
+   - Postgres readiness；
+   - read model clear/enqueue side effects；
+   - Workbench/Bankdetail invalidation side effects。
+5. 下一条最小 prompt：
+   - 如果可以开始 cleanup，生成 `PF-P123 - ...` 的最小 cleanup prompt；
+   - 如果风险仍高，生成 construction stabilization 或更窄 tests prompt；
+   - 不得直接进入 Merge Gate。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得删除 fallback。
+- 不得改变 UoW/facade 语义。
+- 不得新增 SQL migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P122|Cleanup Candidate Matrix|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 cleanup candidate matrix、minimal cleanup order、risk register 和下一条 prompt。
+3. 如验证通过，可标记 PF-P122 verified。
+```
+
+### 审查结论
+
+- PF-P122 边界正确：只做 fallback cleanup planning 和文档回写。
+- PF-P122 不修改 production code、不修改 tests、不删除 fallback。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` 已执行并验证通过 |
-| 当前 active prompt | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
+| 当前阶段 | `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` |
 | 最近 verified prompt | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-remaining-boundary-p120` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，61 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests |
-| 下一条允许任务 | 生成并审查 `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` |
+| 下一条允许任务 | 执行 `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` |
 
 ## Prompt 执行日志
 
@@ -8614,6 +8614,34 @@ Verification：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
 
 当前 fallback 行为已足够进入 cleanup planning。下一条应生成并审查 `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning`：只规划最小 cleanup 顺序，决定先移除哪个 fallback 或先稳定哪类 facade construction；不直接修改 production code。
+
+### PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning
+
+状态：`planned`
+
+#### 范围
+
+- 基于 PF-P120/PF-P121 的 fallback matrix 和 tests，规划下一步最小 cleanup 顺序。
+- 只做文档和状态机回写。
+- 不修改 production code，不修改 tests，不删除 fallback。
+
+#### 必须输出
+
+- Cleanup Candidate Matrix：每个 fallback 的删除/保留/先稳定 facade construction 判断。
+- 最小可执行 cleanup 顺序：每次只允许处理一个入口或一类同构入口。
+- Risk Register：local/dev/test compatibility、dependency missing、Postgres readiness、queue API 支持、read model refresh side effects。
+- 下一条 prompt：如果可执行，生成最小 cleanup；如果风险仍高，生成更窄测试或 construction stabilization。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P122|Cleanup Candidate Matrix|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+TBD。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
