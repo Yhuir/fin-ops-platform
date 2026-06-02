@@ -272,6 +272,7 @@ from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_T
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankdetailWritePort,
+    TurnoverLedgerBankRowTagsLegacyFallbackFacade,
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
@@ -2708,20 +2709,20 @@ class Application:
             ),
         )
 
-    def _turnover_ledger_bank_row_tags_write_facade(self) -> TurnoverLedgerWriteFacade | None:
+    def _turnover_ledger_bank_row_tags_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerBankRowTagsLegacyFallbackFacade | None:
         override = getattr(self, "_turnover_ledger_bank_row_tags_write_facade_override", None)
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
-            return None
+            return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
         storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(state_store, "_connection", None)
             enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
             if connection is None or not callable(enqueue_in_transaction):
-                return None
+                return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
             bankdetail_port = TurnoverLedgerBankdetailWritePort(
                 category_service=self._bank_transaction_category_service,
                 relation_service=self._turnover_relation_service,
@@ -2738,7 +2739,7 @@ class Application:
         else:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
-                return None
+                return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
             connection = TurnoverLedgerLocalBankRowTagsConnection(
                 category_snapshot_provider=self._bank_transaction_category_service.snapshot,
                 relation_snapshot_provider=self._turnover_relation_service.snapshot,
@@ -2769,6 +2770,16 @@ class Application:
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
         )
         return TurnoverLedgerWriteFacade(uow=uow)
+
+    def _turnover_ledger_bank_row_tags_legacy_fallback_facade(self) -> TurnoverLedgerBankRowTagsLegacyFallbackFacade:
+        state_store = getattr(self, "_state_store", None)
+        return TurnoverLedgerBankRowTagsLegacyFallbackFacade(
+            category_service=self._bank_transaction_category_service,
+            save_category_snapshot=lambda snapshot: state_store.save_bank_transaction_categories(dict(snapshot)),
+            relation_rebuild=self._turnover_relation_service.rebuild_from_bank_rows,
+            bank_rows_provider=self._turnover_bank_transaction_rows,
+            after_mutation=self._after_turnover_relation_mutation,
+        )
 
     def _turnover_ledger_confirm_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerConfirmLegacyFallbackFacade:
         override = getattr(self, "_turnover_ledger_confirm_write_facade_override", None)
@@ -12498,21 +12509,19 @@ class Application:
             for update in updates
             if str(update.get("transaction_id") or "").strip()
         ]
-        facade: TurnoverLedgerWriteFacade | None = None
         try:
             self._ensure_turnover_bank_row_tag_targets(transaction_ids)
             actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
             affected_months = self._bank_transaction_category_affected_months(transaction_ids)
             facade = self._turnover_ledger_bank_row_tags_write_facade()
-            if facade is not None:
-                result = facade.update_bank_row_tags_batch(
-                    updates=updates,
-                    actor_id=actor,
-                    tenant_id=tenant_id_for_session(session_response),
-                    affected_months=affected_months,
-                )
-            else:
-                result = self._bank_transaction_category_service.apply_turnover_updates(updates, actor=actor)
+            if facade is None:
+                facade = self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
+            result = facade.update_bank_row_tags_batch(
+                updates=updates,
+                actor_id=actor,
+                tenant_id=tenant_id_for_session(session_response),
+                affected_months=affected_months,
+            )
         except BankTransactionCategoryConflictError as exc:
             return self._json_response(
                 HTTPStatus.CONFLICT,
@@ -12529,10 +12538,6 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
             )
-        if facade is None:
-            self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
-            self._turnover_relation_service.rebuild_from_bank_rows(self._turnover_bank_transaction_rows())
-            self._after_turnover_relation_mutation(affected_months)
         result["affected_months"] = affected_months
         result["turnover_ledger_invalidated"] = True
         result["workbench_invalidated"] = True

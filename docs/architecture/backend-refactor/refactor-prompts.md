@@ -24833,6 +24833,31 @@ Post-Flight:
 - 将 fallback side effects 移入显式 adapter 符合当前 Python-first 架构目标：`server.py` 只做路由、HTTP mapping、依赖组装和调用。
 - PF-P129 的 expectedFailure target 必须在 PF-P130 转为普通通过；不得放宽断言。
 
+### PF-P130 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 `TurnoverLedgerBankRowTagsLegacyFallbackFacade`。
+  - `_turnover_ledger_bank_row_tags_write_facade(...)` 在 primary facade 不可用时返回显式 fallback adapter。
+  - `_handle_api_turnover_ledger_bank_row_tags_batch(...)` 不再直接执行 fallback category apply/save、relation rebuild、after-mutation。
+  - PF-P129 handler-thinness target 已从 expectedFailure 转为普通通过。
+- 验证：
+  - `git status --short --branch`：Pass，仅包含 PF-P130 允许文件。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+  - targeted bank row tags fallback tests：Pass，4 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 下一条最小 prompt：`PF-P130-MG - Turnover Ledger Bank Row Tags Fallback Cleanup Cumulative Merge Gate`，统一覆盖 PF-P128、PF-P129、PF-P130。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

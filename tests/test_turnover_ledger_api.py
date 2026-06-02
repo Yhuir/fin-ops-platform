@@ -1253,7 +1253,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
-    @unittest.expectedFailure
     def test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
         source = inspect.getsource(Application._handle_api_turnover_ledger_bank_row_tags_batch)
 
