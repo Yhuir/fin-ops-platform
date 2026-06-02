@@ -26634,6 +26634,548 @@ Post-Flight:
 - merge 后已在 `main` 上重跑同一组验证，结果全部通过。
 - 下一步必须从最新 `main` 新建 `codex/` 分支，再生成 `PF-P148 - Turnover Ledger Primary Write Builder Rebaseline After Legacy Fallback Cleanup`。
 
+## PF-P148 - Turnover Ledger Primary Write Builder Rebaseline After Legacy Fallback Cleanup
+
+状态：`verified`
+
+```text
+/goal
+PF-P148 - Turnover Ledger Primary Write Builder Rebaseline After Legacy Fallback Cleanup
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 legacy fallback group 收口后，重新盘点 Turnover Ledger primary write builder 剩余 seam，为后续 characterization 和 extraction 建立新的事实源。
+
+Context:
+- PF-P147-MG 已 verified 并已 push `origin/main`。
+- 当前必须从最新 `main` 新建新的 `codex/` 分支后工作。
+- legacy fallback builder cleanup 已完成；剩余更大的 seam 已转向 primary write facade / UoW builder orchestration duplication。
+
+Task:
+1. 重新盘点 `server.py` 中五个 `_turnover_ledger_*_write_facade(...)` 的重复组装逻辑。
+2. 明确区分：
+   - 共享的 backend selection / queue selection / connection selection；
+   - `TurnoverLedgerWriteUnitOfWork` 的重复 placeholder 注入（`SimpleNamespace()`）；
+   - 仍由 `server.py` 持有的 port selection / idempotency store selection / stale precondition default。
+3. 输出新的 builder seam matrix，并给出下一条最小 prompt 建议。
+4. 本轮只允许修改 backend-refactor 文档，不修改 production code 或 tests。
+```
+
+### 审查结论
+
+- PF-P148 的边界正确：它只做 primary write builder 的 rebaseline，不碰实现。
+- 在 legacy fallback group 收口后，先重新盘点 builder duplication 是必要的。
+
+### PF-P148 执行结果
+
+- PF-P148 已完成并验证。
+- 重新扫描确认：Turnover Ledger 目前有 5 个 primary write builder 仍在 `server.py` 中各自组装 `TurnoverLedgerWriteUnitOfWork`：
+  - relation extra
+  - bank row tags
+  - confirm
+  - withdraw
+  - tag selection
+- 共性重复点已明确：
+  - `state_store` / `queue_repository` 检测
+  - `storage_backend == "postgres"` 分支
+  - `TurnoverLedgerDirtyOutboxWriter` vs `TurnoverLedgerLocalDirtyOutboxWriter`
+  - `stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)`
+  - 多处 `SimpleNamespace()` placeholder 注入到 unused ports
+- 当前最小下一刀不应直接合并 builder，而应先用 characterization tests 锁定这些 source-level builder contracts。
+- 下一条建议 prompt：`PF-P149 - Turnover Ledger Primary Write Builder Characterization Tests`。
+
+## PF-P149 - Turnover Ledger Primary Write Builder Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P149 - Turnover Ledger Primary Write Builder Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须先用 characterization tests 锁定 Turnover Ledger primary write builder 当前 source-level contract，再进入后续 builder extraction。
+
+Context:
+- PF-P148 已 verified。
+- 当前 `server.py` 中五个 `_turnover_ledger_*_write_facade(...)` 仍重复组装 `TurnoverLedgerWriteUnitOfWork`。
+- 直接抽 builder 风险过高，必须先锁 source-level contract。
+
+Task:
+1. 只修改 `tests/test_turnover_ledger_api.py` 与 backend-refactor 文档。
+2. 为以下 builder 共性增加 characterization guards：
+   - `state_store` / `queue_repository` 检测仍在各 facade 中存在；
+   - `TurnoverLedgerWriteUnitOfWork(` 仍在各 facade 中直接构造；
+   - `stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)` 当前仍存在；
+   - 对应 unused port 仍通过 `SimpleNamespace()` 占位。
+3. 只做 source-level characterization，不得改 production code。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+### 审查结论
+
+- PF-P149 的边界正确：它只锁 primary write builder 的 source-level contract，不碰实现。
+- 这是进入 builder extraction 前必须的门禁。
+
+### PF-P149 执行结果
+
+- PF-P149 已完成并验证。
+- `tests/test_turnover_ledger_api.py` 新增 primary write builder characterization guards：
+  - `test_turnover_ledger_primary_write_facades_still_construct_uow_in_server`
+  - `test_turnover_ledger_primary_write_facades_still_use_placeholder_ports_and_default_stale_precondition`
+- 当前 source-level contract 已被机械锁定：
+  - 五个 `_turnover_ledger_*_write_facade(...)` 仍在 `server.py` 中直接构造 `TurnoverLedgerWriteUnitOfWork`
+  - `state_store` / `queue_repository` 检测仍存在
+  - `stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)` 仍存在
+  - unused ports 仍通过 `SimpleNamespace()` 占位
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，82 tests
+- 下一条建议 prompt：`PF-P150 - Turnover Ledger Tag Selection Primary Write Builder Extraction`。
+
+## PF-P150 - Turnover Ledger Tag Selection Primary Write Builder Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P150 - Turnover Ledger Tag Selection Primary Write Builder Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger tag selection primary write builder 中仍由 `server.py` 持有的 UoW/facade 组装逻辑。
+
+Context:
+- PF-P149 已 verified。
+- primary write builder 的 source-level contract 已锁定。
+- 在五条 primary write path 中，tag selection 是最小切片：只涉及 settings_port、dirty outbox writer 和 facade 组装，不涉及 relation/extra/bankdetail/idempotency 的额外复杂度。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 将 `_turnover_ledger_tag_selection_write_facade(...)` 中的 primary write builder 组装逻辑收到 adapter module 或等价的稳定 builder boundary。
+2. 保持 runtime behavior 不变：
+   - PostgreSQL path 仍走 `TurnoverLedgerTagSelectionSettingsAdapter`
+   - local path 仍走 `TurnoverLedgerLocalTagSelectionAdapterSet`
+   - 仍构造 `TurnoverLedgerWriteFacade(..., app_settings_service=...)`
+3. 允许更新 PF-P149 中与 source-level builder 位置相关的 characterization test，使其反映抽离后的新约束。
+
+Constraints:
+- 不得修改 relation extra / confirm / withdraw / bank row tags primary builder
+- 不得修改 UoW contract、SQL migration、idempotency store
+- 不得修改前端、部署或生产配置
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P150 的边界正确：它只处理 tag selection primary write builder。
+- 这是当前 primary builder 组里复杂度最低的一刀，适合作为第一条 extraction。
+
+### PF-P150 执行结果
+
+- PF-P150 已完成并验证。
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder`。
+- `server.py` 的 `_turnover_ledger_tag_selection_write_facade(...)` 不再直接构造 `TurnoverLedgerWriteUnitOfWork(...)`，改为调用 builder，并在 builder 不可用时保留 legacy fallback。
+- `tests/test_turnover_ledger_api.py` 新增并通过：
+  - `test_turnover_ledger_tag_selection_primary_write_facade_uses_builder_boundary`
+- PF-P149 中的 source-level characterization 已按抽离后约束更新：
+  - `test_turnover_ledger_primary_write_facades_still_construct_uow_in_server`
+  - `test_turnover_ledger_primary_write_facades_still_use_placeholder_ports_and_default_stale_precondition`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，83 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：`PF-P151 - Turnover Ledger Withdraw Primary Write Builder Extraction`。
+
+## PF-P151 - Turnover Ledger Withdraw Primary Write Builder Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P151 - Turnover Ledger Withdraw Primary Write Builder Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger withdraw primary write builder 中仍由 `server.py` 持有的 UoW/facade 组装逻辑。
+
+Context:
+- PF-P150 已 verified。
+- 当前仍在 `server.py` 中直接构造 primary write builder 的剩余路径是：
+  - relation extra
+  - bank row tags
+  - confirm
+  - withdraw
+- 在这四条里，withdraw 是最小切片：
+  - 只涉及 `relation_repository` 与 `dirty_outbox_writer`
+  - 不涉及 relation extra 的 idempotency store
+  - 不涉及 bank row tags 的 `bankdetail_port`
+  - 比 confirm 少一层 local rebuild wiring
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 将 `_turnover_ledger_withdraw_write_facade(...)` 中的 primary write builder 组装逻辑收到 adapter module 或等价的稳定 builder boundary。
+2. 保持 runtime behavior 不变：
+   - PostgreSQL path 仍走 `TurnoverLedgerRelationWritePort`
+   - local path 仍走 `TurnoverLedgerLocalWithdrawRelationAdapterSet`
+   - 仍构造 `TurnoverLedgerWriteFacade(uow=...)`
+3. 允许更新 PF-P149 中与 source-level builder 位置相关的 characterization test，使其反映 withdraw 抽离后的新约束。
+4. 为 withdraw 新增一条 source-level builder boundary test，锁定：
+   - handler 不再直接出现 `TurnoverLedgerWriteUnitOfWork(`
+   - handler 不再直接出现 withdraw primary builder 的 placeholder port 组装
+
+Constraints:
+- 不得修改 relation extra / confirm / bank row tags primary builder
+- 不得修改 withdraw API contract、stale guard、idempotency 语义
+- 不得修改 UoW contract、SQL migration、前端、部署或生产配置
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P151 的边界正确：它只处理 withdraw primary write builder。
+- 这是当前 primary builder 组里比 confirm 更小的一刀，先做它更稳妥。
+
+### PF-P151 执行结果
+
+- PF-P151 已完成并验证。
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder`。
+- `server.py` 的 `_turnover_ledger_withdraw_write_facade(...)` 不再直接构造 `TurnoverLedgerWriteUnitOfWork(...)`，改为通过 builder 组装，并在 builder 不可用时保留 legacy fallback。
+- `tests/test_turnover_ledger_api.py` 新增并通过：
+  - `test_turnover_ledger_withdraw_primary_write_facade_uses_builder_boundary`
+- PF-P149 的 source-level characterization 已按抽离后约束更新：
+  - `test_turnover_ledger_primary_write_facades_still_construct_uow_in_server`
+  - `test_turnover_ledger_primary_write_facades_still_use_placeholder_ports_and_default_stale_precondition`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，84 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：`PF-P152 - Turnover Ledger Confirm Primary Write Builder Extraction`。
+
+## PF-P152 - Turnover Ledger Confirm Primary Write Builder Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P152 - Turnover Ledger Confirm Primary Write Builder Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger confirm primary write builder 中仍由 `server.py` 持有的 UoW/facade 组装逻辑。
+
+Context:
+- PF-P151 已 verified。
+- 当前 remaining primary write builder paths 是：
+  - relation extra
+  - bank row tags
+  - confirm
+- 在这三条里，confirm 是下一条最小切片：
+  - 只涉及 `relation_repository` 与 `dirty_outbox_writer`
+  - 不涉及 relation extra 的 idempotency store
+  - 不涉及 bank row tags 的 `bankdetail_port`
+  - 比 relation extra/bank row tags 更适合在当前分支继续保持小步推进
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 将 `_turnover_ledger_confirm_write_facade(...)` 中的 primary write builder 组装逻辑收到 adapter module 或等价的稳定 builder boundary。
+2. 保持 runtime behavior 不变：
+   - PostgreSQL path 仍走 `TurnoverLedgerRelationWritePort`
+   - local path 仍走 `TurnoverLedgerLocalConfirmRelationAdapterSet`
+   - 仍构造 `TurnoverLedgerWriteFacade(uow=...)`
+3. 允许更新 PF-P149 中与 source-level builder 位置相关的 characterization test，使其反映 confirm 抽离后的新约束。
+4. 为 confirm 新增一条 source-level builder boundary test，锁定：
+   - handler 不再直接出现 `TurnoverLedgerWriteUnitOfWork(`
+   - handler 不再直接出现 confirm primary builder 的 placeholder port 组装
+
+Constraints:
+- 不得修改 relation extra / bank row tags primary builder
+- 不得修改 confirm API contract、stale guard、duplicate submit 语义
+- 不得修改 UoW contract、SQL migration、前端、部署或生产配置
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P152 的边界正确：它只处理 confirm primary write builder。
+- 完成 confirm 后，primary builder 组就只剩 relation extra 与 bank row tags 两条更重的 seam。
+
+### PF-P152 执行结果
+
+- PF-P152 已完成并验证。
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerConfirmPrimaryWriteFacadeBuilder`。
+- `server.py` 的 `_turnover_ledger_confirm_write_facade(...)` 不再直接构造 `TurnoverLedgerWriteUnitOfWork(...)`，改为通过 builder 组装，并在 builder 不可用时保留 legacy fallback。
+- `tests/test_turnover_ledger_api.py` 新增并通过：
+  - `test_turnover_ledger_confirm_primary_write_facade_uses_builder_boundary`
+- PF-P149 的 source-level characterization 已按抽离后约束更新：
+  - `test_turnover_ledger_primary_write_facades_still_construct_uow_in_server`
+  - `test_turnover_ledger_primary_write_facades_still_use_placeholder_ports_and_default_stale_precondition`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，85 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：`PF-P153 - Turnover Ledger Bank Row Tags Primary Write Builder Extraction`。
+
+## PF-P153 - Turnover Ledger Bank Row Tags Primary Write Builder Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P153 - Turnover Ledger Bank Row Tags Primary Write Builder Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger bank row tags primary write builder 中仍由 `server.py` 持有的 UoW/facade 组装逻辑。
+
+Context:
+- PF-P152 已 verified。
+- 当前 remaining primary write builder paths 是：
+  - relation extra
+  - bank row tags
+- bank row tags 是下一条最小切片：
+  - 虽然涉及 `bankdetail_port`，但不涉及 relation extra 的 idempotency store
+  - 本轮只收 builder boundary，不修改 bank row tags 的 mutation/runtime contract
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 将 `_turnover_ledger_bank_row_tags_write_facade(...)` 中的 primary write builder 组装逻辑收到 adapter module 或等价的稳定 builder boundary。
+2. 保持 runtime behavior 不变：
+   - PostgreSQL path 仍走 `TurnoverLedgerBankdetailWritePort`
+   - local path 仍走 `TurnoverLedgerLocalBankRowTagsAdapterSet`
+   - 仍构造 `TurnoverLedgerWriteFacade(uow=...)`
+3. 允许更新 PF-P149 中与 source-level builder 位置相关的 characterization test，使其反映 bank row tags 抽离后的新约束。
+4. 为 bank row tags 新增一条 source-level builder boundary test，锁定：
+   - handler 不再直接出现 `TurnoverLedgerWriteUnitOfWork(`
+   - handler 不再直接出现 bank row tags primary builder 的 placeholder port 组装
+
+Constraints:
+- 不得修改 relation extra primary builder
+- 不得修改 bank row tags API contract、scope refresh、queue failure rollback 语义
+- 不得修改 UoW contract、SQL migration、前端、部署或生产配置
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P153 的边界正确：它只处理 bank row tags primary write builder。
+- 完成 PF-P153 后，primary builder 组将只剩 relation extra 最后一条更重的 seam。
+
+### PF-P153 执行结果
+
+- PF-P153 已完成并验证。
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder`。
+- `server.py` 的 `_turnover_ledger_bank_row_tags_write_facade(...)` 不再直接构造 `TurnoverLedgerWriteUnitOfWork(...)`，改为通过 builder 组装，并在 builder 不可用时保留 legacy fallback。
+- `tests/test_turnover_ledger_api.py` 新增并通过：
+  - `test_turnover_ledger_bank_row_tags_primary_write_facade_uses_builder_boundary`
+- PF-P149 的 source-level characterization 已按抽离后约束更新：
+  - `test_turnover_ledger_primary_write_facades_still_construct_uow_in_server`
+  - `test_turnover_ledger_primary_write_facades_still_use_placeholder_ports_and_default_stale_precondition`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，86 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：`PF-P154 - Turnover Ledger Relation Extra Primary Write Builder Extraction`。
+
+## PF-P154 - Turnover Ledger Relation Extra Primary Write Builder Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P154 - Turnover Ledger Relation Extra Primary Write Builder Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger relation extra primary write builder 中仍由 `server.py` 持有的 UoW/facade 组装逻辑，并完成 primary builder 组的最后一条 seam 收尾。
+
+Context:
+- PF-P153 已 verified。
+- 当前 remaining primary write builder path 只剩：
+  - relation extra
+- relation extra 是本组最后一条也是最重的一刀，因为它仍携带：
+  - `extra_repository`
+  - `dirty_outbox_writer`
+  - durable/in-memory `idempotency_store`
+- 完成后，Turnover Ledger primary write builder 将不再由 `server.py` 直接构造 `TurnoverLedgerWriteUnitOfWork(...)`。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 将 `_turnover_ledger_relation_extra_write_facade(...)` 中的 primary write builder 组装逻辑收到 adapter module 或等价的稳定 builder boundary。
+2. 保持 runtime behavior 不变：
+   - PostgreSQL path 仍走 `TurnoverLedgerExtraRepositoryAdapter + TurnoverLedgerDirtyOutboxWriter + workbench write idempotency store`
+   - local path 仍走 `TurnoverLedgerLocalRelationExtraAdapterSet + TurnoverLedgerLocalDirtyOutboxWriter + in-memory idempotency store`
+   - 仍构造 `TurnoverLedgerWriteFacade(..., extra_normalizer=..., row_provider=...)`
+3. 允许更新 PF-P149 中与 source-level builder 位置相关的 characterization test；因为这是最后一条 seam，允许把原先“仍在 server.py 构造 UoW”的组级断言翻转为“primary write facades 已不再在 server.py 直接构造 UoW”的新断言。
+4. 为 relation extra 新增一条 source-level builder boundary test，锁定：
+   - handler 不再直接出现 `TurnoverLedgerWriteUnitOfWork(`
+   - handler 不再直接出现 relation extra primary builder 的 placeholder/idempotency store 组装
+
+Constraints:
+- 不得修改 relation extra API contract、idempotency 语义、stale guard、refresh reason
+- 不得修改 UoW contract、SQL migration、前端、部署或生产配置
+- 不得顺手进入 cumulative MG；本轮只完成最后一条 extraction 并回写文档
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P154 的边界正确：它只处理 relation extra primary write builder，并允许在这一刀里把 PF-P149 的组级 source characterization 翻面。
+- PF-P154 完成后，下一条应是 cumulative MG，统一覆盖 PF-P150 到 PF-P154 的 primary write builder extraction 全量 diff。
+
+### PF-P154 执行结果
+
+- PF-P154 已完成并验证。
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder`。
+- `server.py` 的 `_turnover_ledger_relation_extra_write_facade(...)` 不再直接构造 `TurnoverLedgerWriteUnitOfWork(...)`，改为通过 builder 组装。
+- relation extra 的 idempotency store seam 也已从 handler 内联组装收到 builder boundary：
+  - PostgreSQL path 通过 `_turnover_ledger_relation_extra_postgres_idempotency_store(...)`
+  - local path 通过 `_turnover_ledger_relation_extra_local_idempotency_store()`
+- `tests/test_turnover_ledger_api.py` 新增并通过：
+  - `test_turnover_ledger_relation_extra_primary_write_facade_uses_builder_boundary`
+- PF-P149 的组级 characterization 已在本轮翻面：
+  - `test_turnover_ledger_primary_write_facades_no_longer_construct_uow_in_server`
+  - `test_turnover_ledger_primary_write_facades_no_longer_inline_placeholder_ports_or_default_stale_precondition`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，87 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：`PF-P154-MG - Turnover Ledger Primary Write Builder Cumulative Merge Gate`。
+
+## PF-P154-MG - Turnover Ledger Primary Write Builder Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P154-MG - Turnover Ledger Primary Write Builder Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger primary write builder 切片，不新增业务实现。
+
+Context:
+- 当前分支：`codex/turnover-ledger-builder-rebaseline-p148`
+- PF-P150 到 PF-P154 已全部 verified：
+  - PF-P150 - tag selection primary write builder extraction
+  - PF-P151 - withdraw primary write builder extraction
+  - PF-P152 - confirm primary write builder extraction
+  - PF-P153 - bank row tags primary write builder extraction
+  - PF-P154 - relation extra primary write builder extraction
+- 本次 MG 必须统一覆盖这组完整 diff，不得遗漏任何尚未合入 `main` 的切片。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Mandatory Checks:
+1. Branch / diff scope:
+   - git status --short --branch
+   - git ls-files --others --exclude-standard
+   - git diff --check
+   - git diff --name-only main...HEAD
+   - git log --oneline main..HEAD
+2. Verification:
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+   - python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+3. Source contract confirmation:
+   - primary write facades no longer directly construct `TurnoverLedgerWriteUnitOfWork(...)` in `server.py`
+   - relation extra / bank row tags / confirm / withdraw / tag selection each have explicit builder boundary tests
+4. Commit preparation:
+   - 只允许精确 `git add <file>`
+   - 禁止 `git add .`
+   - 禁止 `git add -A`
+   - 必须排查 untracked 文件，禁止把临时文件、`.pkl`、缓存或本地产物带入提交
+5. Merge preparation:
+   - 若用户要求 merge 到 `main`，必须先确认当前分支已包含最新 `main`
+   - 若同步了新的 `main` 提交，必须重新执行全部 verification
+
+Merge Gate Goal:
+- 确认 PF-P150 到 PF-P154 的 scope、测试、文档回写都完整。
+- 确认这一组切片已经把 Turnover Ledger primary write builder 从 `server.py` 直接 UoW 组装中全部抽离。
+- 然后 merge 到 `main`，在 `main` 上重跑同一组验证，再决定是否 `git push origin main`。
+
+Forbidden Scope:
+- 不得新增 PF-P155 或任何新实现。
+- 不得修改 relation extra / confirm / withdraw / bank row tags / tag selection 的业务 contract。
+- 不得执行 Traffic Gate、部署、访问生产、修改 Nginx、修改生产配置。
+
+Post-Flight:
+1. 更新：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 记录：
+   - PF-P154-MG status = implemented / verified / blocked
+   - merge / main verification / push 结果
+   - 下一条 prompt 建议
+```
+
+### 审查结论
+
+- PF-P154-MG 的边界正确：它只覆盖 PF-P150 到 PF-P154 的 primary write builder 累积切片。
+- 这组 MG 完成后，Turnover Ledger 的下一阶段应转向 write UoW deeper boundary 或者剩余 write contract cleanup，而不是再回到 primary builder 组。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

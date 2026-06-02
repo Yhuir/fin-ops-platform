@@ -274,6 +274,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankdetailWritePort,
     TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet,
     TurnoverLedgerBankRowTagsLegacyFallbackFacade,
+    TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder,
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
@@ -283,10 +284,13 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationConnection,
     TurnoverLedgerLocalRelationRepository,
     TurnoverLedgerLocalRelationExtraAdapterSet,
+    TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder,
     TurnoverLedgerLocalTagSelectionAdapterSet,
     TurnoverLedgerLocalWithdrawRelationAdapterSet,
+    TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder,
     TurnoverLedgerConfirmLegacyFallbackAdapterSet,
     TurnoverLedgerConfirmLegacyFallbackFacade,
+    TurnoverLedgerConfirmPrimaryWriteFacadeBuilder,
     TurnoverLedgerRelationMutationInvalidationLegacyAdapter,
     TurnoverLedgerRelationExtraLegacyFallbackAdapterSet,
     TurnoverLedgerRelationExtraLegacyFallbackFacade,
@@ -294,6 +298,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerTagSelectionLegacyFallbackFacade,
     TurnoverLedgerTagSelectionLegacyFallbackAdapterSet,
     TurnoverLedgerTagSelectionSettingsAdapter,
+    TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder,
     TurnoverLedgerWithdrawLegacyFallbackFacade,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
@@ -2654,57 +2659,22 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_relation_extra_legacy_fallback_facade()
-        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
-        if storage_backend == "postgres":
-            connection = getattr(state_store, "_connection", None)
-            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
-                return self._turnover_ledger_relation_extra_legacy_fallback_facade()
-            extra_repository = TurnoverLedgerExtraRepositoryAdapter(
-                repository_factory=lambda transaction: PostgresWorkbenchRepository(transaction)
-            )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
-            idempotency_store = self._workbench_write_idempotency_store(
-                "_turnover_ledger_relation_extra_idempotency_store",
-                connection,
-            )
-        else:
-            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-            if not callable(enqueue):
-                return None
-            local_adapters = TurnoverLedgerLocalRelationExtraAdapterSet(
-                state_store=state_store,
-                routes=self._turnover_ledger_api_routes,
-                replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
-                emit_persistence_warning=self._emit_workbench_persistence_warning,
-            )
-            connection = local_adapters.connection()
-            extra_repository = local_adapters.extra_repository()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
-            idempotency_store = getattr(self, "_turnover_ledger_relation_extra_idempotency_store", None)
-            if idempotency_store is None:
-                idempotency_store = InMemoryWorkbenchIdempotencyRepository()
-                self._turnover_ledger_relation_extra_idempotency_store = idempotency_store
-        uow = TurnoverLedgerWriteUnitOfWork(
-            connection=connection,
-            relation_repository=SimpleNamespace(),
-            extra_repository=extra_repository,
-            settings_port=SimpleNamespace(),
-            bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=dirty_outbox_writer,
-            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
-            idempotency_store=idempotency_store,
-        )
-        return TurnoverLedgerWriteFacade(
-            uow=uow,
-            extra_normalizer=TurnoverLedgerExtraNormalizerAdapter(
-                extra_service=self._turnover_ledger_extra_service,
-            ),
+        facade = TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder(
+            state_store=state_store,
+            queue_repository=queue_repository,
+            routes=self._turnover_ledger_api_routes,
+            replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
+            emit_persistence_warning=self._emit_workbench_persistence_warning,
+            extra_service=self._turnover_ledger_extra_service,
             row_provider=self._turnover_ledger_relation_extra_row_provider,
-        )
+            tenant_id=self._workbench_reconciliation_tenant_id(),
+            postgres_extra_repository_factory=PostgresWorkbenchRepository,
+            postgres_idempotency_store_factory=self._turnover_ledger_relation_extra_postgres_idempotency_store,
+            local_idempotency_store_provider=self._turnover_ledger_relation_extra_local_idempotency_store,
+        ).build()
+        if facade is not None:
+            return facade
+        return self._turnover_ledger_relation_extra_legacy_fallback_facade()
 
     def _turnover_ledger_relation_extra_legacy_fallback_facade(self) -> TurnoverLedgerRelationExtraLegacyFallbackFacade:
         return TurnoverLedgerRelationExtraLegacyFallbackAdapterSet(
@@ -2722,51 +2692,24 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
-        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
-        if storage_backend == "postgres":
-            connection = getattr(state_store, "_connection", None)
-            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
-                return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
-            bankdetail_port = TurnoverLedgerBankdetailWritePort(
-                category_service=self._bank_transaction_category_service,
-                relation_service=self._turnover_relation_service,
-                bank_rows_provider=self._turnover_bank_transaction_rows,
-                persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
-                    transaction,
-                    state_store=state_store,
-                )
-            )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
-        else:
-            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-            if not callable(enqueue):
-                return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
-            local_adapters = TurnoverLedgerLocalBankRowTagsAdapterSet(
+        facade = TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder(
+            state_store=state_store,
+            queue_repository=queue_repository,
+            category_service=self._bank_transaction_category_service,
+            relation_service=self._turnover_relation_service,
+            bank_rows_provider=self._turnover_bank_transaction_rows,
+            replace_category_snapshot=self._replace_local_bank_transaction_category_snapshot,
+            replace_relation_snapshot=self._replace_local_turnover_relation_snapshot,
+            emit_persistence_warning=self._emit_workbench_persistence_warning,
+            tenant_id=self._workbench_reconciliation_tenant_id(),
+            persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
+                transaction,
                 state_store=state_store,
-                category_service=self._bank_transaction_category_service,
-                relation_service=self._turnover_relation_service,
-                bank_rows_provider=self._turnover_bank_transaction_rows,
-                replace_category_snapshot=self._replace_local_bank_transaction_category_snapshot,
-                replace_relation_snapshot=self._replace_local_turnover_relation_snapshot,
-                emit_persistence_warning=self._emit_workbench_persistence_warning,
-            )
-            connection = local_adapters.connection()
-            bankdetail_port = local_adapters.bankdetail_port()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
-        uow = TurnoverLedgerWriteUnitOfWork(
-            connection=connection,
-            relation_repository=SimpleNamespace(),
-            extra_repository=SimpleNamespace(),
-            settings_port=SimpleNamespace(),
-            bankdetail_port=bankdetail_port,
-            dirty_outbox_writer=dirty_outbox_writer,
-            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
-        )
-        return TurnoverLedgerWriteFacade(uow=uow)
+            ),
+        ).build()
+        if facade is not None:
+            return facade
+        return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
 
     def _turnover_ledger_bank_row_tags_legacy_fallback_facade(self) -> TurnoverLedgerBankRowTagsLegacyFallbackFacade:
         state_store = getattr(self, "_state_store", None)
@@ -2787,50 +2730,23 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_confirm_legacy_fallback_facade()
-        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
-        if storage_backend == "postgres":
-            connection = getattr(state_store, "_connection", None)
-            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
-                return self._turnover_ledger_confirm_legacy_fallback_facade()
-            relation_repository = TurnoverLedgerRelationWritePort(
-                relation_service=self._turnover_relation_service,
-                routes=self._turnover_ledger_api_routes,
-                bank_rows_provider=self._turnover_bank_transaction_rows,
-                persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
-                    transaction,
-                    state_store=state_store,
-                )
-            )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
-        else:
-            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-            if not callable(enqueue):
-                return self._turnover_ledger_confirm_legacy_fallback_facade()
-            local_adapters = TurnoverLedgerLocalConfirmRelationAdapterSet(
+        facade = TurnoverLedgerConfirmPrimaryWriteFacadeBuilder(
+            state_store=state_store,
+            queue_repository=queue_repository,
+            relation_service=self._turnover_relation_service,
+            routes=self._turnover_ledger_api_routes,
+            bank_rows_provider=self._turnover_bank_transaction_rows,
+            replace_snapshot=self._replace_local_turnover_relation_snapshot,
+            emit_persistence_warning=self._emit_workbench_persistence_warning,
+            tenant_id=self._workbench_reconciliation_tenant_id(),
+            persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
+                transaction,
                 state_store=state_store,
-                relation_service=self._turnover_relation_service,
-                routes=self._turnover_ledger_api_routes,
-                bank_rows_provider=self._turnover_bank_transaction_rows,
-                replace_snapshot=self._replace_local_turnover_relation_snapshot,
-                emit_persistence_warning=self._emit_workbench_persistence_warning,
-            )
-            connection = local_adapters.connection()
-            relation_repository = local_adapters.relation_repository()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
-        uow = TurnoverLedgerWriteUnitOfWork(
-            connection=connection,
-            relation_repository=relation_repository,
-            extra_repository=SimpleNamespace(),
-            settings_port=SimpleNamespace(),
-            bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=dirty_outbox_writer,
-            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
-        )
-        return TurnoverLedgerWriteFacade(uow=uow)
+            ),
+        ).build()
+        if facade is not None:
+            return facade
+        return self._turnover_ledger_confirm_legacy_fallback_facade()
 
     def _turnover_ledger_confirm_legacy_fallback_facade(self) -> TurnoverLedgerConfirmLegacyFallbackFacade:
         invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
@@ -2849,49 +2765,23 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_withdraw_legacy_fallback_facade()
-        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
-        if storage_backend == "postgres":
-            connection = getattr(state_store, "_connection", None)
-            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
-                return self._turnover_ledger_withdraw_legacy_fallback_facade()
-            relation_repository = TurnoverLedgerRelationWritePort(
-                relation_service=self._turnover_relation_service,
-                routes=self._turnover_ledger_api_routes,
-                bank_rows_provider=self._turnover_bank_transaction_rows,
-                persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
-                    transaction,
-                    state_store=state_store,
-                )
-            )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
-        else:
-            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-            if not callable(enqueue):
-                return self._turnover_ledger_withdraw_legacy_fallback_facade()
-            local_adapters = TurnoverLedgerLocalWithdrawRelationAdapterSet(
+        facade = TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder(
+            state_store=state_store,
+            queue_repository=queue_repository,
+            relation_service=self._turnover_relation_service,
+            routes=self._turnover_ledger_api_routes,
+            bank_rows_provider=self._turnover_bank_transaction_rows,
+            replace_snapshot=self._replace_local_turnover_relation_snapshot,
+            emit_persistence_warning=self._emit_workbench_persistence_warning,
+            tenant_id=self._workbench_reconciliation_tenant_id(),
+            persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
+                transaction,
                 state_store=state_store,
-                relation_service=self._turnover_relation_service,
-                routes=self._turnover_ledger_api_routes,
-                replace_snapshot=self._replace_local_turnover_relation_snapshot,
-                emit_persistence_warning=self._emit_workbench_persistence_warning,
-            )
-            connection = local_adapters.connection()
-            relation_repository = local_adapters.relation_repository()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
-        uow = TurnoverLedgerWriteUnitOfWork(
-            connection=connection,
-            relation_repository=relation_repository,
-            extra_repository=SimpleNamespace(),
-            settings_port=SimpleNamespace(),
-            bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=dirty_outbox_writer,
-            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
-        )
-        return TurnoverLedgerWriteFacade(uow=uow)
+            ),
+        ).build()
+        if facade is not None:
+            return facade
+        return self._turnover_ledger_withdraw_legacy_fallback_facade()
 
     def _turnover_ledger_withdraw_legacy_fallback_facade(self) -> TurnoverLedgerWithdrawLegacyFallbackFacade:
         invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
@@ -3010,41 +2900,17 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_tag_selection_legacy_fallback_facade()
-        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
-        if storage_backend == "postgres":
-            connection = getattr(state_store, "_connection", None)
-            enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
-                return self._turnover_ledger_tag_selection_legacy_fallback_facade()
-            settings_port = TurnoverLedgerTagSelectionSettingsAdapter(
-                repository_factory=lambda transaction: PostgresOpsTaxEtcRepository(transaction)
-            )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
-        else:
-            local_adapters = TurnoverLedgerLocalTagSelectionAdapterSet(
-                state_store=state_store,
-                app_settings_service=self._app_settings_service,
-                refresh_snapshot=self._refresh_local_app_settings_snapshot,
-            )
-            connection = local_adapters.connection()
-            settings_port = local_adapters.settings_writer()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
-        uow = TurnoverLedgerWriteUnitOfWork(
-            connection=connection,
-            relation_repository=SimpleNamespace(),
-            extra_repository=SimpleNamespace(),
-            settings_port=settings_port,
-            bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=dirty_outbox_writer,
-            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
-        )
-        return TurnoverLedgerWriteFacade(
-            uow=uow,
+        facade = TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder(
+            state_store=state_store,
+            queue_repository=queue_repository,
             app_settings_service=self._app_settings_service,
-        )
+            refresh_snapshot=self._refresh_local_app_settings_snapshot,
+            tenant_id=self._workbench_reconciliation_tenant_id(),
+            postgres_settings_repository_factory=lambda transaction: PostgresOpsTaxEtcRepository(transaction),
+        ).build()
+        if facade is None:
+            return self._turnover_ledger_tag_selection_legacy_fallback_facade()
+        return facade
 
     def _turnover_ledger_tag_selection_legacy_fallback_facade(self) -> TurnoverLedgerTagSelectionLegacyFallbackFacade:
         return TurnoverLedgerTagSelectionLegacyFallbackAdapterSet(
@@ -3084,6 +2950,19 @@ class Application:
         else:
             idempotency_store = InMemoryWorkbenchIdempotencyRepository()
         setattr(self, attribute_name, idempotency_store)
+        return idempotency_store
+
+    def _turnover_ledger_relation_extra_postgres_idempotency_store(self, connection: object) -> object:
+        return self._workbench_write_idempotency_store(
+            "_turnover_ledger_relation_extra_idempotency_store",
+            connection,
+        )
+
+    def _turnover_ledger_relation_extra_local_idempotency_store(self) -> object:
+        idempotency_store = getattr(self, "_turnover_ledger_relation_extra_idempotency_store", None)
+        if idempotency_store is None:
+            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+            self._turnover_ledger_relation_extra_idempotency_store = idempotency_store
         return idempotency_store
 
     @staticmethod
