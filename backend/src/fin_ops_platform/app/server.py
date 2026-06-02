@@ -2793,6 +2793,8 @@ class Application:
                 transaction,
                 state_store=state_store,
             ),
+            postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
+            local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
         ).build()
         if facade is not None:
             return facade
@@ -3042,6 +3044,19 @@ class Application:
         if idempotency_store is None:
             idempotency_store = InMemoryWorkbenchIdempotencyRepository()
             self._turnover_ledger_relation_extra_idempotency_store = idempotency_store
+        return idempotency_store
+
+    def _turnover_ledger_confirm_postgres_idempotency_store(self, connection: object) -> object:
+        return self._workbench_write_idempotency_store(
+            "_turnover_ledger_confirm_idempotency_store",
+            connection,
+        )
+
+    def _turnover_ledger_confirm_local_idempotency_store(self) -> object:
+        idempotency_store = getattr(self, "_turnover_ledger_confirm_idempotency_store", None)
+        if idempotency_store is None:
+            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+            self._turnover_ledger_confirm_idempotency_store = idempotency_store
         return idempotency_store
 
     @staticmethod
@@ -12653,6 +12668,7 @@ class Application:
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
         facade = self._turnover_ledger_confirm_request_boundary_facade()
         expected_versions = payload.get("expected_versions") if isinstance(payload.get("expected_versions"), dict) else {}
+        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
         try:
             result = facade.confirm_relation_from_request(
                 bank_row_ids=bank_row_ids,
@@ -12660,6 +12676,7 @@ class Application:
                 tenant_id=tenant_id_for_session(session_response),
                 note=str(payload.get("note")) if payload.get("note") is not None else None,
                 expected_versions=expected_versions,
+                idempotency_key=idempotency_key,
             )
         except TurnoverRelationValidationError as exc:
             return self._json_response(
@@ -12671,6 +12688,8 @@ class Application:
                 exc.status_code,
                 {"error": exc.error_code, "message": str(exc)},
             )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
         return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_turnover_ledger_withdraw(

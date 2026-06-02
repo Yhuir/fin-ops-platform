@@ -163,6 +163,7 @@ class TurnoverLedgerWriteFacade:
         note: str | None,
         affected_months: list[str],
         expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         normalized_bank_row_ids = [
             str(row_id).strip()
@@ -175,8 +176,26 @@ class TurnoverLedgerWriteFacade:
             if str(month).strip()
         ]
         normalized_expected_versions = dict(expected_versions or {})
+        normalized_idempotency_key = str(idempotency_key or "").strip()
+        action_name = "turnover_relation_confirm" if normalized_idempotency_key else "confirm_relation"
+        command_payload = {
+            "bank_row_ids": list(normalized_bank_row_ids),
+            "affected_months": list(normalized_months),
+            "note": note,
+        }
+        request_fingerprint = ""
+        if normalized_idempotency_key:
+            request_fingerprint = workbench_request_fingerprint(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action_name=action_name,
+                payload={
+                    **dict(command_payload),
+                    "expected_versions": dict(normalized_expected_versions),
+                },
+            )
         command = TurnoverLedgerWriteCommand(
-            action_name="confirm_relation",
+            action_name=action_name,
             scope_keys=["all"],
             refresh_requests=[
                 {
@@ -188,10 +207,9 @@ class TurnoverLedgerWriteFacade:
             actor_id=actor_id,
             tenant_id=tenant_id,
             expected_versions=dict(normalized_expected_versions),
-            payload={
-                "bank_row_ids": list(normalized_bank_row_ids),
-                "affected_months": list(normalized_months),
-            },
+            idempotency_key=normalized_idempotency_key,
+            request_fingerprint=request_fingerprint,
+            payload=command_payload,
         )
 
         def handler(context: Any) -> dict[str, object]:

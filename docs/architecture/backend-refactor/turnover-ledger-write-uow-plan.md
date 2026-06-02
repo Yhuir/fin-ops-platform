@@ -6059,6 +6059,111 @@ Remaining seam matrix：
 - 从最新 `main` 新建下一条 `codex/` 分支。
 - 继续 Turnover Ledger 写路径；优先选择 durable idempotency 或剩余 stale precondition 写路径的最小切片。
 
+## PF-P176 Remaining Write Consistency Rebaseline and Planning
+
+状态：
+
+- verified
+
+范围：
+
+- docs-only rebaseline。
+- 盘点 Turnover Ledger 剩余写路径一致性缺口。
+- 不修改 production code，不新增 tests，不进入 MG。
+
+当前一致性状态：
+
+| 写路径 | stale precondition | durable idempotency | dirty/outbox UoW | 下一步判断 |
+| --- | --- | --- | --- | --- |
+| `confirm_relation` | 已有 bank-row stale precondition | 缺失 | 已有 | 下一步优先补 target tests |
+| `withdraw_relation` | 已有 relation stale precondition | 缺失 | 已有 | confirm 后补 |
+| `update_relation_extra` | 已有 expected_versions/stale coverage | 已有 target/API/UoW coverage | 已有 | 暂不优先 |
+| `update_bank_row_tags_batch` | facade baseline 仍显示无 stale/idempotency contract；底层 category service 有 expected_version | 缺失 | 已有 | 后续单独切片 |
+| `update_tag_selection` | request boundary 有 version conflict；facade baseline 仍显示无 stale/idempotency contract | 缺失 | 已有 | 后续单独切片 |
+
+下一条：
+
+- `PF-P177 - Turnover Ledger Confirm Durable Idempotency Contract Tests`
+- 只写 confirm durable idempotency target/compatibility tests。
+- 不实现 idempotency，不迁移 withdraw/bank row tags/tag selection/relation extra。
+
+## PF-P177 Confirm Durable Idempotency Contract Tests
+
+状态：
+
+- verified
+
+范围：
+
+- 只新增 confirm durable idempotency target tests。
+- 使用 `unittest.expectedFailure` 锁定未来目标。
+- 不修改 production code，不实现 idempotency。
+- 不迁移 withdraw、bank row tags、tag selection、relation extra。
+
+目标契约：
+
+- `TurnoverLedgerWriteFacade.confirm_relation(..., idempotency_key=...)` 未来应写入 `TurnoverLedgerWriteCommand.idempotency_key` 和稳定 request fingerprint。
+- HTTP confirm same idempotency key + same payload 应 replay first response，不重复 relation mutation / refresh enqueue。
+- HTTP confirm same idempotency key + different payload 应返回 conflict，不重复 relation mutation / refresh enqueue。
+
+执行结果：
+
+- 新增 3 个 `unittest.expectedFailure` target tests：
+  - UoW/facade-level confirm idempotency command contract。
+  - API same idempotency key + same payload replay contract。
+  - API same idempotency key + different payload conflict contract。
+- 未修改 production code。
+
+验证：
+
+- PF-P177 targeted tests：Pass（expected failures）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（122 tests，expected failures=2）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（58 tests，expected failures=1）。
+- `git diff --check`：Pass。
+
+下一步：
+
+- `PF-P178 - Turnover Ledger Confirm Durable Idempotency Integration`
+- 移除 expectedFailure 并转绿目标测试。
+- 只实现 confirm durable idempotency，不迁移其它写路径。
+
+## PF-P178 Confirm Durable Idempotency Integration
+
+状态：
+
+- verified
+
+范围：
+
+- 只实现 confirm durable idempotency。
+- 不迁移 withdraw、bank row tags、tag selection、relation extra。
+- 不修改 schema、deploy、Traffic Gate 或真实外部服务配置。
+
+执行结果：
+
+- PF-P177 三个 confirm durable idempotency target tests 已从 `unittest.expectedFailure` 转为普通通过。
+- `TurnoverLedgerWriteFacade.confirm_relation(..., idempotency_key=...)` 将 idempotency key 和稳定 request fingerprint 写入 `TurnoverLedgerWriteCommand`。
+- request fingerprint 覆盖 normalized bank_row_ids、affected_months、note、expected_versions。
+- Confirm request boundary 和 HTTP handler 支持 body `idempotency_key` / `idempotencyKey`。
+- Confirm primary builder 接入现有 Workbench idempotency store boundary；local path 使用 in-memory store 保持测试/开发语义。
+- Confirm handler 复用 Workbench idempotency conflict/in-progress/failed 409 mapping。
+- 无 idempotency key 的旧 confirm 和 facade override 行为保持兼容。
+
+验证：
+
+- PF-P178 RED before implementation：Pass。
+- PF-P178 targeted tests：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（122 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（58 tests）。
+- `git diff --check`：Pass。
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+下一步：
+
+- `PF-P178-MG - Turnover Ledger Confirm Durable Idempotency Cumulative Merge Gate`
+- 统一覆盖 PF-P176 到 PF-P178 的完整 diff。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

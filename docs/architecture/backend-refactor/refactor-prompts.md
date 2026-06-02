@@ -29084,6 +29084,311 @@ Verification:
 - 执行 `git push origin main`。
 - push 后从最新 `main` 新建下一条 `codex/` 分支。
 
+## PF-P176 - Turnover Ledger Remaining Write Consistency Rebaseline and Planning
+
+```text
+/goal
+PF-P176 - Turnover Ledger Remaining Write Consistency Rebaseline and Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只做 Turnover Ledger 剩余写路径一致性 rebaseline / planning，不写业务代码。
+
+Context:
+- PF-P175-MG 已 verified 并 push origin/main。
+- 当前分支从最新 main 新建。
+- Confirm/withdraw stale precondition baseline 已建立。
+- Relation extra 已具备 expected_versions / durable idempotency / UoW coverage。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/**
+- tests/**
+- web/src/**
+- SQL/schema/deploy/Traffic Gate/真实外部服务配置
+- 不得进入 MG。
+
+Required Work:
+1. 扫描当前 Turnover Ledger 写路径：
+   - confirm_relation
+   - withdraw_relation
+   - update_bank_row_tags_batch
+   - update_tag_selection
+   - update_relation_extra
+2. 输出每条写路径的一致性状态：
+   - expected_versions / stale precondition
+   - durable idempotency
+   - dirty/outbox transaction boundary
+   - repository/port ownership
+3. 给出下一条最小 prompt 推荐，只允许推荐一条。
+4. 更新状态机和 Turnover 专项计划。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "currently_has_no_stale|durable_idempotency|idempotency|stale_precondition|expected_versions" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py
+- rg -n "def update_bank_row_tags_batch|def update_tag_selection|def confirm_relation|def withdraw_relation|idempotency_key|expected_versions" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py backend/src/fin_ops_platform/app/server.py
+```
+
+### 审查结论
+
+- PF-P176 是 PF-P175-MG 后合理的 docs-only rebaseline，避免在剩余写路径中盲目选择下一刀。
+- 本 prompt 不改生产代码、不新增测试、不进入 MG。
+
+### PF-P176 执行结果
+
+- PF-P176 已完成并验证。
+- 剩余优先级：
+  1. confirm durable idempotency；
+  2. withdraw durable idempotency；
+  3. bank row tags / tag selection 的 durable idempotency 与 stale contract。
+- 下一条建议：
+  - `PF-P177 - Turnover Ledger Confirm Durable Idempotency Contract Tests`
+  - PF-P177 只写 confirm durable idempotency target/compatibility tests，不实现 idempotency，不迁移其它写路径。
+
+## PF-P177 - Turnover Ledger Confirm Durable Idempotency Contract Tests
+
+```text
+/goal
+PF-P177 - Turnover Ledger Confirm Durable Idempotency Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的测试先行工程师。你必须只为 Turnover Ledger confirm durable idempotency 写目标契约测试，不实现 idempotency。
+
+Context:
+- PF-P176 已 verified。
+- confirm 已具备 expected_versions propagation 和 bank-row stale precondition。
+- confirm/withdraw 目前仍没有 durable idempotency。
+- relation_extra 已有 idempotency target/API/UoW coverage，可作为风格参考。
+
+Allowed Scope:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/**
+- web/src/**
+- SQL/schema/deploy/Traffic Gate/真实外部服务配置
+- 不得实现 confirm idempotency。
+- 不得迁移 withdraw、bank row tags、tag selection、relation extra。
+
+Required Test Work:
+1. 新增 UoW/facade-level target test，并标记 `unittest.expectedFailure`：
+   - `TurnoverLedgerWriteFacade.confirm_relation(..., idempotency_key=...)` 未来应写入 `TurnoverLedgerWriteCommand.idempotency_key`。
+   - request fingerprint 必须非空，并包含 tenant/actor/action/payload/expected_versions 的稳定语义。
+2. 新增 API-level target test，并标记 `unittest.expectedFailure`：
+   - same `idempotency_key` + same confirm payload 应 replay first response；
+   - 不应执行第二次 relation mutation；
+   - 不应重复 enqueue read model refresh。
+3. 新增 API-level target test，并标记 `unittest.expectedFailure`：
+   - same `idempotency_key` + different confirm payload 应返回 409 conflict；
+   - 不应执行第二次 relation mutation；
+   - 不应重复 enqueue read model refresh。
+4. 保持 legacy confirm payload 无 `idempotency_key` 行为不变。
+5. 更新状态机和 Turnover 专项计划。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_confirm_idempotency_key_replays_without_duplicate_confirm_or_refresh tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_confirm_idempotency_key_conflict_rejects_different_payload -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_target_confirm_relation_facade_passes_idempotency_before_repository -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- git status --short --branch
+- git ls-files --others --exclude-standard
+```
+
+### 审查结论
+
+- PF-P177 边界正确：只新增 expectedFailure target tests，不改 production code。
+- 使用 expectedFailure 是为了把目标契约放进默认 test suite，同时不让尚未实现的 durable idempotency 阻塞 CI。
+
+### PF-P177 执行结果
+
+- PF-P177 已完成并验证。
+- 新增 3 个 confirm durable idempotency target tests，均为 `unittest.expectedFailure`。
+- 未修改 production code。
+- 验证：
+  - PF-P177 targeted tests：Pass（expected failures）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（122 tests，expected failures=2）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（58 tests，expected failures=1）。
+  - `git diff --check`：Pass。
+
+下一条建议：
+
+- `PF-P178 - Turnover Ledger Confirm Durable Idempotency Integration`
+- PF-P178 应移除 PF-P177 的 expectedFailure 并转绿，只实现 confirm durable idempotency。
+
+## PF-P178 - Turnover Ledger Confirm Durable Idempotency Integration
+
+```text
+/goal
+PF-P178 - Turnover Ledger Confirm Durable Idempotency Integration
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只实现 Turnover Ledger confirm durable idempotency，不迁移其它写路径。
+
+Context:
+- PF-P177 已 verified。
+- PF-P177 新增了 3 个 expectedFailure target tests。
+- `relation_extra` 已经有 durable idempotency 风格，可复用 `workbench_request_fingerprint`、`TurnoverLedgerWriteCommand.idempotency_key`、UoW `idempotency_store`。
+- confirm 已具备 expected_versions 和 stale precondition。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py，除非 existing idempotency seam cannot support confirm and tests prove it.
+- web/src/**
+- SQL/schema/deploy/Traffic Gate/真实外部服务配置
+- 不得迁移 withdraw、bank row tags、tag selection、relation extra。
+- 不得新增新 idempotency framework；必须复用现有 Workbench idempotency primitives。
+
+Required Work:
+1. 移除 PF-P177 三个 target tests 的 `unittest.expectedFailure`，确认 RED。
+2. `TurnoverLedgerWriteFacade.confirm_relation(...)` 增加 optional `idempotency_key` 参数。
+3. 当 idempotency key 非空时：
+   - action name 使用 stable durable action（建议 `turnover_relation_confirm`）；
+   - 填充 `TurnoverLedgerWriteCommand.idempotency_key`；
+   - 使用 `workbench_request_fingerprint(...)` 生成 request fingerprint；
+   - fingerprint payload 必须包含 normalized bank_row_ids、note、affected_months、expected_versions。
+4. `TurnoverLedgerConfirmRequestBoundaryFacade.confirm_relation_from_request(...)` 兼容读取并透传 idempotency key。
+5. `_handle_api_turnover_ledger_confirm(...)` 兼容 body `idempotency_key` 和 `idempotencyKey`。
+6. Confirm primary builder 接入 existing idempotency store provider，优先复用 relation_extra 已有的 `_workbench_write_idempotency_store(...)` 组装方式。
+7. 保持无 idempotency key 的 legacy confirm 行为不变。
+8. 更新状态机和 Turnover 专项计划。
+
+Verification:
+- RED before implementation for the three PF-P177 target tests after removing expectedFailure.
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_confirm_idempotency_key_replays_without_duplicate_confirm_or_refresh tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_confirm_idempotency_key_conflict_rejects_different_payload -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_target_confirm_relation_facade_passes_idempotency_before_repository -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- git status --short --branch
+- git ls-files --others --exclude-standard
+```
+
+### 审查结论
+
+- PF-P178 是 PF-P177 后合理的最小实现切片。
+- 本轮只处理 confirm durable idempotency，不接 withdraw 或其它写路径。
+
+### PF-P178 执行结果
+
+- PF-P178 已完成并验证。
+- 移除 PF-P177 三个 confirm durable idempotency target tests 的 `unittest.expectedFailure` 并转为普通通过。
+- `TurnoverLedgerWriteFacade.confirm_relation(..., idempotency_key=...)` 支持 command idempotency identity 和 stable request fingerprint。
+- `_handle_api_turnover_ledger_confirm(...)` 支持 body `idempotency_key` / `idempotencyKey`，并复用 Workbench idempotency 409 mapping。
+- Confirm primary builder 复用现有 Workbench idempotency store boundary；local path 使用 in-memory idempotency store 保持测试/开发语义。
+- 验证通过：
+  - PF-P178 RED before implementation：Pass。
+  - PF-P178 targeted tests：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（122 tests）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（58 tests）。
+  - `git diff --check`：Pass。
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+
+## PF-P178-MG - Turnover Ledger Confirm Durable Idempotency Cumulative Merge Gate
+
+```text
+/goal
+PF-P178-MG - Turnover Ledger Confirm Durable Idempotency Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger confirm durable idempotency 切片，不新增业务实现，不执行下一条功能 prompt。
+
+Context:
+- PF-P176 已 verified（remaining write consistency rebaseline / planning）。
+- PF-P177 已 verified（confirm durable idempotency target/compatibility tests）。
+- PF-P178 已 verified（confirm durable idempotency integration）。
+- 当前分支：`codex/turnover-ledger-remaining-consistency-p176`。
+- 本 MG 覆盖 PF-P176 到 PF-P178 的完整 diff。
+
+Gate Scope:
+- 这是 Merge Gate，不是 Traffic Gate。
+- 只允许合入 confirm durable idempotency 切片。
+- 不部署、不访问生产、不修改 Nginx、不打开 feature flag、不访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不允许继续迁移 withdraw、bank row tags、tag selection、relation extra 或其它模块。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- SQL/schema/migrations/deploy/Traffic Gate/生产配置。
+- web/src/**
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py（本切片必须复用既有 idempotency seam）。
+- 任何 withdraw、bank row tags、tag selection、relation extra 的行为迁移。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Required Gate Work:
+1. 确认当前分支和 main/origin 状态：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --name-only main...HEAD`
+   - `git diff --name-only`
+2. 确认 changed files 只在 Allowed Changed Files 内。
+3. 确认没有 untracked 临时文件；如果有，停止并报告。
+4. 执行 verification：
+   - `git diff --check`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+5. 精确 stage 本 MG 允许的文件，不得使用 `git add .` 或 `git add -A`。
+6. commit 建议：
+   - `test(turnover-ledger): enforce confirm durable idempotency`
+7. 合入 main 前先同步最新 main：
+   - 如果 main/origin/main 有新提交，先停止或按用户授权同步；不得覆盖用户改动。
+8. merge 到 main 后，在 main 上重跑第 4 步 verification。
+9. 只有 main 上 verification 全部通过，才允许 `git push origin main`。
+10. push 完成后，从最新 main 新建下一条 `codex/` 分支；如果下一模块/切片不明确，停止并总结。
+11. 更新 `migration-state-log.md`，将 PF-P178-MG 标记为 verified，并记录验证命令、commit、merge、push 状态。
+
+Verification:
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --name-only`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+```
+
+### 审查结论
+
+- PF-P178-MG 是当前分支合理的收口边界。
+- 它覆盖一个完整、可合入的小切片：PF-P176 rebaseline、PF-P177 confirm idempotency tests、PF-P178 confirm idempotency implementation。
+- 本 MG 不触发 Traffic Gate，不继续业务迁移。
+
+### PF-P178-MG 执行结果
+
+- PF-P178-MG 已完成并验证。
+- 范围检查通过：当前 diff 只包含 MG 白名单文件，无 untracked 临时文件。
+- 验证通过：
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（122 tests）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（58 tests）。
+- 下一步：精确 stage、commit、merge 到 main，在 main 上重跑验证，通过后 push `origin/main`。
+
 ## PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate
 
 状态：`planned`

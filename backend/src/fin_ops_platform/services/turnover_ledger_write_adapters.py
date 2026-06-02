@@ -505,6 +505,8 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         emit_persistence_warning: Callable[..., None],
         tenant_id: str,
         persistence_repository_factory: Callable[[Any], Any],
+        postgres_idempotency_store_factory: Callable[[Any], Any],
+        local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
         self._state_store = state_store
         self._queue_repository = queue_repository
@@ -515,6 +517,8 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self._emit_persistence_warning = emit_persistence_warning
         self._tenant_id = tenant_id
         self._persistence_repository_factory = persistence_repository_factory
+        self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
+        self._local_idempotency_store_provider = local_idempotency_store_provider
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
@@ -533,6 +537,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 queue_repository=self._queue_repository,
                 tenant_id=self._tenant_id,
             )
+            idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
             enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
@@ -550,6 +555,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
                 queue_repository=self._queue_repository
             )
+            idempotency_store = self._local_idempotency_store_provider()
         stale_precondition_port = TurnoverLedgerBankRowStalePreconditionPort(
             bank_rows_provider=self._bank_rows_provider
         )
@@ -561,6 +567,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             bankdetail_port=SimpleNamespace(),
             dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=stale_precondition_port,
+            idempotency_store=idempotency_store,
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
@@ -877,8 +884,9 @@ class TurnoverLedgerConfirmLegacyFallbackFacade:
         note: str | None,
         affected_months: list[str],
         expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
-        _ = tenant_id, expected_versions
+        _ = tenant_id, expected_versions, idempotency_key
         self._relation_rebuild()
         result = self._routes.confirm_relation(
             bank_row_ids=list(bank_row_ids or []),
@@ -907,6 +915,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         tenant_id: str,
         note: str | None,
         expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         normalized_bank_row_ids = [
             str(row_id).strip()
@@ -914,14 +923,17 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             if str(row_id).strip()
         ]
         affected_months = self._affected_months_resolver(list(normalized_bank_row_ids))
-        result = self._facade.confirm_relation(
-            bank_row_ids=normalized_bank_row_ids,
-            actor_id=actor_id,
-            tenant_id=tenant_id,
-            note=note,
-            affected_months=affected_months,
-            expected_versions=dict(expected_versions or {}),
-        )
+        confirm_kwargs = {
+            "bank_row_ids": normalized_bank_row_ids,
+            "actor_id": actor_id,
+            "tenant_id": tenant_id,
+            "note": note,
+            "affected_months": affected_months,
+            "expected_versions": dict(expected_versions or {}),
+        }
+        if idempotency_key:
+            confirm_kwargs["idempotency_key"] = idempotency_key
+        result = self._facade.confirm_relation(**confirm_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
         return payload
