@@ -4476,7 +4476,7 @@ Remaining write path matrix：
 
 状态：
 
-- planned
+- verified
 
 目标：
 
@@ -4487,6 +4487,37 @@ Remaining write path matrix：
 
 - 只处理 confirm local adapter。
 - 不碰 withdraw / bank row tags。
+
+结果：
+
+- 已新增 `TurnoverLedgerLocalConfirmRelationAdapterSet`。
+- confirm local path 的 snapshot/save/relation rebuild 组装已从 `server.py` 移入 adapter module。
+- `server.py` 不再内联 `save_snapshot=lambda ...` 与 `relation_rebuild=lambda ...`。
+- 新增 guard test：
+  - `test_confirm_relation_write_facade_does_not_inline_local_snapshot_or_rebuild_closures`
+- 保持旧合同：
+  - local relation save 持久化失败仍然只是 warning，不影响成功响应路径。
+
+下一步：
+
+- 生成并审查 `PF-P139 - Turnover Ledger Withdraw Relation Local Adapter Extraction`。
+- PF-P139 只抽离 withdraw local path 的 snapshot/save 组装，不顺手修改 bank row tags。
+
+## PF-P139 Withdraw Relation Local Adapter Extraction
+
+状态：
+
+- planned
+
+目标：
+
+- 把 withdraw local path 的 snapshot/save 组装迁入 adapter module。
+- 继续减少 `server.py` 中的 local wiring，但不改变 stale / duplicate submit / queue failure rollback / no direct clear 合约。
+
+边界：
+
+- 只处理 withdraw local adapter。
+- 不碰 bank row tags。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

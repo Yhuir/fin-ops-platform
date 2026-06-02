@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction` 已完成并验证 |
-| 当前 active prompt | `PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction` 已生成并审查，待执行 |
-| 最近 verified prompt | `PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction` |
+| 当前阶段 | `PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction` 已完成并验证 |
+| 当前 active prompt | `PF-P139 - Turnover Ledger Withdraw Relation Local Adapter Extraction` 已生成并审查，待执行 |
+| 最近 verified prompt | `PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p136` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，73 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
-| 下一条允许任务 | 执行 `PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，74 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
+| 下一条允许任务 | 执行 `PF-P139 - Turnover Ledger Withdraw Relation Local Adapter Extraction` |
 
 ## Prompt 执行日志
 
@@ -9873,6 +9873,52 @@ PF-P136 结论：下一条最小实现 prompt 应为 `PF-P137 - Turnover Ledger 
 PF-P136 / PF-P137 已形成一个新的 local adapter 子组：rebaseline -> relation extra extraction。下一步应在以下两者之间选择其一：
 - 继续同组 local adapter extraction（优先 `confirm relation local adapter seam`，其次 `withdraw relation local adapter seam`）；
 - 若希望先收口已完成的 local adapter 子组，再生成 cumulative MG，统一覆盖 PF-P136 / PF-P137。
+
+### PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction
+
+状态：`verified`
+
+#### 范围
+
+- 只抽离 confirm local path 的 local adapter seam。
+- 把 `server.py` 中 confirm local path 的 snapshot/save/rebuild 组装尽量收束到 adapter module。
+- 不改 API contract，不改 stale/idempotency/queue failure 语义，不进入 MG。
+
+#### 执行摘要
+
+- 已新增 `TurnoverLedgerLocalConfirmRelationAdapterSet`，将 confirm local path 的 snapshot/save/relation rebuild 组装从 `server.py` 移入 adapter module。
+- `server.py` 的 `_turnover_ledger_confirm_write_facade(...)` 不再直接内联 `save_snapshot=lambda ...` 与 `relation_rebuild=lambda ...`。
+- 新增 source-level guard test，锁定 confirm write facade 不再内联 local snapshot/save/rebuild closures。
+- 过程中发现一个真实语义回归风险：local relation save 必须保持“持久化失败仅记 warning，不改变成功响应路径”的旧合同；已在 adapter 内复用该行为，而不是修改测试。
+- 原有 confirm 行为保持不变：stale、duplicate submit、queue failure rollback、fallback facade、no direct clear 全部继续通过。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+当前 local adapter 子组已经完成：
+- PF-P136 rebaseline
+- PF-P137 relation extra local adapter extraction
+- PF-P138 confirm local adapter extraction
+
+下一步优先应为 `PF-P139 - Turnover Ledger Withdraw Relation Local Adapter Extraction`。它与 confirm 共用相似的 local relation connection seam，但不应顺手扩展到 bank row tags。
+
+### PF-P139 - Turnover Ledger Withdraw Relation Local Adapter Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 只抽离 withdraw local path 的 local adapter seam。
+- 把 `server.py` 中 withdraw local path 的 snapshot/save 组装尽量收束到 adapter module。
+- 不改 API contract，不改 stale/idempotency/queue failure 语义，不进入 MG。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

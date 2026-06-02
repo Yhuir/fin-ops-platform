@@ -278,6 +278,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerExtraRepositoryAdapter,
     TurnoverLedgerLocalBankdetailPort,
     TurnoverLedgerLocalBankRowTagsConnection,
+    TurnoverLedgerLocalConfirmRelationAdapterSet,
     TurnoverLedgerLocalDirtyOutboxWriter,
     TurnoverLedgerLocalRelationConnection,
     TurnoverLedgerLocalRelationRepository,
@@ -2818,20 +2819,16 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return self._turnover_ledger_confirm_legacy_fallback_facade()
-            connection = TurnoverLedgerLocalRelationConnection(
-                relation_snapshot_provider=self._turnover_relation_service.snapshot,
-                replace_snapshot=self._replace_local_turnover_relation_snapshot,
-                save_snapshot=lambda snapshot: self._save_local_turnover_relations_snapshot(
-                    state_store,
-                    snapshot,
-                ),
-            )
-            relation_repository = TurnoverLedgerLocalRelationRepository(
+            local_adapters = TurnoverLedgerLocalConfirmRelationAdapterSet(
+                state_store=state_store,
+                relation_service=self._turnover_relation_service,
                 routes=self._turnover_ledger_api_routes,
-                relation_rebuild=lambda: self._turnover_relation_service.rebuild_from_bank_rows(
-                    self._turnover_bank_transaction_rows()
-                ),
+                bank_rows_provider=self._turnover_bank_transaction_rows,
+                replace_snapshot=self._replace_local_turnover_relation_snapshot,
+                emit_persistence_warning=self._emit_workbench_persistence_warning,
             )
+            connection = local_adapters.connection()
+            relation_repository = local_adapters.relation_repository()
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,

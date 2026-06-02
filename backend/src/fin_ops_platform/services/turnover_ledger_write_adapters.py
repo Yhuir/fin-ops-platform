@@ -781,6 +781,61 @@ class TurnoverLedgerLocalRelationRepository:
         )
 
 
+class TurnoverLedgerLocalConfirmRelationAdapterSet:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        relation_service: Any,
+        routes: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        replace_snapshot: Callable[[dict[str, object]], None],
+        emit_persistence_warning: Callable[..., None],
+    ) -> None:
+        self._state_store = state_store
+        self._relation_service = relation_service
+        self._routes = routes
+        self._bank_rows_provider = bank_rows_provider
+        self._replace_snapshot = replace_snapshot
+        self._emit_persistence_warning = emit_persistence_warning
+
+    def connection(self) -> TurnoverLedgerLocalRelationConnection:
+        return TurnoverLedgerLocalRelationConnection(
+            relation_snapshot_provider=self.relation_snapshot,
+            replace_snapshot=self._replace_snapshot,
+            save_snapshot=self.save_snapshot,
+        )
+
+    def relation_repository(self) -> TurnoverLedgerLocalRelationRepository:
+        return TurnoverLedgerLocalRelationRepository(
+            routes=self._routes,
+            relation_rebuild=self.rebuild_relations,
+        )
+
+    def relation_snapshot(self) -> dict[str, object]:
+        snapshot = getattr(self._relation_service, "snapshot", None)
+        if callable(snapshot):
+            return dict(snapshot() or {})
+        return {}
+
+    def save_snapshot(self, snapshot: dict[str, object]) -> None:
+        save_relations = getattr(self._state_store, "save_turnover_relations", None)
+        if not callable(save_relations):
+            raise RuntimeError("state store must expose save_turnover_relations.")
+        try:
+            save_relations(dict(snapshot))
+        except Exception as exc:
+            self._emit_persistence_warning(
+                operation="turnover_relations_updated",
+                detail=str(exc),
+            )
+
+    def rebuild_relations(self) -> None:
+        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
+        if callable(rebuild):
+            rebuild(self._bank_rows_provider())
+
+
 class TurnoverLedgerLocalBankRowTagsConnection:
     def __init__(
         self,
