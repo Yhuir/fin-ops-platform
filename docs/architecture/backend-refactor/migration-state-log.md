@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate` 已完成并验证 |
-| 当前 active prompt | 空；push 后需从最新 `main` 新建分支，生成并审查 `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline` |
-| 最近 verified prompt | `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | `git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（96 tests）；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | push `origin/main`；然后从最新 `main` 新建分支，生成并审查 `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline` |
+| 当前阶段 | `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction` 已完成并验证 |
+| 当前 active prompt | 空；下一步可生成并审查 `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate` |
+| 最近 verified prompt | `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction` |
+| 当前分支 | `codex/turnover-ledger-relation-extra-boundary-p160` |
+| 最近验证 | `git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（97 tests）；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
+| 下一条允许任务 | 生成并审查 `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -403,6 +403,121 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
   - PF-P159 bank row tags handler boundary
 - 下一步不应继续扩大范围，应进入 cumulative MG：
   - `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate`
+
+### PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 累计覆盖：
+  - `PF-P156 - Turnover Ledger Write Handler Boundary Characterization Tests`
+  - `PF-P157 - Turnover Ledger Confirm Handler Boundary Extraction`
+  - `PF-P158 - Turnover Ledger Withdraw Handler Boundary Extraction`
+  - `PF-P159 - Turnover Ledger Bank Row Tags Handler Boundary Extraction`
+
+#### 执行摘要
+
+- 已完成分支 scope / 白名单检查。
+- 已完成分支验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+  - `python3 -m compileall ...`
+- 已 merge 到 `main` 并在 `main` 上重跑同组验证，结果仍为绿。
+- 已 push `origin/main`。
+
+#### 下一条 Prompt 上下文
+
+- write handler boundary 这一整组切片已完成并合入主干。
+- 下一条不应直接继续 MG，也不应跨模块跳转。
+- 当前 Turnover Ledger 剩余最重的 handler seam 是 relation extra：
+  - stale expected version precheck
+  - `expected_versions`
+  - `idempotency_key`
+  - stale conflict HTTP mapping
+- 下一条应先做 `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline`。
+
+### PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline
+
+状态：`verified`
+
+#### 范围
+
+- 只做 Turnover Ledger relation extra handler seam 的 rebaseline / planning。
+- 不改生产代码，不改 tests，不进入 MG。
+
+#### 执行摘要
+
+- 已确认 confirm / withdraw / bank row tags 的 request boundary 已抽离完成。
+- 当前 relation extra 仍由 handler 直接持有：
+  - `expected_versions = payload.get("expected_versions")`
+  - `idempotency_key = ...`
+  - stale precheck 通过 `self._turnover_ledger_read_facade.get_relation_extra(relation_id)` 读取当前 `updated_at`
+  - stale 冲突时直接返回 `turnover_relation_extra_conflict`
+- relation extra 的这一层比 confirm/withdraw 更重，因为它同时连着：
+  - stale guard
+  - durable idempotency contract
+  - HTTP conflict mapping
+- 因此下一条实现不应直接碰 UoW / schema，而应先抽 request boundary。
+
+#### 下一条 Prompt 上下文
+
+- 下一条应生成并审查：
+  - `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction`
+- 边界要求：
+  - 只把 relation extra handler 的 request orchestration 收到显式 boundary 对象
+  - 不改 UoW contract
+  - 不改 PostgreSQL schema
+  - 不进入 MG
+
+### PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction
+
+状态：`verified`
+
+#### 范围
+
+- 只迁移 relation extra handler 的 request orchestration 边界。
+- 不修改 UoW contract、PostgreSQL schema 或其它写路径。
+
+#### 执行摘要
+
+- 新增：
+  - `TurnoverLedgerRelationExtraRequestBoundaryFacade`
+  - `TurnoverLedgerRelationExtraRequestBoundaryError`
+- `Application._handle_api_turnover_ledger_relation_extra_update(...)` 不再直接持有：
+  - `expected_versions`
+  - `idempotency_key`
+  - stale precheck 的 current extra read / `updated_at` compare
+  - `turnover_relation_extra_conflict` 的前置数据准备
+  - `turnover_ledger_invalidated` response 注入
+- handler 现在只保留：
+  - auth/session
+  - JSON/body 校验
+  - boundary 调用
+  - `KeyError` / request-boundary error / idempotency / validation 的 HTTP mapping
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，97 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+#### 下一条 Prompt 上下文
+
+- relation extra request boundary 已抽离完成。
+- 这一分支当前只包含：
+  - `PF-P160` docs-only rebaseline
+  - `PF-P161` relation extra request boundary extraction
+- 下一步应进入这一组的 MG：
+  - `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate`
 
 ### PF-P002 - Platform / Ops / Runtime Boundary Deep Dive
 

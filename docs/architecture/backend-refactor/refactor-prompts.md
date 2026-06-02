@@ -27611,6 +27611,193 @@ Post-Flight:
   - push 完成后，从最新 `main` 新建分支
   - 生成并审查 `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline`
 
+## PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline
+
+状态：`verified`
+
+```text
+/goal
+PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 write handler boundary 组完成并合入主干后，重新盘点 Turnover Ledger relation extra 剩余 seam，决定下一条最小切片。
+
+Context:
+- PF-P159-MG 已 verified，并已 merge / push。
+- confirm / withdraw / bank row tags 三条 request boundary 已抽离完成。
+- relation extra 仍是当前剩余最重的 write handler seam。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 重新盘点 relation extra handler 当前仍持有的职责。
+2. 明确它与 stale guard / durable idempotency / HTTP conflict mapping 的连接点。
+3. 给出下一条最小实现 prompt 建议。
+4. 不修改生产代码或 tests。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n \"expected_versions|idempotency_key|turnover_relation_extra_conflict|get_relation_extra\\(relation_id\\)\" backend/src/fin_ops_platform/app/server.py
+```
+
+### 审查结论
+
+- PF-P160 边界正确：这是 relation extra handler extraction 前必要的 rebaseline。
+- 它避免直接把 stale/idempotency 复杂性带进新一轮实现。
+
+### PF-P160 执行结果
+
+- PF-P160 已完成并验证。
+- 已确认 relation extra handler 当前仍直接持有：
+  - `expected_versions`
+  - `idempotency_key`
+  - stale precheck
+  - stale conflict HTTP mapping
+- 已确认下一条最小切片应为：
+  - `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction`
+
+## PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger relation extra handler 中仍残留的 request orchestration 收到显式 boundary 对象，但不能扩大到 UoW、schema 或其它写路径。
+
+Context:
+- PF-P160 已 verified。
+- relation extra handler 当前仍持有：
+  - `expected_versions`
+  - `idempotency_key`
+  - stale precheck（通过当前 extra 的 `updated_at`）
+  - stale conflict HTTP mapping 前的数据准备
+- PF-P156 的 characterization tests 已锁住这条路径的现状。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 引入显式 request boundary/facade，承接 relation extra handler 的：
+   - `expected_versions` 读取与规范化
+   - `idempotency_key` 提取与规范化
+   - stale precheck 所需的 current extra read / `updated_at` compare
+   - response payload 返回前的数据整合
+2. handler 仅保留：
+   - auth/session
+   - JSON/body 校验
+   - boundary 调用
+   - `KeyError` / stale conflict / idempotency / validation 的 HTTP mapping
+3. 不得修改 `TurnoverLedgerWriteUnitOfWork` 语义。
+4. 不得修改 PostgreSQL schema、outbox、dirty scope 或进入 MG。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P161 的边界正确：它只处理 relation extra handler 的 request boundary，不跨到 UoW 或 schema。
+
+### PF-P161 执行结果
+
+- PF-P161 已完成并验证。
+- 新增：
+  - `TurnoverLedgerRelationExtraRequestBoundaryFacade`
+  - `TurnoverLedgerRelationExtraRequestBoundaryError`
+- `Application._handle_api_turnover_ledger_relation_extra_update(...)` 不再直接持有：
+  - `expected_versions`
+  - `idempotency_key`
+  - stale precheck 的 current extra read / compare
+  - `turnover_ledger_invalidated` response 注入
+- 验证：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，97 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议：
+  - `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate`
+
+## PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须对 relation extra request boundary 这一组切片做 merge gate，确认 scope、测试、文档和主干合并条件都满足要求。
+
+Context:
+- 当前分支：`codex/turnover-ledger-relation-extra-boundary-p160`
+- 本次 MG 覆盖完整 diff：
+  - `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline`
+  - `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction`
+- 本次不得扩大到新的 UoW/schema/idempotency 语义变更，也不得进入别的模块。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+- 允许 merge 到 `main`、在 `main` 上复验、以及 `git push origin main`
+
+Required MG Checks:
+1. Scope:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --check`
+   - `git diff --name-only main...HEAD`
+   - `git log --oneline main..HEAD`
+2. 白名单：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+   - `tests/test_turnover_ledger_api.py`
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+3. Verification:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+4. Merge:
+   - 确认 `main` 已包含最新 `origin/main`
+   - merge 后在 `main` 上重跑同组验证
+   - 复验通过后才允许 push
+
+Forbidden Scope:
+- 不得新增生产实现
+- 不得修改 UoW、schema、outbox、dirty scope
+- 不得执行 Traffic Gate、部署、访问生产或修改生产配置
+
+Post-Flight:
+1. 若 MG 通过：
+   - 标记 PF-P161-MG 为 verified
+   - 更新 backend-refactor 文档
+2. push 完成后：
+   - 从最新 `main` 新建分支
+   - 生成下一条 prompt
+```
+
+### 审查结论
+
+- PF-P161-MG 边界正确：它只覆盖 relation extra request boundary 这一个明确切片。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

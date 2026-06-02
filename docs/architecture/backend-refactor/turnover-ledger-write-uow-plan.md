@@ -5410,6 +5410,65 @@ Remaining seam matrix：
 - 从最新 `main` 新建分支
 - 生成并审查 `PF-P160 - Turnover Ledger Relation Extra Handler Boundary Rebaseline`
 
+## PF-P160 Relation Extra Handler Boundary Rebaseline
+
+状态：
+
+- verified
+
+目标：
+
+- 在 write handler boundary 组完成后，重新盘点 relation extra 剩余 seam。
+- 为下一条最小实现切片提供事实基线。
+
+执行结果：
+
+- 已确认 relation extra 仍是当前剩余最重的 write handler seam。
+- handler 仍直接持有：
+  - `expected_versions`
+  - `idempotency_key`
+  - stale precheck
+  - stale conflict HTTP mapping 的前置数据准备
+- 结论：
+  - 下一条不应直接动 UoW 或 schema
+  - 应先抽 `request boundary`
+
+下一步：
+
+- 生成并审查 `PF-P161 - Turnover Ledger Relation Extra Request Boundary Extraction`
+
+## PF-P161 Relation Extra Request Boundary Extraction
+
+状态：
+
+- verified
+
+目标：
+
+- 把 relation extra handler 仍持有的 request orchestration 收到显式 boundary。
+- 不改变 UoW contract、schema 或 durable idempotency 底座。
+
+执行结果：
+
+- 新增 `TurnoverLedgerRelationExtraRequestBoundaryFacade`
+- 新增 `TurnoverLedgerRelationExtraRequestBoundaryError`
+- 从 handler 抽走：
+  - `expected_versions`
+  - `idempotency_key`
+  - stale precheck
+  - stale conflict 前置准备
+  - `turnover_ledger_invalidated` 注入
+
+验证：
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，97 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+下一步：
+
+- 生成并审查 `PF-P161-MG - Turnover Ledger Relation Extra Request Boundary Merge Gate`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

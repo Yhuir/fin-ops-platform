@@ -2167,17 +2167,27 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("_clear_turnover_ledger_read_model_best_effort(", source)
         self.assertNotIn("_enqueue_turnover_ledger_read_model_refreshes(", source)
 
-    def test_relation_extra_handler_still_owns_expected_versions_and_idempotency_boundary(self) -> None:
+    def test_relation_extra_handler_delegates_expected_versions_idempotency_and_stale_boundary(self) -> None:
         source = inspect.getsource(Application._handle_api_turnover_ledger_relation_extra_update)
 
-        self.assertIn('expected_versions = payload.get("expected_versions")', source)
-        self.assertIn(
+        self.assertIn("facade = self._turnover_ledger_relation_extra_request_boundary_facade()", source)
+        self.assertIn("result = facade.update_relation_extra_from_request(", source)
+        self.assertIn("except TurnoverLedgerRelationExtraRequestBoundaryError as exc:", source)
+        self.assertNotIn('expected_versions = payload.get("expected_versions")', source)
+        self.assertNotIn(
             'idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None',
             source,
         )
-        self.assertIn('expected_key = f"turnover_relation_extra:{relation_id}"', source)
-        self.assertIn("self._turnover_ledger_read_facade.get_relation_extra(relation_id)", source)
-        self.assertIn('"turnover_relation_extra_conflict"', source)
+        self.assertNotIn('expected_key = f"turnover_relation_extra:{relation_id}"', source)
+        self.assertNotIn("self._turnover_ledger_read_facade.get_relation_extra(relation_id)", source)
+        self.assertNotIn('"turnover_relation_extra_conflict"', source)
+
+    def test_relation_extra_request_boundary_facade_wires_current_extra_reader_and_write_facade(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_relation_extra_request_boundary_facade)
+
+        self.assertIn("TurnoverLedgerRelationExtraRequestBoundaryFacade(", source)
+        self.assertIn("facade_provider=self._turnover_ledger_relation_extra_write_facade", source)
+        self.assertIn("current_extra_reader=self._turnover_ledger_read_facade.get_relation_extra", source)
 
     def test_relation_extra_write_facade_does_not_inline_local_snapshot_closures(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_relation_extra_write_facade)

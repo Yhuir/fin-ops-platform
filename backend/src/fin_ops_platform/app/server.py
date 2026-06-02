@@ -279,6 +279,8 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
+    TurnoverLedgerRelationExtraRequestBoundaryError,
+    TurnoverLedgerRelationExtraRequestBoundaryFacade,
     TurnoverLedgerLocalBankRowTagsAdapterSet,
     TurnoverLedgerLocalConfirmRelationAdapterSet,
     TurnoverLedgerLocalDirtyOutboxWriter,
@@ -12525,38 +12527,23 @@ class Application:
             )
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
         try:
-            facade = self._turnover_ledger_relation_extra_write_facade()
-            expected_versions = payload.get("expected_versions")
-            idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
-            if isinstance(expected_versions, dict):
-                expected_key = f"turnover_relation_extra:{relation_id}"
-                if expected_key in expected_versions:
-                    current_payload = self._turnover_ledger_read_facade.get_relation_extra(relation_id)
-                    current_extra = current_payload.get("extra") if isinstance(current_payload, dict) else None
-                    current_updated_at = ""
-                    if isinstance(current_extra, dict):
-                        current_updated_at = str(current_extra.get("updated_at") or "")
-                    if str(expected_versions.get(expected_key) or "") != current_updated_at:
-                        return self._json_response(
-                            HTTPStatus.CONFLICT,
-                            {
-                                "error": "turnover_relation_extra_conflict",
-                                "message": "往来款补充信息已更新，请刷新后重试。",
-                            },
-                        )
-            result = facade.update_relation_extra(
+            facade = self._turnover_ledger_relation_extra_request_boundary_facade()
+            result = facade.update_relation_extra_from_request(
                 relation_id=relation_id,
                 payload=payload,
                 actor_id=actor,
                 tenant_id=self._workbench_reconciliation_tenant_id(),
                 scope_keys=["all"],
-                expected_versions=expected_versions if isinstance(expected_versions, dict) else None,
-                idempotency_key=idempotency_key,
             )
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
+            )
+        except TurnoverLedgerRelationExtraRequestBoundaryError as exc:
+            return self._json_response(
+                exc.status_code,
+                {"error": exc.error_code, "message": str(exc)},
             )
         except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
             return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
@@ -12565,8 +12552,13 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_turnover_ledger_extra", "message": str(exc)},
             )
-        result["turnover_ledger_invalidated"] = True
         return self._json_response(HTTPStatus.OK, result)
+
+    def _turnover_ledger_relation_extra_request_boundary_facade(self) -> TurnoverLedgerRelationExtraRequestBoundaryFacade:
+        return TurnoverLedgerRelationExtraRequestBoundaryFacade(
+            facade_provider=self._turnover_ledger_relation_extra_write_facade,
+            current_extra_reader=self._turnover_ledger_read_facade.get_relation_extra,
+        )
 
     def _handle_api_turnover_ledger_confirm(
         self,

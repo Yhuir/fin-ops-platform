@@ -858,6 +858,66 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         return payload
 
 
+class TurnoverLedgerRelationExtraRequestBoundaryError(ValueError):
+    def __init__(self, *, status_code: int, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
+
+
+class TurnoverLedgerRelationExtraRequestBoundaryFacade:
+    def __init__(
+        self,
+        *,
+        facade_provider: Callable[[], Any],
+        current_extra_reader: Callable[[str], dict[str, object]],
+    ) -> None:
+        self._facade_provider = facade_provider
+        self._current_extra_reader = current_extra_reader
+
+    def update_relation_extra_from_request(
+        self,
+        *,
+        relation_id: str,
+        payload: dict[str, object],
+        actor_id: str,
+        tenant_id: str,
+        scope_keys: list[str],
+    ) -> dict[str, object]:
+        normalized_payload = dict(payload or {})
+        expected_versions = normalized_payload.get("expected_versions")
+        idempotency_key = str(
+            normalized_payload.get("idempotency_key") or normalized_payload.get("idempotencyKey") or ""
+        ).strip() or None
+        if isinstance(expected_versions, dict):
+            expected_key = f"turnover_relation_extra:{relation_id}"
+            if expected_key in expected_versions:
+                current_payload = self._current_extra_reader(relation_id)
+                current_extra = current_payload.get("extra") if isinstance(current_payload, dict) else None
+                current_updated_at = ""
+                if isinstance(current_extra, dict):
+                    current_updated_at = str(current_extra.get("updated_at") or "")
+                if str(expected_versions.get(expected_key) or "") != current_updated_at:
+                    raise TurnoverLedgerRelationExtraRequestBoundaryError(
+                        status_code=409,
+                        error_code="turnover_relation_extra_conflict",
+                        message="往来款补充信息已更新，请刷新后重试。",
+                    )
+        facade = self._facade_provider()
+        result = facade.update_relation_extra(
+            relation_id=relation_id,
+            payload=normalized_payload,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            scope_keys=list(scope_keys or ["all"]),
+            expected_versions=expected_versions if isinstance(expected_versions, dict) else None,
+            idempotency_key=idempotency_key,
+        )
+        response_payload = dict(result or {})
+        response_payload["turnover_ledger_invalidated"] = True
+        return response_payload
+
+
 class TurnoverLedgerConfirmLegacyFallbackAdapterSet:
     def __init__(
         self,
