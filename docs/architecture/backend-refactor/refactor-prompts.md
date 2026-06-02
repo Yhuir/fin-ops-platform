@@ -22437,6 +22437,424 @@ Post-Flight:
 - Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
 - 下一步：push `origin/main`；push 完成后从最新 main 新建下一条 `codex/` 分支。
 
+## PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
+
+状态：`planned`
+
+```text
+/goal
+PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构盘点工程师。你必须只做 Turnover Ledger 剩余写边界 rebaseline / planning，不修改生产代码或测试。
+
+Context:
+- PF-P184-MG 已 verified、合入并 push `origin/main`。
+- 当前分支为 `codex/turnover-ledger-next-boundary-p185`，从最新 `main` 创建。
+- Turnover Ledger 已完成的主要写路径基础：
+  - relation extra：expected_versions + durable idempotency + UoW/local adapter/fallback 边界；
+  - confirm：stale precondition + durable idempotency + UoW/fallback/invalidation 边界；
+  - withdraw：stale precondition + durable idempotency + UoW/fallback/invalidation 边界；
+  - bank-row-tags batch：Bankdetail expected_version baseline + durable idempotency + UoW dirty/outbox；
+  - tag-selection：expected_version baseline + durable idempotency + UoW dirty/outbox。
+- 但 Turnover Ledger 模块仍可能存在 server.py 组装残留、legacy local shim、repository ownership、source version / dirty-outbox consistency 文档缺口。
+
+Goal:
+重新盘点 Turnover Ledger 写路径剩余风险，输出下一条最小可执行 prompt。不要沿用旧优先级猜测；必须基于当前代码事实判断下一刀。
+
+Allowed Scope:
+- 文档：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 只读扫描代码和测试：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+  - `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+
+Required Discovery Work:
+1. CodeGraph / static scan:
+   - 使用 CodeGraph 或等价结构化扫描定位 Turnover Ledger 写 handler、request boundary、facade、adapter、UoW 的当前调用关系。
+2. Remaining matrix:
+   - 输出剩余写路径矩阵，至少覆盖：
+     - tag-selection；
+     - bank-row-tags batch；
+     - relation extra；
+     - confirm relation；
+     - withdraw relation；
+     - read model dirty/outbox / source version ownership；
+     - local runtime support / fallback adapter。
+3. Ownership / coupling audit:
+   - 明确哪些逻辑仍留在 `server.py`，哪些已经进入 services/adapters/repositories。
+   - 标出是否仍有 Application god object、HTTP context 泄漏、业务 service SQL 散落、worker/HTTP 耦合。
+4. Risk and next prompt recommendation:
+   - 给出 P1/P2/P3 优先级。
+   - 必须推荐唯一下一条最小 prompt，并说明为什么它比其它候选更安全。
+   - 如果 Turnover Ledger 已达到当前模块可合并完成状态，必须建议生成模块 completion/MG/report prompt，而不是继续切片。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 SQL migration、schema、deploy、Nginx、feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得开始下一个业务模块。
+
+Verification:
+必须执行：
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P185|Remaining Write Boundary Rebaseline|Remaining write boundary matrix|Next minimal prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+Post-Flight:
+1. 更新 `migration-state-log.md`、`refactor-prompts.md` 和 `turnover-ledger-write-uow-plan.md`。
+2. 如果验证通过，将 PF-P185 标记为 `verified`。
+3. 生成并审查下一条唯一最小 prompt；不要一次性生成多个。
+```
+
+### 审查结论
+
+- PF-P185 边界正确：只做 discovery/planning 和文档回写。
+- 当前 Turnover Ledger 多个写路径刚完成 durable idempotency，必须先 rebaseline 再继续，避免沿用旧优先级。
+- 本轮不改 production code、不改 tests、不进入 MG。
+
+### PF-P185 执行结果
+
+- 状态：`verified`
+- 变更范围：
+  - 只更新 backend-refactor 文档和状态机。
+  - 未修改 production code。
+  - 未修改 tests。
+- CodeGraph/static scan 结论：
+  - `TurnoverLedgerWriteUnitOfWork.run(...)` 已统一承接 idempotency reserve/replay/conflict、stale precondition、dirty/outbox enqueue。
+  - confirm / withdraw 已通过真实 stale precondition port 接入 UoW。
+  - bank row tags / tag selection 的 expected-version 语义仍在现有业务 service/normalizer 边界内，primary builder 使用 no-op stale precondition port；这是已知兼容边界，不应跨 Bankdetail 或 Settings 模块贸然迁移。
+  - relation extra 的 HTTP request boundary 当前会读取 current extra 并做 409 stale conflict，但 primary builder 仍注入 no-op stale precondition port，存在 TOCTOU 语义缺口：请求边界检查和实际写入不在同一个 UoW transaction 内。
+  - `server.py` 仍作为 composition root 组装 relation extra、confirm、withdraw、bank row tags、tag selection builders；未发现 service 读取 HTTP cookie/header 或直接依赖 `app.auth` 的新增泄漏。
+- Remaining write boundary matrix：
+  - `confirm relation`：stale precondition + durable idempotency + dirty/outbox 已接入 UoW；剩余主要是 completion/MG 前的收口确认。
+  - `withdraw relation`：stale precondition + durable idempotency + dirty/outbox 已接入 UoW；剩余主要是 completion/MG 前的收口确认。
+  - `relation extra`：durable idempotency + dirty/outbox 已接入 UoW；stale conflict 仍主要在 request boundary，下一步应先锁定 UoW-level target contract。
+  - `bank row tags batch`：durable idempotency + dirty/outbox 已接入 UoW；expected-version 语义依赖 Bankdetail category service，不在下一刀跨模块迁移。
+  - `tag selection`：durable idempotency + dirty/outbox 已接入 UoW；expected-version 语义依赖 AppSettingsService/normalizer，不在下一刀跨 Settings 模块迁移。
+  - `read model dirty/outbox`：primary write paths 已通过 transaction-bound writer 收敛；legacy/local fallback 保留兼容。
+  - `local runtime support / fallback adapter`：仍作为兼容路径存在；不在本轮移除。
+- 下一条唯一最小 prompt：
+  - `PF-P186 - Turnover Ledger Relation Extra UoW Stale Precondition Contract Tests`
+  - 理由：relation extra 是当前唯一同时具备 request-boundary stale guard 和 UoW no-op stale port 的写路径。先用 expectedFailure target tests 锁定目标语义，避免直接改 production code 导致旧兼容路径退化。
+- 验证：
+  - `git status --short --branch`：Pass
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+
+## PF-P186 - Turnover Ledger Relation Extra UoW Stale Precondition Contract Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P186 - Turnover Ledger Relation Extra UoW Stale Precondition Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的测试锁定工程师。你必须只为 Turnover Ledger relation extra 写路径补充 UoW-level stale precondition 目标契约测试，不修改生产代码。
+
+Context:
+- PF-P185 已 verified。
+- PF-P185 发现 relation extra 当前 HTTP request boundary 会基于 current extra 做 stale conflict 409，但 `TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder.build(...)` 仍注入 `SimpleNamespace(assert_current=lambda **_kwargs: None)`。
+- 这说明现有 stale guard 不在 UoW transaction 内，后续需要把 relation extra stale precondition 下沉到 UoW primary builder。
+- 本轮只锁定目标契约，不实现真实 stale port。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P185 为 verified。
+
+Allowed Scope:
+- 允许修改：
+  - tests/test_turnover_ledger_api.py
+  - tests/test_turnover_ledger_uow_contract.py
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+- 只允许新增或调整目标契约测试和文档。
+
+Required Test Work:
+1. 新增 API/source-level target contract test，并用 `unittest.expectedFailure` 或等价机制保持默认 CI 绿色：
+   - 断言 relation extra primary builder 不应继续使用 no-op stale precondition port；
+   - 断言目标应是显式 relation-extra stale precondition port 或等价命名边界；
+   - 不得删除现有 characterization test `test_turnover_ledger_primary_write_builders_still_use_noop_local_stale_precondition_ports`，除非本 prompt 明确进入实现阶段，本轮不得进入实现。
+2. 新增 facade/UoW-level target contract test，并用 `unittest.expectedFailure` 或等价机制保持默认 CI 绿色：
+   - 构造 primary-builder-like relation extra facade；
+   - 提供 stale expected_versions；
+   - 目标行为是 stale precondition 在 extra repository save 与 dirty/outbox writer 前执行并返回 conflict；
+   - 当前未实现时必须表现为 expected failure，而不是 skip。
+3. 测试说明必须明确：
+   - request boundary stale guard 只能作为兼容防线；
+   - 后续实现 prompt 需要把 stale guard 下沉到 UoW transaction 内；
+   - 本轮不修改 production code。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得实现 relation extra stale precondition port。
+- 不得修改 schema、SQL migration、deploy、Nginx、feature flag。
+- 不得迁移 bank row tags、tag selection、confirm、withdraw。
+- 不得删除或弱化现有 passing characterization tests。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 如果验证通过，将 PF-P186 标记为 verified。
+3. 下一条 prompt 应实现 relation extra UoW stale precondition port，转绿 PF-P186 的 expectedFailure target tests；不得同时迁移其它写路径。
+```
+
+### 审查结论
+
+- PF-P186 边界正确：只新增目标契约测试，不改生产代码。
+- 使用 expectedFailure 合理，因为当前 relation extra stale guard 仍在 request boundary，UoW primary builder 尚未有真实 stale precondition port。
+- 下一条实现 prompt 应只转绿 PF-P186 的 target tests，不扩大到其它 Turnover 写路径。
+
+### PF-P186 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 source-level target test：relation extra primary builder 未来不得继续使用 no-op stale precondition port。
+  - 新增 builder/UoW-level target test：relation extra primary builder 产物必须向 UoW 注入显式 relation-extra stale precondition port。
+  - 两个目标测试均为 `unittest.expectedFailure`，默认 CI 保持绿色。
+  - 未修改 production code。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests，expected failures=1）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests，expected failures=1）
+  - `git diff --check`：Pass
+  - `git ls-files --others --exclude-standard`：empty
+
+## PF-P187 - Turnover Ledger Relation Extra UoW Stale Precondition Integration
+
+状态：`planned`
+
+```text
+/goal
+PF-P187 - Turnover Ledger Relation Extra UoW Stale Precondition Integration
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只实现 Turnover Ledger relation extra primary builder 的 UoW stale precondition port，并转绿 PF-P186 的目标测试。
+
+Context:
+- PF-P186 已 verified。
+- PF-P186 新增两个 expectedFailure target tests：
+  - `tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_relation_extra_primary_builder_uses_explicit_stale_precondition_port`
+  - `tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_target_relation_extra_primary_builder_injects_transactional_stale_precondition_port`
+- 当前 request boundary 已有 stale guard，但它不在 UoW transaction 内。
+- 目标是把 relation extra stale precondition 下沉到 primary UoW path，而不是删除 request-boundary 兼容防线。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/app/server.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P186 为 verified。
+
+Allowed Scope:
+- 允许修改：
+  - backend/src/fin_ops_platform/app/server.py
+  - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+  - tests/test_turnover_ledger_api.py
+  - tests/test_turnover_ledger_uow_contract.py
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Implementation Work:
+1. 在 adapter/service 边界新增显式 relation extra stale precondition port：
+   - port 不得依赖 `Application`；
+   - port 不得读取 HTTP cookie/header；
+   - port 必须只接收明确依赖，例如 `current_extra_reader`；
+   - port 必须只处理 `turnover_relation_extra:{relation_id}` expected_versions key。
+2. 更新 `TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder`：
+   - constructor 接收明确的 `current_extra_reader` 或等价细粒度依赖；
+   - `build()` 给 UoW 注入 relation extra stale precondition port；
+   - 不改变 dirty/outbox reason、idempotency action、repository adapter、local fallback contract。
+3. 更新 `server.py` composition root：
+   - 只向 builder 传入 `self._turnover_ledger_read_facade.get_relation_extra` 或等价明确依赖；
+   - handler/request boundary 保持当前兼容 stale guard，不删除。
+4. 测试：
+   - 移除 PF-P186 两个 target tests 的 `unittest.expectedFailure`；
+   - 不删除现有 characterization tests；
+   - 如果现有 test 明确记录 relation extra 仍使用 no-op stale port，必须把它收窄到 bank row tags / tag selection，不能继续要求 relation extra no-op。
+
+Forbidden Scope:
+- 不得修改 schema、SQL migration、deploy、Nginx、feature flag。
+- 不得迁移 bank row tags、tag selection、confirm、withdraw。
+- 不得移除 request-boundary stale guard。
+- 不得修改 Workbench 或其它业务模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 如果验证通过，将 PF-P187 标记为 verified。
+3. 下一步根据 diff 判断是否生成 cumulative MG；不得直接进入其它模块。
+```
+
+### 审查结论
+
+- PF-P187 边界正确：只转绿 PF-P186 两个 relation extra stale precondition target tests。
+- 该 prompt 保留 request-boundary stale guard 作为兼容防线，同时把 primary UoW path 的 stale precondition 补齐。
+- 不允许顺手迁移其它 Turnover 写路径。
+
+### PF-P187 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 `TurnoverLedgerRelationExtraStalePreconditionPort`，只依赖 `current_extra_reader`。
+  - relation extra primary builder 将显式 stale precondition port 注入 UoW。
+  - `server.py` composition root 传入 `self._turnover_ledger_read_facade.get_relation_extra`，handler 增加 UoW precondition conflict 409 mapping。
+  - request-boundary stale guard 保留为兼容防线。
+  - PF-P186 两个 expectedFailure target tests 已转为普通通过。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests）
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+  - `git diff --check`：Pass
+  - `git ls-files --others --exclude-standard`：empty
+
+## PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger relation extra stale precondition 切片，不新增业务实现。
+
+Context:
+- PF-P185、PF-P186、PF-P187 均已 verified。
+- 当前分支为 `codex/turnover-ledger-next-boundary-p185`。
+- 本 MG 统一覆盖：
+  - PF-P185 remaining write boundary rebaseline；
+  - PF-P186 relation extra UoW stale precondition target tests；
+  - PF-P187 relation extra stale precondition port integration。
+
+Gate Scope:
+- relation extra primary builder explicit stale precondition port；
+- relation extra source/UoW tests；
+- 文档和状态机回写。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得迁移 bank row tags、tag selection、confirm、withdraw。
+- 不得修改 schema、SQL migration、deploy、Nginx、feature flag。
+- 不得修改 Workbench 或其它业务模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P185、PF-P186、PF-P187 均为 verified。
+4. 必须确认 `git diff --name-only main...HEAD` 和 `git diff --name-only` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git diff --name-only
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Commit / Merge Rules:
+1. 只允许用精确文件路径 `git add`。
+2. Commit message 建议：
+   - `feat(turnover-ledger): enforce relation extra uow stale precondition`
+3. 合入 main 前必须同步最新 `origin/main`：checkout main 后 `git pull --ff-only origin main`。
+4. 如果 pull/merge 出现冲突，停止并报告。
+5. 将当前分支 merge 到 main。
+6. 在 main 上重新执行完整 Verification 中的测试命令。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P187-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一条 prompt 分支。
+9. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P187-MG 执行结果。
+2. push 完成后，从最新 main 新建下一条 `codex/` 分支。
+3. 不得在 main 或旧分支继续开发下一切片。
+```
+
+### 审查结论
+
+- PF-P187-MG 边界正确：只覆盖 PF-P185/PF-P186/PF-P187 relation extra stale precondition 切片。
+- 文件白名单与当前 diff 一致。
+- 该 MG 不执行 Traffic Gate，不部署，不访问生产或真实外部服务。
+
 ## PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
 状态：`planned`

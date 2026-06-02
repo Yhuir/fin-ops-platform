@@ -3208,6 +3208,132 @@ PF-P110 边界：
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
 - Traffic Gate 未执行。
 
+## PF-P185 Remaining Write Boundary Rebaseline After Idempotency
+
+状态：`verified`
+
+范围：
+
+- 只做 Turnover Ledger 剩余写边界 rebaseline / planning。
+- 不修改 production code。
+- 不修改 tests。
+
+CodeGraph / static scan 结论：
+
+- `TurnoverLedgerWriteUnitOfWork.run(...)` 已统一承接 idempotency reserve/replay/conflict、stale precondition、dirty/outbox enqueue。
+- confirm / withdraw 已通过真实 stale precondition port 接入 UoW。
+- relation extra 的 HTTP request boundary 当前会读取 current extra 并做 409 stale conflict，但 `TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder.build(...)` 仍注入 no-op stale precondition port。
+- bank row tags / tag selection 的 expected-version 语义仍在现有业务 service/normalizer 边界内，primary builder 使用 no-op stale precondition port；这属于跨 Bankdetail/Settings 的兼容边界，不作为下一刀。
+- `server.py` 仍作为 composition root 组装 relation extra、confirm、withdraw、bank row tags、tag selection builders；未发现 service 读取 HTTP cookie/header 或直接依赖 `app.auth` 的新增泄漏。
+
+Remaining write boundary matrix：
+
+| 写路径 | 已完成 | 剩余风险 | 下一步判断 |
+| --- | --- | --- | --- |
+| confirm relation | stale precondition、durable idempotency、dirty/outbox 已接入 UoW | 主要是模块 completion/MG 前收口确认 | 暂不继续切 |
+| withdraw relation | stale precondition、durable idempotency、dirty/outbox 已接入 UoW | 主要是模块 completion/MG 前收口确认 | 暂不继续切 |
+| relation extra | durable idempotency、dirty/outbox 已接入 UoW；request boundary 有 stale guard | stale guard 不在 UoW transaction 内，存在 TOCTOU 语义缺口 | 下一条最小切片 |
+| bank row tags batch | durable idempotency、dirty/outbox 已接入 UoW | expected-version 语义依赖 Bankdetail category service | 不跨模块迁移 |
+| tag selection | durable idempotency、dirty/outbox 已接入 UoW | expected-version 语义依赖 AppSettingsService / normalizer | 不跨 Settings 模块迁移 |
+| read model dirty/outbox | primary write paths 已通过 transaction-bound writer 收敛 | legacy/local fallback 保留兼容 | 收口前保留 |
+| local runtime / fallback adapter | 兼容路径保留 | 不能在无替代测试下删除 | 收口前保留 |
+
+下一条唯一最小 prompt：
+
+- `PF-P186 - Turnover Ledger Relation Extra UoW Stale Precondition Contract Tests`
+
+原因：
+
+- relation extra 是当前唯一同时具备 request-boundary stale guard 和 UoW no-op stale port 的写路径。
+- 直接实现可能影响现有兼容路径；应先用 expectedFailure target tests 锁定目标，再用下一条实现 prompt 转绿。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+
+## PF-P186 Relation Extra UoW Stale Precondition Contract Tests
+
+状态：`verified`
+
+目标：
+
+- 只新增 relation extra UoW stale precondition target contract tests。
+- 默认 CI 必须保持绿色；尚未实现的目标语义使用 `unittest.expectedFailure`。
+- 不修改 production code。
+
+边界：
+
+- 不实现 relation extra stale precondition port。
+- 不迁移 bank row tags、tag selection、confirm、withdraw。
+- 不改 schema、deploy、Traffic Gate 或真实外部服务配置。
+
+执行结果：
+
+- 新增 `tests/test_turnover_ledger_api.py` source-level expectedFailure target test，锁定 relation extra primary builder 未来不再使用 no-op stale precondition port。
+- 新增 `tests/test_turnover_ledger_uow_contract.py` builder/UoW-level expectedFailure target test，锁定 relation extra primary builder 产物应给 UoW 注入显式 stale precondition port。
+- 未修改 production code。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests，expected failures=1）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests，expected failures=1）。
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+
+## PF-P187 Relation Extra UoW Stale Precondition Integration
+
+状态：`verified`
+
+目标：
+
+- 新增 relation extra stale precondition port，并注入 `TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder` 生成的 UoW。
+- 移除 PF-P186 两个 target tests 的 `unittest.expectedFailure`，转为普通通过。
+- 保留 request-boundary stale guard 作为兼容防线。
+
+边界：
+
+- 只处理 relation extra primary UoW stale precondition。
+- 不迁移 bank row tags、tag selection、confirm、withdraw。
+- 不改 schema、deploy、Traffic Gate 或真实外部服务配置。
+
+执行结果：
+
+- 新增 `TurnoverLedgerRelationExtraStalePreconditionPort`，只依赖明确的 `current_extra_reader`。
+- `TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder` 将显式 relation-extra stale precondition port 注入 UoW。
+- `server.py` composition root 传入 `self._turnover_ledger_read_facade.get_relation_extra`；request-boundary stale guard 保留。
+- relation extra handler 映射 UoW `TurnoverLedgerWritePreconditionError` 为 HTTP 409 JSON。
+- PF-P186 两个 expectedFailure target tests 已转为普通通过。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests）。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+
+## PF-P187-MG Relation Extra UoW Stale Precondition Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一覆盖 PF-P185/PF-P186/PF-P187。
+- 只包含 relation extra remaining boundary rebaseline、relation extra UoW stale target tests、relation extra stale precondition port integration。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git diff --name-only`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P115 Relation Local Adapter Extraction
 
 状态：`verified`

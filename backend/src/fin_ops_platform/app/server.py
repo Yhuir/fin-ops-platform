@@ -2715,6 +2715,7 @@ class Application:
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             extra_service=self._turnover_ledger_extra_service,
             row_provider=self._turnover_ledger_relation_extra_row_provider,
+            current_extra_reader=self._turnover_ledger_read_facade.get_relation_extra,
             tenant_id=self._workbench_reconciliation_tenant_id(),
             postgres_extra_repository_factory=PostgresWorkbenchRepository,
             postgres_idempotency_store_factory=self._turnover_ledger_relation_extra_postgres_idempotency_store,
@@ -12682,6 +12683,11 @@ class Application:
                 {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
             )
         except TurnoverLedgerRelationExtraRequestBoundaryError as exc:
+            return self._json_response(
+                exc.status_code,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except TurnoverLedgerWritePreconditionError as exc:
             return self._json_response(
                 exc.status_code,
                 {"error": exc.error_code, "message": str(exc)},
