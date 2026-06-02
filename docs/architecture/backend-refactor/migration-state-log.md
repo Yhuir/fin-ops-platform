@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate` planned |
-| 当前 active prompt | `PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P187 - Turnover Ledger Relation Extra UoW Stale Precondition Integration` |
-| 当前分支 | `codex/turnover-ledger-next-boundary-p185` |
-| 最近验证 | PF-P187：`tests.test_turnover_ledger_api` Pass（129 tests）；`tests.test_turnover_ledger_uow_contract` Pass（62 tests）；`compileall` Pass；`git diff --check` Pass；无 untracked |
-| 下一条允许任务 | 执行 PF-P187-MG；统一覆盖 PF-P185 到 PF-P187 的完整 diff，验证后合入 main 并 push origin/main |
+| 当前阶段 | PF-P187-MG verified；等待 push `origin/main` 后从最新 main 新建下一条 prompt 分支 |
+| 当前 active prompt | 空 |
+| 最近 verified prompt | `PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P187-MG 已合入 main；merge commit `bfbdca80`；main 复验 `tests.test_turnover_ledger_api` Pass（129 tests）；`tests.test_turnover_ledger_uow_contract` Pass（62 tests）；`compileall` Pass；`git diff --check` Pass |
+| 下一条允许任务 | push `origin/main`；push 完成后从最新 main 新建下一条 `codex/` 分支，再根据状态机生成下一条 Turnover Ledger prompt |
 
 ## Prompt 执行日志
 
@@ -163,7 +163,7 @@
 
 ### PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -177,6 +177,32 @@
 - Turnover Ledger API/UoW tests 通过。
 - compileall 通过。
 - 无 untracked 临时文件。
+
+执行结果：
+
+- PF-P185/PF-P186/PF-P187 已合入 main。
+- Merge commit：`bfbdca80`。
+- relation extra primary builder 现在注入显式 stale precondition port，UoW 会在同一 transaction 内、extra repository save 和 dirty/outbox 前校验 `turnover_relation_extra:{relation_id}` expected_versions。
+- request-boundary stale guard 保留为兼容防线。
+- Traffic Gate 未执行；未部署、未切流、未访问生产或真实外部服务。
+
+验证：
+
+- 分支验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests）。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+  - `git diff --check`：Pass。
+  - `git ls-files --others --exclude-standard`：empty。
+- main 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests）。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一步：
+
+- push `origin/main`。
+- push 完成后从最新 main 新建下一条 `codex/` 分支。
 
 ### PF-P000 - Fresh Documentation Baseline
 

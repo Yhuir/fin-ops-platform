@@ -3316,7 +3316,7 @@ Remaining write boundary matrix：
 
 ## PF-P187-MG Relation Extra UoW Stale Precondition Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -3333,6 +3333,20 @@ Remaining write boundary matrix：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- PF-P185/PF-P186/PF-P187 已合入 main。
+- Merge commit：`bfbdca80`。
+- relation extra primary builder 现在注入显式 stale precondition port。
+- request-boundary stale guard 保留为兼容防线。
+- Traffic Gate 未执行。
+
+main 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests）。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
 
 ## PF-P115 Relation Local Adapter Extraction
 
