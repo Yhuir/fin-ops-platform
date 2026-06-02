@@ -5759,6 +5759,107 @@ Remaining seam matrix：
 
 - 当前暂停点之后，恢复时生成并审查 `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration`
 
+## PF-P170 Withdraw Stale Precondition Integration
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已为 withdraw primary write path 接入显式 relation stale precondition port。
+- `TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder` 现在通过 `TurnoverLedgerRelationStalePreconditionPort(relation_detail_provider=self._routes.get_relation)` 执行 relation version check。
+- stale relation version 会在 UoW handler mutation 前抛出 `TurnoverLedgerWritePreconditionError`，HTTP 层映射为 `409 / turnover_relation_conflict`。
+- 测试已证明 stale withdraw 不会产生第二次 relation mutation、audit 或 dirty/outbox refresh。
+- `confirm / bank row tags / tag selection` 仍保持 PF-P169 锁定的当前缺口，不在 PF-P170 中扩大范围。
+
+验证：
+
+- RED baseline：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_withdraw_stale_precondition_rejects_changed_relation_before_mutation_or_refresh -v`：先失败（`200 != 409`）
+- Targeted PASS：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_withdraw_stale_precondition_rejects_changed_relation_before_mutation_or_refresh tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_ledger_withdraw_builder_uses_relation_stale_precondition_port -v`：Pass（2 tests）
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（56 tests）
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（116 tests）
+- `git diff --check`：Pass
+
+下一步：
+
+- 生成并审查 `PF-P171 - Turnover Ledger Confirm Stale Precondition Discovery and Characterization`。
+- `confirm` 当前没有 request-level `expected_versions` 输入契约，不能直接做 stale precondition integration；必须先盘点现有 confirm payload、frontend contract、relation/source version 可用事实，并补 characterization tests。
+
+## PF-P171 Confirm Stale Precondition Discovery and Characterization
+
+状态：
+
+- verified
+
+目标：
+
+- 只锁定 confirm stale precondition 的当前缺口，不实现 stale guard。
+- 明确 confirm request body 当前没有 `expected_versions` 透传契约。
+- 明确 confirm primary builder 当前仍使用 no-op stale precondition port。
+
+边界：
+
+- 允许修改 `tests/test_turnover_ledger_api.py` 和后端重构文档。
+- 不修改 production code、UoW、schema、deploy、Traffic Gate 或真实外部服务配置。
+
+验收：
+
+- 新增 characterization test 证明 confirm handler 即使收到 `expected_versions` body 字段，也不会透传到 `TurnoverLedgerWriteCommand.expected_versions`。
+- 复用或补强现有 builder source guard，证明 confirm primary builder 仍保留 no-op stale precondition。
+- 下一步只能先设计 confirm expected_versions API/contract，不能直接大范围接入 stale guard。
+
+执行结果：
+
+- 已新增 `test_confirm_request_body_expected_versions_are_currently_not_forwarded_to_write_command`。
+- 该测试证明 confirm request body 中的 `expected_versions` 当前不会进入 command 层。
+- 已确认 confirm primary builder 仍使用 no-op stale precondition port。
+- 后续如要实现 confirm stale guard，必须先定义 confirm expected_versions API/contract。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_confirm_request_body_expected_versions_are_currently_not_forwarded_to_write_command tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_ledger_primary_write_builders_still_use_noop_local_stale_precondition_ports -v`：Pass（2 tests）
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（117 tests）
+- `git diff --check`：Pass
+
+下一步：
+
+- 生成并执行 `PF-P171-MG - Turnover Ledger Stale Precondition Cumulative Merge Gate`。
+- MG 统一覆盖 PF-P170 + PF-P171，不继续扩大到 confirm stale integration。
+
+## PF-P171-MG Stale Precondition Cumulative Merge Gate
+
+状态：
+
+- verified
+
+范围：
+
+- 统一覆盖 PF-P170 + PF-P171：
+  - withdraw stale precondition integration；
+  - confirm expected_versions gap characterization。
+
+执行结果：
+
+- 已确认 diff 只包含允许的 code/test/docs 文件。
+- 已确认无 untracked 文件。
+- 已通过 UoW contract 和 Turnover API 回归。
+
+验证：
+
+- `git status --short --branch`：Pass
+- `git ls-files --others --exclude-standard`：Pass
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（56 tests）
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（117 tests）
+
+下一步：
+
+- 完成 commit / merge / push。
+- push 后从最新 `main` 新建下一条 `codex/` 分支。
+- 下一条建议：`PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning`。
+- PF-P172 应先定义 confirm expected_versions API/contract，不得直接实现 confirm stale guard。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

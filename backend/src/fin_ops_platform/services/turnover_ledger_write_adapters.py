@@ -8,6 +8,13 @@ from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedge
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
 
 
+class TurnoverLedgerWritePreconditionError(ValueError):
+    def __init__(self, *, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.status_code = 409
+        self.error_code = error_code
+
+
 class TurnoverLedgerExtraRepositoryAdapter:
     def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
         self._repository_factory = repository_factory
@@ -470,6 +477,9 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
                 queue_repository=self._queue_repository
             )
+        stale_precondition_port = TurnoverLedgerRelationStalePreconditionPort(
+            relation_detail_provider=self._routes.get_relation
+        )
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=relation_repository,
@@ -477,7 +487,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
             dirty_outbox_writer=dirty_outbox_writer,
-            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+            stale_precondition_port=stale_precondition_port,
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
@@ -916,6 +926,29 @@ class TurnoverLedgerWithdrawRequestBoundaryError(ValueError):
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code
+
+
+class TurnoverLedgerRelationStalePreconditionPort:
+    def __init__(self, *, relation_detail_provider: Callable[[str], dict[str, object]]) -> None:
+        self._relation_detail_provider = relation_detail_provider
+
+    def assert_current(self, *, expected_versions: dict[str, object], transaction: object) -> None:
+        _ = transaction
+        for raw_key, expected_value in dict(expected_versions or {}).items():
+            key = str(raw_key)
+            if not key.startswith("relation:"):
+                continue
+            relation_id = key.removeprefix("relation:")
+            if not relation_id:
+                continue
+            detail = self._relation_detail_provider(relation_id)
+            relation = dict(detail.get("relation") or {})
+            current_version = relation.get("version")
+            if str(current_version) != str(expected_value):
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="往来款关系已变化，请刷新后重试。",
+                )
 
 
 class TurnoverLedgerWithdrawRequestBoundaryFacade:
