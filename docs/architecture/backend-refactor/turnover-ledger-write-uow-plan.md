@@ -3554,7 +3554,7 @@ PF-P110 边界：
 
 ## PF-P121 Facade None Fallback Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3584,6 +3584,24 @@ PF-P110 边界：
 - `git diff --check`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+执行结果：
+
+- 新增 `test_turnover_ledger_tag_selection_facade_none_keeps_legacy_direct_update_and_refresh`。
+- 新增 `test_relation_extra_facade_none_keeps_legacy_direct_update_persist_and_refresh`。
+- 新增 `test_confirm_relation_facade_none_keeps_legacy_rebuild_confirm_and_after_mutation`。
+- 新增 `test_withdraw_relation_facade_none_keeps_legacy_withdraw_and_after_mutation`。
+- 新增 `test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects`。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，61 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+下一条最小 prompt：
+
+- `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning`
+- 只规划最小 cleanup 顺序和风险，不直接修改 production code。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

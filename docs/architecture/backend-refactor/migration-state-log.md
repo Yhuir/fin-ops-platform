@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` 已执行并验证通过 |
 | 当前 active prompt | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
-| 最近 verified prompt | `PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning` |
+| 最近 verified prompt | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-remaining-boundary-p120` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，61 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests |
+| 下一条允许任务 | 生成并审查 `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning` |
 
 ## Prompt 执行日志
 
@@ -8574,7 +8574,7 @@ PF-P120 已确认 fallback 不能直接删除。下一条应生成并审查 `PF-
 
 ### PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8600,7 +8600,20 @@ PF-P120 已确认 fallback 不能直接删除。下一条应生成并审查 `PF-
 
 #### 下一条 Prompt 上下文
 
-TBD。PF-P121 执行后必须记录新增测试、验证结果，以及是否足够进入 fallback cleanup。
+PF-P121 已新增 5 个 characterization tests：
+
+- `test_turnover_ledger_tag_selection_facade_none_keeps_legacy_direct_update_and_refresh`
+- `test_relation_extra_facade_none_keeps_legacy_direct_update_persist_and_refresh`
+- `test_confirm_relation_facade_none_keeps_legacy_rebuild_confirm_and_after_mutation`
+- `test_withdraw_relation_facade_none_keeps_legacy_withdraw_and_after_mutation`
+- `test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects`
+
+Verification：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，61 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+当前 fallback 行为已足够进入 cleanup planning。下一条应生成并审查 `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning`：只规划最小 cleanup 顺序，决定先移除哪个 fallback 或先稳定哪类 facade construction；不直接修改 production code。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

@@ -23543,7 +23543,7 @@ Verification：
 
 ## PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 ```text
 /goal
@@ -23646,6 +23646,23 @@ Post-Flight:
 
 - PF-P121 边界正确：只补 facade None fallback characterization tests 和文档。
 - PF-P121 不修改 production code，不删除 fallback，不改变 UoW/facade 语义。
+
+### PF-P121 执行结果
+
+新增 5 个 characterization tests：
+
+- `test_turnover_ledger_tag_selection_facade_none_keeps_legacy_direct_update_and_refresh`
+- `test_relation_extra_facade_none_keeps_legacy_direct_update_persist_and_refresh`
+- `test_confirm_relation_facade_none_keeps_legacy_rebuild_confirm_and_after_mutation`
+- `test_withdraw_relation_facade_none_keeps_legacy_withdraw_and_after_mutation`
+- `test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects`
+
+Verification：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，61 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+下一条最小 prompt：`PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning`，只做 cleanup 顺序和风险规划，不直接修改 production code。
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
