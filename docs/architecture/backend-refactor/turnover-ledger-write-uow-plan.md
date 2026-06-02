@@ -4220,6 +4220,71 @@ PF-P110 边界：
 - `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests`
 - 理由：先把 `_after_turnover_relation_mutation(...)` 的顺序、兼容语义和 primary-vs-legacy 差异锁住，再做最小 extraction，风险最低。
 
+## PF-P132 Relation Mutation Invalidation Characterization Tests
+
+状态：`planned`
+
+目标：
+
+- 锁定 `_after_turnover_relation_mutation(...)` 的顺序、legacy fallback failure semantics 和 primary UoW path 不触达 legacy helper 的现有行为。
+- 为下一条 relation mutation invalidation adapter / facade extraction 提供测试护栏。
+
+边界：
+
+- 只改 `tests/test_turnover_ledger_api.py` 与文档回写。
+- 不改 production code，不进入 MG。
+
+必须覆盖：
+
+- relation mutation invalidation chain 顺序；
+- legacy fallback path 的 clear/enqueue/persist 失败语义；
+- primary UoW path 不触达 `_after_turnover_relation_mutation(...)`；
+- 下一条 extraction 的 handler-thinness target。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `rg -n "PF-P132|Relation Mutation Invalidation Characterization|after_turnover_relation_mutation|handler-thinness|ordering" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md tests/test_turnover_ledger_api.py`
+
+执行结果：
+
+- 已新增 4 个 relation mutation invalidation characterization tests。
+- 已锁定 `_after_turnover_relation_mutation(...)` 的 helper 顺序。
+- 已锁定 relation persist best-effort failure 时仍 clear/enqueue 的现有行为。
+- 已锁定 queue failure 发生在 clear 与 Workbench invalidation 之后。
+- 已锁定 bank row tags postgres facade path 不触达 legacy helper。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests。
+
+下一条最小 prompt：
+
+- `PF-P133 - Turnover Ledger Relation Mutation Invalidation Adapter Extraction`
+- 理由：测试护栏已建立，允许做最小 extraction，把 relation mutation invalidation legacy chain 从 `server.py` 移到显式 adapter/facade，同时保持既有语义不变。
+
+## PF-P133 Relation Mutation Invalidation Adapter Extraction
+
+状态：`planned`
+
+目标：
+
+- 在 PF-P132 护栏内抽离 relation mutation invalidation legacy chain seam。
+- 把 `_after_turnover_relation_mutation(...)` 的 orchestration 从 `server.py` 迁入显式 adapter/facade。
+
+边界：
+
+- 允许改 `server.py`、`turnover_ledger_write_adapters.py`、`tests/test_turnover_ledger_api.py` 和文档。
+- 不改 UoW 主路径，不改 schema/worker/deploy，不进入 MG。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

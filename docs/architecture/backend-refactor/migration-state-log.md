@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P131 - Turnover Ledger Relation Mutation Invalidation Boundary Discovery and Planning` 已完成并验证 |
-| 当前 active prompt | `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests` 待生成并审查 |
-| 最近 verified prompt | `PF-P131 - Turnover Ledger Relation Mutation Invalidation Boundary Discovery and Planning` |
+| 当前阶段 | `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests` 已完成并验证 |
+| 当前 active prompt | `PF-P133 - Turnover Ledger Relation Mutation Invalidation Adapter Extraction` 已生成并审查，待执行 |
+| 最近 verified prompt | `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p131` |
-| 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；PF-P131 文档关键词检查：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests` |
+| 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests；PF-P132 关键词检查：Pass |
+| 下一条允许任务 | 执行 `PF-P133 - Turnover Ledger Relation Mutation Invalidation Adapter Extraction` |
 
 ## Prompt 执行日志
 
@@ -9365,6 +9365,121 @@ PF-P130 已完成 bank row tags legacy fallback facade extraction：
 #### 下一条 Prompt 上下文
 
 PF-P131 已确认下一条最小 prompt 应为 `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests`。PF-P132 只能补测试，不得直接做 extraction；必须锁定 `_after_turnover_relation_mutation(...)` 的顺序、legacy fallback side effects、primary UoW path 不触达 legacy helper、以及 Workbench/Turnover invalidation 的既有语义。
+
+### PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只补 Turnover Ledger relation mutation invalidation characterization tests。
+- 锁定 `_after_turnover_relation_mutation(...)` 的顺序、legacy fallback failure semantics、以及 primary UoW path 不触达 legacy helper。
+- 不修改 production code，不进入 MG。
+
+#### 允许改动
+
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 必须覆盖
+
+- helper-level or API-level characterization：relation mutation invalidation chain 顺序必须锁定为 pre-persist -> Workbench invalidation -> final persist -> clear -> enqueue。
+- legacy fallback path 的 clear/enqueue/persist 失败语义必须以当前行为为准，不得擅自“修正”。
+- primary UoW path 必须继续证明不会触达 `_after_turnover_relation_mutation(...)`。
+- handler-thinness / adapter seam 的下一个 extraction 目标必须有 target test 保护。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `rg -n "PF-P132|Relation Mutation Invalidation Characterization|after_turnover_relation_mutation|handler-thinness|ordering" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md tests/test_turnover_ledger_api.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P132 只能先锁定测试基线。只有在 PF-P132 verified 后，才允许生成下一条最小 extraction prompt，目标应是 relation mutation invalidation adapter / facade 的最小抽离，而不是继续扩大 Turnover Ledger 写路径范围。
+
+### PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只补 relation mutation invalidation characterization tests。
+- 不修改 production code，不进入 MG。
+
+#### 执行摘要
+
+- 已新增 helper-level characterization tests，锁定 `_after_turnover_relation_mutation(...)` 当前顺序：
+  1. pre-invalidation relation persist
+  2. Workbench invalidation
+  3. final relation persist
+  4. Turnover Ledger read model clear
+  5. `turnover_relation_changed` enqueue
+- 已新增测试锁定 relation snapshot persist 失败时仍继续 clear/enqueue 的 best-effort 语义。
+- 已新增测试锁定 queue failure 发生在 clear 与 Workbench invalidation 之后。
+- 已新增 target test，证明 bank row tags 的 postgres/primary facade path 不会触达 `_after_turnover_relation_mutation(...)`。
+- 现有 confirm / withdraw primary path 不触达 legacy helper 的测试继续保持通过。
+
+#### 变更文件
+
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`：Pass，仅包含 PF-P132 允许文件。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests。
+- `rg -n "PF-P132|Relation Mutation Invalidation Characterization|after_turnover_relation_mutation|handler-thinness|ordering" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md tests/test_turnover_ledger_api.py`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P132 已将 relation mutation invalidation chain 的顺序、legacy failure semantics 与 primary-vs-legacy 差异锁定。下一条最小 prompt 应为 `PF-P133 - Turnover Ledger Relation Mutation Invalidation Adapter Extraction`，只抽离 legacy invalidation chain seam，不扩大到其它 Turnover 写路径，不改变 UoW 语义。
+
+### PF-P133 - Turnover Ledger Relation Mutation Invalidation Adapter Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 只抽离 relation mutation invalidation legacy chain seam。
+- 允许把 `_after_turnover_relation_mutation(...)` 的 orchestration 从 `server.py` 迁入显式 adapter / facade。
+- 不修改 UoW 事务模型，不改其它 Turnover 写路径，不进入 MG。
+
+#### 允许改动
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 必须保持
+
+- chain 顺序与 PF-P132 characterization tests 一致。
+- legacy failure semantics 不变。
+- primary UoW / postgres facade path 不触达 legacy helper。
+- handler 不重新 inline side effects。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 下一条 Prompt 上下文
+
+若 PF-P133 通过，则继续同一分支内再决定是否需要一个补充切片或直接生成本组 cumulative MG。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
