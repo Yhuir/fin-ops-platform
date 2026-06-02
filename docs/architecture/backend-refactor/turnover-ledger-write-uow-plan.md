@@ -3801,6 +3801,37 @@ PF-P110 边界：
 - `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`
 - 只规划 confirm/withdraw relation fallback 和 `_after_turnover_relation_mutation(...)` 归属，不直接处理 bank row tags。
 
+## PF-P125 Relation Mutation Fallback Cleanup Planning
+
+状态：`planned`
+
+目标：
+
+- 只规划 confirm/withdraw relation mutation fallback cleanup。
+- 梳理 `_after_turnover_relation_mutation(...)` 的 side effects、测试覆盖和长期归属。
+- 决定下一条最小 prompt 是补 tests 还是抽 adapter。
+
+边界：
+
+- 只做文档和状态机回写。
+- 不修改 production code，不修改 tests。
+- 不处理 bank row tags。
+
+必须输出：
+
+- Relation Mutation Side Effect Matrix。
+- Confirm vs Withdraw Boundary。
+- Handler Thinness Gap。
+- Risk Register。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P125|Relation Mutation Side Effect Matrix|after_turnover_relation_mutation" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` 已执行并验证通过 |
-| 当前 active prompt | `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` |
+| 当前阶段 | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` |
 | 最近 verified prompt | `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-relation-mutation-fallback-p125` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `git push origin main` 后，从最新 `main` 新建下一条 `codex/` 分支并生成下一条 prompt |
+| 下一条允许任务 | 执行 `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` |
 
 ## Prompt 执行日志
 
@@ -8838,6 +8838,34 @@ PF-P120 到 PF-P124 已形成一个可合并切片：fallback rebaseline、fallb
 #### 下一条 Prompt 上下文
 
 下一步先提交本次 post-flight 文档并执行 `git push origin main`。push 后必须从最新 `main` 新建下一条 `codex/` 分支。下一条建议 prompt：`PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`，只规划 confirm/withdraw relation fallback 的 `_after_turnover_relation_mutation(...)` 归属和最小拆分顺序，不直接处理 bank row tags。
+
+### PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning
+
+状态：`planned`
+
+#### 范围
+
+- 只规划 confirm/withdraw relation mutation fallback cleanup。
+- 重点梳理 `_after_turnover_relation_mutation(...)` 的 side effects 和长期归属。
+- 不修改 production code，不修改 tests，不处理 bank row tags。
+
+#### 必须输出
+
+- Relation Mutation Side Effect Matrix。
+- Confirm vs Withdraw fallback 差异和共同边界。
+- `_after_turnover_relation_mutation(...)` 迁移目标判断。
+- 下一条最小 prompt：tests、adapter extraction 或更窄 planning。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P125|Relation Mutation Side Effect Matrix|after_turnover_relation_mutation" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+TBD。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
