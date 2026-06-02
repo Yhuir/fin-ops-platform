@@ -3348,6 +3348,59 @@ main 验证：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests）。
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
 
+## PF-P188 Turnover Ledger Module Completion Readiness Audit
+
+状态：`verified`
+
+目标：
+
+- 盘点 Turnover Ledger 模块是否达到当前 Python-first 目标架构状态。
+- 明确剩余 seam 是否需要继续在 Turnover Ledger 内处理，还是移交后续模块。
+- 如果达到完成标准，下一条生成 module completion MG。
+
+边界：
+
+- 只做文档审计和状态机回写。
+- 不修改 production code。
+- 不修改 tests。
+- 不开始其它业务模块。
+
+执行结果：
+
+- Completion readiness matrix：
+  - read/query route boundary 已完成。
+  - write request boundaries 已完成。
+  - write facades 已完成。
+  - UoW transaction / dirty-outbox 已完成。
+  - confirm、withdraw、relation extra stale precondition 已进入 UoW。
+  - durable idempotency 已覆盖 relation extra、confirm、withdraw、bank row tags、tag selection。
+  - PostgreSQL 写入通过 repository adapter/port；Turnover 写服务未发现业务 SQL 散落。
+  - `server.py` 保留 composition root / HTTP mapping / session tenant extraction，属于允许职责。
+  - local/fallback compatibility paths 当前允许保留。
+- Remaining seam handoff：
+  - Bankdetail expected-version ownership 后续归 Bankdetail 模块。
+  - Settings/tag-selection version ownership 后续归 Settings/Platform 边界。
+  - global fallback retirement 后续归 Platform/Ops 或模块级 deprecation 计划。
+- Exit decision：
+  - Turnover Ledger 达到当前 Python-first 模块化重构目标状态。
+  - 下一条唯一 prompt：`PF-P188-MG - Turnover Ledger Module Completion Merge Gate`。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+
+## PF-P188-MG Turnover Ledger Module Completion Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 只合入 Turnover Ledger module completion readiness 文档。
+- 不修改 production code 或 tests。
+- 不执行 Traffic Gate。
+
 ## PF-P115 Relation Local Adapter Extraction
 
 状态：`verified`
