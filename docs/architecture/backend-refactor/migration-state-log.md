@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P178-MG - Turnover Ledger Confirm Durable Idempotency Cumulative Merge Gate` 已完成并验证 |
+| 当前阶段 | `PF-P180-MG - Turnover Ledger Withdraw Durable Idempotency Cumulative Merge Gate` 已完成并验证 |
 | 当前 active prompt | 无；下一条待生成 |
-| 最近 verified prompt | `PF-P178-MG - Turnover Ledger Confirm Durable Idempotency Cumulative Merge Gate` |
-| 当前分支 | `codex/turnover-ledger-remaining-consistency-p176` |
-| 最近验证 | PF-P178-MG scope check：Pass；`git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（122 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（58 tests）；无 untracked 临时文件 |
-| 下一条允许任务 | 合入 main 后在 main 重跑 PF-P178-MG verification；通过后 push `origin/main`；再从最新 main 新建下一条 `codex/` 分支 |
+| 最近 verified prompt | `PF-P180-MG - Turnover Ledger Withdraw Durable Idempotency Cumulative Merge Gate` |
+| 当前分支 | `codex/turnover-ledger-withdraw-idempotency-p179` |
+| 最近验证 | PF-P180-MG scope check：Pass；`git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（124 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（59 tests）；无 untracked 临时文件 |
+| 下一条允许任务 | 合入 main 后在 main 重跑 PF-P180-MG verification；通过后 push `origin/main`；再从最新 main 新建下一条 `codex/` 分支 |
 
 ## Prompt 执行日志
 
@@ -1595,6 +1595,114 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
 
 - 精确 stage 白名单文件并提交。
 - merge 到 `main` 后在 `main` 上重跑 PF-P178-MG verification。
+- main verification 全部通过后再 push `origin/main`。
+
+### PF-P179 - Turnover Ledger Withdraw Durable Idempotency Contract Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只新增 withdraw durable idempotency target/compatibility tests。
+- 使用 `unittest.expectedFailure` 锁定未来目标。
+- 不修改 production code，不实现 withdraw idempotency。
+- 不迁移 confirm、bank row tags、tag selection、relation extra。
+
+#### 审查结论
+
+- PF-P178-MG 后，confirm 已具备 stale precondition + durable idempotency。
+- withdraw 已具备 expected_versions + stale precondition + UoW dirty/outbox rollback，但仍缺 durable idempotency。
+- 下一条最小切片应先锁定 withdraw durable idempotency 合同，避免直接实现时改变 legacy duplicate-submit 行为。
+
+#### 验证计划
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v` 预期 Pass，并出现新增 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v` 预期 Pass，并出现新增 expected failures。
+- `git diff --check`。
+- `git status --short --branch`。
+- `git ls-files --others --exclude-standard`。
+
+#### 执行结果
+
+- 新增 3 个 `unittest.expectedFailure` target tests：
+  - UoW/facade-level withdraw idempotency command contract。
+  - API same idempotency key + same payload replay contract。
+  - API same idempotency key + different payload conflict contract。
+- 未修改 production code。
+- 未实现 withdraw idempotency。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（124 tests，expected failures=2）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（59 tests，expected failures=1）。
+- `git diff --check`：Pass。
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+#### 下一步
+
+- 生成并审查 `PF-P180 - Turnover Ledger Withdraw Durable Idempotency Integration`。
+- PF-P180 应移除 PF-P179 的 expectedFailure 并转绿，只实现 withdraw durable idempotency，不迁移其它写路径。
+
+### PF-P180 - Turnover Ledger Withdraw Durable Idempotency Integration
+
+状态：`verified`
+
+#### 范围
+
+- 只实现 Turnover Ledger withdraw durable idempotency。
+- 不迁移 confirm、bank row tags、tag selection、relation extra。
+- 不修改 schema、deploy、Traffic Gate 或真实外部服务配置。
+
+#### 执行结果
+
+- 移除 PF-P179 三个 withdraw idempotency target tests 的 `unittest.expectedFailure` 并转为普通通过。
+- `TurnoverLedgerWriteFacade.withdraw_relation(...)` 支持 optional `idempotency_key`。
+- 有 key 时 action name 使用 `turnover_relation_withdraw`，并写入 command idempotency identity 与 stable request fingerprint。
+- withdraw command 继续携带 `expected_versions` 做 stale precondition；request fingerprint 不绑定后端瞬时生成的 relation version，避免 replay 时因状态变化误判 conflict。
+- `_handle_api_turnover_ledger_withdraw(...)` 支持 body `idempotency_key` / `idempotencyKey`。
+- Withdraw primary builder 复用现有 Workbench idempotency store boundary；local path 使用 in-memory idempotency store 保持测试/开发语义。
+- Withdraw handler 捕获 Workbench idempotency conflict/in-progress/failed 并返回 409 JSON。
+
+#### 验证
+
+- PF-P180 RED before implementation：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_withdraw_idempotency_key_replays_without_duplicate_withdraw_or_refresh tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_withdraw_idempotency_key_conflict_rejects_different_payload -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_target_withdraw_relation_facade_passes_idempotency_before_repository -v`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（124 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（59 tests）。
+- `git diff --check`：Pass。
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+#### 下一步
+
+- 生成并审查 `PF-P180-MG - Turnover Ledger Withdraw Durable Idempotency Cumulative Merge Gate`。
+- PF-P180-MG 应统一覆盖 PF-P179 到 PF-P180 的完整 diff。
+
+### PF-P180-MG - Turnover Ledger Withdraw Durable Idempotency Cumulative Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 统一覆盖 PF-P179、PF-P180 的完整 diff。
+- 只合入 Turnover Ledger withdraw durable idempotency 切片。
+- 不触发 Traffic Gate，不部署，不访问生产或真实外部服务。
+
+#### 验证
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass（无输出）。
+- `git diff --name-only`：Pass（仅白名单文件）。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（124 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（59 tests）。
+
+#### 下一步
+
+- 精确 stage 白名单文件并提交。
+- merge 到 `main` 后在 `main` 上重跑 PF-P180-MG verification。
 - main verification 全部通过后再 push `origin/main`。
 
 ### PF-P002 - Platform / Ops / Runtime Boundary Deep Dive
