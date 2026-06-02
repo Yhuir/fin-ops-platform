@@ -284,6 +284,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationExtraConnection,
     TurnoverLedgerLocalTagSelectionConnection,
     TurnoverLedgerLocalTagSelectionSettingsWriter,
+    TurnoverLedgerConfirmLegacyFallbackFacade,
     TurnoverLedgerRelationExtraLegacyFallbackFacade,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionLegacyFallbackFacade,
@@ -2768,19 +2769,20 @@ class Application:
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
-    def _turnover_ledger_confirm_write_facade(self) -> TurnoverLedgerWriteFacade | None:
-        if hasattr(self, "_turnover_ledger_confirm_write_facade_override"):
-            return getattr(self, "_turnover_ledger_confirm_write_facade_override")
+    def _turnover_ledger_confirm_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerConfirmLegacyFallbackFacade:
+        override = getattr(self, "_turnover_ledger_confirm_write_facade_override", None)
+        if override is not None:
+            return override
         state_store = getattr(self, "_state_store", None)
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
-            return None
+            return self._turnover_ledger_confirm_legacy_fallback_facade()
         storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(state_store, "_connection", None)
             enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
             if connection is None or not callable(enqueue_in_transaction):
-                return None
+                return self._turnover_ledger_confirm_legacy_fallback_facade()
             relation_repository = TurnoverLedgerRelationWritePort(
                 relation_service=self._turnover_relation_service,
                 routes=self._turnover_ledger_api_routes,
@@ -2797,7 +2799,7 @@ class Application:
         else:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
-                return None
+                return self._turnover_ledger_confirm_legacy_fallback_facade()
             connection = TurnoverLedgerLocalRelationConnection(
                 relation_snapshot_provider=self._turnover_relation_service.snapshot,
                 replace_snapshot=self._replace_local_turnover_relation_snapshot,
@@ -2823,6 +2825,15 @@ class Application:
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
         )
         return TurnoverLedgerWriteFacade(uow=uow)
+
+    def _turnover_ledger_confirm_legacy_fallback_facade(self) -> TurnoverLedgerConfirmLegacyFallbackFacade:
+        return TurnoverLedgerConfirmLegacyFallbackFacade(
+            relation_rebuild=lambda: self._turnover_relation_service.rebuild_from_bank_rows(
+                self._turnover_bank_transaction_rows()
+            ),
+            routes=self._turnover_ledger_api_routes,
+            after_mutation=self._after_turnover_relation_mutation,
+        )
 
     def _turnover_ledger_withdraw_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         if hasattr(self, "_turnover_ledger_withdraw_write_facade_override"):
@@ -12690,30 +12701,18 @@ class Application:
         affected_months = self._bank_transaction_category_affected_months(normalized_bank_row_ids)
         facade = self._turnover_ledger_confirm_write_facade()
         try:
-            if facade is not None:
-                result = facade.confirm_relation(
-                    bank_row_ids=normalized_bank_row_ids,
-                    actor_id=actor,
-                    tenant_id=tenant_id_for_session(session_response),
-                    note=str(payload.get("note")) if payload.get("note") is not None else None,
-                    affected_months=affected_months,
-                )
-            else:
-                self._turnover_relation_service.rebuild_from_bank_rows(
-                    self._turnover_bank_transaction_rows()
-                )
-                result = self._turnover_ledger_api_routes.confirm_relation(
-                    bank_row_ids=normalized_bank_row_ids,
-                    actor=actor,
-                    note=str(payload.get("note")) if payload.get("note") is not None else None,
-                )
+            result = facade.confirm_relation(
+                bank_row_ids=normalized_bank_row_ids,
+                actor_id=actor,
+                tenant_id=tenant_id_for_session(session_response),
+                note=str(payload.get("note")) if payload.get("note") is not None else None,
+                affected_months=affected_months,
+            )
         except TurnoverRelationValidationError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": exc.error_code, "message": str(exc)},
             )
-        if facade is None:
-            self._after_turnover_relation_mutation(affected_months)
         result["affected_months"] = affected_months
         return self._json_response(HTTPStatus.OK, result)
 

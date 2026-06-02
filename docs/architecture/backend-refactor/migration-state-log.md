@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` 已实现并验证通过 |
 | 当前 active prompt | `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` |
-| 最近 verified prompt | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` |
+| 最近 verified prompt | `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` |
 | 当前分支 | `codex/turnover-ledger-relation-mutation-fallback-p125` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，64 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
+| 下一条允许任务 | 生成并审查 `PF-P127 - Turnover Ledger Withdraw Relation Legacy Fallback Facade Extraction` |
 
 ## Prompt 执行日志
 
@@ -8907,7 +8907,7 @@ Verification：
 
 ### PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8934,9 +8934,25 @@ Verification：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
+#### 执行结果
+
+- 新增 `TurnoverLedgerConfirmLegacyFallbackFacade`，将 confirm legacy fallback 的 relation rebuild、route confirm 和 after-mutation 副作用收敛到显式 adapter。
+- `_turnover_ledger_confirm_write_facade()` 在 primary UoW facade 不可用时返回 confirm fallback adapter，不再返回 `None` 让 handler 执行分支逻辑。
+- `_handle_api_turnover_ledger_confirm(...)` 已保持 thin handler：只做 session/body parsing、bank row ids 校验、actor/affected months 计算、facade 调用和 response packaging。
+- 新增 confirm handler-thinness guard；confirm fallback success/queue-failure tests 改为通过 unsupported postgres queue API 触发 fallback adapter，而不是依赖 override `None`。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_confirm_relation_handler_does_not_inline_legacy_fallback_side_effects tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_confirm_relation_fallback_adapter_keeps_legacy_rebuild_confirm_and_after_mutation tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_confirm_relation_queue_failure_happens_after_relation_confirm_and_read_model_clear -v`：先 RED，后 Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，64 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+
 #### 下一条 Prompt 上下文
 
-TBD。
+下一条最小 prompt 是 `PF-P127 - Turnover Ledger Withdraw Relation Legacy Fallback Facade Extraction`。PF-P127 只处理 withdraw relation fallback：将 legacy route withdraw 与 `_after_turnover_relation_mutation(...)` 从 handler 移入显式 withdraw fallback adapter；不得处理 bank row tags，不得改变 manual-only、already-withdrawn、expected_versions/stale/duplicate submit 行为。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
