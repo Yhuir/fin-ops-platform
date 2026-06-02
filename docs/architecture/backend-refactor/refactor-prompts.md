@@ -23184,6 +23184,30 @@ Post-Flight:
 - PF-P118 边界正确：只补 bank row tags local shim characterization tests。
 - 该 prompt 明确不修改 production code、不抽离 adapter、不执行 Traffic Gate。
 
+### PF-P118 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 新增 tests：
+  - `test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_relation_snapshot`
+  - `test_target_turnover_bank_row_tag_batch_local_facade_saves_snapshots_and_rebuilds_after_apply`
+  - `test_turnover_bank_row_tag_batch_facade_none_keeps_legacy_direct_side_effects`
+- 关键结果：
+  - local facade queue failure 同时锁定 category/relation rollback 与 previous snapshot 保存。
+  - local facade success 锁定 category/relation snapshot 保存与 apply -> rebuild 顺序。
+  - facade None fallback 作为 legacy compatibility，锁定 direct save/rebuild/direct read model invalidation。
+- 验证：
+  - `git status --short --branch`：Pass，仅包含 PF-P118 允许文件。
+  - `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- 下一条建议：生成 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction`，只抽离 bank row tags local connection/port，不改 handler facade None fallback。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

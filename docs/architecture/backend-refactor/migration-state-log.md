@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests` |
-| 最近 verified prompt | `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` |
+| 当前阶段 | `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests` 已执行并验证通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-bank-row-tags-local-shim-p117` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests` |
+| 下一条允许任务 | 生成并审查 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction` |
 
 ## Prompt 执行日志
 
@@ -8345,7 +8345,7 @@ PF-P117 已确认 bank row tags local shim 仍需测试锁定后再抽离。下�
 
 ### PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8370,6 +8370,31 @@ PF-P117 已确认 bank row tags local shim 仍需测试锁定后再抽离。下�
 - `git diff --check`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+#### 执行结果
+
+- `tests/test_turnover_ledger_api.py` 新增 3 个 characterization tests：
+  - `test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_relation_snapshot`；
+  - `test_target_turnover_bank_row_tag_batch_local_facade_saves_snapshots_and_rebuilds_after_apply`；
+  - `test_turnover_bank_row_tag_batch_facade_none_keeps_legacy_direct_side_effects`。
+- 已锁定：
+  - local facade queue failure 会 rollback category snapshot 和 relation snapshot，并保存 previous snapshots；
+  - local facade success 会保存 category/relation snapshots，并保持 apply -> rebuild 顺序；
+  - local facade path 不直接 clear read model；
+  - facade None fallback 仍保留 direct save/rebuild/direct invalidation 的 legacy compatibility behavior。
+- 未修改 production code、facade/UoW 语义、SQL migration、部署配置或 Traffic Gate。
+
+#### Verification Result
+
+- `git status --short --branch`：Pass，仅包含 PF-P118 允许文件。
+- `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+#### 下一条 Prompt 上下文
+
+PF-P118 已完成 bank row tags local shim 抽离前的测试锁定。下一条可生成并审查 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction`：只把 `_local_turnover_ledger_bank_row_tags_connection(...)` 和 `_local_turnover_ledger_bankdetail_port(...)` 迁入 `turnover_ledger_write_adapters.py`，不得改 handler facade None fallback，且不得把 Bankdetail 业务规则搬入 Turnover adapter。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

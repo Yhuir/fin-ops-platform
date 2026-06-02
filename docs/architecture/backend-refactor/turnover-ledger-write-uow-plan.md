@@ -3252,7 +3252,7 @@ PF-P110 边界：
 
 ## PF-P116-MG Local Relation and Tag Selection Adapter Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -3377,6 +3377,23 @@ PF-P110 边界：
 - `git diff --check`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+执行结果：
+
+- 新增 3 个 API-level characterization tests：
+  - queue failure rolls back relation snapshot；
+  - local facade success saves category/relation snapshots and rebuilds after apply；
+  - facade None keeps legacy direct side effects。
+- `tests.test_turnover_ledger_api` 从 53 增至 56 tests。
+- 未修改 production code。
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+下一步：
+
+- 生成 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction`。
+- PF-P119 只抽离 `_local_turnover_ledger_bank_row_tags_connection(...)` 和 `_local_turnover_ledger_bankdetail_port(...)`，不得改 handler facade None fallback。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
