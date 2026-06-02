@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` 已执行并验证通过 |
 | 当前 active prompt | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
-| 最近 verified prompt | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` |
+| 最近 verified prompt | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
 | 当前分支 | `codex/turnover-ledger-bank-row-tags-fallback-p128` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
+| 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；PF-P128 文档关键词检查：Pass |
+| 下一条允许任务 | 生成并审查 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -9051,7 +9051,7 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 
 ### PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -9076,6 +9076,50 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 - Adapter extraction readiness and blockers。
 - 下一条最小 prompt 建议。
 
+#### Discovery 输出
+
+##### Bank Row Tags Fallback Inventory
+
+| 入口 | 当前 fallback 触发条件 | fallback 行为 | 风险 |
+| --- | --- | --- | --- |
+| `_handle_api_turnover_ledger_bank_row_tags_batch(...)` | `_turnover_ledger_bank_row_tags_write_facade()` 返回 `None`。 | handler 直接调用 `BankTransactionCategoryService.apply_turnover_updates(...)`。 | 业务 mutation 仍在 handler 内。 |
+| `_turnover_ledger_bank_row_tags_write_facade(...)` | 依赖缺失：state store 或 queue repository 缺失；PostgreSQL path 缺少 connection 或 `enqueue_read_model_refresh_in_transaction`；local path queue 缺少 `enqueue_read_model_refresh`。 | 返回 `None`，由 handler 执行 legacy direct side effects。 | dependency-missing fallback 与 explicit override None 需要分开锁定。 |
+| tests monkeypatch | 测试可将 `_turnover_ledger_bank_row_tags_write_facade` 替换为 lambda `None`。 | 强制 handler fallback。 | 后续 cleanup 不能只删除 override None 路径，否则会破坏兼容测试语义。 |
+
+##### Handler Direct Side Effects Matrix
+
+| side effect | 当前位置 | 已有 facade/UoW path | fallback cleanup 风险 |
+| --- | --- | --- | --- |
+| target validation | handler `_ensure_turnover_bank_row_tag_targets(...)` | 仍在 handler | 可保留在 handler，属于 HTTP 前置校验。 |
+| category apply | handler fallback 直接 `apply_turnover_updates(...)` | `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 通过 `bankdetail_port.apply_turnover_category_updates(...)` | 需要 fallback adapter 包住，不能继续留在 handler。 |
+| category snapshot save | handler fallback 直接 `state_store.save_bank_transaction_categories(...)` | local connection commit save；PostgreSQL adapter repository save | fallback adapter 需要明确 save callback 或依赖已抽出的 local adapter。 |
+| relation rebuild/save | handler fallback 调用 `rebuild_from_bank_rows(...)`，after-mutation 间接持久化 relation | facade/UoW bankdetail port 已 rebuild relation 并保存 category/relation snapshots | fallback adapter 必须保留 relation rebuild 顺序和 persistence warning 语义。 |
+| Workbench invalidation | `_after_turnover_relation_mutation(...)` 间接调用 `_invalidate_workbench_after_bank_transaction_categories(...)` | facade/UoW refresh requests 包含 `workbench` affected months | fallback adapter 需要继续调用 after-mutation 或等价 invalidation dependency。 |
+| Turnover Ledger read model clear/enqueue | `_after_turnover_relation_mutation(...)` clear + enqueue turnover refresh | facade/UoW transaction-bound dirty/outbox | fallback adapter 只移动边界，不改变 legacy queue failure 发生在 mutation 后的语义。 |
+
+##### Existing Characterization Coverage Matrix
+
+| 测试 | 覆盖内容 | 缺口 |
+| --- | --- | --- |
+| `test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details` | 正常保存、Bank Details 反映 category 更新。 | 不是 fallback-specific。 |
+| `test_turnover_bank_row_tag_batch_queue_failure_happens_after_category_save` | explicit facade None fallback 下 queue failure 发生在 category mutation 后。 | 仍通过 monkeypatch facade None，未锁定 future fallback adapter。 |
+| `test_turnover_bank_row_tag_batch_facade_none_keeps_legacy_direct_side_effects` | explicit facade None fallback direct side effects。 | 缺 handler-thinness guard。 |
+| `test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects` | dependency-missing fallback direct side effects。 | 缺 unsupported postgres queue API fallback adapter success/queue-failure 命名。 |
+| `test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save` / relation snapshot rollback | UoW target rollback。 | 已覆盖 primary facade path，不覆盖 legacy fallback adapter extraction。 |
+| `test_target_turnover_bank_row_tag_batch_local_facade_saves_snapshots_and_rebuilds_after_apply` | local facade success save category/relation snapshots。 | 可作为 adapter extraction 后 regression。 |
+
+##### Adapter Extraction Readiness
+
+- 可以按 confirm/withdraw 模式新增 explicit bank row tags fallback adapter，但必须先补一组 tests，避免跨模块副作用被误删。
+- Adapter 不得接收 `Application`，建议细粒度依赖：
+  - `category_service` 或 `apply_updates` callable；
+  - `save_category_snapshot` callable；
+  - `relation_rebuild` callable；
+  - `bank_rows_provider` callable；
+  - `after_mutation` callable。
+- 不建议本轮直接实现 adapter：bank row tags fallback 比 confirm/withdraw 更复杂，涉及 Bankdetail category service、Turnover relation rebuild、Workbench invalidation、Turnover Ledger read model refresh。
+- 下一步应先写 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`，补 handler-thinness target 和 unsupported postgres queue API fallback adapter tests。
+
 #### 验证
 
 - `git status --short --branch`
@@ -9085,7 +9129,7 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 
 #### 下一条 Prompt 上下文
 
-TBD。
+下一条最小 prompt 是 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`。PF-P129 只补 tests 和文档，不修改 production code；必须锁定 handler-thinness target、unsupported postgres queue API fallback adapter success/queue-failure，以及现有 dependency-missing fallback 语义。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

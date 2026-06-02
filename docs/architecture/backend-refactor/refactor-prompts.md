@@ -24601,6 +24601,34 @@ Post-Flight:
 - PF-P128 明确不修改 production code、不修改 tests、不执行 MG 或 Traffic Gate。
 - 该 prompt 避免直接照搬 confirm/withdraw 模式，先盘点 Bankdetail、relation rebuild、Workbench invalidation 和 read model refresh 的跨模块副作用。
 
+### PF-P128 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- Bank Row Tags Fallback Inventory：
+  - handler fallback 仍直接执行 `apply_turnover_updates(...)`、category snapshot save、relation rebuild 和 `_after_turnover_relation_mutation(...)`。
+  - `_turnover_ledger_bank_row_tags_write_facade()` 会因 state store / queue repository 缺失、PostgreSQL transaction-bound enqueue 缺失或 local enqueue 缺失返回 `None`。
+  - explicit override None 与 dependency-missing fallback 都已有测试语义，后续不能混为一谈。
+- Handler Direct Side Effects Matrix：
+  - target validation 可保留在 handler；
+  - category apply/save、relation rebuild/save、Workbench invalidation、Turnover Ledger read model clear/enqueue 应作为 fallback adapter extraction 候选；
+  - legacy queue failure 当前发生在 mutation 之后，本轮不改变该语义。
+- Existing Characterization Coverage Matrix：
+  - 已覆盖 explicit facade None fallback、dependency-missing fallback、queue failure after mutation、UoW rollback、local facade save/rebuild。
+  - 缺口：handler-thinness target、unsupported postgres queue API fallback adapter success/queue-failure tests。
+- Adapter Extraction Readiness：
+  - 可新增 explicit bank row tags fallback adapter，但必须先补 tests。
+  - adapter 需要细粒度依赖：category apply、category snapshot save、relation rebuild、bank rows provider、after mutation；不得接收 `Application`。
+- 验证：
+  - `git status --short --branch`：Pass
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `rg -n "PF-P128|Bank Row Tags Legacy Fallback Cleanup|bank row tags fallback inventory|Handler Direct Side Effects Matrix" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass
+- 下一条最小 prompt：`PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`。PF-P129 只补 tests 和文档，不修改 production code。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

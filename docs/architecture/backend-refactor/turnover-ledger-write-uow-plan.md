@@ -3946,7 +3946,7 @@ PF-P110 边界：
 
 ## PF-P127-MG Relation Mutation Fallback Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -4009,12 +4009,52 @@ PF-P110 边界：
 - Adapter Extraction Readiness。
 - 下一条最小 prompt。
 
+执行结果：
+
+### Bank Row Tags Fallback Inventory
+
+| 入口 | 当前 fallback 触发条件 | fallback 行为 |
+| --- | --- | --- |
+| handler fallback | `_turnover_ledger_bank_row_tags_write_facade()` 返回 `None` | direct category apply、category snapshot save、relation rebuild、after-mutation。 |
+| facade construction | state store / queue repository 缺失，或 queue API 不满足当前 path | 返回 `None`。 |
+| tests override | monkeypatch facade helper 返回 `None` | 强制 legacy fallback。 |
+
+### Handler Direct Side Effects Matrix
+
+| side effect | 结论 |
+| --- | --- |
+| target validation | 可留在 handler，属于 HTTP 前置校验。 |
+| category apply/save | 应迁入 explicit fallback adapter。 |
+| relation rebuild/save | 应迁入 explicit fallback adapter 或细粒度 dependency callback。 |
+| Workbench invalidation | 当前由 `_after_turnover_relation_mutation(...)` 触发，后续 adapter 可注入该 callback，先不改变语义。 |
+| Turnover Ledger read model refresh | 当前 legacy queue failure 在 mutation 后发生，后续只移动边界，不改变语义。 |
+
+### Existing Characterization Coverage Matrix
+
+- 已覆盖 explicit facade None fallback direct side effects。
+- 已覆盖 dependency-missing fallback direct side effects。
+- 已覆盖 fallback queue failure happens after category mutation。
+- 已覆盖 UoW rollback for category and relation snapshots。
+- 已覆盖 local facade success save/rebuild。
+- 缺口：handler-thinness target、unsupported postgres queue API fallback adapter success/queue-failure tests。
+
+### Adapter Extraction Readiness
+
+- 可以新增 bank row tags explicit fallback adapter，但必须先补 characterization tests。
+- adapter 构造函数不得接收 `Application`；建议接收 category apply、category snapshot save、relation rebuild、bank rows provider 和 after-mutation callback。
+- 不应直接跳到 adapter extraction；下一步先写 PF-P129 tests。
+
 验证：
 
 - `git status --short --branch`
 - `git ls-files --others --exclude-standard`
 - `git diff --check`
 - `rg -n "PF-P128|Bank Row Tags Legacy Fallback Cleanup|bank row tags fallback inventory|Handler Direct Side Effects Matrix" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+下一条最小 prompt：
+
+- `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`
+- 只补 tests 和文档，不修改 production code。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
