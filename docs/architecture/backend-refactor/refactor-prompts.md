@@ -28246,6 +28246,326 @@ Post-Flight:
   - 从最新 `main` 新建分支
   - 生成并审查 `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline`
 
+## PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline
+
+状态：`verified`
+
+```text
+/goal
+PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 local runtime support 抽离合入后，重新盘点 Turnover Ledger 剩余的高价值写路径 seam，决定下一条最小但高收益的切片；本轮只允许做 discovery/planning 和文档回写。
+
+Context:
+- `PF-P166-MG` 已 verified 并已合入 `main`。
+- 当前必须从最新 `main` 新建分支。
+- Turnover Ledger 已完成：
+  - legacy fallback adapter group
+  - primary write builder group
+  - request-boundary extraction group
+  - local runtime support group
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Reading:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+
+Task:
+1. 重新盘点 local runtime support 抽离完成后，Turnover Ledger 写路径还剩哪些高价值 seam。
+2. 明确区分：
+   - 低价值的机械 helper 清理
+   - 高价值的一致性 / dirty-outbox / 双路径收敛问题
+3. 给出下一条最小 prompt 的建议。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- 结合 CodeGraph 与源码审计当前 write path 剩余 seam
+```
+
+### 审查结论
+
+- PF-P167 边界正确：这是 local runtime support 合入后的必要 rebaseline。
+
+### PF-P167 执行结果
+
+- PF-P167 已完成并验证。
+- 已确认继续做纯 helper 清理的收益开始下降。
+- 已确认当前剩余高价值 seam 已转向：
+  - write consistency
+  - dirty/outbox 收敛
+  - local / postgres 双路径一致性契约
+- 下一条建议：
+  - `PF-P168 - Turnover Ledger Write Consistency / Dirty-Outbox Rebaseline`
+
+## PF-P168 - Turnover Ledger Write Consistency / Dirty-Outbox Rebaseline
+
+状态：`planned`
+
+```text
+/goal
+PF-P168 - Turnover Ledger Write Consistency / Dirty-Outbox Rebaseline
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须重新盘点 Turnover Ledger 写路径在 local / postgres 双路径下的一致性、dirty scope/outbox、read model refresh 收敛情况，明确下一条最小高价值切片；本轮只允许做 discovery/planning 和文档回写。
+
+Context:
+- `PF-P167` 已 verified。
+- 当前 Turnover Ledger 的结构性拆分已经推进到 request-boundary 与 local runtime support。
+- 下一阶段需要优先解决的一致性问题，必须先基于代码事实重新盘点。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Reading:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- tests/test_turnover_ledger_api.py
+
+Task:
+1. 盘点 Turnover Ledger 当前 local / postgres 双路径在以下方面的实际差异：
+   - dirty scope/outbox enqueue
+   - local queue vs transaction-bound queue
+   - stale/idempotency/expected_versions coverage
+   - relation extra / tag selection / bank row tags / confirm / withdraw 的一致性边界
+2. 明确下一条最小高价值切片是：
+   - consistency characterization tests
+   - 还是某一条具体写路径的 dirty-outbox convergence
+3. 不得直接修改事务语义。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- 结合 CodeGraph 与源码审计剩余 consistency seam
+```
+
+### 审查结论
+
+- PF-P168 边界正确：它把下一阶段聚焦到 Turnover Ledger 仍未解决的写一致性问题，而不是继续做低收益的机械拆分。
+
+### PF-P168 执行结果
+
+- PF-P168 已完成并验证。
+- 已确认当前剩余高价值 seam 主要是：
+  - dirty-outbox local vs postgres 双路径差异
+  - stale precondition coverage 不一致
+  - durable idempotency coverage 不一致
+- 已确认：
+  - `relation extra` 最成熟，已有 `expected_versions + idempotency`
+  - `withdraw` 仅有 `expected_versions`
+  - `confirm / bank row tags / tag selection` 尚无对应一致性收敛
+  - local path builders 仍注入 `TurnoverLedgerLocalDirtyOutboxWriter` 和 no-op stale precondition port
+- 下一条建议：
+  - `PF-P169 - Turnover Ledger Write Consistency Characterization Tests`
+
+## PF-P169 - Turnover Ledger Write Consistency Characterization Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P169 - Turnover Ledger Write Consistency Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只为 Turnover Ledger 写一致性 / dirty-outbox / 双路径 contract 补 characterization tests；不得直接改 UoW、dirty-outbox writer 或事务语义。
+
+Context:
+- `PF-P168` 已 verified。
+- 当前高价值问题不是结构拆分，而是 local/postgres 双路径一致性 contract。
+
+Allowed Scope:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- 不得修改 production code、schema、UoW 语义或部署配置
+
+Required Test Work:
+1. 锁定 relation extra / withdraw 当前已有的一致性 contract：
+   - relation extra：expected_versions / idempotency / local-vs-postgres dirty-outbox path
+   - withdraw：expected_versions / local-vs-postgres dirty-outbox path
+2. 锁定 confirm / bank row tags / tag selection 当前缺失的一致性 contract：
+   - confirm 当前仍无 stale precondition guard
+   - bank row tags 当前仍无 stale precondition / durable idempotency
+   - tag selection 当前仍无 stale precondition / durable idempotency
+3. 必须让测试明确区分：
+   - 哪些是当前已保证 contract
+   - 哪些是当前明确缺失、但后续需要收敛的 contract
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+### 审查结论
+
+- PF-P169 边界正确：它先用测试把一致性事实锁定，避免下一步直接修改 dirty-outbox / stale precondition 语义时失去基线。
+
+### PF-P169 执行结果
+
+- PF-P169 已完成并验证。
+- 已锁定当前已保证的 contract：
+  - `relation extra`：`expected_versions + idempotency + dirty-outbox refresh`
+  - `withdraw`：`expected_versions + dirty-outbox refresh`
+- 已锁定当前明确缺失的 contract：
+  - `confirm`：无 stale precondition / durable idempotency
+  - `bank row tags`：无 stale precondition / durable idempotency
+  - `tag selection`：无 stale precondition / durable idempotency
+- 已锁定当前 builders 仍保留的双路径差异：
+  - local path 使用 `TurnoverLedgerLocalDirtyOutboxWriter`
+  - local path 使用 no-op `stale_precondition_port`
+- 下一步最小高价值实现切片：
+  - `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration`
+
+## PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration
+
+状态：`planned`
+
+```text
+/goal
+PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger 的 withdraw 写路径接到显式 stale precondition integration 上，消除当前 no-op stale precondition 在 withdraw 路径上的空洞；不得顺手迁移 confirm、bank row tags、tag selection。
+
+Context:
+- `PF-P169` 已 verified。
+- 当前 `withdraw` 已经具备：
+  - request boundary 生成 `expected_versions`
+  - UoW contract tests 覆盖 stale precondition should run before repository
+- 当前缺口是：app 实际 primary write builder 仍给 withdraw 注入 no-op `stale_precondition_port`。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- backend/src/fin_ops_platform/app/server.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- backend/src/fin_ops_platform/services/workbench_*.py
+- 不得顺手迁移 confirm、bank row tags、tag selection、relation extra
+- 不得改 dirty-outbox 语义、schema、部署配置
+
+Required Work:
+1. 为 Turnover Ledger withdraw 写路径建立显式 stale precondition adapter / boundary，替换当前 builder 中的 no-op `stale_precondition_port`。
+2. 该 integration 必须复用现有 `expected_versions` 契约，不重复发明新的请求字段。
+3. 必须通过 tests 锁定：
+   - stale withdraw 在 repository mutation 前被拒绝
+   - 不产生第二次 dirty/outbox refresh
+   - local / postgres path 都走同一 stale precondition boundary
+4. `confirm / bank row tags / tag selection` 当前缺失 contract 必须保持不变，不得在本轮偷偷扩大范围。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+### 审查结论
+
+- PF-P170 边界正确：它只修复 `withdraw` 这条已经具备 `expected_versions` 契约、但实际 app wiring 仍是 no-op 的真实缺口。
+- 这一步不会把 `confirm / bank row tags / tag selection` 一起拖进来，符合最小高价值切片原则。
+
+## PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger 写一致性 baseline 切片，不新增业务实现，不执行 PF-P170。
+
+Context:
+- `PF-P167` 已 verified（docs-only rebaseline）
+- `PF-P168` 已 verified（docs-only consistency rebaseline）
+- `PF-P169` 已 verified（characterization tests）
+- 当前分支 `codex/turnover-ledger-post-local-runtime-p167` 相对 `main` 没有已提交差异，只有未提交的 baseline/test/docs 改动。
+
+This MG covers the complete unmerged diff for:
+- `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline`
+- `PF-P168 - Turnover Ledger Write Consistency / Dirty-Outbox Rebaseline`
+- `PF-P169 - Turnover Ledger Write Consistency Characterization Tests`
+
+Allowed Scope:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_*.py
+- 不得顺手执行 PF-P170
+- 不得修改 schema、deploy、Traffic Gate
+
+Required MG Checks:
+1. 范围检查：
+   - `git diff --name-only main...HEAD` 允许为空，因为当前差异可能全部是未提交工作区变更
+   - 必须额外检查 `git diff --name-only -- tests/test_turnover_ledger_api.py docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+   - 只允许上述 4 个文件进入本次 MG
+2. 脏文件检查：
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --check`
+3. 测试：
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+4. 提交准备：
+   - 只允许精确 `git add` 这 4 个文件
+   - 禁止 `git add .`
+   - commit message 建议：
+     - `test(turnover-ledger): lock write consistency baseline`
+5. merge/main 验证：
+   - merge 到 `main`
+   - 在 `main` 上重跑：
+     - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - 通过后再 `git push origin main`
+
+Post-Flight:
+1. 更新：
+   - `migration-state-log.md`
+   - `refactor-prompts.md`
+   - `turnover-ledger-write-uow-plan.md`
+2. 将 `PF-P169-MG` 标记为 verified
+3. 明确记录：
+   - 这次 MG 只合入 baseline/test slice
+   - `PF-P170` 仍未执行
+
+Stop Conditions:
+- 若出现范围外 production code diff，立即停止
+- 若 unittest 失败且不能在 PF-P169 范围内修复，立即停止
+- 若 merge/main 复验失败，不得 push
+```
+
+### 审查结论
+
+- PF-P169-MG 的边界正确：当前分支只积累了 PF-P167/PF-P168/PF-P169 的 baseline/test/docs 事实源，先收口再进入 PF-P170 更稳妥。
+- 这不是跳过实现，而是先把新的事实源与 characterization baseline 合入 `main`，避免后续 stale-precondition 实现基线漂移。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

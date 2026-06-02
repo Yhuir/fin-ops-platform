@@ -19,6 +19,7 @@ from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 
 
 class _QueueRecorder:
@@ -204,6 +205,16 @@ class _BankRowTagsWriteFacadeRecorder:
             }
         )
         return {"updated": len(list(updates or []))}
+
+
+class _RecordingTurnoverLedgerUow:
+    def __init__(self) -> None:
+        self.commands: list[object] = []
+
+    def run(self, command: object, handler: object) -> dict[str, object]:
+        self.commands.append(command)
+        _ = handler
+        return {"ok": True}
 
 
 class TurnoverLedgerApiTests(unittest.TestCase):
@@ -980,6 +991,158 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             with self.subTest(method=method.__name__):
                 source = inspect.getsource(method)
                 self.assertIn("support = self._turnover_ledger_local_runtime_support()", source)
+
+    def test_relation_extra_write_facade_keeps_expected_versions_and_durable_idempotency_contract(self) -> None:
+        uow = _RecordingTurnoverLedgerUow()
+        facade = TurnoverLedgerWriteFacade(
+            uow=uow,
+            extra_normalizer=lambda relation_id, payload, actor_id: {
+                "relation_id": relation_id,
+                "note": payload.get("note"),
+                "updated_by": actor_id,
+            },
+        )
+
+        facade.update_relation_extra(
+            relation_id="turnover_rel_consistency",
+            payload={"note": "keep-contract"},
+            actor_id="actor-1",
+            tenant_id="tenant-1",
+            expected_versions={"turnover_relation_extra:turnover_rel_consistency": "v1"},
+            idempotency_key=" idem-1 ",
+        )
+
+        command = uow.commands[0]
+        self.assertEqual(command.action_name, "turnover_relation_extra_update")
+        self.assertEqual(
+            command.expected_versions,
+            {"turnover_relation_extra:turnover_rel_consistency": "v1"},
+        )
+        self.assertEqual(command.idempotency_key, "idem-1")
+        self.assertTrue(command.request_fingerprint)
+        self.assertEqual(
+            command.refresh_requests,
+            [{"scope_type": "turnover_ledger", "scope_keys": ["all"], "reason": "turnover_relation_extra_changed"}],
+        )
+
+    def test_withdraw_write_facade_keeps_expected_versions_but_has_no_durable_idempotency_contract(self) -> None:
+        uow = _RecordingTurnoverLedgerUow()
+        facade = TurnoverLedgerWriteFacade(uow=uow)
+
+        facade.withdraw_relation(
+            relation_id="turnover_rel_withdraw_consistency",
+            actor_id="actor-1",
+            tenant_id="tenant-1",
+            note="withdraw",
+            affected_months=["2026-02", "2026-03"],
+            expected_versions={"relation:turnover_rel_withdraw_consistency": 3},
+        )
+
+        command = uow.commands[0]
+        self.assertEqual(command.action_name, "withdraw_relation")
+        self.assertEqual(command.expected_versions, {"relation:turnover_rel_withdraw_consistency": 3})
+        self.assertEqual(command.idempotency_key, "")
+        self.assertEqual(command.request_fingerprint, "")
+        self.assertEqual(
+            command.refresh_requests,
+            [{"scope_type": "turnover_ledger", "scope_keys": ["all"], "reason": "turnover_relation_changed"}],
+        )
+
+    def test_confirm_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract(self) -> None:
+        uow = _RecordingTurnoverLedgerUow()
+        facade = TurnoverLedgerWriteFacade(uow=uow)
+
+        facade.confirm_relation(
+            bank_row_ids=["txn-1", "txn-2"],
+            actor_id="actor-1",
+            tenant_id="tenant-1",
+            note="confirm",
+            affected_months=["2026-02"],
+        )
+
+        command = uow.commands[0]
+        self.assertEqual(command.action_name, "confirm_relation")
+        self.assertEqual(command.expected_versions, {})
+        self.assertEqual(command.idempotency_key, "")
+        self.assertEqual(command.request_fingerprint, "")
+
+    def test_bank_row_tags_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract(self) -> None:
+        uow = _RecordingTurnoverLedgerUow()
+        facade = TurnoverLedgerWriteFacade(uow=uow)
+
+        facade.update_bank_row_tags_batch(
+            updates=[{"transaction_id": "txn-1", "category_code": "borrow_out_company_lent"}],
+            actor_id="actor-1",
+            tenant_id="tenant-1",
+            affected_months=["2026-02"],
+        )
+
+        command = uow.commands[0]
+        self.assertEqual(command.action_name, "bank_row_tags_batch")
+        self.assertEqual(command.expected_versions, {})
+        self.assertEqual(command.idempotency_key, "")
+        self.assertEqual(command.request_fingerprint, "")
+
+    def test_tag_selection_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract(self) -> None:
+        uow = _RecordingTurnoverLedgerUow()
+        facade = TurnoverLedgerWriteFacade(
+            uow=uow,
+            tag_selection_normalizer=lambda payload, actor_id: {
+                "public_payload": {"selected_tag_codes": list(payload.get("selected_tag_codes") or [])},
+                "next_selection": {"selected_tag_codes": list(payload.get("selected_tag_codes") or [])},
+                "next_snapshot": {"version": 2, "selected_tag_codes": list(payload.get("selected_tag_codes") or [])},
+                "audit_event": {"actor_id": actor_id, "selected_tag_codes": list(payload.get("selected_tag_codes") or [])},
+            },
+        )
+
+        facade.update_tag_selection(
+            payload={"selected_tag_codes": ["external_rule_borrow_out"]},
+            actor_id="actor-1",
+            tenant_id="tenant-1",
+        )
+
+        command = uow.commands[0]
+        self.assertEqual(command.action_name, "turnover_ledger_tag_selection_changed")
+        self.assertEqual(command.expected_versions, {})
+        self.assertEqual(command.idempotency_key, "")
+        self.assertEqual(command.request_fingerprint, "")
+
+    def test_turnover_ledger_primary_write_builders_still_use_local_and_postgres_dirty_outbox_split(self) -> None:
+        builder_sources = {
+            "relation_extra": inspect.getsource(Application._turnover_ledger_relation_extra_write_facade),
+            "withdraw": inspect.getsource(Application._turnover_ledger_withdraw_write_facade),
+            "confirm": inspect.getsource(Application._turnover_ledger_confirm_write_facade),
+            "bank_row_tags": inspect.getsource(Application._turnover_ledger_bank_row_tags_write_facade),
+            "tag_selection": inspect.getsource(Application._turnover_ledger_tag_selection_write_facade),
+        }
+
+        for name, source in builder_sources.items():
+            with self.subTest(builder=name):
+                self.assertIn("PrimaryWriteFacadeBuilder(", source)
+
+        adapter_source = inspect.getsource(Application._turnover_ledger_relation_extra_write_facade.__globals__["TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder"].build)
+        self.assertIn("TurnoverLedgerDirtyOutboxWriter(", adapter_source)
+        self.assertIn("TurnoverLedgerLocalDirtyOutboxWriter(", adapter_source)
+
+        withdraw_builder_source = inspect.getsource(
+            Application._turnover_ledger_withdraw_write_facade.__globals__["TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder"].build
+        )
+        self.assertIn("TurnoverLedgerDirtyOutboxWriter(", withdraw_builder_source)
+        self.assertIn("TurnoverLedgerLocalDirtyOutboxWriter(", withdraw_builder_source)
+
+    def test_turnover_ledger_primary_write_builders_still_use_noop_local_stale_precondition_ports(self) -> None:
+        builder_methods = [
+            Application._turnover_ledger_tag_selection_write_facade.__globals__["TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder"].build,
+            Application._turnover_ledger_withdraw_write_facade.__globals__["TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder"].build,
+            Application._turnover_ledger_confirm_write_facade.__globals__["TurnoverLedgerConfirmPrimaryWriteFacadeBuilder"].build,
+            Application._turnover_ledger_bank_row_tags_write_facade.__globals__["TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder"].build,
+            Application._turnover_ledger_relation_extra_write_facade.__globals__["TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder"].build,
+        ]
+
+        for build_method in builder_methods:
+            with self.subTest(builder=build_method.__qualname__):
+                source = inspect.getsource(build_method)
+                self.assertIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
 
     def test_turnover_ledger_local_runtime_helpers_delegate_to_support_boundary(self) -> None:
         helper_names = [

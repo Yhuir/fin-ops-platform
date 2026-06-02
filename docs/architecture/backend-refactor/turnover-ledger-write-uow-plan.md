@@ -5659,6 +5659,80 @@ Remaining seam matrix：
 - 从最新 `main` 新建分支
 - 先生成并审查 `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline`
 
+## PF-P167 Post-Local-Runtime Rebaseline
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已确认 request-boundary、local runtime support、primary write builder / legacy fallback 等结构性切片已经基本收口。
+- 已确认继续做机械 helper 清理的收益低于继续推进一致性收敛。
+- 当前剩余高价值 seam 已转向：
+  - write consistency
+  - dirty/outbox 收敛
+  - local / postgres 双路径一致性契约重盘点
+
+下一步：
+
+- 生成并审查 `PF-P168 - Turnover Ledger Write Consistency / Dirty-Outbox Rebaseline`
+
+## PF-P168 Write Consistency / Dirty-Outbox Rebaseline
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已确认当前剩余高价值 seam 不再是结构拆分，而是：
+  - dirty-outbox local / postgres 双路径差异
+  - stale precondition coverage 不一致
+  - durable idempotency coverage 不一致
+- 已确认：
+  - relation extra：已有 `expected_versions + idempotency`
+  - withdraw：仅有 `expected_versions`
+  - confirm / bank row tags / tag selection：尚无对应一致性收敛
+- 已确认 local path builders 仍使用：
+  - `TurnoverLedgerLocalDirtyOutboxWriter`
+  - no-op `stale_precondition_port`
+
+下一步：
+
+- 生成并审查 `PF-P169 - Turnover Ledger Write Consistency Characterization Tests`
+
+## PF-P169 Write Consistency Characterization Tests
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已新增 characterization tests，明确区分当前已保证与当前缺失的写一致性 contract：
+  - `relation extra`：保留 `expected_versions + idempotency + dirty-outbox refresh`
+  - `withdraw`：保留 `expected_versions + dirty-outbox refresh`，但仍无 durable idempotency
+  - `confirm / bank row tags / tag selection`：当前仍无 stale precondition / durable idempotency
+- 已锁定 primary write builders 当前仍存在的 local/postgres 差异：
+  - local path 使用 `TurnoverLedgerLocalDirtyOutboxWriter`
+  - local path 使用 no-op `stale_precondition_port`
+- 下一步不应直接扩到全部写路径；最小高价值实现切片应先做 `withdraw` stale precondition integration。
+
+下一步：
+
+- 生成并审查 `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration`
+
+补充：
+
+- 当前分支尚未有新的生产代码实现，只包含：
+  - `PF-P167` docs-only rebaseline
+  - `PF-P168` docs-only rebaseline
+  - `PF-P169` characterization tests
+- 因此在进入 `PF-P170` 之前，更合理的是先执行一个小型 cumulative MG，把这组 baseline/test 事实源合入 `main`。
+- 对应 MG：
+  - `PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
