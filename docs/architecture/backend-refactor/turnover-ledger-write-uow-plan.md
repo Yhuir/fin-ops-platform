@@ -6300,6 +6300,78 @@ Remaining seam matrix：
 - `PF-P180-MG - Turnover Ledger Withdraw Durable Idempotency Cumulative Merge Gate`
 - 统一覆盖 PF-P179 到 PF-P180 的完整 diff。
 
+## PF-P183 Tag Selection Durable Idempotency Contract Tests
+
+状态：
+
+- verified
+
+范围：
+
+- 只新增 tag-selection durable idempotency 目标/兼容测试。
+- 不修改生产代码。
+- 不迁移 confirm、withdraw、bank row tags、relation extra 或其它写路径。
+
+执行结果：
+
+- 新增 2 个 API-level `unittest.expectedFailure` target tests：
+  - same `idempotency_key` + same payload 必须 replay first response，不重复 settings save / dirty-outbox refresh；
+  - same key + different payload 必须返回 409 `idempotency_key_conflict`。
+- 新增 1 个 facade/UoW `unittest.expectedFailure` target test：
+  - `TurnoverLedgerWriteFacade.update_tag_selection(..., idempotency_key=...)` 未来必须在 settings port 前执行 idempotency get/reserve/commit。
+- 现有 `expected_version` / `turnover_ledger_tag_selection_version_conflict` baseline 保持不变。
+
+验证：
+
+- targeted PF-P183 tests：Pass（expected failures=3）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（128 tests，expected failures=2）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（61 tests，expected failures=1）。
+- `git diff --check`：Pass。
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+下一步：
+
+- `PF-P184 - Turnover Ledger Tag Selection Durable Idempotency Integration`
+- 只移除 PF-P183 三个 expectedFailure，并实现 tag-selection durable idempotency。
+
+## PF-P184 Tag Selection Durable Idempotency Integration
+
+状态：
+
+- verified
+
+范围：
+
+- 只实现 tag-selection durable idempotency。
+- 不迁移 confirm、withdraw、bank row tags、relation extra 或其它写路径。
+- 不修改 schema、deploy、Traffic Gate 或真实外部服务配置。
+
+执行结果：
+
+- PF-P183 三个 target tests 已从 `unittest.expectedFailure` 转为普通通过。
+- `TurnoverLedgerWriteFacade.update_tag_selection(..., idempotency_key=...)` 将 idempotency key 和 stable request fingerprint 写入 command。
+- action name 使用 `turnover_ledger_tag_selection_update`；dirty/outbox refresh reason 显式保持 `turnover_ledger_tag_selection_changed`。
+- request fingerprint 基于请求 payload，排除 `idempotency_key` / `idempotencyKey`，不绑定服务端生成的新 version，保证 same-key replay 不因 version 已变更误判 conflict。
+- Tag selection request boundary 和 HTTP handler 支持 body `idempotency_key` / `idempotencyKey`。
+- Tag selection primary builder 接入现有 Workbench idempotency store boundary；local path 使用 in-memory store 保持测试/开发语义。
+- Tag selection handler 复用 Workbench idempotency conflict/in-progress/failed 409 mapping。
+
+验证：
+
+- targeted PF-P184 tests：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（128 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（61 tests）。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git diff --check`：Pass。
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+下一步：
+
+- `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate`
+- 统一覆盖 PF-P183 到 PF-P184 的完整 diff。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

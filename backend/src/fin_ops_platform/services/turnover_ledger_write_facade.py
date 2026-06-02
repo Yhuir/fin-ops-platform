@@ -306,18 +306,49 @@ class TurnoverLedgerWriteFacade:
         actor_id: str,
         tenant_id: str,
         scope_keys: list[str] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         normalized_update = self._normalize_tag_selection(payload=dict(payload), actor_id=actor_id)
         public_payload = dict(normalized_update["public_payload"])
+        normalized_idempotency_key = str(idempotency_key or "").strip()
+        action_name = (
+            "turnover_ledger_tag_selection_update"
+            if normalized_idempotency_key
+            else "turnover_ledger_tag_selection_changed"
+        )
+        command_payload = {
+            "request_payload": dict(payload or {}),
+            "next_selection": dict(normalized_update["next_selection"]),
+            "audit_event": dict(normalized_update["audit_event"]),
+        }
+        request_fingerprint = ""
+        if normalized_idempotency_key:
+            request_payload = {
+                key: value
+                for key, value in dict(payload or {}).items()
+                if key not in {"idempotency_key", "idempotencyKey"}
+            }
+            request_fingerprint = workbench_request_fingerprint(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action_name=action_name,
+                payload=request_payload,
+            )
         command = TurnoverLedgerWriteCommand(
-            action_name="turnover_ledger_tag_selection_changed",
+            action_name=action_name,
             scope_keys=list(scope_keys or ["all"]),
+            refresh_requests=[
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_keys": list(scope_keys or ["all"]),
+                    "reason": "turnover_ledger_tag_selection_changed",
+                }
+            ],
             actor_id=actor_id,
             tenant_id=tenant_id,
-            payload={
-                "next_selection": dict(normalized_update["next_selection"]),
-                "audit_event": dict(normalized_update["audit_event"]),
-            },
+            idempotency_key=normalized_idempotency_key,
+            request_fingerprint=request_fingerprint,
+            payload=command_payload,
         )
 
         def handler(context: Any) -> dict[str, object]:

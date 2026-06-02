@@ -47,10 +47,21 @@ class _TurnoverReadModelRecorder:
         self.clear_calls += 1
 
 
+class _PostgresFakeTransaction:
+    def __init__(self) -> None:
+        self.executed: list[dict[str, object]] = []
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        self.executed.append({"sql": sql, "params": params})
+
+
 class _PostgresFakeConnection:
+    def __init__(self) -> None:
+        self.transaction_obj = _PostgresFakeTransaction()
+
     @contextmanager
     def transaction(self) -> object:
-        yield object()
+        yield self.transaction_obj
 
 
 class _PostgresLikeStateStore:
@@ -304,6 +315,63 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         app._state_store.save_bank_transaction_categories(app._bank_transaction_category_service.snapshot())
         app._turnover_ledger_service.list_ledger()
         app._state_store.save_turnover_relations(app._turnover_relation_service.snapshot())
+
+    def _seed_turnover_tag_selection_settings(self, data_dir: Path) -> None:
+        ApplicationStateStore(data_dir).save_app_settings(
+            {
+                "bank_transaction_tags": {
+                    "version": 1,
+                    "definitions": [
+                        {
+                            "code": "external_rule_borrow_out",
+                            "label": "借出款",
+                            "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                            "source": "custom",
+                            "status": "active",
+                            "output_primary_label": "外部往来款付款",
+                            "output_sub_label": "借出款",
+                            "turnover_role": "external_turnover",
+                            "turnover_action_type": "pending_collection",
+                            "direction": "any",
+                            "account_scope": {"type": "any", "values": []},
+                            "rules": {
+                                "match_fields": ["all_text"],
+                                "contains_any": ["借出"],
+                                "contains_all": [],
+                                "exact_any": [],
+                                "regex_any": [],
+                                "none_of": [],
+                            },
+                        },
+                        {
+                            "code": "external_rule_repaid",
+                            "label": "归还借款",
+                            "path": ["银行明细自动标签规则", "外部往来款付款", "归还借款"],
+                            "source": "custom",
+                            "status": "active",
+                            "output_primary_label": "外部往来款付款",
+                            "output_sub_label": "归还借款",
+                            "turnover_role": "external_turnover",
+                            "turnover_action_type": "repaid",
+                            "direction": "any",
+                            "account_scope": {"type": "any", "values": []},
+                            "rules": {
+                                "match_fields": ["all_text"],
+                                "contains_any": ["归还"],
+                                "contains_all": [],
+                                "exact_any": [],
+                                "regex_any": [],
+                                "none_of": [],
+                            },
+                        },
+                    ],
+                },
+                "turnover_ledger_tag_selection": {
+                    "version": 1,
+                    "selected_tag_codes": ["external_rule_borrow_out"],
+                },
+            }
+        )
 
     def _seed_turnover_rows(self, app: Application, category_by_transaction_id: dict[str, str]) -> None:
         rows: list[dict[str, object]] = []
@@ -1511,40 +1579,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
     def test_turnover_ledger_tag_selection_fallback_adapter_keeps_legacy_update_and_refresh(self) -> None:
         # PF-P123 target: unsupported postgres queue API uses explicit fallback adapter, not handler direct side effects.
         with TemporaryDirectory() as temp_dir:
-            ApplicationStateStore(Path(temp_dir)).save_app_settings(
-                {
-                    "bank_transaction_tags": {
-                        "version": 1,
-                        "definitions": [
-                            {
-                                "code": "external_rule_borrow_out",
-                                "label": "借出款",
-                                "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
-                                "source": "custom",
-                                "status": "active",
-                                "output_primary_label": "外部往来款付款",
-                                "output_sub_label": "借出款",
-                                "turnover_role": "external_turnover",
-                                "turnover_action_type": "pending_collection",
-                                "direction": "any",
-                                "account_scope": {"type": "any", "values": []},
-                                "rules": {
-                                    "match_fields": ["all_text"],
-                                    "contains_any": ["借出"],
-                                    "contains_all": [],
-                                    "exact_any": [],
-                                    "regex_any": [],
-                                    "none_of": [],
-                                },
-                            }
-                        ],
-                    },
-                    "turnover_ledger_tag_selection": {
-                        "version": 1,
-                        "selected_tag_codes": ["external_rule_borrow_out"],
-                    },
-                }
-            )
+            self._seed_turnover_tag_selection_settings(Path(temp_dir))
             app = build_application(data_dir=Path(temp_dir))
             queue = _QueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
@@ -1575,6 +1610,82 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         source = inspect.getsource(Application._turnover_ledger_tag_selection_legacy_fallback_facade)
 
         self.assertNotIn("enqueue_refresh=lambda scope_keys", source)
+
+    def test_target_tag_selection_idempotency_key_replays_without_duplicate_settings_save_or_refresh(self) -> None:
+        # PF-P183 target contract: same idempotency key/fingerprint should replay the first response.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            self._seed_turnover_tag_selection_settings(Path(temp_dir))
+            app = build_application(data_dir=Path(temp_dir))
+            queue = _PostgresQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
+            request_body = {
+                "expected_version": initial_payload["version"],
+                "selected_tag_codes": ["external_rule_repaid"],
+                "idempotency_key": "tag-selection-idem-1",
+            }
+
+            first_response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(request_body),
+            )
+            replay_response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(request_body),
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(replay_response.status_code, 200)
+        self.assertEqual(json.loads(replay_response.body), json.loads(first_response.body))
+        self.assertEqual(
+            [item[:3] for item in queue.transactional],
+            [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")],
+        )
+        self.assertEqual(read_repository.clear_calls, 0)
+
+    def test_target_tag_selection_idempotency_key_conflict_rejects_different_payload(self) -> None:
+        # PF-P183 target contract: same key with a different payload must fail before another settings save/refresh.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            self._seed_turnover_tag_selection_settings(Path(temp_dir))
+            app = build_application(data_dir=Path(temp_dir))
+            queue = _PostgresQueueRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
+            first_body = {
+                "expected_version": initial_payload["version"],
+                "selected_tag_codes": ["external_rule_repaid"],
+                "idempotency_key": "tag-selection-idem-conflict",
+            }
+            conflict_body = {
+                "expected_version": initial_payload["version"],
+                "selected_tag_codes": ["external_rule_borrow_out"],
+                "idempotency_key": "tag-selection-idem-conflict",
+            }
+
+            first_response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(first_body),
+            )
+            conflict_response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(conflict_body),
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
+        self.assertEqual(
+            [item[:3] for item in queue.transactional],
+            [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")],
+        )
 
     def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
