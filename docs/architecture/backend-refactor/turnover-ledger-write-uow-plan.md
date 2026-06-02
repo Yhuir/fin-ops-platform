@@ -3860,6 +3860,30 @@ PF-P110 边界：
 - `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`
 - 只处理 confirm fallback；不处理 withdraw、bank row tags 或全局 after-mutation 重构。
 
+## PF-P126 Confirm Relation Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+目标：
+
+- 只处理 confirm relation fallback。
+- 将 direct relation rebuild、route confirm、after-mutation 从 handler 移入显式 fallback facade/adapter。
+- 不处理 withdraw、bank row tags 或全局 `_after_turnover_relation_mutation(...)` 重构。
+
+边界：
+
+- 允许修改 `server.py`、`turnover_ledger_write_adapters.py`、Turnover Ledger tests 和 backend-refactor 文档。
+- 不改变 queue reason、response payload、validation error behavior。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` 已执行并验证通过 |
-| 当前 active prompt | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` |
+| 当前阶段 | `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` |
 | 最近 verified prompt | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` |
 | 当前分支 | `codex/turnover-ledger-relation-mutation-fallback-p125` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` |
+| 下一条允许任务 | 执行 `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` |
 
 ## Prompt 执行日志
 
@@ -8904,6 +8904,39 @@ Verification：
 #### 下一条 Prompt 上下文
 
 下一条应生成并审查 `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`。PF-P126 只处理 confirm relation fallback：先新增/调整 handler-thinness test，再把 direct rebuild/route confirm/after-mutation 从 handler 移入显式 confirm legacy fallback adapter；不得处理 withdraw、bank row tags 或 `_after_turnover_relation_mutation(...)` 全局重构。
+
+### PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 只处理 Turnover Ledger confirm relation legacy fallback。
+- 将 handler 中的 direct relation rebuild、route confirm、after-mutation 调用迁入显式 confirm fallback adapter。
+- 不处理 withdraw、bank row tags 或全局 `_after_turnover_relation_mutation(...)` 重构。
+
+#### 允许文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 下一条 Prompt 上下文
+
+TBD。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
