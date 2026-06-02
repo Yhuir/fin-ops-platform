@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` 已执行并验证通过 |
 | 当前 active prompt | `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction` |
-| 当前分支 | `codex/turnover-ledger-remaining-boundary-p120` |
+| 最近 verified prompt | `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` |
+| 下一条允许任务 | 执行 `git push origin main` 后，从最新 `main` 新建下一条 `codex/` 分支并生成下一条 prompt |
 
 ## Prompt 执行日志
 
@@ -8785,7 +8785,7 @@ PF-P120 到 PF-P124 已形成一个可合并切片：fallback rebaseline、fallb
 
 ### PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8815,7 +8815,29 @@ PF-P120 到 PF-P124 已形成一个可合并切片：fallback rebaseline、fallb
 
 #### 下一条 Prompt 上下文
 
-TBD。
+执行结果：
+
+- Branch scope：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+  - `git diff --check`：Pass。
+  - `git diff --name-only main...HEAD`：只包含允许文件。
+  - `git log --oneline main..HEAD`：只包含 PF-P120/PF-P121/PF-P122/PF-P123/PF-P124/PF-P124-MG 相关提交。
+- Branch verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Merge：
+  - 已将 `codex/turnover-ledger-remaining-boundary-p120` 合入 `main`。
+- Main verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate：未执行；本切片不部署、不切流、不访问生产。
+
+#### 下一条 Prompt 上下文
+
+下一步先提交本次 post-flight 文档并执行 `git push origin main`。push 后必须从最新 `main` 新建下一条 `codex/` 分支。下一条建议 prompt：`PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`，只规划 confirm/withdraw relation fallback 的 `_after_turnover_relation_mutation(...)` 归属和最小拆分顺序，不直接处理 bank row tags。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

@@ -23987,7 +23987,7 @@ Verification：
 
 ## PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 ```text
 /goal
@@ -24054,6 +24054,22 @@ Post-Flight:
 - PF-P124-MG 边界正确：只覆盖 PF-P120 到 PF-P124 的完整 diff。
 - MG 明确不执行 Traffic Gate、部署或生产访问。
 - MG 包含 untracked 检查、scope 白名单、branch/main 双重测试和 push 前安全锁。
+
+### PF-P124-MG 执行结果
+
+- Branch scope：Pass，diff 只包含允许文件，log 只包含 PF-P120 到 PF-P124-MG 相关提交。
+- Branch verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Merge：已合入 `main`。
+- Main verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate：未执行。
+
+下一步：提交 post-flight 文档并 `git push origin main`；push 后从最新 main 新建分支，建议生成 `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`。
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
