@@ -3173,7 +3173,7 @@ PF-P110 边界：
 
 ## PF-P115 Relation Local Adapter Extraction
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3277,6 +3277,22 @@ PF-P110 边界：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- PF-P115/PF-P116 已合并为一个 cumulative slice。
+- `TurnoverLedgerLocalRelationConnection`、`TurnoverLedgerLocalRelationRepository`、`TurnoverLedgerLocalTagSelectionConnection`、`TurnoverLedgerLocalTagSelectionSettingsWriter` 已进入 `turnover_ledger_write_adapters.py`。
+- `server.py` 删除 confirm/withdraw relation local helper 和 tag selection local helper，只保留 adapter 组装。
+- Branch 和 main 验证均通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate 未执行。
+
+下一步：
+
+- 执行 `git push origin main`。
+- push 后从最新 main 新建分支，生成 Turnover Ledger bank row tags local shim discovery/characterization prompt；该路径跨 Bankdetail/category/relation，应先 discovery/characterization，不直接实现。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate` |
-| 最近 verified prompt | `PF-P116 - Turnover Ledger Tag Selection Local Adapter Extraction` |
-| 当前分支 | `codex/turnover-ledger-next-slice-p115` |
+| 当前阶段 | `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate` 已合入 main 并验证通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate` |
+| 下一条允许任务 | 执行 `git push origin main`，push 完成后从最新 main 新建下一条 `codex/` 分支并生成 Turnover Ledger bank row tags local shim discovery/characterization prompt |
 
 ## Prompt 执行日志
 
@@ -8203,7 +8203,7 @@ PF-P115/PF-P116 已连续抽离 confirm/withdraw relation local adapter 和 tag 
 
 ### PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### Gate Scope
 
@@ -8229,6 +8229,32 @@ PF-P115/PF-P116 已连续抽离 confirm/withdraw relation local adapter 和 tag 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 执行结果
+
+- 分支：`codex/turnover-ledger-next-slice-p115`
+- Merge commit：`9d5e4904`
+- Branch 验证：
+  - `git status --short --branch`：clean on feature branch。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+  - `git diff --name-only main...HEAD`：只包含 PF-P115/PF-P116 允许文件。
+  - `git log --oneline main..HEAD`：只包含 PF-P115、PF-P116、PF-P116-MG 相关提交。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `main` 验证：
+  - `git status --short --branch`：`main...origin/main [ahead 6]`，无 dirty changes。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate：未执行；本 MG 不部署、不切流、不访问生产。
+
+#### 下一条 Prompt 上下文
+
+PF-P116-MG 已合入 main 并通过 main 验证。下一步先提交本次 post-flight 文档并执行 `git push origin main`；push 完成后必须从最新 main 新建 `codex/` 分支。剩余 Turnover Ledger local shim 是 bank row tags，本地路径涉及 Bankdetail/category/relation 交叉边界，下一条应先做 discovery/characterization，不直接抽离实现。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
