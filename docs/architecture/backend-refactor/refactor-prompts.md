@@ -21337,3 +21337,429 @@ main 验证：
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
 
 下一步必须先执行 `git push origin main`。push 完成后，从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 Turnover Ledger prompt。
+
+## PF-P104 - Turnover Ledger Relation Extra Durable Idempotency Discovery and Planning
+
+状态：`planned`
+
+```text
+/goal
+PF-P104 - Turnover Ledger Relation Extra Durable Idempotency Discovery and Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的后端架构工程师。你必须只做 Turnover Ledger relation extra durable idempotency 的 discovery/planning，不写业务实现。
+
+Context:
+PF-P103-MG 已 verified 并已合入 main/push origin/main。Relation extra 写路径已经具备最小 `expected_versions` stale guard：携带旧 `turnover_relation_extra:<relation_id>` expected version 时返回 409 `turnover_relation_extra_conflict`。剩余 gap 包括 durable idempotency store、fallback cleanup、local transaction shim extraction。
+
+本轮只处理 durable idempotency 的规划。当前代码中 Workbench 已有可复用 idempotency 基础设施：
+- `backend/src/fin_ops_platform/services/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py`
+- `backend/src/fin_ops_platform/services/workbench_uow.py`
+- migration `0043_workbench_idempotency_records.sql`
+Turnover Ledger 必须优先评估复用这些封装/primitive，不得重复造轮子。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/workbench_idempotency.py
+   - backend/src/fin_ops_platform/services/postgres_repositories/workbench_idempotency.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - tests/test_workbench_uow_contract.py
+   - tests/test_workbench_write_characterization.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P103-MG 已 verified。
+4. 可使用 CodeGraph 查询 relation extra / UoW / idempotency 调用链；如果 CodeGraph 不足，再用 `rg` 精确补充。
+
+Task:
+1. 审计 relation extra 当前 HTTP contract：
+   - 是否支持 body/header 中的 `idempotency_key` / `Idempotency-Key`；
+   - 当前 repeated same PUT characterization 与 future durable idempotency 的差异；
+   - stale guard 与 durable idempotency 的执行顺序建议。
+2. 审计可复用 idempotency primitive：
+   - Workbench `WorkbenchIdempotencyRecord` / fingerprint / conflict / repository / UoW flow 是否可直接复用；
+   - 如果复用，需要什么 adapter 或 action namespace；
+   - 如果不能复用，必须给出具体阻断原因，不得泛泛而谈。
+3. 输出 relation extra durable idempotency contract 草案：
+   - action_name；
+   - idempotency key source；
+   - fingerprint fields；
+   - replay response shape；
+   - conflict code；
+   - reserved/in-progress/expired/failed policy 是否沿用 Workbench 语义；
+   - tenant/actor boundary。
+4. 输出下一条 characterization tests 的精确范围：
+   - current behavior tests 是否需要补充；
+   - future target tests 应该使用 `unittest.expectedFailure` 还是普通 tests；
+   - API tests 与 UoW/facade tests 如何分层。
+5. 更新 `turnover-ledger-write-uow-plan.md`：新增 PF-P104 discovery 结果和 PF-P105 建议。
+6. 更新 `migration-state-log.md` 和 `refactor-prompts.md`：记录执行结果、验证和下一条 prompt。
+
+Allowed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得新增或修改 tests。
+- 不得实现 idempotency store/repository/adapters。
+- 不得新增 SQL migration。
+- 不得处理 fallback cleanup 或 local transaction shim extraction。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P104|durable idempotency|idempotency_key|Idempotency-Key|workbench_idempotency|fingerprint|PF-P105" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md
+
+Post-Flight:
+1. 如果文档回写完成且 verification 通过，可标记 PF-P104 verified。
+2. 下一条应生成并审查 `PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests`。
+3. PF-P105 仍应先写 tests，不直接迁移 production idempotency implementation，除非 PF-P104 明确发现已有 primitive 可零风险接入并且 prompt 单独审查通过。
+```
+
+### 审查结论
+
+- PF-P104 是 PF-P103-MG 后合理的下一步：先审计 durable idempotency contract 和复用 Workbench primitive，不直接实现。
+- prompt 明确只改文档，不允许 production code、tests、SQL migration 或 fallback/local transaction shim 工作。
+- prompt 将“不重复造轮子”固化到本切片：必须优先评估复用 `workbench_idempotency` 与 PostgreSQL repository。
+
+### PF-P104 执行结果
+
+- 状态：`verified`。
+- 已确认 relation extra HTTP contract 当前不读取 body `idempotency_key` / `idempotencyKey`，也不读取 `Idempotency-Key` header。
+- 已确认 PF-P103 stale guard 已建立，但 durable idempotency 仍缺少 command/UoW seam。
+- 已确认 Workbench `WorkbenchIdempotencyRecord`、`workbench_request_fingerprint`、`WorkbenchIdempotencyKeyConflict/InProgress/Failed`、`InMemoryWorkbenchIdempotencyRepository` 和 `PostgresWorkbenchIdempotencyRepository` 可作为复用候选。
+- 已确认 `TurnoverLedgerWriteUnitOfWork` 当前没有 `idempotency_store` seam，也没有 command-level `idempotency_key` / `request_fingerprint`。
+- 已在 `turnover-ledger-write-uow-plan.md` 写入 durable idempotency contract 草案和 PF-P105 测试边界。
+
+验证：
+
+- `git status --short --branch`：Pass，仅有 PF-P104 文档范围改动。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P104|durable idempotency|idempotency_key|Idempotency-Key|workbench_idempotency|fingerprint|PF-P105" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+下一条应生成并审查 `PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests`。PF-P105 只写 tests 和文档，不实现 production idempotency seam。
+
+## PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须只新增/调整 Turnover Ledger relation extra durable idempotency 的 characterization/contract tests 和必要文档，不实现 production idempotency。
+
+Context:
+PF-P104 已 verified。PF-P104 发现：
+- relation extra HTTP contract 当前不读取 body `idempotency_key` / `idempotencyKey`，也不读取 `Idempotency-Key` header；
+- PF-P103 已建立 relation extra stale guard；
+- Workbench idempotency primitives 可复用；
+- `TurnoverLedgerWriteUnitOfWork` 当前没有 `idempotency_store` seam，也没有 command-level `idempotency_key` / `request_fingerprint`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/workbench_idempotency.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P104 已 verified。
+4. 必须先运行 Turnover Ledger targeted tests，确认当前 baseline 绿色。
+
+Task:
+1. 在 `tests/test_turnover_ledger_api.py` 中保留/补强 current behavior：
+   - 无 idempotency key 时 repeated same PUT 仍会更新 `updated_at` 并 enqueue 两次 refresh。
+   - 如新增携带 idempotency key 的 current behavior test，必须明确它当前仍不会 replay，避免误以为已实现。
+2. 在 `tests/test_turnover_ledger_api.py` 中新增 future target expectedFailure：
+   - 相同 actor/tenant/idempotency key + 相同 payload/fingerprint 的第二次 relation extra PUT 应 replay 第一次 response；
+   - 第二次不得再次 save extra，不得再次 enqueue dirty/outbox refresh；
+   - 建议 test name：`test_target_relation_extra_idempotency_key_replays_without_duplicate_save_or_refresh`。
+3. 在 `tests/test_turnover_ledger_api.py` 中新增 future target expectedFailure：
+   - 相同 actor/tenant/idempotency key + 不同 payload/fingerprint 应返回 409 `idempotency_key_conflict`；
+   - 不得保存第二个 payload，不得 enqueue 第二次 refresh；
+   - 建议 test name：`test_target_relation_extra_idempotency_key_conflict_rejects_different_payload`。
+4. 在 `tests/test_turnover_ledger_uow_contract.py` 中新增 future target expectedFailure：
+   - `TurnoverLedgerWriteFacade.update_relation_extra(..., idempotency_key=...)` 或等价 command contract 应写入 idempotency identity/fingerprint；
+   - UoW 应在 handler 前 reserve/replay/conflict；
+   - 不得执行 extra repository save 或 dirty/outbox when replay/conflict；
+   - 建议 test name：`test_target_relation_extra_facade_passes_idempotency_before_repository`。
+5. 默认 CI 必须保持绿色：尚未实现的目标语义使用 `unittest.expectedFailure`，不得 skip，不得删除/弱化现有断言。
+6. 更新文档：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得实现 idempotency_key 参数、store、repository、adapter 或 UoW seam。
+- 不得新增 SQL migration。
+- 不得处理 fallback cleanup 或 local transaction shim extraction。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "PF-P105|test_target_relation_extra_idempotency|idempotency_key_conflict|idempotency_key|expectedFailure" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P105 status = implemented / verified / blocked；
+   - 记录新增 target tests、expectedFailure 数量、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md 和 turnover-ledger-write-uow-plan.md：
+   - 记录 PF-P105 执行结果。
+3. PF-P105 verified 后，下一条应生成 relation extra durable idempotency command/UoW skeleton；不得在本 prompt 中实现。
+```
+
+### 审查结论
+
+- PF-P105 是 PF-P104 后的正确测试锁定步骤。
+- prompt 明确 test-only，不允许 production code、idempotency store/UoW seam、SQL migration 或 fallback/local transaction shim 工作。
+- 使用 `unittest.expectedFailure` 保留目标契约，默认 CI 继续绿色。
+
+### PF-P105 执行结果
+
+- 状态：`verified`。
+- 新增 API future target expectedFailure：相同 actor/tenant/idempotency key + 相同 payload/fingerprint 的第二次 relation extra PUT 应 replay 第一次 response，不二次 save/enqueue。
+- 新增 API future target expectedFailure：相同 actor/tenant/idempotency key + 不同 payload/fingerprint 应返回 409 `idempotency_key_conflict`，不保存第二个 payload，不 enqueue 第二次 refresh。
+- 新增 facade/UoW future target expectedFailure：`TurnoverLedgerWriteFacade.update_relation_extra(..., idempotency_key=...)` 应将 idempotency identity/fingerprint 写入 command，UoW 在 handler 前 reserve/replay/conflict。
+- 未修改 production code。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests，1 expected failure。
+
+下一条应生成并审查 `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton`。PF-P106 只实现最小 command/facade idempotency fields，让 facade/UoW target command test 转绿；不得直接实现 full replay/conflict HTTP behavior、PostgreSQL repository 接线、fallback cleanup 或 local transaction shim extraction。
+
+## PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton
+
+状态：`planned`
+
+```text
+/goal
+PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须实现最小 relation extra idempotency command/facade skeleton，让 PF-P105 的 facade/UoW target command test 转为普通通过，同时严格禁止实现 HTTP replay/conflict 行为。
+
+Context:
+PF-P105 已 verified，新增 3 个 expectedFailure target tests：
+- API replay target；
+- API conflict target；
+- facade/UoW command target。
+本轮只处理 facade/UoW command target。API replay/conflict target 必须继续保留 expectedFailure。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/workbench_idempotency.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - tests/test_turnover_ledger_api.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P105 已 verified。
+4. 必须先运行 targeted tests，确认 PF-P105 的 3 个 expectedFailure 存在。
+
+Task:
+1. 更新 `TurnoverLedgerWriteCommand`：
+   - 增加 `idempotency_key: str = ""`；
+   - 增加 `request_fingerprint: str = ""`。
+2. 更新 `TurnoverLedgerWriteFacade.update_relation_extra(...)`：
+   - 增加 optional `idempotency_key: str | None = None` 参数；
+   - normalized key 非空时写入 command；
+   - 使用现有 `workbench_request_fingerprint(...)` 计算 request_fingerprint；
+   - action_name 使用 `turnover_relation_extra_update`；
+   - fingerprint payload 至少包含 relation_id、normalized extra、expected_versions；不得包含 headers/cookie/token/timestamp/response updated_at。
+3. 将 `tests/test_turnover_ledger_uow_contract.py::test_target_relation_extra_facade_passes_idempotency_before_repository` 从 `unittest.expectedFailure` 转为普通通过。
+4. `tests/test_turnover_ledger_api.py` 中两个 API-level idempotency target tests 必须继续保持 `unittest.expectedFailure`。
+5. 更新文档：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 `server.py`。
+- 不得实现 API replay/conflict behavior。
+- 不得接入 idempotency store/repository。
+- 不得修改 `TurnoverLedgerWriteUnitOfWork.run`。
+- 不得新增 SQL migration。
+- 不得处理 fallback cleanup 或 local transaction shim extraction。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- rg -n "PF-P106|turnover_relation_extra_update|idempotency_key|request_fingerprint|workbench_request_fingerprint|test_target_relation_extra_facade_passes_idempotency|expectedFailure" backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_uow_contract.py tests/test_turnover_ledger_api.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P106 status = implemented / verified / blocked；
+   - 记录 target test 转绿、API expectedFailure 保留、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md 和 turnover-ledger-write-uow-plan.md：
+   - 记录 PF-P106 执行结果。
+3. PF-P106 verified 后，下一条应处理 minimal UoW idempotency store seam 或生成 cumulative MG，取决于当前 diff 大小和风险。
+```
+
+### 审查结论
+
+- PF-P106 是 PF-P105 后的最小 implementation：只让 facade/UoW command target 转绿。
+- prompt 明确禁止 server.py、API replay/conflict、idempotency store、UoW run 和 SQL migration，避免 scope creep。
+
+### PF-P106 执行结果
+
+- 状态：`verified`。
+- `TurnoverLedgerWriteCommand` 新增 `idempotency_key` 和 `request_fingerprint` 字段。
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 新增 optional `idempotency_key` 参数。
+- relation extra idempotency command 使用 `workbench_request_fingerprint(...)` 计算 request fingerprint。
+- 有 idempotency key 时，command `action_name` 使用 `turnover_relation_extra_update`。
+- PF-P105 的 facade/UoW command target test 已从 `unittest.expectedFailure` 转为普通通过。
+- PF-P105 的两个 API-level replay/conflict target tests 继续保持 `unittest.expectedFailure`。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条建议生成 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106 的完整 diff；不得继续扩大到 UoW idempotency store seam、API replay/conflict 或 fallback/local transaction shim。
+
+## PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger relation extra durable idempotency contract 切片，不新增业务实现。
+
+Context:
+PF-P104、PF-P105、PF-P106 均已 verified。当前分支应为 `codex/turnover-ledger-next-slice-p104`，相对 `main` 的提交应为：
+- `docs(turnover-ledger): plan relation extra idempotency contracts`
+- `test(turnover-ledger): lock relation extra idempotency contracts`
+- `feat(turnover-ledger): add relation extra idempotency command fields`
+
+Gate Scope:
+本 MG 只覆盖 PF-P104 到 PF-P106 的完整 diff：
+- relation extra durable idempotency discovery/planning；
+- relation extra durable idempotency target tests；
+- 最小 command/facade idempotency fields；
+- 文档回写。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得修改 `server.py`。
+- 不得实现 API replay/conflict behavior。
+- 不得接入 idempotency store/repository。
+- 不得修改 `TurnoverLedgerWriteUnitOfWork.run`。
+- 不得新增 SQL migration。
+- 不得处理 fallback cleanup 或 local transaction shim extraction。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或访问真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P104、PF-P105、PF-P106 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认 `git diff --name-only main...HEAD` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+
+Commit / Merge Rules:
+1. 如果 MG prompt/状态机文档有变更，必须只用精确文件路径 `git add`。
+2. 允许提交 MG 文档变更，commit message 建议：
+   - `docs(turnover-ledger): add relation extra idempotency merge gate`
+3. 合入 main 前必须同步最新 `origin/main`：checkout main 后 `git pull --ff-only origin main`。
+4. 如果 pull/merge 出现冲突，停止并报告。
+5. 将当前分支 merge 到 main。
+6. 在 main 上重新执行完整 Verification 中的测试命令。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P106-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一条 prompt 分支。
+9. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P106-MG 执行结果。
+2. push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt。
+3. 不得在 main 或旧分支继续开发下一切片。
+```
+
+### 审查结论
+
+- PF-P106-MG 的边界正确：只覆盖 PF-P104 到 PF-P106 的 relation extra durable idempotency contract 切片。
+- MG 明确不执行 Traffic Gate，不实现 API replay/conflict、idempotency store/UoW seam、fallback cleanup 或 local transaction shim。
+- 允许文件白名单与当前 `main...HEAD` diff 一致。

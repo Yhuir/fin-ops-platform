@@ -1287,6 +1287,76 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
 
+    @unittest.expectedFailure
+    def test_target_relation_extra_idempotency_key_replays_without_duplicate_save_or_refresh(self) -> None:
+        # PF-P105 target contract: same idempotency key/fingerprint should replay the first response.
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            payload = {
+                "note": "idempotent payload",
+                "interest_rate_type": "none",
+                "idempotency_key": "relation-extra-idem-1",
+            }
+
+            first_response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps(payload),
+            )
+            first_payload = json.loads(first_response.body)
+            second_response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps(payload),
+            )
+            second_payload = json.loads(second_response.body)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_payload, first_payload)
+        self.assertEqual(
+            queue.enqueued,
+            [("turnover_ledger", "all", "turnover_relation_extra_changed")],
+        )
+
+    @unittest.expectedFailure
+    def test_target_relation_extra_idempotency_key_conflict_rejects_different_payload(self) -> None:
+        # PF-P105 target contract: same idempotency key with different payload must be a 409 conflict.
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            first_response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps({"note": "first idem", "idempotency_key": "relation-extra-idem-conflict"}),
+            )
+            conflict_response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps({"note": "different idem", "idempotency_key": "relation-extra-idem-conflict"}),
+            )
+            restored_payload = json.loads(
+                app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra").body
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
+        self.assertEqual(restored_payload["extra"]["note"], "first idem")
+        self.assertEqual(
+            queue.enqueued,
+            [("turnover_ledger", "all", "turnover_relation_extra_changed")],
+        )
+
     def test_target_relation_extra_stale_expected_version_rejects_without_save_or_refresh(self) -> None:
         # PF-P102 target contract: stale relation extra writes should become conflict-safe.
         with TemporaryDirectory() as temp_dir:

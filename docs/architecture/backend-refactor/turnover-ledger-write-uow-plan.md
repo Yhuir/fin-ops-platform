@@ -2621,3 +2621,186 @@ Relation extra 当前写路径：
 
 - push `origin/main`。
 - push 后从最新 main 新建分支，生成下一条 Turnover Ledger prompt。
+
+## PF-P104 Relation Extra Durable Idempotency Discovery and Planning
+
+状态：`planned`
+
+目标：
+
+- 审计 relation extra durable idempotency 的契约边界。
+- 优先评估复用 Workbench durable idempotency primitive 和 PostgreSQL repository，避免重复造轮子。
+- 明确下一条 PF-P105 characterization tests 的精确范围。
+
+边界：
+
+- 只更新文档。
+- 不修改 production code。
+- 不新增或修改 tests。
+- 不新增 SQL migration。
+- 不处理 fallback cleanup 或 local transaction shim extraction。
+
+### PF-P104 执行结果
+
+状态：`verified`
+
+#### 读取与事实源
+
+- 已读取 `server.py` relation extra handler、`TurnoverLedgerWriteFacade.update_relation_extra`、`TurnoverLedgerWriteUnitOfWork.run`。
+- 已读取 Workbench durable idempotency primitives：`workbench_idempotency.py`、`postgres_repositories/workbench_idempotency.py`、`workbench_uow.py` 的 idempotency helper flow。
+- 已读取 Turnover Ledger API / UoW contract tests 和 Workbench UoW/idempotency tests 作为测试模板。
+
+#### 当前 relation extra HTTP contract
+
+| Concern | 当前事实 | 判断 |
+| --- | --- | --- |
+| idempotency key 输入 | `PUT /api/turnover-ledger/relations/{id}/extra` 当前不读取 body `idempotency_key` / `idempotencyKey`，也不读取 `Idempotency-Key` header | PF-P105 应先锁定 current behavior：相同 payload 重复 PUT 仍会生成新的 `updated_at` 并 enqueue refresh；新增 idempotency key 不应被当前逻辑误判。 |
+| stale guard | PF-P103 已支持 `expected_versions["turnover_relation_extra:<relation_id>"]`，不匹配时 409 | durable idempotency 应在 stale guard 之后/同一 UoW 边界内定义清楚，不能 replay 一个基于旧 expected version 的成功响应。 |
+| replay response | 当前没有持久化 response replay | PF-P105 target 应锁定：相同 actor/tenant/idempotency key + 相同 fingerprint 第二次请求 replay 第一次响应，且不再次 save/enqueue。 |
+| conflict response | 当前无 idempotency conflict response | 应复用 Workbench `idempotency_key_conflict` 语义，HTTP 409，避免新造错误码，除非后续测试发现前端需要 Turnover-specific code。 |
+
+#### 可复用 idempotency primitive 审计
+
+| Primitive | 可复用性 | 说明 |
+| --- | --- | --- |
+| `WorkbenchIdempotencyRecord` | 可复用 | 字段是 tenant/actor/action/idempotency_key/fingerprint/status/request/response/source/outbox，未绑定 Workbench 页面语义。命名虽为 Workbench，但 schema 已是通用写请求幂等记录形态。 |
+| `workbench_request_fingerprint` | 可复用 | 已剔除 timestamp/header/token/cookie 等不稳定或敏感字段，适合 Turnover relation extra payload。需要 action namespace 区分。 |
+| `WorkbenchIdempotencyKeyConflict/InProgress/Failed` | 可复用 | 响应 payload 稳定，HTTP 409；可先接受 Workbench 命名，避免重复造轮子。 |
+| `InMemoryWorkbenchIdempotencyRepository` | 可复用 | 可用于 local/testing path。PF-P105 应先用 fake/in-memory 契约测试，不要求真实 PostgreSQL。 |
+| `PostgresWorkbenchIdempotencyRepository` | 可复用但需后续接线 | 依赖 `app.workbench_idempotency_records`；schema action_name 可容纳 `turnover_relation_extra_update`。接入应在后续 implementation prompt 完成，不在 PF-P104/PF-P105。 |
+| `workbench_uow.py` idempotency helper flow | 可借鉴，不可直接套用 | `TurnoverLedgerWriteUnitOfWork` 当前没有 `idempotency_store` seam，也没有 command-level `idempotency_key` / `request_fingerprint`；后续需小切片引入，而不是复制整个 Workbench UoW。 |
+
+#### Durable idempotency contract 草案
+
+| Field | 建议 |
+| --- | --- |
+| action_name | `turnover_relation_extra_update`，与当前 UoW action `relation_extra_update` 可保持兼容但建议使用更明确 namespace，PF-P105 需测试最终选择。 |
+| idempotency key source | 优先 body `idempotency_key` / `idempotencyKey`；可后续评估 `Idempotency-Key` header，但不应让 service 直接读 header。handler 负责 HTTP mapping。 |
+| fingerprint payload | tenant_id、actor_id、action_name、relation_id、normalized extra payload、expected_versions。不得包含 header/cookie/token/timestamp/updated_at response marker。 |
+| replay | committed same fingerprint replay stored response payload，不再次调用 extra repository，不再次 enqueue dirty/outbox。 |
+| conflict | same tenant/actor/idempotency key + different fingerprint -> 409 `idempotency_key_conflict`。 |
+| reserved/in-progress | 沿用 Workbench `idempotency_key_in_progress` 409 retryable。 |
+| expired reserved | 沿用 Workbench expired reserved takeover policy。 |
+| failed reservation | 沿用 Workbench `idempotency_key_failed`，要求使用新 key 重试。 |
+| tenant/actor boundary | identity 使用 `(tenant_id, actor_id, idempotency_key)`；tenant 来自 `_workbench_reconciliation_tenant_id()`，actor 来自 session identity。 |
+| stale order | stale expected_versions 与 idempotency 的精确顺序需用 PF-P105 target tests 锁定：建议同 fingerprint replay 可返回原响应；新 reservation 执行写入前必须先通过 stale precondition。 |
+
+#### PF-P105 建议
+
+下一条应生成并审查：
+
+`PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests`
+
+边界：
+
+- 只修改 `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py` 和必要文档。
+- 保留 current behavior characterization：没有 idempotency key 时 repeated same PUT 仍更新 marker/enqueue。
+- 新增 future target expectedFailure：相同 idempotency key + 相同 payload/fingerprint replay response，不二次 save/enqueue。
+- 新增 future target expectedFailure：相同 idempotency key + 不同 payload/fingerprint 返回 409 `idempotency_key_conflict`。
+- 新增 facade/UoW future target expectedFailure：`TurnoverLedgerWriteFacade.update_relation_extra(..., idempotency_key=...)` 将 idempotency identity/fingerprint 写入 command，UoW 在 handler 前 reserve/replay/conflict。
+- 不修改 production code，不实现 idempotency store，不新增 SQL migration。
+
+验证：
+
+- `git status --short --branch`：Pass，仅有 PF-P104 文档范围改动。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P104|durable idempotency|idempotency_key|Idempotency-Key|workbench_idempotency|fingerprint|PF-P105" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
+
+## PF-P105 Relation Extra Durable Idempotency Characterization Tests
+
+状态：`planned`
+
+目标：
+
+- 用 tests 锁定 relation extra durable idempotency 的目标语义。
+- 保持默认 CI 绿色；尚未实现的目标语义使用 `unittest.expectedFailure`。
+
+边界：
+
+- 只修改 Turnover Ledger tests 和必要文档。
+- 不修改 production code。
+- 不实现 idempotency key 参数、store、repository、adapter 或 UoW seam。
+- 不新增 SQL migration。
+
+### PF-P105 执行结果
+
+状态：`verified`
+
+结果：
+
+- 新增 API target expectedFailure：same idempotency key/fingerprint replay，不二次 save/enqueue。
+- 新增 API target expectedFailure：same idempotency key different fingerprint 返回 409 `idempotency_key_conflict`。
+- 新增 facade/UoW target expectedFailure：facade command 应携带 idempotency identity/fingerprint，UoW 应在 handler 前 reserve/replay/conflict。
+- 未修改 production code。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests，1 expected failure。
+
+下一条：
+
+- 生成并审查 `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton`。
+- PF-P106 只实现最小 command/facade idempotency fields，让 facade/UoW target command test 转绿；不得实现 full replay/conflict HTTP behavior。
+
+## PF-P106 Relation Extra Idempotency Command Skeleton
+
+状态：`planned`
+
+目标：
+
+- 只实现 relation extra command/facade idempotency fields。
+- 让 PF-P105 的 facade/UoW target command test 转为普通通过。
+- 保留 API replay/conflict target tests 为 `unittest.expectedFailure`。
+
+边界：
+
+- 不修改 `server.py`。
+- 不实现 API replay/conflict。
+- 不接入 idempotency store/repository。
+- 不修改 `TurnoverLedgerWriteUnitOfWork.run`。
+
+### PF-P106 执行结果
+
+状态：`verified`
+
+结果：
+
+- `TurnoverLedgerWriteCommand` 新增 `idempotency_key` 和 `request_fingerprint` 字段。
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 新增 optional `idempotency_key` 参数。
+- relation extra idempotency command 使用 `workbench_request_fingerprint(...)` 计算 request fingerprint。
+- 有 idempotency key 时，command `action_name` 使用 `turnover_relation_extra_update`。
+- PF-P105 的 facade/UoW command target test 已转为普通通过。
+- 两个 API-level replay/conflict target tests 继续保持 `unittest.expectedFailure`。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条：
+
+- 生成 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106。
+
+## PF-P106-MG Relation Extra Durable Idempotency Contract Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 只执行 relation extra durable idempotency contract 切片的 cumulative Merge Gate。
+- 统一覆盖 PF-P104、PF-P105、PF-P106 的完整 diff。
+- 不新增业务实现，不开始 API replay/conflict、idempotency store/UoW seam、fallback cleanup 或 local transaction shim extraction。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
