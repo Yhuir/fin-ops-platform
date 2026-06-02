@@ -389,25 +389,61 @@ function HierarchicalRuleBlock({
   const tree = tagTree(tags);
   return (
     <Paper role="group" aria-label={group.label} variant="outlined" sx={{ borderRadius: 1, p: 0.75, minWidth: 0 }}>
-      <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 0.55, fontSize: 13, lineHeight: 1.25 }}>
-        {group.label}
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.55 }}>
+        <Typography variant="subtitle2" fontWeight={900} sx={{ fontSize: 13, lineHeight: 1.25 }}>
+          {group.label}
+        </Typography>
+        {readonly ? (
+          <Box
+            component="span"
+            sx={{
+              border: 1,
+              borderColor: "divider",
+              borderRadius: 999,
+              color: "text.secondary",
+              fontSize: 10.5,
+              fontWeight: 800,
+              lineHeight: 1,
+              px: 0.55,
+              py: 0.28,
+            }}
+          >
+            自动归类
+          </Box>
+        ) : null}
+      </Stack>
       {tree.length === 0 ? (
         <Typography variant="body2" color="text.secondary">暂无标签。</Typography>
       ) : (
         <Stack data-testid="pending-invoice-rule-list" spacing={0.35} sx={{ overflowY: "visible" }}>
           {tree.map(({ primary, items }) => (
             <Stack key={primary} spacing={0.2}>
-              <Typography variant="caption" color="text.secondary" fontWeight={800} sx={{ fontSize: 11, lineHeight: 1.25 }}>
+              <Typography
+                data-testid="pending-invoice-rule-primary-label"
+                variant="caption"
+                color="text.secondary"
+                fontWeight={900}
+                sx={{
+                  alignSelf: "flex-start",
+                  bgcolor: readonly ? "action.hover" : "transparent",
+                  borderLeft: readonly ? 2 : 0,
+                  borderColor: readonly ? "divider" : "transparent",
+                  borderRadius: 0.5,
+                  fontSize: 11,
+                  lineHeight: 1.25,
+                  px: readonly ? 0.45 : 0,
+                  py: readonly ? 0.2 : 0,
+                }}
+              >
                 {primary}
               </Typography>
               <Box
                 sx={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))",
-                  columnGap: 0.75,
-                  rowGap: 0.1,
-                  pl: 0.25,
+                  gridTemplateColumns: readonly ? "repeat(auto-fit, minmax(96px, 1fr))" : "repeat(auto-fit, minmax(92px, 1fr))",
+                  columnGap: readonly ? 0.45 : 0.75,
+                  rowGap: readonly ? 0.25 : 0.1,
+                  pl: readonly ? 0 : 0.25,
                   alignItems: "center",
                 }}
               >
@@ -416,9 +452,50 @@ function HierarchicalRuleBlock({
                   const checked = selectedCodes.has(tag.code);
                   if (readonly) {
                     return (
-                      <Typography key={tag.code} variant="body2" sx={{ fontSize: 12, lineHeight: 1.35, minHeight: 20 }}>
-                        {childLabel}
-                      </Typography>
+                      <Box
+                        key={tag.code}
+                        data-testid="pending-invoice-rule-readonly-tag"
+                        component="span"
+                        sx={{
+                          alignItems: "center",
+                          bgcolor: "background.paper",
+                          border: 1,
+                          borderColor: "divider",
+                          borderRadius: 0.75,
+                          color: "text.primary",
+                          display: "inline-flex",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          gap: 0.5,
+                          lineHeight: 1.2,
+                          minHeight: 22,
+                          minWidth: 0,
+                          px: 0.65,
+                        }}
+                      >
+                        <Box
+                          component="span"
+                          aria-hidden="true"
+                          sx={{
+                            bgcolor: "text.disabled",
+                            borderRadius: 999,
+                            flex: "0 0 auto",
+                            height: 5,
+                            width: 5,
+                          }}
+                        />
+                        <Box
+                          component="span"
+                          sx={{
+                            minWidth: 0,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {childLabel}
+                        </Box>
+                      </Box>
                     );
                   }
                   return (

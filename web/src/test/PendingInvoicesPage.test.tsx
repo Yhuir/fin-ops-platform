@@ -763,6 +763,13 @@ describe("Pending invoices page", () => {
     expect(bankStatementFee).not.toBeChecked();
     expect(within(noInvoiceBlock).getByRole("checkbox", { name: "手续费" })).not.toBeDisabled();
     expect(within(requiresInvoiceBlock).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(requiresInvoiceBlock).getByText("自动归类")).toBeInTheDocument();
+    const readonlyPrimaryLabels = within(requiresInvoiceBlock).getAllByTestId("pending-invoice-rule-primary-label");
+    const readonlyTags = within(requiresInvoiceBlock).getAllByTestId("pending-invoice-rule-readonly-tag");
+    const readonlyFeePrimary = readonlyPrimaryLabels.find((node) => node.textContent === "费用");
+    expect(readonlyFeePrimary).toBeInTheDocument();
+    expect(readonlyTags).not.toContain(readonlyFeePrimary);
+    expect(readonlyTags.some((node) => node.textContent?.includes("手续费"))).toBe(true);
     expect(within(requiresInvoiceBlock).getByText("手续费")).toBeInTheDocument();
     expect(within(requiresInvoiceBlock).getAllByText("餐饮")).toHaveLength(2);
 
