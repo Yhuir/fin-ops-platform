@@ -29066,6 +29066,24 @@ Verification:
 - PF-P175-MG 是当前切片的合理收口点：PF-P172 到 PF-P175 已形成完整 confirm expected_versions + stale guard baseline。
 - MG 不触发 Traffic Gate，不部署，不访问真实外部服务。
 
+### PF-P175-MG 执行结果
+
+- PF-P175-MG 已完成并验证。
+- 已在功能分支提交 `706da926 test(turnover-ledger): enforce confirm stale precondition baseline`。
+- 已 merge 到 `main`，并在 `main` 上重跑 verification。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（120 tests）。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests）。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+  - `git diff --check`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+- Traffic Gate 未执行。
+
+下一步：
+
+- 执行 `git push origin main`。
+- push 后从最新 `main` 新建下一条 `codex/` 分支。
+
 ## PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate
 
 状态：`planned`

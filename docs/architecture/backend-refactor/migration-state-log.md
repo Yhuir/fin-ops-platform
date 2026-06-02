@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P175 - Turnover Ledger Confirm Stale Precondition Port Wiring` 已完成并验证 |
+| 当前阶段 | `PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate` 已完成并验证 |
 | 当前 active prompt | 无；下一条待生成 |
-| 最近 verified prompt | `PF-P175 - Turnover Ledger Confirm Stale Precondition Port Wiring` |
-| 当前分支 | `codex/turnover-ledger-confirm-versions-p172` |
-| 最近验证 | PF-P175 RED：Pass（confirm stale API/builder tests 失败）；PF-P175 targeted tests：Pass；`tests.test_turnover_ledger_api`：Pass（120 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（57 tests）；`git diff --check`：Pass；`git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate` |
+| 最近 verified prompt | `PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P175-MG branch/main verification：`tests.test_turnover_ledger_api` Pass（120 tests）；`tests.test_turnover_ledger_uow_contract` Pass（57 tests）；`compileall` Pass；`git diff --check` Pass；无 untracked |
+| 下一条允许任务 | `git push origin main`；push 后从最新 main 新建下一条 `codex/` 分支，并生成下一条 Turnover Ledger 写路径 prompt |
 
 ## Prompt 执行日志
 
@@ -1398,6 +1398,45 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
 
 - 生成并审查 `PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate`。
 - MG 统一覆盖 PF-P172、PF-P173、PF-P174、PF-P175 的完整 diff。
+
+### PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 统一覆盖 PF-P172、PF-P173、PF-P174、PF-P175：
+  - confirm expected_versions contract planning；
+  - confirm expected_versions target / compatibility tests；
+  - expected_versions request -> boundary -> facade -> command propagation；
+  - confirm bank-row stale precondition port wiring。
+- 不执行 Traffic Gate，不部署，不访问真实外部服务。
+
+#### 执行结果
+
+- 已确认 diff 只包含允许文件。
+- 已确认无 untracked 文件。
+- 已通过 branch verification。
+- 已在功能分支提交：
+  - `706da926 test(turnover-ledger): enforce confirm stale precondition baseline`
+- 已 merge 到 `main`：
+  - `Merge branch 'codex/turnover-ledger-confirm-versions-p172': turnover confirm stale baseline`
+- 已在 merge 后的 `main` 上重跑 verification，全部通过。
+
+#### 验证
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（120 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests）。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+#### 下一步
+
+- 提交本次 post-flight 文档并执行 `git push origin main`。
+- push 后从最新 `main` 新建下一条 `codex/` 分支。
+- 下一条 prompt 应继续 Turnover Ledger 写路径，优先围绕 durable idempotency 或 bank row tags/tag selection/relation extra stale precondition 收敛；不要跨模块。
 
 ### PF-P002 - Platform / Ops / Runtime Boundary Deep Dive
 

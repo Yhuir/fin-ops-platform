@@ -6026,6 +6026,39 @@ Remaining seam matrix：
 - `PF-P175-MG - Turnover Ledger Confirm Expected Versions and Stale Guard Cumulative Merge Gate`
 - MG 统一覆盖 PF-P172、PF-P173、PF-P174、PF-P175。
 
+## PF-P175-MG Confirm Expected Versions and Stale Guard Cumulative Merge Gate
+
+状态：
+
+- verified
+
+范围：
+
+- 统一覆盖 PF-P172、PF-P173、PF-P174、PF-P175。
+- 合入 confirm expected_versions + bank-row stale guard baseline。
+- 不执行 Traffic Gate，不部署，不访问真实外部服务。
+
+执行结果：
+
+- PF-P172/PF-P173/PF-P174/PF-P175 已作为一个 cumulative slice 合入 `main`。
+- 功能分支提交：
+  - `706da926 test(turnover-ledger): enforce confirm stale precondition baseline`
+- 已在 merge 后 `main` 上重跑 verification，全部通过。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（120 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（57 tests）。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+下一步：
+
+- push `main` 到 `origin/main`。
+- 从最新 `main` 新建下一条 `codex/` 分支。
+- 继续 Turnover Ledger 写路径；优先选择 durable idempotency 或剩余 stale precondition 写路径的最小切片。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
