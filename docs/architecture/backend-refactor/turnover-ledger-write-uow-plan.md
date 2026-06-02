@@ -5493,6 +5493,46 @@ Remaining seam matrix：
 - 从最新 `main` 新建分支
 - 重新盘点 Turnover Ledger 写路径剩余 seam，再生成下一条 prompt
 
+## PF-P162 Remaining Write Seam Rebaseline
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已确认 request-boundary 组目前已覆盖：
+  - confirm
+  - withdraw
+  - bank row tags
+  - relation extra
+- 当前剩余最小 write seam 为 `tag_selection_update` handler。
+
+下一步：
+
+- 生成并审查 `PF-P163 - Turnover Ledger Tag Selection Request Boundary Extraction`
+
+## PF-P163 Tag Selection Request Boundary Extraction
+
+状态：
+
+- verified
+
+执行结果：
+
+- 新增 `TurnoverLedgerTagSelectionRequestBoundaryFacade`
+- handler 不再直接持有 `scope_keys=["all"]` 和直接 facade 调用
+
+验证：
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，98 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+下一步：
+
+- 生成并审查 `PF-P163-MG - Turnover Ledger Tag Selection Request Boundary Merge Gate`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

@@ -291,6 +291,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalTagSelectionAdapterSet,
     TurnoverLedgerLocalWithdrawRelationAdapterSet,
     TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder,
+    TurnoverLedgerTagSelectionRequestBoundaryFacade,
     TurnoverLedgerConfirmLegacyFallbackAdapterSet,
     TurnoverLedgerConfirmLegacyFallbackFacade,
     TurnoverLedgerConfirmRequestBoundaryFacade,
@@ -12348,13 +12349,12 @@ class Application:
         if error is not None:
             return error
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-        facade = self._turnover_ledger_tag_selection_write_facade()
+        facade = self._turnover_ledger_tag_selection_request_boundary_facade()
         try:
-            result = facade.update_tag_selection(
+            result = facade.update_tag_selection_from_request(
                 payload=payload,
                 actor_id=actor,
                 tenant_id=tenant_id_for_session(session_response),
-                scope_keys=["all"],
             )
         except AppSettingsValidationError as exc:
             status = (
@@ -12364,6 +12364,11 @@ class Application:
             )
             return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
         return self._json_response(HTTPStatus.OK, result)
+
+    def _turnover_ledger_tag_selection_request_boundary_facade(self) -> TurnoverLedgerTagSelectionRequestBoundaryFacade:
+        return TurnoverLedgerTagSelectionRequestBoundaryFacade(
+            facade_provider=self._turnover_ledger_tag_selection_write_facade,
+        )
 
     def _handle_api_turnover_ledger_bank_row_tags_batch(
         self,
