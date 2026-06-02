@@ -4317,6 +4317,27 @@ PF-P110 边界：
 - 从最新 `main` 新建分支。
 - 生成并审查 `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction`，重新盘点 Turnover Ledger 剩余写路径的下一条最小切片。
 
+## PF-P134 Remaining Write Path Rebaseline After Invalidation Extraction
+
+状态：`planned`
+
+目标：
+
+- 在 PF-P133-MG 合入 main 之后，重新盘点 Turnover Ledger 剩余写路径。
+- 只产出新的 remaining write path matrix 和下一条最小实现切片建议。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不改 production code，不改 tests，不进入 MG。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P134|Remaining Write Path Rebaseline|Remaining write path matrix|Next minimal prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

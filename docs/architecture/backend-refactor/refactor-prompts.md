@@ -25350,6 +25350,76 @@ Post-Flight:
 - Traffic Gate 未执行。
 - 下一步：`git push origin main` 后，从最新 `main` 新建分支，生成并审查 `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction`。
 
+## PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 PF-P133-MG 合入 main 之后，对 Turnover Ledger 剩余写路径做一次 rebaseline，决定下一条最小实现切片。
+
+Context:
+PF-P131 / PF-P132 / PF-P133 / PF-P133-MG 已完成 relation mutation invalidation boundary 切片并合入 main。现在需要基于最新 main 重新盘点 Turnover Ledger 剩余写路径，而不是凭旧计划直接继续改代码。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - tests/test_turnover_ledger_api.py
+2. 必须确认当前分支是从最新 `main` 新建的 `codex/` 分支，而不是 `main`。
+3. 必须确认 PF-P133-MG 已 verified 且 `origin/main` 已同步。
+
+Goal:
+只做 remaining write path rebaseline / discovery / planning，输出最新的剩余写路径矩阵和下一条最小实现 prompt。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Output:
+1. Remaining Write Path Matrix：
+   - 列出 Turnover Ledger 仍未完成目标架构收敛的写路径。
+   - 对每条写路径标记：当前状态、已完成切片、剩余问题、推荐优先级。
+2. Completed vs Remaining Boundary：
+   - 明确哪些部分已足够稳定，不应重复返工。
+   - 明确哪些 helper / local fallback / direct persistence 仍是下一轮目标。
+3. Next Minimal Prompt：
+   - 只能推荐一条。
+   - 不得同时开启多个写路径。
+   - 优先选择最小且高价值的剩余切片。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得执行 MG。
+- 不得开始下一个模块。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P134|Remaining Write Path Rebaseline|Remaining write path matrix|Next minimal prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P134 结论和下一条最小 prompt。
+3. 不得直接进入实现，除非下一条 prompt 已生成并审查。
+```
+
+### 审查结论
+
+- PF-P134 边界正确：它只做 rebaseline/discovery，不碰实现。
+- 在 PF-P133-MG 刚合入 main 后先做这一步，可以避免沿用过期假设继续推进 Turnover Ledger 写路径。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

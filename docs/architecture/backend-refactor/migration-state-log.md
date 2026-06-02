@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate` 已完成并验证 |
-| 当前 active prompt | `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` 待从最新 `main` 新建分支后生成并审查 |
+| 当前阶段 | `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` |
 | 最近 verified prompt | `PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-rebaseline-p134` |
 | 最近验证 | branch 验证：`git diff --name-only main...HEAD` 白名单通过；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。main 验证同样通过。 |
-| 下一条允许任务 | push 完成后，从最新 `main` 新建分支，再生成并审查 `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` |
+| 下一条允许任务 | 执行 `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` |
 
 ## Prompt 执行日志
 
@@ -9587,6 +9587,39 @@ PF-P131 / PF-P132 / PF-P133 已形成完整的 relation mutation invalidation bo
 #### 下一条 Prompt 上下文
 
 本组 relation mutation invalidation boundary 切片已经合入 `main`。下一步必须在 push `origin/main` 后，从最新 `main` 新建新分支，再生成 `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction`。PF-P134 应只做 discovery/planning，重新盘点 Turnover Ledger 剩余写路径的优先级和下一条最小实现切片。
+
+### PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 只做 Turnover Ledger 剩余写路径 rebaseline / discovery / planning。
+- 基于 PF-P133-MG 之后的最新 `main`，重新评估剩余写路径的优先级、边界和下一条最小实现切片。
+- 不修改 production code，不修改 tests，不进入 MG。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 必须输出
+
+- Remaining write path matrix。
+- 已完成切片与未完成切片分界。
+- 下一条最小实现 prompt 建议，只能推荐一条。
+- 不得直接进入实现或测试修改。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P134|Remaining Write Path Rebaseline|Remaining write path matrix|Next minimal prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
