@@ -1255,6 +1255,48 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
+    @unittest.expectedFailure
+    def test_target_relation_extra_facade_passes_idempotency_before_repository(self) -> None:
+        # PF-P105 target contract: durable idempotency should reserve/replay/conflict before repository save.
+        class _CommandCapturingUoW:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+                self.extra_repository = _RecordingExtraRepository()
+
+            def run(self, command: object, handler: Callable[[object], object]) -> object:
+                self.commands.append(command)
+                self.assert_command(command)
+                return handler(
+                    SimpleNamespace(
+                        transaction=object(),
+                        extra_repository=self.extra_repository,
+                    )
+                )
+
+            def assert_command(self, command: object) -> None:
+                self_command = command
+                assert getattr(self_command, "idempotency_key") == "relation-extra-idem-1"
+                assert getattr(self_command, "actor_id") == "finance-user"
+                assert getattr(self_command, "tenant_id") == "default"
+                assert getattr(self_command, "action_name") == "turnover_relation_extra_update"
+                assert getattr(self_command, "request_fingerprint")
+
+        uow = _CommandCapturingUoW()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "idempotent extra"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+            idempotency_key="relation-extra-idem-1",
+        )
+
+        self.assertEqual(result["extra"]["relation_id"], "turnover_rel_1")
+        self.assertEqual(len(uow.commands), 1)
+        self.assertEqual(len(uow.extra_repository.extras), 1)
+
     def test_relation_extra_write_facade_command_result_are_not_http_coupled(self) -> None:
         # PF-P056 target contract: command/result must not carry HTTP response or auth module dependencies.
         uow, _deps = self._build_uow()

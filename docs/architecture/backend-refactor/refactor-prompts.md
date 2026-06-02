@@ -21452,3 +21452,114 @@ Post-Flight:
 - `rg -n "PF-P104|durable idempotency|idempotency_key|Idempotency-Key|workbench_idempotency|fingerprint|PF-P105" docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md`：Pass。
 
 下一条应生成并审查 `PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests`。PF-P105 只写 tests 和文档，不实现 production idempotency seam。
+
+## PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 TDD 后端工程师。你必须只新增/调整 Turnover Ledger relation extra durable idempotency 的 characterization/contract tests 和必要文档，不实现 production idempotency。
+
+Context:
+PF-P104 已 verified。PF-P104 发现：
+- relation extra HTTP contract 当前不读取 body `idempotency_key` / `idempotencyKey`，也不读取 `Idempotency-Key` header；
+- PF-P103 已建立 relation extra stale guard；
+- Workbench idempotency primitives 可复用；
+- `TurnoverLedgerWriteUnitOfWork` 当前没有 `idempotency_store` seam，也没有 command-level `idempotency_key` / `request_fingerprint`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/workbench_idempotency.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P104 已 verified。
+4. 必须先运行 Turnover Ledger targeted tests，确认当前 baseline 绿色。
+
+Task:
+1. 在 `tests/test_turnover_ledger_api.py` 中保留/补强 current behavior：
+   - 无 idempotency key 时 repeated same PUT 仍会更新 `updated_at` 并 enqueue 两次 refresh。
+   - 如新增携带 idempotency key 的 current behavior test，必须明确它当前仍不会 replay，避免误以为已实现。
+2. 在 `tests/test_turnover_ledger_api.py` 中新增 future target expectedFailure：
+   - 相同 actor/tenant/idempotency key + 相同 payload/fingerprint 的第二次 relation extra PUT 应 replay 第一次 response；
+   - 第二次不得再次 save extra，不得再次 enqueue dirty/outbox refresh；
+   - 建议 test name：`test_target_relation_extra_idempotency_key_replays_without_duplicate_save_or_refresh`。
+3. 在 `tests/test_turnover_ledger_api.py` 中新增 future target expectedFailure：
+   - 相同 actor/tenant/idempotency key + 不同 payload/fingerprint 应返回 409 `idempotency_key_conflict`；
+   - 不得保存第二个 payload，不得 enqueue 第二次 refresh；
+   - 建议 test name：`test_target_relation_extra_idempotency_key_conflict_rejects_different_payload`。
+4. 在 `tests/test_turnover_ledger_uow_contract.py` 中新增 future target expectedFailure：
+   - `TurnoverLedgerWriteFacade.update_relation_extra(..., idempotency_key=...)` 或等价 command contract 应写入 idempotency identity/fingerprint；
+   - UoW 应在 handler 前 reserve/replay/conflict；
+   - 不得执行 extra repository save 或 dirty/outbox when replay/conflict；
+   - 建议 test name：`test_target_relation_extra_facade_passes_idempotency_before_repository`。
+5. 默认 CI 必须保持绿色：尚未实现的目标语义使用 `unittest.expectedFailure`，不得 skip，不得删除/弱化现有断言。
+6. 更新文档：
+   - migration-state-log.md
+   - refactor-prompts.md
+   - turnover-ledger-write-uow-plan.md
+
+Allowed Files:
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得实现 idempotency_key 参数、store、repository、adapter 或 UoW seam。
+- 不得新增 SQL migration。
+- 不得处理 fallback cleanup 或 local transaction shim extraction。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 Traffic Gate。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- rg -n "PF-P105|test_target_relation_extra_idempotency|idempotency_key_conflict|idempotency_key|expectedFailure" tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor
+
+Post-Flight:
+1. 更新 migration-state-log.md：
+   - PF-P105 status = implemented / verified / blocked；
+   - 记录新增 target tests、expectedFailure 数量、验证结果和下一条 prompt。
+2. 更新 refactor-prompts.md 和 turnover-ledger-write-uow-plan.md：
+   - 记录 PF-P105 执行结果。
+3. PF-P105 verified 后，下一条应生成 relation extra durable idempotency command/UoW skeleton；不得在本 prompt 中实现。
+```
+
+### 审查结论
+
+- PF-P105 是 PF-P104 后的正确测试锁定步骤。
+- prompt 明确 test-only，不允许 production code、idempotency store/UoW seam、SQL migration 或 fallback/local transaction shim 工作。
+- 使用 `unittest.expectedFailure` 保留目标契约，默认 CI 继续绿色。
+
+### PF-P105 执行结果
+
+- 状态：`verified`。
+- 新增 API future target expectedFailure：相同 actor/tenant/idempotency key + 相同 payload/fingerprint 的第二次 relation extra PUT 应 replay 第一次 response，不二次 save/enqueue。
+- 新增 API future target expectedFailure：相同 actor/tenant/idempotency key + 不同 payload/fingerprint 应返回 409 `idempotency_key_conflict`，不保存第二个 payload，不 enqueue 第二次 refresh。
+- 新增 facade/UoW future target expectedFailure：`TurnoverLedgerWriteFacade.update_relation_extra(..., idempotency_key=...)` 应将 idempotency identity/fingerprint 写入 command，UoW 在 handler 前 reserve/replay/conflict。
+- 未修改 production code。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests，1 expected failure。
+
+下一条应生成并审查 `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton`。PF-P106 只实现最小 command/facade idempotency fields，让 facade/UoW target command test 转绿；不得直接实现 full replay/conflict HTTP behavior、PostgreSQL repository 接线、fallback cleanup 或 local transaction shim extraction。
