@@ -3294,6 +3294,37 @@ PF-P110 边界：
 - 执行 `git push origin main`。
 - push 后从最新 main 新建分支，生成 Turnover Ledger bank row tags local shim discovery/characterization prompt；该路径跨 Bankdetail/category/relation，应先 discovery/characterization，不直接实现。
 
+## PF-P117 Bank Row Tags Local Shim Discovery and Characterization Planning
+
+状态：`planned`
+
+目标：
+
+- 盘点 bank row tags local connection、local bankdetail port、handler direct fallback 和现有测试覆盖。
+- 输出 characterization test gap、风险清单和下一条最小测试 prompt。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests。
+- 不抽离 adapter，不修改 facade/UoW 语义。
+- 不新增 SQL migration，不执行 Traffic Gate。
+
+必须输出：
+
+- Bank Row Tags Local Shim Inventory。
+- Runtime Sequence：facade path、local facade path、facade None fallback path、queue/outbox failure rollback path。
+- Characterization Test Gap。
+- Extraction Risk。
+- 下一条最小 prompt，优先 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P117|Bank Row Tags Local Shim|bank row tags local" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

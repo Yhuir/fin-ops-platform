@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate` 已合入 main 并验证通过 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` |
 | 最近 verified prompt | `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-bank-row-tags-local-shim-p117` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `git push origin main`，push 完成后从最新 main 新建下一条 `codex/` 分支并生成 Turnover Ledger bank row tags local shim discovery/characterization prompt |
+| 下一条允许任务 | 执行 `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` |
 
 ## Prompt 执行日志
 
@@ -8255,6 +8255,32 @@ PF-P115/PF-P116 已连续抽离 confirm/withdraw relation local adapter 和 tag 
 #### 下一条 Prompt 上下文
 
 PF-P116-MG 已合入 main 并通过 main 验证。下一步先提交本次 post-flight 文档并执行 `git push origin main`；push 完成后必须从最新 main 新建 `codex/` 分支。剩余 Turnover Ledger local shim 是 bank row tags，本地路径涉及 Bankdetail/category/relation 交叉边界，下一条应先做 discovery/characterization，不直接抽离实现。
+
+### PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning
+
+状态：`planned`
+
+#### 范围
+
+- 盘点 bank row tags local connection、local bankdetail port、handler direct fallback 和现有测试覆盖。
+- 输出 characterization test gap 和下一条最小测试 prompt。
+- 不修改 production code，不抽离 adapter，不新增 SQL migration。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P117|Bank Row Tags Local Shim|bank row tags local" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

@@ -22982,6 +22982,102 @@ Post-Flight:
 - Traffic Gate：未执行；本 MG 不部署、不切流、不访问生产。
 - 下一步：提交 post-flight 文档并 `git push origin main`；push 完成后从最新 main 新建分支，生成 Turnover Ledger bank row tags local shim discovery/characterization prompt。
 
+## PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning
+
+状态：`planned`
+
+```text
+/goal
+PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只做 Turnover Ledger bank row tags local shim 的 discovery/planning 和文档回写，不修改业务代码。
+
+Context:
+PF-P116-MG 已 verified、merge 并 push 到 origin/main。当前已完成：
+- local dirty outbox writer extraction；
+- relation extra local adapter extraction；
+- confirm/withdraw relation local adapter extraction；
+- tag selection local adapter extraction。
+`server.py` 中仍保留 bank row tags 相关 local shim 和 fallback：
+- `_local_turnover_ledger_bank_row_tags_connection`
+- `_local_turnover_ledger_bankdetail_port`
+- `_handle_api_turnover_ledger_bank_row_tags_batch(...)` 中 facade 为 None 时的 direct category save / relation rebuild / read model clear+enqueue。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P116-MG 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+为 bank row tags local shim 的后续安全抽离建立事实清单和 characterization test 计划。由于该路径跨 Turnover Ledger、Bankdetail category service、relation rebuild 和 read model refresh，不允许本轮直接实现抽离。
+
+Required Discovery Work:
+1. 输出 Bank Row Tags Local Shim Inventory：
+   - local connection 捕获了哪些 snapshot；
+   - local bankdetail port 调用了哪些 service；
+   - handler fallback 的 direct side effects；
+   - 哪些行为属于 local/dev/test compatibility。
+2. 输出 Runtime Sequence：
+   - facade path；
+   - local facade path；
+   - facade None fallback path；
+   - queue/outbox failure rollback path。
+3. 输出 Characterization Test Gap：
+   - 当前哪些 tests 已覆盖 queue failure rollback、category save、relation rebuild、read model invalidation；
+   - 缺少哪些 tests 用于证明抽离 adapter 后不改变行为；
+   - 是否需要锁定 facade None fallback 的 direct save/rebuild/enqueue 行为。
+4. 输出 Extraction Risk：
+   - Bankdetail/category/relation 交叉边界；
+   - state_store save order；
+   - relation rebuild timing；
+   - affected_months 与 dirty/outbox scopes；
+   - 不得把 Bankdetail 业务逻辑搬入 Turnover adapter。
+5. 输出下一条最小 prompt：
+   - 应优先是 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`；
+   - 不得直接进入 adapter extraction，除非本轮证明现有测试已经足够。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得抽离 adapter。
+- 不得修改 facade/UoW 语义。
+- 不得新增 SQL migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P117|Bank Row Tags Local Shim|bank row tags local" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 discovery output、risk、next prompt。
+3. 如验证通过，可标记 PF-P117 verified。
+```
+
+### 审查结论
+
+- PF-P117 边界正确：只做 bank row tags local shim discovery/planning 和文档回写。
+- 该 prompt 不修改 production code、不修改 tests、不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
