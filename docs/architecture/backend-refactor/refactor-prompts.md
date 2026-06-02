@@ -21785,6 +21785,92 @@ Post-Flight:
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。
 
+## PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
+
+状态：`planned`
+
+```text
+/goal
+PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构审计工程师。你必须基于最新 main 重新盘点 Turnover Ledger 剩余写路径，不写业务代码。
+
+Context:
+PF-P108-MG 已 verified、merge 并 push 到 origin/main。当前 Turnover Ledger 已完成：
+- tag selection facade/UoW seam；
+- bank row tags batch facade/UoW seam；
+- confirm/withdraw PostgreSQL write ports 与 withdraw stale guard；
+- relation extra expected_versions stale guard；
+- relation extra durable idempotency UoW seam 与 HTTP boundary。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`，且从最新 `main` 新建。
+3. 必须确认 PF-P108-MG 已 verified。
+
+Goal:
+重新盘点 Turnover Ledger 写路径剩余风险，尤其是 `server.py` 中仍存在的 fallback/local transaction shim/best-effort helper，选择下一条最小可执行 prompt。
+
+Required Discovery Output:
+1. Write Path Matrix:
+   - `PUT /api/turnover-ledger/tag-selection`
+   - `POST /api/turnover-ledger/bank-row-tags/batch`
+   - `PUT /api/turnover-ledger/relations/{id}/extra`
+   - `POST /api/turnover-ledger/relations/confirm`
+   - `POST /api/turnover-ledger/relations/{id}/withdraw`
+2. Residual Server Orchestration:
+   - 列出仍在 `server.py` 中承担业务或 persistence orchestration 的 helper。
+   - 特别检查 `_local_turnover_ledger_*` helpers、`_persist_turnover_ledger_extras_best_effort`、fallback direct route calls、read model clear/enqueue fallback。
+3. Cleanup Decision:
+   - 哪些 fallback 是测试/本地兼容必须保留；
+   - 哪些 fallback 可作为下一切片 cleanup；
+   - 哪些 cleanup 需要先写 characterization tests；
+   - 哪些风险必须留到其它模块或明确 blocked。
+4. Next Prompt Recommendation:
+   - 只推荐一条下一 prompt。
+   - 说明它是 discovery、tests、implementation 还是 MG。
+
+Allowed Scope:
+- 只更新：
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 SQL migration。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得生成多个后续 prompt。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P109|Remaining Write Path Rebaseline|Fallback Cleanup Decision|local transaction shim|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P109 status、changed files、verification commands/results。
+3. 下一条 prompt 必须基于 PF-P109 的实际盘点结果生成。
+```
+
+### 审查结论
+
+- PF-P109 边界正确：只做 Turnover Ledger 剩余写路径和 fallback cleanup 重新盘点。
+- 该 prompt 不修改代码、不修改 tests，适合作为 relation extra idempotency 完成后的下一步选择门。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` 已 verified，已 merge 到 `main`，待 push origin/main |
-| 当前 active prompt | 无，等待 push origin/main 后从最新 `main` 新建下一条 `codex/` 分支 |
+| 当前阶段 | `PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision` |
 | 最近 verified prompt | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-next-slice-p109` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 提交 PF-P108-MG post-flight 文档更新并执行 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支 |
+| 下一条允许任务 | 执行 `PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision` |
 
 ## Prompt 执行日志
 
@@ -8114,6 +8114,43 @@ PF-P108-MG 已 verified。先提交本次 post-flight 文档更新并 `git push 
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - Traffic Gate：未执行；本切片不部署、不切流、不访问生产。
+
+### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
+
+状态：`planned`
+
+#### 范围
+
+- 基于 PF-P108-MG 后的最新 main，重新盘点 Turnover Ledger 剩余写路径和 server.py 中的 fallback/local transaction shim。
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests，不新增 SQL migration，不执行 Traffic Gate。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+#### 必须输出
+
+- 当前 Turnover Ledger 写路径矩阵：tag selection、bank row tags batch、relation extra、confirm、withdraw。
+- `server.py` 中仍存在的 local transaction shim / fallback helper 清单。
+- 哪些 fallback 是测试/本地兼容必须保留，哪些可作为下一切片 cleanup。
+- 下一条 prompt 的精确建议，不得一次性推进多个写路径。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P109|Remaining Write Path Rebaseline|Fallback Cleanup Decision|local transaction shim|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+PF-P109 planned。执行后应根据实际盘点结果选择下一条最小切片；不得直接修改代码。
 
 ## 维护规则
 

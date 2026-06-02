@@ -2966,3 +2966,42 @@ Relation extra 当前写路径：
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：先 push `origin/main`，再从最新 `main` 新建下一条 `codex/` 分支。
+
+## PF-P109 Remaining Write Path Rebaseline / Fallback Cleanup Decision
+
+状态：`planned`
+
+目标：
+
+- 基于 PF-P108-MG 后的最新 main，重新盘点 Turnover Ledger 剩余写路径。
+- 明确 `server.py` 中仍存在的 fallback/local transaction shim/best-effort helper。
+- 选择下一条最小可执行 prompt。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests，不新增 SQL migration。
+- 不执行 Traffic Gate、部署、生产访问或真实外部服务访问。
+
+必须扫描：
+
+- `server.py` 的 Turnover Ledger 写 handler、facade construction helper、`_local_turnover_ledger_*` helpers、`_persist_turnover_ledger_extras_best_effort`。
+- `turnover_ledger_write_facade.py`
+- `turnover_ledger_write_uow.py`
+- `turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+必须输出：
+
+- 当前 Turnover Ledger 写路径矩阵。
+- fallback/local transaction shim 残留清单。
+- cleanup 优先级和阻断条件。
+- 下一条 prompt 的精确建议。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P109|Remaining Write Path Rebaseline|Fallback Cleanup Decision|local transaction shim|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
