@@ -933,6 +933,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
 
+    def test_turnover_ledger_tag_selection_legacy_fallback_facade_does_not_inline_refresh_closure(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_tag_selection_legacy_fallback_facade)
+
+        self.assertNotIn("enqueue_refresh=lambda scope_keys", source)
+
     def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1208,6 +1213,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
+    def test_confirm_relation_legacy_fallback_facade_does_not_inline_relation_rebuild_closure(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_confirm_legacy_fallback_facade)
+
+        self.assertNotIn("relation_rebuild=lambda", source)
+
     def test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects(self) -> None:
         # PF-P121 characterization: unsupported postgres queue API still falls back to legacy direct side effects.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -1272,6 +1282,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertNotIn("save_category_snapshot=lambda", source)
         self.assertNotIn("save_relation_snapshot=lambda", source)
+
+    def test_turnover_bank_row_tags_legacy_fallback_facade_does_not_inline_category_snapshot_closure(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_bank_row_tags_legacy_fallback_facade)
+
+        self.assertNotIn("save_category_snapshot=lambda snapshot", source)
 
     def test_after_turnover_relation_mutation_keeps_legacy_side_effect_order(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -2027,6 +2042,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(persist_operations, ["turnover_ledger_extra_updated"])
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+
+    def test_relation_extra_legacy_fallback_facade_does_not_inline_persist_and_refresh_closures(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_relation_extra_legacy_fallback_facade)
+
+        self.assertNotIn("persist_extra=lambda", source)
+        self.assertNotIn("enqueue_refresh=lambda scope_keys", source)
 
     def test_target_relation_extra_queue_failure_rolls_back_extra_save(self) -> None:
         with TemporaryDirectory() as temp_dir:

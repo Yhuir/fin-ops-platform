@@ -26186,6 +26186,439 @@ Post-Flight:
 - merge 后已在 `main` 上重跑同一组验证，结果全部通过。
 - 下一步必须从最新 `main` 新建 `codex/` 分支，再生成 `PF-P142 - Turnover Ledger Remaining Seam Rebaseline After Local Adapter Cleanup`。
 
+## PF-P142 - Turnover Ledger Remaining Seam Rebaseline After Local Adapter Cleanup
+
+状态：`verified`
+
+```text
+/goal
+PF-P142 - Turnover Ledger Remaining Seam Rebaseline After Local Adapter Cleanup
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 PF-P141-MG 完成后，重新扫描 Turnover Ledger 剩余写路径 seam，建立新的事实源，避免沿用已经过期的 local adapter 优先级。
+
+Context:
+- PF-P141-MG 已 verified 并已 push `origin/main`。
+- 当前必须从最新 `main` 新建新的 `codex/` 分支后工作。
+- local adapter cleanup 已完成：tag selection、relation extra、confirm、withdraw、bank row tags 的 local path 组装都已进入 adapter module。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须检查：
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+3. 建议使用 CodeGraph 或结构化源码扫描确认：
+   - `_turnover_ledger_*_write_facade`
+   - `_turnover_ledger_*_legacy_fallback_facade`
+   - `TurnoverLedgerWriteFacade`
+   - `TurnoverLedgerWriteUnitOfWork`
+   - `TurnoverLedgerLocal*AdapterSet`
+
+Task:
+1. 重新盘点 Turnover Ledger 写路径在 `server.py` 中剩余的显式 seam。
+2. 明确区分：
+   - 已完成的 local adapter cleanup；
+   - 仍残留在 `server.py` 的 legacy fallback side-effect assembly；
+   - 仍残留在 `server.py` 的 primary facade/UoW orchestration duplication。
+3. 输出新的 remaining seam matrix，并给出下一条最小 prompt 建议。
+4. 本轮只允许修改 backend-refactor 文档，不修改 production code 或 tests。
+
+Required Output:
+1. Remaining seam matrix，至少覆盖：
+   - relation extra
+   - bank row tags
+   - confirm
+   - withdraw
+   - tag selection
+2. 对每个 seam 说明：
+   - 当前仍由 `server.py` 持有的职责；
+   - 为什么它是或不是下一条最小切片；
+   - 风险等级与建议顺序。
+3. 明确下一条 prompt 名称。
+
+Constraints:
+- 不得修改业务代码。
+- 不得新增测试实现。
+- 不得直接进入 UoW 重构或 repository 重构。
+- 不得修改 Workbench 模块。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P142|Remaining Seam Rebaseline After Local Adapter Cleanup|Legacy Fallback Characterization Tests" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md、turnover-ledger-write-uow-plan.md。
+2. 记录新的 remaining seam matrix。
+3. 写明下一条建议 prompt。
+```
+
+### 审查结论
+
+- PF-P142 的边界正确：它只做 Turnover Ledger 剩余 seam 的重新盘点，不碰业务实现。
+- 在 PF-P141-MG 之后先做 rebaseline 是必要的，否则下一刀会继续沿用过期的 local adapter 优先级。
+
+### PF-P142 执行结果
+
+- PF-P142 已完成并验证。
+- 通过源码扫描与 CodeGraph 重新确认：local adapter cleanup 已完成，但 `server.py` 仍残留两层 seam。
+- 第一层是 legacy fallback side-effect assembly：
+  - `relation extra` fallback 仍内联 `persist_extra` / `enqueue_refresh`；
+  - `bank row tags` fallback 仍内联 `save_category_snapshot`；
+  - `confirm` fallback 仍内联 `relation_rebuild`；
+  - `tag selection` fallback 仍内联 `enqueue_refresh`。
+- 第二层是 primary facade/UoW orchestration duplication：
+  - 五个 `_turnover_ledger_*_write_facade(...)` 仍在 `server.py` 内各自组装 `TurnoverLedgerWriteUnitOfWork`；
+  - 仍存在 `SimpleNamespace()` placeholder orchestration，说明真正的 builder seam 还没到最小安全切点。
+- 结论：下一条最小 prompt 不应直接做 UoW 或 repository 重构，而应先锁 legacy fallback 当前行为。
+- 下一条建议 prompt：`PF-P143 - Turnover Ledger Legacy Fallback Characterization Tests`。
+
+## PF-P143 - Turnover Ledger Legacy Fallback Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P143 - Turnover Ledger Legacy Fallback Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须先用 characterization tests 锁定 Turnover Ledger 剩余 legacy fallback seam 的当前 source-level contract，再进入后续 extraction。
+
+Context:
+- PF-P142 已 verified。
+- PF-P142 已确认 local adapter cleanup 完成后，`server.py` 仍残留一组 legacy fallback side-effect assembly seam。
+- 下一步不能直接抽代码，必须先锁定当前 fallback builder 的 source-level contract。
+
+Task:
+1. 只修改 `tests/test_turnover_ledger_api.py` 与 backend-refactor 文档。
+2. 为以下 legacy fallback builder 增加 characterization tests，锁定当前 inline closure seam：
+   - `_turnover_ledger_relation_extra_legacy_fallback_facade`
+   - `_turnover_ledger_bank_row_tags_legacy_fallback_facade`
+   - `_turnover_ledger_confirm_legacy_fallback_facade`
+   - `_turnover_ledger_tag_selection_legacy_fallback_facade`
+3. 新测试只做 source/contract characterization，不得改变 production code。
+
+Constraints:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`
+- 不得修改 `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- 不得顺手开始 extraction
+- 不得修改 Workbench、UoW、repository 或 SQL migration
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md、turnover-ledger-write-uow-plan.md。
+2. 记录新增的 characterization guard。
+3. 给出下一条最小 extraction prompt。
+```
+
+### 审查结论
+
+- PF-P143 的边界正确：它只补 legacy fallback characterization tests，不碰任何 production code。
+- 在 relation extra / bank row tags / confirm / tag selection 的 fallback seam 上先锁 source-level contract，是进入 extraction 前必须的门禁。
+
+### PF-P143 执行结果
+
+- PF-P143 已完成并验证。
+- `tests/test_turnover_ledger_api.py` 新增 4 个 characterization guards：
+  - `test_turnover_ledger_tag_selection_legacy_fallback_facade_keeps_inline_refresh_closure`
+  - `test_turnover_bank_row_tags_legacy_fallback_facade_keeps_inline_category_snapshot_closure`
+  - `test_relation_extra_legacy_fallback_facade_keeps_inline_persist_and_refresh_closures`
+  - `test_confirm_relation_legacy_fallback_facade_keeps_inline_relation_rebuild_closure`
+- 这些测试只锁当前 legacy fallback builder source contract，不改变任何运行时语义。
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，80 tests。
+- 下一条建议 prompt：`PF-P144 - Turnover Ledger Relation Extra Legacy Fallback Adapter Extraction`。
+
+## PF-P144 - Turnover Ledger Relation Extra Legacy Fallback Adapter Extraction
+
+状态：`verified`
+
+```text
+/goal
+PF-P144 - Turnover Ledger Relation Extra Legacy Fallback Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger relation extra legacy fallback builder 中残留在 `server.py` 的 side-effect wiring。
+
+Context:
+- PF-P143 已 verified，并已锁定 relation extra legacy fallback 当前 source-level contract。
+- 当前只允许推进 relation extra 这一条 legacy fallback seam，不得顺手处理 tag selection、bank row tags 或 confirm。
+
+Task:
+1. 只修改：
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - backend-refactor 文档
+2. 将 `_turnover_ledger_relation_extra_legacy_fallback_facade(...)` 中的 inline fallback side-effect wiring 收到 adapter module。
+3. 保持运行时语义不变：
+   - 仍调用 `TurnoverLedgerRelationExtraLegacyFallbackFacade`
+   - 仍执行 persist extra -> clear read model -> enqueue refresh
+   - 不改变现有 API contract 和 warning/refresh 行为
+4. 允许更新 PF-P143 中与 source-level closure 存在性相关的 characterization test，使其反映抽离后的新约束。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P144 的边界正确：只处理 relation extra legacy fallback builder，不扩大到其它 fallback seam。
+- 在 PF-P143 已锁测试的前提下，先做 relation extra 是最小、最可控的一刀。
+
+### PF-P144 执行结果
+
+- PF-P144 已完成并验证。
+- `turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerRelationExtraLegacyFallbackAdapterSet`。
+- `server.py` 的 `_turnover_ledger_relation_extra_legacy_fallback_facade(...)` 不再内联：
+  - `persist_extra=lambda ...`
+  - `enqueue_refresh=lambda ...`
+- `tests/test_turnover_ledger_api.py` 已把 relation extra legacy fallback source characterization 更新为抽离后约束：
+  - `test_relation_extra_legacy_fallback_facade_does_not_inline_persist_and_refresh_closures`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，80 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：`PF-P145 - Turnover Ledger Tag Selection Legacy Fallback Adapter Extraction`。
+
+## PF-P145 - Turnover Ledger Tag Selection Legacy Fallback Adapter Extraction
+
+状态：`verified`
+
+```text
+/goal
+PF-P145 - Turnover Ledger Tag Selection Legacy Fallback Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger tag selection legacy fallback builder 中残留在 `server.py` 的 refresh wiring。
+
+Context:
+- PF-P144 已 verified。
+- relation extra legacy fallback seam 已抽离完成。
+- 当前同组剩余最小 seam 是 tag selection legacy fallback；不要越级跳到 bank row tags 或 confirm。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 将 `_turnover_ledger_tag_selection_legacy_fallback_facade(...)` 中的 inline refresh side-effect wiring 收到 adapter module。
+2. 保持 fallback runtime behavior 不变：
+   - 仍走 `TurnoverLedgerTagSelectionLegacyFallbackFacade`
+   - 仍执行 clear read model -> enqueue refresh
+3. 允许更新 PF-P143 中 tag selection 的 source characterization，使其反映抽离后的新约束。
+
+Constraints:
+- 不得修改 bank row tags / confirm / withdraw legacy fallback
+- 不得修改 UoW、repository、SQL migration
+- 不得改前端、部署、生产配置
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P145 的边界正确：它只推进 tag selection legacy fallback seam。
+- 这是 relation extra 之后同组里最小、最独立的一刀，适合继续而不进入 MG。
+
+### PF-P145 执行结果
+
+- PF-P145 已完成并验证。
+- `turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerTagSelectionLegacyFallbackAdapterSet`。
+- `server.py` 的 `_turnover_ledger_tag_selection_legacy_fallback_facade(...)` 不再内联：
+  - `enqueue_refresh=lambda ...`
+- `tests/test_turnover_ledger_api.py` 已把 tag selection legacy fallback source characterization 更新为抽离后约束：
+  - `test_turnover_ledger_tag_selection_legacy_fallback_facade_does_not_inline_refresh_closure`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，80 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：`PF-P146 - Turnover Ledger Bank Row Tags Legacy Fallback Adapter Extraction`。
+
+## PF-P146 - Turnover Ledger Bank Row Tags Legacy Fallback Adapter Extraction
+
+状态：`verified`
+
+```text
+/goal
+PF-P146 - Turnover Ledger Bank Row Tags Legacy Fallback Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger bank row tags legacy fallback builder 中残留在 `server.py` 的 category snapshot save wiring。
+
+Context:
+- PF-P145 已 verified。
+- tag selection legacy fallback seam 已抽离完成。
+- 当前同组剩余最小 seam 是 bank row tags；confirm legacy fallback 仍更重。
+
+Task:
+1. 只修改：
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - backend-refactor 文档
+2. 将 `_turnover_ledger_bank_row_tags_legacy_fallback_facade(...)` 中的 inline category snapshot wiring 收到 adapter module。
+3. 保持 fallback runtime behavior 不变。
+4. 允许更新 PF-P143 中与 source-level closure 存在性相关的 characterization test。
+```
+
+### 审查结论
+
+- PF-P146 的边界正确：它只推进 bank row tags legacy fallback 的 category snapshot seam。
+- 这一步比 confirm 更小，先做更稳妥。
+
+### PF-P146 执行结果
+
+- PF-P146 已完成并验证。
+- `turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet`。
+- `server.py` 的 `_turnover_ledger_bank_row_tags_legacy_fallback_facade(...)` 不再内联：
+  - `save_category_snapshot=lambda ...`
+- `tests/test_turnover_ledger_api.py` 已把 bank row tags legacy fallback source characterization 更新为抽离后约束：
+  - `test_turnover_bank_row_tags_legacy_fallback_facade_does_not_inline_category_snapshot_closure`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，80 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议 prompt：`PF-P147 - Turnover Ledger Confirm Legacy Fallback Adapter Extraction`。
+
+## PF-P147 - Turnover Ledger Confirm Legacy Fallback Adapter Extraction
+
+状态：`verified`
+
+```text
+/goal
+PF-P147 - Turnover Ledger Confirm Legacy Fallback Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只抽离 Turnover Ledger confirm legacy fallback builder 中残留在 `server.py` 的 relation rebuild wiring。
+
+Context:
+- PF-P146 已 verified。
+- relation extra / tag selection / bank row tags legacy fallback seam 都已抽离。
+- 当前这一组只剩 confirm legacy fallback；完成后即可考虑 cumulative MG。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 将 `_turnover_ledger_confirm_legacy_fallback_facade(...)` 中的 inline relation rebuild wiring 收到 adapter module。
+2. 保持 fallback runtime behavior 不变。
+3. 允许更新 PF-P143 中 confirm legacy fallback 的 source characterization，使其反映抽离后的新约束。
+
+Constraints:
+- 不得修改 withdraw legacy fallback。
+- 不得修改 UoW、repository、SQL migration。
+- 不得进入 MG 之前的 merge/main/push 操作。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P147 的边界正确：它只处理 confirm legacy fallback 的 relation rebuild seam。
+- 这一刀做完后，legacy fallback group 可以形成可合并边界。
+
+### PF-P147 执行结果
+
+- PF-P147 已完成并验证。
+- `turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerConfirmLegacyFallbackAdapterSet`。
+- `server.py` 的 `_turnover_ledger_confirm_legacy_fallback_facade(...)` 不再内联：
+  - `relation_rebuild=lambda ...`
+- `tests/test_turnover_ledger_api.py` 已把 confirm legacy fallback source characterization 更新为抽离后约束：
+  - `test_confirm_relation_legacy_fallback_facade_does_not_inline_relation_rebuild_closure`
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，80 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一步应进入 `PF-P147-MG - Turnover Ledger Legacy Fallback Adapter Group Merge Gate`。
+
+## PF-P147-MG - Turnover Ledger Legacy Fallback Adapter Group Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P147-MG - Turnover Ledger Legacy Fallback Adapter Group Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须对 Turnover Ledger legacy fallback adapter group 做 cumulative Merge Gate。
+
+Context:
+以下 prompt 已 verified：
+- PF-P142 - Turnover Ledger Remaining Seam Rebaseline After Local Adapter Cleanup
+- PF-P143 - Turnover Ledger Legacy Fallback Characterization Tests
+- PF-P144 - Turnover Ledger Relation Extra Legacy Fallback Adapter Extraction
+- PF-P145 - Turnover Ledger Tag Selection Legacy Fallback Adapter Extraction
+- PF-P146 - Turnover Ledger Bank Row Tags Legacy Fallback Adapter Extraction
+- PF-P147 - Turnover Ledger Confirm Legacy Fallback Adapter Extraction
+
+当前分支应为 `codex/turnover-ledger-rebaseline-p142`。本 MG 统一覆盖 PF-P142 到 PF-P147 的完整 diff。
+
+Expected Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Mandatory Checks:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Merge Rules:
+- 只允许精确 `git add`；
+- 如果 `git diff --name-only main...HEAD` 超出白名单，必须停止；
+- merge 后必须在 `main` 上重跑同一组验证，成功后才能 push `origin/main`。
+
+Forbidden Scope:
+- 不得混入其它模块改动。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 若 merge 成功并 push 完成，下一条 prompt 必须从最新 `main` 新建分支后生成。
+```
+
+### 审查结论
+
+- PF-P147-MG 的边界正确：它只覆盖 PF-P142 到 PF-P147 的 legacy fallback group。
+- 当前 cumulative slice 已经具备合并条件，不需要继续拖延 MG。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
