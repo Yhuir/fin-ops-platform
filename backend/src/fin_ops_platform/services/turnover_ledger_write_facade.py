@@ -232,6 +232,7 @@ class TurnoverLedgerWriteFacade:
         note: str | None,
         affected_months: list[str],
         expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         normalized_relation_id = str(relation_id or "").strip()
         normalized_months = [
@@ -239,10 +240,26 @@ class TurnoverLedgerWriteFacade:
             for month in list(affected_months or [])
             if str(month).strip()
         ]
+        normalized_expected_versions = dict(expected_versions or {})
+        normalized_idempotency_key = str(idempotency_key or "").strip()
+        action_name = "turnover_relation_withdraw" if normalized_idempotency_key else "withdraw_relation"
+        command_payload = {
+            "relation_id": normalized_relation_id,
+            "affected_months": list(normalized_months),
+            "note": note,
+        }
+        request_fingerprint = ""
+        if normalized_idempotency_key:
+            request_fingerprint = workbench_request_fingerprint(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action_name=action_name,
+                payload=dict(command_payload),
+            )
         command = TurnoverLedgerWriteCommand(
-            action_name="withdraw_relation",
+            action_name=action_name,
             scope_keys=["all"],
-            expected_versions=dict(expected_versions or {}),
+            expected_versions=dict(normalized_expected_versions),
             refresh_requests=[
                 {
                     "scope_type": "turnover_ledger",
@@ -252,10 +269,9 @@ class TurnoverLedgerWriteFacade:
             ],
             actor_id=actor_id,
             tenant_id=tenant_id,
-            payload={
-                "relation_id": normalized_relation_id,
-                "affected_months": list(normalized_months),
-            },
+            idempotency_key=normalized_idempotency_key,
+            request_fingerprint=request_fingerprint,
+            payload=command_payload,
         )
 
         def handler(context: Any) -> dict[str, object]:

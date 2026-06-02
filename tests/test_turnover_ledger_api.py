@@ -3501,6 +3501,99 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
 
+    def test_target_withdraw_idempotency_key_replays_without_duplicate_withdraw_or_refresh(self) -> None:
+        # PF-P179 target contract: same idempotency key/fingerprint should replay the first withdraw response.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before idempotent withdraw"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+            request_body = {"note": "idempotent withdraw", "idempotency_key": "withdraw-idem-1"}
+
+            first_response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps(request_body),
+            )
+            second_response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps(request_body),
+            )
+            first_payload = json.loads(first_response.body)
+            second_payload = json.loads(second_response.body)
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_payload, first_payload)
+        self.assertEqual(
+            [(entry["action"], entry["new_status"]) for entry in audit_log],
+            [
+                ("confirm_relation", "confirmed"),
+                ("withdraw_relation", "withdrawn"),
+            ],
+        )
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+            ],
+        )
+
+    def test_target_withdraw_idempotency_key_conflict_rejects_different_payload(self) -> None:
+        # PF-P179 target contract: same idempotency key with different payload must be a 409 conflict.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before idempotent withdraw"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+
+            first_response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "first withdraw", "idempotency_key": "withdraw-idem-conflict"}),
+            )
+            conflict_response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "different withdraw", "idempotency_key": "withdraw-idem-conflict"}),
+            )
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
+        self.assertEqual(
+            [(entry["action"], entry["new_status"]) for entry in audit_log],
+            [
+                ("confirm_relation", "confirmed"),
+                ("withdraw_relation", "withdrawn"),
+            ],
+        )
+        self.assertEqual(
+            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
+            [
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+            ],
+        )
+
     def test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh(self) -> None:
         # PF-P099 target contract: duplicate withdraw should become a conflict, not a second mutation.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

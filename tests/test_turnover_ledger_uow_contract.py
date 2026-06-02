@@ -1232,6 +1232,62 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
+    def test_target_withdraw_relation_facade_passes_idempotency_before_repository(self) -> None:
+        # PF-P179 target contract: withdraw should reserve/replay/conflict by durable idempotency before repository save.
+        class _CommandCapturingUoW:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+                self.withdraw_calls: list[dict[str, object]] = []
+
+            def run(self, command: object, handler: Callable[[object], object]) -> object:
+                self.commands.append(command)
+                assert getattr(command, "idempotency_key") == "withdraw-idem-1"
+                assert getattr(command, "actor_id") == "finance-user"
+                assert getattr(command, "tenant_id") == "default"
+                assert getattr(command, "action_name") == "turnover_relation_withdraw"
+                assert getattr(command, "request_fingerprint")
+                return handler(
+                    SimpleNamespace(
+                        transaction=object(),
+                        relation_repository=SimpleNamespace(withdraw_relation=self.withdraw_relation),
+                    )
+                )
+
+            def withdraw_relation(
+                self,
+                *,
+                relation_id: str,
+                actor_id: str,
+                note: str | None,
+                transaction: object,
+            ) -> dict[str, object]:
+                self.withdraw_calls.append(
+                    {
+                        "relation_id": relation_id,
+                        "actor_id": actor_id,
+                        "note": note,
+                        "transaction": transaction,
+                    }
+                )
+                return {"relation": {"relation_id": relation_id, "status": "withdrawn"}}
+
+        uow = _CommandCapturingUoW()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.withdraw_relation(
+            relation_id="turnover_rel_1",
+            actor_id="finance-user",
+            tenant_id="default",
+            note="idempotent withdraw",
+            affected_months=["2026-02"],
+            expected_versions={"relation:turnover_rel_1": 3},
+            idempotency_key="withdraw-idem-1",
+        )
+
+        self.assertEqual(result["relation"]["status"], "withdrawn")
+        self.assertEqual(len(uow.commands), 1)
+        self.assertEqual(len(uow.withdraw_calls), 1)
+
     def test_relation_extra_outbox_failure_does_not_return_best_effort_success(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 

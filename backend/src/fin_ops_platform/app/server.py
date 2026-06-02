@@ -2837,6 +2837,8 @@ class Application:
                 transaction,
                 state_store=state_store,
             ),
+            postgres_idempotency_store_factory=self._turnover_ledger_withdraw_postgres_idempotency_store,
+            local_idempotency_store_provider=self._turnover_ledger_withdraw_local_idempotency_store,
         ).build()
         if facade is not None:
             return facade
@@ -3057,6 +3059,19 @@ class Application:
         if idempotency_store is None:
             idempotency_store = InMemoryWorkbenchIdempotencyRepository()
             self._turnover_ledger_confirm_idempotency_store = idempotency_store
+        return idempotency_store
+
+    def _turnover_ledger_withdraw_postgres_idempotency_store(self, connection: object) -> object:
+        return self._workbench_write_idempotency_store(
+            "_turnover_ledger_withdraw_idempotency_store",
+            connection,
+        )
+
+    def _turnover_ledger_withdraw_local_idempotency_store(self) -> object:
+        idempotency_store = getattr(self, "_turnover_ledger_withdraw_idempotency_store", None)
+        if idempotency_store is None:
+            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+            self._turnover_ledger_withdraw_idempotency_store = idempotency_store
         return idempotency_store
 
     @staticmethod
@@ -12705,6 +12720,7 @@ class Application:
         if error is not None:
             return error
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
+        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
         try:
             facade = self._turnover_ledger_withdraw_request_boundary_facade()
             result = facade.withdraw_relation_from_request(
@@ -12712,6 +12728,7 @@ class Application:
                 actor_id=actor,
                 tenant_id=tenant_id_for_session(session_response),
                 note=str(payload.get("note")) if payload.get("note") is not None else None,
+                idempotency_key=idempotency_key,
             )
         except KeyError:
             return self._json_response(
@@ -12728,6 +12745,8 @@ class Application:
                 exc.status_code,
                 {"error": exc.error_code, "message": str(exc)},
             )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
         except TurnoverRelationValidationError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,

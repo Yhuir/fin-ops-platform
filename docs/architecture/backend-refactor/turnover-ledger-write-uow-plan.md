@@ -6164,6 +6164,105 @@ Remaining seam matrix：
 - `PF-P178-MG - Turnover Ledger Confirm Durable Idempotency Cumulative Merge Gate`
 - 统一覆盖 PF-P176 到 PF-P178 的完整 diff。
 
+## PF-P179 Withdraw Durable Idempotency Contract Tests
+
+状态：
+
+- verified
+
+背景：
+
+- confirm 已完成 stale precondition + durable idempotency。
+- withdraw 已完成 expected_versions、stale precondition 和 transaction-bound dirty/outbox UoW。
+- withdraw 当前仍缺 durable idempotency；重复提交目前有 legacy duplicate rejection characterization，但没有 stable replay/conflict contract。
+
+目标：
+
+- 新增 withdraw durable idempotency 目标测试。
+- 使用 `unittest.expectedFailure` 保留目标合同，不在本轮实现。
+- 为后续 PF-P180 实现切片提供最小、安全的 RED 契约。
+
+目标契约：
+
+- `TurnoverLedgerWriteFacade.withdraw_relation(..., idempotency_key=...)` 未来应写入 `TurnoverLedgerWriteCommand.idempotency_key` 和稳定 request fingerprint。
+- HTTP withdraw same idempotency key + same payload 应 replay first response，不重复 relation mutation / refresh enqueue。
+- HTTP withdraw same idempotency key + different payload 应返回 conflict，不重复 relation mutation / refresh enqueue。
+
+边界：
+
+- 不修改 production code。
+- 不实现 idempotency store、HTTP mapping 或 UoW behavior。
+- 不迁移 confirm、bank row tags、tag selection、relation extra。
+- 不修改 schema、deploy、Traffic Gate 或真实外部服务配置。
+
+验证计划：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：预期 Pass，包含新增 expected failures。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：预期 Pass，包含新增 expected failures。
+- `git diff --check`。
+- `git status --short --branch`。
+- `git ls-files --others --exclude-standard`。
+
+执行结果：
+
+- 新增 3 个 `unittest.expectedFailure` target tests：
+  - UoW/facade-level withdraw idempotency command contract。
+  - API same idempotency key + same payload replay contract。
+  - API same idempotency key + different payload conflict contract。
+- 未修改 production code。
+- 未实现 withdraw idempotency。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（124 tests，expected failures=2）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（59 tests，expected failures=1）。
+- `git diff --check`：Pass。
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+下一步：
+
+- `PF-P180 - Turnover Ledger Withdraw Durable Idempotency Integration`
+- 移除 expectedFailure 并转绿目标测试。
+- 只实现 withdraw durable idempotency，不迁移其它写路径。
+
+## PF-P180 Withdraw Durable Idempotency Integration
+
+状态：
+
+- verified
+
+范围：
+
+- 只实现 withdraw durable idempotency。
+- 不迁移 confirm、bank row tags、tag selection、relation extra。
+- 不修改 schema、deploy、Traffic Gate 或真实外部服务配置。
+
+执行结果：
+
+- PF-P179 三个 withdraw durable idempotency target tests 已从 `unittest.expectedFailure` 转为普通通过。
+- `TurnoverLedgerWriteFacade.withdraw_relation(..., idempotency_key=...)` 将 idempotency key 和 stable request fingerprint 写入 command。
+- action name 使用 `turnover_relation_withdraw`。
+- withdraw command 仍携带 `expected_versions` 做 stale precondition；request fingerprint 不绑定后端瞬时生成版本，保证 same-key replay 不因 relation 状态变化误判 conflict。
+- Withdraw request boundary 和 HTTP handler 支持 body `idempotency_key` / `idempotencyKey`。
+- Withdraw primary builder 接入现有 Workbench idempotency store boundary；local path 使用 in-memory store 保持测试/开发语义。
+- Withdraw handler 复用 Workbench idempotency conflict/in-progress/failed 409 mapping。
+
+验证：
+
+- PF-P180 RED before implementation：Pass。
+- PF-P180 targeted tests：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（124 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（59 tests）。
+- `git diff --check`：Pass。
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+
+下一步：
+
+- `PF-P180-MG - Turnover Ledger Withdraw Durable Idempotency Cumulative Merge Gate`
+- 统一覆盖 PF-P179 到 PF-P180 的完整 diff。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

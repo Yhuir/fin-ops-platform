@@ -433,6 +433,8 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         emit_persistence_warning: Callable[..., None],
         tenant_id: str,
         persistence_repository_factory: Callable[[Any], Any],
+        postgres_idempotency_store_factory: Callable[[Any], Any],
+        local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
         self._state_store = state_store
         self._queue_repository = queue_repository
@@ -443,6 +445,8 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         self._emit_persistence_warning = emit_persistence_warning
         self._tenant_id = tenant_id
         self._persistence_repository_factory = persistence_repository_factory
+        self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
+        self._local_idempotency_store_provider = local_idempotency_store_provider
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
@@ -461,6 +465,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
                 queue_repository=self._queue_repository,
                 tenant_id=self._tenant_id,
             )
+            idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
             enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
@@ -477,6 +482,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
                 queue_repository=self._queue_repository
             )
+            idempotency_store = self._local_idempotency_store_provider()
         stale_precondition_port = TurnoverLedgerRelationStalePreconditionPort(
             relation_detail_provider=self._routes.get_relation
         )
@@ -488,6 +494,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             bankdetail_port=SimpleNamespace(),
             dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=stale_precondition_port,
+            idempotency_store=idempotency_store,
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
@@ -1027,6 +1034,7 @@ class TurnoverLedgerWithdrawRequestBoundaryFacade:
         actor_id: str,
         tenant_id: str,
         note: str | None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         detail = self._relation_detail_provider(relation_id)
         relation = dict(detail.get("relation") or {})
@@ -1036,7 +1044,8 @@ class TurnoverLedgerWithdrawRequestBoundaryFacade:
                 error_code="system_relation_cannot_withdraw",
                 message="系统自动生成的往来款关系不能直接撤回，请先人工确认或调整银行流水标签。",
             )
-        if str(relation.get("status") or "") == "withdrawn":
+        normalized_idempotency_key = str(idempotency_key or "").strip()
+        if not normalized_idempotency_key and str(relation.get("status") or "") == "withdrawn":
             raise TurnoverLedgerWithdrawRequestBoundaryError(
                 status_code=409,
                 error_code="relation_already_withdrawn",
@@ -1049,14 +1058,17 @@ class TurnoverLedgerWithdrawRequestBoundaryFacade:
             expected_versions[f"relation:{relation_id}"] = int(relation.get("version") or 0)
         except (TypeError, ValueError):
             expected_versions = {}
-        result = self._facade.withdraw_relation(
-            relation_id=relation_id,
-            actor_id=actor_id,
-            tenant_id=tenant_id,
-            note=note,
-            affected_months=affected_months,
-            expected_versions=expected_versions,
-        )
+        withdraw_kwargs = {
+            "relation_id": relation_id,
+            "actor_id": actor_id,
+            "tenant_id": tenant_id,
+            "note": note,
+            "affected_months": affected_months,
+            "expected_versions": expected_versions,
+        }
+        if normalized_idempotency_key:
+            withdraw_kwargs["idempotency_key"] = normalized_idempotency_key
+        result = self._facade.withdraw_relation(**withdraw_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
         return payload
