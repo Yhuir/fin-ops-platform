@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision` |
-| 最近 verified prompt | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
+| 当前阶段 | `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests` |
+| 最近 verified prompt | `PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p109` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision` |
+| 下一条允许任务 | 执行 `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -8117,7 +8117,7 @@ PF-P108-MG 已 verified。先提交本次 post-flight 文档更新并 `git push 
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8150,7 +8150,58 @@ PF-P108-MG 已 verified。先提交本次 post-flight 文档更新并 `git push 
 
 #### 下一条 Prompt 上下文
 
-PF-P109 planned。执行后应根据实际盘点结果选择下一条最小切片；不得直接修改代码。
+PF-P109 盘点结论：
+
+- 五条 Turnover Ledger 写路径均已存在 facade/UoW seam：tag selection、bank row tags batch、relation extra、confirm、withdraw。
+- PostgreSQL path 已经朝 transaction-bound dirty/outbox 收敛：通过 `TurnoverLedgerDirtyOutboxWriter.enqueue_refresh(...)` 调用 `enqueue_read_model_refresh_in_transaction(...)`。
+- `server.py` 仍保留 local/dev/test 兼容路径和 fallback 编排：
+  - `_local_turnover_ledger_tag_selection_connection(...)`
+  - `_local_turnover_ledger_bank_row_tags_connection(...)`
+  - `_local_turnover_ledger_relation_extra_connection(...)`
+  - `_local_turnover_ledger_confirm_connection(...)`
+  - `_local_turnover_ledger_withdraw_connection(...)`
+  - `_local_turnover_ledger_dirty_outbox_writer(...)`
+  - `_persist_turnover_ledger_extras_best_effort(...)`
+  - facade 为 `None` 时的 direct service/routes fallback 与 direct read-model clear/enqueue。
+- 这些 fallback/shim 仍被现有 local-state API tests 使用，不能直接删除；下一步必须先用 characterization tests 锁定当前兼容语义和可清理边界。
+- 下一条 prompt 应生成并审查 `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests`。PF-P110 只应新增/调整测试和文档，不修改 production code，不执行 fallback cleanup。
+
+#### Verification Result
+
+- `git status --short --branch`：Pass，仅包含 PF-P109 文档变更。
+- `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P109|Remaining Write Path Rebaseline|Fallback Cleanup Decision|local transaction shim|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
+
+### PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests
+
+状态：`planned`
+
+#### 范围
+
+- 基于 PF-P109 的盘点结果，新增 Turnover Ledger fallback/local shim characterization tests。
+- 只允许修改 `tests/test_turnover_ledger_api.py` 和相关文档。
+- 不修改 production code，不清理 fallback，不抽离 local transaction shim，不新增 SQL migration。
+
+#### 必须锁定
+
+- facade 可用时，relation extra、confirm、withdraw、tag selection、bank row tags batch 不应触发 handler fallback 的 direct read-model clear/enqueue。
+- facade 不可用时，local fallback 仍保持当前兼容返回、queue enqueue 和 local state store persistence 行为。
+- `_persist_turnover_ledger_extras_best_effort` 的 dedicated state-store path 与 legacy full snapshot fallback 行为。
+- local transaction shim 在 queue/outbox failure 时仍 rollback 对应 local snapshot。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P110 planned。执行后如测试锁定完整，应选择最小 fallback cleanup 或 local shim extraction 切片；不得直接修改 production code 直到 PF-P110 verified。
 
 ## 维护规则
 

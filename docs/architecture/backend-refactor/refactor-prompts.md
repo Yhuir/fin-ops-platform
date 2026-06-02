@@ -21871,6 +21871,135 @@ Post-Flight:
 - PF-P109 边界正确：只做 Turnover Ledger 剩余写路径和 fallback cleanup 重新盘点。
 - 该 prompt 不修改代码、不修改 tests，适合作为 relation extra idempotency 完成后的下一步选择门。
 
+### PF-P109 执行结果
+
+状态：`implemented`
+
+扫描范围：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+Write Path Matrix：
+
+| API | Handler | Facade/UoW 状态 | PostgreSQL path | Local/dev/test path | 剩余风险 |
+| --- | --- | --- | --- | --- | --- |
+| `PUT /api/turnover-ledger/tag-selection` | `_handle_api_turnover_ledger_tag_selection_update` | `TurnoverLedgerWriteFacade.update_tag_selection` | `TurnoverLedgerTagSelectionSettingsAdapter` + transaction-bound dirty/outbox | local settings transaction shim + writer | fallback direct settings update 后仍 direct clear/enqueue；local shim 仍在 `server.py`。 |
+| `POST /api/turnover-ledger/bank-row-tags/batch` | `_handle_api_turnover_ledger_bank_row_tags_batch` | `TurnoverLedgerWriteFacade.update_bank_row_tags_batch` | `TurnoverLedgerBankdetailWritePort` + persistence repository factory + transaction-bound dirty/outbox | local bank row tags transaction shim + local bankdetail port | handler 仍承担 target validation/affected months；fallback direct service path 仍 direct state store/read-model invalidation。 |
+| `PUT /api/turnover-ledger/relations/{id}/extra` | `_handle_api_turnover_ledger_relation_extra_update` | `TurnoverLedgerWriteFacade.update_relation_extra` | extra repository adapter + transaction-bound dirty/outbox + durable-capable idempotency seam | local relation extra transaction shim + in-memory idempotency store | expected_versions/idempotency 已完成；fallback direct route update 和 `_persist_turnover_ledger_extras_best_effort` 仍需测试锁定后再清理。 |
+| `POST /api/turnover-ledger/relations/confirm` | `_handle_api_turnover_ledger_confirm` | `TurnoverLedgerWriteFacade.confirm_relation` | relation write port + persistence repository factory + transaction-bound dirty/outbox | local confirm transaction shim + local relation repository | duplicate/stale path已有覆盖；fallback direct route path 仍保留。 |
+| `POST /api/turnover-ledger/relations/{id}/withdraw` | `_handle_api_turnover_ledger_withdraw` | `TurnoverLedgerWriteFacade.withdraw_relation` | relation write port + persistence repository factory + transaction-bound dirty/outbox + expected_versions | local withdraw transaction shim + local relation repository | handler 仍先读 relation detail 组装 expected_versions；fallback direct route path 仍保留。 |
+
+Residual Server Orchestration：
+
+- local transaction shim 仍集中在 `server.py`：`_local_turnover_ledger_tag_selection_connection`、`_local_turnover_ledger_bank_row_tags_connection`、`_local_turnover_ledger_relation_extra_connection`、`_local_turnover_ledger_confirm_connection`、`_local_turnover_ledger_withdraw_connection`。
+- local ports/repositories 仍集中在 `server.py`：`_local_turnover_ledger_bankdetail_port`、`_local_turnover_ledger_extra_repository`、`_local_turnover_ledger_confirm_relation_repository`、`_local_turnover_ledger_withdraw_relation_repository`。
+- fallback direct calls 仍存在于五个 handler：当 facade 为 `None` 时调用 app settings service、bank transaction category service 或 turnover ledger API routes，再执行 best-effort persistence/read-model clear/enqueue。
+- `_persist_turnover_ledger_extras_best_effort` 仍有 legacy full snapshot fallback；该路径必须先测试锁定，不能直接删除。
+
+Cleanup Decision：
+
+- PostgreSQL production path 已经具备主要 UoW/outbox/idempotency/stale seam，下一步不应继续扩大 production semantics。
+- local/dev/test fallback/shim 是当前测试兼容层，直接删除会破坏既有 API tests 和 local state store 流程。
+- 下一步应先写 characterization tests，锁定：
+  - facade available 时不得触发 direct fallback persistence/read-model clear/enqueue；
+  - facade unavailable 时 local fallback 的兼容返回和 refresh 行为；
+  - `_persist_turnover_ledger_extras_best_effort` 的 dedicated store path 与 legacy full snapshot path；
+  - local shim rollback 行为仍有效。
+
+下一条建议：
+
+- 生成并审查 `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests`。
+- PF-P110 应是 test/docs-only prompt；不得修改 production code，不得开始 fallback cleanup。
+
+验证结果：
+
+- `git status --short --branch`：Pass，仅包含 PF-P109 文档变更。
+- `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+- `git diff --check`：Pass。
+- `rg -n "PF-P109|Remaining Write Path Rebaseline|Fallback Cleanup Decision|local transaction shim|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
+
+## PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的测试与遗留系统安全工程师。你必须用 characterization tests 锁定 Turnover Ledger fallback/local shim 当前行为，不修改生产代码。
+
+Context:
+PF-P109 已 verified。当前 Turnover Ledger 五条写路径都已有 facade/UoW seam，但 `server.py` 仍保留 local/dev/test fallback、local transaction shim 和 best-effort persistence helper。直接清理这些路径会破坏兼容行为，因此本轮只写测试。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P109 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+新增最小 characterization tests，锁定 Turnover Ledger fallback/local shim 行为，为下一步 fallback cleanup 或 local shim extraction 提供安全网。
+
+Required Test Work:
+1. Facade path no direct fallback side effects:
+   - 覆盖至少 relation extra、confirm、withdraw 中一个或多个代表路径。
+   - 当 facade 可用时，必须断言 handler 不调用 direct fallback persistence/read-model clear/enqueue。
+2. Local fallback compatibility:
+   - 当 facade 显式不可用时，锁定当前兼容行为：返回 payload、queue enqueue、local state store persistence。
+3. Relation extra persistence fallback:
+   - 锁定 dedicated `save_turnover_ledger_extras(...)` path。
+   - 锁定缺少 dedicated method 时的 legacy full snapshot fallback。
+4. Local transaction shim rollback:
+   - 至少覆盖一个 local shim 在 queue/outbox failure 时 rollback local snapshot 的行为。
+   - 不允许通过放宽断言绕过已有 rollback 语义。
+
+Allowed Scope:
+- 可以修改：
+  - tests/test_turnover_ledger_api.py
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 UoW/facade/adapters 生产实现。
+- 不得新增 SQL migration。
+- 不得清理 fallback。
+- 不得抽离 local transaction shim。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录新增测试覆盖点和验证结果。
+3. 如果测试通过，将 PF-P110 标记为 implemented；按自动 verified 条件可标记为 verified。
+4. 下一条 prompt 必须基于 PF-P110 的测试结果选择最小 cleanup/extraction 切片。
+```
+
+### 审查结论
+
+- PF-P110 边界正确：test/docs-only，先锁定 fallback/local shim 行为。
+- 该 prompt 不允许修改 production code，避免在没有测试护栏时清理兼容路径。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
