@@ -21321,3 +21321,19 @@ Post-Flight:
 - PF-P103-MG 的边界正确：只覆盖 PF-P101 到 PF-P103 的 relation extra expected_versions 切片。
 - MG 明确不执行 Traffic Gate，不处理 durable idempotency、fallback cleanup 或 local transaction shim。
 - 允许文件白名单与当前 `main...HEAD` diff 一致。
+
+### PF-P103-MG 执行结果
+
+- 状态：`verified`。
+- 分支 `codex/turnover-ledger-next-slice-p101` 已合入 `main`。
+- merge commit：`18fbb887`。
+- MG 覆盖 PF-P101、PF-P102、PF-P103 的完整 diff。
+- 未执行 Traffic Gate、部署、生产配置、Nginx 修改或真实外部服务访问。
+
+main 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一步必须先执行 `git push origin main`。push 完成后，从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 Turnover Ledger prompt。

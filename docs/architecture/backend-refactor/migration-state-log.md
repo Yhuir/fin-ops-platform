@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate` 已合入 main 并 verified，待 push origin/main |
 | 当前 active prompt | `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate` |
 | 最近 verified prompt | `PF-P103 - Turnover Ledger Relation Extra Expected Versions Skeleton` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p101` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass；`git diff --check`：Pass |
-| 下一条允许任务 | 执行 `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate`，统一覆盖 PF-P101 到 PF-P103 |
+| 最近验证 | main 上 `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests；main 上 `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests；main 上 `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
+| 下一条允许任务 | push `origin/main`；push 后从最新 main 新建 `codex/` 分支，再生成下一条 Turnover Ledger prompt |
 
 ## Prompt 执行日志
 
@@ -7809,7 +7809,7 @@ PF-P103 已 verified。下一条必须生成并执行 `PF-P103-MG - Turnover Led
 
 ### PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7828,9 +7828,23 @@ PF-P103 已 verified。下一条必须生成并执行 `PF-P103-MG - Turnover Led
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
 
+#### 执行结果
+
+- 分支 `codex/turnover-ledger-next-slice-p101` 已合入 `main`。
+- merge commit：`18fbb887`。
+- MG 覆盖 PF-P101、PF-P102、PF-P103 的完整 diff。
+- main 上复验通过。
+- 未执行 Traffic Gate、部署、生产配置、Nginx 修改或真实外部服务访问。
+
+#### main 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
 #### 下一条 Prompt 上下文
 
-PF-P103-MG planned。执行时必须先确认当前分支不是 `main`，且 diff 只包含 PF-P101 到 PF-P103 的允许文件。MG 通过后可合入 `main`、在 `main` 上复验并 `git push origin main`；push 完成后必须从最新 `main` 新建下一条 `codex/` 分支。
+PF-P103-MG 已 verified。下一步必须先执行 `git push origin main`。push 完成后，必须从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 Turnover Ledger prompt；不得在 `main` 或旧分支继续开发。
 
 ## 维护规则
 
