@@ -3350,7 +3350,7 @@ PF-P110 边界：
 
 ## PF-P118 Bank Row Tags Local Shim Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3463,6 +3463,23 @@ PF-P110 边界：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- PF-P117/PF-P118/PF-P119 已合并为一个 cumulative slice。
+- `tests/test_turnover_ledger_api.py` 已增加 bank row tags local shim characterization tests。
+- `TurnoverLedgerLocalBankRowTagsConnection`、`TurnoverLedgerLocalBankdetailPort` 已进入 `turnover_ledger_write_adapters.py`。
+- `server.py` 删除 bank row tags local connection/port helper。
+- Branch 和 main 验证均通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate 未执行。
+
+下一步：
+
+- 执行 `git push origin main`。
+- push 后从最新 main 新建分支，并基于剩余 Turnover Ledger 重构清单生成下一条 prompt。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction` |
-| 当前分支 | `codex/turnover-ledger-bank-row-tags-local-shim-p117` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate` |
+| 当前阶段 | `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate` 已合入 main 并验证通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
+| 下一条允许任务 | 执行 `git push origin main`，push 完成后从最新 main 新建下一条 `codex/` 分支并生成下一条 Turnover Ledger prompt |
 
 ## Prompt 执行日志
 
@@ -8449,7 +8449,7 @@ PF-P117/PF-P118/PF-P119 已形成一个可合并切片：bank row tags local shi
 
 ### PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### Gate Scope
 
@@ -8475,6 +8475,32 @@ PF-P117/PF-P118/PF-P119 已形成一个可合并切片：bank row tags local shi
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 执行结果
+
+- 分支：`codex/turnover-ledger-bank-row-tags-local-shim-p117`
+- Merge commit：`0aaf9285`
+- Branch 验证：
+  - `git status --short --branch`：clean on feature branch。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+  - `git diff --name-only main...HEAD`：只包含 PF-P117/PF-P118/PF-P119 允许文件。
+  - `git log --oneline main..HEAD`：只包含 PF-P117、PF-P118、PF-P119、PF-P119-MG 相关提交。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `main` 验证：
+  - `git status --short --branch`：`main...origin/main [ahead 8]`，无 dirty changes。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate：未执行；本 MG 不部署、不切流、不访问生产。
+
+#### 下一条 Prompt 上下文
+
+PF-P119-MG 已合入 main 并通过 main 验证。下一步先提交本次 post-flight 文档并执行 `git push origin main`；push 完成后必须从最新 main 新建 `codex/` 分支，再根据 Turnover Ledger 剩余重构清单生成下一条 prompt。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
