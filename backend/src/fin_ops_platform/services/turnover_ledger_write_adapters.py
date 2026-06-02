@@ -4,6 +4,9 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, Callable
 
+from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
+from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
+
 
 class TurnoverLedgerExtraRepositoryAdapter:
     def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
@@ -190,6 +193,354 @@ class TurnoverLedgerTagSelectionLegacyFallbackAdapterSet:
         self._enqueue_refresh(
             list(scope_keys or []),
             reason="turnover_ledger_tag_selection_changed",
+        )
+
+
+class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        queue_repository: Any,
+        app_settings_service: Any,
+        refresh_snapshot: Callable[[dict[str, object]], None],
+        tenant_id: str,
+        postgres_settings_repository_factory: Callable[[Any], Any],
+    ) -> None:
+        self._state_store = state_store
+        self._queue_repository = queue_repository
+        self._app_settings_service = app_settings_service
+        self._refresh_snapshot = refresh_snapshot
+        self._tenant_id = tenant_id
+        self._postgres_settings_repository_factory = postgres_settings_repository_factory
+
+    def build(self) -> TurnoverLedgerWriteFacade | None:
+        storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            connection = getattr(self._state_store, "_connection", None)
+            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            settings_port = TurnoverLedgerTagSelectionSettingsAdapter(
+                repository_factory=self._postgres_settings_repository_factory
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=self._queue_repository,
+                tenant_id=self._tenant_id,
+            )
+        else:
+            local_adapters = TurnoverLedgerLocalTagSelectionAdapterSet(
+                state_store=self._state_store,
+                app_settings_service=self._app_settings_service,
+                refresh_snapshot=self._refresh_snapshot,
+            )
+            connection = local_adapters.connection()
+            settings_port = local_adapters.settings_writer()
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
+                queue_repository=self._queue_repository
+            )
+        uow = TurnoverLedgerWriteUnitOfWork(
+            connection=connection,
+            relation_repository=SimpleNamespace(),
+            extra_repository=SimpleNamespace(),
+            settings_port=settings_port,
+            bankdetail_port=SimpleNamespace(),
+            dirty_outbox_writer=dirty_outbox_writer,
+            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+        )
+        return TurnoverLedgerWriteFacade(
+            uow=uow,
+            app_settings_service=self._app_settings_service,
+        )
+
+
+class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        queue_repository: Any,
+        relation_service: Any,
+        routes: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        replace_snapshot: Callable[[dict[str, object]], None],
+        emit_persistence_warning: Callable[..., None],
+        tenant_id: str,
+        persistence_repository_factory: Callable[[Any], Any],
+    ) -> None:
+        self._state_store = state_store
+        self._queue_repository = queue_repository
+        self._relation_service = relation_service
+        self._routes = routes
+        self._bank_rows_provider = bank_rows_provider
+        self._replace_snapshot = replace_snapshot
+        self._emit_persistence_warning = emit_persistence_warning
+        self._tenant_id = tenant_id
+        self._persistence_repository_factory = persistence_repository_factory
+
+    def build(self) -> TurnoverLedgerWriteFacade | None:
+        storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            connection = getattr(self._state_store, "_connection", None)
+            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            relation_repository = TurnoverLedgerRelationWritePort(
+                relation_service=self._relation_service,
+                routes=self._routes,
+                bank_rows_provider=self._bank_rows_provider,
+                persistence_repository_factory=self._persistence_repository_factory,
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=self._queue_repository,
+                tenant_id=self._tenant_id,
+            )
+        else:
+            enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+            if not callable(enqueue):
+                return None
+            local_adapters = TurnoverLedgerLocalWithdrawRelationAdapterSet(
+                state_store=self._state_store,
+                relation_service=self._relation_service,
+                routes=self._routes,
+                replace_snapshot=self._replace_snapshot,
+                emit_persistence_warning=self._emit_persistence_warning,
+            )
+            connection = local_adapters.connection()
+            relation_repository = local_adapters.relation_repository()
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
+                queue_repository=self._queue_repository
+            )
+        uow = TurnoverLedgerWriteUnitOfWork(
+            connection=connection,
+            relation_repository=relation_repository,
+            extra_repository=SimpleNamespace(),
+            settings_port=SimpleNamespace(),
+            bankdetail_port=SimpleNamespace(),
+            dirty_outbox_writer=dirty_outbox_writer,
+            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+        )
+        return TurnoverLedgerWriteFacade(uow=uow)
+
+
+class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        queue_repository: Any,
+        relation_service: Any,
+        routes: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        replace_snapshot: Callable[[dict[str, object]], None],
+        emit_persistence_warning: Callable[..., None],
+        tenant_id: str,
+        persistence_repository_factory: Callable[[Any], Any],
+    ) -> None:
+        self._state_store = state_store
+        self._queue_repository = queue_repository
+        self._relation_service = relation_service
+        self._routes = routes
+        self._bank_rows_provider = bank_rows_provider
+        self._replace_snapshot = replace_snapshot
+        self._emit_persistence_warning = emit_persistence_warning
+        self._tenant_id = tenant_id
+        self._persistence_repository_factory = persistence_repository_factory
+
+    def build(self) -> TurnoverLedgerWriteFacade | None:
+        storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            connection = getattr(self._state_store, "_connection", None)
+            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            relation_repository = TurnoverLedgerRelationWritePort(
+                relation_service=self._relation_service,
+                routes=self._routes,
+                bank_rows_provider=self._bank_rows_provider,
+                persistence_repository_factory=self._persistence_repository_factory,
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=self._queue_repository,
+                tenant_id=self._tenant_id,
+            )
+        else:
+            enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+            if not callable(enqueue):
+                return None
+            local_adapters = TurnoverLedgerLocalConfirmRelationAdapterSet(
+                state_store=self._state_store,
+                relation_service=self._relation_service,
+                routes=self._routes,
+                bank_rows_provider=self._bank_rows_provider,
+                replace_snapshot=self._replace_snapshot,
+                emit_persistence_warning=self._emit_persistence_warning,
+            )
+            connection = local_adapters.connection()
+            relation_repository = local_adapters.relation_repository()
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
+                queue_repository=self._queue_repository
+            )
+        uow = TurnoverLedgerWriteUnitOfWork(
+            connection=connection,
+            relation_repository=relation_repository,
+            extra_repository=SimpleNamespace(),
+            settings_port=SimpleNamespace(),
+            bankdetail_port=SimpleNamespace(),
+            dirty_outbox_writer=dirty_outbox_writer,
+            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+        )
+        return TurnoverLedgerWriteFacade(uow=uow)
+
+
+class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        queue_repository: Any,
+        category_service: Any,
+        relation_service: Any,
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        replace_category_snapshot: Callable[[dict[str, object]], None],
+        replace_relation_snapshot: Callable[[dict[str, object]], None],
+        emit_persistence_warning: Callable[..., None],
+        tenant_id: str,
+        persistence_repository_factory: Callable[[Any], Any],
+    ) -> None:
+        self._state_store = state_store
+        self._queue_repository = queue_repository
+        self._category_service = category_service
+        self._relation_service = relation_service
+        self._bank_rows_provider = bank_rows_provider
+        self._replace_category_snapshot = replace_category_snapshot
+        self._replace_relation_snapshot = replace_relation_snapshot
+        self._emit_persistence_warning = emit_persistence_warning
+        self._tenant_id = tenant_id
+        self._persistence_repository_factory = persistence_repository_factory
+
+    def build(self) -> TurnoverLedgerWriteFacade | None:
+        storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            connection = getattr(self._state_store, "_connection", None)
+            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            bankdetail_port = TurnoverLedgerBankdetailWritePort(
+                category_service=self._category_service,
+                relation_service=self._relation_service,
+                bank_rows_provider=self._bank_rows_provider,
+                persistence_repository_factory=self._persistence_repository_factory,
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=self._queue_repository,
+                tenant_id=self._tenant_id,
+            )
+        else:
+            enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+            if not callable(enqueue):
+                return None
+            local_adapters = TurnoverLedgerLocalBankRowTagsAdapterSet(
+                state_store=self._state_store,
+                category_service=self._category_service,
+                relation_service=self._relation_service,
+                bank_rows_provider=self._bank_rows_provider,
+                replace_category_snapshot=self._replace_category_snapshot,
+                replace_relation_snapshot=self._replace_relation_snapshot,
+                emit_persistence_warning=self._emit_persistence_warning,
+            )
+            connection = local_adapters.connection()
+            bankdetail_port = local_adapters.bankdetail_port()
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
+                queue_repository=self._queue_repository
+            )
+        uow = TurnoverLedgerWriteUnitOfWork(
+            connection=connection,
+            relation_repository=SimpleNamespace(),
+            extra_repository=SimpleNamespace(),
+            settings_port=SimpleNamespace(),
+            bankdetail_port=bankdetail_port,
+            dirty_outbox_writer=dirty_outbox_writer,
+            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+        )
+        return TurnoverLedgerWriteFacade(uow=uow)
+
+
+class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        queue_repository: Any,
+        routes: Any,
+        replace_snapshot: Callable[[dict[str, object]], None],
+        emit_persistence_warning: Callable[..., None],
+        extra_service: Any,
+        row_provider: Callable[..., dict[str, object] | None],
+        tenant_id: str,
+        postgres_extra_repository_factory: Callable[[Any], Any],
+        postgres_idempotency_store_factory: Callable[[Any], Any],
+        local_idempotency_store_provider: Callable[[], Any],
+    ) -> None:
+        self._state_store = state_store
+        self._queue_repository = queue_repository
+        self._routes = routes
+        self._replace_snapshot = replace_snapshot
+        self._emit_persistence_warning = emit_persistence_warning
+        self._extra_service = extra_service
+        self._row_provider = row_provider
+        self._tenant_id = tenant_id
+        self._postgres_extra_repository_factory = postgres_extra_repository_factory
+        self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
+        self._local_idempotency_store_provider = local_idempotency_store_provider
+
+    def build(self) -> TurnoverLedgerWriteFacade | None:
+        storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
+        if storage_backend == "postgres":
+            connection = getattr(self._state_store, "_connection", None)
+            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+            if connection is None or not callable(enqueue_in_transaction):
+                return None
+            extra_repository = TurnoverLedgerExtraRepositoryAdapter(
+                repository_factory=self._postgres_extra_repository_factory
+            )
+            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
+                queue_repository=self._queue_repository,
+                tenant_id=self._tenant_id,
+            )
+            idempotency_store = self._postgres_idempotency_store_factory(connection)
+        else:
+            enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+            if not callable(enqueue):
+                return None
+            local_adapters = TurnoverLedgerLocalRelationExtraAdapterSet(
+                state_store=self._state_store,
+                routes=self._routes,
+                replace_snapshot=self._replace_snapshot,
+                emit_persistence_warning=self._emit_persistence_warning,
+            )
+            connection = local_adapters.connection()
+            extra_repository = local_adapters.extra_repository()
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
+                queue_repository=self._queue_repository
+            )
+            idempotency_store = self._local_idempotency_store_provider()
+        uow = TurnoverLedgerWriteUnitOfWork(
+            connection=connection,
+            relation_repository=SimpleNamespace(),
+            extra_repository=extra_repository,
+            settings_port=SimpleNamespace(),
+            bankdetail_port=SimpleNamespace(),
+            dirty_outbox_writer=dirty_outbox_writer,
+            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+            idempotency_store=idempotency_store,
+        )
+        return TurnoverLedgerWriteFacade(
+            uow=uow,
+            extra_normalizer=TurnoverLedgerExtraNormalizerAdapter(
+                extra_service=self._extra_service,
+            ),
+            row_provider=self._row_provider,
         )
 
 

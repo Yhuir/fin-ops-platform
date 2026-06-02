@@ -870,6 +870,71 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("settings_snapshot_provider=lambda", source)
         self.assertNotIn("save_snapshot = lambda", source)
 
+    def test_turnover_ledger_primary_write_facades_no_longer_construct_uow_in_server(self) -> None:
+        methods = [
+            Application._turnover_ledger_relation_extra_write_facade,
+            Application._turnover_ledger_bank_row_tags_write_facade,
+            Application._turnover_ledger_confirm_write_facade,
+            Application._turnover_ledger_withdraw_write_facade,
+            Application._turnover_ledger_tag_selection_write_facade,
+        ]
+
+        for method in methods:
+            with self.subTest(method=method.__name__):
+                source = inspect.getsource(method)
+                self.assertIn("state_store = getattr(self, \"_state_store\", None)", source)
+                self.assertIn("queue_repository = getattr(getattr(self, \"_runtime_repositories\", None), \"queue_repository\", None)", source)
+                self.assertNotIn("TurnoverLedgerWriteUnitOfWork(", source)
+
+    def test_turnover_ledger_primary_write_facades_no_longer_inline_placeholder_ports_or_default_stale_precondition(self) -> None:
+        relation_extra_source = inspect.getsource(Application._turnover_ledger_relation_extra_write_facade)
+        self.assertNotIn("relation_repository=SimpleNamespace()", relation_extra_source)
+        self.assertNotIn("settings_port=SimpleNamespace()", relation_extra_source)
+        self.assertNotIn("bankdetail_port=SimpleNamespace()", relation_extra_source)
+        self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", relation_extra_source)
+
+    def test_turnover_ledger_tag_selection_primary_write_facade_uses_builder_boundary(self) -> None:
+        tag_selection_source = inspect.getsource(Application._turnover_ledger_tag_selection_write_facade)
+        self.assertIn("TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder(", tag_selection_source)
+        self.assertNotIn("TurnoverLedgerWriteUnitOfWork(", tag_selection_source)
+        self.assertNotIn("relation_repository=SimpleNamespace()", tag_selection_source)
+        self.assertNotIn("extra_repository=SimpleNamespace()", tag_selection_source)
+        self.assertNotIn("bankdetail_port=SimpleNamespace()", tag_selection_source)
+
+    def test_turnover_ledger_withdraw_primary_write_facade_uses_builder_boundary(self) -> None:
+        withdraw_source = inspect.getsource(Application._turnover_ledger_withdraw_write_facade)
+        self.assertIn("TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder(", withdraw_source)
+        self.assertNotIn("TurnoverLedgerWriteUnitOfWork(", withdraw_source)
+        self.assertNotIn("extra_repository=SimpleNamespace()", withdraw_source)
+        self.assertNotIn("settings_port=SimpleNamespace()", withdraw_source)
+        self.assertNotIn("bankdetail_port=SimpleNamespace()", withdraw_source)
+
+    def test_turnover_ledger_confirm_primary_write_facade_uses_builder_boundary(self) -> None:
+        confirm_source = inspect.getsource(Application._turnover_ledger_confirm_write_facade)
+        self.assertIn("TurnoverLedgerConfirmPrimaryWriteFacadeBuilder(", confirm_source)
+        self.assertNotIn("TurnoverLedgerWriteUnitOfWork(", confirm_source)
+        self.assertNotIn("extra_repository=SimpleNamespace()", confirm_source)
+        self.assertNotIn("settings_port=SimpleNamespace()", confirm_source)
+        self.assertNotIn("bankdetail_port=SimpleNamespace()", confirm_source)
+
+    def test_turnover_ledger_bank_row_tags_primary_write_facade_uses_builder_boundary(self) -> None:
+        bank_row_tags_source = inspect.getsource(Application._turnover_ledger_bank_row_tags_write_facade)
+        self.assertIn("TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder(", bank_row_tags_source)
+        self.assertNotIn("TurnoverLedgerWriteUnitOfWork(", bank_row_tags_source)
+        self.assertNotIn("relation_repository=SimpleNamespace()", bank_row_tags_source)
+        self.assertNotIn("extra_repository=SimpleNamespace()", bank_row_tags_source)
+        self.assertNotIn("settings_port=SimpleNamespace()", bank_row_tags_source)
+
+    def test_turnover_ledger_relation_extra_primary_write_facade_uses_builder_boundary(self) -> None:
+        relation_extra_source = inspect.getsource(Application._turnover_ledger_relation_extra_write_facade)
+        self.assertIn("TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder(", relation_extra_source)
+        self.assertNotIn("TurnoverLedgerWriteUnitOfWork(", relation_extra_source)
+        self.assertNotIn("relation_repository=SimpleNamespace()", relation_extra_source)
+        self.assertNotIn("settings_port=SimpleNamespace()", relation_extra_source)
+        self.assertNotIn("bankdetail_port=SimpleNamespace()", relation_extra_source)
+        self.assertNotIn("_workbench_write_idempotency_store(", relation_extra_source)
+        self.assertNotIn("InMemoryWorkbenchIdempotencyRepository()", relation_extra_source)
+
     def test_turnover_ledger_tag_selection_fallback_adapter_keeps_legacy_update_and_refresh(self) -> None:
         # PF-P123 target: unsupported postgres queue API uses explicit fallback adapter, not handler direct side effects.
         with TemporaryDirectory() as temp_dir:
