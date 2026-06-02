@@ -23078,6 +23078,25 @@ Post-Flight:
 - PF-P117 边界正确：只做 bank row tags local shim discovery/planning 和文档回写。
 - 该 prompt 不修改 production code、不修改 tests、不执行 Traffic Gate。
 
+### PF-P117 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- Bank Row Tags Local Shim Inventory：
+  - local path 使用 `_local_turnover_ledger_bank_row_tags_connection(...)`、`_local_turnover_ledger_bankdetail_port(...)` 和 `TurnoverLedgerLocalDirtyOutboxWriter`。
+  - local connection 捕获 bank category snapshot 与 turnover relation snapshot；failure path restore 并保存 previous snapshots，success path 保存 current snapshots。
+  - local bankdetail port 直接调用 category service apply，再调用 relation service rebuild。
+  - facade None fallback 仍在 handler 中直接 apply category、save category snapshot、rebuild relation、直接 clear/enqueue read model。
+- Characterization Test Gap：
+  - 需要显式断言 local facade queue failure 同时 rollback/save previous relation snapshot。
+  - 需要显式断言 local facade success 保存 category 与 relation snapshots。
+  - 需要锁定 local bankdetail port apply -> relation rebuild 顺序。
+  - 需要锁定 facade None fallback 的 legacy direct side effects。
+- 下一条建议：生成 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`，只补 tests 和文档，不修改 production code。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

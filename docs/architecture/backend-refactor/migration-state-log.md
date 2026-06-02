@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` |
-| 最近 verified prompt | `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate` |
+| 当前阶段 | `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` 已执行并验证通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` |
 | 当前分支 | `codex/turnover-ledger-bank-row-tags-local-shim-p117` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning` |
+| 下一条允许任务 | 生成并审查 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -8258,7 +8258,7 @@ PF-P116-MG 已合入 main 并通过 main 验证。下一步先提交本次 post-
 
 ### PF-P117 - Turnover Ledger Bank Row Tags Local Shim Discovery and Characterization Planning
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8281,6 +8281,67 @@ PF-P116-MG 已合入 main 并通过 main 验证。下一步先提交本次 post-
 - `git ls-files --others --exclude-standard`
 - `git diff --check`
 - `rg -n "PF-P117|Bank Row Tags Local Shim|bank row tags local" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 执行结果
+
+##### Bank Row Tags Local Shim Inventory
+
+- `_turnover_ledger_bank_row_tags_write_facade(...)` 的 local path 仍在 `server.py` 内组装：
+  - `_local_turnover_ledger_bank_row_tags_connection(state_store)`；
+  - `_local_turnover_ledger_bankdetail_port()`；
+  - `TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)`。
+- `_local_turnover_ledger_bank_row_tags_connection(...)` 捕获两个 snapshot：
+  - `_bank_transaction_category_service.snapshot()`；
+  - `_turnover_relation_service.snapshot()`。
+- local transaction failure path：
+  - restore bank category snapshot；
+  - restore turnover relation snapshot；
+  - save previous category snapshot to state_store；
+  - save previous relation snapshot to state_store；
+  - re-raise。
+- local transaction success path：
+  - save current bank category snapshot；
+  - save current turnover relation snapshot。
+- `_local_turnover_ledger_bankdetail_port(...)` 直接调用：
+  - `_bank_transaction_category_service.apply_turnover_updates(...)`；
+  - `_turnover_relation_service.rebuild_from_bank_rows(_turnover_bank_transaction_rows())`。
+- handler facade None fallback 仍直接执行：
+  - `apply_turnover_updates(...)`；
+  - `state_store.save_bank_transaction_categories(...)`；
+  - `rebuild_from_bank_rows(...)`；
+  - `_after_turnover_relation_mutation(affected_months)`，包含 direct read model clear/enqueue。
+
+##### Runtime Sequence
+
+- PostgreSQL facade path：handler validate target rows -> calculate affected months -> facade -> `TurnoverLedgerBankdetailWritePort` -> category update + relation rebuild + persistence repository save -> transaction-bound dirty/outbox。
+- Local facade path：handler validate target rows -> calculate affected months -> facade -> local connection snapshot transaction -> local bankdetail port apply category update + relation rebuild -> local dirty/outbox enqueue -> transaction success saves category/relation snapshots。
+- Local facade queue failure path：category/relation mutate first -> dirty/outbox enqueue raises -> local connection restores and saves previous category/relation snapshots -> exception propagates。
+- Facade None fallback path：handler apply category update directly -> after success save category snapshot -> rebuild relation snapshot -> `_after_turnover_relation_mutation(...)` clears/enqueues read models directly。该路径是 legacy/local compatibility，不是目标架构。
+
+##### Characterization Test Gap
+
+- 已有覆盖：
+  - facade None queue failure currently happens after category save；
+  - target local facade queue failure rolls back category save；
+  - target local/postgres facade path does not directly clear read model；
+  - bank row tags facade uses explicit bankdetail port；
+  - bankdetail write port rejects Application god object and persists categories/relations through explicit repository。
+- 缺口：
+  - local facade queue failure 还没有显式断言 relation snapshot 也被 rollback/save previous；
+  - local facade success 还没有显式断言 category snapshot 与 relation snapshot 都通过 state_store 保存；
+  - local bankdetail port 的 apply -> relation rebuild 顺序未被独立锁定；
+  - facade None fallback 的 direct save/rebuild/enqueue 行为只部分锁定，抽离前应明确它是 legacy compatibility，不应被 adapter extraction 误删。
+
+##### Extraction Risk
+
+- 该路径跨 Turnover Ledger 与 Bankdetail/category service，不能把 Bankdetail 业务规则搬进 Turnover adapter。
+- 抽离时 adapter 必须接收 category service、relation service、bank rows provider、snapshot save/restore callbacks 等明确依赖，不能接收 `Application`。
+- state_store save order 和 relation rebuild timing 会影响测试语义。
+- affected_months 仍应由 handler HTTP mapping 层计算并传入 facade；adapter 不应读取 request/header/cookie。
+
+#### 下一条 Prompt 上下文
+
+PF-P117 已确认 bank row tags local shim 仍需测试锁定后再抽离。下一条应生成并审查 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`，只补 tests 和文档，不修改 production code。PF-P118 应重点覆盖 local facade relation rollback、local success save category/relation snapshots、local bankdetail port update/rebuild 顺序、facade None fallback legacy direct side effects。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

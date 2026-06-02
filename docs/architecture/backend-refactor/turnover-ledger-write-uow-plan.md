@@ -3212,7 +3212,7 @@ PF-P110 边界：
 
 ## PF-P116 Tag Selection Local Adapter Extraction
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3324,6 +3324,29 @@ PF-P110 边界：
 - `git ls-files --others --exclude-standard`
 - `git diff --check`
 - `rg -n "PF-P117|Bank Row Tags Local Shim|bank row tags local" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+- Bank Row Tags Local Shim Inventory：
+  - `_turnover_ledger_bank_row_tags_write_facade(...)` 的 local path 仍在 `server.py` 组装 local connection、local bankdetail port 和 local dirty/outbox writer。
+  - `_local_turnover_ledger_bank_row_tags_connection(...)` 捕获 bank category snapshot 与 turnover relation snapshot；failure path restore/save previous snapshots；success path save current snapshots。
+  - `_local_turnover_ledger_bankdetail_port(...)` 直接调用 category service apply，再调用 relation rebuild。
+  - handler facade None fallback 仍直接 apply category、save category snapshot、rebuild relation、clear/enqueue read model，是 legacy/local compatibility。
+- 已有测试覆盖：
+  - facade None queue failure currently happens after category save；
+  - target facade queue failure rolls back category save；
+  - target facade path does not directly clear read model；
+  - UoW/facade bankdetail port contract。
+- 测试缺口：
+  - local facade queue failure 未显式断言 relation snapshot rollback/save previous；
+  - local facade success 未显式断言 category/relation snapshots 都保存；
+  - local bankdetail port apply -> relation rebuild 顺序未锁定；
+  - facade None fallback direct side effects 需作为 legacy compatibility 明确锁定。
+
+下一步：
+
+- 生成 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`。
+- PF-P118 只补 tests 和文档，不修改 production code。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
