@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` 已完成并验证 |
-| 当前 active prompt | `PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction` 已生成并审查，待执行 |
-| 最近 verified prompt | `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` |
+| 当前阶段 | `PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction` 已完成并验证 |
+| 当前 active prompt | `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate` 已生成并审查，待执行 |
+| 最近 verified prompt | `PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction` |
 | 当前分支 | `codex/turnover-ledger-rebaseline-p134` |
-| 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；PF-P134 关键词检查：Pass |
-| 下一条允许任务 | 执行 `PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
+| 下一条允许任务 | 执行 `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -9670,7 +9670,7 @@ PF-P134 结论：下一条最小实现 prompt 应为 `PF-P135 - Turnover Ledger 
 
 ### PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -9700,6 +9700,46 @@ PF-P134 结论：下一条最小实现 prompt 应为 `PF-P135 - Turnover Ledger 
 - `git diff --check`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 执行摘要
+
+- 已新增 `TurnoverLedgerLocalTagSelectionAdapterSet`，将 tag selection local path 的 snapshot/save/refresh 组装从 `server.py` 移入 adapter module。
+- `server.py` 的 `_turnover_ledger_tag_selection_write_facade(...)` 不再直接内联 `settings_snapshot_provider=lambda ...` 与 `save_snapshot = lambda ...`。
+- 新增 source-level guard test，锁定 tag selection write facade 不再内联 local snapshot closures。
+- 原有 tag selection 行为保持不变：handler-thinness、queue failure rollback、fallback facade、version conflict、no direct clear 全部继续通过。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+PF-P134 + PF-P135 已形成一个完整的小切片：rebaseline -> local adapter extraction。下一步应生成 `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate`，统一覆盖该组 diff。
+
+### PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 统一覆盖 PF-P134、PF-P135。
+- 只处理 Turnover Ledger tag selection local adapter 小切片。
+
+#### 必须检查
+
+- diff 只能包含：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- merge 后必须在 `main` 上重跑 tag selection 所在的 `tests.test_turnover_ledger_api` 与 compileall。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

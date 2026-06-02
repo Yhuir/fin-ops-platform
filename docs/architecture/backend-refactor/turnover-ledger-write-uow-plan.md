@@ -4382,6 +4382,19 @@ Remaining write path matrix：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
+执行结果：
+
+- 已新增 `TurnoverLedgerLocalTagSelectionAdapterSet`。
+- `server.py` 不再内联 local snapshot/save closures。
+- 新增 guard test：`test_turnover_ledger_tag_selection_write_facade_does_not_inline_local_snapshot_closures`。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一步：
+
+- 进入 `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate`。
+- 本组切片统一覆盖 PF-P134 / PF-P135。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

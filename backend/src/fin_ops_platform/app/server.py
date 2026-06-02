@@ -283,6 +283,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationConnection,
     TurnoverLedgerLocalRelationRepository,
     TurnoverLedgerLocalRelationExtraConnection,
+    TurnoverLedgerLocalTagSelectionAdapterSet,
     TurnoverLedgerLocalTagSelectionConnection,
     TurnoverLedgerLocalTagSelectionSettingsWriter,
     TurnoverLedgerConfirmLegacyFallbackFacade,
@@ -3045,18 +3046,13 @@ class Application:
                 tenant_id=self._workbench_reconciliation_tenant_id(),
             )
         else:
-            save_snapshot = lambda snapshot: state_store.save_app_settings(dict(snapshot))
-            connection = TurnoverLedgerLocalTagSelectionConnection(
-                settings_snapshot_provider=lambda: dict(
-                    getattr(self._app_settings_service, "_snapshot", {}) or {}
-                ),
-                save_snapshot=save_snapshot,
+            local_adapters = TurnoverLedgerLocalTagSelectionAdapterSet(
+                state_store=state_store,
+                app_settings_service=self._app_settings_service,
                 refresh_snapshot=self._refresh_local_app_settings_snapshot,
             )
-            settings_port = TurnoverLedgerLocalTagSelectionSettingsWriter(
-                save_snapshot=save_snapshot,
-                refresh_snapshot=self._refresh_local_app_settings_snapshot,
-            )
+            connection = local_adapters.connection()
+            settings_port = local_adapters.settings_writer()
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
