@@ -9228,7 +9228,7 @@ PF-P130 已完成 bank row tags legacy fallback facade extraction：
 
 ### PF-P130-MG - Turnover Ledger Bank Row Tags Fallback Cleanup Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -9258,7 +9258,28 @@ PF-P130 已完成 bank row tags legacy fallback facade extraction：
 
 #### 下一条 Prompt 上下文
 
-TBD。
+执行结果：
+
+- Branch scope：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+  - `git diff --name-only main...HEAD`：只包含 PF-P128/PF-P129/PF-P130 允许文件。
+  - `git log --oneline main..HEAD`：只包含 bank row tags fallback cleanup discovery/tests/extraction/MG 相关提交。
+- Branch verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Merge：
+  - 已将 `codex/turnover-ledger-bank-row-tags-fallback-p128` 合入 `main`。
+  - Merge commit：`5b85a506`。
+- Main verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
+
+下一步先提交本次 post-flight 文档并执行 `git push origin main`。push 完成后必须从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 prompt；不得在 `main` 或旧分支继续开发。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

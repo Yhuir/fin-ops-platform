@@ -24947,6 +24947,27 @@ Post-Flight:
 - 允许文件白名单与本切片实际涉及文件一致。
 - MG 明确不执行 Traffic Gate、不部署、不访问生产。
 
+### PF-P130-MG 执行结果
+
+- 状态：`verified`
+- 分支：`codex/turnover-ledger-bank-row-tags-fallback-p128`
+- Merge commit：`5b85a506`
+- 分支验证：
+  - `git status --short --branch`：clean on feature branch
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `git diff --name-only main...HEAD`：只包含 PF-P128/PF-P129/PF-P130 允许文件
+  - `git log --oneline main..HEAD`：只包含 bank row tags fallback cleanup 相关提交
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- `main` 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- Traffic Gate：未执行；未部署、未切流、未访问生产。
+- 下一步：提交本次 post-flight 文档并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
