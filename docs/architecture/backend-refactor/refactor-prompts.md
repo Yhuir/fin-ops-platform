@@ -23436,7 +23436,7 @@ Post-Flight:
 
 ## PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning
 
-状态：`planned`
+状态：`verified`
 
 ```text
 /goal
@@ -23525,6 +23525,21 @@ Post-Flight:
 
 - PF-P120 边界正确：只做 Turnover Ledger facade None fallback 与 handler thinness discovery/planning。
 - 该 prompt 不修改 production code、不修改 tests、不删除 fallback、不执行 Traffic Gate。
+
+### PF-P120 执行结果
+
+- Facade None fallback 当前覆盖 tag selection update、bank row tags batch、relation extra update、confirm relation、withdraw relation。
+- 所有 fallback 暂时保留；它们仍承担 local/dev/test compatibility 或 dependency-missing fallback。
+- handler 可保留 HTTP mapping、session/auth、JSON parsing 和 response packaging；direct service mutation、snapshot persistence、read model clear/enqueue、relation rebuild、Workbench/Bankdetail invalidation orchestration 应继续迁出。
+- 当前测试已覆盖一部分 queue failure / rollback / facade override 行为，但缺少 tag selection、relation extra、confirm relation、withdraw relation 的 facade None success characterization，以及 bank row tags dependency-missing fallback characterization。
+- 下一条最小 prompt：`PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests`，只补 tests 和文档，不修改 production code，不删除 fallback。
+
+Verification：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P120|Facade None Fallback|Handler Thinness" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 

@@ -3483,7 +3483,7 @@ PF-P110 边界：
 
 ## PF-P120 Facade None Fallback Rebaseline and Handler Thinness Planning
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3511,6 +3511,46 @@ PF-P110 边界：
 - `git ls-files --others --exclude-standard`
 - `git diff --check`
 - `rg -n "PF-P120|Facade None Fallback|Handler Thinness" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+### Facade None Fallback Matrix
+
+| 写入口 | fallback 触发条件 | direct side effects | 当前测试覆盖 | 目标架构状态 |
+| --- | --- | --- | --- | --- |
+| tag selection update | facade construction 因 `state_store`、`queue_repository` 或 queue API 缺失返回 `None`。 | 直接调用 `AppSettingsService.update_turnover_ledger_tag_selection(...)`，再 clear Turnover Ledger read model 并 enqueue refresh。 | 已覆盖 UoW/local facade queue rollback 和 no direct clear；未覆盖 facade None 正向 fallback。 | 暂留 local/dev/test compatibility；先补 tests，再推动稳定 local facade construction。 |
+| bank row tags batch | facade construction 依赖缺失返回 `None`，或显式 monkeypatch 为 `None`。 | 直接 apply bank category、save category snapshot、rebuild relation、执行 `_after_turnover_relation_mutation(...)`。 | 已覆盖显式 facade None direct side effects、local facade success/rollback；缺少 dependency-missing fallback。 | 已接近可 cleanup，但需要先区分 override None 与 dependency missing。 |
+| relation extra update | facade construction 依赖缺失返回 `None`，或显式 monkeypatch 为 `None`。 | 直接 route update extra、best-effort persist extra、clear read model、enqueue refresh。 | 已覆盖 queue failure after direct update、facade path skips legacy side effects、target rollback；缺少 facade None success characterization。 | 暂留，先补正向 fallback tests。 |
+| confirm relation | facade construction 依赖缺失返回 `None`，或 override 属性存在且为 `None`。 | 直接 rebuild relation、route confirm、执行 `_after_turnover_relation_mutation(...)`。 | 已覆盖 queue failure after direct confirm、target rollback、facade override skips after-mutation、Postgres facade readiness；缺少 facade None success characterization。 | 暂留，后续按测试锁定再 cleanup。 |
+| withdraw relation | facade construction 依赖缺失返回 `None`，或 override 属性存在且为 `None`。 | 直接 route withdraw、执行 `_after_turnover_relation_mutation(...)`。 | 已覆盖 queue failure after direct withdraw、target rollback、facade override skips after-mutation、Postgres facade readiness；缺少 facade None success characterization。 | 暂留，后续按测试锁定再 cleanup。 |
+
+### Handler Thinness Gap
+
+- handler 可保留：session/auth、JSON parsing、HTTP status mapping、response packaging、简单 body shape 校验。
+- handler 应迁出：facade construction failure policy、local direct mutation、snapshot persistence、read model clear/enqueue、Workbench/Bankdetail invalidation orchestration、relation rebuild sequencing。
+- `_after_turnover_relation_mutation(...)` 仍是跨模块副作用聚合点，长期应收敛到 facade/application service 或专门 invalidation adapter。
+
+### Compatibility Decision
+
+- 所有 `facade is None` fallback 当前都先保留。
+- 删除 fallback 前必须先补 characterization tests，且测试要区分：
+  - 显式 override None。
+  - dependency missing / unsupported queue API 导致 construction None。
+- 下一步不改 production code，先补 fallback tests。
+
+### Characterization Test Gap
+
+- tag selection：缺少 facade None success fallback 的 direct update、clear、enqueue 断言。
+- relation extra：缺少 facade None success fallback 的 direct update、persist、clear、enqueue 断言。
+- confirm relation：缺少 facade None success fallback 的 rebuild、confirm、after-mutation 断言。
+- withdraw relation：缺少 facade None success fallback 的 withdraw、after-mutation 断言。
+- bank row tags：已有 explicit override None 测试，但缺少 dependency-missing fallback 测试。
+
+下一条最小 prompt：
+
+- `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests`
+- 只补测试和文档，不修改 production code。
+- 不删除 fallback，不改变 UoW/facade 语义。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
