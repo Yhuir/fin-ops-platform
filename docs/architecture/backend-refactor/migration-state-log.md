@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction` |
-| 最近 verified prompt | `PF-P112 - Turnover Ledger Local Shim Extraction Discovery and Planning` |
+| 当前阶段 | `PF-P114 - Turnover Ledger Relation Extra Local Adapter Extraction` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P114 - Turnover Ledger Relation Extra Local Adapter Extraction` |
+| 最近 verified prompt | `PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p112` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction` |
+| 下一条允许任务 | 执行 `PF-P114 - Turnover Ledger Relation Extra Local Adapter Extraction` |
 
 ## Prompt 执行日志
 
@@ -8360,13 +8360,44 @@ Verification：
 
 ### PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
 - 将 `server.py` 中 `_local_turnover_ledger_dirty_outbox_writer(...)` 抽为 `turnover_ledger_write_adapters.py` 中的显式 local adapter。
 - 保持现有 queue reason mapping 和返回 events 行为不变。
 - 不处理其它 local transaction shim。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 执行结果
+
+- 新增 `TurnoverLedgerLocalDirtyOutboxWriter` adapter。
+- `server.py` 的 5 个 local path 改为使用该 adapter。
+- 删除旧 `_local_turnover_ledger_dirty_outbox_writer(...)` static helper。
+
+Verification：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+### PF-P114 - Turnover Ledger Relation Extra Local Adapter Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 抽离 relation extra local transaction / repository adapter，减少 `server.py` 中 relation extra local shim 细节。
+- 保持现有 local rollback、dedicated persistence、queue failure 行为不变。
+- 不处理 confirm/withdraw/bank row tags/tag selection local shim。
 
 #### 验证
 

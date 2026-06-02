@@ -22418,6 +22418,109 @@ Post-Flight:
 - PF-P113 边界正确：只抽离无 Application 依赖的 local dirty/outbox writer。
 - 该 prompt 不触碰 local transaction shim，风险可控。
 
+### PF-P113 执行结果
+
+状态：`verified`
+
+变更：
+
+- `turnover_ledger_write_adapters.py` 新增 `TurnoverLedgerLocalDirtyOutboxWriter`。
+- `server.py` local Turnover Ledger 写路径改用该 adapter。
+- 删除 `server.py` 中旧 `_local_turnover_ledger_dirty_outbox_writer(...)` static helper。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条建议：
+
+- 生成并执行 `PF-P114 - Turnover Ledger Relation Extra Local Adapter Extraction`。
+- PF-P114 只抽离 relation extra local transaction/repository adapter，不处理其它 local shim。
+
+## PF-P114 - Turnover Ledger Relation Extra Local Adapter Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P114 - Turnover Ledger Relation Extra Local Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger relation extra 的 local transaction/repository adapter 从 `server.py` 迁到 adapter module，保持行为不变。
+
+Context:
+PF-P113 已 verified。`TurnoverLedgerLocalDirtyOutboxWriter` 已抽到 `turnover_ledger_write_adapters.py`。当前 `server.py` 中 relation extra local path 仍包含：
+- `_local_turnover_ledger_relation_extra_connection`
+- `_local_turnover_ledger_extra_repository`
+- `_save_local_turnover_ledger_relation_extra`
+- `_replace_local_turnover_ledger_extra_snapshot`
+- `_save_local_turnover_ledger_extras_snapshot`
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P113 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+将 relation extra local transaction/repository 逻辑迁入 `turnover_ledger_write_adapters.py`，让 `server.py` 只负责组装 adapter 所需的明确依赖。
+
+Required Implementation Work:
+1. 在 `turnover_ledger_write_adapters.py` 中新增 local relation extra adapter：
+   - local transaction connection：负责 snapshot、rollback、success save。
+   - local extra repository：负责保存单个 relation extra。
+   - 构造函数必须接收明确依赖，如 `extras_snapshot_provider`、`replace_snapshot`、`save_snapshot`、`save_extra`。
+   - 不得接收 `Application`。
+2. 修改 `server.py`：
+   - 用新 adapter/factory 替代 `_local_turnover_ledger_relation_extra_connection(...)` 和 `_local_turnover_ledger_extra_repository(...)`。
+   - 尽量删除 relation extra 专用 local helper；如仍需保留 snapshot replace/save 组装 helper，必须说明原因。
+3. 保持现有 behavior：
+   - queue failure rollback extra snapshot。
+   - dedicated `save_turnover_ledger_extras(...)` path。
+   - relation extra idempotency/stale behavior不变。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 tests，除非现有测试暴露与旧行为不一致。
+- 不得处理 confirm/withdraw/bank row tags/tag selection local shim。
+- 不得修改 facade/UoW 行为。
+- 不得新增 SQL migration。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 changed files 和 verification results。
+3. 如验证通过，可标记 PF-P114 verified。
+```
+
+### 审查结论
+
+- PF-P114 边界正确：只抽离 relation extra local adapter。
+- 该 prompt 复用现有 rollback/idempotency/stale tests，不扩大到其它 local shim。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

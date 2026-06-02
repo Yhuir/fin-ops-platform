@@ -301,6 +301,40 @@ class TurnoverLedgerDirtyOutboxWriter:
         return events
 
 
+class TurnoverLedgerLocalDirtyOutboxWriter:
+    def __init__(self, *, queue_repository: Any) -> None:
+        self._queue_repository = queue_repository
+
+    def enqueue_refresh(
+        self,
+        *,
+        transaction: Any,
+        scope_type: str,
+        scope_keys: list[str],
+        reason: str,
+        payload: dict[str, object] | None = None,
+    ) -> list[Any]:
+        _ = transaction, payload
+        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
+        events: list[Any] = []
+        refresh_reason = (
+            "turnover_relation_extra_changed"
+            if reason == "relation_extra_update"
+            else reason
+        )
+        for scope_key in list(scope_keys or ["all"]):
+            events.append(
+                enqueue(
+                    scope_type=scope_type,
+                    scope_key=str(scope_key or "all"),
+                    reason=refresh_reason,
+                )
+            )
+        return events
+
+
 class TurnoverLedgerExtraNormalizerAdapter:
     def __init__(self, *, extra_service: Any) -> None:
         self._extra_service = extra_service

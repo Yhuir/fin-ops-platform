@@ -275,6 +275,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
+    TurnoverLedgerLocalDirtyOutboxWriter,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionSettingsAdapter,
 )
@@ -2649,7 +2650,7 @@ class Application:
                 return None
             connection = self._local_turnover_ledger_relation_extra_connection(state_store)
             extra_repository = self._local_turnover_ledger_extra_repository()
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
             idempotency_store = getattr(self, "_turnover_ledger_relation_extra_idempotency_store", None)
             if idempotency_store is None:
                 idempotency_store = InMemoryWorkbenchIdempotencyRepository()
@@ -2705,7 +2706,7 @@ class Application:
                 return None
             connection = self._local_turnover_ledger_bank_row_tags_connection(state_store)
             bankdetail_port = self._local_turnover_ledger_bankdetail_port()
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=SimpleNamespace(),
@@ -2749,7 +2750,7 @@ class Application:
                 return None
             connection = self._local_turnover_ledger_confirm_connection(state_store)
             relation_repository = self._local_turnover_ledger_confirm_relation_repository()
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=relation_repository,
@@ -2793,7 +2794,7 @@ class Application:
                 return None
             connection = self._local_turnover_ledger_withdraw_connection(state_store)
             relation_repository = self._local_turnover_ledger_withdraw_relation_repository()
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=relation_repository,
@@ -3129,7 +3130,7 @@ class Application:
                     audit_event=audit_event,
                 )
             )
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=SimpleNamespace(),
@@ -3177,39 +3178,6 @@ class Application:
                     raise
 
         return _LocalTagSelectionConnection()
-
-    @staticmethod
-    def _local_turnover_ledger_dirty_outbox_writer(queue_repository: object) -> object:
-        class _LocalTurnoverLedgerDirtyOutboxWriter:
-            def enqueue_refresh(
-                self,
-                *,
-                transaction: object,
-                scope_type: str,
-                scope_keys: list[str],
-                reason: str,
-                payload: dict[str, object] | None = None,
-            ) -> list[object]:
-                enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-                if not callable(enqueue):
-                    raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
-                events: list[object] = []
-                refresh_reason = (
-                    "turnover_relation_extra_changed"
-                    if reason == "relation_extra_update"
-                    else reason
-                )
-                for scope_key in list(scope_keys or ["all"]):
-                    events.append(
-                        enqueue(
-                            scope_type=scope_type,
-                            scope_key=str(scope_key or "all"),
-                            reason=refresh_reason,
-                        )
-                    )
-                return events
-
-        return _LocalTurnoverLedgerDirtyOutboxWriter()
 
     def _turnover_ledger_relation_extra_row_provider(
         self,
