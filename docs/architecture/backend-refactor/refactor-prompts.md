@@ -23883,6 +23883,92 @@ Verification：
 
 下一条最小 prompt：`PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction`，只处理 relation extra fallback。
 
+## PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction
+
+Role:
+你是一位负责 Python-first 后端架构重构的资深工程师。你必须只处理 Turnover Ledger relation extra update 的 legacy fallback，把 handler 中的 direct update / persist / clear / enqueue 迁入显式 fallback facade/adapter。
+
+Context:
+PF-P123 已 verified，并已完成 tag selection legacy fallback adapter extraction。PF-P124 继续同一模式，但只处理 relation extra update。relation extra handler 中的 expected_versions/idempotency precheck 已有行为保护，本轮不得改变这些 precheck。
+
+Goal:
+让 `_handle_api_turnover_ledger_relation_extra_update(...)` 不再直接执行 fallback route update / best-effort persist / read model clear / enqueue。handler 应只负责 HTTP mapping、session/body parsing、expected_versions/idempotency precheck、调用 facade-like object 和返回 response。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P123 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Required Implementation Work:
+1. Test first:
+   - 更新或新增 relation extra handler-thinness test。
+   - 该测试应证明 relation extra handler 不再内联 `_turnover_ledger_api_routes.update_relation_extra(...)` 的 fallback branch，也不直接调用 `_persist_turnover_ledger_extras_best_effort(...)`、`_clear_turnover_ledger_read_model_best_effort(...)`、`_enqueue_turnover_ledger_read_model_refreshes(...)`。
+   - 测试仍必须证明 unsupported postgres queue API fallback adapter 保持 legacy update/persist/clear/enqueue 行为。
+2. Adapter extraction:
+   - 在 `turnover_ledger_write_adapters.py` 新增显式 relation extra legacy fallback facade/adapter。
+   - adapter 构造函数只能接收细粒度依赖，例如 `routes`、`persist_extra` callable、`clear_read_model` callable、`enqueue_refresh` callable。
+   - adapter 不得接收 `Application` god object。
+   - adapter 暴露 `update_relation_extra(...)`，与 `TurnoverLedgerWriteFacade.update_relation_extra(...)` 调用形态兼容。
+3. Handler cleanup:
+   - `_turnover_ledger_relation_extra_write_facade()` 应在 primary UoW facade 不可用时返回 legacy fallback adapter。
+   - `_handle_api_turnover_ledger_relation_extra_update(...)` 不应保留 `if facade is None` direct route update / persist / clear / enqueue 分支。
+   - handler 中的 expected_versions/idempotency precheck 可以暂留，不在本轮迁移。
+4. Scope discipline:
+   - 不处理 tag selection、bank row tags、confirm、withdraw。
+   - 不改变 response payload、version conflict、idempotency conflict 或 validation error behavior。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 tag selection、bank row tags、confirm、withdraw 行为。
+- 不得修改 database migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得接入真实外部服务。
+- 不得执行 Traffic Gate、部署、访问生产。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录新增/调整的 tests、adapter、handler cleanup、验证结果。
+3. 判断下一条最小 prompt：优先生成 relation mutation fallback cleanup planning，除非 P124 暴露 blocker。
+```
+
+### 审查结论
+
+- PF-P124 边界正确：只处理 relation extra fallback handler thinness。
+- PF-P124 允许 production code，但只限 `server.py` 和 `turnover_ledger_write_adapters.py`。
+- PF-P124 不处理 tag selection、bank row tags、confirm、withdraw，不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
