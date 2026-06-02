@@ -1261,6 +1261,116 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("rebuild_from_bank_rows(", source)
         self.assertNotIn("_after_turnover_relation_mutation(", source)
 
+    def test_after_turnover_relation_mutation_keeps_legacy_side_effect_order(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            call_order: list[object] = []
+
+            def record_persist(*, operation: str) -> None:
+                call_order.append(("persist", operation))
+
+            def record_invalidate(affected_months: list[str]) -> bool:
+                call_order.append(("invalidate_workbench", list(affected_months)))
+                return True
+
+            def record_clear() -> None:
+                call_order.append("clear_turnover_ledger_read_model")
+
+            def record_enqueue(scope_keys: list[str], *, reason: str) -> bool:
+                call_order.append(("enqueue_turnover_refresh", list(scope_keys), reason))
+                return True
+
+            app._persist_turnover_relations_best_effort = record_persist  # type: ignore[method-assign]
+            app._invalidate_workbench_after_bank_transaction_categories = record_invalidate  # type: ignore[method-assign]
+            app._clear_turnover_ledger_read_model_best_effort = record_clear  # type: ignore[method-assign]
+            app._enqueue_turnover_ledger_read_model_refreshes = record_enqueue  # type: ignore[method-assign]
+
+            app._after_turnover_relation_mutation(["2026-02", "2026-03"])
+
+        self.assertEqual(
+            call_order,
+            [
+                ("persist", "turnover_relation_mutation_pre_invalidation"),
+                ("invalidate_workbench", ["2026-02", "2026-03"]),
+                ("persist", "turnover_relation_mutation"),
+                "clear_turnover_ledger_read_model",
+                ("enqueue_turnover_refresh", ["all"], "turnover_relation_changed"),
+            ],
+        )
+
+    def test_after_turnover_relation_mutation_persistence_failure_is_best_effort_and_still_refreshes(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            queue = _QueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            def fail_save_turnover_relations(_snapshot: dict[str, object]) -> None:
+                raise RuntimeError("relation store unavailable")
+
+            app._state_store.save_turnover_relations = fail_save_turnover_relations  # type: ignore[method-assign]
+
+            app._after_turnover_relation_mutation(["2026-02", "2026-03"])
+
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
+
+    def test_after_turnover_relation_mutation_queue_failure_happens_after_clear_and_invalidation(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            queue = _FailingQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app._after_turnover_relation_mutation(["2026-02", "2026-03"])
+
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.attempts)
+        self.assertEqual(
+            [item for item in queue.attempts if item[0] == "turnover_ledger"],
+            [("turnover_ledger", "all", "turnover_relation_changed")],
+        )
+
+    def test_turnover_bank_row_tag_batch_postgres_facade_path_skips_legacy_after_mutation_helper(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _PostgresQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            def unexpected_after_mutation(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("legacy after-mutation helper should not run on postgres facade path")
+
+            app._after_turnover_relation_mutation = unexpected_after_mutation  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(read_repository.clear_calls, 0)
+        self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
+        self.assertEqual(queue.enqueued, [])
+
     def test_turnover_bank_row_tag_batch_dependency_missing_queue_failure_happens_after_category_save(self) -> None:
         # PF-P129 characterization: unsupported postgres queue API fallback keeps legacy post-mutation queue failure.
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -2383,19 +2493,29 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             call_order: list[str] = []
             after_mutation_months: list[list[str]] = []
             original_rebuild = app._turnover_relation_service.rebuild_from_bank_rows
-            original_after_mutation = app._after_turnover_relation_mutation
 
             def record_rebuild(rows: list[dict[str, object]]) -> None:
                 call_order.append("rebuild")
                 original_rebuild(rows)
 
-            def record_after_mutation(affected_months: list[str]) -> None:
-                call_order.append("after_mutation")
-                after_mutation_months.append(list(affected_months))
-                original_after_mutation(affected_months)
+            original_invalidation_adapter_factory = app._turnover_ledger_relation_mutation_invalidation_adapter
+
+            def record_invalidation_adapter() -> object:
+                original_adapter = original_invalidation_adapter_factory()
+
+                def record_after_mutation(affected_months: list[str]) -> None:
+                    call_order.append("after_mutation")
+                    after_mutation_months.append(list(affected_months))
+                    original_adapter.after_relation_mutation(affected_months)
+
+                return type(
+                    "RelationMutationInvalidationRecorder",
+                    (),
+                    {"after_relation_mutation": staticmethod(record_after_mutation)},
+                )()
 
             app._turnover_relation_service.rebuild_from_bank_rows = record_rebuild  # type: ignore[method-assign]
-            app._after_turnover_relation_mutation = record_after_mutation  # type: ignore[method-assign]
+            app._turnover_ledger_relation_mutation_invalidation_adapter = record_invalidation_adapter  # type: ignore[method-assign]
 
             response = app.handle_request(
                 "POST",
@@ -2720,13 +2840,23 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository.clear_calls = 0
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             after_mutation_months: list[list[str]] = []
-            original_after_mutation = app._after_turnover_relation_mutation
 
-            def record_after_mutation(affected_months: list[str]) -> None:
-                after_mutation_months.append(list(affected_months))
-                original_after_mutation(affected_months)
+            original_invalidation_adapter_factory = app._turnover_ledger_relation_mutation_invalidation_adapter
 
-            app._after_turnover_relation_mutation = record_after_mutation  # type: ignore[method-assign]
+            def record_invalidation_adapter() -> object:
+                original_adapter = original_invalidation_adapter_factory()
+
+                def record_after_mutation(affected_months: list[str]) -> None:
+                    after_mutation_months.append(list(affected_months))
+                    original_adapter.after_relation_mutation(affected_months)
+
+                return type(
+                    "RelationMutationInvalidationRecorder",
+                    (),
+                    {"after_relation_mutation": staticmethod(record_after_mutation)},
+                )()
+
+            app._turnover_ledger_relation_mutation_invalidation_adapter = record_invalidation_adapter  # type: ignore[method-assign]
 
             response = app.handle_request(
                 "POST",
