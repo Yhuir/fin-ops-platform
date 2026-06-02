@@ -17792,6 +17792,9 @@ class Application:
             "expense:bank_statement_as_invoice",
             "expense:no_invoice_required",
             "income:all",
+            "income:requires_invoice",
+            "income:no_invoice_required",
+            "income:cash_income",
         ]
 
     def _invalidate_pending_invoice_read_model_scopes(self, *, reason: str) -> list[str]:

@@ -626,6 +626,123 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(matched_rule["tag_sub_label"], "税款支出")
         self.assertEqual(matched_rule["tag_label_path"], ["税费", "税款支出"])
 
+    def test_expense_rule_filters_use_effective_category_path_for_bank_statement_group(self) -> None:
+        equipment_txn = self._bank_transaction(
+            "txn_equipment_purchase",
+            TransactionDirection.OUTFLOW,
+            "云南辰飞机电工程有限公司",
+            "23053.31",
+        )
+
+        class EffectiveProvider:
+            def bulk_get_for_rows(self, rows: list[BankTransaction]) -> dict[str, dict[str, object]]:
+                return {
+                    row.id: {
+                        "effective_category_code": "equipment_purchase",
+                        "effective_category_label": "设备采购",
+                        "effective_category_primary_label": "货款",
+                        "effective_category_sub_label": "设备采购",
+                        "effective_category_label_path": ["货款", "设备采购"],
+                        "effective_category_source": "auto",
+                    }
+                    for row in rows
+                }
+
+        category_service = BankTransactionCategoryService(
+            tag_dictionary={
+                "version": 12,
+                "definitions": [
+                    {
+                        "code": "equipment_purchase",
+                        "label": "设备采购",
+                        "status": "active",
+                        "direction": "expense",
+                        "rules": {"match_fields": ["all_text"], "contains": ["设备采购"]},
+                    },
+                ],
+            }
+        )
+        service = self._query_service(
+            transactions=[equipment_txn],
+            category_service=category_service,
+            effective_category_provider=EffectiveProvider(),
+            tag_groups={"bank_statement_as_invoice": ["equipment_purchase"]},
+        )
+
+        payload = service.list_rows(direction="expense", filter="bank_statement_as_invoice")
+
+        self.assertEqual([row["id"] for row in payload["rows"]], ["txn_equipment_purchase"])
+        row = payload["rows"][0]
+        self.assertEqual(row["invoice_acquisition_status"]["code"], "bank_statement_as_invoice")
+        self.assertEqual(row["invoice_acquisition_status"]["matched_rule"]["tag_code"], "equipment_purchase")
+        self.assertEqual(row["invoice_acquisition_status"]["matched_rule"]["tag_label_path"], ["货款", "设备采购"])
+        self.assertEqual(row["bank_transaction"]["effective_tag_label_path"], ["货款", "设备采购"])
+
+    def test_income_rule_filters_use_effective_categories_and_active_requires_complement(self) -> None:
+        no_invoice_txn = self._bank_transaction("txn_income_no_invoice_effective", TransactionDirection.INFLOW, "客户免票", "120.00")
+        cash_txn = self._bank_transaction("txn_income_cash_effective", TransactionDirection.INFLOW, "现金客户", "80.00")
+        requires_txn = self._bank_transaction("txn_income_requires_effective", TransactionDirection.INFLOW, "服务客户", "300.00")
+        unknown_txn = self._bank_transaction("txn_income_unknown_effective", TransactionDirection.INFLOW, "未知客户", "90.00")
+        archived_txn = self._bank_transaction("txn_income_archived_effective", TransactionDirection.INFLOW, "归档客户", "70.00")
+
+        class EffectiveProvider:
+            def bulk_get_for_rows(self, rows: list[BankTransaction]) -> dict[str, dict[str, object]]:
+                categories = {
+                    no_invoice_txn.id: {
+                        "effective_category_code": "income_internal_transfer",
+                        "effective_category_label": "内部往来",
+                        "effective_category_label_path": ["收入", "内部往来"],
+                    },
+                    cash_txn.id: {
+                        "effective_category_code": "cash_sale",
+                        "effective_category_label": "现金销售",
+                        "effective_category_label_path": ["收入", "现金销售"],
+                    },
+                    requires_txn.id: {
+                        "effective_category_code": "service_income",
+                        "effective_category_label": "服务收入",
+                        "effective_category_label_path": ["收入", "服务收入"],
+                    },
+                    unknown_txn.id: {
+                        "effective_category_code": "unknown_income",
+                        "effective_category_label": "未知收入",
+                        "effective_category_label_path": ["收入", "未知收入"],
+                    },
+                    archived_txn.id: {
+                        "effective_category_code": "archived_income",
+                        "effective_category_label": "归档收入",
+                        "effective_category_label_path": ["收入", "归档收入"],
+                    },
+                }
+                return {row.id: categories.get(row.id, {}) for row in rows}
+
+        category_service = BankTransactionCategoryService(
+            tag_dictionary={
+                "version": 12,
+                "definitions": [
+                    {"code": "service_income", "label": "服务收入", "status": "active", "direction": "income", "rules": {"match_fields": ["all_text"], "contains": ["服务收入"]}},
+                    {"code": "income_internal_transfer", "label": "内部往来", "status": "active", "direction": "income", "rules": {"match_fields": ["all_text"], "contains": ["内部往来"]}},
+                    {"code": "cash_sale", "label": "现金销售", "status": "active", "direction": "income", "rules": {"match_fields": ["all_text"], "contains": ["现金销售"]}},
+                    {"code": "archived_income", "label": "归档收入", "status": "archived", "direction": "income", "rules": {"match_fields": ["all_text"], "contains": ["归档收入"]}},
+                ],
+            }
+        )
+        service = self._query_service(
+            transactions=[no_invoice_txn, cash_txn, requires_txn, unknown_txn, archived_txn],
+            category_service=category_service,
+            effective_category_provider=EffectiveProvider(),
+            income_tag_groups={"no_invoice_required": ["income_internal_transfer"], "cash_income": ["cash_sale"]},
+        )
+
+        no_invoice_payload = service.list_rows(direction="income", filter="no_invoice_required", page_size=10)
+        cash_payload = service.list_rows(direction="income", filter="cash_income", page_size=10)
+        requires_payload = service.list_rows(direction="income", filter="requires_invoice", page_size=10)
+
+        self.assertEqual([row["id"] for row in no_invoice_payload["rows"]], [no_invoice_txn.id])
+        self.assertEqual([row["id"] for row in cash_payload["rows"]], [cash_txn.id])
+        self.assertEqual([row["id"] for row in requires_payload["rows"]], [requires_txn.id])
+        self.assertEqual(requires_payload["rows"][0]["invoice_acquisition_status"]["matched_rule"]["tag_label_path"], ["收入", "服务收入"])
+
     def test_bank_account_label_uses_bank_mapping_not_company_account_name(self) -> None:
         txn = BankTransaction(
             id="txn_bank_mapping",

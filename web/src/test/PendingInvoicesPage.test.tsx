@@ -30,6 +30,11 @@ function upgradedRows() {
         enterprise_serial_no: "ent-paid-pending",
         voucher_type: "电子凭证",
         voucher_no: "v-paid-pending",
+        effective_tag_code: "equipment_purchase",
+        effective_tag_label: "设备采购",
+        effective_tag_primary_label: "货款",
+        effective_tag_sub_label: "设备采购",
+        effective_tag_label_path: ["货款", "设备采购"],
       },
       invoice_acquisition_status: {
         code: "paid_pending_invoice",
@@ -559,11 +564,16 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "项目 / 详情" })).toBeInTheDocument();
 
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
+    expect(within(page).queryByText("正在加载待找发票。")).not.toBeInTheDocument();
+    expect(within(page).queryByText(/对方尾号/)).not.toBeInTheDocument();
     expect(within(page).getByText("全部流水 431")).toBeInTheDocument();
     expect(within(page).getByText("支出流水 356")).toBeInTheDocument();
     expect(within(page).getByText("收入流水 75")).toBeInTheDocument();
 
     expect(within(page).getByText("2026-04-19 10:52:02")).toBeInTheDocument();
+    expect(within(page).getByText("货款 / 设备采购")).toBeInTheDocument();
+    expect(within(page).getAllByText("支").length).toBeGreaterThan(0);
+    expect(within(page).getAllByText("1,200.00").length).toBeGreaterThan(0);
     expect(within(page).getByText("建行 8106")).toBeInTheDocument();
     expect(within(page).queryByText("2026-04-19T10:52:02+08:00")).not.toBeInTheDocument();
     expect(within(page).queryByText("人民币元")).not.toBeInTheDocument();
@@ -583,7 +593,33 @@ describe("Pending invoices page", () => {
 
   test("shows income rule-group filters and requests selected income scopes", async () => {
     const user = userEvent.setup();
-    const fetchMock = installPendingInvoiceFetch();
+    const incomeRow = {
+      ...pendingRuleClosureRow("income-service", "收入服务客户", "未开票", "requires_invoice"),
+      bank_transaction: {
+        ...pendingRuleClosureRow("income-service", "收入服务客户", "未开票", "requires_invoice").bank_transaction,
+        debit_amount: "0.00",
+        credit_amount: "300.00",
+        amount: "300.00",
+        effective_tag_code: "service_income",
+        effective_tag_label: "服务收入",
+        effective_tag_primary_label: "收入",
+        effective_tag_sub_label: "服务收入",
+        effective_tag_label_path: ["收入", "服务收入"],
+      },
+      invoice_acquisition_status: {
+        code: "income_pending_invoice",
+        label: "未开票",
+        reason: "收入流水未关联销项发票。",
+        severity: "warning",
+        primary_action: "mark_income_status",
+        matched_rule: { source: "pending_output_invoice_tag_groups", group: "requires_invoice", tag_code: "service_income", tag_label: "服务收入" },
+      },
+      can_create_invoice: false,
+      available_actions: ["mark_income_status"],
+    };
+    const fetchMock = installPendingInvoiceFetch({
+      rowsPayload: (url) => (url.searchParams.get("direction") === "income" ? [incomeRow] : upgradedRows()),
+    });
     renderAppAt("/pending-invoices");
 
     const page = await screen.findByTestId("pending-invoices-page");
@@ -592,6 +628,9 @@ describe("Pending invoices page", () => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
       expect(latest?.searchParams.get("direction")).toBe("income");
     });
+    expect(await within(page).findByText("收入 / 服务收入")).toBeInTheDocument();
+    expect(within(page).getByText("收")).toBeInTheDocument();
+    expect(within(page).getByText("300.00")).toBeInTheDocument();
 
     await user.click(within(page).getByRole("button", { name: "全部" }));
     expect(await screen.findByRole("menuitem", { name: "待开发票" })).toBeInTheDocument();

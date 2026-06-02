@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import LinearProgress from "@mui/material/LinearProgress";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
-import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import TablePagination from "@mui/material/TablePagination";
 import TextField from "@mui/material/TextField";
@@ -336,13 +336,21 @@ export default function PendingInvoicesPage() {
       });
   }, []);
 
+  const compactStatusText = error
+    ? error
+    : readModelStatus === "refreshing"
+      ? "数据刷新中"
+      : readModelStatus && !["fresh", "refreshing"].includes(readModelStatus)
+        ? `读模型 ${readModelStatus}，写入和导出已暂停`
+        : "";
+
   return (
     <Box data-testid="pending-invoices-page" sx={{ px: { xs: 2, md: 3 }, py: 2 }}>
-      <Stack spacing={2}>
-        <Paper elevation={0} sx={{ p: 2, border: "1px solid", borderColor: "divider" }}>
+      <Stack spacing={1}>
+        <Box sx={{ borderBottom: "1px solid", borderColor: "divider", pb: 1 }}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between">
             <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-              <Typography variant="h6" fontWeight={900}>待找发票</Typography>
+              <Typography component="h1" fontWeight={900} sx={{ fontSize: 18, lineHeight: 1.3 }}>待找发票</Typography>
               {sourceSummary ? (
                 <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap" aria-label="待找发票流水范围">
                   {([
@@ -390,7 +398,13 @@ export default function PendingInvoicesPage() {
                 </>
               ) : null}
             </Stack>
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack direction="row" spacing={1} alignItems="center" justifyContent={{ xs: "space-between", md: "flex-end" }}>
+              <Typography
+                color={error ? "error" : readModelStatus && !["fresh", "refreshing"].includes(readModelStatus) ? "warning.main" : "text.secondary"}
+                sx={{ minWidth: 74, fontSize: 12, lineHeight: 1.25 }}
+              >
+                {compactStatusText}
+              </Typography>
               <TextField
                 size="small"
                 placeholder="搜索流水"
@@ -406,14 +420,8 @@ export default function PendingInvoicesPage() {
               </Button>
             </Stack>
           </Stack>
-        </Paper>
-
-        {error ? <Typography color="error">{error}</Typography> : null}
-        {loading ? <Typography color="text.secondary">正在加载待找发票。</Typography> : null}
-        {readModelStatus === "refreshing" ? <Typography color="text.secondary">待找发票数据正在刷新。</Typography> : null}
-        {readModelStatus && !["fresh", "refreshing"].includes(readModelStatus) ? (
-          <Typography color="warning.main">待找发票读模型状态：{readModelStatus}，写入和导出操作已暂停。</Typography>
-        ) : null}
+        </Box>
+        <Box sx={{ height: 2 }}>{loading ? <LinearProgress aria-label="待找发票加载中" sx={{ height: 2 }} /> : null}</Box>
         <PendingInvoicesTable
           rows={rows}
           config={tableConfig}

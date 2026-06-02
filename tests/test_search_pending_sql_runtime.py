@@ -396,6 +396,85 @@ class PendingRuleClosureProjectionConnection:
         }
 
 
+class PendingEffectiveCategoryProjectionConnection:
+    def __init__(self, *, direction: str = "expense") -> None:
+        self.direction = direction
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized:
+            if self.direction == "income":
+                return [
+                    self._row("txn-income-service", "service_income", "服务收入", ["收入", "服务收入"]),
+                    self._row("txn-income-cash", "cash_sale", "现金销售", ["收入", "现金销售"]),
+                    self._row("txn-income-unknown", "unknown_income", "未知收入", ["收入", "未知收入"]),
+                ]
+            return [
+                self._row("txn-equipment", "equipment_purchase", "设备采购", ["货款", "设备采购"]),
+                self._row("txn-expense-unknown", "unknown_expense", "未知支出", ["货款", "未知支出"]),
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "bank_transaction_tags": {
+                        "version": 12,
+                        "definitions": [
+                            {"code": "equipment_purchase", "label": "设备采购", "status": "active", "direction": "expense", "rules": {"match_fields": ["all_text"], "contains": ["设备采购"]}},
+                            {"code": "service_income", "label": "服务收入", "status": "active", "direction": "income", "rules": {"match_fields": ["all_text"], "contains": ["服务收入"]}},
+                            {"code": "cash_sale", "label": "现金销售", "status": "active", "direction": "income", "rules": {"match_fields": ["all_text"], "contains": ["现金销售"]}},
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "groups": {
+                            "bank_statement_as_invoice": {"tag_codes": ["equipment_purchase"]},
+                            "no_invoice_required": {"tag_codes": []},
+                        }
+                    },
+                    "pending_output_invoice_tag_groups": {
+                        "groups": {
+                            "no_invoice_required": {"tag_codes": []},
+                            "cash_income": {"tag_codes": ["cash_sale"]},
+                        }
+                    },
+                }
+            }
+        return None
+
+    @staticmethod
+    def _row(transaction_id: str, category_code: str, category_label: str, label_path: list[str]) -> dict:
+        return {
+            "transaction_id": transaction_id,
+            "counterparty_name_raw": transaction_id,
+            "trade_time": "2026-05-20 10:00:00",
+            "txn_date": "2026-05-20",
+            "amount": "118.00",
+            "balance": "1000.00",
+            "currency": "CNY",
+            "summary": "转账",
+            "remark": "",
+            "bank_serial_no": transaction_id,
+            "account_name": "工商银行",
+            "account_no": "622200001234",
+            "category_payload": {
+                "effective_category_code": category_code,
+                "effective_category_label": category_label,
+                "effective_category_primary_label": label_path[0] if label_path else "",
+                "effective_category_sub_label": label_path[1] if len(label_path) > 1 else category_label,
+                "effective_category_label_path": label_path,
+            },
+            "invoices": [],
+            "paid_total": "0.00",
+            "oa_applicant": "",
+            "oa_project_name": "",
+            "income_status_override": None,
+            "relation_case_ids": [],
+        }
+
+
 class PendingIncomeProjectionConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -1051,6 +1130,21 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["payload"]["id"] for row in statement_rows], ["txn-internal-transfer"])
         self.assertEqual([row["payload"]["id"] for row in no_invoice_rows], ["txn-salary"])
 
+    def test_pending_invoice_sql_projection_uses_effective_category_fields_for_expense_rules(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingEffectiveCategoryProjectionConnection())
+
+        statement_rows = builder._pending_invoice_rows(direction="expense", filter_name="bank_statement_as_invoice", month="2026-05")
+        requires_rows = builder._pending_invoice_rows(direction="expense", filter_name="requires_invoice", month="2026-05")
+
+        self.assertEqual([row["payload"]["id"] for row in statement_rows], ["txn-equipment"])
+        payload = statement_rows[0]["payload"]
+        self.assertEqual(payload["filter_group"], "bank_statement_as_invoice")
+        self.assertEqual(payload["invoice_acquisition_status"]["code"], "bank_statement_as_invoice")
+        self.assertEqual(payload["invoice_acquisition_status"]["matched_rule"]["tag_code"], "equipment_purchase")
+        self.assertEqual(payload["invoice_acquisition_status"]["matched_rule"]["tag_label_path"], ["货款", "设备采购"])
+        self.assertEqual(payload["bank_transaction"]["effective_tag_label_path"], ["货款", "设备采购"])
+        self.assertEqual(requires_rows, [])
+
     def test_pending_invoice_sql_projection_emits_income_output_statuses(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingIncomeProjectionConnection())
 
@@ -1077,6 +1171,32 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(requires_rows[0]["payload"]["invoice_acquisition_status"]["code"], "income_invoiced")
         self.assertEqual([row["payload"]["id"] for row in no_invoice_rows], ["txn-no-invoice"])
         self.assertEqual([row["payload"]["id"] for row in cash_rows], ["txn-cash"])
+
+    def test_pending_invoice_sql_projection_uses_effective_category_fields_for_income_rules(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingEffectiveCategoryProjectionConnection(direction="income"))
+
+        requires_rows = builder._pending_invoice_rows(direction="income", filter_name="requires_invoice", month="2026-05")
+        cash_rows = builder._pending_invoice_rows(direction="income", filter_name="cash_income", month="2026-05")
+
+        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-income-service"])
+        self.assertEqual([row["payload"]["id"] for row in cash_rows], ["txn-income-cash"])
+        self.assertEqual(requires_rows[0]["payload"]["invoice_acquisition_status"]["matched_rule"]["tag_label_path"], ["收入", "服务收入"])
+        self.assertEqual(cash_rows[0]["payload"]["bank_transaction"]["effective_tag_code"], "cash_sale")
+
+    def test_application_pending_invoice_invalidation_scopes_cover_income_filters(self) -> None:
+        self.assertEqual(
+            Application._pending_invoice_read_model_scope_keys(),
+            [
+                "expense:all",
+                "expense:requires_invoice",
+                "expense:bank_statement_as_invoice",
+                "expense:no_invoice_required",
+                "income:all",
+                "income:requires_invoice",
+                "income:no_invoice_required",
+                "income:cash_income",
+            ],
+        )
 
     def test_refresh_handler_rebuilds_search_and_pending_scopes(self) -> None:
         class FakeBuilder:
