@@ -3665,6 +3665,31 @@ PF-P110 边界：
 - read model clear/enqueue 次数必须保持 PF-P121 tests 锁定的行为。
 - Bankdetail/Workbench invalidation side effects 后续单独处理。
 
+## PF-P123 Tag Selection Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+目标：
+
+- 只处理 tag selection update fallback。
+- 将 direct settings update、read model clear、refresh enqueue 从 handler 移入显式 legacy fallback facade/adapter。
+- 让 handler 只做 HTTP mapping、session/body parsing、调用 facade-like object 和 response packaging。
+
+边界：
+
+- 允许修改 `server.py`、`turnover_ledger_write_adapters.py`、Turnover Ledger tests 和 backend-refactor 文档。
+- 不处理 relation extra、bank row tags、confirm、withdraw。
+- 不改变 queue reason、response payload、version conflict 行为。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

@@ -23779,6 +23779,95 @@ Verification：
 
 下一条最小 prompt：`PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction`，只处理 tag selection fallback，不处理其它入口。
 
+## PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction
+
+Role:
+你是一位负责 Python-first 后端架构重构的资深工程师。你必须只处理 Turnover Ledger tag selection update 的 legacy fallback，把 handler 中的直接业务副作用迁入显式 fallback facade/adapter。
+
+Context:
+PF-P122 已 verified。cleanup 顺序明确：先处理 tag selection update，因为它的 side effects 最小。PF-P121 已有 characterization test 锁定 legacy fallback 行为：
+- direct settings update；
+- read model clear；
+- turnover refresh enqueue。
+
+Goal:
+让 `_handle_api_turnover_ledger_tag_selection_update(...)` 不再直接执行 fallback settings update / read model clear / enqueue。handler 应只负责 HTTP mapping、session/body parsing、调用 facade-like object 和返回 response。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P122 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Required Implementation Work:
+1. Test first:
+   - 更新或新增一个 tag selection handler-thinness test。
+   - 该测试应证明当 primary UoW facade 不可用时，handler 不再直接调用 `_clear_turnover_ledger_read_model_best_effort()` 或 `_enqueue_turnover_ledger_read_model_refreshes(...)`。
+   - 测试仍必须证明 response 和 legacy side effects 与 PF-P121 保持一致。
+2. Adapter extraction:
+   - 在 `turnover_ledger_write_adapters.py` 新增显式 tag selection legacy fallback facade/adapter。
+   - adapter 构造函数只能接收细粒度依赖，例如 `app_settings_service`、`clear_read_model` callable、`enqueue_refresh` callable。
+   - adapter 不得接收 `Application` god object。
+   - adapter 暴露 `update_tag_selection(...)`，与 `TurnoverLedgerWriteFacade.update_tag_selection(...)` 保持调用形态兼容。
+3. Handler cleanup:
+   - `_turnover_ledger_tag_selection_write_facade()` 应在 primary UoW facade 不可用时返回 legacy fallback adapter，而不是让 handler 执行业务 fallback。
+   - `_handle_api_turnover_ledger_tag_selection_update(...)` 不应保留 `if facade is None` direct mutation / clear / enqueue 分支。
+   - handler 仍负责 `AppSettingsValidationError` 到 HTTP status 的 mapping。
+4. Scope discipline:
+   - 不处理 relation extra、bank row tags、confirm、withdraw。
+   - 不改变 queue reason、response payload、version conflict 行为。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 relation extra、bank row tags、confirm、withdraw handler 行为。
+- 不得修改 database migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得接入真实外部服务。
+- 不得执行 Traffic Gate、部署、访问生产。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录新增/调整的 tests、adapter、handler cleanup、验证结果。
+3. 判断下一条最小 prompt：优先进入 relation extra legacy fallback facade extraction，除非 P123 暴露 blocker。
+```
+
+### 审查结论
+
+- PF-P123 边界正确：只处理 tag selection fallback handler thinness。
+- PF-P123 允许 production code，但只限 `server.py` 和 `turnover_ledger_write_adapters.py`。
+- PF-P123 不处理其它 Turnover Ledger 写入口，不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
