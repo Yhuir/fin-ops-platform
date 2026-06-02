@@ -22644,6 +22644,97 @@ Main merge：
 - 提交 PF-P114-MG post-flight 文档后执行 `git push origin main`。
 - push 后从最新 `main` 新建下一条 `codex/` 分支。
 
+## PF-P115 - Turnover Ledger Relation Local Adapter Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P115 - Turnover Ledger Relation Local Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger confirm/withdraw 共用的 local relation transaction/repository adapter 从 `server.py` 迁到 adapter module，保持行为不变。
+
+Context:
+PF-P114-MG 已 verified、merge 并 push 到 origin/main。当前已完成：
+- local dirty outbox writer extraction；
+- relation extra local adapter extraction。
+`server.py` 中仍保留 confirm/withdraw 相关 local helpers：
+- `_local_turnover_ledger_confirm_connection`
+- `_local_turnover_ledger_withdraw_connection`
+- `_local_turnover_ledger_confirm_relation_repository`
+- `_local_turnover_ledger_withdraw_relation_repository`
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P114-MG 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+将 confirm/withdraw 共用的 relation local transaction 和 relation repository 迁入 `turnover_ledger_write_adapters.py`，让 `server.py` 只负责组装明确依赖。
+
+Required Implementation Work:
+1. 在 `turnover_ledger_write_adapters.py` 中新增：
+   - `TurnoverLedgerLocalRelationConnection`
+   - `TurnoverLedgerLocalRelationRepository`
+2. `TurnoverLedgerLocalRelationConnection`：
+   - 接收 `relation_snapshot_provider`、`replace_snapshot`、`save_snapshot`。
+   - queue/outbox failure 时 rollback relation snapshot 并保存 previous snapshot。
+   - success 时保存 current relation snapshot。
+3. `TurnoverLedgerLocalRelationRepository`：
+   - 接收 `routes`、可选 `relation_rebuild` callable。
+   - `confirm_relation(...)` 先执行 rebuild，再调用 routes.confirm_relation。
+   - `withdraw_relation(...)` 调用 routes.withdraw_relation。
+   - 不接收 `Application`。
+4. 修改 `server.py`：
+   - confirm/withdraw local path 使用新 adapter。
+   - 删除 confirm/withdraw 专用 local connection/repository helper。
+5. 保持现有 behavior：
+   - confirm/withdraw queue failure rollback。
+   - duplicate/stale behavior不变。
+   - affected_months 仍由 handler 计算。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 tests，除非现有测试暴露与旧行为不一致。
+- 不得处理 bank row tags/tag selection local shim。
+- 不得修改 facade/UoW 行为。
+- 不得新增 SQL migration。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 changed files 和 verification results。
+3. 如验证通过，可标记 PF-P115 verified。
+```
+
+### 审查结论
+
+- PF-P115 边界正确：只抽离 confirm/withdraw 共用 relation local adapter。
+- 该 prompt 不处理 bank row tags/tag selection local shim，不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

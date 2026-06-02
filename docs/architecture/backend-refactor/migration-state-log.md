@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` 已 verified 并合入 main |
-| 当前 active prompt | `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` |
+| 当前阶段 | `PF-P115 - Turnover Ledger Relation Local Adapter Extraction` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P115 - Turnover Ledger Relation Local Adapter Extraction` |
 | 最近 verified prompt | `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-next-slice-p115` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass |
-| 下一条允许任务 | 提交 PF-P114-MG post-flight 文档并 `git push origin main`；push 后从最新 main 新建下一条 codex 分支 |
+| 下一条允许任务 | 执行 `PF-P115 - Turnover Ledger Relation Local Adapter Extraction` |
 
 ## Prompt 执行日志
 
@@ -8114,6 +8114,25 @@ PF-P108-MG 已 verified。先提交本次 post-flight 文档更新并 `git push 
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - Traffic Gate：未执行；本切片不部署、不切流、不访问生产。
+
+### PF-P115 - Turnover Ledger Relation Local Adapter Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 抽离 confirm/withdraw 共用的 local relation transaction/repository adapter。
+- 保持 local relation rollback、confirm/withdraw queue failure rollback、affected_months 行为不变。
+- 不处理 bank row tags/tag selection local shim。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
