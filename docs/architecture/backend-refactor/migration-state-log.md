@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests` |
-| 最近 verified prompt | `PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision` |
+| 当前阶段 | `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup` |
+| 最近 verified prompt | `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p109` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass |
+| 下一条允许任务 | 执行 `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup` |
 
 ## Prompt 执行日志
 
@@ -8175,7 +8175,7 @@ PF-P109 盘点结论：
 
 ### PF-P110 - Turnover Ledger Fallback and Local Shim Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8201,7 +8201,43 @@ PF-P109 盘点结论：
 
 #### 下一条 Prompt 上下文
 
-PF-P110 planned。执行后如测试锁定完整，应选择最小 fallback cleanup 或 local shim extraction 切片；不得直接修改 production code 直到 PF-P110 verified。
+PF-P110 已补充 fallback/local shim characterization tests：
+
+- 新增 confirm facade override 测试，断言 facade path 不触发 `_after_turnover_relation_mutation(...)`。
+- 新增 withdraw facade override 测试，断言 facade path 不触发 `_after_turnover_relation_mutation(...)`，并保留 expected_versions 传递断言。
+- 新增 relation extra dedicated persistence 测试，断言存在 `save_turnover_ledger_extras(...)` 时不调用 legacy full snapshot fallback。
+- 既有 relation extra legacy full snapshot fallback 测试仍保留，用于下一切片安全改变行为。
+
+Verification：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
+
+下一条应执行 `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup`。PF-P111 只处理 `_persist_turnover_ledger_extras_best_effort(...)` 的 legacy full snapshot fallback，不清理其它 fallback/local shim。
+
+### PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup
+
+状态：`planned`
+
+#### 范围
+
+- 移除或禁用 `_persist_turnover_ledger_extras_best_effort(...)` 中缺少 dedicated `save_turnover_ledger_extras(...)` 时调用 `legacy_bootstrap.load_full_snapshot(...)` 的 fallback。
+- 更新对应 characterization test，使其断言不再读取 full snapshot，并通过 persistence warning/无保存行为保留 best-effort 语义。
+- 不处理 confirm/withdraw/tag selection/bank row tags fallback，不抽离 local transaction shim。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P111 planned。执行后如范围保持最小，下一条可继续针对 local shim extraction 做 discovery/tests，或进入 PF-P111/PF-P110 cumulative MG，视 diff 大小决定。
 
 ## 维护规则
 
