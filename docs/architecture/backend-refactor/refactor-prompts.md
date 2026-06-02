@@ -22121,3 +22121,24 @@ Post-Flight:
 - PF-P108-MG 边界正确：只覆盖 PF-P107/PF-P108 relation extra idempotency 切片。
 - MG 明确不执行 Traffic Gate，不新增 migration，不迁移其它 Turnover 写路径。
 - 允许文件白名单与当前 `main...HEAD` diff 一致。
+
+### PF-P108-MG 执行结果
+
+- 状态：`verified`
+- 分支：`codex/turnover-ledger-next-slice-p107`
+- Merge commit：`7edcb0b5`
+- 分支验证：
+  - `git status --short --branch`：clean on feature branch
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `git diff --name-only main...HEAD`：只包含 PF-P107/PF-P108 允许文件
+  - `git log --oneline main..HEAD`：只包含 PF-P107、PF-P108、PF-P108-MG 相关提交
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- `main` 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- Traffic Gate：未执行；未部署、未切流、未访问生产。
+- 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。

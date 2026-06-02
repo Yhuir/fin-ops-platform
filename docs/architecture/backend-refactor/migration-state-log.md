@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping` |
-| 当前分支 | `codex/turnover-ledger-next-slice-p107` |
+| 当前阶段 | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` 已 verified，已 merge 到 `main`，待 push origin/main |
+| 当前 active prompt | 无，等待 push origin/main 后从最新 `main` 新建下一条 `codex/` 分支 |
+| 最近 verified prompt | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
+| 下一条允许任务 | 提交 PF-P108-MG post-flight 文档更新并执行 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支 |
 
 ## Prompt 执行日志
 
@@ -8074,7 +8074,7 @@ PF-P108 verified。Relation extra HTTP endpoint 已支持 body `idempotency_key`
 
 ### PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8095,7 +8095,25 @@ PF-P108 verified。Relation extra HTTP endpoint 已支持 body `idempotency_key`
 
 #### 下一条 Prompt 上下文
 
-PF-P108-MG planned。执行时必须确认 diff 只包含 PF-P107/PF-P108 允许文件。MG 通过后可 merge 到 `main`、在 `main` 上复验并 `git push origin main`；push 完成后必须从最新 `main` 新建下一条 `codex/` 分支。
+PF-P108-MG 已 verified。先提交本次 post-flight 文档更新并 `git push origin main`。push 完成后必须从最新 `main` 新建下一条 `codex/` 分支，再根据 Turnover Ledger 当前剩余风险生成下一条 prompt。
+
+#### 执行结果
+
+- 分支：`codex/turnover-ledger-next-slice-p107`
+- Merge commit：`7edcb0b5`
+- 分支验证：
+  - `git status --short --branch`：clean on feature branch
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `git diff --name-only main...HEAD`：只包含 PF-P107/PF-P108 允许文件
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- `main` 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- Traffic Gate：未执行；本切片不部署、不切流、不访问生产。
 
 ## 维护规则
 
