@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` 已 verified 并合入 main |
 | 当前 active prompt | `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P114 - Turnover Ledger Relation Extra Local Adapter Extraction` |
-| 当前分支 | `codex/turnover-ledger-next-slice-p112` |
+| 最近 verified prompt | `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` |
+| 下一条允许任务 | 提交 PF-P114-MG post-flight 文档并 `git push origin main`；push 后从最新 main 新建下一条 codex 分支 |
 
 ## Prompt 执行日志
 
@@ -8423,7 +8423,7 @@ Verification：
 
 ### PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8449,6 +8449,26 @@ Verification：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 执行结果
+
+- Branch scope：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+  - `git diff --name-only main...HEAD`：只包含允许文件。
+  - `git log --oneline main..HEAD`：只包含 PF-P112/PF-P113/PF-P114 相关提交。
+- Branch verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Merge：
+  - 已将 `codex/turnover-ledger-next-slice-p112` 合入 `main`。
+- Main verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate：未执行；本切片不部署、不切流、不访问生产。
 
 ## 维护规则
 
