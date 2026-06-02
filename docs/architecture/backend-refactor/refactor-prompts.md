@@ -22422,6 +22422,21 @@ Post-Flight:
 - 允许文件白名单与当前切片一致。
 - MG 明确禁止 Traffic Gate、schema、部署和其它写路径迁移。
 
+### PF-P184-MG 执行结果
+
+- 状态：`verified`
+- 分支：`codex/turnover-ledger-tag-selection-idempotency-p183`
+- Merge commit：`1c9c4238`
+- Branch / main 验证：
+  - `git status --short --branch`：Pass
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（128 tests）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（61 tests）
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
+- 下一步：push `origin/main`；push 完成后从最新 main 新建下一条 `codex/` 分支。
+
 ## PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
 状态：`planned`

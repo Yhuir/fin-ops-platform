@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate` planned |
-| 当前 active prompt | `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P184 - Turnover Ledger Tag Selection Durable Idempotency Integration` |
-| 当前分支 | `codex/turnover-ledger-tag-selection-idempotency-p183` |
-| 最近验证 | PF-P184 已 verified；`git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（128 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（61 tests）；`compileall`：Pass |
-| 下一条允许任务 | 执行 PF-P184-MG；统一覆盖 PF-P183/PF-P184 完整 diff，不新增业务实现、不迁移其它写路径 |
+| 当前阶段 | `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate` verified |
+| 当前 active prompt | 空 |
+| 最近 verified prompt | `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | PF-P184-MG 已合入 main，merge commit `1c9c4238`；main 复验 `git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（128 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（61 tests）；`compileall`：Pass |
+| 下一条允许任务 | push `origin/main`；push 后从最新 main 新建下一条 `codex/` 分支，并基于 Turnover Ledger 模块计划生成下一条 prompt |
 
 ## Prompt 执行日志
 

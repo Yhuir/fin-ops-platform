@@ -6372,6 +6372,34 @@ Remaining seam matrix：
 - `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate`
 - 统一覆盖 PF-P183 到 PF-P184 的完整 diff。
 
+## PF-P184-MG Tag Selection Durable Idempotency Cumulative Merge Gate
+
+状态：
+
+- verified
+
+范围：
+
+- 统一覆盖 PF-P183/PF-P184。
+- 只包含 tag-selection durable idempotency contract tests、HTTP/request boundary、facade command、builder store injection 和文档回写。
+
+执行结果：
+
+- PF-P183/PF-P184 已合入 main。
+- Merge commit：`1c9c4238`。
+- Tag selection endpoint 现在支持 body `idempotency_key` / `idempotencyKey`：
+  - same key + same payload replay；
+  - same key + different payload 返回 409 `idempotency_key_conflict`；
+  - existing `expected_version` conflict 语义保持。
+- Traffic Gate 未执行；未部署、未切流、未访问生产或真实外部服务。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（128 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（61 tests）。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git diff --check`：Pass。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
