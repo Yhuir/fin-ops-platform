@@ -27981,6 +27981,248 @@ Post-Flight:
   - 从最新 `main` 新建分支
   - 生成并审查 `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline`
 
+## PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline
+
+状态：`verified`
+
+```text
+/goal
+PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 tag selection request boundary 合入主干后，重新盘点 Turnover Ledger 剩余写路径 seam，明确下一条最小切片，但本轮只允许做 discovery/planning 和文档回写。
+
+Context:
+- `PF-P163-MG` 已 verified 并已合入 `main`。
+- 当前必须从最新 `main` 新建分支。
+- Turnover Ledger 已完成：
+  - legacy fallback adapter group
+  - primary write builder group
+  - request-boundary extraction group
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Reading:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+
+Task:
+1. 重新盘点 request-boundary 抽离完成后，Turnover Ledger 写路径还剩哪些 seam。
+2. 明确区分：
+   - app boundary / auth boundary
+   - local runtime support
+   - primary write composition
+   - invalidation / read-model side-effect seam
+3. 给出下一条最小 prompt 的建议。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "def _handle_api_turnover_ledger_|TurnoverLedger.*RequestBoundaryFacade" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- rg -n "_replace_local_bank_transaction_category_snapshot|_replace_local_turnover_relation_snapshot|_replace_local_turnover_ledger_extra_snapshot|_refresh_local_app_settings_snapshot|_save_local_bank_transaction_categories_snapshot|_save_local_turnover_relations_snapshot|_save_local_turnover_ledger_extras_snapshot|_postgres_turnover_ledger_persistence_repository" backend/src/fin_ops_platform/app/server.py
+```
+
+### 审查结论
+
+- PF-P164 边界正确：这是 request-boundary 组完成后的必要 rebaseline。
+
+### PF-P164 执行结果
+
+- PF-P164 已完成并验证。
+- 已确认五条 Turnover Ledger 写 handler 的 request-boundary 抽离全部完成。
+- 已确认当前剩余最小 seam 不再是 handler orchestration，而是 `server.py` 中的 local runtime support / composition helpers。
+- 已确认下一条不应直接做更大的 module completion audit，而应先锁定 local runtime support contract。
+- 下一条建议：
+  - `PF-P165 - Turnover Ledger Local Runtime Support Characterization Tests`
+
+## PF-P165 - Turnover Ledger Local Runtime Support Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P165 - Turnover Ledger Local Runtime Support Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只为 Turnover Ledger local runtime support seam 补 characterization tests，锁定当前 contract；不得直接抽离实现。
+
+Context:
+- `PF-P164` 已 verified。
+- request-boundary 抽离已经完成。
+- 当前剩余最小 seam 是 `server.py` 中承载 local runtime / local snapshot mutation / persistence repository selection 的 helper 组。
+
+Allowed Scope:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- 不得修改 production code、schema、UoW 语义、部署配置
+
+Required Test Work:
+1. 为以下 local runtime support seam 补 source-level / behavior characterization：
+   - `_replace_local_bank_transaction_category_snapshot(...)`
+   - `_replace_local_turnover_relation_snapshot(...)`
+   - `_replace_local_turnover_ledger_extra_snapshot(...)`
+   - `_refresh_local_app_settings_snapshot(...)`
+   - `_save_local_bank_transaction_categories_snapshot(...)`
+   - `_save_local_turnover_relations_snapshot(...)`
+   - `_save_local_turnover_ledger_extras_snapshot(...)`
+   - `_postgres_turnover_ledger_persistence_repository(...)`
+2. 至少锁定：
+   - local snapshot replace helper 会把依赖服务指向新的 snapshot-backed service；
+   - local save helper 缺失 state_store method 时抛明确错误，而不是 silent pass；
+   - local save helper 持续 best-effort warning contract；
+   - `_postgres_turnover_ledger_persistence_repository(...)` 在 transaction 支持 `execute` 时返回 `PostgresWorkbenchRepository`，否则退回 `state_store`。
+3. 测试必须只锁定当前行为，不得借机清理或重构代码。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+### 审查结论
+
+- PF-P165 边界正确：它只做 local runtime support 的测试锁定，是下一步抽离前的最小安全切片。
+
+### PF-P165 执行结果
+
+- PF-P165 已完成并验证。
+- 新增 local runtime support characterization tests，锁定：
+  - local snapshot replace helper 的 service / route rebinding
+  - local save helper 的 required-method contract
+  - local save helper 的 best-effort warning contract
+  - `_postgres_turnover_ledger_persistence_repository(...)` 的 repository selection contract
+- 验证：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，105 tests
+- 下一条建议：
+  - `PF-P166 - Turnover Ledger Local Runtime Support Extraction`
+
+## PF-P166 - Turnover Ledger Local Runtime Support Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P166 - Turnover Ledger Local Runtime Support Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger local runtime support helper 组从 `server.py` 收到显式 support/adapter 对象，但不能扩大到新的业务模块、schema、UoW 语义或 module completion audit。
+
+Context:
+- `PF-P165` 已 verified。
+- local runtime support seam 的 contract 已被测试锁定。
+- 当前剩余目标是减少 Turnover Ledger write path 对 `Application` helper 组的直接耦合。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 引入显式 local runtime support / adapter set，承接以下 helper 组的职责：
+   - `_replace_local_bank_transaction_category_snapshot(...)`
+   - `_replace_local_turnover_relation_snapshot(...)`
+   - `_replace_local_turnover_ledger_extra_snapshot(...)`
+   - `_refresh_local_app_settings_snapshot(...)`
+   - `_save_local_bank_transaction_categories_snapshot(...)`
+   - `_save_local_turnover_relations_snapshot(...)`
+   - `_save_local_turnover_ledger_extras_snapshot(...)`
+   - `_postgres_turnover_ledger_persistence_repository(...)`
+2. `server.py` 只保留创建该 support object 的最小组装边界；不得继续在多个 write facade builder 中散落 local helper 细节。
+3. 不得修改 handler contract、request-boundary contract、legacy fallback contract、UoW 事务语义或 read-model invalidation 语义。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P166 边界正确：它只处理 local runtime support extraction，是 PF-P165 测试锁定后的自然实现切片。
+
+### PF-P166 执行结果
+
+- PF-P166 已完成并验证。
+- 已新增 `TurnoverLedgerLocalRuntimeSupport`，统一 local runtime helper 组。
+- 已将 relation extra / bank row tags / confirm / withdraw 四条 primary write builder 的 local wiring 改为通过 local runtime support boundary 获取。
+- 已将 `Application` 中对应 helper 改为 thin wrapper / delegate。
+- 已增加 source-level regression tests，确认 builder 与 helper 都经由 local runtime support boundary。
+- 验证：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，107 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议：
+  - `PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate`
+
+## PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须对 Turnover Ledger local runtime support 这一组切片执行 cumulative merge gate，确认 scope、测试、文档状态全部满足合入标准。
+
+Context:
+- 当前分支：`codex/turnover-ledger-post-request-boundary-p164`
+- 本次 MG 覆盖：
+  - `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline`
+  - `PF-P165 - Turnover Ledger Local Runtime Support Characterization Tests`
+  - `PF-P166 - Turnover Ledger Local Runtime Support Extraction`
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+- 允许 merge 到 `main`、在 `main` 上复验、并 `git push origin main`
+
+Required MG Checks:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Forbidden Scope:
+- 不得扩大到新的业务模块
+- 不得修改 schema / UoW 事务语义 / deployment / Traffic Gate
+
+Post-Flight:
+1. 若 MG 通过：
+   - 标记 PF-P166-MG 为 verified
+   - merge 到 `main`
+   - 在 `main` 上重跑验证
+   - `git push origin main`
+2. push 完成后：
+   - 从最新 `main` 新建分支
+   - 再生成 Turnover Ledger 下一条 rebaseline / completion prompt
+```
+
+### 审查结论
+
+- PF-P166-MG 边界正确：它只收口 local runtime support 这一组连续切片。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

@@ -5557,6 +5557,84 @@ Remaining seam matrix：
 - 从最新 `main` 新建分支
 - 先生成并审查 `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline`
 
+## PF-P164 Post-Request-Boundary Rebaseline
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已确认 request-boundary 抽离组全部完成：
+  - confirm
+  - withdraw
+  - bank row tags
+  - relation extra
+  - tag selection
+- 已确认当前剩余最小 seam 是 `server.py` 中的 local runtime / composition support helper 组，而不是 handler orchestration。
+- 已确认以下 helper 是当前 Turnover Ledger 写路径继续依赖 `Application` 的主要原因：
+  - `_replace_local_bank_transaction_category_snapshot(...)`
+  - `_replace_local_turnover_relation_snapshot(...)`
+  - `_replace_local_turnover_ledger_extra_snapshot(...)`
+  - `_refresh_local_app_settings_snapshot(...)`
+  - `_save_local_bank_transaction_categories_snapshot(...)`
+  - `_save_local_turnover_relations_snapshot(...)`
+  - `_save_local_turnover_ledger_extras_snapshot(...)`
+  - `_postgres_turnover_ledger_persistence_repository(...)`
+- 已确认 `_turnover_mutation_session(...)`、`_bank_transaction_category_affected_months(...)`、`_after_turnover_relation_mutation(...)` 暂不作为下一条最小切片。
+
+下一步：
+
+- 生成并审查 `PF-P165 - Turnover Ledger Local Runtime Support Characterization Tests`
+
+## PF-P165 Local Runtime Support Characterization Tests
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已补齐 local runtime support contract tests。
+- 已锁定：
+  - local snapshot replace helper 的 service / route rebinding
+  - local save helper 的 required-method contract
+  - local save helper 的 best-effort warning contract
+  - `_postgres_turnover_ledger_persistence_repository(...)` 的 repository selection contract
+
+验证：
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，105 tests
+
+下一步：
+
+- 生成并审查 `PF-P166 - Turnover Ledger Local Runtime Support Extraction`
+
+## PF-P166 Local Runtime Support Extraction
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已新增 `TurnoverLedgerLocalRuntimeSupport`。
+- 已将 relation extra / bank row tags / confirm / withdraw 的 local runtime wiring 统一收到 support boundary。
+- 已将 `Application` 中对应 local helper 改为 thin wrapper / delegate。
+- 已通过 source-level regression tests 锁定新的 support boundary。
+- 已修复一次 local rollback regression：support 现在会通过 rebinder callback 回绑 `Application` 顶层 runtime service 指针。
+
+验证：
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，107 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+下一步：
+
+- 生成并审查 `PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

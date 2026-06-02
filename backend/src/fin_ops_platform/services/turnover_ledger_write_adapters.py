@@ -140,6 +140,165 @@ class TurnoverLedgerLocalTagSelectionAdapterSet:
         self._state_store.save_app_settings(dict(snapshot))
 
 
+class TurnoverLedgerLocalRuntimeSupport:
+    def __init__(
+        self,
+        *,
+        app_settings_service: Any,
+        bank_details_service: Any,
+        turnover_ledger_service: Any,
+        turnover_ledger_api_routes: Any,
+        live_workbench_service: Any,
+        category_service_from_snapshot: Callable[[dict[str, object]], Any],
+        auto_category_service_factory: Callable[[Any], Any],
+        effective_category_provider_factory: Callable[[Any, Any], Any],
+        relation_service_from_snapshot: Callable[[dict[str, object]], Any],
+        extra_service_builder: Callable[[object], object],
+        emit_persistence_warning: Callable[..., None],
+        postgres_repository_factory: Callable[[Any], Any],
+        category_service_rebinder: Callable[[Any, Any, Any], None] | None = None,
+        relation_service_rebinder: Callable[[Any], None] | None = None,
+        extra_service_rebinder: Callable[[Any], None] | None = None,
+    ) -> None:
+        self._app_settings_service = app_settings_service
+        self._bank_details_service = bank_details_service
+        self._turnover_ledger_service = turnover_ledger_service
+        self._turnover_ledger_api_routes = turnover_ledger_api_routes
+        self._live_workbench_service = live_workbench_service
+        self._category_service_from_snapshot = category_service_from_snapshot
+        self._auto_category_service_factory = auto_category_service_factory
+        self._effective_category_provider_factory = effective_category_provider_factory
+        self._relation_service_from_snapshot = relation_service_from_snapshot
+        self._extra_service_builder = extra_service_builder
+        self._emit_persistence_warning = emit_persistence_warning
+        self._postgres_repository_factory = postgres_repository_factory
+        self._category_service_rebinder = category_service_rebinder
+        self._relation_service_rebinder = relation_service_rebinder
+        self._extra_service_rebinder = extra_service_rebinder
+        self._current_category_service: Any = None
+        self._current_auto_category_service: Any = None
+        self._current_effective_category_provider: Any = None
+        self._current_relation_service: Any = None
+        self._current_extra_service: Any = None
+
+    @property
+    def category_service(self) -> Any:
+        return self._current_category_service
+
+    @property
+    def auto_category_service(self) -> Any:
+        return self._current_auto_category_service
+
+    @property
+    def effective_category_provider(self) -> Any:
+        return self._current_effective_category_provider
+
+    @property
+    def relation_service(self) -> Any:
+        return self._current_relation_service
+
+    @property
+    def extra_service(self) -> Any:
+        return self._current_extra_service
+
+    def persistence_repository(self, transaction: object, *, state_store: object) -> object:
+        if callable(getattr(transaction, "execute", None)):
+            return self._postgres_repository_factory(transaction)
+        return state_store
+
+    def replace_bank_transaction_category_snapshot(self, snapshot: dict[str, object]) -> None:
+        category_service = self._category_service_from_snapshot(dict(snapshot))
+        auto_category_service = self._auto_category_service_factory(category_service)
+        effective_category_provider = self._effective_category_provider_factory(
+            category_service,
+            auto_category_service,
+        )
+        self._current_category_service = category_service
+        self._current_auto_category_service = auto_category_service
+        self._current_effective_category_provider = effective_category_provider
+        if callable(self._category_service_rebinder):
+            self._category_service_rebinder(
+                category_service,
+                auto_category_service,
+                effective_category_provider,
+            )
+        if self._app_settings_service is not None:
+            setattr(self._app_settings_service, "_bank_transaction_category_service", category_service)
+            setattr(self._app_settings_service, "_bank_transaction_auto_category_service", auto_category_service)
+        if self._bank_details_service is not None:
+            setattr(self._bank_details_service, "_category_service", category_service)
+            setattr(self._bank_details_service, "_auto_category_service", auto_category_service)
+        if self._turnover_ledger_service is not None:
+            setattr(self._turnover_ledger_service, "_category_service", category_service)
+            setattr(self._turnover_ledger_service, "_category_provider", effective_category_provider)
+        if self._live_workbench_service is not None:
+            setattr(self._live_workbench_service, "_category_provider", effective_category_provider)
+
+    def replace_turnover_relation_snapshot(self, snapshot: dict[str, object]) -> None:
+        relation_service = self._relation_service_from_snapshot(dict(snapshot))
+        self._current_relation_service = relation_service
+        if callable(self._relation_service_rebinder):
+            self._relation_service_rebinder(relation_service)
+        if self._turnover_ledger_service is not None:
+            setattr(self._turnover_ledger_service, "_relation_service", relation_service)
+        if self._turnover_ledger_api_routes is not None:
+            setattr(self._turnover_ledger_api_routes, "_relation_service", relation_service)
+
+    def replace_turnover_ledger_extra_snapshot(self, snapshot: dict[str, object]) -> None:
+        extra_service = self._extra_service_builder(snapshot)
+        self._current_extra_service = extra_service
+        if callable(self._extra_service_rebinder):
+            self._extra_service_rebinder(extra_service)
+        if self._turnover_ledger_api_routes is not None:
+            setattr(self._turnover_ledger_api_routes, "_extra_service", extra_service)
+        if self._turnover_ledger_service is not None:
+            setattr(self._turnover_ledger_service, "_extra_service", extra_service)
+
+    def refresh_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
+        if self._app_settings_service is None:
+            return
+        setattr(self._app_settings_service, "_snapshot", dict(snapshot))
+        configure_category_service = getattr(self._app_settings_service, "_configure_category_service", None)
+        if callable(configure_category_service):
+            configure_category_service(dict(snapshot))
+
+    def save_bank_transaction_categories_snapshot(self, state_store: object, snapshot: dict[str, object]) -> None:
+        save_categories = getattr(state_store, "save_bank_transaction_categories", None)
+        if not callable(save_categories):
+            raise RuntimeError("state store must expose save_bank_transaction_categories.")
+        try:
+            save_categories(dict(snapshot))
+        except Exception as exc:
+            self._emit_persistence_warning(
+                operation="bank_transaction_categories_updated",
+                detail=str(exc),
+            )
+
+    def save_turnover_relations_snapshot(self, state_store: object, snapshot: dict[str, object]) -> None:
+        save_relations = getattr(state_store, "save_turnover_relations", None)
+        if not callable(save_relations):
+            raise RuntimeError("state store must expose save_turnover_relations.")
+        try:
+            save_relations(dict(snapshot))
+        except Exception as exc:
+            self._emit_persistence_warning(
+                operation="turnover_relations_updated",
+                detail=str(exc),
+            )
+
+    def save_turnover_ledger_extras_snapshot(self, state_store: object, snapshot: dict[str, object]) -> None:
+        save_extras = getattr(state_store, "save_turnover_ledger_extras", None)
+        if not callable(save_extras):
+            raise RuntimeError("state store must expose save_turnover_ledger_extras.")
+        try:
+            save_extras(dict(snapshot))
+        except Exception as exc:
+            self._emit_persistence_warning(
+                operation="turnover_ledger_extra_updated",
+                detail=str(exc),
+            )
+
+
 class TurnoverLedgerTagSelectionLegacyFallbackFacade:
     def __init__(
         self,
