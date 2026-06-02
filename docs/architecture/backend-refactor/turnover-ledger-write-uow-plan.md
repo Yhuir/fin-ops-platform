@@ -5733,6 +5733,32 @@ Remaining seam matrix：
 - 对应 MG：
   - `PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate`
 
+## PF-P169-MG Write Consistency Baseline Merge Gate
+
+状态：
+
+- verified
+
+执行结果：
+
+- 已对 `PF-P167 + PF-P168 + PF-P169` 做 cumulative MG。
+- MG 只覆盖 baseline/test/docs 事实源：
+  - `tests/test_turnover_ledger_api.py`
+  - `migration-state-log.md`
+  - `refactor-prompts.md`
+  - `turnover-ledger-write-uow-plan.md`
+- 已在功能分支提交：
+  - `3c99d511 test(turnover-ledger): lock write consistency baseline`
+- 已 merge 到 `main`：
+  - `365d9ef4 Merge branch 'codex/turnover-ledger-post-local-runtime-p167': turnover write consistency baseline`
+- 已在 merge 后的 `main` 上重跑：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+  - 通过（114 tests）
+
+下一步：
+
+- 当前暂停点之后，恢复时生成并审查 `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

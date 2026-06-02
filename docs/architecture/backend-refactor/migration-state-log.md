@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P169 - Turnover Ledger Write Consistency Characterization Tests` 已完成并验证 |
-| 当前 active prompt | `PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate`（planned） |
-| 最近 verified prompt | `PF-P169 - Turnover Ledger Write Consistency Characterization Tests` |
+| 当前阶段 | `PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate` 已完成并验证 |
+| 当前 active prompt | 空；当前目标暂停，下一步可生成并审查 `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration` |
+| 最近 verified prompt | `PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate` |
 | 当前分支 | `codex/turnover-ledger-post-local-runtime-p167` |
 | 最近验证 | `git diff --check`：Pass；`git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：Pass；CodeGraph / source seam audit：Pass；dirty-outbox / expected_versions / idempotency source audit：Pass |
-| 下一条允许任务 | 执行 `PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate` |
+| 下一条允许任务 | 生成并审查 `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration` |
 
 ## Prompt 执行日志
 
@@ -1009,6 +1009,49 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
 - 下一条应生成并审查：
   - `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration`
 - PF-P170 只迁移 `withdraw` 的 stale precondition integration，不得顺手迁移 `confirm`、`bank row tags`、`tag selection`。
+
+### PF-P169-MG - Turnover Ledger Write Consistency Baseline Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- cumulative MG 只覆盖以下未合入切片：
+  - `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline`
+  - `PF-P168 - Turnover Ledger Write Consistency / Dirty-Outbox Rebaseline`
+  - `PF-P169 - Turnover Ledger Write Consistency Characterization Tests`
+- 不执行 `PF-P170`
+- 不修改 production code、schema、deploy 或 Traffic Gate
+
+#### 执行摘要
+
+- 已确认当前分支只包含 4 个文件差异：
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 已完成范围检查、脏文件检查和 targeted unittest。
+- 已在功能分支提交：
+  - `3c99d511 test(turnover-ledger): lock write consistency baseline`
+- 已 merge 到 `main`：
+  - `365d9ef4 Merge branch 'codex/turnover-ledger-post-local-runtime-p167': turnover write consistency baseline`
+- 已在 merge 后的 `main` 上再次重跑 `tests.test_turnover_ledger_api`，通过。
+- 结论：
+  - 写一致性 baseline/test 事实源已安全合入 `main`
+  - 下一条实现切片仍应是 `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration`
+
+#### 验证
+
+- `git status --short --branch`：Pass
+- `git ls-files --others --exclude-standard`：Pass
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（分支 114 tests；merge 后 main 114 tests）
+
+#### 下一条 Prompt 上下文
+
+- 当前目标暂停。
+- 恢复时下一条应生成并审查：
+  - `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration`
 
 ### PF-P002 - Platform / Ops / Runtime Boundary Deep Dive
 

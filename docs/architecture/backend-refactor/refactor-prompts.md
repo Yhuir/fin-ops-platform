@@ -28566,6 +28566,28 @@ Stop Conditions:
 - PF-P169-MG 的边界正确：当前分支只积累了 PF-P167/PF-P168/PF-P169 的 baseline/test/docs 事实源，先收口再进入 PF-P170 更稳妥。
 - 这不是跳过实现，而是先把新的事实源与 characterization baseline 合入 `main`，避免后续 stale-precondition 实现基线漂移。
 
+### PF-P169-MG 执行结果
+
+- PF-P169-MG 已完成并验证。
+- 本次 cumulative MG 覆盖：
+  - `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline`
+  - `PF-P168 - Turnover Ledger Write Consistency / Dirty-Outbox Rebaseline`
+  - `PF-P169 - Turnover Ledger Write Consistency Characterization Tests`
+- 已确认差异范围只包含：
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 已在分支提交：
+  - `3c99d511 test(turnover-ledger): lock write consistency baseline`
+- 已 merge 到 `main`：
+  - `365d9ef4 Merge branch 'codex/turnover-ledger-post-local-runtime-p167': turnover write consistency baseline`
+- 已在 merge 后的 `main` 上重跑：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+  - 通过（114 tests）
+- 当前暂停点之后，恢复时下一条仍是：
+  - `PF-P170 - Turnover Ledger Withdraw Stale Precondition Integration`
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
