@@ -25938,6 +25938,74 @@ Post-Flight:
 - PF-P139 的边界正确：它只处理 withdraw local adapter seam，不碰 bank row tags。
 - 在 PF-P138 后继续执行 PF-P139，可以把 relation local path 这一组 seam 一次性收得更干净，再进入 cumulative MG。
 
+### PF-P139 执行结果
+
+- PF-P139 已完成并验证。
+- 新增 `TurnoverLedgerLocalWithdrawRelationAdapterSet`，将 withdraw local path 的 snapshot/save/repository 组装迁入 adapter module。
+- `server.py` 不再内联 `save_snapshot=lambda ...`。
+- 新增 source-level guard test，锁定该约束。
+- 复用了 confirm / relation extra 已锁定的旧合同：
+  - local relation save 失败时，仍然只记 `workbench_persistence_warning`，不改变成功响应路径。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，75 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 下一步应进入 `PF-P140-MG - Turnover Ledger Local Adapter Group Cumulative Merge Gate`。
+
+## PF-P140-MG - Turnover Ledger Local Adapter Group Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P140-MG - Turnover Ledger Local Adapter Group Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须对 PF-P136 / PF-P137 / PF-P138 / PF-P139 组成的 Turnover Ledger local adapter group 做正式 Merge Gate。
+
+Context:
+以下 prompt 已 verified：
+- PF-P136 - Turnover Ledger Remaining Write Path Rebaseline After Tag Selection Extraction
+- PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction
+- PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction
+- PF-P139 - Turnover Ledger Withdraw Relation Local Adapter Extraction
+
+当前分支应为 `codex/turnover-ledger-next-slice-p136`。本 MG 统一覆盖上述四条 prompt 的完整 diff。
+
+Expected Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Mandatory Checks:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Merge Rules:
+- 只允许精确 `git add`；
+- 如果 `git diff --name-only main...HEAD` 超出白名单，必须停止；
+- merge 后必须在 `main` 上重跑同一组验证，成功后才能 push `origin/main`。
+
+Forbidden Scope:
+- 不得混入 bank row tags 或其它模块改动。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 若 merge 成功并 push 完成，下一条 prompt 必须从最新 `main` 新建分支后生成。
+```
+
+### 审查结论
+
+- PF-P140-MG 的边界正确：它只覆盖 PF-P136 / PF-P137 / PF-P138 / PF-P139 的 local adapter group 小切片。
+- 当前 diff 已形成完整闭环，适合现在进入 cumulative MG。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

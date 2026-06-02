@@ -284,6 +284,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationRepository,
     TurnoverLedgerLocalRelationExtraAdapterSet,
     TurnoverLedgerLocalTagSelectionAdapterSet,
+    TurnoverLedgerLocalWithdrawRelationAdapterSet,
     TurnoverLedgerConfirmLegacyFallbackFacade,
     TurnoverLedgerRelationMutationInvalidationLegacyAdapter,
     TurnoverLedgerRelationExtraLegacyFallbackFacade,
@@ -2882,17 +2883,15 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return self._turnover_ledger_withdraw_legacy_fallback_facade()
-            connection = TurnoverLedgerLocalRelationConnection(
-                relation_snapshot_provider=self._turnover_relation_service.snapshot,
-                replace_snapshot=self._replace_local_turnover_relation_snapshot,
-                save_snapshot=lambda snapshot: self._save_local_turnover_relations_snapshot(
-                    state_store,
-                    snapshot,
-                ),
-            )
-            relation_repository = TurnoverLedgerLocalRelationRepository(
+            local_adapters = TurnoverLedgerLocalWithdrawRelationAdapterSet(
+                state_store=state_store,
+                relation_service=self._turnover_relation_service,
                 routes=self._turnover_ledger_api_routes,
+                replace_snapshot=self._replace_local_turnover_relation_snapshot,
+                emit_persistence_warning=self._emit_workbench_persistence_warning,
             )
+            connection = local_adapters.connection()
+            relation_repository = local_adapters.relation_repository()
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,

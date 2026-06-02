@@ -4507,7 +4507,7 @@ Remaining write path matrix：
 
 状态：
 
-- planned
+- verified
 
 目标：
 
@@ -4518,6 +4518,21 @@ Remaining write path matrix：
 
 - 只处理 withdraw local adapter。
 - 不碰 bank row tags。
+
+结果：
+
+- 已新增 `TurnoverLedgerLocalWithdrawRelationAdapterSet`。
+- withdraw local path 的 snapshot/save 组装已从 `server.py` 移入 adapter module。
+- `server.py` 不再内联 `save_snapshot=lambda ...`。
+- 新增 guard test：
+  - `test_withdraw_relation_write_facade_does_not_inline_local_snapshot_closures`
+- 保持旧合同：
+  - local relation save 持久化失败仍然只是 warning，不影响成功响应路径。
+
+下一步：
+
+- 进入 `PF-P140-MG - Turnover Ledger Local Adapter Group Cumulative Merge Gate`。
+- 本组切片统一覆盖 PF-P136 / PF-P137 / PF-P138 / PF-P139。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
