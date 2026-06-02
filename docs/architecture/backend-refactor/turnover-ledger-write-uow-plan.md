@@ -3903,7 +3903,7 @@ PF-P110 边界：
 
 ## PF-P127 Withdraw Relation Legacy Fallback Facade Extraction
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3973,6 +3973,23 @@ PF-P110 边界：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- PF-P125/PF-P126/PF-P127 已作为 relation mutation fallback family 合入本地 `main`。
+- Merge commit：`cadb0dbf`。
+- Confirm fallback 和 withdraw fallback 均已有显式 legacy fallback facade/adapter。
+- Confirm/withdraw handlers 不再内联 legacy route mutation 或 `_after_turnover_relation_mutation(...)`。
+- Branch 和 main 验证均通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate 未执行。
+
+下一条最小 prompt：
+
+- `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning`
+- 只做 bank row tags fallback cleanup discovery/planning，不直接改 production code。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

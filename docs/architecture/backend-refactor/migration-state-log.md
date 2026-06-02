@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` 已合入本地 `main` 并验证通过，待 push |
 | 当前 active prompt | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P127 - Turnover Ledger Withdraw Relation Legacy Fallback Facade Extraction` |
-| 当前分支 | `codex/turnover-ledger-relation-mutation-fallback-p125` |
+| 最近 verified prompt | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` |
+| 下一条允许任务 | 提交本次 post-flight 文档并执行 `git push origin main`；push 后从最新 `main` 新建下一条 `codex/` 分支 |
 
 ## Prompt 执行日志
 
@@ -9006,7 +9006,7 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 
 ### PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -9035,9 +9035,19 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
+#### 执行结果
+
+- 分支验证通过：`main...HEAD` 只包含 PF-P125/PF-P126/PF-P127 允许文件。
+- Merge commit：`cadb0dbf`。
+- `main` 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
+
 #### 下一条 Prompt 上下文
 
-TBD。
+下一步先提交本次 post-flight 文档并执行 `git push origin main`。push 完成后必须从最新 `main` 新建下一条 `codex/` 分支。建议下一条 prompt：`PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning`，只做 bank row tags fallback cleanup discovery/planning，不直接改 production code。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
