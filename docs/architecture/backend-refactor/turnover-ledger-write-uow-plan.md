@@ -4395,6 +4395,25 @@ Remaining write path matrix：
 - 进入 `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate`。
 - 本组切片统一覆盖 PF-P134 / PF-P135。
 
+## PF-P135-MG Tag Selection Local Adapter Cumulative Merge Gate
+
+状态：
+
+- verified
+
+结果：
+
+- PF-P134 / PF-P135 已通过 cumulative MG，并已合入 `main`。
+- branch 与 main 验证均通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 该切片完成后，tag selection local path 已不再由 `server.py` 内联 snapshot/save closures 组装。
+
+后续方向：
+
+- 下一条 prompt 必须从最新 `main` 新建分支后重新做 Turnover Ledger discovery/planning。
+- 不直接假定下一条仍是 PF-P134 时的旧优先级；需要基于最新代码事实重新选最小剩余 seam。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

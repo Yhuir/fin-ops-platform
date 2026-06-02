@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction` 已完成并验证 |
-| 当前 active prompt | `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate` 已生成并审查，待执行 |
-| 最近 verified prompt | `PF-P135 - Turnover Ledger Tag Selection Local Adapter Extraction` |
-| 当前分支 | `codex/turnover-ledger-rebaseline-p134` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
-| 下一条允许任务 | 执行 `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate` |
+| 当前阶段 | `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate` 已完成并验证 |
+| 当前 active prompt | 从最新 `main` 新建 `codex/` 分支后生成下一条 Turnover Ledger prompt |
+| 最近 verified prompt | `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass；`git diff --name-only main...HEAD`：白名单通过 |
+| 下一条允许任务 | push `origin/main` 后，从最新 `main` 新建 `codex/` 分支，生成并审查下一条 Turnover Ledger discovery/planning prompt |
 
 ## Prompt 执行日志
 
@@ -9723,7 +9723,7 @@ PF-P134 + PF-P135 已形成一个完整的小切片：rebaseline -> local adapte
 
 ### PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -9740,6 +9740,31 @@ PF-P134 + PF-P135 已形成一个完整的小切片：rebaseline -> local adapte
   - `docs/architecture/backend-refactor/refactor-prompts.md`
   - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
 - merge 后必须在 `main` 上重跑 tag selection 所在的 `tests.test_turnover_ledger_api` 与 compileall。
+
+#### 执行摘要
+
+- branch 范围检查通过，`git diff --name-only main...HEAD` 只包含白名单 6 个文件。
+- branch 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests；
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 已将 `codex/turnover-ledger-rebaseline-p134` 合入 `main`。
+- main 验证再次通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests；
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate 未执行；未部署、未切流、未访问生产或真实外部服务。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+本组 tag selection local adapter 切片已经合入 `main`。下一步必须在 push `origin/main` 后，从最新 `main` 新建新分支，再生成新的 Turnover Ledger discovery/planning prompt，重新决定剩余写路径的最小下一刀，避免直接沿用 PF-P134 的旧优先级。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

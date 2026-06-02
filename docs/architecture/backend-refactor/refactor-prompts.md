@@ -25575,6 +25575,20 @@ Post-Flight:
 - PF-P135-MG 的边界正确：它只覆盖 PF-P134 / PF-P135 的 tag selection local adapter 小切片。
 - 这组改动范围小、测试充分，适合现在进入 cumulative MG。
 
+### PF-P135-MG 执行结果
+
+- PF-P135-MG 已完成并验证。
+- `git diff --name-only main...HEAD`：只包含白名单文件。
+- branch 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 已将 `codex/turnover-ledger-rebaseline-p134` 合入 `main`。
+- main 验证再次通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- Traffic Gate 未执行。
+- 下一步：`git push origin main` 后，从最新 `main` 新建分支，生成并审查新的 Turnover Ledger discovery/planning prompt。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
