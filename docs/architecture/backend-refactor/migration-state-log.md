@@ -57,11 +57,11 @@
 | 字段 | 当前值 |
 | --- | --- |
 | 当前阶段 | `PF-P171-MG - Turnover Ledger Stale Precondition Cumulative Merge Gate` 已完成并验证 |
-| 当前 active prompt | 空；本组等待 commit / merge / push 收口 |
+| 当前 active prompt | 空；PF-P171-MG 已 merge 到 `main`，等待 `git push origin main` |
 | 最近 verified prompt | `PF-P171-MG - Turnover Ledger Stale Precondition Cumulative Merge Gate` |
-| 当前分支 | `codex/turnover-ledger-withdraw-stale-p170` |
-| 最近验证 | `git diff --check`：Pass；`git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：Pass；PF-P170 withdraw targeted RED/PASS：Pass；PF-P171 confirm targeted：Pass；`tests.test_turnover_ledger_uow_contract`：Pass（56 tests）；`tests.test_turnover_ledger_api`：Pass（117 tests） |
-| 下一条允许任务 | 精确提交当前分支，merge 到 `main`，在 `main` 上重跑验证，通过后 `git push origin main` |
+| 当前分支 | `main` |
+| 最近验证 | merge 后 `main`：`git diff --check`：Pass；`git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：Pass；`tests.test_turnover_ledger_uow_contract`：Pass（56 tests）；`tests.test_turnover_ledger_api`：Pass（117 tests） |
+| 下一条允许任务 | `git push origin main`；push 后从最新 `main` 新建 `codex/` 分支并生成 `PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning` |
 
 ## Prompt 执行日志
 
@@ -1177,6 +1177,11 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
 - 已确认 diff 只包含允许的 6 个文件。
 - 已确认无 untracked 文件。
 - 已执行 MG 指定验证集，全部通过。
+- 已在功能分支提交：
+  - `9f163c0b test(turnover-ledger): enforce withdraw stale precondition baseline`
+- 已 merge 到 `main`：
+  - `fd38b581 Merge branch 'codex/turnover-ledger-withdraw-stale-p170': turnover stale precondition baseline`
+- 已在 merge 后的 `main` 上重跑验证，全部通过。
 
 #### 验证
 
@@ -1188,7 +1193,7 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
 
 #### 下一条 Prompt 上下文
 
-- 当前应完成 commit / merge / push。
+- 当前应执行 `git push origin main`。
 - push 完成后，必须从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 prompt。
 - 下一条建议：
   - `PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning`

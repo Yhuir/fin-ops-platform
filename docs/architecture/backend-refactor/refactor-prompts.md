@@ -28662,10 +28662,15 @@ Verification:
   - `git diff --check`：Pass
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（56 tests）
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（117 tests）
+- 已在功能分支提交：
+  - `9f163c0b test(turnover-ledger): enforce withdraw stale precondition baseline`
+- 已 merge 到 `main`：
+  - `fd38b581 Merge branch 'codex/turnover-ledger-withdraw-stale-p170': turnover stale precondition baseline`
+- 已在 merge 后的 `main` 上重跑 verification，全部通过。
 
 下一步：
 
-- 完成当前分支 commit / merge / push。
+- 执行 `git push origin main`。
 - push 后从最新 `main` 新建下一条 `codex/` 分支。
 - 下一条建议 prompt：
   - `PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning`

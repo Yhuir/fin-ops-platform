@@ -5844,6 +5844,11 @@ Remaining seam matrix：
 - 已确认 diff 只包含允许的 code/test/docs 文件。
 - 已确认无 untracked 文件。
 - 已通过 UoW contract 和 Turnover API 回归。
+- 已在功能分支提交：
+  - `9f163c0b test(turnover-ledger): enforce withdraw stale precondition baseline`
+- 已 merge 到 `main`：
+  - `fd38b581 Merge branch 'codex/turnover-ledger-withdraw-stale-p170': turnover stale precondition baseline`
+- 已在 merge 后的 `main` 上重跑 verification，全部通过。
 
 验证：
 
@@ -5855,7 +5860,7 @@ Remaining seam matrix：
 
 下一步：
 
-- 完成 commit / merge / push。
+- 执行 `git push origin main`。
 - push 后从最新 `main` 新建下一条 `codex/` 分支。
 - 下一条建议：`PF-P172 - Turnover Ledger Confirm Expected Versions Contract Planning`。
 - PF-P172 应先定义 confirm expected_versions API/contract，不得直接实现 confirm stale guard。
