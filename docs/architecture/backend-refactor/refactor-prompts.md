@@ -23985,6 +23985,76 @@ Verification：
 
 下一条最小 prompt：`PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate`，统一覆盖 PF-P120 到 PF-P124 完整 diff。
 
+## PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端重构合并门禁的资深工程师。你必须严格验证 PF-P120 到 PF-P124 的完整 diff，只在所有检查通过后合入 main 并 push origin/main。
+
+Context:
+PF-P120/PF-P121/PF-P122/PF-P123/PF-P124 均已 verified。本分支完成：
+- fallback rebaseline；
+- facade None fallback characterization tests；
+- cleanup planning；
+- tag selection legacy fallback facade extraction；
+- relation extra legacy fallback facade extraction。
+
+Gate Scope:
+本 MG 只覆盖当前分支内 PF-P120 到 PF-P124 的完整 diff。不得执行 Traffic Gate、部署、访问生产、修改 Nginx、修改配置或打开 feature flag。
+
+Required Checks:
+1. Branch and dirty state:
+   - git status --short --branch
+   - git ls-files --others --exclude-standard
+   - git diff --check
+   - 严禁 untracked 临时文件。
+2. Scope:
+   - git diff --name-only main...HEAD
+   - git log --oneline main..HEAD
+   - 变更文件必须只属于允许白名单。
+3. Verification:
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+   - PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+   - python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+4. Merge:
+   - 切到 main 前必须确认工作树干净。
+   - 合入前确认 main 与 origin/main 对齐。
+   - merge 当前分支到 main。
+   - 在 main 上重跑 Verification。
+   - 只有 main 上 Verification 全部通过后，才允许 `git push origin main`。
+
+Allowed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden:
+- 禁止 `git add .` 或 `git add -A`。
+- 禁止 destructive git 命令。
+- 禁止 force push。
+- 禁止合入 unrelated changes。
+- 禁止执行 Traffic Gate 或生产操作。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md、turnover-ledger-write-uow-plan.md，记录 MG 结果。
+2. PF-P124-MG verified 后 push origin/main。
+3. push 后从最新 main 新建下一条 codex/ 分支，再生成下一条 prompt。
+```
+
+### 审查结论
+
+- PF-P124-MG 边界正确：只覆盖 PF-P120 到 PF-P124 的完整 diff。
+- MG 明确不执行 Traffic Gate、部署或生产访问。
+- MG 包含 untracked 检查、scope 白名单、branch/main 双重测试和 push 前安全锁。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

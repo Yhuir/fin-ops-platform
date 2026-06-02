@@ -3752,6 +3752,36 @@ PF-P110 边界：
 - `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate`
 - 统一覆盖 PF-P120 到 PF-P124 完整 diff。
 
+## PF-P124-MG Fallback Facade Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一验证并合入 PF-P120 到 PF-P124。
+- 覆盖 fallback rebaseline、fallback tests、cleanup planning、tag selection fallback adapter、relation extra fallback adapter。
+- 不执行 Traffic Gate，不部署，不访问生产。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
