@@ -234,6 +234,41 @@ class TurnoverLedgerWithdrawLegacyFallbackFacade:
         return dict(result or {})
 
 
+class TurnoverLedgerBankRowTagsLegacyFallbackFacade:
+    def __init__(
+        self,
+        *,
+        category_service: Any,
+        save_category_snapshot: Callable[[dict[str, object]], None],
+        relation_rebuild: Callable[[list[dict[str, object]]], None],
+        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        after_mutation: Callable[[list[str]], None],
+    ) -> None:
+        self._category_service = category_service
+        self._save_category_snapshot = save_category_snapshot
+        self._relation_rebuild = relation_rebuild
+        self._bank_rows_provider = bank_rows_provider
+        self._after_mutation = after_mutation
+
+    def update_bank_row_tags_batch(
+        self,
+        *,
+        updates: list[dict[str, object]],
+        actor_id: str,
+        tenant_id: str,
+        affected_months: list[str],
+    ) -> dict[str, object]:
+        _ = tenant_id
+        result = self._category_service.apply_turnover_updates(
+            [dict(update) for update in list(updates or [])],
+            actor=actor_id,
+        )
+        self._save_category_snapshot(dict(self._category_service.snapshot() or {}))
+        self._relation_rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
+        self._after_mutation(list(affected_months or []))
+        return dict(result or {})
+
+
 class TurnoverLedgerRelationRepositoryAdapter:
     def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
         self._repository_factory = repository_factory

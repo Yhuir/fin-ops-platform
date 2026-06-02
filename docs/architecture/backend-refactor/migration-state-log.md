@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` 已合入本地 `main` 并验证通过，待 push |
-| 当前 active prompt | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P127-MG - Turnover Ledger Relation Mutation Fallback Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，65 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 提交本次 post-flight 文档并执行 `git push origin main`；push 后从最新 `main` 新建下一条 `codex/` 分支 |
+| 当前阶段 | `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` |
+| 最近 verified prompt | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
+| 当前分支 | `codex/turnover-ledger-bank-row-tags-fallback-p128` |
+| 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；PF-P128 文档关键词检查：Pass |
+| 下一条允许任务 | 执行 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -9048,6 +9048,217 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 #### 下一条 Prompt 上下文
 
 下一步先提交本次 post-flight 文档并执行 `git push origin main`。push 完成后必须从最新 `main` 新建下一条 `codex/` 分支。建议下一条 prompt：`PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning`，只做 bank row tags fallback cleanup discovery/planning，不直接改 production code。
+
+### PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning
+
+状态：`verified`
+
+#### 范围
+
+- 只做 bank row tags legacy fallback cleanup 的 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests。
+- 不执行 Merge Gate 或 Traffic Gate。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+#### 必须输出
+
+- Bank row tags fallback inventory。
+- Handler direct side effects matrix。
+- Existing characterization coverage matrix。
+- Adapter extraction readiness and blockers。
+- 下一条最小 prompt 建议。
+
+#### Discovery 输出
+
+##### Bank Row Tags Fallback Inventory
+
+| 入口 | 当前 fallback 触发条件 | fallback 行为 | 风险 |
+| --- | --- | --- | --- |
+| `_handle_api_turnover_ledger_bank_row_tags_batch(...)` | `_turnover_ledger_bank_row_tags_write_facade()` 返回 `None`。 | handler 直接调用 `BankTransactionCategoryService.apply_turnover_updates(...)`。 | 业务 mutation 仍在 handler 内。 |
+| `_turnover_ledger_bank_row_tags_write_facade(...)` | 依赖缺失：state store 或 queue repository 缺失；PostgreSQL path 缺少 connection 或 `enqueue_read_model_refresh_in_transaction`；local path queue 缺少 `enqueue_read_model_refresh`。 | 返回 `None`，由 handler 执行 legacy direct side effects。 | dependency-missing fallback 与 explicit override None 需要分开锁定。 |
+| tests monkeypatch | 测试可将 `_turnover_ledger_bank_row_tags_write_facade` 替换为 lambda `None`。 | 强制 handler fallback。 | 后续 cleanup 不能只删除 override None 路径，否则会破坏兼容测试语义。 |
+
+##### Handler Direct Side Effects Matrix
+
+| side effect | 当前位置 | 已有 facade/UoW path | fallback cleanup 风险 |
+| --- | --- | --- | --- |
+| target validation | handler `_ensure_turnover_bank_row_tag_targets(...)` | 仍在 handler | 可保留在 handler，属于 HTTP 前置校验。 |
+| category apply | handler fallback 直接 `apply_turnover_updates(...)` | `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 通过 `bankdetail_port.apply_turnover_category_updates(...)` | 需要 fallback adapter 包住，不能继续留在 handler。 |
+| category snapshot save | handler fallback 直接 `state_store.save_bank_transaction_categories(...)` | local connection commit save；PostgreSQL adapter repository save | fallback adapter 需要明确 save callback 或依赖已抽出的 local adapter。 |
+| relation rebuild/save | handler fallback 调用 `rebuild_from_bank_rows(...)`，after-mutation 间接持久化 relation | facade/UoW bankdetail port 已 rebuild relation 并保存 category/relation snapshots | fallback adapter 必须保留 relation rebuild 顺序和 persistence warning 语义。 |
+| Workbench invalidation | `_after_turnover_relation_mutation(...)` 间接调用 `_invalidate_workbench_after_bank_transaction_categories(...)` | facade/UoW refresh requests 包含 `workbench` affected months | fallback adapter 需要继续调用 after-mutation 或等价 invalidation dependency。 |
+| Turnover Ledger read model clear/enqueue | `_after_turnover_relation_mutation(...)` clear + enqueue turnover refresh | facade/UoW transaction-bound dirty/outbox | fallback adapter 只移动边界，不改变 legacy queue failure 发生在 mutation 后的语义。 |
+
+##### Existing Characterization Coverage Matrix
+
+| 测试 | 覆盖内容 | 缺口 |
+| --- | --- | --- |
+| `test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details` | 正常保存、Bank Details 反映 category 更新。 | 不是 fallback-specific。 |
+| `test_turnover_bank_row_tag_batch_queue_failure_happens_after_category_save` | explicit facade None fallback 下 queue failure 发生在 category mutation 后。 | 仍通过 monkeypatch facade None，未锁定 future fallback adapter。 |
+| `test_turnover_bank_row_tag_batch_facade_none_keeps_legacy_direct_side_effects` | explicit facade None fallback direct side effects。 | 缺 handler-thinness guard。 |
+| `test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects` | dependency-missing fallback direct side effects。 | 缺 unsupported postgres queue API fallback adapter success/queue-failure 命名。 |
+| `test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save` / relation snapshot rollback | UoW target rollback。 | 已覆盖 primary facade path，不覆盖 legacy fallback adapter extraction。 |
+| `test_target_turnover_bank_row_tag_batch_local_facade_saves_snapshots_and_rebuilds_after_apply` | local facade success save category/relation snapshots。 | 可作为 adapter extraction 后 regression。 |
+
+##### Adapter Extraction Readiness
+
+- 可以按 confirm/withdraw 模式新增 explicit bank row tags fallback adapter，但必须先补一组 tests，避免跨模块副作用被误删。
+- Adapter 不得接收 `Application`，建议细粒度依赖：
+  - `category_service` 或 `apply_updates` callable；
+  - `save_category_snapshot` callable；
+  - `relation_rebuild` callable；
+  - `bank_rows_provider` callable；
+  - `after_mutation` callable。
+- 不建议本轮直接实现 adapter：bank row tags fallback 比 confirm/withdraw 更复杂，涉及 Bankdetail category service、Turnover relation rebuild、Workbench invalidation、Turnover Ledger read model refresh。
+- 下一步应先写 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`，补 handler-thinness target 和 unsupported postgres queue API fallback adapter tests。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P128|Bank Row Tags Legacy Fallback Cleanup|bank row tags fallback inventory|Handler Direct Side Effects Matrix" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+下一条最小 prompt 是 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`。PF-P129 只补 tests 和文档，不修改 production code；必须锁定 handler-thinness target、unsupported postgres queue API fallback adapter success/queue-failure，以及现有 dependency-missing fallback 语义。
+
+### PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只补 bank row tags fallback cleanup 前的 characterization tests。
+- 不修改 production code。
+- 不执行 Merge Gate 或 Traffic Gate。
+
+#### 允许文件
+
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+#### 下一条 Prompt 上下文
+
+PF-P129 已完成 bank row tags fallback cleanup 前的测试锁定：
+
+- 新增 handler-thinness target test：`test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects`，当前用 `unittest.expectedFailure` 保留为 PF-P130 的转绿目标。
+- 新增 unsupported PostgreSQL queue API / dependency-missing fallback queue-failure characterization：确认 legacy fallback 在 category mutation、read model clear、bank/workbench refresh enqueue 后，仍会在 turnover refresh enqueue 失败时抛出 queue failure。
+- 保持既有 dependency-missing fallback success 与 explicit facade `None` fallback 语义不变。
+
+验证：
+
+- `git status --short --branch`：Pass，仅包含 PF-P129 允许文件。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_bank_row_tag_batch_dependency_missing_queue_failure_happens_after_category_save -v`：Pass，3 tests，expected failures=1。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests，expected failures=1。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+下一条最小 prompt：`PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction`。PF-P130 可以修改 production code，把 bank row tags legacy fallback side effects 从 handler 移入显式 fallback adapter，并将 PF-P129 的 expectedFailure target 转为普通通过；不得改变 UoW 主路径语义。
+
+### PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction
+
+状态：`verified`
+
+#### 范围
+
+- 将 bank row tags legacy fallback side effects 从 `_handle_api_turnover_ledger_bank_row_tags_batch(...)` 移入显式 fallback adapter。
+- 将 PF-P129 handler-thinness target test 从 expectedFailure 转为普通通过。
+- 不改变 UoW primary path、idempotency、stale write、schema 或其它模块。
+- 不执行 Merge Gate 或 Traffic Gate。
+
+#### 允许文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- targeted bank row tags fallback tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P130 已完成 bank row tags legacy fallback facade extraction：
+
+- 新增 `TurnoverLedgerBankRowTagsLegacyFallbackFacade`，封装 category apply、category snapshot save、relation rebuild 和 after-mutation。
+- `_turnover_ledger_bank_row_tags_write_facade(...)` 在 primary facade 不可用时返回显式 legacy fallback adapter。
+- `_handle_api_turnover_ledger_bank_row_tags_batch(...)` 不再直接调用 `apply_turnover_updates(...)`、`save_bank_transaction_categories(...)`、`rebuild_from_bank_rows(...)` 或 `_after_turnover_relation_mutation(...)`。
+- PF-P129 handler-thinness target 已从 expectedFailure 转为普通通过。
+
+验证：
+
+- `git status --short --branch`：Pass，仅包含 PF-P130 允许文件。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+- targeted bank row tags fallback tests：Pass，4 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+当前 bank row tags fallback cleanup 切片已达到可合并边界。下一条应生成 `PF-P130-MG - Turnover Ledger Bank Row Tags Fallback Cleanup Cumulative Merge Gate`，统一覆盖 PF-P128、PF-P129、PF-P130。
+
+### PF-P130-MG - Turnover Ledger Bank Row Tags Fallback Cleanup Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 统一验证并合入 PF-P128、PF-P129、PF-P130 的完整 diff。
+- 只覆盖 bank row tags fallback cleanup discovery、characterization tests、fallback facade extraction。
+- 不新增业务实现，不执行 Traffic Gate、部署或生产访问。
+
+#### 允许文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 下一条 Prompt 上下文
+
+TBD。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

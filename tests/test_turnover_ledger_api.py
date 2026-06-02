@@ -988,6 +988,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         }
                     ),
                 )
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": _QueueRecorder()})()
             details_response = app.handle_request(
                 "GET",
                 f"/api/bank-details/transactions?category_code=borrow_in_company_pending_repayment",
@@ -1029,6 +1030,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         }
                     ),
                 )
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": _QueueRecorder()})()
             details_response = app.handle_request(
                 "GET",
                 f"/api/bank-details/transactions?category_code=borrow_in_company_pending_repayment",
@@ -1250,6 +1252,56 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
+
+    def test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_bank_row_tags_batch)
+
+        self.assertNotIn("apply_turnover_updates(", source)
+        self.assertNotIn("save_bank_transaction_categories(", source)
+        self.assertNotIn("rebuild_from_bank_rows(", source)
+        self.assertNotIn("_after_turnover_relation_mutation(", source)
+
+    def test_turnover_bank_row_tag_batch_dependency_missing_queue_failure_happens_after_category_save(self) -> None:
+        # PF-P129 characterization: unsupported postgres queue API fallback keeps legacy post-mutation queue failure.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _FailingQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+
+            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+                app.handle_request(
+                    "POST",
+                    "/api/turnover-ledger/bank-row-tags/batch",
+                    body=json.dumps(
+                        {
+                            "updates": [
+                                {
+                                    "transaction_id": transaction_ids[0],
+                                    "category_code": "borrow_in_company_pending_repayment",
+                                    "expected_version": 0,
+                                }
+                            ]
+                        }
+                    ),
+                )
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": _QueueRecorder()})()
+            category_snapshot = app._bank_transaction_category_service.snapshot()
+
+        self.assertEqual(read_repository.clear_calls, 1)
+        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.attempts)
+        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.attempts)
+        self.assertEqual(
+            [item for item in queue.attempts if item[0] == "turnover_ledger"],
+            [("turnover_ledger", "all", "turnover_relation_changed")],
+        )
+        self.assertEqual(
+            category_snapshot["categories"][transaction_ids[0]]["category_code"],
+            "borrow_in_company_pending_repayment",
+        )
 
     def test_target_turnover_bank_row_tag_batch_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
