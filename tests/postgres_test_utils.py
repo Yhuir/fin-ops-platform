@@ -54,6 +54,14 @@ EXPECTED_MIGRATION_FILES = [
     "0040_pending_invoice_source_versions.sql",
     "0041_bank_transaction_category_confirmations.sql",
     "0042_bank_detail_candidate_projection.sql",
+    "0043_workbench_idempotency_records.sql",
+    "0044_bank_detail_external_turnover_third_labels.sql",
+    "0045_output_invoice_collection_lifecycle.sql",
+    "0046_input_invoice_usage_oa_reverse_batches.sql",
+    "0047_oa_pending_payment_read_model.sql",
+    "0048_oa_pending_payment_bank_paid_total.sql",
+    "0049_oa_pending_payment_detail_lookup_indexes.sql",
+    "0050_tax_offset_plans.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

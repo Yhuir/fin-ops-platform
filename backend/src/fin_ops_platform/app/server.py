@@ -492,6 +492,12 @@ class Application:
     def runtime_repositories(self) -> RuntimeRepositoryContext:
         return self._runtime_repositories
 
+    def shutdown_background_jobs(self, *, wait: bool = True) -> None:
+        background_job_service = getattr(self, "_background_job_service", None)
+        shutdown = getattr(background_job_service, "shutdown", None)
+        if callable(shutdown):
+            shutdown(wait=wait)
+
     @staticmethod
     def _normalize_bootstrap_mode(value: str | None) -> str:
         raw_value = (value or os.getenv("FIN_OPS_BOOTSTRAP_MODE") or "production").strip().lower()

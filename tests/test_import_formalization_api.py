@@ -235,6 +235,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             self.assertEqual(retry_response.status_code, 200)
             retry_payload = json.loads(retry_response.body)
             self.assertEqual(retry_payload["files"][0]["batch_type"], "input_invoice")
+            app.shutdown_background_jobs()
 
     def test_revert_batch_and_download_batch_export(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -469,6 +469,9 @@ class BackgroundJobService:
 
         return self._executor.submit(runner)
 
+    def shutdown(self, *, wait: bool = True) -> None:
+        self._executor.shutdown(wait=wait)
+
     def _mutate_job(self, job_id: str, mutator: Callable[[BackgroundJob], None]) -> BackgroundJob:
         normalized_job_id = str(job_id or "").strip()
         with self._lock:

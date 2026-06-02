@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import pickle
 import re
+from threading import RLock
 from typing import Any, Callable, TypeVar
 from urllib.parse import quote_plus
 
@@ -199,6 +200,7 @@ class ApplicationStateStore:
         self._background_jobs_path = root / "background_jobs.pkl"
         self._app_health_alerts_path = root / "app_health_alerts.pkl"
         self._no_oa_bank_batches_path = root / "no_oa_bank_batches.pkl"
+        self._local_pickle_lock = RLock()
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
         self._mongo_settings = load_mongo_state_settings(root)
@@ -1346,8 +1348,7 @@ class ApplicationStateStore:
             )
             merged_snapshot["pair_relations"] = merged_relations
             current_payload["workbench_pair_relations"] = merged_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def load_no_oa_bank_batches(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -1405,8 +1406,7 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["workbench_read_models"] = normalized_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def load_workbench_candidate_matches(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -1439,8 +1439,7 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["workbench_candidate_matches"] = normalized_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def save_workbench_matching_dirty_scopes(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
@@ -1457,8 +1456,7 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["workbench_matching_dirty_scopes"] = normalized_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -1485,8 +1483,7 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["bank_transaction_categories"] = normalized_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def load_turnover_relations(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -1513,8 +1510,7 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["turnover_relations"] = normalized_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def load_turnover_relation_audit_log(self) -> list[Any]:
         snapshot = self.load_turnover_relations()
@@ -1555,8 +1551,7 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["turnover_ledger_extras"] = normalized_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def load_cost_statistics_read_models(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -1589,8 +1584,7 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["cost_statistics_read_models"] = normalized_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def load_tax_offset_read_models(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -1623,8 +1617,7 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["tax_offset_read_models"] = normalized_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def load(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -1702,8 +1695,7 @@ class ApplicationStateStore:
 
         if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(payload, handle)
+        self._save_local_pickle(payload)
 
     def save_workbench_overrides(
         self,
@@ -1732,8 +1724,7 @@ class ApplicationStateStore:
 
         current_payload = self._load_local_pickle()
         current_payload["workbench_overrides"] = workbench_overrides_snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def save_workbench_exception_cases(self, snapshot: dict[str, Any]) -> None:
         if self._mongo_database is not None:
@@ -1748,8 +1739,7 @@ class ApplicationStateStore:
 
         current_payload = self._load_local_pickle()
         current_payload["workbench_exception_cases"] = snapshot
-        with self._legacy_state_path.open("wb") as handle:
-            pickle.dump(current_payload, handle)
+        self._save_local_pickle(current_payload)
 
     def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str:
         if self._mongo_file_bucket is not None:
@@ -3606,11 +3596,20 @@ class ApplicationStateStore:
         )
 
     def _load_local_pickle(self) -> dict[str, Any]:
-        if not self._legacy_state_path.exists():
-            return {}
-        with self._legacy_state_path.open("rb") as handle:
-            loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
+        with self._local_pickle_lock:
+            if not self._legacy_state_path.exists():
+                return {}
+            with self._legacy_state_path.open("rb") as handle:
+                loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
         return loaded if isinstance(loaded, dict) else {}
+
+    def _save_local_pickle(self, payload: dict[str, Any]) -> None:
+        with self._local_pickle_lock:
+            self._legacy_state_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = self._legacy_state_path.with_name(f"{self._legacy_state_path.name}.tmp")
+            with temp_path.open("wb") as handle:
+                pickle.dump(payload, handle)
+            temp_path.replace(self._legacy_state_path)
 
     def _migrate_legacy_file_refs_to_gridfs(self, payload: dict[str, Any]) -> bool:
         if self._mongo_file_bucket is None:

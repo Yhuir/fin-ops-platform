@@ -32,6 +32,7 @@ class OAManualImportApiTests(unittest.TestCase):
         workbench: RecordingWorkbenchQueryService | None = None,
     ) -> Application:
         app = build_application(data_dir=Path(self._temp_dir.name))
+        self.addCleanup(app.shutdown_background_jobs)
         app._workbench_query_service._oa_adapter = adapter
         app._oa_manual_import_service = OAManualImportService(
             state_store=store or MemoryManualImportStore(),
