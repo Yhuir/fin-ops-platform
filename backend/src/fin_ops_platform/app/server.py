@@ -289,6 +289,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationExtraAdapterSet,
     TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder,
     TurnoverLedgerLocalTagSelectionAdapterSet,
+    TurnoverLedgerLocalRuntimeSupport,
     TurnoverLedgerLocalWithdrawRelationAdapterSet,
     TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder,
     TurnoverLedgerTagSelectionRequestBoundaryFacade,
@@ -2666,11 +2667,12 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_relation_extra_legacy_fallback_facade()
+        support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder(
             state_store=state_store,
             queue_repository=queue_repository,
             routes=self._turnover_ledger_api_routes,
-            replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
+            replace_snapshot=support.replace_turnover_ledger_extra_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             extra_service=self._turnover_ledger_extra_service,
             row_provider=self._turnover_ledger_relation_extra_row_provider,
@@ -2699,17 +2701,18 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
+        support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder(
             state_store=state_store,
             queue_repository=queue_repository,
             category_service=self._bank_transaction_category_service,
             relation_service=self._turnover_relation_service,
             bank_rows_provider=self._turnover_bank_transaction_rows,
-            replace_category_snapshot=self._replace_local_bank_transaction_category_snapshot,
-            replace_relation_snapshot=self._replace_local_turnover_relation_snapshot,
+            replace_category_snapshot=support.replace_bank_transaction_category_snapshot,
+            replace_relation_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             tenant_id=self._workbench_reconciliation_tenant_id(),
-            persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
+            persistence_repository_factory=lambda transaction: support.persistence_repository(
                 transaction,
                 state_store=state_store,
             ),
@@ -2737,16 +2740,17 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_confirm_legacy_fallback_facade()
+        support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerConfirmPrimaryWriteFacadeBuilder(
             state_store=state_store,
             queue_repository=queue_repository,
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
-            replace_snapshot=self._replace_local_turnover_relation_snapshot,
+            replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             tenant_id=self._workbench_reconciliation_tenant_id(),
-            persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
+            persistence_repository_factory=lambda transaction: support.persistence_repository(
                 transaction,
                 state_store=state_store,
             ),
@@ -2778,16 +2782,17 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
             return self._turnover_ledger_withdraw_legacy_fallback_facade()
+        support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder(
             state_store=state_store,
             queue_repository=queue_repository,
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
-            replace_snapshot=self._replace_local_turnover_relation_snapshot,
+            replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             tenant_id=self._workbench_reconciliation_tenant_id(),
-            persistence_repository_factory=lambda transaction: self._postgres_turnover_ledger_persistence_repository(
+            persistence_repository_factory=lambda transaction: support.persistence_repository(
                 transaction,
                 state_store=state_store,
             ),
@@ -2816,101 +2821,103 @@ class Application:
         *,
         state_store: object,
     ) -> object:
-        if callable(getattr(transaction, "execute", None)):
-            return PostgresWorkbenchRepository(transaction)
-        return state_store
+        return self._turnover_ledger_local_runtime_support().persistence_repository(
+            transaction,
+            state_store=state_store,
+        )
 
-    def _replace_local_bank_transaction_category_snapshot(self, snapshot: dict[str, object]) -> None:
-        category_service = BankTransactionCategoryService.from_snapshot(
-            dict(snapshot),
-            transaction_exists=self._bank_transaction_exists,
+    def _turnover_ledger_local_runtime_support(self) -> TurnoverLedgerLocalRuntimeSupport:
+        return TurnoverLedgerLocalRuntimeSupport(
+            app_settings_service=getattr(self, "_app_settings_service", None),
+            bank_details_service=getattr(self, "_bank_details_service", None),
+            turnover_ledger_service=getattr(self, "_turnover_ledger_service", None),
+            turnover_ledger_api_routes=getattr(self, "_turnover_ledger_api_routes", None),
+            live_workbench_service=getattr(self, "_live_workbench_service", None),
+            category_service_from_snapshot=lambda snapshot: BankTransactionCategoryService.from_snapshot(
+                dict(snapshot),
+                transaction_exists=self._bank_transaction_exists,
+            ),
+            auto_category_service_factory=lambda category_service: BankTransactionAutoCategoryService(
+                category_service=category_service,
+            ),
+            effective_category_provider_factory=lambda category_service, auto_category_service: BankTransactionEffectiveCategoryProvider(
+                category_service=category_service,
+                auto_category_service=auto_category_service,
+            ),
+            relation_service_from_snapshot=lambda snapshot: TurnoverRelationService.from_snapshot(
+                dict(snapshot),
+                bank_rows=self._turnover_bank_transaction_rows(),
+            ),
+            extra_service_builder=self._build_turnover_ledger_extra_service,
+            emit_persistence_warning=self._emit_workbench_persistence_warning,
+            postgres_repository_factory=PostgresWorkbenchRepository,
+            category_service_rebinder=self._bind_local_bank_transaction_category_runtime,
+            relation_service_rebinder=self._bind_local_turnover_relation_runtime,
+            extra_service_rebinder=self._bind_local_turnover_ledger_extra_runtime,
         )
-        auto_category_service = BankTransactionAutoCategoryService(
-            category_service=category_service,
-        )
-        effective_category_provider = BankTransactionEffectiveCategoryProvider(
-            category_service=category_service,
-            auto_category_service=auto_category_service,
-        )
+
+    def _bind_local_bank_transaction_category_runtime(
+        self,
+        category_service: object,
+        auto_category_service: object,
+        effective_category_provider: object,
+    ) -> None:
         self._bank_transaction_category_service = category_service
         self._bank_transaction_auto_category_service = auto_category_service
         self._bank_transaction_effective_category_provider = effective_category_provider
-        if getattr(self, "_app_settings_service", None) is not None:
-            setattr(self._app_settings_service, "_bank_transaction_category_service", category_service)
-            setattr(self._app_settings_service, "_bank_transaction_auto_category_service", auto_category_service)
-        if getattr(self, "_bank_details_service", None) is not None:
-            setattr(self._bank_details_service, "_category_service", category_service)
-            setattr(self._bank_details_service, "_auto_category_service", auto_category_service)
-        if getattr(self, "_turnover_ledger_service", None) is not None:
-            setattr(self._turnover_ledger_service, "_category_service", category_service)
-            setattr(self._turnover_ledger_service, "_category_provider", effective_category_provider)
-        if getattr(self, "_live_workbench_service", None) is not None:
-            setattr(self._live_workbench_service, "_category_provider", effective_category_provider)
+
+    def _bind_local_turnover_relation_runtime(self, relation_service: object) -> None:
+        self._turnover_relation_service = relation_service
+
+    def _bind_local_turnover_ledger_extra_runtime(self, extra_service: object) -> None:
+        self._turnover_ledger_extra_service = extra_service
+
+    def _replace_local_bank_transaction_category_snapshot(self, snapshot: dict[str, object]) -> None:
+        support = self._turnover_ledger_local_runtime_support()
+        support.replace_bank_transaction_category_snapshot(snapshot)
+        self._bank_transaction_category_service = support.category_service
+        self._bank_transaction_auto_category_service = support.auto_category_service
+        self._bank_transaction_effective_category_provider = support.effective_category_provider
 
     def _replace_local_turnover_relation_snapshot(self, snapshot: dict[str, object]) -> None:
-        relation_service = TurnoverRelationService.from_snapshot(
-            dict(snapshot),
-            bank_rows=self._turnover_bank_transaction_rows(),
-        )
-        self._turnover_relation_service = relation_service
-        if getattr(self, "_turnover_ledger_service", None) is not None:
-            setattr(self._turnover_ledger_service, "_relation_service", relation_service)
-        if getattr(self, "_turnover_ledger_api_routes", None) is not None:
-            setattr(self._turnover_ledger_api_routes, "_relation_service", relation_service)
+        support = self._turnover_ledger_local_runtime_support()
+        support.replace_turnover_relation_snapshot(snapshot)
+        self._turnover_relation_service = support.relation_service
 
     def _save_local_bank_transaction_categories_snapshot(
         self,
         state_store: object,
         snapshot: dict[str, object],
     ) -> None:
-        save_categories = getattr(state_store, "save_bank_transaction_categories", None)
-        if not callable(save_categories):
-            raise RuntimeError("state store must expose save_bank_transaction_categories.")
-        try:
-            save_categories(dict(snapshot))
-        except Exception as exc:
-            self._emit_workbench_persistence_warning(
-                operation="bank_transaction_categories_updated",
-                detail=str(exc),
-            )
+        self._turnover_ledger_local_runtime_support().save_bank_transaction_categories_snapshot(
+            state_store,
+            snapshot,
+        )
 
     def _save_local_turnover_relations_snapshot(
         self,
         state_store: object,
         snapshot: dict[str, object],
     ) -> None:
-        save_relations = getattr(state_store, "save_turnover_relations", None)
-        if not callable(save_relations):
-            raise RuntimeError("state store must expose save_turnover_relations.")
-        try:
-            save_relations(dict(snapshot))
-        except Exception as exc:
-            self._emit_workbench_persistence_warning(
-                operation="turnover_relations_updated",
-                detail=str(exc),
-            )
+        self._turnover_ledger_local_runtime_support().save_turnover_relations_snapshot(
+            state_store,
+            snapshot,
+        )
 
     def _replace_local_turnover_ledger_extra_snapshot(self, snapshot: dict[str, object]) -> None:
-        extra_service = self._build_turnover_ledger_extra_service(snapshot)
-        self._turnover_ledger_extra_service = extra_service
-        self._turnover_ledger_api_routes._extra_service = extra_service
-        setattr(self._turnover_ledger_service, "_extra_service", extra_service)
+        support = self._turnover_ledger_local_runtime_support()
+        support.replace_turnover_ledger_extra_snapshot(snapshot)
+        self._turnover_ledger_extra_service = support.extra_service
 
     def _save_local_turnover_ledger_extras_snapshot(
         self,
         state_store: object,
         snapshot: dict[str, object],
     ) -> None:
-        save_extras = getattr(state_store, "save_turnover_ledger_extras", None)
-        if not callable(save_extras):
-            raise RuntimeError("state store must expose save_turnover_ledger_extras.")
-        try:
-            save_extras(dict(snapshot))
-        except Exception as exc:
-            self._emit_workbench_persistence_warning(
-                operation="turnover_ledger_extra_updated",
-                detail=str(exc),
-            )
+        self._turnover_ledger_local_runtime_support().save_turnover_ledger_extras_snapshot(
+            state_store,
+            snapshot,
+        )
 
     def _turnover_ledger_tag_selection_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerTagSelectionLegacyFallbackFacade:
         override = getattr(self, "_turnover_ledger_tag_selection_write_facade_override", None)
@@ -2940,10 +2947,7 @@ class Application:
         ).facade()
 
     def _refresh_local_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
-        setattr(self._app_settings_service, "_snapshot", dict(snapshot))
-        configure_category_service = getattr(self._app_settings_service, "_configure_category_service", None)
-        if callable(configure_category_service):
-            configure_category_service(dict(snapshot))
+        self._turnover_ledger_local_runtime_support().refresh_app_settings_snapshot(snapshot)
 
     def _turnover_ledger_relation_extra_row_provider(
         self,

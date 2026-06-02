@@ -17,6 +17,7 @@ from fin_ops_platform.app.routes_turnover_ledger import TurnoverLedgerApiRoutes
 from fin_ops_platform.app.server import Application, build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
@@ -966,6 +967,162 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("bankdetail_port=SimpleNamespace()", relation_extra_source)
         self.assertNotIn("_workbench_write_idempotency_store(", relation_extra_source)
         self.assertNotIn("InMemoryWorkbenchIdempotencyRepository()", relation_extra_source)
+
+    def test_turnover_ledger_primary_write_facades_use_local_runtime_support_boundary(self) -> None:
+        methods = [
+            Application._turnover_ledger_relation_extra_write_facade,
+            Application._turnover_ledger_bank_row_tags_write_facade,
+            Application._turnover_ledger_confirm_write_facade,
+            Application._turnover_ledger_withdraw_write_facade,
+        ]
+
+        for method in methods:
+            with self.subTest(method=method.__name__):
+                source = inspect.getsource(method)
+                self.assertIn("support = self._turnover_ledger_local_runtime_support()", source)
+
+    def test_turnover_ledger_local_runtime_helpers_delegate_to_support_boundary(self) -> None:
+        helper_names = [
+            "_postgres_turnover_ledger_persistence_repository",
+            "_replace_local_bank_transaction_category_snapshot",
+            "_replace_local_turnover_relation_snapshot",
+            "_replace_local_turnover_ledger_extra_snapshot",
+            "_save_local_bank_transaction_categories_snapshot",
+            "_save_local_turnover_relations_snapshot",
+            "_save_local_turnover_ledger_extras_snapshot",
+            "_refresh_local_app_settings_snapshot",
+        ]
+
+        for helper_name in helper_names:
+            with self.subTest(helper_name=helper_name):
+                source = inspect.getsource(getattr(Application, helper_name))
+                self.assertIn("_turnover_ledger_local_runtime_support()", source)
+
+    def test_replace_local_bank_transaction_category_snapshot_rebinds_dependent_services(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            original_category_service = app._bank_transaction_category_service
+            snapshot = original_category_service.snapshot()
+
+            app._replace_local_bank_transaction_category_snapshot(snapshot)
+
+        self.assertIsNot(app._bank_transaction_category_service, original_category_service)
+        self.assertIs(app._app_settings_service._bank_transaction_category_service, app._bank_transaction_category_service)
+        self.assertIs(app._bank_details_service._category_service, app._bank_transaction_category_service)
+        self.assertIs(app._turnover_ledger_service._category_service, app._bank_transaction_category_service)
+        self.assertIs(app._turnover_ledger_service._category_provider, app._bank_transaction_effective_category_provider)
+        self.assertIs(app._live_workbench_service._category_provider, app._bank_transaction_effective_category_provider)
+
+    def test_replace_local_turnover_relation_snapshot_rebinds_routes_and_service(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            original_relation_service = app._turnover_relation_service
+            snapshot = original_relation_service.snapshot()
+
+            app._replace_local_turnover_relation_snapshot(snapshot)
+
+        self.assertIsNot(app._turnover_relation_service, original_relation_service)
+        self.assertIs(app._turnover_ledger_service._relation_service, app._turnover_relation_service)
+        self.assertIs(app._turnover_ledger_api_routes._relation_service, app._turnover_relation_service)
+
+    def test_replace_local_turnover_ledger_extra_snapshot_rebinds_routes_and_service(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            original_extra_service = app._turnover_ledger_extra_service
+            snapshot = app._turnover_ledger_api_routes.extras_snapshot()
+
+            app._replace_local_turnover_ledger_extra_snapshot(snapshot)
+
+        self.assertIsNot(app._turnover_ledger_extra_service, original_extra_service)
+        self.assertIs(app._turnover_ledger_api_routes._extra_service, app._turnover_ledger_extra_service)
+        self.assertIs(app._turnover_ledger_service._extra_service, app._turnover_ledger_extra_service)
+
+    def test_refresh_local_app_settings_snapshot_updates_snapshot_in_place(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            snapshot = dict(getattr(app._app_settings_service, "_snapshot", {}) or {})
+            snapshot["turnover_ledger_tag_selection"] = {
+                "version": 99,
+                "selected_tag_codes": ["external_rule_borrow_out"],
+            }
+
+            app._refresh_local_app_settings_snapshot(snapshot)
+
+        self.assertEqual(app._app_settings_service._snapshot["turnover_ledger_tag_selection"]["version"], 99)
+        self.assertEqual(
+            app._app_settings_service._snapshot["turnover_ledger_tag_selection"]["selected_tag_codes"],
+            ["external_rule_borrow_out"],
+        )
+
+    def test_turnover_ledger_local_save_helpers_require_state_store_methods(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            for helper, expected_message in (
+                (app._save_local_bank_transaction_categories_snapshot, "save_bank_transaction_categories"),
+                (app._save_local_turnover_relations_snapshot, "save_turnover_relations"),
+                (app._save_local_turnover_ledger_extras_snapshot, "save_turnover_ledger_extras"),
+            ):
+                with self.subTest(helper=helper.__name__):
+                    with self.assertRaisesRegex(RuntimeError, expected_message):
+                        helper(object(), {})
+
+    def test_turnover_ledger_local_save_helpers_keep_best_effort_warning_contract(self) -> None:
+        class FailingCategoryStore:
+            def save_bank_transaction_categories(self, snapshot: dict[str, object]) -> None:
+                _ = snapshot
+                raise RuntimeError("category store unavailable")
+
+        class FailingRelationStore:
+            def save_turnover_relations(self, snapshot: dict[str, object]) -> None:
+                _ = snapshot
+                raise RuntimeError("relation store unavailable")
+
+        class FailingExtraStore:
+            def save_turnover_ledger_extras(self, snapshot: dict[str, object]) -> None:
+                _ = snapshot
+                raise RuntimeError("extra store unavailable")
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            warnings: list[dict[str, object]] = []
+            app._emit_workbench_persistence_warning = lambda **kwargs: warnings.append(dict(kwargs))
+
+            app._save_local_bank_transaction_categories_snapshot(FailingCategoryStore(), {})
+            app._save_local_turnover_relations_snapshot(FailingRelationStore(), {})
+            app._save_local_turnover_ledger_extras_snapshot(FailingExtraStore(), {})
+
+        self.assertEqual(
+            warnings,
+            [
+                {"operation": "bank_transaction_categories_updated", "detail": "category store unavailable"},
+                {"operation": "turnover_relations_updated", "detail": "relation store unavailable"},
+                {"operation": "turnover_ledger_extra_updated", "detail": "extra store unavailable"},
+            ],
+        )
+
+    def test_postgres_turnover_ledger_persistence_repository_selects_postgres_only_for_execute_transactions(self) -> None:
+        class ExecuteTransaction:
+            def execute(self, *_args: object, **_kwargs: object) -> None:
+                return None
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            state_store = object()
+
+            postgres_repository = app._postgres_turnover_ledger_persistence_repository(
+                ExecuteTransaction(),
+                state_store=state_store,
+            )
+            fallback_repository = app._postgres_turnover_ledger_persistence_repository(
+                object(),
+                state_store=state_store,
+            )
+
+        self.assertIsInstance(postgres_repository, PostgresWorkbenchRepository)
+        self.assertIs(fallback_repository, state_store)
 
     def test_turnover_ledger_tag_selection_fallback_adapter_keeps_legacy_update_and_refresh(self) -> None:
         # PF-P123 target: unsupported postgres queue API uses explicit fallback adapter, not handler direct side effects.
