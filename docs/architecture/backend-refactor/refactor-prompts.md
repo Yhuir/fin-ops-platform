@@ -22521,6 +22521,98 @@ Post-Flight:
 - PF-P114 边界正确：只抽离 relation extra local adapter。
 - 该 prompt 复用现有 rollback/idempotency/stale tests，不扩大到其它 local shim。
 
+### PF-P114 执行结果
+
+状态：`verified`
+
+变更：
+
+- `turnover_ledger_write_adapters.py` 新增：
+  - `TurnoverLedgerLocalRelationExtraConnection`
+  - `TurnoverLedgerLocalExtraRepository`
+- `server.py`：
+  - relation extra local path 改为组装新 adapter。
+  - 删除 relation extra 专用 local transaction/repository helper。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条建议：
+
+- 生成并执行 `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate`。
+
+## PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 merge gate 审核工程师。你必须严格验证 PF-P112 到 PF-P114 的完整 diff，确认范围、测试和文档状态后再合入 main。
+
+Context:
+PF-P112、PF-P113、PF-P114 均已 verified。当前分支应为 `codex/turnover-ledger-next-slice-p112`。本 MG 覆盖：
+- PF-P112：local shim extraction discovery/planning。
+- PF-P113：local dirty outbox writer extraction。
+- PF-P114：relation extra local adapter extraction。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P112、PF-P113、PF-P114 均为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Gate Scope:
+只允许以下文件出现在 `main...HEAD` diff：
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Mandatory Checks:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Merge Rules:
+- 严禁 `git add .` 或 `git add -A`。
+- 如有 untracked 临时文件，必须停止。
+- 如 main 已有远端更新，合入 main 前必须先同步并重新验证。
+- 合入 main 后必须在 main 重跑 mandatory tests；若失败，停止且不得 push。
+- push origin/main 只代表 Git 推送，不代表部署、切流或 Traffic Gate。
+
+Forbidden Scope:
+- 不执行 Traffic Gate。
+- 不部署，不访问生产，不修改 Nginx/配置/feature flag。
+- 不开始下一业务模块。
+- 不继续抽离其它 local shim。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P114-MG 结果。
+2. 将 PF-P114-MG 标记为 verified。
+3. 合入 main 并在 main 重跑验证。
+4. 验证通过后执行 git push origin main。
+5. push 后从最新 main 新建下一条 codex 分支。
+```
+
+### 审查结论
+
+- PF-P114-MG 边界正确：只覆盖 PF-P112/PF-P113/PF-P114。
+- 该 MG 不继续抽离其它 local shim，不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

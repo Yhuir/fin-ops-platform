@@ -276,6 +276,8 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
     TurnoverLedgerLocalDirtyOutboxWriter,
+    TurnoverLedgerLocalExtraRepository,
+    TurnoverLedgerLocalRelationExtraConnection,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionSettingsAdapter,
 )
@@ -2648,8 +2650,18 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return None
-            connection = self._local_turnover_ledger_relation_extra_connection(state_store)
-            extra_repository = self._local_turnover_ledger_extra_repository()
+            connection = TurnoverLedgerLocalRelationExtraConnection(
+                extras_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
+                replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
+                save_snapshot=lambda snapshot: self._save_local_turnover_ledger_extras_snapshot(
+                    state_store,
+                    snapshot,
+                ),
+            )
+            extra_repository = TurnoverLedgerLocalExtraRepository(
+                extras_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
+                replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
+            )
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
             idempotency_store = getattr(self, "_turnover_ledger_relation_extra_idempotency_store", None)
             if idempotency_store is None:
@@ -3032,52 +3044,6 @@ class Application:
                 operation="turnover_relations_updated",
                 detail=str(exc),
             )
-
-    def _local_turnover_ledger_relation_extra_connection(self, state_store: object) -> object:
-        application = self
-
-        class _LocalRelationExtraConnection:
-            @contextmanager
-            def transaction(self) -> Any:
-                previous_snapshot = application._turnover_ledger_api_routes.extras_snapshot()
-                try:
-                    yield SimpleNamespace()
-                except Exception:
-                    application._replace_local_turnover_ledger_extra_snapshot(previous_snapshot)
-                    application._save_local_turnover_ledger_extras_snapshot(state_store, previous_snapshot)
-                    raise
-                else:
-                    current_snapshot = application._turnover_ledger_api_routes.extras_snapshot()
-                    application._save_local_turnover_ledger_extras_snapshot(state_store, current_snapshot)
-
-        return _LocalRelationExtraConnection()
-
-    def _local_turnover_ledger_extra_repository(self) -> object:
-        save_extra = self._save_local_turnover_ledger_relation_extra
-
-        class _LocalTurnoverLedgerExtraRepository:
-            def save_extra(self, extra: dict[str, object], *, transaction: object) -> None:
-                save_extra(extra)
-
-        return _LocalTurnoverLedgerExtraRepository()
-
-    def _save_local_turnover_ledger_relation_extra(self, extra: dict[str, object]) -> None:
-        relation_id = str(extra.get("relation_id") or "").strip()
-        if not relation_id:
-            raise ValueError("relation_id is required.")
-        current_snapshot = self._turnover_ledger_api_routes.extras_snapshot()
-        extras = [
-            dict(item)
-            for item in list(current_snapshot.get("extras") or [])
-            if isinstance(item, dict) and str(item.get("relation_id") or "").strip() != relation_id
-        ]
-        extras.append(dict(extra))
-        self._replace_local_turnover_ledger_extra_snapshot(
-            {
-                "version": current_snapshot.get("version") or 1,
-                "extras": extras,
-            }
-        )
 
     def _replace_local_turnover_ledger_extra_snapshot(self, snapshot: dict[str, object]) -> None:
         extra_service = self._build_turnover_ledger_extra_service(snapshot)

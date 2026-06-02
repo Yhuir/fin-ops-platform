@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any, Callable
 
 
@@ -333,6 +335,62 @@ class TurnoverLedgerLocalDirtyOutboxWriter:
                 )
             )
         return events
+
+
+class TurnoverLedgerLocalRelationExtraConnection:
+    def __init__(
+        self,
+        *,
+        extras_snapshot_provider: Callable[[], dict[str, object]],
+        replace_snapshot: Callable[[dict[str, object]], None],
+        save_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._extras_snapshot_provider = extras_snapshot_provider
+        self._replace_snapshot = replace_snapshot
+        self._save_snapshot = save_snapshot
+
+    @contextmanager
+    def transaction(self) -> Any:
+        previous_snapshot = dict(self._extras_snapshot_provider() or {})
+        try:
+            yield SimpleNamespace()
+        except Exception:
+            self._replace_snapshot(dict(previous_snapshot))
+            self._save_snapshot(dict(previous_snapshot))
+            raise
+        else:
+            current_snapshot = dict(self._extras_snapshot_provider() or {})
+            self._save_snapshot(current_snapshot)
+
+
+class TurnoverLedgerLocalExtraRepository:
+    def __init__(
+        self,
+        *,
+        extras_snapshot_provider: Callable[[], dict[str, object]],
+        replace_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._extras_snapshot_provider = extras_snapshot_provider
+        self._replace_snapshot = replace_snapshot
+
+    def save_extra(self, extra: dict[str, object], *, transaction: Any) -> None:
+        _ = transaction
+        relation_id = str(extra.get("relation_id") or "").strip()
+        if not relation_id:
+            raise ValueError("relation_id is required.")
+        current_snapshot = dict(self._extras_snapshot_provider() or {})
+        extras = [
+            dict(item)
+            for item in list(current_snapshot.get("extras") or [])
+            if isinstance(item, dict) and str(item.get("relation_id") or "").strip() != relation_id
+        ]
+        extras.append(dict(extra))
+        self._replace_snapshot(
+            {
+                "version": current_snapshot.get("version") or 1,
+                "extras": extras,
+            }
+        )
 
 
 class TurnoverLedgerExtraNormalizerAdapter:
