@@ -4472,6 +4472,22 @@ Remaining write path matrix：
 - 继续同组 local adapter extraction 时，优先 `confirm relation local adapter seam`。
 - 若希望先收口当前子组，可生成覆盖 PF-P136 / PF-P137 的 cumulative MG。
 
+## PF-P138 Confirm Relation Local Adapter Extraction
+
+状态：
+
+- planned
+
+目标：
+
+- 把 confirm local path 的 snapshot/save/relation rebuild 组装迁入 adapter module。
+- 继续减少 `server.py` 中的 local wiring，但不改变 stale / duplicate submit / queue failure rollback / no direct clear 合约。
+
+边界：
+
+- 只处理 confirm local adapter。
+- 不碰 withdraw / bank row tags。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

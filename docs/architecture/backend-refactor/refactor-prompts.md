@@ -25763,6 +25763,88 @@ Post-Flight:
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
 - 下一步应决定：继续 confirm/withdraw local adapter seam，或为 PF-P136 / PF-P137 先生成 cumulative MG。
 
+## PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在不改变 confirm relation API contract、stale/idempotency 行为、queue failure 语义与 legacy fallback 语义的前提下，抽离 Turnover Ledger confirm local path 的 adapter seam。
+
+Context:
+PF-P136 / PF-P137 已 verified。当前 confirm relation 写路径已经具备：
+- primary UoW path；
+- explicit legacy fallback facade；
+- stale guard / duplicate submit / queue rollback / no direct clear 护栏。
+
+但 local path 仍由 `server.py` 直接组装：
+- `TurnoverLedgerLocalRelationConnection(...)`
+- `save_snapshot=lambda ...`
+- `TurnoverLedgerLocalRelationRepository(...)`
+- `relation_rebuild=lambda: self._turnover_relation_service.rebuild_from_bank_rows(...)`
+
+这仍然让 `server.py` 持有 relation local adapter 细节。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+2. 必须确认当前分支是 `codex/turnover-ledger-next-slice-p136`，不是 `main`。
+3. 必须确认 PF-P137 已 verified。
+
+Goal:
+把 confirm local path 的 local adapter 组装迁入 adapter module，减少 `server.py` 中的 inline closure 与 relation rebuild wiring。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Implementation Work:
+1. 抽离 confirm local path 所需的 local adapter seam，减少 `server.py` 中的 inline closure。
+2. 保持 `TurnoverLedgerLocalRelationConnection` / local relation repository 语义不变。
+3. relation rebuild 仍必须发生在当前 local confirm 语义所要求的位置。
+4. 不得把 `Application` 整体注入 adapter。
+5. 如需要，新增 source-level guard test，锁定 `server.py` 不再内联 confirm local snapshot/save/rebuild closure。
+
+Behavior Constraints:
+- stale / duplicate submit / queue failure rollback 行为不变；
+- fallback facade 仍能工作；
+- no direct clear 行为不变；
+- 不新增 schema / worker / deploy 改动。
+
+Forbidden Scope:
+- 不得修改 withdraw、bank row tags。
+- 不得修改 MG / deploy / Traffic Gate。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P138 status、变更文件、验证结果与 residual risk。
+3. 完成后再决定是否继续 withdraw local adapter seam，或进入 cumulative MG。
+```
+
+### 审查结论
+
+- PF-P138 的边界正确：它只处理 confirm local adapter seam，不碰 withdraw / bank row tags。
+- 它与 PF-P137 同属一组 local adapter 收束工作，继续在同一分支推进是合理的。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

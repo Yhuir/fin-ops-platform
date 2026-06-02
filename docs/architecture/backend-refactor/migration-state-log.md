@@ -57,11 +57,11 @@
 | 字段 | 当前值 |
 | --- | --- |
 | 当前阶段 | `PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction` 已完成并验证 |
-| 当前 active prompt | 从 `PF-P137` 结论决定下一条同组 local adapter prompt 或 cumulative MG |
+| 当前 active prompt | `PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction` 已生成并审查，待执行 |
 | 最近 verified prompt | `PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p136` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，73 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
-| 下一条允许任务 | 生成并审查 Turnover Ledger 下一条 local adapter prompt，或在达到可合并边界时生成 cumulative MG |
+| 下一条允许任务 | 执行 `PF-P138 - Turnover Ledger Confirm Relation Local Adapter Extraction` |
 
 ## Prompt 执行日志
 
