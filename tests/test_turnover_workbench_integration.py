@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -15,6 +16,15 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
         self.addCleanup(cost_warmup_patcher.stop)
         cost_warmup_patcher.start()
+
+    @contextmanager
+    def _temporary_app(self):
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            try:
+                yield app
+            finally:
+                app.shutdown_background_jobs()
 
     def _import_bank_rows(
         self,
@@ -78,6 +88,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             ],
             actor="YNSYLP005",
         )
+        app._turnover_ledger_service._selected_tag_codes_provider = None
         app._state_store.save_bank_transaction_categories(
             app._bank_transaction_category_service.snapshot()
         )
@@ -93,8 +104,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         return [str(row["id"]) for row in list(group.get("bank_rows") or [])]
 
     def test_deterministic_turnover_relation_syncs_to_workbench_same_row(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app)
             self._tag_borrow_in_rows(app, transaction_ids)
 
@@ -112,8 +122,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(turnover_groups[0]["group_metadata"]["relation_status"], "deterministic")
 
     def test_suggested_partial_turnover_relation_does_not_sync_to_workbench_same_row(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app, settlement_amount="100000.00")
             self._tag_borrow_in_rows(app, transaction_ids)
 
@@ -129,8 +138,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         ])
 
     def test_confirm_and_withdraw_relation_updates_workbench_grouping(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app, settlement_amount="100000.00")
             self._tag_borrow_in_rows(app, transaction_ids)
 

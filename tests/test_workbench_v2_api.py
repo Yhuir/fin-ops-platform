@@ -690,6 +690,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "GET",
                     "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
                 )
+            app.shutdown_background_jobs()
 
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
         confirm_payload = json.loads(confirm_response.body)
@@ -5771,7 +5772,11 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         app._import_service.confirm_import(preview.id)
         row_ids = [transaction.id for transaction in app._import_service.list_transactions() if transaction.source_batch_id == preview.id]
 
-        with patch.object(app._live_workbench_service, "_rebuild_cache", wraps=app._live_workbench_service._rebuild_cache) as rebuild_cache:
+        with patch.object(
+            app._live_workbench_service,
+            "get_rows_detail",
+            wraps=app._live_workbench_service.get_rows_detail,
+        ) as get_rows_detail:
             confirm_response = app._handle_live_workbench_confirm_link(
                 {
                     "month": "2026-03",
@@ -5781,7 +5786,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             )
 
         self.assertEqual(confirm_response.status_code, 200)
-        self.assertLessEqual(rebuild_cache.call_count, 1)
+        get_rows_detail.assert_called_once_with(row_ids)
 
     def test_cancel_exception_returns_processed_rows_to_open_state(self) -> None:
         app = build_application()

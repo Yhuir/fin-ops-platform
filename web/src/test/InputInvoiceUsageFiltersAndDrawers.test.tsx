@@ -164,7 +164,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
         onClose={() => undefined}
       />,
     );
-    expect(await screen.findByText("OA详情不可用")).toBeInTheDocument();
+    expect(await screen.findByText("详情暂不可用")).toBeInTheDocument();
     expect(screen.getByText("后端未提供 OA 完整详情")).toBeInTheDocument();
     expect(screen.queryByText("模拟 OA 明细")).not.toBeInTheDocument();
 

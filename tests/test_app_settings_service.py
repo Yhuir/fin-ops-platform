@@ -1099,32 +1099,35 @@ class AppSettingsServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            update_response = app.handle_request(
-                "POST",
-                "/api/workbench/settings",
-                body=json.dumps(
-                    {
-                        "completed_project_ids": [],
-                        "bank_account_mappings": [],
-                        "allowed_usernames": ["FULL001", "READONLY001"],
-                        "readonly_export_usernames": ["READONLY001"],
-                        "admin_usernames": [],
-                        "oa_retention": {"cutoff_date": "2026-01-01"},
-                        "oa_import": {
-                            "form_types": ["payment_request"],
-                            "statuses": ["completed"],
-                        },
-                        "workbench_column_layouts": {
-                            "oa": ["projectName", "applicant"],
-                            "bank": ["amount", "counterparty"],
-                        },
-                    }
-                ),
-            )
-            updated_payload = json.loads(update_response.body)
+            try:
+                update_response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings",
+                    body=json.dumps(
+                        {
+                            "completed_project_ids": [],
+                            "bank_account_mappings": [],
+                            "allowed_usernames": ["FULL001", "READONLY001"],
+                            "readonly_export_usernames": ["READONLY001"],
+                            "admin_usernames": [],
+                            "oa_retention": {"cutoff_date": "2026-01-01"},
+                            "oa_import": {
+                                "form_types": ["payment_request"],
+                                "statuses": ["completed"],
+                            },
+                            "workbench_column_layouts": {
+                                "oa": ["projectName", "applicant"],
+                                "bank": ["amount", "counterparty"],
+                            },
+                        }
+                    ),
+                )
+                updated_payload = json.loads(update_response.body)
 
-            get_response = app.handle_request("GET", "/api/workbench/settings")
-            get_payload = json.loads(get_response.body)
+                get_response = app.handle_request("GET", "/api/workbench/settings")
+                get_payload = json.loads(get_response.body)
+            finally:
+                app.shutdown_background_jobs()
 
         self.assertEqual(update_response.status_code, 200)
         self.assertEqual(
