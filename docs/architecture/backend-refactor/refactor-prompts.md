@@ -22757,6 +22757,99 @@ Post-Flight:
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
 - 下一条建议：生成并审查 `PF-P116 - Turnover Ledger Tag Selection Local Adapter Extraction`，只抽离 tag selection local connection/settings repository，不处理 bank row tags，不进入 MG。
 
+## PF-P116 - Turnover Ledger Tag Selection Local Adapter Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P116 - Turnover Ledger Tag Selection Local Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger tag selection 的 local transaction/settings writer 从 `server.py` 迁到 adapter module，保持行为不变。
+
+Context:
+PF-P115 已 verified。当前已完成：
+- local dirty outbox writer extraction；
+- relation extra local adapter extraction；
+- confirm/withdraw relation local adapter extraction。
+`server.py` 中仍保留 tag selection local helper：
+- `_local_turnover_ledger_tag_selection_connection`
+- `_save_local_turnover_ledger_tag_selection`
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P115 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+将 tag selection local transaction 和 local settings writer 迁入 `turnover_ledger_write_adapters.py`，让 `server.py` 只负责组装明确依赖。
+
+Required Implementation Work:
+1. 在 `turnover_ledger_write_adapters.py` 中新增：
+   - `TurnoverLedgerLocalTagSelectionConnection`
+   - `TurnoverLedgerLocalTagSelectionSettingsWriter`
+2. `TurnoverLedgerLocalTagSelectionConnection`：
+   - 接收 `settings_snapshot_provider`、`save_snapshot`、`refresh_snapshot`。
+   - transaction rollback 时保存 previous settings snapshot，并刷新 app settings snapshot。
+   - transaction success 时不额外保存；settings 写入由 settings writer 完成。
+   - 不接收 `Application` 或 `state_store` god object。
+3. `TurnoverLedgerLocalTagSelectionSettingsWriter`：
+   - 接收 `save_snapshot`、`refresh_snapshot`。
+   - `save_tag_selection_settings(...)` 或 callable writer 方法必须保存 `next_snapshot` 并刷新 app settings snapshot。
+   - 保留 audit_event 参数但本地路径可继续不写 audit，不改变当前行为。
+4. 修改 `server.py`：
+   - tag selection local path 使用新 connection 和 settings writer。
+   - 删除 `_local_turnover_ledger_tag_selection_connection(...)`。
+   - 删除或薄化 `_save_local_turnover_ledger_tag_selection(...)`；如果保留，只能作为通用 snapshot save callback，不能继续承载 transaction/repository 逻辑。
+5. 保持现有 behavior：
+   - tag selection version conflict 行为不变。
+   - queue/outbox failure rollback app settings snapshot。
+   - facade path 不直接 clear read model，仍通过 dirty/outbox enqueue。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 tests，除非现有测试暴露与旧行为不一致。
+- 不得处理 bank row tags local shim。
+- 不得修改 facade/UoW 行为。
+- 不得新增 SQL migration。
+- 不得修改 Workbench 或其它模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 changed files 和 verification results。
+3. 如验证通过，可标记 PF-P116 verified。
+4. PF-P116 后仍不要直接进入 bank row tags；应先判断是否生成 cumulative MG 覆盖 PF-P115/PF-P116，或生成 bank row tags discovery/characterization prompt。
+```
+
+### 审查结论
+
+- PF-P116 边界正确：只抽离 tag selection local connection/settings writer。
+- 该 prompt 不处理 bank row tags local shim，不修改 facade/UoW 语义，不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

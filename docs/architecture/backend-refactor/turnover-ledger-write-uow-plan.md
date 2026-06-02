@@ -3210,6 +3210,31 @@ PF-P110 边界：
 - 生成并审查 `PF-P116 - Turnover Ledger Tag Selection Local Adapter Extraction`。
 - PF-P116 只处理 tag selection local connection/settings repository；bank row tags local shim 由于跨 Bankdetail/category/relation 边界，暂不处理。
 
+## PF-P116 Tag Selection Local Adapter Extraction
+
+状态：`planned`
+
+目标：
+
+- 把 tag selection local transaction/settings writer 逻辑从 `server.py` 迁入 adapter module。
+- 保持 app settings rollback、version conflict、queue failure rollback 和 dirty/outbox enqueue 行为不变。
+
+边界：
+
+- 只处理 tag selection local adapter。
+- 不处理 bank row tags local shim。
+- 不修改 facade/UoW 行为。
+- 不新增 SQL migration，不执行 Traffic Gate。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
