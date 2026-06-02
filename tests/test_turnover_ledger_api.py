@@ -2493,19 +2493,29 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             call_order: list[str] = []
             after_mutation_months: list[list[str]] = []
             original_rebuild = app._turnover_relation_service.rebuild_from_bank_rows
-            original_after_mutation = app._after_turnover_relation_mutation
 
             def record_rebuild(rows: list[dict[str, object]]) -> None:
                 call_order.append("rebuild")
                 original_rebuild(rows)
 
-            def record_after_mutation(affected_months: list[str]) -> None:
-                call_order.append("after_mutation")
-                after_mutation_months.append(list(affected_months))
-                original_after_mutation(affected_months)
+            original_invalidation_adapter_factory = app._turnover_ledger_relation_mutation_invalidation_adapter
+
+            def record_invalidation_adapter() -> object:
+                original_adapter = original_invalidation_adapter_factory()
+
+                def record_after_mutation(affected_months: list[str]) -> None:
+                    call_order.append("after_mutation")
+                    after_mutation_months.append(list(affected_months))
+                    original_adapter.after_relation_mutation(affected_months)
+
+                return type(
+                    "RelationMutationInvalidationRecorder",
+                    (),
+                    {"after_relation_mutation": staticmethod(record_after_mutation)},
+                )()
 
             app._turnover_relation_service.rebuild_from_bank_rows = record_rebuild  # type: ignore[method-assign]
-            app._after_turnover_relation_mutation = record_after_mutation  # type: ignore[method-assign]
+            app._turnover_ledger_relation_mutation_invalidation_adapter = record_invalidation_adapter  # type: ignore[method-assign]
 
             response = app.handle_request(
                 "POST",
@@ -2830,13 +2840,23 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             read_repository.clear_calls = 0
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             after_mutation_months: list[list[str]] = []
-            original_after_mutation = app._after_turnover_relation_mutation
 
-            def record_after_mutation(affected_months: list[str]) -> None:
-                after_mutation_months.append(list(affected_months))
-                original_after_mutation(affected_months)
+            original_invalidation_adapter_factory = app._turnover_ledger_relation_mutation_invalidation_adapter
 
-            app._after_turnover_relation_mutation = record_after_mutation  # type: ignore[method-assign]
+            def record_invalidation_adapter() -> object:
+                original_adapter = original_invalidation_adapter_factory()
+
+                def record_after_mutation(affected_months: list[str]) -> None:
+                    after_mutation_months.append(list(affected_months))
+                    original_adapter.after_relation_mutation(affected_months)
+
+                return type(
+                    "RelationMutationInvalidationRecorder",
+                    (),
+                    {"after_relation_mutation": staticmethod(record_after_mutation)},
+                )()
+
+            app._turnover_ledger_relation_mutation_invalidation_adapter = record_invalidation_adapter  # type: ignore[method-assign]
 
             response = app.handle_request(
                 "POST",

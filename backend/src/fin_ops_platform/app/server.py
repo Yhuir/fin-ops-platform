@@ -286,6 +286,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalTagSelectionConnection,
     TurnoverLedgerLocalTagSelectionSettingsWriter,
     TurnoverLedgerConfirmLegacyFallbackFacade,
+    TurnoverLedgerRelationMutationInvalidationLegacyAdapter,
     TurnoverLedgerRelationExtraLegacyFallbackFacade,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionLegacyFallbackFacade,
@@ -2773,12 +2774,13 @@ class Application:
 
     def _turnover_ledger_bank_row_tags_legacy_fallback_facade(self) -> TurnoverLedgerBankRowTagsLegacyFallbackFacade:
         state_store = getattr(self, "_state_store", None)
+        invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
         return TurnoverLedgerBankRowTagsLegacyFallbackFacade(
             category_service=self._bank_transaction_category_service,
             save_category_snapshot=lambda snapshot: state_store.save_bank_transaction_categories(dict(snapshot)),
             relation_rebuild=self._turnover_relation_service.rebuild_from_bank_rows,
             bank_rows_provider=self._turnover_bank_transaction_rows,
-            after_mutation=self._after_turnover_relation_mutation,
+            after_mutation=invalidation_adapter.after_relation_mutation,
         )
 
     def _turnover_ledger_confirm_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerConfirmLegacyFallbackFacade:
@@ -2839,12 +2841,13 @@ class Application:
         return TurnoverLedgerWriteFacade(uow=uow)
 
     def _turnover_ledger_confirm_legacy_fallback_facade(self) -> TurnoverLedgerConfirmLegacyFallbackFacade:
+        invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
         return TurnoverLedgerConfirmLegacyFallbackFacade(
             relation_rebuild=lambda: self._turnover_relation_service.rebuild_from_bank_rows(
                 self._turnover_bank_transaction_rows()
             ),
             routes=self._turnover_ledger_api_routes,
-            after_mutation=self._after_turnover_relation_mutation,
+            after_mutation=invalidation_adapter.after_relation_mutation,
         )
 
     def _turnover_ledger_withdraw_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerWithdrawLegacyFallbackFacade:
@@ -2902,9 +2905,10 @@ class Application:
         return TurnoverLedgerWriteFacade(uow=uow)
 
     def _turnover_ledger_withdraw_legacy_fallback_facade(self) -> TurnoverLedgerWithdrawLegacyFallbackFacade:
+        invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
         return TurnoverLedgerWithdrawLegacyFallbackFacade(
             routes=self._turnover_ledger_api_routes,
-            after_mutation=self._after_turnover_relation_mutation,
+            after_mutation=invalidation_adapter.after_relation_mutation,
         )
 
     def _postgres_turnover_ledger_persistence_repository(
@@ -12804,13 +12808,16 @@ class Application:
         return session
 
     def _after_turnover_relation_mutation(self, affected_months: list[str]) -> None:
-        self._persist_turnover_relations_best_effort(operation="turnover_relation_mutation_pre_invalidation")
-        self._invalidate_workbench_after_bank_transaction_categories(affected_months)
-        self._persist_turnover_relations_best_effort(operation="turnover_relation_mutation")
-        self._clear_turnover_ledger_read_model_best_effort()
-        self._enqueue_turnover_ledger_read_model_refreshes(
-            ["all"],
-            reason="turnover_relation_changed",
+        self._turnover_ledger_relation_mutation_invalidation_adapter().after_relation_mutation(affected_months)
+
+    def _turnover_ledger_relation_mutation_invalidation_adapter(
+        self,
+    ) -> TurnoverLedgerRelationMutationInvalidationLegacyAdapter:
+        return TurnoverLedgerRelationMutationInvalidationLegacyAdapter(
+            persist_relations=self._persist_turnover_relations_best_effort,
+            invalidate_workbench_after_category_mutation=self._invalidate_workbench_after_bank_transaction_categories,
+            clear_read_model=self._clear_turnover_ledger_read_model_best_effort,
+            enqueue_refresh=self._enqueue_turnover_ledger_read_model_refreshes,
         )
 
     def _clear_turnover_ledger_read_model_best_effort(self) -> None:

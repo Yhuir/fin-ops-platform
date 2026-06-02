@@ -4285,6 +4285,20 @@ PF-P110 边界：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
+执行结果：
+
+- 已新增 `TurnoverLedgerRelationMutationInvalidationLegacyAdapter`。
+- `_after_turnover_relation_mutation(...)` 已委托给 adapter 执行。
+- confirm / withdraw / bank row tags legacy fallback facade 已切到 adapter seam。
+- PF-P132 characterization tests 保持通过，说明抽离未改变顺序与失败语义。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一步：
+
+- 进入 `PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate`。
+- 本组切片统一覆盖 PF-P131 / PF-P132 / PF-P133。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

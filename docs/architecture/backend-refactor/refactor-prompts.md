@@ -25256,6 +25256,86 @@ Post-Flight:
 - PF-P132 已经提供足够护栏，因此现在做最小 extraction 的风险可控。
 - PF-P133 完成后，再根据 diff 大小和残余 helper 判断是否直接进入 cumulative MG。
 
+### PF-P133 执行结果
+
+- PF-P133 已完成并验证。
+- 新增 `TurnoverLedgerRelationMutationInvalidationLegacyAdapter`，将 relation mutation invalidation chain 收为显式 adapter。
+- `server.py` 中 `_after_turnover_relation_mutation(...)` 已收缩为薄包装并委托给 adapter。
+- confirm / withdraw / bank row tags legacy fallback facade 已改为注入 adapter seam，不再直接依赖旧 helper 实现细节。
+- tests 已按新 seam 调整，PF-P132 characterization 行为保持不变。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 下一步应进入 cumulative MG，统一覆盖 PF-P131 / PF-P132 / PF-P133。
+
+## PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须对 PF-P131 / PF-P132 / PF-P133 组成的 Turnover Ledger relation mutation invalidation boundary 切片做正式 Merge Gate。
+
+Context:
+以下 prompt 已 verified：
+- PF-P131 - Turnover Ledger Relation Mutation Invalidation Boundary Discovery and Planning
+- PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests
+- PF-P133 - Turnover Ledger Relation Mutation Invalidation Adapter Extraction
+
+当前分支应为 `codex/turnover-ledger-next-slice-p131`。本 MG 统一覆盖上述三条 prompt 的完整 diff。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P131、PF-P132、PF-P133 均为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+验证 PF-P131/PF-P132/PF-P133 的完整 diff，只在 scope 干净、测试通过、无临时文件的前提下合入 `main`。
+
+Expected Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Mandatory Checks:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Merge Rules:
+- 只允许精确 `git add` 本次切片文件；禁止 `git add .` 或 `git add -A`。
+- 如果 `git diff --name-only main...HEAD` 超出白名单，必须停止。
+- 如果 merge 到 `main` 后验证失败，必须停止，不得 push `origin/main`。
+- merge 成功后，必须在 `main` 上重跑同一组验证，再决定是否 `git push origin main`。
+
+Forbidden Scope:
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得混入其它 Turnover Ledger 切片或其它模块改动。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P133-MG 结果。
+2. 若 merge 成功并 push 完成，下一条 prompt 必须从最新 `main` 新建分支生成。
+3. 若 merge 失败或 main 验证失败，停止并报告 blocker。
+```
+
+### 审查结论
+
+- PF-P133-MG 的边界正确：它只覆盖 PF-P131 / PF-P132 / PF-P133 的 relation mutation invalidation boundary 切片。
+- 当前 diff 已形成完整的 discovery -> characterization -> extraction 闭环，适合在此进入 cumulative MG。
+- MG 通过后，才允许切回 `main` 合并并 push。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
