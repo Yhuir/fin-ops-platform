@@ -1464,6 +1464,33 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             ],
         )
 
+    def test_target_bank_row_tags_facade_passes_idempotency_before_bankdetail_port(self) -> None:
+        idempotency_store = _RecordingIdempotencyStore()
+        uow, deps = self._build_uow(idempotency_store=idempotency_store)
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.update_bank_row_tags_batch(
+            updates=[
+                {
+                    "transaction_id": "bank_txn_1",
+                    "category_code": "borrow_in_company_pending_repayment",
+                    "expected_version": 0,
+                }
+            ],
+            actor_id="finance-user",
+            tenant_id="default",
+            affected_months=["2026-02"],
+            idempotency_key="bank-row-tags-idem-1",
+        )
+
+        self.assertEqual(result["updated_categories"], [{"transaction_id": "bank_txn_1"}])
+        self.assertEqual(
+            [call["operation"] for call in idempotency_store.calls],
+            ["get", "for_transaction", "reserve", "commit"],
+        )
+        self.assertEqual(len(deps.bankdetail_port.category_updates), 1)
+        self.assertEqual(deps.bankdetail_port.category_updates[0]["actor_id"], "finance-user")
+
     def test_uow_constructor_requires_granular_ports_not_application_god_object(self) -> None:
         uow_class = self._uow_class()
 

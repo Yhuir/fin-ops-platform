@@ -1271,7 +1271,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
         self.assertEqual(len(queue.enqueued), 1)
 
-    def test_bank_row_tags_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract(self) -> None:
+    def test_bank_row_tags_write_facade_without_idempotency_key_keeps_empty_idempotency_contract(self) -> None:
         uow = _RecordingTurnoverLedgerUow()
         facade = TurnoverLedgerWriteFacade(uow=uow)
 
@@ -2112,6 +2112,97 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
         self.assertEqual(queue.enqueued, [])
+
+    def test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _PostgresQueueRecorder()
+            read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            app._workbench_sql_read_repository = read_repository
+            request_body = {
+                "idempotency_key": "bank-row-tags-idem-1",
+                "updates": [
+                    {
+                        "transaction_id": transaction_ids[0],
+                        "category_code": "borrow_in_company_pending_repayment",
+                        "expected_version": 0,
+                    }
+                ],
+            }
+
+            first_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(request_body),
+            )
+            replay_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(request_body),
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(replay_response.status_code, 200)
+        self.assertEqual(json.loads(replay_response.body), json.loads(first_response.body))
+        self.assertEqual(
+            [item[:3] for item in queue.transactional],
+            [
+                ("bank_detail", "2026-02", "bank_transaction_category_changed"),
+                ("workbench", "2026-02", "workbench_scope_invalidated"),
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+            ],
+        )
+        self.assertEqual(read_repository.clear_calls, 0)
+
+    def test_target_bank_row_tags_idempotency_key_conflict_rejects_different_payload(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            queue = _PostgresQueueRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            first_body = {
+                "idempotency_key": "bank-row-tags-idem-conflict",
+                "updates": [
+                    {
+                        "transaction_id": transaction_ids[0],
+                        "category_code": "borrow_in_company_pending_repayment",
+                        "expected_version": 0,
+                    }
+                ],
+            }
+            conflict_body = {
+                "idempotency_key": "bank-row-tags-idem-conflict",
+                "updates": [
+                    {
+                        "transaction_id": transaction_ids[0],
+                        "category_code": "borrow_out_company_lent",
+                        "expected_version": 0,
+                    }
+                ],
+            }
+
+            first_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(first_body),
+            )
+            conflict_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(conflict_body),
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
+        self.assertEqual(
+            [item for item in queue.transactional if item[0] == "turnover_ledger"],
+            [("turnover_ledger", "all", "turnover_relation_changed", queue.transactional[-1][3])],
+        )
 
     def test_turnover_bank_row_tag_batch_dependency_missing_queue_failure_happens_after_category_save(self) -> None:
         # PF-P129 characterization: unsupported postgres queue API fallback keeps legacy post-mutation queue failure.

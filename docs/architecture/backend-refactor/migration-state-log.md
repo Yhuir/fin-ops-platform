@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P180-MG - Turnover Ledger Withdraw Durable Idempotency Cumulative Merge Gate` 已完成并验证 |
+| 当前阶段 | `PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate` 已完成并验证 |
 | 当前 active prompt | 无；下一条待生成 |
-| 最近 verified prompt | `PF-P180-MG - Turnover Ledger Withdraw Durable Idempotency Cumulative Merge Gate` |
-| 当前分支 | `codex/turnover-ledger-withdraw-idempotency-p179` |
-| 最近验证 | PF-P180-MG scope check：Pass；`git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（124 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（59 tests）；无 untracked 临时文件 |
-| 下一条允许任务 | 合入 main 后在 main 重跑 PF-P180-MG verification；通过后 push `origin/main`；再从最新 main 新建下一条 `codex/` 分支 |
+| 最近 verified prompt | `PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate` |
+| 当前分支 | `codex/turnover-ledger-bank-row-tags-consistency-p181` |
+| 最近验证 | PF-P182-MG branch verification：Pass；`git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（126 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（60 tests）；`compileall`：Pass；无 untracked 临时文件 |
+| 下一条允许任务 | 提交并合入 main；在 main 上重跑 PF-P182-MG verification，通过后 push `origin/main` |
 
 ## Prompt 执行日志
 
@@ -11824,6 +11824,119 @@ Verification：
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
 - Traffic Gate：未执行；本切片不部署、不切流、不访问生产。
+
+### PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
+
+状态：`verified`
+
+#### 范围
+
+- 只为 `POST /api/turnover-ledger/bank-row-tags/batch` 新增 durable idempotency 目标/兼容测试。
+- 不修改 production code。
+- 不实现 idempotency。
+- 不迁移 tag selection、confirm、withdraw、relation extra 或其它写路径。
+
+#### 变更文件
+
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 执行结果
+
+- 新增 API-level target tests：
+  - `test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh`
+  - `test_target_bank_row_tags_idempotency_key_conflict_rejects_different_payload`
+- 新增 facade/UoW target test：
+  - `test_target_bank_row_tags_facade_passes_idempotency_before_bankdetail_port`
+- 三个目标测试均以 `unittest.expectedFailure` 进入默认测试套件。
+- 已记录 bank-row-tags 当前仍只有 Bankdetail category `expected_version` stale baseline，尚无 durable idempotency。
+
+#### 验证
+
+- `git status --short --branch`：Pass，当前分支 `codex/turnover-ledger-bank-row-tags-consistency-p181`
+- `git ls-files --others --exclude-standard`：Pass，empty
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，126 tests，expected failures=2
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，60 tests，expected failures=1
+
+#### 下一条 Prompt 上下文
+
+PF-P181 已验证。下一条允许生成并执行 `PF-P182 - Turnover Ledger Bank Row Tags Durable Idempotency Integration`。PF-P182 只允许移除 PF-P181 的 expectedFailure 并实现 bank-row-tags durable idempotency；不得迁移 tag selection 或其它写路径，不得修改 schema/deploy/Traffic Gate。
+
+### PF-P182 - Turnover Ledger Bank Row Tags Durable Idempotency Integration
+
+状态：`verified`
+
+#### 范围
+
+- 只实现 `POST /api/turnover-ledger/bank-row-tags/batch` durable idempotency。
+- 移除 PF-P181 三个 target tests 的 `unittest.expectedFailure` 并转为普通通过。
+- 不迁移 tag selection、confirm、withdraw、relation extra 或其它写路径。
+- 不修改 Bankdetail category `expected_version` conflict 语义。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 执行结果
+
+- `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 新增 optional `idempotency_key`。
+- 非空 key 使用 action `turnover_bank_row_tags_batch`，fingerprint 包含 updates 与 affected_months。
+- `TurnoverLedgerBankRowTagsRequestBoundaryFacade` 和 handler 已透传 `idempotency_key` / `idempotencyKey`。
+- `TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder` 已注入 idempotency store；PostgreSQL path 使用 Workbench idempotency store factory，local path 使用 in-memory store。
+- Handler 将 Workbench idempotency conflict/in-progress/failed 映射为 HTTP 409 JSON。
+- 旧 baseline 测试已改名为无 key 时保持空 idempotency contract。
+
+#### 验证
+
+- RED before implementation：3 个 PF-P181 target tests 按预期失败。
+- Targeted PASS after implementation：3 个 PF-P181 target tests 通过。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，126 tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，60 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- `git status --short --branch`：只包含 PF-P181/PF-P182 允许文件
+- `git ls-files --others --exclude-standard`：empty
+- `git diff --check`：Pass
+
+#### 下一条 Prompt 上下文
+
+PF-P181/PF-P182 已形成完整 bank-row-tags durable idempotency 小切片。下一条应生成并执行 `PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate`，统一覆盖 PF-P181/PF-P182 完整 diff，不得继续进入 tag selection 或其它写路径。
+
+### PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 统一验证并准备合入 PF-P181/PF-P182 完整 diff。
+- 覆盖 bank-row-tags durable idempotency target tests、integration、HTTP mapping、builder injection 和文档回写。
+- 不新增业务实现，不迁移 tag selection 或其它写路径。
+
+#### 分支验证
+
+- `git status --short --branch`：Pass，当前分支 `codex/turnover-ledger-bank-row-tags-consistency-p181`
+- `git ls-files --others --exclude-standard`：Pass，empty
+- `git diff --check`：Pass
+- `git diff --name-only`：只包含 PF-P182-MG allowed files
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，126 tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，60 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+#### 下一步
+
+- 精确 stage allowed files，commit。
+- 同步最新 `origin/main`，merge 到 `main`。
+- 在 `main` 上重跑 PF-P182-MG verification；通过后 push `origin/main`。
 
 ## 维护规则
 
