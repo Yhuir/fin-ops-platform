@@ -7,6 +7,8 @@ import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import TablePagination from "@mui/material/TablePagination";
 import TextField from "@mui/material/TextField";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
 
 import ManualInvoiceDialog from "../components/pendingInvoices/ManualInvoiceDialog";
@@ -49,6 +51,7 @@ const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 
 type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
 type RelationTarget = { transactionId: string } | null;
+type RulesDirection = Exclude<PendingInvoiceDirection, "all">;
 
 const EXPENSE_FILTER_LABELS: Record<PendingInvoiceFilter, string> = {
   all: "全部",
@@ -117,6 +120,7 @@ export default function PendingInvoicesPage() {
   const [sortField, setSortField] = useState<PendingInvoiceSortField>("trade_date");
   const [sortDirection, setSortDirection] = useState<PendingInvoiceSortDirection>("desc");
   const [activeDrawer, setActiveDrawer] = useState<ActiveDrawer>(null);
+  const [rulesDirection, setRulesDirection] = useState<RulesDirection>("expense");
   const [detailTarget, setDetailTarget] = useState<PendingInvoiceObjectDetailTarget | null>(null);
   const [relationTarget, setRelationTarget] = useState<RelationTarget>(null);
   const [loading, setLoading] = useState(false);
@@ -311,8 +315,8 @@ export default function PendingInvoicesPage() {
 
   const loadRelation = useCallback((transactionId: string) => fetchPendingInvoiceRelationDetail(transactionId, direction), [direction]);
   const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => fetchPendingInvoiceObjectDetail(target), []);
-  const loadRules = useCallback(() => fetchPendingInvoiceRules(direction), [direction]);
-  const saveRules = useCallback((payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload, direction), [direction]);
+  const loadRules = useCallback(() => fetchPendingInvoiceRules(rulesDirection), [rulesDirection]);
+  const saveRules = useCallback((payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload, rulesDirection), [rulesDirection]);
   const loadCandidates = useCallback(fetchPendingInvoiceCandidates, []);
   const loadExportPreview = useCallback(() => fetchPendingInvoiceExportPreview(query), [query]);
   const handleDownloadExport = useCallback(() => downloadPendingInvoiceExport(query), [query]);
@@ -321,6 +325,11 @@ export default function PendingInvoicesPage() {
     setDirection(nextDirection);
     setFilter("all");
     setPage(1);
+  }, []);
+
+  const handleOpenRules = useCallback((nextRulesDirection: RulesDirection) => {
+    setRulesDirection(nextRulesDirection);
+    setActiveDrawer("rules");
   }, []);
 
   const handleMarkIncomeStatus = useCallback((row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => {
@@ -344,6 +353,34 @@ export default function PendingInvoicesPage() {
         ? `读模型 ${readModelStatus}，写入和导出已暂停`
         : "";
 
+  const summaryCounts = {
+    all: sourceSummary?.bankTransactionRows ?? 0,
+    expense: sourceSummary?.expenseRows ?? 0,
+    income: sourceSummary?.incomeRows ?? 0,
+  };
+
+  const statusFilterControl = (
+    <Button
+      variant="outlined"
+      size="small"
+      aria-haspopup="menu"
+      aria-label={`筛选发票获取状态：${filterLabel(direction, filter)}`}
+      onClick={(event) => setFilterAnchorEl(event.currentTarget)}
+      sx={{
+        minHeight: 24,
+        height: 24,
+        px: 0.8,
+        py: 0,
+        fontSize: 11,
+        lineHeight: 1,
+        borderRadius: 1,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {filterLabel(direction, filter)}
+    </Button>
+  );
+
   return (
     <Box data-testid="pending-invoices-page" sx={{ px: { xs: 2, md: 3 }, py: 2 }}>
       <Stack spacing={1}>
@@ -351,52 +388,47 @@ export default function PendingInvoicesPage() {
           <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between">
             <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
               <Typography component="h1" fontWeight={900} sx={{ fontSize: 18, lineHeight: 1.3 }}>待找发票</Typography>
-              {sourceSummary ? (
-                <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap" aria-label="待找发票流水范围">
-                  {([
-                    ["all", `全部流水 ${sourceSummary.bankTransactionRows}`],
-                    ["expense", `支出流水 ${sourceSummary.expenseRows}`],
-                    ["income", `收入流水 ${sourceSummary.incomeRows}`],
-                  ] as Array<[PendingInvoiceDirection, string]>).map(([value, label]) => (
-                    <Button
-                      key={value}
-                      size="small"
-                      variant={direction === value ? "contained" : "outlined"}
-                      color={value === "expense" ? "success" : "primary"}
-                      onClick={() => handleDirectionChange(value)}
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </Stack>
-              ) : null}
-              {direction !== "all" ? (
-                <>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    aria-haspopup="menu"
-                    onClick={(event) => setFilterAnchorEl(event.currentTarget)}
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={direction}
+                onChange={(_event, nextDirection: PendingInvoiceDirection | null) => {
+                  if (nextDirection) {
+                    handleDirectionChange(nextDirection);
+                  }
+                }}
+                aria-label="待找发票流水范围"
+                sx={{
+                  "& .MuiToggleButton-root": {
+                    minHeight: 30,
+                    px: 1.2,
+                    py: 0.25,
+                    fontSize: 12,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    whiteSpace: "nowrap",
+                  },
+                }}
+              >
+                <ToggleButton value="all">全部 {summaryCounts.all}</ToggleButton>
+                <ToggleButton value="expense">支出 {summaryCounts.expense}</ToggleButton>
+                <ToggleButton value="income">收入 {summaryCounts.income}</ToggleButton>
+              </ToggleButtonGroup>
+              <Menu anchorEl={filterAnchorEl} open={filterOpen} onClose={() => setFilterAnchorEl(null)}>
+                {filterOptions.map((option) => (
+                  <MenuItem
+                    key={option}
+                    selected={option === filter}
+                    onClick={() => {
+                      setFilter(option);
+                      setPage(1);
+                      setFilterAnchorEl(null);
+                    }}
                   >
-                    {filterLabel(direction, filter)}
-                  </Button>
-                  <Menu anchorEl={filterAnchorEl} open={filterOpen} onClose={() => setFilterAnchorEl(null)}>
-                    {filterOptions.map((option) => (
-                      <MenuItem
-                        key={option}
-                        selected={option === filter}
-                        onClick={() => {
-                          setFilter(option);
-                          setPage(1);
-                          setFilterAnchorEl(null);
-                        }}
-                      >
-                        {filterLabel(direction, option)}
-                      </MenuItem>
-                    ))}
-                  </Menu>
-                </>
-              ) : null}
+                    {filterLabel(direction, option)}
+                  </MenuItem>
+                ))}
+              </Menu>
             </Stack>
             <Stack direction="row" spacing={1} alignItems="center" justifyContent={{ xs: "space-between", md: "flex-end" }}>
               <Typography
@@ -405,6 +437,15 @@ export default function PendingInvoicesPage() {
               >
                 {compactStatusText}
               </Typography>
+              <Button size="small" variant="outlined" onClick={() => handleOpenRules("expense")} sx={{ whiteSpace: "nowrap" }}>
+                支出待找发票规则设置
+              </Button>
+              <Button size="small" variant="outlined" onClick={() => handleOpenRules("income")} sx={{ whiteSpace: "nowrap" }}>
+                收入待找发票规则设置
+              </Button>
+              <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => setActiveDrawer("export")} sx={{ whiteSpace: "nowrap" }}>
+                筛选内容导出
+              </Button>
               <TextField
                 size="small"
                 placeholder="搜索流水"
@@ -430,10 +471,9 @@ export default function PendingInvoicesPage() {
           onOpenInvoicePicker={handleOpenInvoicePicker}
           onOpenManualInvoice={setDialogRow}
           onOpenObjectDetail={handleOpenDetail}
-          onOpenRules={() => setActiveDrawer("rules")}
-          onOpenExport={() => setActiveDrawer("export")}
           onMarkIncomeStatus={handleMarkIncomeStatus}
           direction={direction}
+          statusFilterControl={statusFilterControl}
           actionsDisabled={actionsDisabled}
         />
         <TablePagination

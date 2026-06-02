@@ -13,6 +13,7 @@ import TableSortLabel from "@mui/material/TableSortLabel";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import type { SxProps, Theme } from "@mui/material/styles";
+import type { ReactNode } from "react";
 
 import type {
   PendingInvoiceObjectDetailTarget,
@@ -37,10 +38,9 @@ type PendingInvoicesTableProps = {
   onOpenInvoicePicker: (row: PendingInvoiceRow) => void;
   onOpenManualInvoice: (row: PendingInvoiceRow) => void;
   onOpenObjectDetail: (target: PendingInvoiceObjectDetailTarget) => void;
-  onOpenRules: () => void;
-  onOpenExport: () => void;
   onMarkIncomeStatus: (row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => void;
   direction: PendingInvoiceDirection;
+  statusFilterControl: ReactNode;
   actionsDisabled?: boolean;
 };
 
@@ -138,10 +138,6 @@ function shouldOpenRelation(action: PendingInvoicePrimaryAction) {
   return ["view_relation", "view_payment_detail", "view_accumulated", "view_payment_history"].includes(action);
 }
 
-function shouldOpenRules(action: PendingInvoicePrimaryAction) {
-  return ["view_rules", "open_rules"].includes(action);
-}
-
 function shouldOpenInvoicePicker(action: PendingInvoicePrimaryAction) {
   return ["attach_existing_invoice", "choose_invoice", "select_invoice"].includes(action);
 }
@@ -160,10 +156,9 @@ function ActionButtons({
   onOpenRelation,
   onOpenInvoicePicker,
   onOpenManualInvoice,
-  onOpenRules,
   onMarkIncomeStatus,
   actionsDisabled = false,
-}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onOpenRules" | "onMarkIncomeStatus" | "actionsDisabled"> & { row: PendingInvoiceRow }) {
+}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onMarkIncomeStatus" | "actionsDisabled"> & { row: PendingInvoiceRow }) {
   const action = row.invoiceAcquisitionStatus.primaryAction;
   const prefix = row.bankTransaction.counterpartyName;
   const available = new Set(row.availableActions);
@@ -171,15 +166,14 @@ function ActionButtons({
   const canManual = available.has("manual_invoice");
   const canMarkIncome = available.has("mark_income_status");
   const canViewRelation = available.has("view_relation");
-  const canViewRules = available.has("view_rules");
 
   if (action === "mark_income_status" && canMarkIncome) {
     return (
       <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-        <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onMarkIncomeStatus(row, "income_no_invoice_required")} aria-label={`${prefix} 标记无需开票`}>
+        <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onMarkIncomeStatus(row, "income_no_invoice_required")} aria-label={`${prefix} 标记无需开票`} sx={compactActionButtonSx}>
           无需开票
         </Button>
-        <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onMarkIncomeStatus(row, "cash_income")} aria-label={`${prefix} 标记现金收入`}>
+        <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onMarkIncomeStatus(row, "cash_income")} aria-label={`${prefix} 标记现金收入`} sx={compactActionButtonSx}>
           现金收入
         </Button>
       </Stack>
@@ -188,10 +182,10 @@ function ActionButtons({
   if (action === "attach_or_create_invoice" && (canAttach || canManual)) {
     return (
       <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-        {canAttach ? <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`}>
+        {canAttach ? <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`} sx={compactActionButtonSx}>
           选择发票
         </Button> : null}
-        {canManual ? <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`}>
+        {canManual ? <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`} sx={compactActionButtonSx}>
           补票
         </Button> : null}
       </Stack>
@@ -199,33 +193,26 @@ function ActionButtons({
   }
   if (shouldOpenRelation(action) && canViewRelation) {
     return (
-      <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${prefix} 查看支付明细`}>
+      <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${prefix} 查看支付明细`} sx={compactActionButtonSx}>
         查看支付明细
-      </Button>
-    );
-  }
-  if (shouldOpenRules(action) && canViewRules) {
-    return (
-      <Button size="small" variant="outlined" onClick={onOpenRules} aria-label={`${prefix} 打开规则设置`}>
-        规则设置
       </Button>
     );
   }
   if (shouldOpenInvoicePicker(action) && canAttach) {
     return (
-      <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`}>
+      <Button size="small" variant="contained" disabled={actionsDisabled} onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`} sx={compactActionButtonSx}>
         选择发票
       </Button>
     );
   }
   if (shouldOpenManualInvoice(action) && canManual) {
     return (
-      <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`}>
+      <Button size="small" variant="outlined" disabled={actionsDisabled} onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`} sx={compactActionButtonSx}>
         补票
       </Button>
     );
   }
-  return <Typography variant="caption" color="text.secondary">无可用操作</Typography>;
+  return null;
 }
 
 export default function PendingInvoicesTable({
@@ -236,28 +223,21 @@ export default function PendingInvoicesTable({
   onOpenInvoicePicker,
   onOpenManualInvoice,
   onOpenObjectDetail,
-  onOpenRules,
-  onOpenExport,
   onMarkIncomeStatus,
   direction,
+  statusFilterControl,
   actionsDisabled = false,
 }: PendingInvoicesTableProps) {
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
   const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
   return (
     <Box sx={{ border: CELL_BORDER, borderColor: "divider", bgcolor: "background.paper" }}>
-      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between" sx={{ px: 1.5, py: 1 }}>
-        <Stack direction="row" spacing={1}>
-          {direction !== "all" ? <Button size="small" variant="outlined" onClick={onOpenRules}>待找发票规则设置</Button> : null}
-          <Button size="small" variant="contained" disabled={actionsDisabled} onClick={onOpenExport}>筛选内容导出</Button>
-        </Stack>
-      </Stack>
       <Box
         data-testid="pending-invoices-table-shell"
         sx={{
           overflowX: "hidden",
           overflowY: "auto",
-          maxHeight: { xs: "calc(100vh - 300px)", md: "calc(100vh - 260px)" },
+          maxHeight: { xs: "calc(100vh - 255px)", md: "calc(100vh - 220px)" },
           minHeight: 280,
           overscrollBehavior: "contain",
         }}
@@ -290,7 +270,10 @@ export default function PendingInvoicesTable({
               </TableCell>
               <TableCell scope="col" sx={subHeaderSx("#f6faff")}>摘要 / 凭证</TableCell>
               <TableCell scope="col" sx={subHeaderSx("#fffaf0", true)}>
-                {sortableLabel("状态 / 依据 / 主操作", "status_code", config, onSortChange)}
+                <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between" sx={{ minWidth: 0 }}>
+                  {sortableLabel("状态", "status_code", config, onSortChange)}
+                  {statusFilterControl}
+                </Stack>
               </TableCell>
               <TableCell scope="col" sx={subHeaderSx("#f7fcf9", true)}>
                 {sortableLabel("发票号码 / 开票日期", "trade_date", config, onSortChange)}
@@ -319,12 +302,10 @@ export default function PendingInvoicesTable({
             ) : rows.map((row) => renderRow({
               row,
               direction,
-              config,
               onOpenRelation,
               onOpenInvoicePicker,
               onOpenManualInvoice,
               onOpenObjectDetail,
-              onOpenRules,
               onMarkIncomeStatus,
               actionsDisabled,
             }))}
@@ -378,6 +359,18 @@ function dataCellSx(leftBorder = false): SxProps<Theme> {
   };
 }
 
+const compactActionButtonSx: SxProps<Theme> = {
+  minHeight: 24,
+  height: 24,
+  px: 0.85,
+  py: 0,
+  fontSize: 11,
+  lineHeight: 1,
+  borderRadius: 1,
+  boxShadow: "none",
+  whiteSpace: "nowrap",
+};
+
 const denseChipSx: SxProps<Theme> = {
   height: 20,
   maxWidth: "100%",
@@ -403,15 +396,13 @@ const directionChipSx: SxProps<Theme> = {
 function renderRow({
   row,
   direction,
-  config,
   onOpenRelation,
   onOpenInvoicePicker,
   onOpenManualInvoice,
   onOpenObjectDetail,
-  onOpenRules,
   onMarkIncomeStatus,
   actionsDisabled = false,
-}: Omit<PendingInvoicesTableProps, "rows" | "onSortChange" | "onOpenExport"> & { row: PendingInvoiceRow }) {
+}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl"> & { row: PendingInvoiceRow }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
   const invoiceExtraCount = Math.max(0, row.inputInvoices.relationCount - 1);
@@ -475,7 +466,7 @@ function renderRow({
         </Stack>
       </TableCell>
       <TableCell sx={dataCellSx(true)}>
-        <Stack spacing={0.45} alignItems="flex-start">
+        <Stack spacing={0.4} alignItems="flex-start">
           <Chip
             size="small"
             color={chipColor(row.invoiceAcquisitionStatus.severity)}
@@ -483,15 +474,11 @@ function renderRow({
             label={row.invoiceAcquisitionStatus.label}
             sx={denseChipSx}
           />
-          <Typography color="text.secondary" sx={[overflowText(false), { fontSize: 11, lineHeight: 1.25 }]}>
-            {row.invoiceAcquisitionStatus.reason || row.invoiceAcquisitionStatus.matchedRule?.tagLabel || "-"}
-          </Typography>
           <ActionButtons
             row={row}
             onOpenRelation={onOpenRelation}
             onOpenInvoicePicker={onOpenInvoicePicker}
             onOpenManualInvoice={onOpenManualInvoice}
-            onOpenRules={onOpenRules}
             onMarkIncomeStatus={onMarkIncomeStatus}
             actionsDisabled={actionsDisabled}
           />

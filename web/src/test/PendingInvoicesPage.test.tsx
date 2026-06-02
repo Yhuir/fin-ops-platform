@@ -556,7 +556,8 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "对方 / 时间" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "摘要 / 凭证" })).toBeInTheDocument();
-    expect(within(page).getByRole("columnheader", { name: "状态 / 依据 / 主操作" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "状态" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选发票获取状态：全部" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "发票号码 / 开票日期" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "销方 / 识别号" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 支付差额" })).toBeInTheDocument();
@@ -566,9 +567,11 @@ describe("Pending invoices page", () => {
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
     expect(within(page).queryByText("正在加载待找发票。")).not.toBeInTheDocument();
     expect(within(page).queryByText(/对方尾号/)).not.toBeInTheDocument();
-    expect(within(page).getByText("全部流水 431")).toBeInTheDocument();
-    expect(within(page).getByText("支出流水 356")).toBeInTheDocument();
-    expect(within(page).getByText("收入流水 75")).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "全部 431" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "支出 356" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "收入 75" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "支出待找发票规则设置" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "收入待找发票规则设置" })).toBeInTheDocument();
 
     expect(within(page).getByText("2026-04-19 10:52:02")).toBeInTheDocument();
     expect(within(page).getByText("货款 / 设备采购")).toBeInTheDocument();
@@ -578,6 +581,10 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText("2026-04-19T10:52:02+08:00")).not.toBeInTheDocument();
     expect(within(page).queryByText("人民币元")).not.toBeInTheDocument();
     expect(within(page).getByText("已支付待开票")).toBeInTheDocument();
+    expect(within(page).queryByText("未命中免票规则，且未发现进项发票关系")).not.toBeInTheDocument();
+    expect(within(page).queryByText("命中无需开票规则：工资")).not.toBeInTheDocument();
+    expect(within(page).queryByText("发票价税合计大于已付合计")).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: /打开规则设置/ })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /云南开票供应商 选择发票/ })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /云南开票供应商 补票/ })).toBeInTheDocument();
     expect(within(page).getByText("DIG-001")).toBeInTheDocument();
@@ -623,7 +630,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await screen.findByTestId("pending-invoices-page");
-    await user.click(await within(page).findByRole("button", { name: /收入流水 75/ }));
+    await user.click(await within(page).findByRole("button", { name: "收入 75" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
       expect(latest?.searchParams.get("direction")).toBe("income");
@@ -632,7 +639,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByText("收")).toBeInTheDocument();
     expect(within(page).getByText("300.00")).toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: "全部" }));
+    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：全部" }));
     expect(await screen.findByRole("menuitem", { name: "待开发票" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "无需开票" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "现金收入" })).toBeInTheDocument();
@@ -644,7 +651,7 @@ describe("Pending invoices page", () => {
       expect(latest?.searchParams.get("filter")).toBe("requires_invoice");
     });
 
-    await user.click(within(page).getByRole("button", { name: "待开发票" }));
+    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：待开发票" }));
     await user.click(await screen.findByRole("menuitem", { name: "现金收入" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
@@ -680,7 +687,7 @@ describe("Pending invoices page", () => {
     expect(within(oaDialog).getByText("项目负责人审核")).toBeInTheDocument();
     await user.click(within(oaDialog).getByRole("button", { name: "关闭详情抽屉" }));
 
-    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+    await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
     expect(await screen.findByRole("heading", { name: "待找发票规则设置" })).toBeInTheDocument();
     expect(screen.getByText("需要开票")).toBeInTheDocument();
     expect(screen.getAllByText("手续费").length).toBeGreaterThan(0);
@@ -691,6 +698,15 @@ describe("Pending invoices page", () => {
         return url.pathname === "/api/pending-invoices/rules" && (init?.method ?? "GET").toUpperCase() === "PUT";
       });
       expect(rulesPut).toBe(true);
+    });
+    await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "收入待找发票规则设置" }));
+    expect(await screen.findByRole("heading", { name: "待找发票规则设置" })).toBeInTheDocument();
+    await waitFor(() => {
+      const latestRulesGet = pendingInvoiceRulesRequests(fetchMock).at(-1);
+      const url = new URL(typeof latestRulesGet?.[0] === "string" ? latestRulesGet[0] : latestRulesGet?.[0] instanceof URL ? latestRulesGet[0].toString() : latestRulesGet?.[0]?.url ?? "", "http://localhost");
+      expect(url.searchParams.get("direction")).toBe("income");
     });
     await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
 
@@ -723,7 +739,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await screen.findByTestId("pending-invoices-page");
-    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+    await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
 
     const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
     const noInvoiceBlock = screen.getByRole("group", { name: "无需开票" });
@@ -759,7 +775,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await screen.findByTestId("pending-invoices-page");
-    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+    await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
 
     const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
     expect(within(bankStatementBlock).getByText("费用")).toBeInTheDocument();
@@ -788,7 +804,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await screen.findByTestId("pending-invoices-page");
-    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+    await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
 
     const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
     await user.click(within(bankStatementBlock).getByRole("checkbox", { name: "手续费" }));
@@ -849,7 +865,7 @@ describe("Pending invoices page", () => {
 
     const page = await screen.findByTestId("pending-invoices-page");
     const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
-    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+    await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
     await user.click(await screen.findByRole("button", { name: "保存规则" }));
 
     await waitFor(() => {
@@ -862,7 +878,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByText("未知标签闭环供应商")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
 
-    await user.click(within(page).getByRole("button", { name: "全部" }));
+    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：全部" }));
     await user.click(await screen.findByRole("menuitem", { name: "流水代替发票" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
@@ -873,7 +889,7 @@ describe("Pending invoices page", () => {
       expect(within(page).queryByText("未知标签闭环供应商")).not.toBeInTheDocument();
     });
 
-    await user.click(within(page).getByRole("button", { name: "流水代替发票" }));
+    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：流水代替发票" }));
     await user.click(await screen.findByRole("menuitem", { name: "无需开票" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
