@@ -3250,6 +3250,34 @@ PF-P110 边界：
 - 生成 `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate`，统一覆盖 PF-P115/PF-P116 完整 diff。
 - MG 后如合入 main，再从最新 main 新建分支处理 bank row tags local shim discovery/characterization。
 
+## PF-P116-MG Local Relation and Tag Selection Adapter Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一覆盖 PF-P115、PF-P116。
+- 只包含 confirm/withdraw relation local adapter extraction 和 tag selection local adapter extraction。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
