@@ -22735,6 +22735,28 @@ Post-Flight:
 - PF-P115 边界正确：只抽离 confirm/withdraw 共用 relation local adapter。
 - 该 prompt 不处理 bank row tags/tag selection local shim，不执行 Traffic Gate。
 
+### PF-P115 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 `TurnoverLedgerLocalRelationConnection`，通过显式 snapshot callbacks 保留 local relation rollback/save 行为。
+  - 新增 `TurnoverLedgerLocalRelationRepository`，confirm path 使用显式 `relation_rebuild` callable，withdraw path 调用 routes withdraw。
+  - `server.py` 删除 confirm/withdraw 专用 local connection/repository helper，只负责组装细粒度依赖。
+- 验证：
+  - `git status --short --branch`：Pass，仅包含 PF-P115 允许文件。
+  - `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 下一条建议：生成并审查 `PF-P116 - Turnover Ledger Tag Selection Local Adapter Extraction`，只抽离 tag selection local connection/settings repository，不处理 bank row tags，不进入 MG。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

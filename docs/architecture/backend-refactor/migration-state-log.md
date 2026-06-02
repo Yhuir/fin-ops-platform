@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P115 - Turnover Ledger Relation Local Adapter Extraction` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P115 - Turnover Ledger Relation Local Adapter Extraction` |
-| 最近 verified prompt | `PF-P114-MG - Turnover Ledger Local Adapter Extraction Cumulative Merge Gate` |
+| 当前阶段 | `PF-P115 - Turnover Ledger Relation Local Adapter Extraction` 已执行并验证通过 |
+| 当前 active prompt | 无 |
+| 最近 verified prompt | `PF-P115 - Turnover Ledger Relation Local Adapter Extraction` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p115` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P115 - Turnover Ledger Relation Local Adapter Extraction` |
+| 下一条允许任务 | 生成并审查 `PF-P116 - Turnover Ledger Tag Selection Local Adapter Extraction` |
 
 ## Prompt 执行日志
 
@@ -8117,7 +8117,7 @@ PF-P108-MG 已 verified。先提交本次 post-flight 文档更新并 `git push 
 
 ### PF-P115 - Turnover Ledger Relation Local Adapter Extraction
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8133,6 +8133,26 @@ PF-P108-MG 已 verified。先提交本次 post-flight 文档更新并 `git push 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 执行结果
+
+- `TurnoverLedgerLocalRelationConnection` 已迁入 `turnover_ledger_write_adapters.py`，通过明确的 snapshot provider / replace / save callbacks 处理 local transaction rollback 与成功保存。
+- `TurnoverLedgerLocalRelationRepository` 已迁入 `turnover_ledger_write_adapters.py`，confirm path 通过显式 `relation_rebuild` callable 触发关系重建，withdraw path 只调用 route adapter。
+- `server.py` 已删除 confirm/withdraw 专用 local connection/repository helper，只保留 adapter 组装与依赖传入。
+- 未修改 tests、facade/UoW 语义、SQL migration、部署配置或 Traffic Gate。
+
+#### Verification Result
+
+- `git status --short --branch`：Pass，仅包含 PF-P115 允许文件。
+- `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P115 已完成 confirm/withdraw relation local adapter extraction。剩余 local shim 中，tag selection local transaction/settings writer 仍在 `server.py`，范围比 bank row tags 更小，适合作为下一条最小实现切片。下一条应生成并审查 `PF-P116 - Turnover Ledger Tag Selection Local Adapter Extraction`：只抽离 tag selection local connection/settings repository，不处理 bank row tags，不进入 MG。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
