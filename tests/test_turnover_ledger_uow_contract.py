@@ -6,6 +6,12 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Callable
 
+from fin_ops_platform.services.workbench_idempotency import (
+    InMemoryWorkbenchIdempotencyRepository,
+    WorkbenchIdempotencyInProgress,
+    WorkbenchIdempotencyKeyConflict,
+)
+
 
 """
 PF-P053 target contract tests.
@@ -24,6 +30,8 @@ class _Command:
     actor_id: str = "finance-user"
     tenant_id: str = "default"
     payload: dict[str, object] = field(default_factory=dict)
+    idempotency_key: str = ""
+    request_fingerprint: str = ""
 
 
 class _RecordingTransaction:
@@ -227,6 +235,99 @@ class _StalePreconditionPort:
         self.checked.append({"expected_versions": dict(expected_versions), "transaction": transaction})
         if self.stale:
             raise RuntimeError("turnover_write_conflict")
+
+
+class _RecordingIdempotencyStore:
+    def __init__(self) -> None:
+        self.inner = InMemoryWorkbenchIdempotencyRepository()
+        self.calls: list[dict[str, object]] = []
+
+    def for_transaction(self, transaction: object) -> "_RecordingIdempotencyStore":
+        self.calls.append({"operation": "for_transaction", "transaction": transaction})
+        return self
+
+    def get_committed_or_reserved(
+        self,
+        tenant_id: str,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> object:
+        self.calls.append(
+            {
+                "operation": "get",
+                "tenant_id": tenant_id,
+                "actor_id": actor_id,
+                "idempotency_key": idempotency_key,
+            }
+        )
+        return self.inner.get_committed_or_reserved(tenant_id, actor_id, idempotency_key)
+
+    def reserve(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        action_name: str,
+        idempotency_key: str,
+        request_fingerprint: str,
+        request_payload: dict[str, Any] | None = None,
+        expires_at: object | None = None,
+    ) -> object:
+        self.calls.append(
+            {
+                "operation": "reserve",
+                "tenant_id": tenant_id,
+                "actor_id": actor_id,
+                "action_name": action_name,
+                "idempotency_key": idempotency_key,
+                "request_fingerprint": request_fingerprint,
+                "request_payload": dict(request_payload or {}),
+            }
+        )
+        return self.inner.reserve(
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action_name=action_name,
+            idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint,
+            request_payload=request_payload,
+        )
+
+    def commit(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        action_name: str,
+        idempotency_key: str,
+        request_fingerprint: str,
+        response_payload: dict[str, Any],
+        source_versions: dict[str, Any] | None = None,
+        outbox_event_ids: list[Any] | None = None,
+    ) -> object:
+        self.calls.append(
+            {
+                "operation": "commit",
+                "tenant_id": tenant_id,
+                "actor_id": actor_id,
+                "action_name": action_name,
+                "idempotency_key": idempotency_key,
+                "request_fingerprint": request_fingerprint,
+                "response_payload": dict(response_payload),
+                "source_versions": dict(source_versions or {}),
+                "outbox_event_ids": list(outbox_event_ids or []),
+            }
+        )
+        return self.inner.commit(
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action_name=action_name,
+            idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint,
+            response_payload=response_payload,
+            source_versions=source_versions,
+            outbox_event_ids=outbox_event_ids,
+        )
 
 
 class _RecordingTurnoverExtraSnapshotRepository:
@@ -662,6 +763,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         bankdetail_port: _RecordingBankdetailPort | None = None,
         dirty_outbox_writer: _RecordingDirtyOutboxWriter | None = None,
         stale_precondition_port: _StalePreconditionPort | None = None,
+        idempotency_store: _RecordingIdempotencyStore | None = None,
     ) -> tuple[object, SimpleNamespace]:
         dependencies = SimpleNamespace(
             connection=connection or _RecordingConnection(),
@@ -671,15 +773,21 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             bankdetail_port=bankdetail_port or _RecordingBankdetailPort(),
             dirty_outbox_writer=dirty_outbox_writer or _RecordingDirtyOutboxWriter(),
             stale_precondition_port=stale_precondition_port or _StalePreconditionPort(),
+            idempotency_store=idempotency_store,
         )
+        kwargs = {
+            "connection": dependencies.connection,
+            "relation_repository": dependencies.relation_repository,
+            "extra_repository": dependencies.extra_repository,
+            "settings_port": dependencies.settings_port,
+            "bankdetail_port": dependencies.bankdetail_port,
+            "dirty_outbox_writer": dependencies.dirty_outbox_writer,
+            "stale_precondition_port": dependencies.stale_precondition_port,
+        }
+        if idempotency_store is not None:
+            kwargs["idempotency_store"] = idempotency_store
         uow = self._uow_class()(
-            connection=dependencies.connection,
-            relation_repository=dependencies.relation_repository,
-            extra_repository=dependencies.extra_repository,
-            settings_port=dependencies.settings_port,
-            bankdetail_port=dependencies.bankdetail_port,
-            dirty_outbox_writer=dependencies.dirty_outbox_writer,
-            stale_precondition_port=dependencies.stale_precondition_port,
+            **kwargs,
         )
         return uow, dependencies
 
@@ -727,6 +835,129 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
+
+    def test_relation_extra_idempotency_reserves_before_handler_and_commits_response(self) -> None:
+        idempotency_store = _RecordingIdempotencyStore()
+        uow, deps = self._build_uow(idempotency_store=idempotency_store)
+        handler_calls: list[str] = []
+
+        def handler(context: object) -> dict[str, object]:
+            handler_calls.append("handler")
+            transaction = getattr(context, "transaction")
+            deps.extra_repository.save_extra({"relation_id": "turnover_rel_1"}, transaction=transaction)
+            return {"extra": {"relation_id": "turnover_rel_1"}}
+
+        result = self._run_uow(
+            uow,
+            _Command(
+                action_name="turnover_relation_extra_update",
+                scope_keys=["all"],
+                payload={"relation_id": "turnover_rel_1", "extra": {"note": "idem"}},
+                idempotency_key="relation-extra-idem-1",
+                request_fingerprint="fingerprint-1",
+            ),
+            handler,
+        )
+
+        self.assertEqual(result["extra"], {"relation_id": "turnover_rel_1"})
+        self.assertEqual(handler_calls, ["handler"])
+        self.assertEqual([call["operation"] for call in idempotency_store.calls], ["get", "for_transaction", "reserve", "commit"])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
+        self.assertEqual(len(deps.extra_repository.extras), 1)
+        self.assertEqual(len(deps.dirty_outbox_writer.calls), 1)
+
+    def test_relation_extra_idempotency_replays_committed_without_handler_or_dirty_outbox(self) -> None:
+        idempotency_store = _RecordingIdempotencyStore()
+        uow, deps = self._build_uow(idempotency_store=idempotency_store)
+        command = _Command(
+            action_name="turnover_relation_extra_update",
+            scope_keys=["all"],
+            payload={"relation_id": "turnover_rel_1", "extra": {"note": "idem"}},
+            idempotency_key="relation-extra-idem-1",
+            request_fingerprint="fingerprint-1",
+        )
+        handler_calls = 0
+
+        def handler(context: object) -> dict[str, object]:
+            nonlocal handler_calls
+            handler_calls += 1
+            transaction = getattr(context, "transaction")
+            deps.extra_repository.save_extra({"relation_id": "turnover_rel_1"}, transaction=transaction)
+            return {"extra": {"relation_id": "turnover_rel_1"}}
+
+        first = self._run_uow(uow, command, handler)
+        second = self._run_uow(
+            uow,
+            command,
+            lambda _context: self.fail("committed idempotency replay must not call handler"),
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(handler_calls, 1)
+        self.assertEqual(len(deps.extra_repository.extras), 1)
+        self.assertEqual(len(deps.dirty_outbox_writer.calls), 1)
+        self.assertEqual(deps.connection.opened, 1)
+
+    def test_relation_extra_idempotency_conflict_rejects_before_handler_or_dirty_outbox(self) -> None:
+        idempotency_store = _RecordingIdempotencyStore()
+        uow, deps = self._build_uow(idempotency_store=idempotency_store)
+        first_command = _Command(
+            action_name="turnover_relation_extra_update",
+            scope_keys=["all"],
+            payload={"relation_id": "turnover_rel_1", "extra": {"note": "first"}},
+            idempotency_key="relation-extra-idem-conflict",
+            request_fingerprint="fingerprint-1",
+        )
+        conflicting_command = _Command(
+            action_name="turnover_relation_extra_update",
+            scope_keys=["all"],
+            payload={"relation_id": "turnover_rel_1", "extra": {"note": "different"}},
+            idempotency_key="relation-extra-idem-conflict",
+            request_fingerprint="fingerprint-2",
+        )
+
+        self._run_uow(uow, first_command, lambda _context: {"extra": {"relation_id": "turnover_rel_1"}})
+
+        with self.assertRaises(WorkbenchIdempotencyKeyConflict):
+            self._run_uow(
+                uow,
+                conflicting_command,
+                lambda _context: self.fail("fingerprint conflict must not call handler"),
+            )
+
+        self.assertEqual(len(deps.dirty_outbox_writer.calls), 1)
+        self.assertEqual(deps.connection.opened, 1)
+
+    def test_relation_extra_idempotency_reserved_in_progress_rejects_before_handler(self) -> None:
+        idempotency_store = _RecordingIdempotencyStore()
+        idempotency_store.reserve(
+            tenant_id="default",
+            actor_id="finance-user",
+            action_name="turnover_relation_extra_update",
+            idempotency_key="relation-extra-idem-in-progress",
+            request_fingerprint="fingerprint-1",
+            request_payload={"relation_id": "turnover_rel_1"},
+        )
+        idempotency_store.calls.clear()
+        uow, deps = self._build_uow(idempotency_store=idempotency_store)
+
+        with self.assertRaises(WorkbenchIdempotencyInProgress):
+            self._run_uow(
+                uow,
+                _Command(
+                    action_name="turnover_relation_extra_update",
+                    scope_keys=["all"],
+                    payload={"relation_id": "turnover_rel_1"},
+                    idempotency_key="relation-extra-idem-in-progress",
+                    request_fingerprint="fingerprint-1",
+                ),
+                lambda _context: self.fail("in-progress idempotency must not call handler"),
+            )
+
+        self.assertEqual([call["operation"] for call in idempotency_store.calls], ["get"])
+        self.assertEqual(deps.connection.opened, 0)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_target_confirm_relation_facade_uses_relation_port_and_returns_service_payload(self) -> None:
         relation_port = _RecordingConfirmRelationPort()

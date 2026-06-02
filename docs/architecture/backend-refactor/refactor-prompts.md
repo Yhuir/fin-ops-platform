@@ -21882,3 +21882,27 @@ Post-Flight:
 - PF-P107 边界正确：只建立 Turnover Ledger relation extra idempotency 的 UoW/store seam，不做 HTTP handler 接线。
 - 该 prompt 强制复用 Workbench idempotency primitive，符合“不重复造轮子”规则。
 - API-level replay/conflict expectedFailure 明确保留，避免一次性扩大到 handler 和真实 repository。
+
+### PF-P107 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - `TurnoverLedgerWriteUnitOfWork.__init__` 新增 optional `idempotency_store` 细粒度依赖，默认不传时保持旧行为。
+  - UoW 层复用 Workbench idempotency helper，实现 get/reserve/replay/conflict/in-progress/commit seam。
+  - 新增 UoW contract tests 覆盖 first reserve/commit、committed replay、fingerprint conflict、reserved in-progress。
+  - 未修改 `server.py`，未实现 API-level idempotency key extraction 或 HTTP mapping。
+  - `tests/test_turnover_ledger_api.py` 中两个 API-level relation extra idempotency expectedFailure 仍保留。
+- 验证：
+  - `git status --short --branch`：只包含 PF-P107 允许文件
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures
+  - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- 下一条建议：生成并审查 `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping`，只处理 handler 读取 body idempotency key、注入 facade/UoW、HTTP replay/conflict/in-progress mapping。

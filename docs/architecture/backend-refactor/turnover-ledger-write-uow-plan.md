@@ -2624,7 +2624,7 @@ Relation extra 当前写路径：
 
 ## PF-P104 Relation Extra Durable Idempotency Discovery and Planning
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2851,3 +2851,28 @@ Relation extra 当前写路径：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+执行结果：
+
+- `TurnoverLedgerWriteUnitOfWork.__init__` 新增 optional `idempotency_store` 依赖，仍保持默认兼容。
+- `run(command, handler)` 现在在 command 带 `idempotency_key` 且 UoW 有 store 时执行 idempotency get/reserve/replay/conflict/in-progress/commit。
+- UoW idempotency reservation/commit 绑定当前 transaction-bound store。
+- 复用 Workbench idempotency primitive 和 helper，未新建平行状态机。
+- 新增 UoW contract tests：
+  - first request reserve before handler and commit response；
+  - committed replay without handler/dirty outbox；
+  - same key different fingerprint conflict before handler；
+  - reserved in-progress reject before handler。
+- 未修改 `server.py`。
+- `tests/test_turnover_ledger_api.py` 中两个 API-level relation extra replay/conflict expectedFailure 仍保留。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条：
+
+- 生成并审查 `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping`。
+- PF-P108 只处理 handler 读取 body idempotency key、注入 facade/UoW、HTTP replay/conflict/in-progress mapping；不得新增 SQL migration、不得迁移其它 Turnover 写路径。
