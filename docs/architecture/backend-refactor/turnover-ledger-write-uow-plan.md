@@ -3393,13 +3393,33 @@ main 验证：
 
 ## PF-P188-MG Turnover Ledger Module Completion Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
 - 只合入 Turnover Ledger module completion readiness 文档。
 - 不修改 production code 或 tests。
 - 不执行 Traffic Gate。
+
+执行结果：
+
+- PF-P188 module completion readiness 文档已合入 main。
+- Merge commit：`52dcd403`。
+- Turnover Ledger 达到当前 Python-first 模块化重构目标状态。
+- Traffic Gate 未执行。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+- `rg -n "PF-P188|Module Completion Readiness|completion readiness matrix|Exit decision|PF-P188-MG" ...`：Pass。
+
+后续移交：
+
+- Bankdetail expected-version ownership 后续归 Bankdetail 模块。
+- Settings/tag-selection version ownership 后续归 Settings/Platform 边界。
+- global fallback retirement 后续归 Platform/Ops 或模块级 deprecation 计划。
 
 ## PF-P115 Relation Local Adapter Extraction
 
