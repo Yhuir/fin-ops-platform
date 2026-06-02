@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton` 已执行并 verified |
-| 当前 active prompt | `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton` |
+| 当前阶段 | `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate` |
 | 最近 verified prompt | `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p104` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures；`python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 生成并执行 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106 |
+| 下一条允许任务 | 执行 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106 |
 
 ## Prompt 执行日志
 
@@ -7931,6 +7931,31 @@ PF-P105 已 verified。下一条应生成并审查 `PF-P106 - Turnover Ledger Re
 #### 下一条 Prompt 上下文
 
 PF-P106 已 verified。当前分支已完成 PF-P104 discovery、PF-P105 tests、PF-P106 minimal command skeleton，建议下一条生成 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106 的完整 diff；不得继续扩大到 UoW idempotency store seam、API replay/conflict 或 fallback/local transaction shim。
+
+### PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只执行 Turnover Ledger relation extra durable idempotency contract 切片的 cumulative Merge Gate。
+- 覆盖 PF-P104、PF-P105、PF-P106 的完整 diff。
+- 不新增业务实现，不开始 API replay/conflict、idempotency store/UoW seam、fallback cleanup、local transaction shim extraction 或其它模块。
+
+#### 必须验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P106-MG planned。执行时必须确认当前分支不是 `main`，且 diff 只包含 PF-P104 到 PF-P106 的允许文件。MG 通过后可合入 `main`、在 `main` 上复验并 `git push origin main`；push 完成后必须从最新 `main` 新建下一条 `codex/` 分支。
 
 ## 维护规则
 

@@ -2783,3 +2783,24 @@ Relation extra 当前写路径：
 下一条：
 
 - 生成 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106。
+
+## PF-P106-MG Relation Extra Durable Idempotency Contract Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 只执行 relation extra durable idempotency contract 切片的 cumulative Merge Gate。
+- 统一覆盖 PF-P104、PF-P105、PF-P106 的完整 diff。
+- 不新增业务实现，不开始 API replay/conflict、idempotency store/UoW seam、fallback cleanup 或 local transaction shim extraction。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
