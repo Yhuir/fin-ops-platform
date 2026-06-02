@@ -59,6 +59,52 @@ class TurnoverLedgerTagSelectionSettingsAdapter:
             append_audit(dict(audit_event))
 
 
+class TurnoverLedgerLocalTagSelectionConnection:
+    def __init__(
+        self,
+        *,
+        settings_snapshot_provider: Callable[[], dict[str, object]],
+        save_snapshot: Callable[[dict[str, object]], None],
+        refresh_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._settings_snapshot_provider = settings_snapshot_provider
+        self._save_snapshot = save_snapshot
+        self._refresh_snapshot = refresh_snapshot
+
+    @contextmanager
+    def transaction(self) -> Any:
+        previous_snapshot = dict(self._settings_snapshot_provider() or {})
+        try:
+            yield SimpleNamespace()
+        except Exception:
+            self._save_snapshot(dict(previous_snapshot))
+            self._refresh_snapshot(dict(previous_snapshot))
+            raise
+
+
+class TurnoverLedgerLocalTagSelectionSettingsWriter:
+    def __init__(
+        self,
+        *,
+        save_snapshot: Callable[[dict[str, object]], None],
+        refresh_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._save_snapshot = save_snapshot
+        self._refresh_snapshot = refresh_snapshot
+
+    def save_tag_selection_settings(
+        self,
+        *,
+        next_snapshot: dict[str, object],
+        audit_event: dict[str, object],
+        transaction: Any,
+    ) -> None:
+        _ = audit_event, transaction
+        snapshot = dict(next_snapshot)
+        self._save_snapshot(snapshot)
+        self._refresh_snapshot(snapshot)
+
+
 class TurnoverLedgerRelationRepositoryAdapter:
     def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
         self._repository_factory = repository_factory
@@ -390,6 +436,81 @@ class TurnoverLedgerLocalExtraRepository:
                 "version": current_snapshot.get("version") or 1,
                 "extras": extras,
             }
+        )
+
+
+class TurnoverLedgerLocalRelationConnection:
+    def __init__(
+        self,
+        *,
+        relation_snapshot_provider: Callable[[], dict[str, object]],
+        replace_snapshot: Callable[[dict[str, object]], None],
+        save_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._relation_snapshot_provider = relation_snapshot_provider
+        self._replace_snapshot = replace_snapshot
+        self._save_snapshot = save_snapshot
+
+    @contextmanager
+    def transaction(self) -> Any:
+        previous_snapshot = dict(self._relation_snapshot_provider() or {})
+        try:
+            yield SimpleNamespace()
+        except Exception:
+            self._replace_snapshot(dict(previous_snapshot))
+            self._save_snapshot(dict(previous_snapshot))
+            raise
+        else:
+            current_snapshot = dict(self._relation_snapshot_provider() or {})
+            self._save_snapshot(current_snapshot)
+
+
+class TurnoverLedgerLocalRelationRepository:
+    def __init__(
+        self,
+        *,
+        routes: Any,
+        relation_rebuild: Callable[[], None] | None = None,
+    ) -> None:
+        self._routes = routes
+        self._relation_rebuild = relation_rebuild
+
+    def confirm_relation(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        _ = transaction
+        if self._relation_rebuild is not None:
+            self._relation_rebuild()
+        return dict(
+            self._routes.confirm_relation(
+                bank_row_ids=list(bank_row_ids),
+                actor=actor_id,
+                note=note,
+            )
+            or {}
+        )
+
+    def withdraw_relation(
+        self,
+        *,
+        relation_id: str,
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        _ = transaction
+        return dict(
+            self._routes.withdraw_relation(
+                relation_id=relation_id,
+                actor=actor_id,
+                note=note,
+            )
+            or {}
         )
 
 

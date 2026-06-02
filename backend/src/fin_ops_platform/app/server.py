@@ -277,7 +277,11 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerExtraRepositoryAdapter,
     TurnoverLedgerLocalDirtyOutboxWriter,
     TurnoverLedgerLocalExtraRepository,
+    TurnoverLedgerLocalRelationConnection,
+    TurnoverLedgerLocalRelationRepository,
     TurnoverLedgerLocalRelationExtraConnection,
+    TurnoverLedgerLocalTagSelectionConnection,
+    TurnoverLedgerLocalTagSelectionSettingsWriter,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionSettingsAdapter,
 )
@@ -2760,8 +2764,20 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return None
-            connection = self._local_turnover_ledger_confirm_connection(state_store)
-            relation_repository = self._local_turnover_ledger_confirm_relation_repository()
+            connection = TurnoverLedgerLocalRelationConnection(
+                relation_snapshot_provider=self._turnover_relation_service.snapshot,
+                replace_snapshot=self._replace_local_turnover_relation_snapshot,
+                save_snapshot=lambda snapshot: self._save_local_turnover_relations_snapshot(
+                    state_store,
+                    snapshot,
+                ),
+            )
+            relation_repository = TurnoverLedgerLocalRelationRepository(
+                routes=self._turnover_ledger_api_routes,
+                relation_rebuild=lambda: self._turnover_relation_service.rebuild_from_bank_rows(
+                    self._turnover_bank_transaction_rows()
+                ),
+            )
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
@@ -2804,8 +2820,17 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return None
-            connection = self._local_turnover_ledger_withdraw_connection(state_store)
-            relation_repository = self._local_turnover_ledger_withdraw_relation_repository()
+            connection = TurnoverLedgerLocalRelationConnection(
+                relation_snapshot_provider=self._turnover_relation_service.snapshot,
+                replace_snapshot=self._replace_local_turnover_relation_snapshot,
+                save_snapshot=lambda snapshot: self._save_local_turnover_relations_snapshot(
+                    state_store,
+                    snapshot,
+                ),
+            )
+            relation_repository = TurnoverLedgerLocalRelationRepository(
+                routes=self._turnover_ledger_api_routes,
+            )
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
@@ -2827,97 +2852,6 @@ class Application:
         if callable(getattr(transaction, "execute", None)):
             return PostgresWorkbenchRepository(transaction)
         return state_store
-
-    def _local_turnover_ledger_confirm_connection(self, state_store: object) -> object:
-        application = self
-
-        class _LocalConfirmRelationConnection:
-            @contextmanager
-            def transaction(self) -> Any:
-                previous_relation_snapshot = application._turnover_relation_service.snapshot()
-                try:
-                    yield SimpleNamespace()
-                except Exception:
-                    application._replace_local_turnover_relation_snapshot(previous_relation_snapshot)
-                    application._save_local_turnover_relations_snapshot(
-                        state_store,
-                        previous_relation_snapshot,
-                    )
-                    raise
-                else:
-                    application._save_local_turnover_relations_snapshot(
-                        state_store,
-                        application._turnover_relation_service.snapshot(),
-                    )
-
-        return _LocalConfirmRelationConnection()
-
-    def _local_turnover_ledger_withdraw_connection(self, state_store: object) -> object:
-        application = self
-
-        class _LocalWithdrawRelationConnection:
-            @contextmanager
-            def transaction(self) -> Any:
-                previous_relation_snapshot = application._turnover_relation_service.snapshot()
-                try:
-                    yield SimpleNamespace()
-                except Exception:
-                    application._replace_local_turnover_relation_snapshot(previous_relation_snapshot)
-                    application._save_local_turnover_relations_snapshot(
-                        state_store,
-                        previous_relation_snapshot,
-                    )
-                    raise
-                else:
-                    application._save_local_turnover_relations_snapshot(
-                        state_store,
-                        application._turnover_relation_service.snapshot(),
-                    )
-
-        return _LocalWithdrawRelationConnection()
-
-    def _local_turnover_ledger_confirm_relation_repository(self) -> object:
-        routes = self._turnover_ledger_api_routes
-        relation_service = self._turnover_relation_service
-        bank_rows = self._turnover_bank_transaction_rows
-
-        class _LocalConfirmRelationRepository:
-            def confirm_relation(
-                self,
-                *,
-                bank_row_ids: list[str],
-                actor_id: str,
-                note: str | None,
-                transaction: object,
-            ) -> dict[str, object]:
-                relation_service.rebuild_from_bank_rows(bank_rows())
-                return routes.confirm_relation(
-                    bank_row_ids=list(bank_row_ids),
-                    actor=actor_id,
-                    note=note,
-                )
-
-        return _LocalConfirmRelationRepository()
-
-    def _local_turnover_ledger_withdraw_relation_repository(self) -> object:
-        routes = self._turnover_ledger_api_routes
-
-        class _LocalWithdrawRelationRepository:
-            def withdraw_relation(
-                self,
-                *,
-                relation_id: str,
-                actor_id: str,
-                note: str | None,
-                transaction: object,
-            ) -> dict[str, object]:
-                return routes.withdraw_relation(
-                    relation_id=relation_id,
-                    actor=actor_id,
-                    note=note,
-                )
-
-        return _LocalWithdrawRelationRepository()
 
     def _local_turnover_ledger_bank_row_tags_connection(self, state_store: object) -> object:
         application = self
@@ -3089,12 +3023,17 @@ class Application:
                 tenant_id=self._workbench_reconciliation_tenant_id(),
             )
         else:
-            connection = self._local_turnover_ledger_tag_selection_connection(state_store)
-            settings_port = TurnoverLedgerTagSelectionSettingsAdapter(
-                writer=lambda next_snapshot, audit_event, transaction: self._save_local_turnover_ledger_tag_selection(
-                    next_snapshot=next_snapshot,
-                    audit_event=audit_event,
-                )
+            save_snapshot = lambda snapshot: state_store.save_app_settings(dict(snapshot))
+            connection = TurnoverLedgerLocalTagSelectionConnection(
+                settings_snapshot_provider=lambda: dict(
+                    getattr(self._app_settings_service, "_snapshot", {}) or {}
+                ),
+                save_snapshot=save_snapshot,
+                refresh_snapshot=self._refresh_local_app_settings_snapshot,
+            )
+            settings_port = TurnoverLedgerLocalTagSelectionSettingsWriter(
+                save_snapshot=save_snapshot,
+                refresh_snapshot=self._refresh_local_app_settings_snapshot,
             )
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
@@ -3111,39 +3050,11 @@ class Application:
             app_settings_service=self._app_settings_service,
         )
 
-    def _save_local_turnover_ledger_tag_selection(
-        self,
-        *,
-        next_snapshot: dict[str, object],
-        audit_event: dict[str, object],
-    ) -> None:
-        state_store = getattr(self, "_state_store", None)
-        if state_store is None:
-            raise RuntimeError("state store is required.")
-        state_store.save_app_settings(dict(next_snapshot))
-        self._refresh_local_app_settings_snapshot(dict(next_snapshot))
-
     def _refresh_local_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
         setattr(self._app_settings_service, "_snapshot", dict(snapshot))
         configure_category_service = getattr(self._app_settings_service, "_configure_category_service", None)
         if callable(configure_category_service):
             configure_category_service(dict(snapshot))
-
-    def _local_turnover_ledger_tag_selection_connection(self, state_store: object) -> object:
-        application = self
-
-        class _LocalTagSelectionConnection:
-            @contextmanager
-            def transaction(self) -> Any:
-                previous_snapshot = dict(getattr(application._app_settings_service, "_snapshot", {}) or {})
-                try:
-                    yield SimpleNamespace()
-                except Exception:
-                    state_store.save_app_settings(previous_snapshot)
-                    application._refresh_local_app_settings_snapshot(previous_snapshot)
-                    raise
-
-        return _LocalTagSelectionConnection()
 
     def _turnover_ledger_relation_extra_row_provider(
         self,
