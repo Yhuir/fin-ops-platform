@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` |
-| 最近 verified prompt | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
-| 当前分支 | `codex/turnover-ledger-bank-row-tags-fallback-p128` |
-| 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；PF-P128 文档关键词检查：Pass |
-| 下一条允许任务 | 执行 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` |
+| 当前阶段 | `PF-P131 - Turnover Ledger Relation Mutation Invalidation Boundary Discovery and Planning` 已完成并验证 |
+| 当前 active prompt | `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests` 待生成并审查 |
+| 最近 verified prompt | `PF-P131 - Turnover Ledger Relation Mutation Invalidation Boundary Discovery and Planning` |
+| 当前分支 | `codex/turnover-ledger-next-slice-p131` |
+| 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；PF-P131 文档关键词检查：Pass |
+| 下一条允许任务 | 生成并审查 `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -9280,6 +9280,91 @@ PF-P130 已完成 bank row tags legacy fallback facade extraction：
 - Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
 
 下一步先提交本次 post-flight 文档并执行 `git push origin main`。push 完成后必须从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 prompt；不得在 `main` 或旧分支继续开发。
+
+### PF-P131 - Turnover Ledger Relation Mutation Invalidation Boundary Discovery and Planning
+
+状态：`verified`
+
+#### 范围
+
+- 只做 Turnover Ledger relation mutation invalidation boundary 的 discovery/planning。
+- 盘点 `_after_turnover_relation_mutation(...)`、Workbench invalidation、Turnover read model clear/enqueue、relation best-effort persistence 的职责边界与调用链。
+- 不修改 production code，不修改 tests，不进入 MG。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+#### 必须输出
+
+- Relation mutation invalidation chain。
+- Boundary matrix。
+- Test coverage matrix。
+- Risk / blocker。
+- 下一条最小 prompt 建议。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P131|Relation Mutation Invalidation Boundary|Boundary Matrix|Next Minimal Prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 执行摘要
+
+- 已确认 Turnover Ledger 剩余最大的 legacy orchestration 点是 `server.py` 中的 `_after_turnover_relation_mutation(...)`。
+- 已盘点 relation mutation invalidation chain：
+  - confirm fallback path -> `_after_turnover_relation_mutation(affected_months)`；
+  - withdraw fallback path -> `_after_turnover_relation_mutation(affected_months)`；
+  - bank row tags legacy fallback facade -> `_after_turnover_relation_mutation(affected_months)`。
+- 已确认 helper 当前固定顺序为：
+  1. `save_turnover_relations(..., operation=\"turnover_relation_mutation_pre_invalidation\")`
+  2. `_invalidate_workbench_after_bank_transaction_categories(affected_months)`
+  3. `save_turnover_relations(..., operation=\"turnover_relation_mutation\")`
+  4. `_clear_turnover_ledger_read_model_best_effort()`
+  5. `_enqueue_turnover_ledger_read_model_refreshes([\"all\"], reason=\"turnover_relation_changed\")`
+- 已确认该 helper 混合了 Turnover relation snapshot best-effort persistence、Workbench invalidation、Turnover read model clear 与 runtime queue enqueue 四类职责，不应长期滞留在 `server.py`。
+- 已确认现有测试已覆盖大量 side effects 事实，但还缺一个专门锁定 relation mutation invalidation chain 顺序、handler-thinness 与 legacy failure semantics 的独立 characterization slice。
+
+#### Boundary Matrix
+
+| 边界点 | 当前所在 | 结论 |
+| --- | --- | --- |
+| HTTP body / session / permission parsing | `server.py` handler | 保留在 app boundary 合理 |
+| `affected_months` 计算与 response mapping | `server.py` handler | 暂可保留在 handler，属于 HTTP/usecase 入参组装 |
+| relation mutation 后置 invalidation chain | `server.py` helper | 应迁入显式 adapter / application service |
+| Workbench invalidation callable | `server.py` helper | 应作为细粒度依赖注入，不应通过 `Application` 透传 |
+| Turnover read model clear | `server.py` helper | 应作为细粒度 callable 注入，后续由 adapter 拥有 |
+| Turnover refresh enqueue | runtime queue repository wrapper | 应作为细粒度 callable 或 port 注入，不能继续由 handler 直接编排 |
+| relation snapshot best-effort persistence | `server.py` + `state_store` | 应下沉为 adapter seam，避免 handler/fallback 重复编排 |
+
+#### Test Coverage Matrix
+
+- 现有已覆盖：
+  - confirm / withdraw / bank row tags fallback 对 `turnover_relation_changed` enqueue 的断言；
+  - legacy fallback path 对 `read_repository.clear_calls` 的断言；
+  - Workbench invalidation enqueue 的断言；
+  - `save_turnover_relations()` best-effort failure 行为；
+  - confirm / withdraw / bank row tags handler-thinness，确认 handler 不再 inline 主要 side effects。
+- 现有仍缺：
+  - `_after_turnover_relation_mutation(...)` 自身的顺序锁定测试；
+  - relation mutation invalidation chain 的 dedicated handler-thinness / adapter seam 目标测试；
+  - legacy fallback chain 在 clear/enqueue/persist 上的 failure semantics characterization；
+  - 明确区分 primary UoW path 与 legacy fallback path 的 relation mutation invalidation contract。
+
+#### 风险 / 阻断
+
+- `_after_turnover_relation_mutation(...)` 横跨 Turnover Ledger 与 Workbench，两侧 read model/invalidation 责任混在一个 helper 中，直接抽离实现风险高于先补测试。
+- 现有 primary UoW path 与 legacy fallback path 已开始分叉；若不先锁定 chain 顺序和失败语义，后续 extraction 容易破坏兼容行为。
+- 当前 helper 仍依赖多个 `Application` 内部 helper；下一步必须先把目标行为锁住，再做最小 seam extraction。
+
+#### 下一条 Prompt 上下文
+
+PF-P131 已确认下一条最小 prompt 应为 `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests`。PF-P132 只能补测试，不得直接做 extraction；必须锁定 `_after_turnover_relation_mutation(...)` 的顺序、legacy fallback side effects、primary UoW path 不触达 legacy helper、以及 Workbench/Turnover invalidation 的既有语义。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

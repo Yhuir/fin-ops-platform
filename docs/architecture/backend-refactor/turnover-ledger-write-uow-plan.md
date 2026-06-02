@@ -4151,7 +4151,7 @@ PF-P110 边界：
 
 ## PF-P130-MG Bank Row Tags Fallback Cleanup Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -4169,6 +4169,56 @@ PF-P110 边界：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+## PF-P131 Relation Mutation Invalidation Boundary Discovery and Planning
+
+状态：`planned`
+
+目标：
+
+- 盘点 relation mutation invalidation boundary。
+- 明确 `_after_turnover_relation_mutation(...)` 及其相关 helper 的职责边界、调用链和测试缺口。
+- 产出下一条最小 prompt，不修改 production code。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests，不进入 MG。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P131|Relation Mutation Invalidation Boundary|Boundary Matrix|Next Minimal Prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+- 发现 confirm fallback path、withdraw fallback path 与 bank row tags legacy fallback facade 都会进入 `_after_turnover_relation_mutation(...)`。
+- 该 helper 当前顺序被代码固定为：
+  1. pre-invalidation `save_turnover_relations(...)`
+  2. `_invalidate_workbench_after_bank_transaction_categories(...)`
+  3. final `save_turnover_relations(...)`
+  4. `_clear_turnover_ledger_read_model_best_effort()`
+  5. `_enqueue_turnover_ledger_read_model_refreshes(["all"], reason="turnover_relation_changed")`
+- `_invalidate_workbench_after_bank_transaction_categories(...)` 在有月份时走 derived-data lifecycle，无月份时直接清 search cache 并返回。
+- 当前 helper 把 Turnover relation snapshot best-effort persistence、Workbench invalidation、Turnover read model clear 和 queue enqueue 混在 `server.py`，仍然是剩余最大的 orchestration seam。
+- 现有 API / UoW tests 已覆盖：
+  - Workbench invalidation enqueue；
+  - Turnover enqueue；
+  - read model clear count；
+  - save_turnover_relations best-effort failure；
+  - handler 已不再 inline 多数 legacy side effects。
+- 仍缺一个 dedicated characterization slice 去锁定：
+  - relation mutation invalidation chain 顺序；
+  - legacy fallback path 的 failure semantics；
+  - primary UoW path 不触达 legacy helper；
+  - future extraction 的 handler-thinness 目标。
+
+下一条最小 prompt：
+
+- `PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests`
+- 理由：先把 `_after_turnover_relation_mutation(...)` 的顺序、兼容语义和 primary-vs-legacy 差异锁住，再做最小 extraction，风险最低。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

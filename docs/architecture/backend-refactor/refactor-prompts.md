@@ -24968,6 +24968,108 @@ Post-Flight:
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：提交本次 post-flight 文档并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。
 
+## PF-P131 - Turnover Ledger Relation Mutation Invalidation Boundary Discovery and Planning
+
+状态：`planned`
+
+```text
+/goal
+PF-P131 - Turnover Ledger Relation Mutation Invalidation Boundary Discovery and Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在不修改业务实现的前提下，盘点 Turnover Ledger relation mutation 后置失效链路的边界，找出下一条最小切片。
+
+Context:
+PF-P130-MG 已 verified 并已合入 main。当前 Turnover Ledger 写 handler 的 direct fallback side effects 已基本移出 handler，但 `server.py` 仍保留 `_after_turnover_relation_mutation(...)` 及其相关 helper，负责：
+- relation snapshot best-effort persistence；
+- Workbench invalidation；
+- Turnover Ledger read model clear/enqueue；
+- Bank transaction category 相关的衍生数据失效。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P130-MG 已 verified。
+
+Goal:
+只做 relation mutation invalidation boundary 的 discovery/planning，明确 `_after_turnover_relation_mutation(...)`、`_invalidate_workbench_after_bank_transaction_categories(...)`、Turnover read model clear/enqueue、relation best-effort persistence 的职责边界、调用链和测试缺口。产出下一条最小 prompt，不写 production code。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Required Discovery Output:
+1. Relation Mutation Invalidation Chain：
+   - 列出 confirm / withdraw / bank row tags fallback / 其它入口如何触发 `_after_turnover_relation_mutation(...)`。
+   - 说明每一段 side effect 的顺序：pre-invalidation relation persist -> Workbench invalidation -> relation persist -> Turnover Ledger read model clear -> enqueue refresh。
+2. Boundary Matrix：
+   - 哪些职责仍留在 `server.py` 是合理的。
+   - 哪些职责应迁入显式 adapter / application service / invalidation facade。
+   - 哪些依赖必须以细粒度 callable 或 port 注入，不能传 `Application`。
+3. Test Coverage Matrix：
+   - 现有 tests 哪些已经锁定 queue failure / best-effort persistence / invalidation side effects。
+   - 哪些目标测试仍缺失，尤其是 `_after_turnover_relation_mutation(...)` 相关的 handler-thinness / ordering / failure semantics。
+4. Risk / Blocker：
+   - 是否存在跨模块耦合点，导致下一步必须先补 characterization tests。
+   - 是否需要区分 legacy fallback path 和 primary UoW path。
+5. Next Minimal Prompt：
+   - 只能推荐一条。
+   - 优先级只能在以下两类中二选一：
+     - characterization tests for relation mutation invalidation boundary
+     - minimal extraction of relation mutation invalidation adapter/facade
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得生成 Merge Gate。
+- 不得进入下一个模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P131|Relation Mutation Invalidation Boundary|Boundary Matrix|Next Minimal Prompt" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 PF-P131 status、发现结论、风险和下一条最小 prompt。
+3. 不得直接执行 extraction；下一步必须先遵循 PF-P131 产出的最小 prompt。
+```
+
+### 审查结论
+
+- PF-P131 边界正确：只做 relation mutation invalidation boundary discovery/planning，不修改 production code。
+- 它针对的是 Turnover Ledger 当前剩余的最大跨模块 orchestration 点：`_after_turnover_relation_mutation(...)` 及其周边 helper。
+- 下一步应由 PF-P131 的发现来决定，是先补 characterization tests，还是进入最小 adapter extraction。
+
+### PF-P131 执行结果
+
+- PF-P131 已完成并验证，未修改 production code、tests、SQL migration、worker、frontend 或部署配置。
+- 已确认 relation mutation invalidation chain 的主要 legacy 入口：
+  - confirm fallback path；
+  - withdraw fallback path；
+  - bank row tags legacy fallback facade。
+- 已确认 `_after_turnover_relation_mutation(...)` 当前固定顺序是：
+  1. pre-invalidation relation snapshot persist；
+  2. Workbench invalidation；
+  3. final relation snapshot persist；
+  4. Turnover Ledger read model clear；
+  5. `turnover_relation_changed` enqueue。
+- 已确认它仍是当前 Turnover Ledger 写路径中最大的跨模块 orchestration helper，混合了 relation persistence、Workbench invalidation、Turnover read model clear 和 runtime queue enqueue 四类职责。
+- 已确认现有 tests 已覆盖 queue failure、best-effort persistence、clear/enqueue 结果与部分 handler-thinness，但仍缺一个专门锁定 relation mutation invalidation chain 顺序、legacy failure semantics 和 primary-vs-legacy path 差异的 characterization slice。
+- 下一条最小 prompt：`PF-P132 - Turnover Ledger Relation Mutation Invalidation Characterization Tests`。PF-P132 必须先补 tests，不得直接做 extraction。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
