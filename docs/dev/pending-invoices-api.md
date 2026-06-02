@@ -19,7 +19,7 @@
 | 参数 | 说明 |
 | --- | --- |
 | `direction` | `expense`、`income` 或 `all` |
-| `filter` | `expense` 视图支持 `all`、`requires_invoice`、`bank_statement_as_invoice`、`no_invoice_required`；`income` 和 `all` 仅支持 `all` |
+| `filter` | `expense` 视图支持 `all`、`requires_invoice`、`bank_statement_as_invoice`、`no_invoice_required`；`income` 视图支持 `all`、`requires_invoice`、`no_invoice_required`、`cash_income`；`all` 仅支持 `all` |
 | `keyword` | 全局关键字 |
 | `date_from` / `date_to` | 交易日期范围 |
 | `page` / `page_size` | 服务端分页 |

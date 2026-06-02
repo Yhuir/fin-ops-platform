@@ -16,6 +16,7 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.pending_invoice_rules import (
     PENDING_INVOICE_CASH_INCOME_GROUP,
     PENDING_INVOICE_NO_INVOICE_GROUP,
+    pending_invoice_effective_category_payload,
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
 )
@@ -385,7 +386,8 @@ class PendingInvoiceQueryService:
     ) -> bool:
         if direction == "all" or filter_name == "all":
             return True
-        group = self._group_for_category(category.get("category_code"), tag_groups, direction=direction)
+        effective_category = pending_invoice_effective_category_payload(category)
+        group = self._group_for_category(effective_category.get("category_code"), tag_groups, direction=direction)
         return group == filter_name
 
     def _bank_account_mappings_by_last4(self) -> dict[str, dict[str, str]]:
@@ -443,7 +445,8 @@ class PendingInvoiceQueryService:
                     invoice_relations.append((relation, invoice))
         invoice_relations.sort(key=lambda item: str(item[0].get("case_id") or ""))
         invoices = [self._invoice_payload(invoice, direction=direction) for _, invoice in invoice_relations]
-        category_code = category.get("category_code")
+        effective_category = pending_invoice_effective_category_payload(category)
+        category_code = effective_category.get("category_code")
         group = self._group_for_category(category_code, tag_groups, direction=direction)
         status_override = self._income_status_override(transaction.id) if direction == "income" else None
         can_create_invoice = (
@@ -506,10 +509,10 @@ class PendingInvoiceQueryService:
                 "voucher_type": transaction.voucher_kind or "",
                 "voucher_no": transaction.voucher_no or "",
                 "effective_tag_code": category_code,
-                "effective_tag_label": category.get("category_label"),
-                "effective_tag_primary_label": category.get("category_primary_label"),
-                "effective_tag_sub_label": category.get("category_sub_label"),
-                "effective_tag_label_path": list(category.get("category_label_path") or []),
+                "effective_tag_label": effective_category.get("category_label"),
+                "effective_tag_primary_label": effective_category.get("category_primary_label"),
+                "effective_tag_sub_label": effective_category.get("category_sub_label"),
+                "effective_tag_label_path": list(effective_category.get("category_label_path") or []),
             },
             "invoice_acquisition_status": status_payload,
             "input_invoices": input_invoices,
@@ -553,13 +556,14 @@ class PendingInvoiceQueryService:
     def _matched_rule_payload(*, group: str | None, category: dict[str, Any]) -> dict[str, Any] | None:
         if not group:
             return None
+        effective_category = pending_invoice_effective_category_payload(category)
         return {
             "group": group,
-            "tag_code": category.get("category_code"),
-            "tag_label": category.get("category_label"),
-            "tag_primary_label": category.get("category_primary_label"),
-            "tag_sub_label": category.get("category_sub_label"),
-            "tag_label_path": list(category.get("category_label_path") or []),
+            "tag_code": effective_category.get("category_code"),
+            "tag_label": effective_category.get("category_label"),
+            "tag_primary_label": effective_category.get("category_primary_label"),
+            "tag_sub_label": effective_category.get("category_sub_label"),
+            "tag_label_path": list(effective_category.get("category_label_path") or []),
         }
 
     @staticmethod

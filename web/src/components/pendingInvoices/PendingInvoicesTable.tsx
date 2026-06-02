@@ -63,7 +63,33 @@ function bankAccountLabel(row: PendingInvoiceRow["bankTransaction"]) {
   return [row.bankShortName || row.bankName, row.accountLast4].filter(Boolean).join(" ") || "-";
 }
 
-function overflowText(expanded: boolean): SxProps<Theme> {
+function numericAmount(value: string) {
+  const parsed = Number(String(value ?? "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function rowMoneyDirection(row: PendingInvoiceRow, direction: PendingInvoiceDirection) {
+  if (direction === "income") {
+    return "income";
+  }
+  if (direction === "expense") {
+    return "expense";
+  }
+  return numericAmount(row.bankTransaction.creditAmount) > 0 && numericAmount(row.bankTransaction.debitAmount) <= 0 ? "income" : "expense";
+}
+
+function tagPathLabel(row: PendingInvoiceRow["bankTransaction"]) {
+  const path = row.effectiveTagLabelPath.map((item) => item.trim()).filter(Boolean);
+  if (path.length > 0) {
+    return path.join(" / ");
+  }
+  return [row.effectiveTagPrimaryLabel, row.effectiveTagSubLabel]
+    .map((item) => item?.trim())
+    .filter(Boolean)
+    .join(" / ") || row.effectiveTagLabel || row.effectiveTagCode || "未标注";
+}
+
+function overflowText(expanded: boolean): Record<string, string | number> {
   return expanded ? {
     whiteSpace: "normal",
     wordBreak: "break-word",
@@ -292,6 +318,7 @@ export default function PendingInvoicesTable({
               </TableRow>
             ) : rows.map((row) => renderRow({
               row,
+              direction,
               config,
               onOpenRelation,
               onOpenInvoicePicker,
@@ -343,13 +370,39 @@ function subHeaderSx(bgcolor: string, leftBorder = false): SxProps<Theme> {
 function dataCellSx(leftBorder = false): SxProps<Theme> {
   return {
     verticalAlign: "top",
-    p: 1,
+    px: 0.8,
+    py: 0.55,
+    fontSize: 12,
+    lineHeight: 1.3,
     ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
   };
 }
 
+const denseChipSx: SxProps<Theme> = {
+  height: 20,
+  maxWidth: "100%",
+  "& .MuiChip-label": {
+    px: 0.6,
+    fontSize: 11,
+    lineHeight: 1.2,
+  },
+};
+
+const directionChipSx: SxProps<Theme> = {
+  height: 20,
+  maxWidth: "100%",
+  minWidth: 24,
+  fontWeight: 900,
+  "& .MuiChip-label": {
+    px: 0.6,
+    fontSize: 11,
+    lineHeight: 1.2,
+  },
+};
+
 function renderRow({
   row,
+  direction,
   config,
   onOpenRelation,
   onOpenInvoicePicker,
@@ -358,19 +411,20 @@ function renderRow({
   onOpenRules,
   onMarkIncomeStatus,
   actionsDisabled = false,
-}: Omit<PendingInvoicesTableProps, "rows" | "onSortChange" | "onOpenExport" | "direction"> & { row: PendingInvoiceRow }) {
+}: Omit<PendingInvoicesTableProps, "rows" | "onSortChange" | "onOpenExport"> & { row: PendingInvoiceRow }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
   const invoiceExtraCount = Math.max(0, row.inputInvoices.relationCount - 1);
   const oaExtraCount = Math.max(0, row.oa.relationCount - 1);
   const oaDetailAvailable = canOpenOaDetail(row);
+  const moneyDirection = rowMoneyDirection(row, direction);
 
   return (
     <TableRow key={row.id} hover>
       <TableCell sx={dataCellSx()}>
-        <Stack spacing={0.75} sx={{ minWidth: 0 }}>
+        <Stack spacing={0.4} sx={{ minWidth: 0 }}>
           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
-            <Typography component="div" variant="body2" fontWeight={900} noWrap title={row.bankTransaction.counterpartyName}>
+            <Typography component="div" fontWeight={900} noWrap title={row.bankTransaction.counterpartyName} sx={{ fontSize: 12, lineHeight: 1.3 }}>
               {row.bankTransaction.counterpartyName}
             </Typography>
             <Tooltip title="流水详情">
@@ -378,54 +432,58 @@ function renderRow({
                 size="small"
                 aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
                 onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
+                sx={{ width: 24, height: 24 }}
               >
                 <InfoOutlinedIcon fontSize="inherit" />
               </IconButton>
             </Tooltip>
           </Stack>
-          <Typography variant="caption" color="text.secondary">{row.bankTransaction.tradeTime || "-"}</Typography>
-          {row.bankTransaction.effectiveTagLabel ? (
-            <Chip
-              size="small"
-              variant="outlined"
-              label={row.bankTransaction.effectiveTagLabel}
-              sx={{ alignSelf: "flex-start", maxWidth: "100%" }}
-            />
-          ) : null}
-          {row.bankTransaction.counterpartyAccountNo ? (
-            <Typography variant="caption" color="text.secondary" noWrap title={row.bankTransaction.counterpartyAccountNo}>
-              对方尾号 {row.bankTransaction.counterpartyAccountNo.slice(-4)}
-            </Typography>
-          ) : null}
+          <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>{row.bankTransaction.tradeTime || "-"}</Typography>
+          <Chip
+            size="small"
+            variant="outlined"
+            label={tagPathLabel(row.bankTransaction)}
+            sx={{ ...denseChipSx, alignSelf: "flex-start" }}
+          />
         </Stack>
       </TableCell>
       <TableCell align="right" sx={dataCellSx()}>
-        <Typography component="div" variant="body2" fontWeight={900} sx={{ fontVariantNumeric: "tabular-nums" }}>
-          {formatMoney(row.bankTransaction.amount)}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+        <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
+          <Chip
+            size="small"
+            label={moneyDirection === "income" ? "收" : "支"}
+            color={moneyDirection === "income" ? "success" : "error"}
+            variant="outlined"
+            sx={directionChipSx}
+          />
+          <Typography component="div" fontWeight={900} sx={{ fontSize: 12, lineHeight: 1.3, fontVariantNumeric: "tabular-nums" }}>
+            {formatMoney(row.bankTransaction.amount)}
+          </Typography>
+        </Stack>
+        <Typography color="text.secondary" component="div" sx={{ mt: 0.3, fontSize: 11, lineHeight: 1.25 }}>
           {bankAccountLabel(row.bankTransaction)}
         </Typography>
       </TableCell>
       <TableCell sx={dataCellSx()}>
-        <Stack spacing={0.5}>
-          <Typography variant="body2" sx={overflowText(false)}>
+        <Stack spacing={0.35}>
+          <Typography sx={[overflowText(false), { fontSize: 12, lineHeight: 1.3 }]}>
             {row.bankTransaction.summary || "-"}
           </Typography>
-          <Typography variant="caption" color="text.secondary" sx={overflowText(false)}>
+          <Typography color="text.secondary" sx={[overflowText(false), { fontSize: 11, lineHeight: 1.25 }]}>
             {row.bankTransaction.remark || row.bankTransaction.voucherNo || "-"}
           </Typography>
         </Stack>
       </TableCell>
       <TableCell sx={dataCellSx(true)}>
-        <Stack spacing={0.8} alignItems="flex-start">
+        <Stack spacing={0.45} alignItems="flex-start">
           <Chip
             size="small"
             color={chipColor(row.invoiceAcquisitionStatus.severity)}
             variant={row.invoiceAcquisitionStatus.severity === "default" ? "outlined" : "filled"}
             label={row.invoiceAcquisitionStatus.label}
+            sx={denseChipSx}
           />
-          <Typography variant="caption" color="text.secondary" sx={overflowText(false)}>
+          <Typography color="text.secondary" sx={[overflowText(false), { fontSize: 11, lineHeight: 1.25 }]}>
             {row.invoiceAcquisitionStatus.reason || row.invoiceAcquisitionStatus.matchedRule?.tagLabel || "-"}
           </Typography>
           <ActionButtons
@@ -441,12 +499,12 @@ function renderRow({
       </TableCell>
       <TableCell sx={dataCellSx(true)}>
         {primaryInvoice ? (
-          <Stack spacing={0.5} sx={{ minWidth: 0 }}>
-            <Typography variant="body2" fontWeight={900} noWrap title={invoiceNumber(primaryInvoice)}>
+          <Stack spacing={0.35} sx={{ minWidth: 0 }}>
+            <Typography fontWeight={900} noWrap title={invoiceNumber(primaryInvoice)} sx={{ fontSize: 12, lineHeight: 1.3 }}>
               {invoiceNumber(primaryInvoice)}
             </Typography>
             <Stack direction="row" spacing={0.5} alignItems="center">
-              <Typography variant="caption" color="text.secondary">{primaryInvoice.issueDate || "-"}</Typography>
+              <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>{primaryInvoice.issueDate || "-"}</Typography>
               <Button
                 size="small"
                 variant="text"
@@ -468,11 +526,11 @@ function renderRow({
       </TableCell>
       <TableCell sx={dataCellSx()}>
         {primaryInvoice ? (
-          <Stack spacing={0.5}>
-            <Typography variant="body2" fontWeight={800} sx={overflowText(false)}>
+          <Stack spacing={0.35}>
+            <Typography fontWeight={800} sx={[overflowText(false), { fontSize: 12, lineHeight: 1.3 }]}>
               {primaryInvoice.sellerName || "-"}
             </Typography>
-            <Typography variant="caption" color="text.secondary" sx={overflowText(false)}>
+            <Typography color="text.secondary" sx={[overflowText(false), { fontSize: 11, lineHeight: 1.25 }]}>
               {primaryInvoice.sellerTaxNo || "-"}
             </Typography>
           </Stack>
@@ -483,13 +541,13 @@ function renderRow({
       <TableCell align="right" sx={dataCellSx()}>
         {primaryInvoice ? (
           <Stack spacing={0.35}>
-            <Typography variant="body2" fontWeight={900} sx={{ fontVariantNumeric: "tabular-nums" }}>
+            <Typography fontWeight={900} sx={{ fontSize: 12, lineHeight: 1.3, fontVariantNumeric: "tabular-nums" }}>
               {formatMoney(primaryInvoice.totalWithTax)}
             </Typography>
             {row.inputInvoices.paymentSummary ? (
               <>
-                <Typography variant="caption" color="text.secondary">已付 {formatMoney(row.inputInvoices.paymentSummary.paidTotal)}</Typography>
-                <Typography variant="caption" color="text.secondary">待付 {formatMoney(row.inputInvoices.paymentSummary.remainingAmount)}</Typography>
+                <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>已付 {formatMoney(row.inputInvoices.paymentSummary.paidTotal)}</Typography>
+                <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>待付 {formatMoney(row.inputInvoices.paymentSummary.remainingAmount)}</Typography>
               </>
             ) : null}
           </Stack>
@@ -499,9 +557,9 @@ function renderRow({
       </TableCell>
       <TableCell sx={dataCellSx(true)}>
         {primaryOa ? (
-          <Stack spacing={0.5} sx={{ minWidth: 0 }}>
-            <Typography variant="body2" fontWeight={900} noWrap title={primaryOa.applicant}>{primaryOa.applicant || "-"}</Typography>
-            <Typography variant="caption" color="text.secondary">{primaryOa.applicationType || "-"}</Typography>
+          <Stack spacing={0.35} sx={{ minWidth: 0 }}>
+            <Typography fontWeight={900} noWrap title={primaryOa.applicant} sx={{ fontSize: 12, lineHeight: 1.3 }}>{primaryOa.applicant || "-"}</Typography>
+            <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>{primaryOa.applicationType || "-"}</Typography>
           </Stack>
         ) : (
           <Typography color="text.secondary">-</Typography>
@@ -509,8 +567,8 @@ function renderRow({
       </TableCell>
       <TableCell sx={dataCellSx()}>
         {primaryOa ? (
-          <Stack spacing={0.5} alignItems="flex-start" sx={{ minWidth: 0 }}>
-            <Typography variant="body2" fontWeight={800} sx={overflowText(false)}>
+          <Stack spacing={0.35} alignItems="flex-start" sx={{ minWidth: 0 }}>
+            <Typography fontWeight={800} sx={[overflowText(false), { fontSize: 12, lineHeight: 1.3 }]}>
               {primaryOa.projectName || "-"}
             </Typography>
             <Stack direction="row" spacing={0.5} alignItems="center">

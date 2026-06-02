@@ -159,6 +159,51 @@ def pending_invoice_group_codes(groups_payload: Any, group_name: str) -> list[st
     return tag_codes
 
 
+def pending_invoice_effective_category_payload(category: dict[str, Any] | None) -> dict[str, Any]:
+    raw = category if isinstance(category, dict) else {}
+    code = str(
+        raw.get("effective_category_code")
+        or raw.get("category_code")
+        or raw.get("category")
+        or ""
+    ).strip()
+    label = str(
+        raw.get("effective_category_label")
+        or raw.get("category_label")
+        or raw.get("label")
+        or code
+        or ""
+    ).strip()
+    primary_label = str(raw.get("effective_category_primary_label") or raw.get("category_primary_label") or "").strip()
+    sub_label = str(raw.get("effective_category_sub_label") or raw.get("category_sub_label") or "").strip()
+    raw_path = (
+        raw.get("effective_category_label_path")
+        or raw.get("category_label_path")
+        or raw.get("effective_category_path")
+        or raw.get("category_path")
+        or raw.get("path")
+        or []
+    )
+    label_path = [
+        str(item).strip()
+        for item in list(raw_path if isinstance(raw_path, list) else [])
+        if str(item).strip()
+    ]
+    if not primary_label and label_path:
+        primary_label = label_path[0]
+    if not sub_label and len(label_path) > 1:
+        sub_label = label_path[1]
+    if not label_path:
+        label_path = [part for part in [primary_label, sub_label or label] if part]
+    return {
+        "category_code": code or None,
+        "category_label": label or None,
+        "category_primary_label": primary_label or None,
+        "category_sub_label": sub_label or None,
+        "category_label_path": label_path,
+    }
+
+
 def editable_pending_invoice_tag_groups_payload(value: dict[str, Any], *, direction: str | None = "expense") -> dict[str, Any]:
     return {
         "groups": {

@@ -8,6 +8,7 @@ from typing import Any
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.pending_invoice_rules import (
+    pending_invoice_effective_category_payload,
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
 )
@@ -353,7 +354,8 @@ class SearchPendingSqlProjectionBuilder:
         for row in rows:
             category = row_payload(row, "category_payload")
             category = category if isinstance(category, dict) else {}
-            category_code = str(category.get("category_code") or category.get("category") or "").strip()
+            effective_category = pending_invoice_effective_category_payload(category)
+            category_code = str(effective_category.get("category_code") or "").strip()
             filter_group = _filter_group_for_category(category_code, tag_groups, direction=direction) or "all"
             if filter_name != "all" and filter_group != filter_name:
                 continue
@@ -382,8 +384,8 @@ class SearchPendingSqlProjectionBuilder:
                 matched_rule=_matched_rule_payload(
                     group=filter_group if filter_group != "all" else None,
                     category_code=category_code,
-                    category_label=category.get("category_label"),
-                    category=category,
+                    category_label=effective_category.get("category_label"),
+                    category=effective_category,
                 ),
                 status_override=row.get("income_status_override") if isinstance(row.get("income_status_override"), dict) else None,
             )
@@ -412,10 +414,10 @@ class SearchPendingSqlProjectionBuilder:
                 "voucher_type": "",
                 "voucher_no": "",
                 "effective_tag_code": category_code or None,
-                "effective_tag_label": category.get("category_label"),
-                "effective_tag_primary_label": category.get("category_primary_label"),
-                "effective_tag_sub_label": category.get("category_sub_label"),
-                "effective_tag_label_path": list(category.get("category_label_path") or []),
+                "effective_tag_label": effective_category.get("category_label"),
+                "effective_tag_primary_label": effective_category.get("category_primary_label"),
+                "effective_tag_sub_label": effective_category.get("category_sub_label"),
+                "effective_tag_label_path": list(effective_category.get("category_label_path") or []),
             }
             input_invoices = {
                 "primary": invoices[0] if invoices else None,
