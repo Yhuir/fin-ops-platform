@@ -23097,6 +23097,93 @@ Post-Flight:
   - 需要锁定 facade None fallback 的 legacy direct side effects。
 - 下一条建议：生成 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`，只补 tests 和文档，不修改 production code。
 
+## PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests
+
+Role:
+你是一位负责遗留系统安全重构的测试工程师。你必须只为 Turnover Ledger bank row tags local shim 补 characterization tests，不修改生产代码。
+
+Context:
+PF-P117 已 verified。PF-P117 发现 bank row tags local shim 仍在 `server.py`，且涉及：
+- `_local_turnover_ledger_bank_row_tags_connection(...)`；
+- `_local_turnover_ledger_bankdetail_port(...)`；
+- handler facade None fallback 的 direct category save / relation rebuild / direct read model clear+enqueue。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P117 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+补齐 bank row tags local shim 抽离前的行为锁定，确保后续 adapter extraction 不改变 local facade 和 facade None fallback 行为。
+
+Required Test Work:
+1. Local facade rollback test：
+   - 使用默认 local state_store + runtime queue recorder 进入 facade/UoW path。
+   - 触发 queue/outbox failure。
+   - 断言 category update 未保留。
+   - 断言 relation snapshot 也 rollback 到 previous snapshot。
+   - 断言 previous category/relation snapshots 被保存回 state_store。
+2. Local facade success save test：
+   - 使用默认 local state_store + successful queue recorder。
+   - 提交 bank row tag update。
+   - 断言 category snapshot 保存。
+   - 断言 relation snapshot 保存。
+   - 断言 read model 不直接 clear，只通过 queue enqueue。
+3. Local bankdetail port ordering test：
+   - 在可能范围内锁定 apply turnover category update 先于 relation rebuild。
+   - 可以通过 monkeypatch/recording service 方式记录顺序，但不得 mock 掉 HTTP handler -> facade -> local port 真实链路。
+4. Facade None fallback characterization：
+   - 保留或补充 facade None 时 direct category save、relation rebuild、direct read model clear/enqueue 的 legacy behavior。
+   - 明确该测试是 compatibility lock，不是目标架构。
+
+Allowed Scope:
+- tests/test_turnover_ledger_api.py
+- 必要时 tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得抽离 adapter。
+- 不得修改 facade/UoW 语义。
+- 不得新增 SQL migration。
+- 不得放宽或删除现有断言来让测试通过。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录新增/调整的 tests 和 verification results。
+3. 如验证通过，可标记 PF-P118 verified。
+4. 下一条建议应是 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction`，除非 tests 暴露 blocker。
+```
+
+### 审查结论
+
+- PF-P118 边界正确：只补 bank row tags local shim characterization tests。
+- 该 prompt 明确不修改 production code、不抽离 adapter、不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

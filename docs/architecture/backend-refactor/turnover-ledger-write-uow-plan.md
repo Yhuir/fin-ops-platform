@@ -3348,6 +3348,36 @@ PF-P110 边界：
 - 生成 `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests`。
 - PF-P118 只补 tests 和文档，不修改 production code。
 
+## PF-P118 Bank Row Tags Local Shim Characterization Tests
+
+状态：`planned`
+
+目标：
+
+- 补齐 bank row tags local shim 抽离前的 behavior locks。
+- 覆盖 local facade rollback、success save、apply/rebuild 顺序和 facade None fallback legacy behavior。
+
+边界：
+
+- 只修改 tests 和 backend-refactor 文档。
+- 不修改 production code。
+- 不抽离 adapter，不修改 facade/UoW 语义。
+
+测试要求：
+
+- local facade queue failure 同时 rollback category 和 relation snapshot。
+- local facade success 保存 category 和 relation snapshots。
+- local bankdetail port 先 apply category update，再 relation rebuild。
+- facade None fallback 保持 direct category save、relation rebuild、direct read model clear/enqueue 的 legacy behavior。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
