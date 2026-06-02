@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning` 已执行并验证通过 |
-| 当前 active prompt | `PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning` |
+| 当前阶段 | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
 | 最近 verified prompt | `PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning` |
 | 当前分支 | `codex/turnover-ledger-remaining-boundary-p120` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
+| 下一条允许任务 | 执行 `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -8571,6 +8571,36 @@ Verification：
 #### 下一条 Prompt 上下文
 
 PF-P120 已确认 fallback 不能直接删除。下一条应生成并审查 `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests`：只补 tests 和文档，不修改 production code。PF-P121 应覆盖 tag selection、relation extra、confirm relation、withdraw relation 的 facade None 正向兼容行为，并补 bank row tags dependency-missing fallback；不得删除 fallback，不得引入 UoW 语义变更。
+
+### PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests
+
+状态：`planned`
+
+#### 范围
+
+- 为 PF-P120 识别的 `facade is None` fallback 补 characterization tests。
+- 只修改 Turnover Ledger API tests 和后端重构文档。
+- 不修改 production code，不删除 fallback，不改变 UoW/facade 语义。
+
+#### 必须覆盖
+
+- tag selection facade None success fallback：direct settings update、read model clear、refresh enqueue。
+- relation extra facade None success fallback：direct extra update、best-effort persist、read model clear、refresh enqueue。
+- confirm relation facade None success fallback：relation rebuild、route confirm、`_after_turnover_relation_mutation(...)` side effects。
+- withdraw relation facade None success fallback：route withdraw、`_after_turnover_relation_mutation(...)` side effects。
+- bank row tags dependency-missing fallback：当 facade construction 因 queue API 不可用返回 `None` 时，保持 legacy direct side effects。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+#### 下一条 Prompt 上下文
+
+TBD。PF-P121 执行后必须记录新增测试、验证结果，以及是否足够进入 fallback cleanup。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

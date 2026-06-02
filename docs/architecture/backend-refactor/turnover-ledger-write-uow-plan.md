@@ -3552,6 +3552,39 @@ PF-P110 边界：
 - 只补测试和文档，不修改 production code。
 - 不删除 fallback，不改变 UoW/facade 语义。
 
+## PF-P121 Facade None Fallback Characterization Tests
+
+状态：`planned`
+
+目标：
+
+- 补齐 PF-P120 识别的 facade None fallback characterization tests。
+- 锁定 tag selection、relation extra、confirm relation、withdraw relation 的 facade None success fallback。
+- 补齐 bank row tags dependency-missing fallback 覆盖。
+
+边界：
+
+- 允许修改 `tests/test_turnover_ledger_api.py` 和 backend-refactor 文档。
+- 不修改 production code。
+- 不删除 fallback。
+- 不改变 UoW/facade 语义。
+
+必须覆盖：
+
+- tag selection direct settings update、read model clear、refresh enqueue。
+- relation extra direct update、best-effort persist、read model clear、refresh enqueue。
+- confirm relation direct rebuild、route confirm、after-mutation side effects。
+- withdraw relation direct route withdraw、after-mutation side effects。
+- bank row tags queue API missing 导致 facade construction None 的 legacy fallback。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
