@@ -66,6 +66,13 @@ class SearchPendingConnection:
         self.fetch_all_calls.append((normalized, params))
         if "from read_model.search_index_rows" in normalized:
             return self.search_rows
+        if "from read_model.pending_invoice_scopes" in normalized:
+            return [
+                {
+                    "scope_key": params[0],
+                    "source_versions": _pending_invoice_expected_source_versions(),
+                }
+            ] if self.pending_scope_exists else []
         if "from read_model.pending_invoice_rows" in normalized and "group by direction" in normalized:
             return [
                 {"direction": direction, "count": count}
@@ -80,8 +87,6 @@ class SearchPendingConnection:
         self.fetch_one_calls.append((normalized, params))
         if "from job.read_model_dirty_scopes" in normalized:
             return {"status": "pending", "updated_at": "2026-05-21T09:00:00+00:00"} if self.dirty else None
-        if "from read_model.pending_invoice_scopes" in normalized:
-            return {"scope_key": params[0]} if self.pending_scope_exists else None
         if "count(*)" in normalized and "from read_model.pending_invoice_rows" in normalized:
             return {"count": len(self.pending_rows)}
         return None
@@ -999,6 +1004,67 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("pending_invoice_tag_groups_version_mismatch", payload["read_model_stale_reasons"])
         self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
 
+    def test_pending_invoice_api_bank_detail_source_version_stale_enqueues_refresh(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+
+        class PendingRepo:
+            def __init__(self) -> None:
+                self.version_queries: list[dict[str, object]] = []
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": "txn-bank-tag-stale",
+                            "bank_transaction": {
+                                "id": "txn-bank-tag-stale",
+                                "trade_time": "2026-04-23 11:18:17",
+                                "effective_tag_label_path": [],
+                            },
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                    "source_versions": {
+                        key: value
+                        for key, value in _pending_invoice_expected_source_versions().items()
+                        if key != "bank_detail_source_versions"
+                    },
+                }
+
+            def pending_invoice_bank_detail_source_versions(self, **kwargs: object) -> dict[str, object]:
+                self.version_queries.append(dict(kwargs))
+                return {"bank_detail_schema_version": 12, "bank_auto_tag_rules_version": 7}
+
+        pending_repo = PendingRepo()
+        app._pending_invoice_sql_read_repository = pending_repo
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("bank-detail stale pending invoice API must not scan in-memory state"))},
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["rows"][0]["id"], "txn-bank-tag-stale")
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertIn("bank_detail_source_versions_missing", payload["read_model_stale_reasons"])
+        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
+        self.assertEqual(pending_repo.version_queries[0]["direction"], "expense")
+        self.assertEqual(pending_repo.version_queries[0]["filter"], "all")
+
     def test_pending_invoice_all_direction_miss_enqueues_expense_and_income_refresh_without_sync_scan(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -1139,6 +1205,55 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["bank_transaction_tags"], {"version": 7, "items": [{"code": "A1"}]})
         self.assertEqual(payload["bank_transaction_tags_version"], 7)
+
+    def test_pending_invoice_repository_aggregates_bank_detail_source_versions_across_month_shards(self) -> None:
+        class PendingScopeConnection:
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.pending_invoice_scopes" in normalized:
+                    return [
+                        {
+                            "scope_key": "expense:all:2026-04",
+                            "source_versions": {
+                                **_pending_invoice_expected_source_versions(),
+                                "bank_detail_source_versions": {"bank_detail_schema_version": 12, "rules": 7},
+                            },
+                        },
+                        {
+                            "scope_key": "expense:all:2026-05",
+                            "source_versions": {
+                                **_pending_invoice_expected_source_versions(),
+                                "bank_detail_source_versions": {"bank_detail_schema_version": 12, "rules": 8},
+                            },
+                        },
+                    ]
+                return []
+
+            def transaction(self):
+                connection = self
+
+                class Transaction:
+                    def __enter__(self) -> PendingScopeConnection:
+                        return connection
+
+                    def __exit__(self, exc_type, exc, traceback) -> bool:
+                        return False
+
+                return Transaction()
+
+        repository = PostgresReadModelRepository(PendingScopeConnection())
+
+        scope_row = repository._pending_invoice_scope_row("expense:all")
+
+        self.assertIsNotNone(scope_row)
+        source_versions = scope_row["source_versions"]
+        self.assertEqual(
+            source_versions["bank_detail_source_versions"],
+            {
+                "2026-04": {"bank_detail_schema_version": 12, "rules": 7},
+                "2026-05": {"bank_detail_schema_version": 12, "rules": 8},
+            },
+        )
 
     def test_pending_invoice_sql_projection_emits_upgraded_four_zone_payload(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingProjectionConnection())

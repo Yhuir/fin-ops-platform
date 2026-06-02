@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+from inspect import signature
 from typing import Any, Callable
 
 from fin_ops_platform.services.pending_invoice_service import (
@@ -22,12 +23,13 @@ def pending_invoice_source_versions(
     *,
     attachment_invoice_parser_version: str,
     oa_projection_sync_version: str,
+    bank_detail_source_versions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = settings if isinstance(settings, dict) else {}
     pending_groups = payload.get("pending_invoice_tag_groups")
     pending_output_groups = payload.get("pending_output_invoice_tag_groups")
     bank_tags = payload.get("bank_transaction_tags")
-    return {
+    result: dict[str, Any] = {
         "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1",
         "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
         "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
@@ -35,6 +37,9 @@ def pending_invoice_source_versions(
         "oa_attachment_invoice_parser_version": attachment_invoice_parser_version,
         "oa_projection_sync_version": oa_projection_sync_version,
     }
+    if isinstance(bank_detail_source_versions, dict) and bank_detail_source_versions:
+        result["bank_detail_source_versions"] = dict(bank_detail_source_versions)
+    return result
 
 
 class PendingInvoiceReadModelService:
@@ -95,7 +100,7 @@ class PendingInvoiceReadModelService:
             return self.payload_response(payload, read_model_status=refresh_status, scope_key=scope_key)
 
         stale_reasons = source_version_mismatch_reasons(
-            expected=self.expected_source_versions(),
+            expected=self.expected_source_versions(query=query, payload=payload),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
@@ -150,8 +155,23 @@ class PendingInvoiceReadModelService:
             "read_model_scope_key": first_payload.get("read_model_scope_key"),
         }
 
-    def expected_source_versions(self) -> dict[str, Any]:
-        return dict(self._source_versions_provider() or {})
+    def expected_source_versions(
+        self,
+        *,
+        query: dict[str, list[str]] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        provider = self._source_versions_provider
+        try:
+            parameters = signature(provider).parameters
+        except (TypeError, ValueError):
+            return dict(provider() or {})
+        if any(parameter.kind == parameter.VAR_KEYWORD for parameter in parameters.values()) or {
+            "query",
+            "payload",
+        }.intersection(parameters):
+            return dict(provider(query=query or {}, payload=payload or {}) or {})
+        return dict(provider() or {})
 
     def source_summary_for_query(
         self,
@@ -350,3 +370,52 @@ class PendingInvoiceReadModelService:
             return int(value)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             return None
+
+
+class PendingInvoiceSourceVersionsProvider:
+    def __init__(
+        self,
+        *,
+        settings_provider: SettingsProvider,
+        attachment_invoice_parser_version_provider: Callable[[], str],
+        oa_projection_sync_version_provider: Callable[[], str],
+        repository: Any | None,
+    ) -> None:
+        self._settings_provider = settings_provider
+        self._attachment_invoice_parser_version_provider = attachment_invoice_parser_version_provider
+        self._oa_projection_sync_version_provider = oa_projection_sync_version_provider
+        self._repository = repository
+
+    def __call__(
+        self,
+        *,
+        query: dict[str, list[str]] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return pending_invoice_source_versions(
+            self._settings_provider(),
+            attachment_invoice_parser_version=self._attachment_invoice_parser_version_provider(),
+            oa_projection_sync_version=self._oa_projection_sync_version_provider(),
+            bank_detail_source_versions=self._bank_detail_source_versions(query=query or {}, payload=payload or {}),
+        )
+
+    def _bank_detail_source_versions(
+        self,
+        *,
+        query: dict[str, list[str]],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        source_versions_loader = getattr(self._repository, "pending_invoice_bank_detail_source_versions", None)
+        if not callable(source_versions_loader):
+            return {}
+        return dict(
+            source_versions_loader(
+                direction=str(query.get("direction", [payload.get("direction") or "expense"])[0] or "expense"),
+                filter=str(query.get("filter", [payload.get("filter") or "all"])[0] or "all"),
+                date_from=query.get("date_from", [None])[0],
+                date_to=query.get("date_to", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                filters=query.get("filters", [None])[0],
+            )
+            or {}
+        )

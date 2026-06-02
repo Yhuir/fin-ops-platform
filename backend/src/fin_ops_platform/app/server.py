@@ -231,7 +231,7 @@ from fin_ops_platform.services.pending_invoice_service import (
 from fin_ops_platform.services.pending_invoice_lifecycle_service import PendingInvoiceLifecycleService
 from fin_ops_platform.services.pending_invoice_read_model_service import (
     PendingInvoiceReadModelService,
-    pending_invoice_source_versions,
+    PendingInvoiceSourceVersionsProvider,
 )
 from fin_ops_platform.services.pending_invoice_rules_application_service import (
     AppSettingsPendingInvoiceRulesGateway,
@@ -8991,10 +8991,11 @@ class Application:
             queue_repository=queue_repository,
             row_normalizer=row_normalizer if callable(row_normalizer) else None,
             settings_provider=settings_provider,
-            source_versions_provider=lambda: pending_invoice_source_versions(
-                settings_provider(),
-                attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version(),
-                oa_projection_sync_version=self._current_oa_projection_sync_version(),
+            source_versions_provider=PendingInvoiceSourceVersionsProvider(
+                settings_provider=settings_provider,
+                attachment_invoice_parser_version_provider=self._current_oa_attachment_invoice_parser_version,
+                oa_projection_sync_version_provider=self._current_oa_projection_sync_version,
+                repository=getattr(self, "_pending_invoice_sql_read_repository", None),
             ),
         )
         rules_service = PendingInvoiceRulesApplicationService(
