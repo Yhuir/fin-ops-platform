@@ -2709,7 +2709,7 @@ Relation extra 当前写路径：
 
 ## PF-P105 Relation Extra Durable Idempotency Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2885,7 +2885,7 @@ Relation extra 当前写路径：
 
 - 将 PF-P107 的 relation extra idempotency UoW seam 接到 HTTP boundary。
 - Handler 从 JSON body 读取 `idempotency_key` / `idempotencyKey` 并传给 facade。
-- postgres relation extra facade construction 复用 `_workbench_write_idempotency_store(...)` 注入 UoW。
+- postgres relation extra facade construction 复用 `_workbench_write_idempotency_store(...)` 注入 durable-capable store；local path 可使用 in-memory store 维持测试/开发 idempotency 语义，但不得声明为 durable。
 - 捕获 Workbench idempotency conflict/in-progress/failed 并返回 HTTP 409 JSON。
 - 让两个 relation extra API-level idempotency expectedFailure 转为普通通过。
 
@@ -2905,3 +2905,23 @@ Relation extra 当前写路径：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+执行结果：
+
+- relation extra handler 从 body 读取 `idempotency_key` / `idempotencyKey` 并传入 facade。
+- relation extra facade construction 为 postgres path 注入 durable-capable idempotency store；local path 使用 in-memory store 保持测试/开发 idempotency 语义。
+- handler 捕获 Workbench idempotency conflict/in-progress/failed 并返回 HTTP 409 JSON。
+- 两个 relation extra API-level idempotency expectedFailure 已转为普通通过：
+  - same key/fingerprint replay 不重复 save/enqueue；
+  - same key/different payload 返回 409 `idempotency_key_conflict`。
+- relation extra refresh reason 固定为 `turnover_relation_extra_changed`。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条：
+
+- 生成 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate`，统一覆盖 PF-P107 + PF-P108 完整 diff。

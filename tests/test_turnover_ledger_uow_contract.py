@@ -1433,7 +1433,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.extra_repository.extras[0]["extra"]["relation_id"], "turnover_rel_1")
         self.assertEqual(deps.extra_repository.extras[0]["extra"]["note"], "facade note")
         self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_type"], "turnover_ledger")
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "relation_extra_update")
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_relation_extra_changed")
         self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_keys"], ["all"])
         self.assertEqual(result["extra"]["relation_id"], "turnover_rel_1")
 

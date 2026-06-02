@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping` |
-| 最近 verified prompt | `PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam` |
+| 当前阶段 | `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping` 已 verified，待提交 |
+| 当前 active prompt | 无，等待提交 PF-P108 后生成 cumulative MG |
+| 最近 verified prompt | `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p107` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures；`python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
+| 下一条允许任务 | 提交 PF-P108；随后生成 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -8021,13 +8021,13 @@ PF-P107 verified。已在 `TurnoverLedgerWriteUnitOfWork` 中建立 optional `id
 
 ### PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
 - 只处理 Turnover Ledger relation extra HTTP boundary 的 idempotency key extraction 和 error mapping。
 - `server.py` 可读取 JSON body 的 `idempotency_key` / `idempotencyKey` 并传给 `TurnoverLedgerWriteFacade.update_relation_extra(...)`。
-- postgres facade construction 可复用 `_workbench_write_idempotency_store(...)`，将 store 注入 `TurnoverLedgerWriteUnitOfWork`。
+- postgres facade construction 可复用 `_workbench_write_idempotency_store(...)`，将 durable-capable store 注入 `TurnoverLedgerWriteUnitOfWork`；local path 可使用 in-memory store 维持测试/开发 idempotency 语义，但不得声明为 durable。
 - 捕获 Workbench idempotency conflict/in-progress/failed 异常并映射为 HTTP 409 JSON。
 - 让 PF-P105 的两个 API-level relation extra idempotency expectedFailure 转为普通通过。
 
@@ -8049,7 +8049,28 @@ PF-P107 verified。已在 `TurnoverLedgerWriteUnitOfWork` 中建立 optional `id
 
 #### 下一条 Prompt 上下文
 
-PF-P108 planned。执行时必须保持 relation extra HTTP boundary 最小边界；如果 API replay/conflict 转绿且 diff 仍只覆盖 PF-P107/PF-P108，下一条应生成 cumulative MG，统一覆盖 relation extra idempotency UoW seam + HTTP boundary。
+PF-P108 verified。Relation extra HTTP endpoint 已支持 body `idempotency_key` / `idempotencyKey`，并通过 facade/UoW 执行 replay/conflict/in-progress；两个 API-level relation extra idempotency target tests 已从 expectedFailure 转为普通通过。下一条应生成 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate`，统一覆盖 PF-P107 + PF-P108 完整 diff。
+
+#### 执行结果
+
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+- 关键结果：
+  - relation extra facade construction 为 postgres path 注入 durable-capable idempotency store；local path 使用 in-memory store 保持测试/开发 idempotency 语义。
+  - relation extra handler 从 body 读取 `idempotency_key` / `idempotencyKey` 并传入 facade。
+  - handler 捕获 `WorkbenchIdempotencyKeyConflict`、`WorkbenchIdempotencyInProgress`、`WorkbenchIdempotencyFailed` 并返回 HTTP 409 JSON。
+  - 两个 API-level relation extra idempotency expectedFailure 已转为普通通过。
+  - relation extra refresh reason 固定为 `turnover_relation_extra_changed`，避免 idempotency action name 改变读模型刷新契约。
+- 验证：
+  - `git status --short --branch`：只包含 PF-P108 允许文件
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 
 ## 维护规则
 

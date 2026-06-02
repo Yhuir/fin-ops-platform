@@ -21963,7 +21963,7 @@ Required Implementation Work:
 2. UoW store injection:
    - 在 `_turnover_ledger_relation_extra_write_facade(...)` 的 postgres path 中复用 `_workbench_write_idempotency_store(...)`。
    - 将 idempotency store 注入 `TurnoverLedgerWriteUnitOfWork`。
-   - local/fallback path 不得伪造 durable idempotency；保持现有 fallback 行为。
+   - local path 可以使用 `InMemoryWorkbenchIdempotencyRepository` 维持测试/开发 idempotency 语义，但不得伪造或声明为 durable idempotency。
 3. Error mapping:
    - 捕获 `WorkbenchIdempotencyKeyConflict`、`WorkbenchIdempotencyInProgress`、`WorkbenchIdempotencyFailed` 或其共同 response payload 行为。
    - 返回 HTTP 409 JSON，payload 必须保留 `error` code，例如 `idempotency_key_conflict`。
@@ -22000,3 +22000,29 @@ Post-Flight:
 - PF-P108 边界正确：只把 PF-P107 的 UoW/store seam 接到 relation extra HTTP boundary。
 - 该 prompt 允许 `server.py` 的最小 HTTP mapping 变更，但禁止 handler 内实现 idempotency 状态机。
 - 不新增 migration、不改 schema、不迁移其它 Turnover 写路径，适合作为 PF-P107 后的同切片实现。
+
+### PF-P108 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - relation extra handler 读取 body `idempotency_key` / `idempotencyKey` 并传给 facade。
+  - relation extra facade construction 注入 idempotency store；postgres path 使用 durable-capable store，local path 使用 in-memory store。
+  - handler 捕获 Workbench idempotency conflict/in-progress/failed，统一返回 HTTP 409 JSON。
+  - 两个 relation extra API-level idempotency target tests 已从 expectedFailure 转为普通通过。
+  - relation extra refresh reason 固定为 `turnover_relation_extra_changed`。
+- 验证：
+  - `git status --short --branch`：只包含 PF-P108 允许文件
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- 下一条建议：生成 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate`，统一覆盖 PF-P107 + PF-P108 完整 diff。

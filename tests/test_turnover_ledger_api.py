@@ -98,17 +98,19 @@ class _RelationExtraWriteFacadeRecorder:
         tenant_id: str,
         scope_keys: list[str],
         expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
-        self.calls.append(
-            {
-                "relation_id": relation_id,
-                "payload": dict(payload),
-                "actor_id": actor_id,
-                "tenant_id": tenant_id,
-                "scope_keys": list(scope_keys),
-                "expected_versions": dict(expected_versions or {}),
-            }
-        )
+        call = {
+            "relation_id": relation_id,
+            "payload": dict(payload),
+            "actor_id": actor_id,
+            "tenant_id": tenant_id,
+            "scope_keys": list(scope_keys),
+            "expected_versions": dict(expected_versions or {}),
+        }
+        if idempotency_key is not None:
+            call["idempotency_key"] = idempotency_key
+        self.calls.append(call)
         return {
             "extra": {
                 "relation_id": relation_id,
@@ -1287,7 +1289,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
 
-    @unittest.expectedFailure
     def test_target_relation_extra_idempotency_key_replays_without_duplicate_save_or_refresh(self) -> None:
         # PF-P105 target contract: same idempotency key/fingerprint should replay the first response.
         with TemporaryDirectory() as temp_dir:
@@ -1324,7 +1325,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [("turnover_ledger", "all", "turnover_relation_extra_changed")],
         )
 
-    @unittest.expectedFailure
     def test_target_relation_extra_idempotency_key_conflict_rejects_different_payload(self) -> None:
         # PF-P105 target contract: same idempotency key with different payload must be a 409 conflict.
         with TemporaryDirectory() as temp_dir:
