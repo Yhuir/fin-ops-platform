@@ -24711,6 +24711,27 @@ Post-Flight:
 - handler-thinness target 使用 `expectedFailure` 是合理的，因为 PF-P129 禁止修改 production code；真正转绿应在 PF-P130 adapter extraction。
 - PF-P129 不执行 MG、Traffic Gate，不访问生产或外部服务。
 
+### PF-P129 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_turnover_ledger_api.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 bank row tags handler-thinness target test，当前为 `unittest.expectedFailure`。
+  - 新增 unsupported PostgreSQL queue API / dependency-missing fallback queue-failure characterization。
+  - 保持 dependency-missing fallback success 与 explicit facade `None` fallback 语义不变。
+- 验证：
+  - `git status --short --branch`：Pass，仅包含 PF-P129 允许文件。
+  - `git ls-files --others --exclude-standard`：empty。
+  - `git diff --check`：Pass。
+  - targeted bank row tags fallback tests：Pass，3 tests，expected failures=1。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests，expected failures=1。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- 下一条最小 prompt：`PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction`。PF-P130 可以修改 production code，将 bank row tags legacy fallback side effects 从 handler 移入显式 fallback adapter，并将 PF-P129 的 expectedFailure target 转为普通通过。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

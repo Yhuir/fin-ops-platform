@@ -9133,7 +9133,7 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 
 ### PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -9158,7 +9158,22 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 
 #### 下一条 Prompt 上下文
 
-TBD。
+PF-P129 已完成 bank row tags fallback cleanup 前的测试锁定：
+
+- 新增 handler-thinness target test：`test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects`，当前用 `unittest.expectedFailure` 保留为 PF-P130 的转绿目标。
+- 新增 unsupported PostgreSQL queue API / dependency-missing fallback queue-failure characterization：确认 legacy fallback 在 category mutation、read model clear、bank/workbench refresh enqueue 后，仍会在 turnover refresh enqueue 失败时抛出 queue failure。
+- 保持既有 dependency-missing fallback success 与 explicit facade `None` fallback 语义不变。
+
+验证：
+
+- `git status --short --branch`：Pass，仅包含 PF-P129 允许文件。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_turnover_bank_row_tag_batch_dependency_missing_queue_failure_happens_after_category_save -v`：Pass，3 tests，expected failures=1。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests，expected failures=1。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+下一条最小 prompt：`PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction`。PF-P130 可以修改 production code，把 bank row tags legacy fallback side effects 从 handler 移入显式 fallback adapter，并将 PF-P129 的 expectedFailure target 转为普通通过；不得改变 UoW 主路径语义。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

@@ -3993,7 +3993,7 @@ PF-P110 边界：
 
 ## PF-P128 Bank Row Tags Legacy Fallback Cleanup Discovery and Planning
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -4081,6 +4081,21 @@ PF-P110 边界：
 - `git diff --check`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+执行结果：
+
+- 新增 bank row tags handler-thinness target test，当前为 `unittest.expectedFailure`，用于锁定 PF-P130 adapter extraction 后的转绿目标。
+- 新增 unsupported PostgreSQL queue API / dependency-missing fallback queue-failure characterization，确认 legacy fallback mutation 后 queue failure 语义不变。
+- 保持 dependency-missing fallback success 与 explicit facade `None` fallback 语义不变。
+- 验证通过：
+  - targeted bank row tags fallback tests：Pass，3 tests，expected failures=1。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，67 tests，expected failures=1。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+下一条最小 prompt：
+
+- `PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction`
+- 允许修改 production code，将 handler 中的 bank row tags legacy fallback side effects 移入显式 fallback adapter，并把 PF-P129 expectedFailure target 转为普通通过。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
