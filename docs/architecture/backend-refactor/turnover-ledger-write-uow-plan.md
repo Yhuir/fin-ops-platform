@@ -2575,7 +2575,7 @@ Relation extra 当前写路径：
 
 ## PF-P103-MG Relation Extra Expected Versions Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -2786,7 +2786,7 @@ Relation extra 当前写路径：
 
 ## PF-P106-MG Relation Extra Durable Idempotency Contract Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -2804,3 +2804,23 @@ Relation extra 当前写路径：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+执行结果：
+
+- 分支：`codex/turnover-ledger-next-slice-p104`
+- Merge commit：`e2c97b89`
+- PF-P104 到 PF-P106 已作为 relation extra durable idempotency contract 切片合入 `main`。
+- 分支验证：
+  - `git status --short --branch`：clean on feature branch
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `git diff --name-only main...HEAD`：只包含允许文件
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- `main` 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- Traffic Gate：未执行；未部署、未切流、未访问生产。
+- 下一步：先 push `origin/main`，再从最新 `main` 新建下一条 `codex/` 分支，继续 relation extra idempotency 后续切片。

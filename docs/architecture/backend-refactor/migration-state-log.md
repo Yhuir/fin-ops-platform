@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate` 已生成并审查，待执行 |
-| 当前 active prompt | `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton` |
-| 当前分支 | `codex/turnover-ledger-next-slice-p104` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures；`python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106 |
+| 当前阶段 | `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate` 已 verified，已 merge 到 `main`，待 push origin/main |
+| 当前 active prompt | 无，等待 push origin/main 后从最新 `main` 新建下一条 `codex/` 分支 |
+| 最近 verified prompt | `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | 分支与 `main` 均通过：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests；`python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
+| 下一条允许任务 | 提交 PF-P106-MG post-flight 文档更新并执行 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支 |
 
 ## Prompt 执行日志
 
@@ -7934,7 +7934,7 @@ PF-P106 已 verified。当前分支已完成 PF-P104 discovery、PF-P105 tests�
 
 ### PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -7953,9 +7953,27 @@ PF-P106 已 verified。当前分支已完成 PF-P104 discovery、PF-P105 tests�
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
 
+#### 执行结果
+
+- 分支：`codex/turnover-ledger-next-slice-p104`
+- Merge commit：`e2c97b89`
+- 分支验证：
+  - `git status --short --branch`：clean on feature branch
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `git diff --name-only main...HEAD`：只包含 PF-P104 到 PF-P106 允许文件
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- `main` 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- Traffic Gate：未执行；本切片只合入代码和测试基线，不部署、不切流、不访问生产。
+
 #### 下一条 Prompt 上下文
 
-PF-P106-MG planned。执行时必须确认当前分支不是 `main`，且 diff 只包含 PF-P104 到 PF-P106 的允许文件。MG 通过后可合入 `main`、在 `main` 上复验并 `git push origin main`；push 完成后必须从最新 `main` 新建下一条 `codex/` 分支。
+PF-P106-MG 已 verified。先提交本次 post-flight 文档更新并 `git push origin main`。push 完成后必须从最新 `main` 新建下一条 `codex/` 分支，再生成并审查下一条 Turnover Ledger relation extra idempotency 后续 prompt。
 
 ## 维护规则
 

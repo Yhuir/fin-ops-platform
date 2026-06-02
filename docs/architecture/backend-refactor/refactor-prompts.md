@@ -21763,3 +21763,24 @@ Post-Flight:
 - PF-P106-MG 的边界正确：只覆盖 PF-P104 到 PF-P106 的 relation extra durable idempotency contract 切片。
 - MG 明确不执行 Traffic Gate，不实现 API replay/conflict、idempotency store/UoW seam、fallback cleanup 或 local transaction shim。
 - 允许文件白名单与当前 `main...HEAD` diff 一致。
+
+### PF-P106-MG 执行结果
+
+- 状态：`verified`
+- 分支：`codex/turnover-ledger-next-slice-p104`
+- Merge commit：`e2c97b89`
+- 分支验证：
+  - `git status --short --branch`：clean on feature branch
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `git diff --name-only main...HEAD`：只包含 PF-P104 到 PF-P106 允许文件
+  - `git log --oneline main..HEAD`：只包含 PF-P104、PF-P105、PF-P106、PF-P106-MG 相关提交
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- `main` 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+- Traffic Gate：未执行；未部署、未切流、未访问生产。
+- 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。
