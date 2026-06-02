@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate` 已合入 main 并验证通过 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning` |
 | 最近 verified prompt | `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-remaining-boundary-p120` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `git push origin main`，push 完成后从最新 main 新建下一条 `codex/` 分支并生成下一条 Turnover Ledger prompt |
+| 下一条允许任务 | 执行 `PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning` |
 
 ## Prompt 执行日志
 
@@ -8501,6 +8501,33 @@ PF-P117/PF-P118/PF-P119 已形成一个可合并切片：bank row tags local shi
 #### 下一条 Prompt 上下文
 
 PF-P119-MG 已合入 main 并通过 main 验证。下一步先提交本次 post-flight 文档并执行 `git push origin main`；push 完成后必须从最新 main 新建 `codex/` 分支，再根据 Turnover Ledger 剩余重构清单生成下一条 prompt。
+
+### PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning
+
+状态：`planned`
+
+#### 范围
+
+- 盘点 Turnover Ledger 写 handler 中所有 `facade is None` fallback。
+- 评估哪些 fallback 仍是 local/dev/test compatibility，哪些可进入后续 cleanup。
+- 输出 handler thinness gap、characterization test gap 和下一条最小 prompt。
+- 不修改 production code，不修改 tests。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P120|Facade None Fallback|Handler Thinness" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

@@ -23434,6 +23434,98 @@ Post-Flight:
 - Traffic Gate：未执行；本 MG 不部署、不切流、不访问生产。
 - 下一步：提交 post-flight 文档并 `git push origin main`；push 完成后从最新 main 新建分支，生成下一条 Turnover Ledger prompt。
 
+## PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning
+
+状态：`planned`
+
+```text
+/goal
+PF-P120 - Turnover Ledger Facade None Fallback Rebaseline and Handler Thinness Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只做 Turnover Ledger 写 handler fallback 的 discovery/planning 和文档回写，不修改业务代码。
+
+Context:
+PF-P119-MG 已 verified、merge 并 push 到 origin/main。当前 Turnover Ledger local adapter extraction 已完成：
+- relation extra local adapter；
+- confirm/withdraw relation local adapter；
+- tag selection local adapter；
+- bank row tags local adapter。
+但 `server.py` 的多个 Turnover Ledger 写 handler 仍保留 `facade is None` fallback direct side effects，例如 direct service mutation、state_store save、read model clear/enqueue。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P119-MG 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+重新盘点 Turnover Ledger 写 handler 的 facade None fallback 与 handler thinness gap，决定下一步应先补 characterization tests、移除 fallback、还是继续抽离 handler 组装逻辑。
+
+Required Discovery Work:
+1. 输出 Facade None Fallback Matrix：
+   - tag selection update；
+   - bank row tags batch；
+   - relation extra update；
+   - confirm relation；
+   - withdraw relation。
+   对每一项说明 fallback 触发条件、direct side effects、当前测试覆盖、目标架构状态。
+2. 输出 Handler Thinness Gap：
+   - handler 中仍做了哪些业务编排；
+   - 哪些属于 HTTP mapping 可保留；
+   - 哪些应迁入 facade/application service 或 adapter。
+3. 输出 Compatibility Decision：
+   - 哪些 fallback 仍必须为 local/dev/test 保留；
+   - 哪些 fallback 可以在下一切片用 tests 锁定后删除；
+   - 哪些需要先改变 facade construction，使 facade 在 local path 下更稳定返回。
+4. 输出 Characterization Test Gap：
+   - 缺少哪些 tests 来保证删除 fallback 不破坏 legacy compatibility；
+   - 是否需要分别锁定 “queue missing -> facade None” 与 “facade override None”。
+5. 输出下一条最小 prompt：
+   - 如果测试不足，建议 PF-P121 做 fallback characterization tests；
+   - 如果测试已足够，建议 PF-P121 做最小 fallback cleanup；
+   - 不得一次性清理所有 handler fallback。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得删除 fallback。
+- 不得修改 facade/UoW 语义。
+- 不得新增 SQL migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "PF-P120|Facade None Fallback|Handler Thinness" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 fallback matrix、handler thinness gap、compatibility decision、next prompt。
+3. 如验证通过，可标记 PF-P120 verified。
+```
+
+### 审查结论
+
+- PF-P120 边界正确：只做 Turnover Ledger facade None fallback 与 handler thinness discovery/planning。
+- 该 prompt 不修改 production code、不修改 tests、不删除 fallback、不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

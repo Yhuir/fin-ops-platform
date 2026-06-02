@@ -3437,7 +3437,7 @@ PF-P110 边界：
 
 ## PF-P119-MG Bank Row Tags Local Adapter Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -3480,6 +3480,37 @@ PF-P110 边界：
 
 - 执行 `git push origin main`。
 - push 后从最新 main 新建分支，并基于剩余 Turnover Ledger 重构清单生成下一条 prompt。
+
+## PF-P120 Facade None Fallback Rebaseline and Handler Thinness Planning
+
+状态：`planned`
+
+目标：
+
+- 盘点 Turnover Ledger 写 handler 中所有 `facade is None` fallback。
+- 判断哪些 fallback 仍是 local/dev/test compatibility，哪些可以进入后续 cleanup。
+- 输出 handler thinness gap、characterization test gap 和下一条最小 prompt。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests。
+- 不删除 fallback，不修改 facade/UoW 语义。
+
+必须输出：
+
+- Facade None Fallback Matrix。
+- Handler Thinness Gap。
+- Compatibility Decision。
+- Characterization Test Gap。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P120|Facade None Fallback|Handler Thinness" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
