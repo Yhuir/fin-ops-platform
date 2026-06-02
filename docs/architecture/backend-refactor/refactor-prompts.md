@@ -28223,6 +28223,29 @@ Post-Flight:
 
 - PF-P166-MG 边界正确：它只收口 local runtime support 这一组连续切片。
 
+### PF-P166-MG 执行结果
+
+- PF-P166-MG 已完成并验证。
+- 已确认 MG 覆盖范围只包含：
+  - `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline`
+  - `PF-P165 - Turnover Ledger Local Runtime Support Characterization Tests`
+  - `PF-P166 - Turnover Ledger Local Runtime Support Extraction`
+- 已确认生产代码 diff 白名单仅为：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - backend-refactor 文档三件套
+- 已完成功能提交：
+  - `4e15ff24 refactor(turnover-ledger): extract local runtime support boundary`
+- 已 merge 到 `main`，并在 `main` 上复验：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，107 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一步：
+  - push `origin/main`
+  - 从最新 `main` 新建分支
+  - 生成并审查 `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline`
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

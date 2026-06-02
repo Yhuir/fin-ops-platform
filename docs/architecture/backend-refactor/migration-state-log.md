@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P166 - Turnover Ledger Local Runtime Support Extraction` 已完成并验证 |
-| 当前 active prompt | 空；下一步可生成并审查 `PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P166 - Turnover Ledger Local Runtime Support Extraction` |
-| 当前分支 | `codex/turnover-ledger-post-request-boundary-p164` |
-| 最近验证 | `git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（107 tests）；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate` |
+| 当前阶段 | `PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate` 已完成并验证 |
+| 当前 active prompt | 空；push `origin/main` 后必须从最新 `main` 新建分支，再生成并审查 `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline` |
+| 最近 verified prompt | `PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | `git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（107 tests）；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；merge 后 `main` 复验通过 |
+| 下一条允许任务 | push `origin/main`；随后从最新 `main` 新建 `codex/` 分支，生成并审查 `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline` |
 
 ## Prompt 执行日志
 
@@ -814,6 +814,48 @@ PF-P001-C1 是 PF-P001 的生产级覆盖面修正，不是新的业务重构阶
 - `PF-P164 + PF-P165 + PF-P166` 已构成一个完整的 local runtime support 切片组。
 - 下一步应进入 cumulative MG：
   - `PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate`
+
+### PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 统一覆盖：
+  - `PF-P164 - Turnover Ledger Post-Request-Boundary Rebaseline`
+  - `PF-P165 - Turnover Ledger Local Runtime Support Characterization Tests`
+  - `PF-P166 - Turnover Ledger Local Runtime Support Extraction`
+- 允许 merge 到 `main`、在 `main` 上复验、并 push 到 `origin/main`。
+
+#### 执行摘要
+
+- 已确认 cumulative diff 白名单只包含：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - backend-refactor 文档三件套
+- 已完成功能提交：
+  - `4e15ff24 refactor(turnover-ledger): extract local runtime support boundary`
+- 已 merge 到 `main`：
+  - `Merge branch 'codex/turnover-ledger-post-request-boundary-p164': turnover local runtime support`
+- 已在 `main` 上完成复验通过。
+
+#### 验证
+
+- `git status --short --branch`：Pass
+- `git ls-files --others --exclude-standard`：Pass
+- `git diff --check`：Pass
+- `git diff --name-only main...HEAD`：Pass
+- `git log --oneline main..HEAD`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，107 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+#### 下一条 Prompt 上下文
+
+- local runtime support seam 已合入主干。
+- push `origin/main` 完成后，必须从最新 `main` 新建分支。
+- 下一条应先做 rebaseline，而不是直接跳到新的大切片：
+  - `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline`
 
 ### PF-P002 - Platform / Ops / Runtime Boundary Deep Dive
 

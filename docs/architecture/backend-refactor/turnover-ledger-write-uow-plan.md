@@ -5635,6 +5635,30 @@ Remaining seam matrix：
 
 - 生成并审查 `PF-P166-MG - Turnover Ledger Local Runtime Support Cumulative Merge Gate`
 
+## PF-P166-MG Local Runtime Support Cumulative Merge Gate
+
+状态：
+
+- verified
+
+执行结果：
+
+- `PF-P164 + PF-P165 + PF-P166` 已通过 cumulative MG。
+- 已确认本组 diff 只包含：
+  - local runtime support 生产代码改动
+  - `tests/test_turnover_ledger_api.py`
+  - backend-refactor 文档回写
+- 已 merge 到 `main`，并在 `main` 上完成复验：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，107 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+下一步：
+
+- push `origin/main`
+- 从最新 `main` 新建分支
+- 先生成并审查 `PF-P167 - Turnover Ledger Post-Local-Runtime Rebaseline`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
