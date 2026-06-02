@@ -4846,6 +4846,47 @@ Remaining seam matrix：
 
 - 进入 `PF-P147-MG - Turnover Ledger Legacy Fallback Adapter Group Merge Gate`。
 
+## PF-P147-MG Legacy Fallback Adapter Group Merge Gate
+
+状态：
+
+- verified
+
+范围：
+
+- 统一覆盖 PF-P142 到 PF-P147。
+- 包含：
+  - remaining seam rebaseline
+  - legacy fallback characterization tests
+  - relation extra legacy fallback extraction
+  - tag selection legacy fallback extraction
+  - bank row tags legacy fallback extraction
+  - confirm legacy fallback extraction
+
+结果：
+
+- PF-P147-MG 已完成并验证。
+- `server.py` 已移除本组 legacy fallback builder 中的 inline closures：
+  - relation extra: `persist_extra=lambda ...` / `enqueue_refresh=lambda ...`
+  - tag selection: `enqueue_refresh=lambda ...`
+  - bank row tags: `save_category_snapshot=lambda ...`
+  - confirm: `relation_rebuild=lambda ...`
+- 相关 adapter set 已进入 `turnover_ledger_write_adapters.py`。
+- `tests/test_turnover_ledger_api.py` 中的 source characterization 已同步更新为抽离后约束。
+- branch 与 main 上均通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，80 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+结论：
+
+- Turnover Ledger legacy fallback group 已收口并可视为合入主干的一个完整切片。
+- 剩余更大的 seam 已转向 primary write facade / UoW builder orchestration duplication。
+
+下一步：
+
+- 从最新 `main` 新建分支。
+- 生成并审查 `PF-P148 - Turnover Ledger Primary Write Builder Rebaseline After Legacy Fallback Cleanup`。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

@@ -26619,6 +26619,21 @@ Post-Flight:
 - PF-P147-MG 的边界正确：它只覆盖 PF-P142 到 PF-P147 的 legacy fallback group。
 - 当前 cumulative slice 已经具备合并条件，不需要继续拖延 MG。
 
+### PF-P147-MG 执行结果
+
+- PF-P147-MG 已完成并验证。
+- `main...HEAD` diff 白名单校验通过，仅包含：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - backend-refactor 文档
+- 分支侧验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，80 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 已将 `codex/turnover-ledger-rebaseline-p142` merge 回 `main`。
+- merge 后已在 `main` 上重跑同一组验证，结果全部通过。
+- 下一步必须从最新 `main` 新建 `codex/` 分支，再生成 `PF-P148 - Turnover Ledger Primary Write Builder Rebaseline After Legacy Fallback Cleanup`。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
