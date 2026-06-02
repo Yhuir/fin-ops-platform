@@ -4555,6 +4555,37 @@ Remaining write path matrix：
 
 - 下一条 prompt 必须从最新 `main` 新建分支后重新做 Turnover Ledger discovery/planning 或直接进入 bank row tags local seam。
 
+## PF-P141 Bank Row Tags Local Adapter Set Extraction
+
+状态：
+
+- verified
+
+目标：
+
+- 把 bank row tags local path 的 category/relation snapshot save 组装迁入 adapter module。
+- 继续减少 `server.py` 中的 local wiring，但不改变 queue failure rollback / fallback / no direct clear / refresh scopes 合约。
+
+边界：
+
+- 只处理 bank row tags local adapter set。
+- 不扩到其它模块。
+
+结果：
+
+- 已新增 `TurnoverLedgerLocalBankRowTagsAdapterSet`。
+- bank row tags local path 的 category/relation snapshot save 组装已从 `server.py` 移入 adapter module。
+- `server.py` 不再内联 `save_category_snapshot=lambda ...` 与 `save_relation_snapshot=lambda ...`。
+- 新增 guard test：
+  - `test_turnover_bank_row_tags_write_facade_does_not_inline_local_snapshot_closures`
+- 保持旧合同：
+  - category snapshot save 失败仍然只是 warning；
+  - relation snapshot save 失败仍然只是 warning。
+
+下一步：
+
+- 进入 `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate`。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
