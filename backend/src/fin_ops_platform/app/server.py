@@ -2755,6 +2755,8 @@ class Application:
                 transaction,
                 state_store=state_store,
             ),
+            postgres_idempotency_store_factory=self._turnover_ledger_bank_row_tags_postgres_idempotency_store,
+            local_idempotency_store_provider=self._turnover_ledger_bank_row_tags_local_idempotency_store,
         ).build()
         if facade is not None:
             return facade
@@ -3046,6 +3048,19 @@ class Application:
         if idempotency_store is None:
             idempotency_store = InMemoryWorkbenchIdempotencyRepository()
             self._turnover_ledger_relation_extra_idempotency_store = idempotency_store
+        return idempotency_store
+
+    def _turnover_ledger_bank_row_tags_postgres_idempotency_store(self, connection: object) -> object:
+        return self._workbench_write_idempotency_store(
+            "_turnover_ledger_bank_row_tags_idempotency_store",
+            connection,
+        )
+
+    def _turnover_ledger_bank_row_tags_local_idempotency_store(self) -> object:
+        idempotency_store = getattr(self, "_turnover_ledger_bank_row_tags_idempotency_store", None)
+        if idempotency_store is None:
+            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+            self._turnover_ledger_bank_row_tags_idempotency_store = idempotency_store
         return idempotency_store
 
     def _turnover_ledger_confirm_postgres_idempotency_store(self, connection: object) -> object:
@@ -12485,11 +12500,15 @@ class Application:
         try:
             actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
             facade = self._turnover_ledger_bank_row_tags_request_boundary_facade()
+            idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
             result = facade.update_bank_row_tags_batch_from_request(
                 updates=updates,
                 actor_id=actor,
                 tenant_id=tenant_id_for_session(session_response),
+                idempotency_key=idempotency_key,
             )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
         except BankTransactionCategoryConflictError as exc:
             return self._json_response(
                 HTTPStatus.CONFLICT,

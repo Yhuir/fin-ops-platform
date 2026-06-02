@@ -106,6 +106,7 @@ class TurnoverLedgerWriteFacade:
         actor_id: str,
         tenant_id: str,
         affected_months: list[str],
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         normalized_updates = [dict(update) for update in list(updates or [])]
         normalized_months = [
@@ -130,16 +131,29 @@ class TurnoverLedgerWriteFacade:
                 "reason": "turnover_relation_changed",
             },
         ]
+        normalized_idempotency_key = str(idempotency_key or "").strip()
+        action_name = "turnover_bank_row_tags_batch" if normalized_idempotency_key else "bank_row_tags_batch"
+        command_payload = {
+            "updates": list(normalized_updates),
+            "affected_months": list(normalized_months),
+        }
+        request_fingerprint = ""
+        if normalized_idempotency_key:
+            request_fingerprint = workbench_request_fingerprint(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action_name=action_name,
+                payload=dict(command_payload),
+            )
         command = TurnoverLedgerWriteCommand(
-            action_name="bank_row_tags_batch",
+            action_name=action_name,
             scope_keys=["all"],
             refresh_requests=refresh_requests,
             actor_id=actor_id,
             tenant_id=tenant_id,
-            payload={
-                "updates": list(normalized_updates),
-                "affected_months": list(normalized_months),
-            },
+            idempotency_key=normalized_idempotency_key,
+            request_fingerprint=request_fingerprint,
+            payload=command_payload,
         )
 
         def handler(context: Any) -> dict[str, object]:

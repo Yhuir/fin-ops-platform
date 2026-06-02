@@ -21785,6 +21785,336 @@ Post-Flight:
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。
 
+## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的测试先行工程师。你必须只为 Turnover Ledger `bank-row-tags/batch` 写 durable idempotency 目标/兼容测试，不实现生产逻辑。
+
+Context:
+- PF-P180-MG 已 verified 并合入 `main`。
+- 当前分支必须从最新 `main` 新建，当前分支为 `codex/turnover-ledger-bank-row-tags-consistency-p181`。
+- `confirm` 已具备 stale precondition + durable idempotency。
+- `withdraw` 已具备 expected_versions + stale precondition + durable idempotency。
+- `relation_extra` 已具备 expected_versions + durable idempotency。
+- `bank_row_tags_batch` 已经通过 UoW 路径写 Bankdetail category、rebuild Turnover relations，并 enqueue Bankdetail / Workbench / Turnover read model refresh；但 facade/request boundary 当前仍没有 durable idempotency contract。
+- Bankdetail category service 自身已有 per-row `expected_version` conflict 机制；PF-P181 不改变它。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/workbench_idempotency.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P180-MG 已 verified。
+
+Goal:
+只新增 bank-row-tags durable idempotency 目标契约测试，明确未来同一 `idempotency_key` + 同一 payload 必须 replay，不重复 Bankdetail category update / relation rebuild / dirty-outbox refresh；同一 key + 不同 payload 必须返回 409 `idempotency_key_conflict`；facade/UoW 必须在调用 bankdetail port 前执行 idempotency reserve/replay/conflict 判定。
+
+Allowed Scope:
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- 文档：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+Required Test Work:
+1. API-level expectedFailure tests:
+   - 新增 `test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh`。
+   - 新增 `test_target_bank_row_tags_idempotency_key_conflict_rejects_different_payload`。
+   - 这两个测试必须暂时标记为 `unittest.expectedFailure`，因为 PF-P181 不实现生产逻辑。
+   - replay 测试必须断言第二次相同 key/payload 不重复执行 Bankdetail category update、relation rebuild 或 dirty-outbox refresh。
+   - conflict 测试必须断言不同 payload 返回 HTTP 409，并保留 `error == "idempotency_key_conflict"`。
+2. Facade/UoW expectedFailure test:
+   - 新增 `test_target_bank_row_tags_facade_passes_idempotency_before_bankdetail_port`。
+   - 必须表达未来 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(..., idempotency_key=...)` 应在 bankdetail port 前执行 idempotency store reserve/replay/conflict。
+   - 当前生产签名尚不支持 `idempotency_key` 时，测试应以 expectedFailure 锁定目标，不得修改生产代码。
+3. Compatibility baseline:
+   - 保留现有 `test_bank_row_tags_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract` 或等价 baseline。
+   - 不得删除或放宽现有 Bankdetail expected_version conflict tests。
+4. 文档回写：
+   - 在 `turnover-ledger-write-uow-plan.md` 记录 bank-row-tags 当前状态：已有 category expected_version stale baseline，但尚无 durable idempotency；PF-P181 只新增 expectedFailure target tests。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 `server.py`、facade、adapters、UoW 或 repository。
+- 不得实现 idempotency。
+- 不得迁移 tag selection、confirm、withdraw、relation extra 或其它写路径。
+- 不得新增 SQL migration、schema、deploy、Nginx、feature flag 或 Traffic Gate。
+- 不得访问生产、staging 或真实外部服务。
+
+Verification:
+必须执行：
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+Post-Flight:
+1. 更新 `migration-state-log.md`、`refactor-prompts.md` 和 `turnover-ledger-write-uow-plan.md`。
+2. 记录新增 tests、expectedFailure 数量、verification commands/results。
+3. 如果验证通过，将 PF-P181 标记为 `verified`。
+4. 下一条建议应为 `PF-P182 - Turnover Ledger Bank Row Tags Durable Idempotency Integration`，只移除 PF-P181 expectedFailure 并实现 bank-row-tags durable idempotency，不迁移 tag selection 或其它写路径。
+```
+
+### 审查结论
+
+- PF-P181 边界正确：只为 `bank-row-tags/batch` 新增 durable idempotency 目标合同，不改生产逻辑。
+- expectedFailure 是合适的：它把目标合同纳入默认测试套件，同时不阻塞尚未实现的行为。
+- 本轮不处理 tag selection，不改变 Bankdetail category `expected_version` 现有 stale/conflict 语义。
+
+### PF-P181 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 新增 expectedFailure target tests：
+  - `test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh`
+  - `test_target_bank_row_tags_idempotency_key_conflict_rejects_different_payload`
+  - `test_target_bank_row_tags_facade_passes_idempotency_before_bankdetail_port`
+- 验证：
+  - `git status --short --branch`：Pass
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，126 tests，expected failures=2
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，60 tests，expected failures=1
+- 下一条建议：生成并执行 `PF-P182 - Turnover Ledger Bank Row Tags Durable Idempotency Integration`。
+
+## PF-P182 - Turnover Ledger Bank Row Tags Durable Idempotency Integration
+
+状态：`planned`
+
+```text
+/goal
+PF-P182 - Turnover Ledger Bank Row Tags Durable Idempotency Integration
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只实现 Turnover Ledger `bank-row-tags/batch` durable idempotency，不迁移其它写路径。
+
+Context:
+- PF-P181 已 verified，并新增 3 个 bank-row-tags durable idempotency expectedFailure target tests。
+- `confirm`、`withdraw`、`relation_extra` 已有 durable idempotency 实现，可复用 `workbench_request_fingerprint`、`TurnoverLedgerWriteCommand.idempotency_key`、UoW `idempotency_store` 和 HTTP 409 mapping 风格。
+- `bank_row_tags_batch` 已走 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 和 `TurnoverLedgerWriteUnitOfWork`。
+- `bank_row_tags_batch` 的 stale baseline 仍由 Bankdetail category `expected_version` 处理；PF-P182 不改变该语义。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/workbench_idempotency.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认当前分支不是 `main`。
+3. 必须确认 PF-P181 已 verified。
+
+Goal:
+移除 PF-P181 三个 expectedFailure 并让它们转为普通通过。实现同一 `idempotency_key` + 同一 payload replay，同一 key + 不同 payload 409 conflict，且 replay/conflict 必须发生在 Bankdetail category update、Turnover relation rebuild 和 dirty-outbox refresh 前。
+
+Allowed Scope:
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- 文档：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+Required Implementation Work:
+1. RED check:
+   - 先移除 PF-P181 三个 target tests 的 `@unittest.expectedFailure`。
+   - 运行 targeted tests，确认它们在实现前失败。
+2. Facade command:
+   - 为 `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 增加 optional `idempotency_key`。
+   - 非空 key 时设置 action name，例如 `turnover_bank_row_tags_batch`。
+   - request fingerprint 必须包含 tenant、actor、action、updates、affected_months。
+   - fingerprint 不应引入非确定性字段。
+3. Request boundary:
+   - `TurnoverLedgerBankRowTagsRequestBoundaryFacade.update_bank_row_tags_batch_from_request(...)` 接收 optional `idempotency_key`。
+   - Handler 从 body 读取 `idempotency_key` / `idempotencyKey`，只做 HTTP mapping，然后传给 request boundary。
+4. Builder / UoW injection:
+   - `TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder` 必须注入 idempotency store。
+   - PostgreSQL path 复用 Application 中既有 Workbench idempotency store factory。
+   - Local path 可以使用 in-memory idempotency store 保持 dev/test 语义，但不得声明为 durable。
+   - 不得直接在 facade 内 import Redis、Postgres connection 或 Application。
+5. Error mapping:
+   - Handler 必须将 Workbench idempotency conflict/in-progress/failed 映射为 HTTP 409 JSON。
+   - conflict payload 必须保留 `error == "idempotency_key_conflict"`。
+6. Tests:
+   - PF-P181 三个 target tests 必须普通通过。
+   - 现有 Bankdetail category `expected_version` conflict tests 必须保持不变。
+
+Forbidden Scope:
+- 不得迁移 tag selection、confirm、withdraw、relation extra 或其它写路径。
+- 不得修改 Bankdetail category version/conflict 语义。
+- 不得新增 SQL migration 或 schema。
+- 不得修改 deploy、Nginx、production config、feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得用 broad try/except 吞掉 Bankdetail conflict。
+
+Verification:
+必须执行：
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- targeted RED before implementation for the three PF-P181 tests
+- targeted PASS after implementation for the three PF-P181 tests
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+Post-Flight:
+1. 更新 `migration-state-log.md`、`refactor-prompts.md` 和 `turnover-ledger-write-uow-plan.md`。
+2. 记录 RED/PASS、changed files、verification commands/results。
+3. 如果验证通过，将 PF-P182 标记为 `verified`。
+4. PF-P181/PF-P182 是一个完整小切片；下一步应生成 cumulative MG，除非状态机明确需要继续同一 bank-row-tags 切片。
+```
+
+### 审查结论
+
+- PF-P182 边界正确：只转绿 PF-P181 的 bank-row-tags durable idempotency 目标合同。
+- 它复用既有 Workbench idempotency primitive，不引入新 schema，不改变 Bankdetail expected_version stale 语义。
+- 本轮不处理 tag selection，不扩大到其它 Turnover 写路径。
+
+### PF-P182 执行结果
+
+- 状态：`verified`
+- RED before implementation：PF-P181 三个 target tests 按预期失败。
+- 实现：
+  - `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` 支持 optional `idempotency_key`。
+  - `TurnoverLedgerBankRowTagsRequestBoundaryFacade` 和 handler 透传 `idempotency_key` / `idempotencyKey`。
+  - `TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder` 注入 idempotency store。
+  - Handler 将 Workbench idempotency exceptions 映射为 HTTP 409 JSON。
+  - PostgreSQL path 复用 Workbench idempotency store factory；local path 使用 in-memory store。
+- 验证：
+  - PF-P181 三个 target tests 转为普通通过。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，126 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，60 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+  - `git diff --check`：Pass
+- 下一条建议：生成 `PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate`，统一覆盖 PF-P181/PF-P182 完整 diff。
+
+## PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger bank-row-tags durable idempotency 切片，不新增业务实现，不执行下一条功能 prompt。
+
+Context:
+- PF-P181 已 verified（bank-row-tags durable idempotency contract tests）。
+- PF-P182 已 verified（bank-row-tags durable idempotency integration）。
+- 当前分支应为 `codex/turnover-ledger-bank-row-tags-consistency-p181`。
+- 本 MG 覆盖 PF-P181 到 PF-P182 的完整 diff。
+
+Gate Scope:
+- 只允许合入 `bank-row-tags/batch` durable idempotency 切片。
+- 包含 API target tests、UoW/facade target test、facade command、request boundary、Application builder/idempotency store injection、HTTP 409 idempotency mapping 和文档回写。
+- 不包含 tag selection、confirm、withdraw、relation extra 或其它写路径迁移。
+
+Allowed Changed Files:
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得迁移 tag selection、confirm、withdraw、relation extra 或其它 Turnover 写路径。
+- 不得修改 Bankdetail category version/conflict 语义。
+- 不得新增 SQL migration 或 schema。
+- 不得修改 deploy、Nginx、production config、feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+2. 必须确认 PF-P181、PF-P182 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认 `git diff --name-only main...HEAD` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+Commit / Merge Rules:
+1. 只允许精确 `git add` Allowed Changed Files。
+2. Commit message 建议：
+   - `test(turnover-ledger): enforce bank row tags durable idempotency`
+3. 合入 main 前必须同步最新 `origin/main`。
+4. 如果 merge/rebase 出现冲突，停止并报告。
+5. 合入 `main` 后必须在 main 上重跑 Verification 中的测试命令。
+6. 如果 main 上验证失败，停止，不得 push。
+7. 如果 main 上验证通过，更新状态机并 `git push origin main`。
+
+Post-Flight:
+1. 更新 `migration-state-log.md`、`refactor-prompts.md` 和 `turnover-ledger-write-uow-plan.md`。
+2. 记录 branch verification、main verification、commit、merge、push 状态。
+3. push 完成后，从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 prompt。
+```
+
+### 审查结论
+
+- PF-P182-MG 是当前分支的合理收口点：PF-P181/PF-P182 已形成完整 bank-row-tags durable idempotency 小切片。
+- MG 白名单与当前切片范围一致。
+- 不需要 Traffic Gate；本轮不部署、不切流、不访问生产。
+
+### PF-P182-MG 执行结果
+
+- 状态：`verified`
+- 分支验证：
+  - `git status --short --branch`：Pass
+  - `git ls-files --others --exclude-standard`：empty
+  - `git diff --check`：Pass
+  - `git diff --name-only`：只包含 allowed files
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，126 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，60 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一步：commit、merge 到 main、main 复验、push origin/main。
+
 ## PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
 状态：`planned`

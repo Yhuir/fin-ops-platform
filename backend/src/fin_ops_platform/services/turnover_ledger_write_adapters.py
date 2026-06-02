@@ -593,6 +593,8 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         emit_persistence_warning: Callable[..., None],
         tenant_id: str,
         persistence_repository_factory: Callable[[Any], Any],
+        postgres_idempotency_store_factory: Callable[[Any], Any],
+        local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
         self._state_store = state_store
         self._queue_repository = queue_repository
@@ -604,6 +606,8 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         self._emit_persistence_warning = emit_persistence_warning
         self._tenant_id = tenant_id
         self._persistence_repository_factory = persistence_repository_factory
+        self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
+        self._local_idempotency_store_provider = local_idempotency_store_provider
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
@@ -622,6 +626,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
                 queue_repository=self._queue_repository,
                 tenant_id=self._tenant_id,
             )
+            idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
             enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
@@ -640,6 +645,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
                 queue_repository=self._queue_repository
             )
+            idempotency_store = self._local_idempotency_store_provider()
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=SimpleNamespace(),
@@ -648,6 +654,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
             bankdetail_port=bankdetail_port,
             dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+            idempotency_store=idempotency_store,
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
@@ -1094,6 +1101,7 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         updates: list[dict[str, object]],
         actor_id: str,
         tenant_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         normalized_updates = [dict(update) for update in list(updates or [])]
         transaction_ids = [
@@ -1106,12 +1114,15 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         facade = self._facade_provider()
         if facade is None:
             facade = self._legacy_fallback_provider()
-        result = facade.update_bank_row_tags_batch(
-            updates=normalized_updates,
-            actor_id=actor_id,
-            tenant_id=tenant_id,
-            affected_months=affected_months,
-        )
+        update_kwargs = {
+            "updates": normalized_updates,
+            "actor_id": actor_id,
+            "tenant_id": tenant_id,
+            "affected_months": affected_months,
+        }
+        if idempotency_key:
+            update_kwargs["idempotency_key"] = idempotency_key
+        result = facade.update_bank_row_tags_batch(**update_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
         payload["turnover_ledger_invalidated"] = True
@@ -1282,8 +1293,9 @@ class TurnoverLedgerBankRowTagsLegacyFallbackFacade:
         actor_id: str,
         tenant_id: str,
         affected_months: list[str],
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
-        _ = tenant_id
+        _ = tenant_id, idempotency_key
         result = self._category_service.apply_turnover_updates(
             [dict(update) for update in list(updates or [])],
             actor=actor_id,

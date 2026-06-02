@@ -259,6 +259,43 @@ Current coupling:
 - Runtime queue access is through `_runtime_repositories.queue_repository`, but from `server.py`.
 - Legacy full snapshot fallback remains for extras.
 
+## PF-P181 Bank Row Tags Durable Idempotency Contract Tests
+
+PF-P181 adds target tests only. It does not implement durable idempotency for `POST /api/turnover-ledger/bank-row-tags/batch`.
+
+Current state after PF-P180-MG:
+
+- `confirm` has bank-row stale precondition and durable idempotency.
+- `withdraw` has relation stale precondition and durable idempotency.
+- `relation_extra` has expected versions and durable idempotency.
+- `bank_row_tags_batch` already uses the Turnover write UoW for Bankdetail category mutation, relation rebuild, and transaction-bound Bankdetail / Workbench / Turnover dirty-outbox refresh.
+- `bank_row_tags_batch` still lacks durable idempotency at the request boundary and facade command level.
+- Existing Bankdetail `expected_version` conflict semantics remain the stale-write baseline for category rows; PF-P181 does not change them.
+
+PF-P181 target tests:
+
+- API replay contract: same `idempotency_key` + same payload should replay the first response without repeating category update, relation rebuild, or refresh enqueue.
+- API conflict contract: same `idempotency_key` + different payload should return HTTP 409 with `error == "idempotency_key_conflict"`.
+- Facade/UoW contract: `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(..., idempotency_key=...)` should reserve/replay/conflict before calling the Bankdetail port.
+
+All three target tests are expected failures until PF-P182 implements the integration.
+
+## PF-P182 Bank Row Tags Durable Idempotency Integration
+
+PF-P182 implements the PF-P181 target contract.
+
+Implemented state:
+
+- `TurnoverLedgerWriteFacade.update_bank_row_tags_batch(...)` accepts optional `idempotency_key`.
+- Non-empty `idempotency_key` uses action `turnover_bank_row_tags_batch` and a deterministic request fingerprint built from tenant, actor, action, updates, and affected months.
+- `TurnoverLedgerBankRowTagsRequestBoundaryFacade` accepts optional `idempotency_key` and passes it to the write facade.
+- `Application._handle_api_turnover_ledger_bank_row_tags_batch(...)` reads body `idempotency_key` / `idempotencyKey` and maps Workbench idempotency conflict/in-progress/failed exceptions to HTTP 409.
+- `TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder` injects an idempotency store into `TurnoverLedgerWriteUnitOfWork`.
+- PostgreSQL path uses the existing Workbench idempotency store factory; local path uses in-memory idempotency for dev/test semantics only.
+- Bankdetail category `expected_version` conflict semantics remain unchanged.
+
+PF-P182 does not migrate tag selection, change schema, change deployment, or execute a Traffic Gate.
+
 Future ownership target:
 
 - `server.py`: auth/session, request/response mapping, dependency assembly, error mapping only.
