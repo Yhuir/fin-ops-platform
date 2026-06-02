@@ -284,6 +284,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationExtraConnection,
     TurnoverLedgerLocalTagSelectionConnection,
     TurnoverLedgerLocalTagSelectionSettingsWriter,
+    TurnoverLedgerRelationExtraLegacyFallbackFacade,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionLegacyFallbackFacade,
     TurnoverLedgerTagSelectionSettingsAdapter,
@@ -2628,20 +2629,20 @@ class Application:
             idempotency_store=idempotency_store,
         )
 
-    def _turnover_ledger_relation_extra_write_facade(self) -> TurnoverLedgerWriteFacade | None:
+    def _turnover_ledger_relation_extra_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerRelationExtraLegacyFallbackFacade:
         override = getattr(self, "_turnover_ledger_relation_extra_write_facade_override", None)
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         if state_store is None or queue_repository is None:
-            return None
+            return self._turnover_ledger_relation_extra_legacy_fallback_facade()
         storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(state_store, "_connection", None)
             enqueue_in_transaction = getattr(queue_repository, "enqueue_read_model_refresh_in_transaction", None)
             if connection is None or not callable(enqueue_in_transaction):
-                return None
+                return self._turnover_ledger_relation_extra_legacy_fallback_facade()
             extra_repository = TurnoverLedgerExtraRepositoryAdapter(
                 repository_factory=lambda transaction: PostgresWorkbenchRepository(transaction)
             )
@@ -2690,6 +2691,19 @@ class Application:
                 extra_service=self._turnover_ledger_extra_service,
             ),
             row_provider=self._turnover_ledger_relation_extra_row_provider,
+        )
+
+    def _turnover_ledger_relation_extra_legacy_fallback_facade(self) -> TurnoverLedgerRelationExtraLegacyFallbackFacade:
+        return TurnoverLedgerRelationExtraLegacyFallbackFacade(
+            routes=self._turnover_ledger_api_routes,
+            persist_extra=lambda: self._persist_turnover_ledger_extras_best_effort(
+                operation="turnover_ledger_extra_updated",
+            ),
+            clear_read_model=self._clear_turnover_ledger_read_model_best_effort,
+            enqueue_refresh=lambda scope_keys: self._enqueue_turnover_ledger_read_model_refreshes(
+                scope_keys,
+                reason="turnover_relation_extra_changed",
+            ),
         )
 
     def _turnover_ledger_bank_row_tags_write_facade(self) -> TurnoverLedgerWriteFacade | None:
@@ -12630,22 +12644,15 @@ class Application:
                                 "message": "往来款补充信息已更新，请刷新后重试。",
                             },
                         )
-            if facade is None:
-                result = self._turnover_ledger_api_routes.update_relation_extra(
-                    relation_id,
-                    payload,
-                    actor=actor,
-                )
-            else:
-                result = facade.update_relation_extra(
-                    relation_id=relation_id,
-                    payload=payload,
-                    actor_id=actor,
-                    tenant_id=self._workbench_reconciliation_tenant_id(),
-                    scope_keys=["all"],
-                    expected_versions=expected_versions if isinstance(expected_versions, dict) else None,
-                    idempotency_key=idempotency_key,
-                )
+            result = facade.update_relation_extra(
+                relation_id=relation_id,
+                payload=payload,
+                actor_id=actor,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+                scope_keys=["all"],
+                expected_versions=expected_versions if isinstance(expected_versions, dict) else None,
+                idempotency_key=idempotency_key,
+            )
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -12657,13 +12664,6 @@ class Application:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_turnover_ledger_extra", "message": str(exc)},
-            )
-        if facade is None:
-            self._persist_turnover_ledger_extras_best_effort(operation="turnover_ledger_extra_updated")
-            self._clear_turnover_ledger_read_model_best_effort()
-            self._enqueue_turnover_ledger_read_model_refreshes(
-                ["all"],
-                reason="turnover_relation_extra_changed",
             )
         result["turnover_ledger_invalidated"] = True
         return self._json_response(HTTPStatus.OK, result)

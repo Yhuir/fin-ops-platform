@@ -3710,7 +3710,7 @@ PF-P110 边界：
 
 ## PF-P124 Relation Extra Legacy Fallback Facade Extraction
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3732,6 +3732,25 @@ PF-P110 边界：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- 新增 `TurnoverLedgerRelationExtraLegacyFallbackFacade`。
+- relation extra facade construction 在 primary UoW facade 不可用时返回 legacy fallback adapter。
+- relation extra handler 删除 `facade is None` direct route update / persist / clear / enqueue 分支。
+- 保留 expected_versions/idempotency precheck。
+- tests 增加 handler thinness 静态门禁，并验证 unsupported postgres queue API fallback adapter 保持 legacy update/persist/clear/enqueue 行为。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条最小 prompt：
+
+- `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate`
+- 统一覆盖 PF-P120 到 PF-P124 完整 diff。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 

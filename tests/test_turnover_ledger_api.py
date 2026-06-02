@@ -1787,9 +1787,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
             queue = _FailingQueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
-            app._turnover_ledger_relation_extra_write_facade = lambda: None  # type: ignore[method-assign]
 
             with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
                 app.handle_request(
@@ -1805,8 +1805,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 1)
         self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
 
-    def test_relation_extra_facade_none_keeps_legacy_direct_update_persist_and_refresh(self) -> None:
-        # PF-P121 characterization: facade None fallback updates extra directly and performs legacy refresh side effects.
+    def test_relation_extra_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_relation_extra_update)
+
+        self.assertNotIn("if facade is None", source)
+        self.assertNotIn("_persist_turnover_ledger_extras_best_effort(", source)
+        self.assertNotIn("_clear_turnover_ledger_read_model_best_effort(", source)
+        self.assertNotIn("_enqueue_turnover_ledger_read_model_refreshes(", source)
+
+    def test_relation_extra_fallback_adapter_keeps_legacy_update_persist_and_refresh(self) -> None:
+        # PF-P124 target: unsupported postgres queue API uses explicit fallback adapter.
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -1815,9 +1823,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             queue = _QueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
             persist_operations: list[str] = []
+            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
-            app._turnover_ledger_relation_extra_write_facade = lambda: None  # type: ignore[method-assign]
 
             def record_persist(*, operation: str) -> None:
                 persist_operations.append(operation)

@@ -135,6 +135,43 @@ class TurnoverLedgerTagSelectionLegacyFallbackFacade:
         return result
 
 
+class TurnoverLedgerRelationExtraLegacyFallbackFacade:
+    def __init__(
+        self,
+        *,
+        routes: Any,
+        persist_extra: Callable[[], None],
+        clear_read_model: Callable[[], None],
+        enqueue_refresh: Callable[[list[str]], None],
+    ) -> None:
+        self._routes = routes
+        self._persist_extra = persist_extra
+        self._clear_read_model = clear_read_model
+        self._enqueue_refresh = enqueue_refresh
+
+    def update_relation_extra(
+        self,
+        *,
+        relation_id: str,
+        payload: dict[str, object],
+        actor_id: str,
+        tenant_id: str,
+        scope_keys: list[str],
+        expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        _ = tenant_id, expected_versions, idempotency_key
+        result = self._routes.update_relation_extra(
+            relation_id,
+            payload,
+            actor=actor_id,
+        )
+        self._persist_extra()
+        self._clear_read_model()
+        self._enqueue_refresh(list(scope_keys or ["all"]))
+        return result
+
+
 class TurnoverLedgerRelationRepositoryAdapter:
     def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
         self._repository_factory = repository_factory
