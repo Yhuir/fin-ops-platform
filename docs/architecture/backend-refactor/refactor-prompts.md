@@ -26119,7 +26119,7 @@ Post-Flight:
 
 ## PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 ```text
 /goal
@@ -26169,6 +26169,22 @@ Post-Flight:
 
 - PF-P141-MG 的边界正确：它只覆盖 PF-P141 的 bank row tags local adapter set 小切片。
 - 当前 diff 范围集中，测试充分，适合直接进入 MG。
+
+### PF-P141-MG 执行结果
+
+- PF-P141-MG 已完成并验证。
+- `main...HEAD` diff 白名单校验通过，仅包含：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - backend-refactor 文档
+- 分支侧验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，76 tests；
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；
+  - `git diff --check`：Pass。
+- 已将 `codex/turnover-ledger-bank-row-tags-p141` merge 回 `main`。
+- merge 后已在 `main` 上重跑同一组验证，结果全部通过。
+- 下一步必须从最新 `main` 新建 `codex/` 分支，再生成 `PF-P142 - Turnover Ledger Remaining Seam Rebaseline After Local Adapter Cleanup`。
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 

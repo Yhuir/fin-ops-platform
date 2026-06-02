@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P141 - Turnover Ledger Bank Row Tags Local Adapter Set Extraction` 已完成并验证 |
-| 当前 active prompt | `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate` 已生成并审查，待执行 |
-| 最近 verified prompt | `PF-P141 - Turnover Ledger Bank Row Tags Local Adapter Set Extraction` |
-| 当前分支 | `codex/turnover-ledger-bank-row-tags-p141` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，76 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
-| 下一条允许任务 | 执行 `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate` |
+| 当前阶段 | `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate` 已完成，待从最新 `main` 新建分支进入下一切片 |
+| 当前 active prompt | 空；下一步必须从最新 `main` 新建 `codex/` 分支后生成 `PF-P142` |
+| 最近 verified prompt | `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，76 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass；merge 后 main 验证通过 |
+| 下一条允许任务 | 从最新 `main` 新建分支，生成并审查 `PF-P142 - Turnover Ledger Remaining Seam Rebaseline After Local Adapter Cleanup` |
 
 ## Prompt 执行日志
 

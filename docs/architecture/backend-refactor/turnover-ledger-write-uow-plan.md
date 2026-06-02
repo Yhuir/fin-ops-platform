@@ -4586,6 +4586,38 @@ Remaining write path matrix：
 
 - 进入 `PF-P141-MG - Turnover Ledger Bank Row Tags Local Adapter Set Merge Gate`。
 
+## PF-P141-MG Bank Row Tags Local Adapter Set Merge Gate
+
+状态：
+
+- verified
+
+目标：
+
+- 对 PF-P141 的 bank row tags local adapter set 小切片做正式 Merge Gate。
+- 确认 diff 白名单、targeted tests、compileall 和 post-flight 文档回写全部通过。
+
+边界：
+
+- 只覆盖 PF-P141 的完整 diff。
+- 不混入其它模块或其它 Turnover Ledger 切片。
+
+结果：
+
+- PF-P141-MG 已完成并验证。
+- `TurnoverLedgerLocalBankRowTagsAdapterSet` 已随 PF-P141 合入 `main`。
+- `server.py` 已移除 bank row tags local path 的内联 category/relation snapshot save closure。
+- `tests/test_turnover_ledger_api.py` 已新增 guard test：
+  - `test_turnover_bank_row_tags_write_facade_does_not_inline_local_snapshot_closures`
+- branch 与 merge 后 `main` 上都已通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+下一步：
+
+- 从最新 `main` 新建分支。
+- 生成并审查 `PF-P142 - Turnover Ledger Remaining Seam Rebaseline After Local Adapter Cleanup`。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
