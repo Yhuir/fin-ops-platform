@@ -162,6 +162,26 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(processing[0]["event_id"], "event-1")
         self.assertEqual(processing[0]["event_type"], "runtime.test")
 
+    def test_heartbeats_include_worker_instance_when_configured(self) -> None:
+        queue = FakeQueue(None)
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="host-workbench",
+                worker_kind="workbench-read-model",
+                worker_instance="workbench",
+                event_types=["runtime.test"],
+            ),
+            handlers={"runtime.test": lambda claimed: {"handled": claimed.event_id}},
+        )
+
+        result = worker.run_once()
+
+        self.assertEqual(result, RuntimeWorkerResult.IDLE)
+        self.assertTrue(queue.heartbeats)
+        for _worker_id, _kind, _status, payload in queue.heartbeats:
+            self.assertEqual(payload["worker_instance"], "workbench")
+
     def test_run_once_retries_when_handler_exceeds_task_timeout(self) -> None:
         queue = FakeQueue(event())
 

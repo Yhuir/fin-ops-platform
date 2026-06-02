@@ -63,6 +63,7 @@ EXPECTED_MIGRATIONS = [
     "0048_oa_pending_payment_bank_paid_total.sql",
     "0049_oa_pending_payment_detail_lookup_indexes.sql",
     "0050_tax_offset_plans.sql",
+    "0051_pending_invoice_cash_income_scope.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -171,9 +172,15 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 51)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 52)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
+
+    def test_pending_invoice_scope_filter_constraint_allows_cash_income(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("pending_invoice_scopes_filter_group_check", sql)
+        self.assertIn("'cash_income'", sql)
 
     def test_discovery_rejects_invalid_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

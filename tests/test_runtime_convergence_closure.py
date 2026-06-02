@@ -154,6 +154,27 @@ class RuntimeConvergenceClosureTests(unittest.TestCase):
 
         self.assertEqual(closure._overall_status(checks), closure.FAIL)
 
+    def test_worker_configuration_check_uses_required_registry_matrix(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(command, **_kwargs):
+            calls.append(list(command))
+            return subprocess.CompletedProcess(command, 0, stdout='{"ok": true}\n', stderr="")
+
+        with patch.object(closure, "_postgres_database_url", return_value="postgresql://finops:secret@db/finops"), patch.object(
+            closure,
+            "_run",
+            side_effect=fake_run,
+        ):
+            result = closure._check_worker_configuration(require_real_infra=True)
+
+        self.assertEqual(result.status, closure.PASS)
+        worker_commands = [command for command in calls if "fin_ops_platform.app.worker" in command]
+        self.assertGreaterEqual(len(worker_commands), 10)
+        self.assertTrue(all("--registration" in command for command in worker_commands))
+        self.assertTrue(any("workbench" in command for command in worker_commands))
+        self.assertTrue(any("import" in command for command in worker_commands))
+
     def test_report_output_file_is_written(self) -> None:
         output = Path("docs/database-migration/reports/runtime-convergence-closure-test.json")
         try:

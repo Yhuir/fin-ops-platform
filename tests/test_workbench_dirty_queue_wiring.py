@@ -9,7 +9,11 @@ from unittest.mock import patch
 
 import fin_ops_platform.app.server as server_module
 from fin_ops_platform.app.server import build_application
-from fin_ops_platform.app.worker import _build_workbench_matching_dirty_scope_worker, build_parser
+from fin_ops_platform.app.worker import build_parser
+from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
+    WorkbenchMatchingDirtyScopeWorker,
+    WorkbenchMatchingDirtyScopeWorkerConfig,
+)
 from fin_ops_platform.services.workbench_reconciliation_models import expand_scope_month_window
 
 
@@ -524,21 +528,20 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
     def test_worker_wiring_uses_decoupled_dirty_scope_runner(self) -> None:
         queue = RecordingDirtyQueue()
         heartbeat_recorder = RecordingHeartbeatRecorder()
-        app = SimpleNamespace(
-            _workbench_reconciliation_dirty_queue=queue,
-            _workbench_matching_orchestrator=SimpleNamespace(run=lambda **kwargs: {}),
-            _workbench_matching_source_versions=lambda: {"rules": "v1"},
-        )
-
-        worker = _build_workbench_matching_dirty_scope_worker(
-            app,
+        worker = WorkbenchMatchingDirtyScopeWorker(
+            dirty_queue=queue,
+            matching_orchestrator=SimpleNamespace(run=lambda **kwargs: {}),
+            source_versions_provider=lambda: {"rules": "v1"},
             heartbeat_recorder=heartbeat_recorder,
-            worker_id="worker-a",
-            poll_interval_seconds=0.1,
-            batch_size=7,
-            lease_seconds=300,
-            retry_delay_seconds=45,
-            max_iterations=1,
+            config=WorkbenchMatchingDirtyScopeWorkerConfig(
+                worker_id="worker-a",
+                poll_interval_seconds=0.1,
+                batch_size=7,
+                lease_seconds=300,
+                retry_delay_seconds=45,
+                max_iterations=1,
+            ),
+            sleep=lambda _seconds: None,
         )
         worker.run_once()
 

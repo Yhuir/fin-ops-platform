@@ -121,6 +121,8 @@ class ImportFormalizationApiTests(unittest.TestCase):
             self.assertEqual(workbench_payload["month"], "2026-01")
             self.assertGreater(workbench_payload["summary"]["bank_count"], 0)
             self.assertGreater(workbench_payload["summary"]["invoice_count"], 0)
+            app.shutdown_background_jobs()
+            restarted.shutdown_background_jobs()
 
     def test_templates_retry_with_invoice_batch_override_and_original_file_retention(self) -> None:
         with TemporaryDirectory() as temp_dir:

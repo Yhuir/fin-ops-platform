@@ -416,6 +416,42 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_runtime_worker_entrypoint_does_not_import_application(self) -> None:
+        tree = _parse(APP_ROOT / "worker.py")
+
+        self.assertFalse(
+            _imports_name_from_module(
+                tree,
+                module="fin_ops_platform.app.server",
+                name="Application",
+            )
+        )
+        self.assertFalse((APP_ROOT / "worker_legacy_application.py").exists())
+        self.assertNotIn(
+            "worker_legacy_application",
+            (APP_ROOT / "worker.py").read_text(encoding="utf-8"),
+        )
+        self.assertNotIn(
+            "RuntimeWorkerApplicationBridge",
+            (APP_ROOT / "worker.py").read_text(encoding="utf-8"),
+        )
+
+    def test_runtime_worker_handler_bootstrap_does_not_import_application_or_auth(self) -> None:
+        path = SERVICES_ROOT / "runtime_worker_handlers.py"
+        self.assertTrue(path.exists(), "runtime worker handler bootstrap service is missing")
+        tree = _parse(path)
+        modules = _imported_modules(tree)
+
+        self.assertNotIn("fin_ops_platform.app.server", modules)
+        self.assertNotIn("fin_ops_platform.app.auth", modules)
+        self.assertNotIn("HTTPStatus", path.read_text(encoding="utf-8"))
+        self.assertNotIn("RuntimeWorkerApplicationBridge", path.read_text(encoding="utf-8"))
+
+    def test_no_oa_worker_bootstrap_does_not_load_full_workbench_snapshot(self) -> None:
+        worker_source = (APP_ROOT / "worker.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("load_workbench_read_models()", worker_source)
+
     def test_raw_postgres_sql_in_services_is_classified_by_platform_boundary(self) -> None:
         allowed_exact_paths = {
             "backend/src/fin_ops_platform/services/bank_account_balance_projection.py",

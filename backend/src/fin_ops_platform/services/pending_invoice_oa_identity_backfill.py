@@ -18,8 +18,8 @@ PENDING_INVOICE_BASE_SCOPE_KEYS = (
 
 
 class PendingInvoiceOaIdentityBackfillService:
-    def __init__(self, *, connection: Any, queue_repository: Any | None = None) -> None:
-        self._connection = connection
+    def __init__(self, *, repository: Any, queue_repository: Any | None = None) -> None:
+        self._repository = repository
         self._queue_repository = queue_repository
 
     def inspect(self) -> dict[str, Any]:
@@ -47,16 +47,7 @@ class PendingInvoiceOaIdentityBackfillService:
         return scope_keys
 
     def _invalid_read_model_rows(self) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
-            """
-            select row_id, direction, scope_key, payload->'oa' as oa_payload
-            from read_model.pending_invoice_rows
-            where coalesce(payload->'oa'->'primary'->>'id', '') <> ''
-              and payload->'oa'->'primary'->>'id' !~ '^oa-'
-            order by updated_at desc, row_id
-            limit 500
-            """
-        )
+        rows = self._repository.invalid_read_model_rows()
         result: list[dict[str, Any]] = []
         for row in list(rows or []):
             if not isinstance(row, dict):
@@ -77,38 +68,10 @@ class PendingInvoiceOaIdentityBackfillService:
         return result
 
     def _invalid_relation_rows(self) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
-            """
-            select case_id, row_ids, row_types
-            from app.workbench_pair_relations
-            where status = 'active'
-              and exists (
-                  select 1
-                  from unnest(row_ids, row_types) as relation_rows(row_id, row_type)
-                  where row_type = 'oa'
-                    and row_id !~ '^oa-'
-              )
-            order by updated_at desc, case_id
-            limit 500
-            """
-        )
-        return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
+        return list(self._repository.invalid_relation_rows())
 
     def _missing_oa_relation_rows(self) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
-            """
-            select case_id, row_ids, row_types
-            from app.workbench_pair_relations
-            where status = 'active'
-              and row_types && array['bank']::text[]
-              and row_types && array['invoice']::text[]
-              and not row_types && array['oa']::text[]
-              and case_id like 'candidate:%'
-            order by updated_at desc, case_id
-            limit 500
-            """
-        )
-        return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
+        return list(self._repository.missing_oa_relation_rows())
 
     @staticmethod
     def _affected_scope_keys(invalid_read_model_rows: list[dict[str, Any]]) -> list[str]:

@@ -267,15 +267,47 @@ function pendingInvoiceRulesPayload({
   };
 }
 
+function pendingRuleClosureRow(id: string, counterpartyName: string, statusLabel: string, matchedGroup: string) {
+  return {
+    id,
+    bank_transaction: {
+      id,
+      counterparty_name: counterpartyName,
+      trade_time: "2026-05-08 10:00:00",
+      debit_amount: "118.00",
+      credit_amount: "0.00",
+      amount: "118.00",
+      bank_name: "建设银行",
+      account_name: "云南溯源科技有限公司",
+      account_last4: "8106",
+      summary: "规则闭环验证",
+    },
+    invoice_acquisition_status: {
+      code: matchedGroup === "no_invoice_required" ? "no_invoice_required" : "paid_pending_invoice",
+      label: statusLabel,
+      reason: `命中${statusLabel}规则`,
+      severity: matchedGroup === "no_invoice_required" ? "success" : "warning",
+      primary_action: matchedGroup === "no_invoice_required" ? "view_rules" : "attach_or_create_invoice",
+      matched_rule: { source: "pending_invoice_tag_groups", group: matchedGroup, tag_code: id, tag_label: statusLabel },
+    },
+    input_invoices: { primary: null, relation_count: 0, has_multiple: false, summaries: [], payment_summary: null },
+    oa: { primary: null, relation_count: 0, has_multiple: false, detail_available: false, summaries: [] },
+    can_create_invoice: matchedGroup !== "no_invoice_required",
+    available_actions: matchedGroup === "no_invoice_required" ? ["view_rules"] : ["attach_existing_invoice", "manual_invoice"],
+  };
+}
+
 function installPendingInvoiceFetch(options: {
   rulesPayload?: () => ReturnType<typeof pendingInvoiceRulesPayload>;
+  rowsPayload?: (url: URL) => Array<Record<string, unknown>>;
+  onRulesSaved?: () => void;
 } = {}) {
   const baseFetch = installMockApiFetch();
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const method = (init?.method ?? "GET").toUpperCase();
     if (url.pathname === "/api/pending-invoices/rows") {
-      const rows = upgradedRows();
+      const rows = options.rowsPayload?.(url) ?? upgradedRows();
       const direction = url.searchParams.get("direction") ?? "expense";
       return new Response(JSON.stringify({
         direction,
@@ -305,6 +337,7 @@ function installPendingInvoiceFetch(options: {
       });
     }
     if (url.pathname === "/api/pending-invoices/rules" && method === "PUT") {
+      options.onRulesSaved?.();
       return new Response(JSON.stringify({
         version: 8,
         permissions: { can_save: true },
@@ -742,6 +775,73 @@ describe("Pending invoices page", () => {
         bank_statement_as_invoice: { tag_codes: ["internal_transfer", "fee"] },
         no_invoice_required: { tag_codes: ["salary"] },
       },
+    });
+  });
+
+  test("refetches rows after saving rules and displays refreshed rule filter buckets", async () => {
+    const user = userEvent.setup();
+    let rulesSaved = false;
+    const requiresRow = pendingRuleClosureRow("fee", "需要开票闭环供应商", "已支付待开票", "requires_invoice");
+    const statementRow = pendingRuleClosureRow("internal_transfer", "流水代替闭环供应商", "流水代替发票", "bank_statement_as_invoice");
+    const noInvoiceRow = pendingRuleClosureRow("salary", "无需开票闭环供应商", "无需开票", "no_invoice_required");
+    const unknownRow = pendingRuleClosureRow("unknown_external_code", "未知标签闭环供应商", "未分类", "unknown");
+    const fetchMock = installPendingInvoiceFetch({
+      onRulesSaved: () => {
+        rulesSaved = true;
+      },
+      rowsPayload: (url) => {
+        if (!rulesSaved) {
+          return upgradedRows();
+        }
+        const filter = url.searchParams.get("filter") ?? "all";
+        if (filter === "requires_invoice") {
+          return [requiresRow];
+        }
+        if (filter === "bank_statement_as_invoice") {
+          return [statementRow];
+        }
+        if (filter === "no_invoice_required") {
+          return [noInvoiceRow];
+        }
+        return [requiresRow, statementRow, noInvoiceRow, unknownRow];
+      },
+    });
+    renderAppAt("/pending-invoices");
+
+    const page = await screen.findByTestId("pending-invoices-page");
+    const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
+    await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
+    await user.click(await screen.findByRole("button", { name: "保存规则" }));
+
+    await waitFor(() => {
+      expect(rulesSaved).toBe(true);
+      expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
+    });
+    expect(await within(page).findByText("需要开票闭环供应商")).toBeInTheDocument();
+    expect(within(page).getByText("流水代替闭环供应商")).toBeInTheDocument();
+    expect(within(page).getByText("无需开票闭环供应商")).toBeInTheDocument();
+    expect(within(page).getByText("未知标签闭环供应商")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "全部" }));
+    await user.click(await screen.findByRole("menuitem", { name: "流水代替发票" }));
+    await waitFor(() => {
+      const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
+      expect(latest?.searchParams.get("filter")).toBe("bank_statement_as_invoice");
+      expect(within(page).getByText("流水代替闭环供应商")).toBeInTheDocument();
+      expect(within(page).queryByText("需要开票闭环供应商")).not.toBeInTheDocument();
+      expect(within(page).queryByText("无需开票闭环供应商")).not.toBeInTheDocument();
+      expect(within(page).queryByText("未知标签闭环供应商")).not.toBeInTheDocument();
+    });
+
+    await user.click(within(page).getByRole("button", { name: "流水代替发票" }));
+    await user.click(await screen.findByRole("menuitem", { name: "无需开票" }));
+    await waitFor(() => {
+      const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
+      expect(latest?.searchParams.get("filter")).toBe("no_invoice_required");
+      expect(within(page).getByText("无需开票闭环供应商")).toBeInTheDocument();
+      expect(within(page).queryByText("流水代替闭环供应商")).not.toBeInTheDocument();
+      expect(within(page).queryByText("未知标签闭环供应商")).not.toBeInTheDocument();
     });
   });
 

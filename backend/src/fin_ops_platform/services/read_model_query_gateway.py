@@ -55,6 +55,7 @@ class ReadModelQueryGateway:
                 status="fresh",
                 source_versions=expected_versions,
             )
+            payload["refresh_enqueued"] = False
             return ReadModelQueryResult(payload=payload, cache_hit=True)
 
         view = load_view()
@@ -116,7 +117,10 @@ class ReadModelQueryGateway:
             payload["refresh_enqueued"] = refresh_enqueued
             payload["refresh_reason"] = "source_version_mismatch" if refresh_reason == source_mismatch_reason else refresh_reason
         elif cache_key and cache_ttl_seconds:
+            payload["refresh_enqueued"] = False
             self._set_cached_payload(cache_key, payload, ttl_seconds=cache_ttl_seconds)
+        else:
+            payload["refresh_enqueued"] = False
         return ReadModelQueryResult(
             payload=payload,
             cache_hit=False,

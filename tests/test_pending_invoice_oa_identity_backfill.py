@@ -5,27 +5,25 @@ import unittest
 from fin_ops_platform.services.pending_invoice_oa_identity_backfill import PendingInvoiceOaIdentityBackfillService
 
 
-class FakeConnection:
+class FakeRepository:
     def __init__(self) -> None:
         self.fetch_all_calls: list[str] = []
 
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_all_calls.append(normalized)
-        if "from read_model.pending_invoice_rows" in normalized:
-            return [
-                {
-                    "row_id": "txn-1",
-                    "direction": "expense",
-                    "scope_key": "expense:all:2026-05",
-                    "oa_payload": {"primary": {"id": "candidate:bad-oa"}},
-                }
-            ]
-        if "where status = 'active'" in normalized and "row_id !~ '^oa-'" in normalized:
-            return [{"case_id": "case-invalid", "row_ids": ["candidate:bad-oa"], "row_types": ["oa"]}]
-        if "case_id like 'candidate:%'" in normalized:
-            return [{"case_id": "candidate:missing-oa", "row_ids": ["txn-1", "inv-1"], "row_types": ["bank", "invoice"]}]
-        return []
+    def invalid_read_model_rows(self) -> list[dict[str, object]]:
+        return [
+            {
+                "row_id": "txn-1",
+                "direction": "expense",
+                "scope_key": "expense:all:2026-05",
+                "oa_payload": {"primary": {"id": "candidate:bad-oa"}},
+            }
+        ]
+
+    def invalid_relation_rows(self) -> list[dict[str, object]]:
+        return [{"case_id": "case-invalid", "row_ids": ["candidate:bad-oa"], "row_types": ["oa"]}]
+
+    def missing_oa_relation_rows(self) -> list[dict[str, object]]:
+        return [{"case_id": "candidate:missing-oa", "row_ids": ["txn-1", "inv-1"], "row_types": ["bank", "invoice"]}]
 
 
 class QueueRecorder:
@@ -38,9 +36,9 @@ class QueueRecorder:
 
 class PendingInvoiceOaIdentityBackfillTests(unittest.TestCase):
     def test_inspects_invalid_oa_identity_and_enqueues_existing_pending_scopes(self) -> None:
-        connection = FakeConnection()
+        repository = FakeRepository()
         queue = QueueRecorder()
-        service = PendingInvoiceOaIdentityBackfillService(connection=connection, queue_repository=queue)
+        service = PendingInvoiceOaIdentityBackfillService(repository=repository, queue_repository=queue)
 
         report = service.inspect()
         enqueued = service.enqueue_affected_scopes(reason="test_backfill")

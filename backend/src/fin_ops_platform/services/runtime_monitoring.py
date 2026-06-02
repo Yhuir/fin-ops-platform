@@ -167,6 +167,11 @@ class RuntimeMonitoringRepository:
         worker_metrics = self.dashboard_worker_metrics()
         missing_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "required_worker_missing")
         stale_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "worker_heartbeat_stale")
+        mismatched_required_worker_count = sum(
+            1
+            for row in worker_metrics
+            if row.get("required") and row.get("warning_code") in {"worker_kind_mismatch", "worker_event_type_mismatch"}
+        )
         return {
             "queue_backlog": queue_backlog,
             "dirty_scopes": dirty_scopes,
@@ -177,6 +182,7 @@ class RuntimeMonitoringRepository:
             "worker_metrics": worker_metrics,
             "missing_required_worker_count": missing_required_worker_count,
             "stale_required_worker_count": stale_required_worker_count,
+            "mismatched_required_worker_count": mismatched_required_worker_count,
             "read_model_refresh_duration_ms": {
                 "p50": (refresh_duration_row or {}).get("p50_ms"),
                 "p95": (refresh_duration_row or {}).get("p95_ms"),
@@ -561,31 +567,41 @@ class RuntimeMonitoringRepository:
     def dashboard_worker_metrics(self) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
             """
-            select distinct on (worker_kind)
+            select distinct on (coalesce(payload->>'worker_instance', worker_kind))
               worker_id,
+              coalesce(payload->>'worker_instance', worker_kind) as worker_instance,
               worker_kind,
               status,
-              extract(epoch from now() - last_seen_at)::float as heartbeat_lag_seconds
+              extract(epoch from now() - last_seen_at)::float as heartbeat_lag_seconds,
+              payload
             from job.runtime_worker_heartbeats
             where worker_kind <> 'runtime'
-            order by worker_kind, last_seen_at desc
+            order by coalesce(payload->>'worker_instance', worker_kind), last_seen_at desc
             """
         )
-        latest_by_kind: dict[str, dict[str, Any]] = {
-            str(row.get("worker_kind") or "unknown"): row
-            for row in rows
-        }
+        latest_by_instance: dict[str, dict[str, Any]] = {}
+        latest_by_kind: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            worker_instance = str(row.get("worker_instance") or "").strip()
+            worker_kind = str(row.get("worker_kind") or "").strip()
+            if worker_instance:
+                latest_by_instance[worker_instance] = row
+            if worker_kind and worker_kind not in latest_by_kind:
+                latest_by_kind[worker_kind] = row
         registrations_by_kind = registration_by_worker_kind()
         worker_rows: list[dict[str, Any]] = []
-        emitted: set[str] = set()
+        emitted_instances: set[str] = set()
+        emitted_worker_ids: set[str] = set()
         for registration in worker_registrations(required_only=True):
-            row = latest_by_kind.get(registration.worker_kind)
-            emitted.add(registration.worker_kind)
+            row = latest_by_instance.get(registration.instance_name) or latest_by_kind.get(registration.worker_kind)
+            emitted_instances.add(registration.instance_name)
             if row is None:
                 worker_rows.append(
                     {
                         "worker_id": "",
+                        "worker_instance": registration.instance_name,
                         "worker_kind": registration.worker_kind,
+                        "expected_worker_kind": registration.worker_kind,
                         "worker_status": "missing",
                         "heartbeat_lag_seconds": None,
                         "required": True,
@@ -596,10 +612,18 @@ class RuntimeMonitoringRepository:
                     }
                 )
                 continue
+            worker_id = str(row.get("worker_id") or "").strip()
+            if worker_id:
+                emitted_worker_ids.add(worker_id)
             worker_rows.append(_worker_metric_row(row, registration=registration, required=True))
-        for worker_kind, row in latest_by_kind.items():
-            if worker_kind in emitted:
+        for row in rows:
+            worker_instance = str(row.get("worker_instance") or "").strip()
+            if worker_instance in emitted_instances:
                 continue
+            worker_id = str(row.get("worker_id") or "").strip()
+            if worker_id and worker_id in emitted_worker_ids:
+                continue
+            worker_kind = str(row.get("worker_kind") or "unknown")
             registration = registrations_by_kind.get(worker_kind)
             worker_rows.append(_worker_metric_row(row, registration=registration, required=False))
         return worker_rows
@@ -637,6 +661,12 @@ def _worker_metric_row(
     required: bool,
 ) -> dict[str, Any]:
     heartbeat_lag_seconds = _optional_float(row.get("heartbeat_lag_seconds"))
+    worker_instance = str(row.get("worker_instance") or "")
+    worker_kind = str(row.get("worker_kind") or "unknown")
+    payload_value = row.get("payload")
+    heartbeat_payload = payload_value if isinstance(payload_value, dict) else {}
+    configured_event_types = _string_list(heartbeat_payload.get("configured_event_types"))
+    expected_event_types = list(registration.event_types) if registration is not None else []
     stale_after_seconds = (
         int(registration.heartbeat_stale_after_seconds)
         if registration is not None
@@ -648,13 +678,27 @@ def _worker_metric_row(
         and stale_after_seconds is not None
         and heartbeat_lag_seconds > stale_after_seconds
     )
+    warning_code = None
+    if registration is not None and worker_kind != registration.worker_kind:
+        warning_code = "worker_kind_mismatch"
+    elif registration is not None and configured_event_types and tuple(configured_event_types) not in {
+        tuple(registration.event_types),
+        registration.claim_event_types(transport="postgres"),
+        registration.claim_event_types(transport="rabbitmq"),
+    }:
+        warning_code = "worker_event_type_mismatch"
+    elif is_stale:
+        warning_code = "worker_heartbeat_stale"
     payload = {
         "worker_id": str(row.get("worker_id") or ""),
-        "worker_kind": str(row.get("worker_kind") or "unknown"),
+        "worker_instance": worker_instance,
+        "worker_kind": worker_kind,
+        "expected_worker_kind": registration.worker_kind if registration is not None else worker_kind,
         "worker_status": str(row.get("status") or ""),
         "heartbeat_lag_seconds": heartbeat_lag_seconds,
         "required": required,
-        "expected_event_types": list(registration.event_types) if registration is not None else [],
+        "expected_event_types": expected_event_types,
+        "configured_event_types": configured_event_types,
         "expected_transport": (
             "rabbitmq_or_postgres"
             if registration is not None and registration.rabbitmq_eligible
@@ -662,8 +706,14 @@ def _worker_metric_row(
             if registration is not None
             else "unknown"
         ),
-        "status": "stale" if is_stale else "available",
+        "status": "stale" if is_stale else "mismatch" if warning_code else "available",
     }
-    if is_stale:
-        payload["warning_code"] = "worker_heartbeat_stale"
+    if warning_code:
+        payload["warning_code"] = warning_code
     return payload
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item or "").strip()]

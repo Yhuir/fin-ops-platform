@@ -737,6 +737,15 @@ class PostgresStateStore:
     def load_bootstrap_snapshot(self) -> dict[str, Any]:
         return self._load_snapshot_payload(include_import_facts=False)
 
+    def load_imports_snapshot(self) -> dict[str, Any]:
+        return self._load_imports()
+
+    def load_file_imports_snapshot(self) -> dict[str, Any]:
+        return self._load_file_imports()
+
+    def load_matching_snapshot(self) -> dict[str, Any]:
+        return self._load_matching()
+
     def _load_snapshot_payload(self, *, include_import_facts: bool) -> dict[str, Any]:
         snapshot = {
             "imports": self._load_imports() if include_import_facts else {},

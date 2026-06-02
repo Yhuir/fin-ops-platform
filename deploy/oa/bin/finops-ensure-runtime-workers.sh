@@ -6,7 +6,9 @@ systemd_dir="${FINOPS_SYSTEMD_DIR:-/etc/systemd/system}"
 env_dir="${FINOPS_ENV_DIR:-/etc/fin-ops}"
 worker_template="$release_src/deploy/oa/systemd/fin-ops-worker@.service.example"
 worker_unit="$systemd_dir/fin-ops-worker@.service"
-required_workers="${FINOPS_REQUIRED_WORKERS:-oa-sync workbench workbench-matching bank-detail turnover-ledger search-pending invoice-usage-collection cost-tax import no-oa-bank-batch etc-business-oa-detection}"
+worker_python="${FINOPS_WORKER_PYTHON:-/opt/fin-ops/venv/bin/python}"
+runtime_pythonpath="$release_src/backend/src"
+required_workers="${FINOPS_REQUIRED_WORKERS:-}"
 optional_workers="${FINOPS_OPTIONAL_WORKERS:-}"
 
 fail() {
@@ -44,23 +46,13 @@ install_if_missing() {
   install -m "$mode" -o "${owner_group%%:*}" -g "${owner_group##*:}" "$source_file" "$target_file"
 }
 
+runtime_worker_manifest() {
+  PYTHONPATH="$runtime_pythonpath${PYTHONPATH:+:$PYTHONPATH}" \
+    "$worker_python" -m fin_ops_platform.tools.runtime_worker_manifest "$@"
+}
+
 worker_env_example() {
-  case "$1" in
-    oa-sync) printf '%s\n' "fin-ops.worker.oa-sync.env.example" ;;
-    workbench) printf '%s\n' "fin-ops.worker.workbench.env.example" ;;
-    workbench-matching) printf '%s\n' "fin-ops.worker.workbench-matching.env.example" ;;
-    bank-account-balance) printf '%s\n' "fin-ops.worker.bank-account-balance.env.example" ;;
-    bank-detail) printf '%s\n' "fin-ops.worker.bank-detail.env.example" ;;
-    no-oa-bank-batch) printf '%s\n' "fin-ops.worker.no-oa-bank-batch.env.example" ;;
-    turnover-ledger) printf '%s\n' "fin-ops.worker.turnover-ledger.env.example" ;;
-    search-pending) printf '%s\n' "fin-ops.worker.search-pending.env.example" ;;
-    invoice-usage-collection) printf '%s\n' "fin-ops.worker.invoice-usage-collection.env.example" ;;
-    cost-tax) printf '%s\n' "fin-ops.worker.cost-tax.env.example" ;;
-    import) printf '%s\n' "fin-ops.worker.import.env.example" ;;
-    etc-business-oa-detection) printf '%s\n' "fin-ops.worker.etc-business-oa-detection.env.example" ;;
-    file-migration) printf '%s\n' "fin-ops.worker.file-migration.env.example" ;;
-    *) fail "unsupported worker instance: $1" ;;
-  esac
+  runtime_worker_manifest --env-example "$1"
 }
 
 ensure_worker_env() {
@@ -74,11 +66,36 @@ ensure_worker_env() {
     root:fin-ops
 }
 
+check_worker_registration() {
+  local worker="$1"
+  local check_args
+  check_args="$(runtime_worker_manifest --worker-check-command "$worker")"
+  (
+    set -a
+    # shellcheck disable=SC1091
+    . "$env_dir/fin-ops.common.env"
+    # shellcheck disable=SC1091
+    . "$env_dir/fin-ops.secrets.env"
+    if [ -f "$env_dir/fin-ops.worker.${worker}.env" ]; then
+      # shellcheck disable=SC1090
+      . "$env_dir/fin-ops.worker.${worker}.env"
+    fi
+    set +a
+    export PYTHONPATH="$runtime_pythonpath${PYTHONPATH:+:$PYTHONPATH}"
+    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
+    export FIN_OPS_WORKER_ID="${FIN_OPS_WORKER_ID:-$(hostname)-${worker}}"
+    "$worker_python" -m fin_ops_platform.app.worker $check_args >/dev/null
+  )
+}
+
 if [ "$(id -u)" -ne 0 ]; then
   fail "must run as root"
 fi
 if [ ! -d "$release_src" ]; then
   fail "release source directory does not exist: $release_src"
+fi
+if [ ! -d "$runtime_pythonpath" ]; then
+  fail "backend source directory does not exist: $runtime_pythonpath"
 fi
 if ! id -u fin-ops >/dev/null 2>&1; then
   fail "system user fin-ops does not exist"
@@ -90,6 +107,10 @@ fi
 install -d -m 0755 "$systemd_dir"
 install -d -m 0750 -o root -g fin-ops "$env_dir"
 install_if_changed "$worker_template" "$worker_unit" 0644 root:root
+
+if [ -z "$required_workers" ]; then
+  required_workers="$(runtime_worker_manifest --required-instances)"
+fi
 
 for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
@@ -110,6 +131,7 @@ systemctl daemon-reload
 
 for worker in $required_workers $optional_workers; do
   worker_env_example "$worker" >/dev/null
+  check_worker_registration "$worker"
   service_name="fin-ops-worker@${worker}.service"
   systemctl reset-failed "$service_name" >/dev/null 2>&1 || true
   systemctl enable "$service_name"

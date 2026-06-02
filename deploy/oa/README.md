@@ -201,6 +201,11 @@ worker env，并启用、重启以下 PostgreSQL polling worker。仓库内的
 `deploy/oa/bin/finops-ensure-runtime-workers.sh` 是该 helper 的源文件，不能由 `finops-deploy`
 从 release 目录直接 `sudo /bin/bash` 执行：
 
+worker 实例、event types、env 模板和 smoke check 命令均从
+`python -m fin_ops_platform.tools.runtime_worker_manifest` 推导。不要在生产 runbook 中维护第二份
+worker 清单；新增 worker 或 read model refresh event 时先改 registry，再让部署和监控从 registry
+收敛。完整运维口径见 `docs/operations/runtime-worker-governance.md`。
+
 ```bash
 sudo systemctl enable --now fin-ops-worker@oa-sync.service
 sudo systemctl enable --now fin-ops-worker@workbench.service
@@ -218,6 +223,17 @@ sudo systemctl enable --now fin-ops-worker@import.service
 PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。
 `file-migration` 是可选迁移 worker，只有 legacy GridFS 和对象存储 secret 已配置时才加入
 `FINOPS_OPTIONAL_WORKERS=file-migration`。
+
+生产 systemd worker 使用 registration contract：
+
+```bash
+python -m fin_ops_platform.app.worker \
+  --registration <instance> \
+  --worker-instance <instance>
+```
+
+发布激活阶段会在服务重启后等待 `/health` 中 required worker readiness 收敛；systemd active
+只代表进程存在，不代表 worker 已经按 registry claim 正确 event。
 
 ## 一键发布脚本
 

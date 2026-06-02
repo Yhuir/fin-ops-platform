@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -62,7 +63,17 @@ class FakeStore:
         return None
 
     def health_summary(self) -> dict[str, object]:
-        return {"postgres_status": "ready", "postgres_database": "fin_ops_test", "postgres_schema_version": 7}
+        return {
+            "postgres_status": "ready",
+            "postgres_database": "fin_ops_test",
+            "postgres_schema_version": 7,
+            "runtime_infrastructure": {
+                "missing_required_worker_count": 0,
+                "stale_required_worker_count": 0,
+                "mismatched_required_worker_count": 0,
+                "worker_metrics": [],
+            },
+        }
 
     def load_oa_sync_state(self) -> dict:
         return {}
@@ -143,12 +154,29 @@ class AppPostgresModeTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir, patch("fin_ops_platform.app.server.build_state_store", return_value=FakeStore()):
             app = build_application(data_dir=Path(temp_dir))
 
-        storage = app.readiness_summary()["storage"]
+        summary = app.readiness_summary()
+        storage = summary["storage"]
         self.assertEqual(storage["backend"], "postgres")
         self.assertEqual(storage["postgres_status"], "ready")
         self.assertEqual(storage["postgres_schema_version"], 7)
+        self.assertEqual(summary["runtime_infrastructure"]["missing_required_worker_count"], 0)
+        self.assertEqual(summary["runtime_infrastructure"]["stale_required_worker_count"], 0)
+        self.assertEqual(summary["runtime_infrastructure"]["mismatched_required_worker_count"], 0)
         self.assertNotIn("url", str(storage).lower())
         self.assertNotIn("password", str(storage).lower())
+
+    def test_health_endpoint_exposes_runtime_infrastructure_contract(self) -> None:
+        with TemporaryDirectory() as temp_dir, patch("fin_ops_platform.app.server.build_state_store", return_value=FakeStore()):
+            app = build_application(data_dir=Path(temp_dir))
+
+        response = app.handle_request("GET", "/health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["runtime_infrastructure"]["missing_required_worker_count"], 0)
+        self.assertEqual(payload["runtime_infrastructure"]["stale_required_worker_count"], 0)
+        self.assertEqual(payload["runtime_infrastructure"]["mismatched_required_worker_count"], 0)
+        self.assertEqual(payload["storage"]["runtime_infrastructure"], payload["runtime_infrastructure"])
 
     def test_postgres_runtime_bootstrap_loads_pair_relations_without_full_snapshot(self) -> None:
         pair_snapshot = {

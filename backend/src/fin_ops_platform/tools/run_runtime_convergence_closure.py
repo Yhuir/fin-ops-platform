@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
+from fin_ops_platform.services.runtime_worker_registry import worker_check_command_args, worker_registrations
 
 
 PASS = "pass"
@@ -653,24 +654,40 @@ def _check_worker_configuration(*, require_real_infra: bool) -> CheckResult:
             status=FAIL if require_real_infra else SKIP,
             detail="No PostgreSQL URL available for worker --check.",
         )
-    result = _run(
-        [
-            sys.executable,
-            "-m",
-            "fin_ops_platform.app.worker",
-            "--check",
-            "--enable-workbench-read-model-refresh",
-            "--enable-cost-statistics-read-model-refresh",
-            "--enable-tax-offset-read-model-refresh",
-            "--enable-search-read-model-refresh",
-            "--enable-pending-invoice-read-model-refresh",
-        ],
-        env={**_python_env(), "FIN_OPS_POSTGRES_DATABASE_URL": database_url},
-        timeout=30,
+    failures: list[dict[str, str]] = []
+    checked: list[str] = []
+    for registration in worker_registrations(required_only=True):
+        result = _run(
+            [
+                sys.executable,
+                "-m",
+                "fin_ops_platform.app.worker",
+                *worker_check_command_args(registration, transport="postgres"),
+            ],
+            env={**_python_env(), "FIN_OPS_POSTGRES_DATABASE_URL": database_url},
+            timeout=30,
+        )
+        checked.append(registration.instance_name)
+        if result.returncode != 0:
+            failures.append(
+                {
+                    "worker": registration.instance_name,
+                    "stderr": result.stderr[-2000:],
+                }
+            )
+    if failures:
+        return CheckResult(
+            name="worker.check",
+            status=FAIL,
+            detail="One or more required worker --check commands failed.",
+            metadata={"failures": failures, "checked": checked},
+        )
+    return CheckResult(
+        name="worker.check",
+        status=PASS,
+        detail="Required worker registry matrix --check passed.",
+        metadata={"checked": checked},
     )
-    if result.returncode != 0:
-        return CheckResult(name="worker.check", status=FAIL, detail="Worker --check failed.", metadata={"stderr": result.stderr})
-    return CheckResult(name="worker.check", status=PASS, detail="Worker --check passed.", metadata={"stdout": result.stdout})
 
 
 def _check_performance_probe(*, require_real_infra: bool) -> CheckResult:

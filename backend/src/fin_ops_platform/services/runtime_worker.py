@@ -27,6 +27,7 @@ class RuntimeWorkerResult(str, Enum):
 class RuntimeWorkerConfig:
     worker_id: str = field(default_factory=lambda: f"runtime-worker-{os.getpid()}")
     worker_kind: str = "runtime"
+    worker_instance: str | None = None
     event_types: list[str] = field(default_factory=list)
     lock_timeout_seconds: int = 300
     retry_delay_seconds: int = 60
@@ -152,7 +153,12 @@ class RuntimeWorker:
     def _record_heartbeat(self, status: str, payload: dict[str, Any]) -> None:
         record = getattr(self._queue, "record_worker_heartbeat", None)
         if callable(record):
-            record(self._config.worker_id, self._config.worker_kind, status, payload=payload)
+            heartbeat_payload = dict(payload)
+            if self._config.worker_instance:
+                heartbeat_payload.setdefault("worker_instance", self._config.worker_instance)
+            if self._config.event_types:
+                heartbeat_payload.setdefault("configured_event_types", list(self._config.event_types))
+            record(self._config.worker_id, self._config.worker_kind, status, payload=heartbeat_payload)
 
     def _set_statement_timeout(self, seconds: int | None) -> None:
         setter = getattr(self._queue, "set_statement_timeout_seconds", None)

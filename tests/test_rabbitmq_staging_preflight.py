@@ -81,6 +81,11 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         self.assertIn("import.process.requested", dispatcher_command)
         worker_env = runner.calls[4][1]
         self.assertEqual(worker_env["FIN_OPS_QUEUE_BACKEND"], "rabbitmq")
+        worker_command = runner.calls[4][0]
+        self.assertIn("--registration", worker_command)
+        self.assertIn("oa-sync", worker_command)
+        self.assertIn("--worker-instance", worker_command)
+        self.assertNotIn("--enable-oa-sync", worker_command)
         encoded = stdout.getvalue()
         self.assertNotIn("pw@", encoded)
         self.assertNotIn("secret@", encoded)

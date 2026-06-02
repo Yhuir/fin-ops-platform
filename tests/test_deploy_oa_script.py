@@ -240,23 +240,19 @@ class DeployOAScriptTest(unittest.TestCase):
     def test_runtime_worker_ensure_script_defaults_to_full_postgres_worker_matrix(self) -> None:
         script = ENSURE_WORKERS_SCRIPT_PATH.read_text()
 
-        self.assertIn(
-            "oa-sync workbench workbench-matching bank-detail turnover-ledger search-pending invoice-usage-collection cost-tax import",
-            script,
-        )
-        for instance_name in (
-            "oa-sync",
-            "workbench",
-            "workbench-matching",
-            "bank-detail",
-            "turnover-ledger",
-            "search-pending",
-            "invoice-usage-collection",
-            "cost-tax",
-            "import",
-        ):
-            self.assertIn(f"fin-ops.worker.{instance_name}.env.example", script)
-            self.assertIn(f"fin-ops-worker@${{worker}}.service", script)
+        self.assertIn("runtime_worker_manifest --required-instances", script)
+        self.assertIn("runtime_worker_manifest --env-example", script)
+        self.assertIn("runtime_worker_manifest --worker-check-command", script)
+        self.assertNotIn("oa-sync workbench workbench-matching", script)
+        self.assertNotIn("case \"$1\" in", script)
+        self.assertIn("fin-ops-worker@${worker}.service", script)
+
+    def test_systemd_worker_template_uses_registry_registration_contract(self) -> None:
+        template = (Path(__file__).resolve().parents[1] / "deploy/oa/systemd/fin-ops-worker@.service.example").read_text()
+
+        self.assertIn("Environment=FIN_OPS_WORKER_INSTANCE=%i", template)
+        self.assertIn("--registration ${FIN_OPS_WORKER_INSTANCE}", template)
+        self.assertIn("--worker-instance ${FIN_OPS_WORKER_INSTANCE}", template)
 
     def test_deploy_control_script_uses_canonical_etc_finops_secret_contract(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
@@ -283,9 +279,19 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"', script)
         self.assertIn('ensure_runtime_workers "$src"', script)
         self.assertIn('"$ENSURE_RUNTIME_WORKERS_HELPER" "$src"', script)
+        self.assertIn("wait_required_workers_ready", script)
+        self.assertIn("FINOPS_WORKER_READY_TIMEOUT_SECONDS", script)
+        self.assertIn("missing_required_worker_count", script)
+        self.assertIn("stale_required_worker_count", script)
+        self.assertIn("worker_kind_mismatch", script)
+        self.assertIn("worker_event_type_mismatch", script)
+        self.assertIn("--registration \\${FIN_OPS_WORKER_INSTANCE}", script)
+        self.assertIn("--worker-instance \\${FIN_OPS_WORKER_INSTANCE}", script)
+        self.assertLess(script.rindex('ensure_runtime_workers "$src"'), script.rindex("wait_required_workers_ready"))
         self.assertNotIn("EnvironmentFile=/opt/fin-ops/fin-ops.env", script)
         self.assertNotIn("/root/fin_ops_stage23_postgres_runtime.env", script)
         self.assertNotIn("FIN_OPS_POSTGRES_DATABASE_URL=", script)
+        self.assertNotIn("--worker-kind \\${FIN_OPS_WORKER_KIND}", script)
 
 
 if __name__ == "__main__":

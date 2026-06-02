@@ -62,6 +62,7 @@ EXPECTED_MIGRATION_FILES = [
     "0048_oa_pending_payment_bank_paid_total.sql",
     "0049_oa_pending_payment_detail_lookup_indexes.sql",
     "0050_tax_offset_plans.sql",
+    "0051_pending_invoice_cash_income_scope.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

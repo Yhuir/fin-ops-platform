@@ -309,6 +309,93 @@ class PendingComplementProjectionConnection:
         }
 
 
+class PendingRuleClosureProjectionConnection:
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized:
+            return [
+                self._row("txn-fee", "fee", "手续费"),
+                self._row("txn-internal-transfer", "internal_transfer", "内部转账"),
+                self._row("txn-salary", "salary", "工资"),
+                self._row("txn-no-category", "", ""),
+                self._row("txn-unknown", "unknown_external_code", "未知"),
+                self._row("txn-archived", "archived_training", "历史培训"),
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "bank_transaction_tags": {
+                        "version": 11,
+                        "definitions": [
+                            {
+                                "code": "fee",
+                                "label": "手续费",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["手续费"]},
+                            },
+                            {
+                                "code": "internal_transfer",
+                                "label": "内部转账",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["内部转账"]},
+                            },
+                            {
+                                "code": "salary",
+                                "label": "工资",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["工资"]},
+                            },
+                            {
+                                "code": "archived_training",
+                                "label": "历史培训",
+                                "status": "archived",
+                                "rules": {"match_fields": ["all_text"], "contains": ["培训"]},
+                            },
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "groups": {
+                            "requires_invoice": {"tag_codes": ["legacy_requires_should_be_ignored"]},
+                            "bank_statement_as_invoice": {"tag_codes": ["internal_transfer"]},
+                            "no_invoice_required": {"tag_codes": ["salary"]},
+                        }
+                    },
+                }
+            }
+        return None
+
+    @staticmethod
+    def _row(transaction_id: str, category_code: str, category_label: str) -> dict:
+        return {
+            "transaction_id": transaction_id,
+            "counterparty_name_raw": transaction_id,
+            "trade_time": "2026-05-20 10:00:00",
+            "txn_date": "2026-05-20",
+            "amount": "118.00",
+            "balance": "1000.00",
+            "currency": "CNY",
+            "summary": "转账",
+            "remark": "",
+            "bank_serial_no": transaction_id,
+            "account_name": "工商银行",
+            "account_no": "622200001234",
+            "category_payload": (
+                {"category_code": category_code, "category_label": category_label}
+                if category_code
+                else {}
+            ),
+            "invoices": [],
+            "paid_total": "0.00",
+            "oa_applicant": "",
+            "oa_project_name": "",
+            "relation_case_ids": [],
+        }
+
+
 class PendingIncomeProjectionConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -945,6 +1032,25 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             "requires_invoice",
         )
 
+    def test_pending_invoice_sql_projection_closes_active_rule_tag_filter_groups(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingRuleClosureProjectionConnection())
+
+        all_rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+        requires_rows = builder._pending_invoice_rows(direction="expense", filter_name="requires_invoice", month="2026-05")
+        statement_rows = builder._pending_invoice_rows(direction="expense", filter_name="bank_statement_as_invoice", month="2026-05")
+        no_invoice_rows = builder._pending_invoice_rows(direction="expense", filter_name="no_invoice_required", month="2026-05")
+
+        groups_by_id = {row["payload"]["id"]: row["payload"]["filter_group"] for row in all_rows}
+        self.assertEqual(groups_by_id["txn-fee"], "requires_invoice")
+        self.assertEqual(groups_by_id["txn-internal-transfer"], "bank_statement_as_invoice")
+        self.assertEqual(groups_by_id["txn-salary"], "no_invoice_required")
+        self.assertEqual(groups_by_id["txn-no-category"], "all")
+        self.assertEqual(groups_by_id["txn-unknown"], "all")
+        self.assertEqual(groups_by_id["txn-archived"], "all")
+        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-fee"])
+        self.assertEqual([row["payload"]["id"] for row in statement_rows], ["txn-internal-transfer"])
+        self.assertEqual([row["payload"]["id"] for row in no_invoice_rows], ["txn-salary"])
+
     def test_pending_invoice_sql_projection_emits_income_output_statuses(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingIncomeProjectionConnection())
 
@@ -1114,6 +1220,92 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(queue.completed, [("tenant-a", "pending_invoice", "expense:all")])
+
+    def test_refresh_handler_expands_pending_filter_scope_into_month_shards(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def list_pending_invoice_scope_shards(self, scope_key: str) -> list[str]:
+                self.calls.append(f"list:{scope_key}")
+                return ["expense:requires_invoice:2026-05", "expense:requires_invoice:2026-04"]
+
+            def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
+                self.calls.append(f"rebuild:{scope_key}")
+                return {"scope_key": scope_key, "row_count": 1}
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = SearchPendingReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-pending-requires",
+            tenant_id="tenant-a",
+            event_type="pending_invoice.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="expense:requires_invoice",
+            scope_type="pending_invoice",
+            scope_key="expense:requires_invoice",
+            dedupe_key=None,
+            payload={"scope_key": "expense:requires_invoice"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(
+            result,
+            {
+                "scope_key": "expense:requires_invoice",
+                "enqueued_scope_keys": ["expense:requires_invoice:2026-05", "expense:requires_invoice:2026-04"],
+                "row_count": 0,
+            },
+        )
+        self.assertEqual(builder.calls, ["list:expense:requires_invoice"])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("pending_invoice", "expense:requires_invoice:2026-05", "pending_invoice_month_shard"),
+                ("pending_invoice", "expense:requires_invoice:2026-04", "pending_invoice_month_shard"),
+            ],
+        )
+        self.assertEqual(queue.completed, [("tenant-a", "pending_invoice", "expense:requires_invoice")])
+
+    def test_refresh_handler_rebuilds_pending_filter_month_shard(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def list_pending_invoice_scope_shards(self, scope_key: str) -> list[str]:
+                raise AssertionError(scope_key)
+
+            def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
+                self.calls.append(scope_key)
+                return {"scope_key": scope_key, "row_count": 1}
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = SearchPendingReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-pending-requires-month",
+            tenant_id="tenant-a",
+            event_type="pending_invoice.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="expense:requires_invoice:2026-05",
+            scope_type="pending_invoice",
+            scope_key="expense:requires_invoice:2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "expense:requires_invoice:2026-05"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result, {"scope_key": "expense:requires_invoice:2026-05", "row_count": 1})
+        self.assertEqual(builder.calls, ["expense:requires_invoice:2026-05"])
+        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(queue.completed, [("tenant-a", "pending_invoice", "expense:requires_invoice:2026-05")])
 
 
 if __name__ == "__main__":

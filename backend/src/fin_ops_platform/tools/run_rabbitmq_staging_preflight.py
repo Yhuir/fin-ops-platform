@@ -13,6 +13,7 @@ from urllib.parse import ParseResult, urlparse, urlunparse
 
 from fin_ops_platform.services.runtime_worker_registry import (
     rabbitmq_dispatch_event_types,
+    worker_check_command_args,
     worker_registrations,
 )
 
@@ -191,16 +192,9 @@ def run_checks(
         )
     )
     worker_checks = {
-        f"rabbitmq.consumer_worker_check.{registration.instance_name.replace('-', '_')}": [
-            *registration.handler_flags,
-            *[
-                item
-                for event_type in registration.event_types
-                for item in ("--event-type", event_type)
-            ],
-            "--worker-kind",
-            registration.worker_kind,
-        ]
+        f"rabbitmq.consumer_worker_check.{registration.instance_name.replace('-', '_')}": list(
+            worker_check_command_args(registration, transport="rabbitmq")
+        )
         for registration in worker_registrations(rabbitmq_eligible_only=True)
     }
     for name, worker_args in worker_checks.items():

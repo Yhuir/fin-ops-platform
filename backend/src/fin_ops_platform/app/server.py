@@ -2033,6 +2033,9 @@ class Application:
 
         runtime_release = self._runtime_release_summary()
         production_runtime_guard = self._production_runtime_guard_summary(storage_summary, runtime_release)
+        runtime_infrastructure = storage_summary.get("runtime_infrastructure")
+        if not isinstance(runtime_infrastructure, dict):
+            runtime_infrastructure = {}
         status = "ready" if runtime_release["consistent"] and production_runtime_guard["consistent"] else "not_ready"
         return {
             "service": "fin-ops-platform-api",
@@ -2214,6 +2217,7 @@ class Application:
                 "background_job_foundation",
             ],
             "storage": storage_summary,
+            "runtime_infrastructure": runtime_infrastructure,
             "future_modules": [],
         }
 

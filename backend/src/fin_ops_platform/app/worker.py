@@ -32,7 +32,7 @@ from fin_ops_platform.services.postgres_connection import (
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
 from fin_ops_platform.services.etc_business_batch_application_service import ETC_BUSINESS_OA_DETECTION_EVENT_TYPE
 from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
-from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJobRepository, ImportJobWorker
+from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_usage_collection_read_model_refresh import (
     InvoiceUsageCollectionReadModelRefreshService,
@@ -53,7 +53,22 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, Runt
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
-from fin_ops_platform.services.runtime_worker_registry import worker_registrations
+from fin_ops_platform.services.runtime_worker_handlers import (
+    IMPORT_FACT_CHANGED_EVENT,
+    EtcBusinessOaDetectionWorkerFactory,
+    ImportRuntimeProcessorFactory,
+    WorkbenchMatchingWorkerFactory,
+    build_etc_business_oa_detection_handler,
+    build_import_job_handler_bundle,
+    check_import_job_processors,
+    handle_import_fact_changed_event,
+)
+from fin_ops_platform.services.runtime_worker_registry import (
+    RuntimeWorkerRegistration,
+    get_registration_by_instance_name,
+    worker_claim_event_types,
+    worker_registrations,
+)
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 from fin_ops_platform.services.state_store import default_data_dir
@@ -64,10 +79,6 @@ from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchRead
 from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
-from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
-    WorkbenchMatchingDirtyScopeWorker,
-    WorkbenchMatchingDirtyScopeWorkerConfig,
-)
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
@@ -77,11 +88,10 @@ from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PRO
 APP_SETTINGS_KEY = "app_settings"
 OA_IMPORT_FORM_TYPES = {"payment_request", "expense_claim"}
 OA_IMPORT_STATUSES = {"completed", "in_progress"}
-IMPORT_FACT_CHANGED_EVENT = "import.fact.changed"
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="fin-ops-platform standalone runtime worker")
+    parser.add_argument("--registration", default=None, help="Runtime worker registry instance name to enable.")
+    parser.add_argument("--worker-instance", default=None, help="Expected runtime worker instance name.")
     parser.add_argument("--worker-id", default=None, help="Stable worker id for PostgreSQL locks and heartbeats.")
     parser.add_argument("--worker-kind", default=None, help="Worker heartbeat kind. Defaults to the enabled handler family.")
     parser.add_argument("--event-type", action="append", default=[], help="Outbox event type to claim. Repeatable.")
@@ -128,11 +138,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = None
         postgres_configuration_error = str(exc)
     queue_settings = RuntimeQueueSettings.from_env()
+    registration = _apply_registration_args(args, queue_settings=queue_settings)
     connection = PostgresConnection(settings) if settings is not None else None
     queue = RuntimeQueueRepository(connection) if connection is not None else SimpleNamespace()
     redis_helper = RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env())
     config = RuntimeWorkerConfig(
         worker_id=args.worker_id or RuntimeWorkerConfig().worker_id,
+        worker_instance=args.worker_instance or getattr(registration, "instance_name", None),
         event_types=list(args.event_type or []),
         poll_interval_seconds=args.poll_interval_seconds,
         lock_timeout_seconds=args.lock_timeout_seconds,
@@ -183,14 +195,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if "oa.sync" not in config.event_types:
             config.event_types.append("oa.sync")
     if args.enable_etc_business_oa_detection:
-        from fin_ops_platform.app.server import Application
-
-        etc_application = Application(data_dir=default_data_dir())
-        etc_business_service = etc_application._etc_business_application_service()
-        handlers[ETC_BUSINESS_OA_DETECTION_EVENT_TYPE] = lambda event: _handle_etc_business_oa_detection_event(
-            etc_business_service,
-            event,
+        etc_business_service = (
+            SimpleNamespace()
+            if args.check
+            else EtcBusinessOaDetectionWorkerFactory(
+                data_dir=default_data_dir(),
+                connection=connection,
+                queue_repository=queue,
+            ).build_service()
         )
+        handlers[ETC_BUSINESS_OA_DETECTION_EVENT_TYPE] = build_etc_business_oa_detection_handler(etc_business_service)
         if ETC_BUSINESS_OA_DETECTION_EVENT_TYPE not in config.event_types:
             config.event_types.append(ETC_BUSINESS_OA_DETECTION_EVENT_TYPE)
     if args.enable_workbench_read_model_refresh:
@@ -269,7 +283,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             bank_transaction_category_service=category_service,
             pair_relation_service=pair_relation_service,
             workbench_read_model_service=WorkbenchReadModelService.from_snapshot(
-                state_store.load_workbench_read_models() if state_store is not None else {}
+                {}
             ),
             state_store=state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None),
             queue_repository=queue,
@@ -321,17 +335,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             if "oa_pending_payment.read_model.refresh" not in config.event_types:
                 config.event_types.append("oa_pending_payment.read_model.refresh")
     if args.enable_import_job_processing:
-        from fin_ops_platform.app.server import Application
-
-        import_application = Application(data_dir=default_data_dir())
-        import_job_repository = ImportJobRepository(connection)
-        import_job_worker = ImportJobWorker(
-            repository=import_job_repository,
-            worker_id=config.worker_id,
-            processors=import_application.build_import_job_processors(),
+        import_processors = (
+            check_import_job_processors()
+            if args.check
+            else ImportRuntimeProcessorFactory(
+                data_dir=default_data_dir(),
+                connection=connection,
+                queue_repository=queue,
+            ).build_processors()
         )
-        handlers[IMPORT_PROCESS_REQUESTED_EVENT] = import_job_worker.handle_runtime_event
-        handlers[IMPORT_FACT_CHANGED_EVENT] = _handle_import_fact_changed_event
+        import_handlers = build_import_job_handler_bundle(
+            connection=connection,
+            worker_id=config.worker_id,
+            processors=import_processors,
+            include_import_fact_changed=True,
+        )
+        handlers.update(import_handlers.handlers)
         if IMPORT_PROCESS_REQUESTED_EVENT not in config.event_types:
             config.event_types.append(IMPORT_PROCESS_REQUESTED_EVENT)
         if queue_settings.backend == "postgres" and IMPORT_FACT_CHANGED_EVENT not in config.event_types:
@@ -358,9 +377,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     },
                     "redis_enabled": redis_helper.enabled,
                     "runtime_transport": "rabbitmq" if queue_settings.backend == "rabbitmq" else "postgres",
+                    "worker_instance": args.worker_instance or getattr(registration, "instance_name", None),
                     "worker_kind": config.worker_kind,
                     "event_types": config.event_types,
                     "handlers": sorted(handlers),
+                    "registration": _registration_check_payload(registration),
                     "poll_interval_seconds": config.poll_interval_seconds,
                     "lock_timeout_seconds": config.lock_timeout_seconds,
                     "task_timeout_seconds": config.task_timeout_seconds,
@@ -380,11 +401,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.enable_workbench_matching:
-        from fin_ops_platform.app.server import Application
-
-        workbench_application = Application(data_dir=default_data_dir())
-        workbench_dirty_scope_worker = _build_workbench_matching_dirty_scope_worker(
-            workbench_application,
+        workbench_dirty_scope_worker = WorkbenchMatchingWorkerFactory(
+            data_dir=default_data_dir(),
+            connection=connection,
+        ).build_dirty_scope_worker(
             heartbeat_recorder=queue,
             worker_id=config.worker_id,
             poll_interval_seconds=args.poll_interval_seconds,
@@ -418,77 +438,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _build_workbench_matching_dirty_scope_worker(
-    application: Any,
-    *,
-    heartbeat_recorder: Any,
-    worker_id: str,
-    poll_interval_seconds: float,
-    batch_size: int,
-    lease_seconds: int,
-    retry_delay_seconds: int | None,
-    max_iterations: int | None,
-) -> WorkbenchMatchingDirtyScopeWorker:
-    dirty_queue = _required_application_dependency(application, "_workbench_reconciliation_dirty_queue")
-    matching_orchestrator = _required_application_dependency(application, "_workbench_matching_orchestrator")
-    source_versions_provider = _required_application_dependency(application, "_workbench_matching_source_versions")
-    if not callable(source_versions_provider):
-        raise RuntimeError("Workbench matching worker requires a callable source version provider.")
-    return WorkbenchMatchingDirtyScopeWorker(
-        dirty_queue=dirty_queue,
-        matching_orchestrator=matching_orchestrator,
-        source_versions_provider=source_versions_provider,
-        heartbeat_recorder=heartbeat_recorder,
-        config=WorkbenchMatchingDirtyScopeWorkerConfig(
-            worker_id=worker_id,
-            poll_interval_seconds=poll_interval_seconds,
-            batch_size=batch_size,
-            lease_seconds=lease_seconds,
-            retry_delay_seconds=retry_delay_seconds,
-            max_iterations=max_iterations,
-        ),
-    )
-
-
-def _required_application_dependency(application: Any, attr_name: str) -> Any:
-    dependency = getattr(application, attr_name, None)
-    if dependency is None:
-        raise RuntimeError(f"Workbench matching worker requires Application.{attr_name}.")
-    return dependency
-
-
 def _handle_import_fact_changed_event(event: Any) -> dict[str, Any]:
-    scope_type = str(getattr(event, "scope_type", None) or event.payload.get("scope_type") or "").strip()
-    scope_key = str(getattr(event, "scope_key", None) or event.payload.get("scope_key") or "").strip()
-    return {
-        "status": "acknowledged",
-        "event_type": IMPORT_FACT_CHANGED_EVENT,
-        "scope_type": scope_type,
-        "scope_key": scope_key,
-        "note": "import fact dirty scopes are persisted by the import fact writer",
-    }
+    return handle_import_fact_changed_event(event)
 
 
 def _handle_etc_business_oa_detection_event(service: Any, event: Any) -> dict[str, Any]:
-    payload = getattr(event, "payload", {}) or {}
-    business_batch_id = str(payload.get("business_batch_id") or getattr(event, "aggregate_id", "") or "").strip()
-    if not business_batch_id:
-        raise ValueError("business_batch_id is required for ETC OA detection event.")
-    expected_version = payload.get("expected_version")
-    if expected_version in (None, ""):
-        expected_version = None
-    else:
-        expected_version = int(expected_version)
-    batch = service.refresh_oa_detection(business_batch_id, expected_version=expected_version)
-    if str(getattr(batch, "status", "")) == "oa_submission_detecting":
-        service.enqueue_oa_detection(batch)
-    else:
-        service.sync_invoices_after_oa_detection(batch, reason="etc_business_oa_status_detected_async")
-    return {
-        "status": str(getattr(batch, "status", "")),
-        "business_batch_id": business_batch_id,
-        "version": int(getattr(batch, "version", 0) or 0),
-    }
+    return build_etc_business_oa_detection_handler(service)(event)
 
 
 def _no_oa_workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:
@@ -525,6 +480,49 @@ def _infer_worker_kind(args: argparse.Namespace) -> str:
         if any(bool(getattr(args, attr_name, False)) for attr_name in attr_names):
             enabled.append(registration.worker_kind)
     return enabled[0] if len(enabled) == 1 else "runtime"
+
+
+def _apply_registration_args(
+    args: argparse.Namespace,
+    *,
+    queue_settings: RuntimeQueueSettings,
+) -> RuntimeWorkerRegistration | None:
+    if not args.registration:
+        return None
+    try:
+        registration = get_registration_by_instance_name(str(args.registration))
+    except KeyError as exc:
+        raise SystemExit(str(exc)) from exc
+    if args.worker_instance and args.worker_instance != registration.instance_name:
+        raise SystemExit(
+            f"Worker instance {args.worker_instance!r} does not match registration {registration.instance_name!r}."
+        )
+    args.worker_instance = registration.instance_name
+    if args.worker_kind and args.worker_kind != registration.worker_kind:
+        raise SystemExit(
+            f"Worker kind {args.worker_kind!r} does not match registration kind {registration.worker_kind!r}."
+        )
+    args.worker_kind = registration.worker_kind
+    for flag in registration.handler_flags:
+        setattr(args, _argparse_attr_name(flag), True)
+    transport = "rabbitmq" if queue_settings.backend == "rabbitmq" else "postgres"
+    args.event_type = list(worker_claim_event_types(registration, transport=transport))
+    return registration
+
+
+def _registration_check_payload(registration: RuntimeWorkerRegistration | None) -> dict[str, object] | None:
+    if registration is None:
+        return None
+    return {
+        "instance_name": registration.instance_name,
+        "worker_kind": registration.worker_kind,
+        "required": registration.required,
+        "rabbitmq_eligible": registration.rabbitmq_eligible,
+        "event_types": list(registration.event_types),
+        "postgres_claim_event_types": list(registration.claim_event_types(transport="postgres")),
+        "rabbitmq_claim_event_types": list(registration.claim_event_types(transport="rabbitmq")),
+        "handler_flags": list(registration.handler_flags),
+    }
 
 
 def _argparse_attr_name(flag: str) -> str:

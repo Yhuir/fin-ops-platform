@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 from pathlib import Path
-import re
 import unittest
 
 from fin_ops_platform.app import worker as worker_app
+from fin_ops_platform.tools import runtime_worker_manifest
 from fin_ops_platform.services.rabbitmq_runtime import SUPPORTED_EVENT_TYPES
 from fin_ops_platform.services.runtime_monitoring import READ_MODEL_EVENT_TYPES
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
 from fin_ops_platform.services.runtime_worker_registry import (
     rabbitmq_dispatch_event_types,
+    registration_by_instance_name,
     required_worker_instance_names,
+    worker_check_command_args,
+    worker_claim_event_types,
+    worker_command_args,
     worker_registrations,
 )
 
@@ -24,12 +31,8 @@ DISPATCHER_ENV = ENV_DIR / "fin-ops.rabbitmq-dispatcher.env.example"
 class RuntimeWorkerRegistryTests(unittest.TestCase):
     def test_required_workers_match_deploy_helper_defaults(self) -> None:
         script = ENSURE_WORKERS_SCRIPT.read_text(encoding="utf-8")
-        match = re.search(r'FINOPS_REQUIRED_WORKERS:-([^}]+)', script)
-        self.assertIsNotNone(match)
-
-        deploy_defaults = tuple(str(match.group(1)).split()) if match else ()
-
-        self.assertEqual(deploy_defaults, required_worker_instance_names())
+        self.assertNotRegex(script, r"required_workers=\"\\$\\{FINOPS_REQUIRED_WORKERS:-")
+        self.assertIn("runtime_worker_manifest --required-instances", script)
 
     def test_required_workers_have_env_examples_and_heartbeat_slos(self) -> None:
         for registration in worker_registrations(required_only=True):
@@ -56,6 +59,42 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         for event_type in rabbitmq_dispatch_event_types():
             self.assertIn(event_type, dispatcher_env)
 
+    def test_registration_lookup_and_command_args_are_registry_derived(self) -> None:
+        registration = registration_by_instance_name()["workbench"]
+
+        self.assertEqual(
+            worker_command_args(registration, transport="postgres"),
+            (
+                "--enable-workbench-read-model-refresh",
+                "--event-type",
+                "workbench.read_model.refresh",
+            ),
+        )
+        self.assertEqual(
+            worker_check_command_args(registration, transport="postgres"),
+            (
+                "--registration",
+                "workbench",
+                "--worker-instance",
+                "workbench",
+                "--check",
+            ),
+        )
+
+    def test_import_claim_events_include_postgres_local_ack_event_but_rabbitmq_dispatch_does_not(self) -> None:
+        registration = registration_by_instance_name()["import"]
+
+        self.assertEqual(
+            worker_claim_event_types(registration, transport="postgres"),
+            ("import.process.requested", "import.fact.changed"),
+        )
+        self.assertEqual(
+            worker_claim_event_types(registration, transport="rabbitmq"),
+            ("import.process.requested",),
+        )
+        self.assertIn("import.process.requested", rabbitmq_dispatch_event_types())
+        self.assertNotIn("import.fact.changed", rabbitmq_dispatch_event_types())
+
     def test_read_model_monitoring_events_are_covered_by_registry(self) -> None:
         registry_events = set(rabbitmq_dispatch_event_types())
 
@@ -75,6 +114,37 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         args = worker_app.build_parser().parse_args(["--enable-no-oa-bank-batch-read-model-refresh"])
 
         self.assertEqual(worker_app._infer_worker_kind(args), "no-oa-bank-batch-read-model")
+
+    def test_worker_registration_check_outputs_registry_derived_configuration(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = worker_app.main(["--registration", "workbench", "--worker-instance", "workbench", "--check"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["worker_instance"], "workbench")
+        self.assertEqual(payload["worker_kind"], "workbench-read-model")
+        self.assertEqual(payload["event_types"], ["workbench.read_model.refresh"])
+        self.assertEqual(payload["handlers"], ["workbench.read_model.refresh"])
+        self.assertEqual(payload["registration"]["instance_name"], "workbench")
+
+    def test_unknown_worker_registration_fails_fast(self) -> None:
+        with self.assertRaises(SystemExit):
+            worker_app.main(["--registration", "missing-worker", "--check"])
+
+    def test_manifest_cli_lists_required_instances_and_env_examples(self) -> None:
+        stdout = io.StringIO()
+
+        exit_code = runtime_worker_manifest.main(["--required-instances"], stdout=stdout)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(tuple(stdout.getvalue().split()), required_worker_instance_names())
+
+        stdout = io.StringIO()
+        exit_code = runtime_worker_manifest.main(["--env-example", "workbench"], stdout=stdout)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "fin-ops.worker.workbench.env.example")
 
 
 if __name__ == "__main__":

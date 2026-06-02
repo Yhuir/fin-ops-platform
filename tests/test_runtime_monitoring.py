@@ -112,6 +112,62 @@ class FakeRabbitMqMetrics:
         }
 
 
+class FakeWorkerMetricsConnection:
+    def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+        normalized = " ".join(sql.lower().split())
+        if "from job.runtime_worker_heartbeats" not in normalized:
+            return []
+        return [
+            {
+                "worker_id": "host-workbench",
+                "worker_instance": "workbench",
+                "worker_kind": "unexpected-kind",
+                "status": "idle",
+                "heartbeat_lag_seconds": 1.0,
+                "payload": {
+                    "worker_instance": "workbench",
+                    "configured_event_types": ["workbench.read_model.refresh"],
+                },
+            },
+            {
+                "worker_id": "host-bank-detail",
+                "worker_instance": "bank-detail",
+                "worker_kind": "bank-detail-read-model",
+                "status": "idle",
+                "heartbeat_lag_seconds": 999.0,
+                "payload": {
+                    "worker_instance": "bank-detail",
+                    "configured_event_types": ["bank_detail.read_model.refresh"],
+                },
+            },
+            {
+                "worker_id": "host-bank-account-balance",
+                "worker_instance": "bank-account-balance",
+                "worker_kind": "bank-account-balance-read-model",
+                "status": "idle",
+                "heartbeat_lag_seconds": 2.0,
+                "payload": {
+                    "worker_instance": "bank-account-balance",
+                    "configured_event_types": ["bank_account_balance.read_model.refresh"],
+                },
+            },
+            {
+                "worker_id": "host-import",
+                "worker_instance": "import",
+                "worker_kind": "import-job",
+                "status": "idle",
+                "heartbeat_lag_seconds": 3.0,
+                "payload": {
+                    "worker_instance": "import",
+                    "configured_event_types": ["import.process.requested", "import.fact.changed"],
+                },
+            },
+        ]
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
+        return {}
+
+
 class RuntimeMonitoringRepositoryTests(unittest.TestCase):
     def test_health_summary_reports_backlog_failed_jobs_and_stale_dirty_scopes(self) -> None:
         repository = RuntimeMonitoringRepository(FakeConnection(), rabbitmq_metrics_provider=FakeRabbitMqMetrics())
@@ -126,6 +182,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["worker_heartbeat_lag_seconds"], 8.0)
         self.assertEqual(summary["missing_required_worker_count"], len(required_worker_instance_names()))
         self.assertEqual(summary["stale_required_worker_count"], 0)
+        self.assertEqual(summary["mismatched_required_worker_count"], 0)
         self.assertEqual(summary["worker_metrics"][0]["status"], "missing")
         self.assertEqual(summary["read_model_refresh_duration_ms"], {"p50": 120.0, "p95": 300.0, "p99": 450.0})
         self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
@@ -191,6 +248,31 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 },
             },
         )
+
+    def test_dashboard_worker_metrics_are_registry_instance_aware(self) -> None:
+        repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
+
+        metrics = repository.dashboard_worker_metrics()
+        by_instance = {row["worker_instance"]: row for row in metrics}
+
+        self.assertEqual(by_instance["workbench"]["warning_code"], "worker_kind_mismatch")
+        self.assertEqual(by_instance["workbench"]["expected_worker_kind"], "workbench-read-model")
+        self.assertEqual(by_instance["workbench"]["worker_kind"], "unexpected-kind")
+        self.assertEqual(by_instance["bank-detail"]["warning_code"], "worker_heartbeat_stale")
+        self.assertEqual(by_instance["bank-detail"]["status"], "stale")
+        self.assertFalse(by_instance["bank-account-balance"]["required"])
+        self.assertEqual(by_instance["bank-account-balance"]["status"], "available")
+        self.assertNotIn("warning_code", by_instance["import"])
+        self.assertEqual(by_instance["oa-sync"]["warning_code"], "required_worker_missing")
+
+    def test_health_summary_counts_worker_mismatches(self) -> None:
+        repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
+
+        summary = repository.health_summary(stale_after_seconds=300)
+
+        self.assertGreaterEqual(summary["missing_required_worker_count"], 1)
+        self.assertEqual(summary["stale_required_worker_count"], 1)
+        self.assertEqual(summary["mismatched_required_worker_count"], 1)
 
 
 if __name__ == "__main__":

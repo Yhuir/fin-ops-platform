@@ -137,7 +137,7 @@ WorkingDirectory=$src
 Environment=PYTHONPATH=$src/backend/src
 Environment=FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=1
 ExecStart=
-ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.worker --worker-id \${FIN_OPS_WORKER_ID} --worker-kind \${FIN_OPS_WORKER_KIND} \$FIN_OPS_WORKER_ARGS --lock-timeout-seconds \${FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS} --task-timeout-seconds \${FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS} --statement-timeout-seconds \${FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS} --max-attempts \${FIN_OPS_WORKER_MAX_ATTEMPTS} --max-events-per-iteration \${FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION}
+ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.worker --worker-id \${FIN_OPS_WORKER_ID} --registration \${FIN_OPS_WORKER_INSTANCE} --worker-instance \${FIN_OPS_WORKER_INSTANCE} \$FIN_OPS_WORKER_ARGS --lock-timeout-seconds \${FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS} --task-timeout-seconds \${FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS} --statement-timeout-seconds \${FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS} --max-attempts \${FIN_OPS_WORKER_MAX_ATTEMPTS} --max-events-per-iteration \${FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION}
 DROPIN
 }
 
@@ -195,6 +195,61 @@ restart_services() {
   if systemctl is-active --quiet fin-ops-rabbitmq-dispatcher.service; then
     systemctl restart fin-ops-rabbitmq-dispatcher.service
   fi
+}
+
+wait_required_workers_ready() {
+  local timeout deadline health status_json
+  timeout="${FINOPS_WORKER_READY_TIMEOUT_SECONDS:-90}"
+  [[ "$timeout" =~ ^[0-9]+$ ]] || die "invalid FINOPS_WORKER_READY_TIMEOUT_SECONDS: $timeout"
+  deadline=$((SECONDS + timeout))
+  health=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    health="$(curl -fsS --max-time 5 http://127.0.0.1:18001/health 2>&1 || true)"
+    status_json="$(printf '%s' "$health" | python3 -c '
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+runtime = data.get("runtime_infrastructure")
+if not isinstance(runtime, dict):
+    sys.exit(1)
+workers = runtime.get("worker_metrics")
+if not isinstance(workers, list):
+    workers = []
+missing = int(runtime.get("missing_required_worker_count") or 0)
+stale = int(runtime.get("stale_required_worker_count") or 0)
+mismatched = int(runtime.get("mismatched_required_worker_count") or 0)
+bad_codes = {"worker_kind_mismatch", "worker_event_type_mismatch"}
+bad_workers = [
+    str(row.get("worker_instance") or row.get("worker_kind") or "")
+    for row in workers
+    if isinstance(row, dict) and row.get("warning_code") in bad_codes
+]
+payload = {
+    "missing_required_worker_count": missing,
+    "stale_required_worker_count": stale,
+    "mismatched_required_worker_count": mismatched,
+    "bad_workers": bad_workers,
+}
+print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+sys.exit(0 if missing == 0 and stale == 0 and mismatched == 0 and not bad_workers else 2)
+' 2>/dev/null)"
+    case "$?" in
+      0)
+        return 0
+        ;;
+      2)
+        health="$status_json"
+        ;;
+    esac
+    sleep 2
+  done
+  echo "required runtime workers did not become ready after release activation" >&2
+  printf '%s\n' "$health" >&2
+  exit 68
 }
 
 status() {
@@ -292,6 +347,7 @@ case "$cmd" in
     ensure_runtime_workers "$src"
     publish_frontend "$src"
     restart_services
+    wait_required_workers_ready
     status
     ;;
   restart)

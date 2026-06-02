@@ -546,6 +546,51 @@ class PendingInvoiceApiTests(unittest.TestCase):
             expected_requires,
         )
 
+    def test_pending_invoice_rules_put_enqueues_all_rule_filter_read_model_scopes(self) -> None:
+        class QueueRepository:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_rule_tags(app)
+            queue_repository = QueueRepository()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue_repository)
+            if hasattr(app, "_pending_invoice_api_routes"):
+                delattr(app, "_pending_invoice_api_routes")
+
+            response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/rules",
+                body=json.dumps({
+                    "groups": {
+                        "bank_statement_as_invoice": {"tag_codes": ["fee"]},
+                        "no_invoice_required": {"tag_codes": ["salary"]},
+                    }
+                }),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        pending_invoice_refreshes = [
+            refresh for refresh in queue_repository.enqueued if refresh[0] == "pending_invoice"
+        ]
+        self.assertEqual(
+            pending_invoice_refreshes,
+            [
+                ("pending_invoice", "expense:all", "pending_invoice_rules_update"),
+                ("pending_invoice", "expense:requires_invoice", "pending_invoice_rules_update"),
+                ("pending_invoice", "expense:bank_statement_as_invoice", "pending_invoice_rules_update"),
+                ("pending_invoice", "expense:no_invoice_required", "pending_invoice_rules_update"),
+                ("pending_invoice", "income:all", "pending_invoice_rules_update"),
+                ("pending_invoice", "income:requires_invoice", "pending_invoice_rules_update"),
+                ("pending_invoice", "income:no_invoice_required", "pending_invoice_rules_update"),
+                ("pending_invoice", "income:cash_income", "pending_invoice_rules_update"),
+            ],
+        )
+
     def test_pending_invoice_rules_put_rejects_duplicate_editable_group_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
