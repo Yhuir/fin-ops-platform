@@ -105,6 +105,38 @@ class TurnoverLedgerLocalTagSelectionSettingsWriter:
         self._refresh_snapshot(snapshot)
 
 
+class TurnoverLedgerLocalTagSelectionAdapterSet:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        app_settings_service: Any,
+        refresh_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._state_store = state_store
+        self._app_settings_service = app_settings_service
+        self._refresh_snapshot = refresh_snapshot
+
+    def connection(self) -> TurnoverLedgerLocalTagSelectionConnection:
+        return TurnoverLedgerLocalTagSelectionConnection(
+            settings_snapshot_provider=self.settings_snapshot,
+            save_snapshot=self.save_snapshot,
+            refresh_snapshot=self._refresh_snapshot,
+        )
+
+    def settings_writer(self) -> TurnoverLedgerLocalTagSelectionSettingsWriter:
+        return TurnoverLedgerLocalTagSelectionSettingsWriter(
+            save_snapshot=self.save_snapshot,
+            refresh_snapshot=self._refresh_snapshot,
+        )
+
+    def settings_snapshot(self) -> dict[str, object]:
+        return dict(getattr(self._app_settings_service, "_snapshot", {}) or {})
+
+    def save_snapshot(self, snapshot: dict[str, object]) -> None:
+        self._state_store.save_app_settings(dict(snapshot))
+
+
 class TurnoverLedgerTagSelectionLegacyFallbackFacade:
     def __init__(
         self,
