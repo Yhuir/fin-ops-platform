@@ -1093,6 +1093,36 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             [("turnover_ledger", ["all"], "turnover_relation_changed")],
         )
 
+    def test_target_confirm_relation_facade_passes_expected_versions_before_repository(self) -> None:
+        # PF-P173 target contract: confirm should accept bank-row expected versions and reject stale submits before mutation.
+        stale_precondition = _StalePreconditionPort(stale=True)
+        relation_port = _RecordingConfirmRelationPort()
+        uow, deps = self._build_uow(
+            relation_repository=relation_port,  # type: ignore[arg-type]
+            stale_precondition_port=stale_precondition,
+        )
+        facade = self._write_facade_class()(uow=uow)
+        expected_versions = {"turnover_bank_row:bank_txn_1": "v1", "turnover_bank_row:bank_txn_2": "v1"}
+
+        with self.assertRaisesRegex(RuntimeError, "turnover_write_conflict"):
+            facade.confirm_relation(
+                bank_row_ids=["bank_txn_1", "bank_txn_2"],
+                actor_id="finance-user",
+                tenant_id="default",
+                note="stale confirm",
+                affected_months=["2026-02"],
+                expected_versions=expected_versions,
+            )
+
+        self.assertEqual(
+            stale_precondition.checked,
+            [{"expected_versions": expected_versions, "transaction": deps.connection.transaction_obj}],
+        )
+        self.assertEqual(relation_port.confirm_calls, [])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 0)
+        self.assertEqual(deps.connection.rollbacks, 1)
+
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:
         uow, deps = self._build_uow(stale_precondition_port=_StalePreconditionPort(stale=True))
         handler_called = False

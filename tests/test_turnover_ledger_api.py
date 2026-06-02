@@ -137,6 +137,7 @@ class _RelationWriteFacadeRecorder:
         tenant_id: str,
         note: str | None,
         affected_months: list[str],
+        expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         self.confirm_calls.append(
             {
@@ -145,6 +146,7 @@ class _RelationWriteFacadeRecorder:
                 "tenant_id": tenant_id,
                 "note": note,
                 "affected_months": list(affected_months),
+                "expected_versions": dict(expected_versions or {}),
             }
         )
         return {
@@ -1096,6 +1098,34 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
         self.assertEqual(queue.enqueued, [])
 
+    def test_confirm_stale_bank_row_precondition_rejects_before_mutation_or_refresh(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps(
+                    {
+                        "bank_row_ids": transaction_ids,
+                        "note": "stale confirm should fail",
+                        "expected_versions": {
+                            f"turnover_bank_row:{transaction_ids[0]}": 0,
+                        },
+                    }
+                ),
+            )
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(json.loads(response.body)["error"], "turnover_relation_conflict")
+        self.assertEqual(audit_log, [])
+        self.assertEqual(queue.enqueued, [])
+
     def test_confirm_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract(self) -> None:
         uow = _RecordingTurnoverLedgerUow()
         facade = TurnoverLedgerWriteFacade(uow=uow)
@@ -1114,7 +1144,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.idempotency_key, "")
         self.assertEqual(command.request_fingerprint, "")
 
-    def test_confirm_request_body_expected_versions_are_currently_not_forwarded_to_write_command(self) -> None:
+    def test_confirm_request_body_without_expected_versions_keeps_empty_write_command_versions(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -1127,8 +1157,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 body=json.dumps(
                     {
                         "bank_row_ids": transaction_ids,
-                        "note": "confirm expected versions ignored today",
-                        "expected_versions": {"relation:turnover_rel_confirm": 99},
+                        "note": "confirm legacy payload has no expected versions",
                     }
                 ),
             )
@@ -1139,6 +1168,31 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.expected_versions, {})
         self.assertEqual(command.idempotency_key, "")
         self.assertEqual(command.request_fingerprint, "")
+
+    def test_target_confirm_request_expected_versions_reach_write_command(self) -> None:
+        expected_versions = {"turnover_bank_row:bank-txn-confirm-1": "v1"}
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            uow = _RecordingTurnoverLedgerUow()
+            app._turnover_ledger_confirm_write_facade_override = TurnoverLedgerWriteFacade(uow=uow)
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps(
+                    {
+                        "bank_row_ids": transaction_ids,
+                        "note": "target confirm expected versions",
+                        "expected_versions": expected_versions,
+                    }
+                ),
+            )
+            command = uow.commands[0]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(command.action_name, "confirm_relation")
+        self.assertEqual(command.expected_versions, expected_versions)
 
     def test_bank_row_tags_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract(self) -> None:
         uow = _RecordingTurnoverLedgerUow()
@@ -1207,7 +1261,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
     def test_turnover_ledger_primary_write_builders_still_use_noop_local_stale_precondition_ports(self) -> None:
         builder_methods = [
             Application._turnover_ledger_tag_selection_write_facade.__globals__["TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder"].build,
-            Application._turnover_ledger_confirm_write_facade.__globals__["TurnoverLedgerConfirmPrimaryWriteFacadeBuilder"].build,
             Application._turnover_ledger_bank_row_tags_write_facade.__globals__["TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder"].build,
             Application._turnover_ledger_relation_extra_write_facade.__globals__["TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder"].build,
         ]
@@ -1224,6 +1277,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertIn("TurnoverLedgerRelationStalePreconditionPort(", source)
         self.assertIn("relation_detail_provider=self._routes.get_relation", source)
+        self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
+
+    def test_turnover_ledger_confirm_builder_uses_bank_row_stale_precondition_port(self) -> None:
+        source = inspect.getsource(
+            Application._turnover_ledger_confirm_write_facade.__globals__["TurnoverLedgerConfirmPrimaryWriteFacadeBuilder"].build
+        )
+
+        self.assertIn("TurnoverLedgerBankRowStalePreconditionPort(", source)
+        self.assertIn("bank_rows_provider=self._bank_rows_provider", source)
         self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
 
     def test_turnover_ledger_local_runtime_helpers_delegate_to_support_boundary(self) -> None:
@@ -3308,6 +3370,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "tenant_id": "default",
                     "note": "facade confirm",
                     "affected_months": ["2026-02", "2026-03"],
+                    "expected_versions": {},
                 }
             ],
         )

@@ -550,6 +550,9 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
                 queue_repository=self._queue_repository
             )
+        stale_precondition_port = TurnoverLedgerBankRowStalePreconditionPort(
+            bank_rows_provider=self._bank_rows_provider
+        )
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=relation_repository,
@@ -557,7 +560,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
             dirty_outbox_writer=dirty_outbox_writer,
-            stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+            stale_precondition_port=stale_precondition_port,
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
@@ -873,8 +876,9 @@ class TurnoverLedgerConfirmLegacyFallbackFacade:
         tenant_id: str,
         note: str | None,
         affected_months: list[str],
+        expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        _ = tenant_id
+        _ = tenant_id, expected_versions
         self._relation_rebuild()
         result = self._routes.confirm_relation(
             bank_row_ids=list(bank_row_ids or []),
@@ -902,6 +906,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         actor_id: str,
         tenant_id: str,
         note: str | None,
+        expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_bank_row_ids = [
             str(row_id).strip()
@@ -915,6 +920,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             tenant_id=tenant_id,
             note=note,
             affected_months=affected_months,
+            expected_versions=dict(expected_versions or {}),
         )
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
@@ -949,6 +955,45 @@ class TurnoverLedgerRelationStalePreconditionPort:
                     error_code="turnover_relation_conflict",
                     message="往来款关系已变化，请刷新后重试。",
                 )
+
+
+class TurnoverLedgerBankRowStalePreconditionPort:
+    def __init__(self, *, bank_rows_provider: Callable[[], list[dict[str, object]]]) -> None:
+        self._bank_rows_provider = bank_rows_provider
+
+    def assert_current(self, *, expected_versions: dict[str, object], transaction: object) -> None:
+        _ = transaction
+        expected_by_transaction_id: dict[str, object] = {}
+        for raw_key, expected_value in dict(expected_versions or {}).items():
+            key = str(raw_key)
+            if not key.startswith("turnover_bank_row:"):
+                continue
+            transaction_id = key.removeprefix("turnover_bank_row:").strip()
+            if transaction_id:
+                expected_by_transaction_id[transaction_id] = expected_value
+        if not expected_by_transaction_id:
+            return
+        rows_by_transaction_id = {
+            str(row.get("id") or row.get("transaction_id") or "").strip(): dict(row)
+            for row in list(self._bank_rows_provider() or [])
+            if str(row.get("id") or row.get("transaction_id") or "").strip()
+        }
+        for transaction_id, expected_value in expected_by_transaction_id.items():
+            row = rows_by_transaction_id.get(transaction_id)
+            current_version = None if row is None else self._bank_row_version(row)
+            if str(current_version) != str(expected_value):
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="银行流水状态已变化，请刷新后重试。",
+                )
+
+    @staticmethod
+    def _bank_row_version(row: dict[str, object]) -> object:
+        for field_name in ("category_version", "manual_category_version", "version"):
+            value = row.get(field_name)
+            if value is not None:
+                return value
+        return None
 
 
 class TurnoverLedgerWithdrawRequestBoundaryFacade:

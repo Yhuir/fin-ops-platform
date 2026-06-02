@@ -162,6 +162,7 @@ class TurnoverLedgerWriteFacade:
         tenant_id: str,
         note: str | None,
         affected_months: list[str],
+        expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_bank_row_ids = [
             str(row_id).strip()
@@ -173,6 +174,7 @@ class TurnoverLedgerWriteFacade:
             for month in list(affected_months or [])
             if str(month).strip()
         ]
+        normalized_expected_versions = dict(expected_versions or {})
         command = TurnoverLedgerWriteCommand(
             action_name="confirm_relation",
             scope_keys=["all"],
@@ -185,6 +187,7 @@ class TurnoverLedgerWriteFacade:
             ],
             actor_id=actor_id,
             tenant_id=tenant_id,
+            expected_versions=dict(normalized_expected_versions),
             payload={
                 "bank_row_ids": list(normalized_bank_row_ids),
                 "affected_months": list(normalized_months),

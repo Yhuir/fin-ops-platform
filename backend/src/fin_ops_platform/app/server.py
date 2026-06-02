@@ -1262,6 +1262,17 @@ class Application:
             row["category_code"] = category_code
             row["category_label"] = category.get("category_label")
             row["category_path"] = list(category.get("category_path") or [])
+            raw_category_version = (
+                category.get("category_version")
+                if category.get("category_version") is not None
+                else category.get("manual_category_version")
+            )
+            if raw_category_version is None:
+                raw_category_version = category.get("version")
+            try:
+                row["category_version"] = int(raw_category_version or 0)
+            except (TypeError, ValueError):
+                row["category_version"] = 0
             amount = row.get("amount") or "0.00"
             direction = str(row.get("txn_direction") or "").strip().lower()
             row["debit_amount"] = amount if direction == "outflow" else "0.00"
@@ -12641,16 +12652,23 @@ class Application:
             )
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
         facade = self._turnover_ledger_confirm_request_boundary_facade()
+        expected_versions = payload.get("expected_versions") if isinstance(payload.get("expected_versions"), dict) else {}
         try:
             result = facade.confirm_relation_from_request(
                 bank_row_ids=bank_row_ids,
                 actor_id=actor,
                 tenant_id=tenant_id_for_session(session_response),
                 note=str(payload.get("note")) if payload.get("note") is not None else None,
+                expected_versions=expected_versions,
             )
         except TurnoverRelationValidationError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except TurnoverLedgerWritePreconditionError as exc:
+            return self._json_response(
+                exc.status_code,
                 {"error": exc.error_code, "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, result)
