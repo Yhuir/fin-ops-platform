@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` 已执行并验证通过 |
-| 当前 active prompt | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
+| 当前阶段 | `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` |
 | 最近 verified prompt | `PF-P128 - Turnover Ledger Bank Row Tags Legacy Fallback Cleanup Discovery and Planning` |
 | 当前分支 | `codex/turnover-ledger-bank-row-tags-fallback-p128` |
 | 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；PF-P128 文档关键词检查：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` |
+| 下一条允许任务 | 执行 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests` |
 
 ## Prompt 执行日志
 
@@ -9130,6 +9130,35 @@ Relation mutation fallback family 已完成 confirm 与 withdraw 两个最小切
 #### 下一条 Prompt 上下文
 
 下一条最小 prompt 是 `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`。PF-P129 只补 tests 和文档，不修改 production code；必须锁定 handler-thinness target、unsupported postgres queue API fallback adapter success/queue-failure，以及现有 dependency-missing fallback 语义。
+
+### PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests
+
+状态：`planned`
+
+#### 范围
+
+- 只补 bank row tags fallback cleanup 前的 characterization tests。
+- 不修改 production code。
+- 不执行 Merge Gate 或 Traffic Gate。
+
+#### 允许文件
+
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+#### 下一条 Prompt 上下文
+
+TBD。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

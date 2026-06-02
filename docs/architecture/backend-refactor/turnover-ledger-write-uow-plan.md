@@ -4056,6 +4056,32 @@ PF-P110 边界：
 - `PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`
 - 只补 tests 和文档，不修改 production code。
 
+## PF-P129 Bank Row Tags Fallback Characterization Tests
+
+状态：`planned`
+
+目标：
+
+- 只补 bank row tags fallback adapter extraction 前的 characterization tests。
+- handler-thinness target 用 `unittest.expectedFailure` 锁定未来目标。
+- 补 unsupported postgres queue API fallback success / queue failure tests。
+- 不修改 production code。
+
+允许文件：
+
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

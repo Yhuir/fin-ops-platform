@@ -24629,6 +24629,88 @@ Post-Flight:
   - `rg -n "PF-P128|Bank Row Tags Legacy Fallback Cleanup|bank row tags fallback inventory|Handler Direct Side Effects Matrix" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass
 - 下一条最小 prompt：`PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests`。PF-P129 只补 tests 和文档，不修改 production code。
 
+## PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests
+
+```text
+/goal
+PF-P129 - Turnover Ledger Bank Row Tags Fallback Characterization Tests
+
+Role:
+你是一位负责遗留系统安全重构的测试工程师。你必须只为 Turnover Ledger bank row tags fallback cleanup 补 characterization tests，不修改生产代码。
+
+Context:
+PF-P128 已 verified。PF-P128 发现 bank row tags fallback 仍在 handler 中直接执行 category apply/save、relation rebuild 和 after-mutation。由于该路径跨 Bankdetail、Turnover Relation、Workbench invalidation 与 Turnover Ledger Read Model，本轮只能补测试锁定。
+
+Goal:
+补齐 bank row tags fallback adapter extraction 前的测试护栏：
+- handler-thinness target，先显式标记为 `unittest.expectedFailure`，证明当前 handler 仍内联 direct fallback side effects；
+- unsupported postgres queue API fallback success characterization；
+- unsupported postgres queue API fallback queue-failure characterization；
+- 保持 existing dependency-missing fallback 和 explicit override None fallback tests 通过。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P128 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Required Test Work:
+1. Handler-thinness target:
+   - 新增 `test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects`。
+   - 使用 `inspect.getsource(Application._handle_api_turnover_ledger_bank_row_tags_batch)`。
+   - 断言未来 handler 不应包含 direct `apply_turnover_updates(...)`、`save_bank_transaction_categories(...)`、`rebuild_from_bank_rows(...)` 或 `_after_turnover_relation_mutation(...)`。
+   - 当前 production code 仍未抽离，因此该 test 必须用 `@unittest.expectedFailure` 标记；不得为了转绿修改 production code。
+2. Unsupported postgres queue API fallback success:
+   - 新增或调整测试，让 `_turnover_ledger_bank_row_tags_write_facade()` 因 postgres-like state store + queue 不支持 `enqueue_read_model_refresh_in_transaction` 而走 fallback。
+   - 断言 legacy fallback 仍执行 category update、relation rebuild、read model clear/enqueue 与 response payload flags。
+3. Unsupported postgres queue API fallback queue failure:
+   - 新增或调整测试，使用 failing queue 触发 legacy queue failure。
+   - 断言当前语义保持：queue failure 发生在 category mutation/relation rebuild 之后。
+4. Existing tests:
+   - 保持 explicit override None fallback test 通过。
+   - 保持 dependency-missing fallback test 通过。
+   - 保持 UoW rollback/local facade tests 通过。
+
+Allowed Scope:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 database migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得实现 bank row tags fallback adapter。
+- 不得移除或放宽现有断言。
+- 不得执行 Merge Gate、Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录新增/调整的 tests、expectedFailure target、验证结果。
+3. 下一条最小 prompt 应是 `PF-P130 - Turnover Ledger Bank Row Tags Legacy Fallback Facade Extraction`，除非 tests 暴露 blocker。
+```
+
+### 审查结论
+
+- PF-P129 边界正确：只补 bank row tags fallback characterization tests 和文档。
+- handler-thinness target 使用 `expectedFailure` 是合理的，因为 PF-P129 禁止修改 production code；真正转绿应在 PF-P130 adapter extraction。
+- PF-P129 不执行 MG、Traffic Gate，不访问生产或外部服务。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
