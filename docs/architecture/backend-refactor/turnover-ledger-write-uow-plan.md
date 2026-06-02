@@ -3437,7 +3437,7 @@ PF-P110 边界：
 
 ## PF-P119-MG Bank Row Tags Local Adapter Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -3480,6 +3480,307 @@ PF-P110 边界：
 
 - 执行 `git push origin main`。
 - push 后从最新 main 新建分支，并基于剩余 Turnover Ledger 重构清单生成下一条 prompt。
+
+## PF-P120 Facade None Fallback Rebaseline and Handler Thinness Planning
+
+状态：`verified`
+
+目标：
+
+- 盘点 Turnover Ledger 写 handler 中所有 `facade is None` fallback。
+- 判断哪些 fallback 仍是 local/dev/test compatibility，哪些可以进入后续 cleanup。
+- 输出 handler thinness gap、characterization test gap 和下一条最小 prompt。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests。
+- 不删除 fallback，不修改 facade/UoW 语义。
+
+必须输出：
+
+- Facade None Fallback Matrix。
+- Handler Thinness Gap。
+- Compatibility Decision。
+- Characterization Test Gap。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P120|Facade None Fallback|Handler Thinness" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+### Facade None Fallback Matrix
+
+| 写入口 | fallback 触发条件 | direct side effects | 当前测试覆盖 | 目标架构状态 |
+| --- | --- | --- | --- | --- |
+| tag selection update | facade construction 因 `state_store`、`queue_repository` 或 queue API 缺失返回 `None`。 | 直接调用 `AppSettingsService.update_turnover_ledger_tag_selection(...)`，再 clear Turnover Ledger read model 并 enqueue refresh。 | 已覆盖 UoW/local facade queue rollback 和 no direct clear；未覆盖 facade None 正向 fallback。 | 暂留 local/dev/test compatibility；先补 tests，再推动稳定 local facade construction。 |
+| bank row tags batch | facade construction 依赖缺失返回 `None`，或显式 monkeypatch 为 `None`。 | 直接 apply bank category、save category snapshot、rebuild relation、执行 `_after_turnover_relation_mutation(...)`。 | 已覆盖显式 facade None direct side effects、local facade success/rollback；缺少 dependency-missing fallback。 | 已接近可 cleanup，但需要先区分 override None 与 dependency missing。 |
+| relation extra update | facade construction 依赖缺失返回 `None`，或显式 monkeypatch 为 `None`。 | 直接 route update extra、best-effort persist extra、clear read model、enqueue refresh。 | 已覆盖 queue failure after direct update、facade path skips legacy side effects、target rollback；缺少 facade None success characterization。 | 暂留，先补正向 fallback tests。 |
+| confirm relation | facade construction 依赖缺失返回 `None`，或 override 属性存在且为 `None`。 | 直接 rebuild relation、route confirm、执行 `_after_turnover_relation_mutation(...)`。 | 已覆盖 queue failure after direct confirm、target rollback、facade override skips after-mutation、Postgres facade readiness；缺少 facade None success characterization。 | 暂留，后续按测试锁定再 cleanup。 |
+| withdraw relation | facade construction 依赖缺失返回 `None`，或 override 属性存在且为 `None`。 | 直接 route withdraw、执行 `_after_turnover_relation_mutation(...)`。 | 已覆盖 queue failure after direct withdraw、target rollback、facade override skips after-mutation、Postgres facade readiness；缺少 facade None success characterization。 | 暂留，后续按测试锁定再 cleanup。 |
+
+### Handler Thinness Gap
+
+- handler 可保留：session/auth、JSON parsing、HTTP status mapping、response packaging、简单 body shape 校验。
+- handler 应迁出：facade construction failure policy、local direct mutation、snapshot persistence、read model clear/enqueue、Workbench/Bankdetail invalidation orchestration、relation rebuild sequencing。
+- `_after_turnover_relation_mutation(...)` 仍是跨模块副作用聚合点，长期应收敛到 facade/application service 或专门 invalidation adapter。
+
+### Compatibility Decision
+
+- 所有 `facade is None` fallback 当前都先保留。
+- 删除 fallback 前必须先补 characterization tests，且测试要区分：
+  - 显式 override None。
+  - dependency missing / unsupported queue API 导致 construction None。
+- 下一步不改 production code，先补 fallback tests。
+
+### Characterization Test Gap
+
+- tag selection：缺少 facade None success fallback 的 direct update、clear、enqueue 断言。
+- relation extra：缺少 facade None success fallback 的 direct update、persist、clear、enqueue 断言。
+- confirm relation：缺少 facade None success fallback 的 rebuild、confirm、after-mutation 断言。
+- withdraw relation：缺少 facade None success fallback 的 withdraw、after-mutation 断言。
+- bank row tags：已有 explicit override None 测试，但缺少 dependency-missing fallback 测试。
+
+下一条最小 prompt：
+
+- `PF-P121 - Turnover Ledger Facade None Fallback Characterization Tests`
+- 只补测试和文档，不修改 production code。
+- 不删除 fallback，不改变 UoW/facade 语义。
+
+## PF-P121 Facade None Fallback Characterization Tests
+
+状态：`verified`
+
+目标：
+
+- 补齐 PF-P120 识别的 facade None fallback characterization tests。
+- 锁定 tag selection、relation extra、confirm relation、withdraw relation 的 facade None success fallback。
+- 补齐 bank row tags dependency-missing fallback 覆盖。
+
+边界：
+
+- 允许修改 `tests/test_turnover_ledger_api.py` 和 backend-refactor 文档。
+- 不修改 production code。
+- 不删除 fallback。
+- 不改变 UoW/facade 语义。
+
+必须覆盖：
+
+- tag selection direct settings update、read model clear、refresh enqueue。
+- relation extra direct update、best-effort persist、read model clear、refresh enqueue。
+- confirm relation direct rebuild、route confirm、after-mutation side effects。
+- withdraw relation direct route withdraw、after-mutation side effects。
+- bank row tags queue API missing 导致 facade construction None 的 legacy fallback。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+执行结果：
+
+- 新增 `test_turnover_ledger_tag_selection_facade_none_keeps_legacy_direct_update_and_refresh`。
+- 新增 `test_relation_extra_facade_none_keeps_legacy_direct_update_persist_and_refresh`。
+- 新增 `test_confirm_relation_facade_none_keeps_legacy_rebuild_confirm_and_after_mutation`。
+- 新增 `test_withdraw_relation_facade_none_keeps_legacy_withdraw_and_after_mutation`。
+- 新增 `test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects`。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，61 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+
+下一条最小 prompt：
+
+- `PF-P122 - Turnover Ledger Facade None Fallback Cleanup Planning`
+- 只规划最小 cleanup 顺序和风险，不直接修改 production code。
+
+## PF-P122 Facade None Fallback Cleanup Planning
+
+状态：`verified`
+
+目标：
+
+- 基于 PF-P120/PF-P121 的发现和测试，规划 facade None fallback cleanup 顺序。
+- 判断每个 fallback 是可删除、需暂留，还是应先稳定 facade construction。
+
+边界：
+
+- 只做文档和状态机回写。
+- 不修改 production code，不修改 tests。
+- 不删除 fallback，不改变 UoW/facade 语义。
+
+必须输出：
+
+- Cleanup Candidate Matrix。
+- Minimal Cleanup Order。
+- Handler Thinness Target。
+- Risk Register。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P122|Cleanup Candidate Matrix|fallback cleanup" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+### Cleanup Candidate Matrix
+
+| 写入口 | 判断 | 下一步 |
+| --- | --- | --- |
+| tag selection update | 最小、最适合先处理；不直接删除 compatibility。 | 抽显式 legacy fallback facade/adapter，handler 不再直接 settings update / clear / enqueue。 |
+| relation extra update | 可第二批处理；涉及 row provider、extra persistence、expected_versions/idempotency precheck。 | 单独 prompt，不与 tag selection 混合。 |
+| bank row tags batch | 跨 Bankdetail、Workbench invalidation、relation rebuild。 | 暂缓，等简单 fallback adapter 模式跑通后再处理。 |
+| confirm relation | 涉及 relation rebuild 和 `_after_turnover_relation_mutation(...)`。 | 先做 relation mutation family planning。 |
+| withdraw relation | 涉及 relation detail precheck、expected_versions、stale/duplicate submit。 | 在 confirm 后处理，避免破坏并发写保护。 |
+
+### Minimal Cleanup Order
+
+1. `PF-P123 - Turnover Ledger Tag Selection Legacy Fallback Facade Extraction`
+2. `PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction`
+3. `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning`
+4. 后续再处理 bank row tags fallback cleanup。
+
+### Handler Thinness Target
+
+- handler 保留 HTTP mapping、session/auth、body parsing、response packaging。
+- handler 不直接做 settings update、read model clear/enqueue、relation extra update、relation rebuild 或跨模块 invalidation orchestration。
+
+### Risk Register
+
+- local/dev/test compatibility 必须被保留或显式收紧。
+- dependency missing fallback 不应继续散落在 handler。
+- Postgres path 必须继续使用 transaction-bound dirty/outbox。
+- read model clear/enqueue 次数必须保持 PF-P121 tests 锁定的行为。
+- Bankdetail/Workbench invalidation side effects 后续单独处理。
+
+## PF-P123 Tag Selection Legacy Fallback Facade Extraction
+
+状态：`verified`
+
+目标：
+
+- 只处理 tag selection update fallback。
+- 将 direct settings update、read model clear、refresh enqueue 从 handler 移入显式 legacy fallback facade/adapter。
+- 让 handler 只做 HTTP mapping、session/body parsing、调用 facade-like object 和 response packaging。
+
+边界：
+
+- 允许修改 `server.py`、`turnover_ledger_write_adapters.py`、Turnover Ledger tests 和 backend-refactor 文档。
+- 不处理 relation extra、bank row tags、confirm、withdraw。
+- 不改变 queue reason、response payload、version conflict 行为。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- 新增 `TurnoverLedgerTagSelectionLegacyFallbackFacade`。
+- tag selection facade construction 在 primary UoW facade 不可用时返回 legacy fallback adapter。
+- tag selection handler 删除 `facade is None` direct mutation/clear/enqueue 分支。
+- tests 增加 handler thinness 静态门禁，并验证 unsupported postgres queue API fallback adapter 保持 legacy update/clear/enqueue 行为。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，62 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条最小 prompt：
+
+- `PF-P124 - Turnover Ledger Relation Extra Legacy Fallback Facade Extraction`
+- 只处理 relation extra fallback，不处理 bank row tags、confirm、withdraw。
+
+## PF-P124 Relation Extra Legacy Fallback Facade Extraction
+
+状态：`verified`
+
+目标：
+
+- 只处理 relation extra update fallback。
+- 将 direct route update、best-effort persist、read model clear、refresh enqueue 从 handler 移入显式 legacy fallback facade/adapter。
+- 保留 expected_versions/idempotency precheck，不在本轮迁移。
+
+边界：
+
+- 允许修改 `server.py`、`turnover_ledger_write_adapters.py`、Turnover Ledger tests 和 backend-refactor 文档。
+- 不处理 tag selection、bank row tags、confirm、withdraw。
+- 不改变 response payload、validation、idempotency conflict 或 stale conflict 行为。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- 新增 `TurnoverLedgerRelationExtraLegacyFallbackFacade`。
+- relation extra facade construction 在 primary UoW facade 不可用时返回 legacy fallback adapter。
+- relation extra handler 删除 `facade is None` direct route update / persist / clear / enqueue 分支。
+- 保留 expected_versions/idempotency precheck。
+- tests 增加 handler thinness 静态门禁，并验证 unsupported postgres queue API fallback adapter 保持 legacy update/persist/clear/enqueue 行为。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+下一条最小 prompt：
+
+- `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate`
+- 统一覆盖 PF-P120 到 PF-P124 完整 diff。
+
+## PF-P124-MG Fallback Facade Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一验证并合入 PF-P120 到 PF-P124。
+- 覆盖 fallback rebaseline、fallback tests、cleanup planning、tag selection fallback adapter、relation extra fallback adapter。
+- 不执行 Traffic Gate，不部署，不访问生产。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
