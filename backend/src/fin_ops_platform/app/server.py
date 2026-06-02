@@ -280,6 +280,8 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationConnection,
     TurnoverLedgerLocalRelationRepository,
     TurnoverLedgerLocalRelationExtraConnection,
+    TurnoverLedgerLocalTagSelectionConnection,
+    TurnoverLedgerLocalTagSelectionSettingsWriter,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionSettingsAdapter,
 )
@@ -3021,12 +3023,17 @@ class Application:
                 tenant_id=self._workbench_reconciliation_tenant_id(),
             )
         else:
-            connection = self._local_turnover_ledger_tag_selection_connection(state_store)
-            settings_port = TurnoverLedgerTagSelectionSettingsAdapter(
-                writer=lambda next_snapshot, audit_event, transaction: self._save_local_turnover_ledger_tag_selection(
-                    next_snapshot=next_snapshot,
-                    audit_event=audit_event,
-                )
+            save_snapshot = lambda snapshot: state_store.save_app_settings(dict(snapshot))
+            connection = TurnoverLedgerLocalTagSelectionConnection(
+                settings_snapshot_provider=lambda: dict(
+                    getattr(self._app_settings_service, "_snapshot", {}) or {}
+                ),
+                save_snapshot=save_snapshot,
+                refresh_snapshot=self._refresh_local_app_settings_snapshot,
+            )
+            settings_port = TurnoverLedgerLocalTagSelectionSettingsWriter(
+                save_snapshot=save_snapshot,
+                refresh_snapshot=self._refresh_local_app_settings_snapshot,
             )
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
@@ -3043,39 +3050,11 @@ class Application:
             app_settings_service=self._app_settings_service,
         )
 
-    def _save_local_turnover_ledger_tag_selection(
-        self,
-        *,
-        next_snapshot: dict[str, object],
-        audit_event: dict[str, object],
-    ) -> None:
-        state_store = getattr(self, "_state_store", None)
-        if state_store is None:
-            raise RuntimeError("state store is required.")
-        state_store.save_app_settings(dict(next_snapshot))
-        self._refresh_local_app_settings_snapshot(dict(next_snapshot))
-
     def _refresh_local_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
         setattr(self._app_settings_service, "_snapshot", dict(snapshot))
         configure_category_service = getattr(self._app_settings_service, "_configure_category_service", None)
         if callable(configure_category_service):
             configure_category_service(dict(snapshot))
-
-    def _local_turnover_ledger_tag_selection_connection(self, state_store: object) -> object:
-        application = self
-
-        class _LocalTagSelectionConnection:
-            @contextmanager
-            def transaction(self) -> Any:
-                previous_snapshot = dict(getattr(application._app_settings_service, "_snapshot", {}) or {})
-                try:
-                    yield SimpleNamespace()
-                except Exception:
-                    state_store.save_app_settings(previous_snapshot)
-                    application._refresh_local_app_settings_snapshot(previous_snapshot)
-                    raise
-
-        return _LocalTagSelectionConnection()
 
     def _turnover_ledger_relation_extra_row_provider(
         self,

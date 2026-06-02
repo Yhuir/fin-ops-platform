@@ -59,6 +59,52 @@ class TurnoverLedgerTagSelectionSettingsAdapter:
             append_audit(dict(audit_event))
 
 
+class TurnoverLedgerLocalTagSelectionConnection:
+    def __init__(
+        self,
+        *,
+        settings_snapshot_provider: Callable[[], dict[str, object]],
+        save_snapshot: Callable[[dict[str, object]], None],
+        refresh_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._settings_snapshot_provider = settings_snapshot_provider
+        self._save_snapshot = save_snapshot
+        self._refresh_snapshot = refresh_snapshot
+
+    @contextmanager
+    def transaction(self) -> Any:
+        previous_snapshot = dict(self._settings_snapshot_provider() or {})
+        try:
+            yield SimpleNamespace()
+        except Exception:
+            self._save_snapshot(dict(previous_snapshot))
+            self._refresh_snapshot(dict(previous_snapshot))
+            raise
+
+
+class TurnoverLedgerLocalTagSelectionSettingsWriter:
+    def __init__(
+        self,
+        *,
+        save_snapshot: Callable[[dict[str, object]], None],
+        refresh_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._save_snapshot = save_snapshot
+        self._refresh_snapshot = refresh_snapshot
+
+    def save_tag_selection_settings(
+        self,
+        *,
+        next_snapshot: dict[str, object],
+        audit_event: dict[str, object],
+        transaction: Any,
+    ) -> None:
+        _ = audit_event, transaction
+        snapshot = dict(next_snapshot)
+        self._save_snapshot(snapshot)
+        self._refresh_snapshot(snapshot)
+
+
 class TurnoverLedgerRelationRepositoryAdapter:
     def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
         self._repository_factory = repository_factory

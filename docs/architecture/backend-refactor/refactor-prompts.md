@@ -22850,6 +22850,28 @@ Post-Flight:
 - PF-P116 边界正确：只抽离 tag selection local connection/settings writer。
 - 该 prompt 不处理 bank row tags local shim，不修改 facade/UoW 语义，不执行 Traffic Gate。
 
+### PF-P116 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 `TurnoverLedgerLocalTagSelectionConnection`，通过显式 settings snapshot provider / save / refresh callbacks 保留 local rollback 行为。
+  - 新增 `TurnoverLedgerLocalTagSelectionSettingsWriter`，保存 next app settings snapshot 并刷新 local app settings service snapshot。
+  - `server.py` 删除 `_local_turnover_ledger_tag_selection_connection(...)` 和 `_save_local_turnover_ledger_tag_selection(...)`，只负责组装细粒度依赖。
+- 验证：
+  - `git status --short --branch`：Pass，仅包含 PF-P116 允许文件。
+  - `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 下一条建议：生成 `PF-P116-MG - Turnover Ledger Local Relation and Tag Selection Adapter Merge Gate`，统一覆盖 PF-P115/PF-P116 完整 diff。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
