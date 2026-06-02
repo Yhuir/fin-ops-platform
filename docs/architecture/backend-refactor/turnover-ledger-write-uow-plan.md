@@ -5203,6 +5203,179 @@ Remaining seam matrix：
 - `git push origin main`
 - 然后从最新 `main` 新建分支，生成并审查 `PF-P155 - Turnover Ledger Write UoW Post-Builder Rebaseline`。
 
+## PF-P155 Write UoW Post-Builder Rebaseline
+
+状态：
+
+- verified
+
+目标：
+
+- 在 primary write builder 组完成后，重新盘点 Turnover Ledger 剩余写路径 seam。
+- 确认下一阶段应该治理的是 write handler / facade / UoW deeper boundary，而不是继续围绕 builder 组扩张。
+
+执行结果：
+
+- 已确认：
+  - 五条 primary write path 已全部离开 `server.py` 的 inline UoW builder。
+  - 当前剩余问题主要集中在 handler 仍持有的 orchestration，而非 builder。
+- 剩余 seam：
+  - relation extra handler 仍持有部分 stale precheck、idempotency key extraction、HTTP conflict mapping
+  - withdraw handler 仍持有 relation detail read、`affected_months` 计算、`expected_versions` 组装
+  - confirm handler 仍持有 `affected_months` 计算，但尚未建立与 withdraw 对称的 stale contract
+  - bank row tags handler 仍持有 target validation 和 `affected_months` 计算
+  - `Application` 仍保留 local snapshot replace helpers、relation extra idempotency helper methods 和 legacy fallback facades
+
+结论：
+
+- 下一阶段最小切片应先锁 handler-owned contract，再决定是否下沉到 facade/UoW。
+- 现在不应该优先抽 local transaction shim，也不应该先删 fallback。
+
+下一步：
+
+- 生成并审查 `PF-P156 - Turnover Ledger Write Handler Boundary Characterization Tests`。
+
+## PF-P156 Write Handler Boundary Characterization Tests
+
+状态：
+
+- verified
+
+目标：
+
+- 锁定 Turnover Ledger 剩余 write handler 的真实 orchestration contract。
+- 在进入 handler boundary extraction 前，先保护 relation extra、confirm、withdraw、bank row tags 的当前行为。
+
+执行结果：
+
+- 已补齐并验证 relation extra / confirm / withdraw / bank row tags 的 handler characterization tests。
+- 锁定内容包括：
+  - relation extra：`expected_versions`、`idempotency_key`、stale conflict mapping
+  - confirm：`affected_months` 计算与 response 注入
+  - withdraw：relation precheck、`expected_versions`、`affected_months`
+  - bank row tags：target validation、`affected_months`、invalidation flags
+- 额外补充 override path characterization：
+  - relation extra override 透传 `expected_versions` / `idempotency_key`
+  - bank row tags override 透传 `affected_months` 并保留 response flags
+
+验证：
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，93 tests
+
+下一步：
+
+- 生成并审查 `PF-P157 - Turnover Ledger Confirm Handler Boundary Extraction`。
+
+## PF-P157 Confirm Handler Boundary Extraction
+
+状态：
+
+- verified
+
+目标：
+
+- 只抽离 confirm handler 当前仍持有的 orchestration 边界。
+- 把 `affected_months` 解析/注入从 `server.py` confirm handler 挪到显式 boundary 对象。
+
+执行结果：
+
+- 新增 `TurnoverLedgerConfirmRequestBoundaryFacade`。
+- `Application._handle_api_turnover_ledger_confirm(...)` 现在只保留：
+  - auth/session
+  - JSON 校验
+  - request boundary 调用
+  - error mapping
+- 从 handler 抽走：
+  - `bank_row_ids` 规范化
+  - `affected_months` 计算
+  - `result["affected_months"]` 注入
+- confirm override / legacy fallback / primary facade 路径全部保持兼容。
+
+验证：
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，94 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+结论：
+
+- confirm 是剩余 handler seam 中最轻的一条，已平稳收掉。
+- 下一条应该进入 `withdraw`，因为它仍持有更重但边界明确的 request orchestration。
+
+下一步：
+
+- 生成并审查 `PF-P158 - Turnover Ledger Withdraw Handler Boundary Extraction`。
+
+## PF-P158 Withdraw Handler Boundary Extraction
+
+状态：
+
+- verified
+
+目标：
+
+- 只抽离 withdraw handler 仍持有的 request orchestration。
+- 让 handler 回到 HTTP mapping 边界，不直接处理 relation precheck / expected_versions / `affected_months`。
+
+执行结果：
+
+- 新增 `TurnoverLedgerWithdrawRequestBoundaryFacade`。
+- 新增 `TurnoverLedgerWithdrawRequestBoundaryError`。
+- 从 `Application._handle_api_turnover_ledger_withdraw(...)` 抽走：
+  - relation detail 读取
+  - manual-only / already-withdrawn precheck
+  - `expected_versions` 组装
+  - `affected_months` 计算
+  - `affected_months` response 注入
+- handler 现在只做 session、body、boundary 调用与 HTTP error mapping。
+- override / legacy fallback / primary facade 路径保持兼容。
+
+验证：
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，95 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+结论：
+
+- withdraw handler seam 已成功下沉到显式 boundary。
+- 当前最自然的下一条是 `bank row tags`，因为它仍持有 target validation、`affected_months` 和 invalidation flags。
+
+下一步：
+
+- 生成并审查 `PF-P159 - Turnover Ledger Bank Row Tags Handler Boundary Extraction`。
+
+## PF-P159 Bank Row Tags Handler Boundary Extraction
+
+状态：
+
+- verified
+
+目标：
+
+- 只抽离 bank row tags handler 当前仍持有的 request orchestration。
+- 把 target validation、`affected_months` 和 response invalidation flags 收到显式 boundary 对象。
+
+执行结果：
+
+- 新增 `TurnoverLedgerBankRowTagsRequestBoundaryFacade`。
+- `Application._handle_api_turnover_ledger_bank_row_tags_batch(...)` 已不再直接持有：
+  - target validation
+  - `affected_months`
+  - invalidation flags 注入
+- 新边界对象保留了 `facade is None -> legacy fallback facade` 的兼容链。
+
+验证：
+
+- `git diff --check`：Pass
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，96 tests
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+
+下一步：
+
+- 生成并审查 `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate`。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

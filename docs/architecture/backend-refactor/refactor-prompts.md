@@ -27198,6 +27198,400 @@ Post-Flight:
   - `PF-P155 - Turnover Ledger Write UoW Post-Builder Rebaseline`
   - 该 prompt 只做 rebaseline / planning，盘点 primary builder 清空之后剩余的 write UoW seam、transaction ownership、remaining handler assembly 和下一组最小切片，不直接改实现。
 
+## PF-P155 - Turnover Ledger Write UoW Post-Builder Rebaseline
+
+状态：`verified`
+
+```text
+/goal
+PF-P155 - Turnover Ledger Write UoW Post-Builder Rebaseline
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 primary write builder 组完成后，重新盘点 Turnover Ledger 剩余写路径的真实 seam，并给出下一组最小切片建议。
+
+Context:
+- PF-P154-MG 已 verified，并已合入 `main` / push `origin/main`。
+- 五条 primary write path 已全部离开 `server.py` 的 inline UoW builder。
+- 下一阶段不应再回到 builder 组，而应重新确认 write handler / facade / UoW / local shim / fallback 的剩余职责边界。
+
+Allowed Changed Files:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 基于当前代码事实，重新盘点 Turnover Ledger 剩余写路径 seam：
+   - handler 是否仍承担 auth/session、JSON、error mapping、`affected_months` 计算、`expected_versions` 预处理、fallback 分流；
+   - facade / UoW 是否仍缺失统一 stale guard / expected_versions / idempotency ownership；
+   - local snapshot replace helpers、local transaction shim、legacy fallback 是否仍停留在 `Application` 边界。
+2. 输出一份“剩余 seam matrix”，明确每条 seam 的 owner、风险和建议优先级。
+3. 给出下一条最小 prompt 建议，但本轮不得修改生产代码或测试。
+
+Constraints:
+- 不修改 `server.py`、facade、UoW、adapter、tests。
+- 不进入 MG。
+- 不修改部署、生产配置、外部服务。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- rg -n "expected_versions|affected_months|_turnover_ledger_relation_extra_local_idempotency_store|_replace_local_turnover|_handle_api_turnover_ledger_(confirm|withdraw|relation_extra_update)" backend/src/fin_ops_platform/app/server.py
+```
+
+### 审查结论
+
+- PF-P155 的边界正确：它只做 post-builder rebaseline，不碰实现。
+- 这是从 builder 组平稳转入下一阶段 write boundary 治理的必要过渡。
+
+### PF-P155 执行结果
+
+- PF-P155 已完成并验证。
+- 代码事实结论：
+  - primary write builder 组已完成，`server.py` 不再直接构造 Turnover Ledger primary write path 的 `TurnoverLedgerWriteUnitOfWork(...)`。
+  - 当前剩余更深层 seam 主要转移到 write handler / facade / UoW 边界，而不是 builder。
+- 剩余 seam matrix：
+  - `relation extra update` handler：
+    - 仍负责 body 解析、`expected_versions` 读取与一部分 stale precheck、idempotency key 提取、HTTP 409 mapping
+    - 说明 stale guard 责任还未完全沉到 facade/UoW
+  - `withdraw relation` handler：
+    - 仍负责 relation detail 读取、`affected_months` 计算、`expected_versions` 组装
+    - 说明 relation stale contract 仍偏 handler-owned
+  - `confirm relation` handler：
+    - 仍负责 `affected_months` 计算，但还没有与 withdraw 对称的 stale/expected_versions contract
+  - `bank row tags batch` handler：
+    - 仍负责 target validation 和 `affected_months` 计算
+  - `Application` boundary：
+    - 仍保留 local snapshot replace helpers
+    - 仍保留 relation extra idempotency helper methods
+    - legacy fallback facades 仍存在并受现有 contract tests 保护
+- 优先级判断：
+  - 下一阶段最小切片不应立刻抽 local transaction shim，也不应直接动 fallback
+  - 应先补一轮 write handler boundary characterization tests，锁定 handler 仍持有的 `affected_months` / `expected_versions` / stale contract
+- 下一条建议 prompt：
+  - `PF-P156 - Turnover Ledger Write Handler Boundary Characterization Tests`
+  - 只补测试，不改实现
+
+## PF-P156 - Turnover Ledger Write Handler Boundary Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P156 - Turnover Ledger Write Handler Boundary Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须先用 characterization tests 锁定 Turnover Ledger 剩余写 handler 的真实职责边界，然后才能安全下刀。
+
+Context:
+- PF-P155 已 verified。
+- primary write builder 组已经完成。
+- 当前剩余 seam 集中在 write handler / facade / UoW 边界。
+
+Allowed Scope:
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 为 relation extra、confirm、withdraw、bank row tags 四条写路径补齐 handler-owned orchestration characterization tests。
+2. 明确锁定：
+   - relation extra 的 `expected_versions` / `idempotency_key` / stale conflict HTTP boundary；
+   - confirm 的 `affected_months` 计算与 response 注入；
+   - withdraw 的 relation precheck、`expected_versions` 组装与 response `affected_months`；
+   - bank row tags 的 target validation、`affected_months` 与 invalidation flags。
+3. 不得修改 production code。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+```
+
+### 审查结论
+
+- PF-P156 边界正确：这是下一轮 handler extraction 之前必要的测试锁定。
+- 它只锁契约，不改变生产逻辑。
+
+### PF-P156 执行结果
+
+- PF-P156 已完成并验证。
+- 新增 characterization tests 锁定了四条剩余 write handler seam。
+- 验证：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，93 tests
+- 下一条建议：
+  - `PF-P157 - Turnover Ledger Confirm Handler Boundary Extraction`
+
+## PF-P157 - Turnover Ledger Confirm Handler Boundary Extraction
+
+状态：`verified`
+
+```text
+/goal
+PF-P157 - Turnover Ledger Confirm Handler Boundary Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须从 Turnover Ledger confirm 写路径开始，抽掉 handler 仍持有的 orchestration，而不扩大到 withdraw、relation extra 或 bank row tags。
+
+Context:
+- PF-P156 已 verified，并已锁定当前 handler contract。
+- confirm 是剩余 handler seam 里最轻的一条：当前主要是 `affected_months` 计算和 response 注入。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 引入一个显式的 request boundary/facade，承接 confirm handler 的：
+   - `bank_row_ids` 规范化
+   - `affected_months` 计算
+   - response 中 `affected_months` 注入
+2. `server.py` 的 confirm handler 仅保留：
+   - auth/session
+   - JSON/body 基础校验
+   - 调用 request boundary
+   - error mapping
+3. 不得顺手迁移 withdraw、relation extra、bank row tags。
+4. 不得改 confirm 的业务语义、UoW 语义或 refresh 语义。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P157 边界正确：只抽 confirm handler boundary，不动更重的写路径。
+- 使用显式 request boundary facade，符合“不要机械搬文件”和“细粒度依赖”的约束。
+
+### PF-P157 执行结果
+
+- PF-P157 已完成并验证。
+- 新增 `TurnoverLedgerConfirmRequestBoundaryFacade`。
+- `Application._handle_api_turnover_ledger_confirm(...)` 不再直接计算 `affected_months` 或写回 response field，而是通过 `_turnover_ledger_confirm_request_boundary_facade()` 调用边界对象。
+- override / legacy fallback / primary facade 路径保持兼容。
+- 验证：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，94 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议：
+  - `PF-P158 - Turnover Ledger Withdraw Handler Boundary Extraction`
+
+## PF-P158 - Turnover Ledger Withdraw Handler Boundary Extraction
+
+状态：`verified`
+
+```text
+/goal
+PF-P158 - Turnover Ledger Withdraw Handler Boundary Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger withdraw handler 中仍残留的 request orchestration 收到显式边界对象，但不能扩大到 relation extra 或 bank row tags。
+
+Context:
+- PF-P157 已 verified。
+- withdraw handler 当前仍持有 relation detail 读取、manual-only / already-withdrawn precheck、`expected_versions`、`affected_months` 和 response 注入。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 引入显式 request boundary/facade，承接 withdraw handler 的：
+   - relation detail 读取
+   - manual-only / already-withdrawn precheck
+   - `expected_versions` 组装
+   - `affected_months` 计算
+   - response `affected_months` 注入
+2. handler 仅保留：
+   - auth/session
+   - JSON/body 读取
+   - request boundary 调用
+   - HTTP error mapping
+3. 不得顺手迁移 relation extra、bank row tags 或 tag selection。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+```
+
+### 审查结论
+
+- PF-P158 边界正确：只处理 withdraw handler seam。
+- 采用 request boundary facade + boundary error，能保持 handler 只做 HTTP mapping。
+
+### PF-P158 执行结果
+
+- PF-P158 已完成并验证。
+- 新增：
+  - `TurnoverLedgerWithdrawRequestBoundaryFacade`
+  - `TurnoverLedgerWithdrawRequestBoundaryError`
+- withdraw handler 已不再直接持有 detail read / precheck / expected_versions / affected_months。
+- 验证：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，95 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议：
+  - `PF-P159 - Turnover Ledger Bank Row Tags Handler Boundary Extraction`
+
+## PF-P159 - Turnover Ledger Bank Row Tags Handler Boundary Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P159 - Turnover Ledger Bank Row Tags Handler Boundary Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须把 Turnover Ledger bank row tags handler 中仍残留的 request orchestration 收到显式边界对象，但不能扩大到 relation extra 或 tag selection。
+
+Context:
+- PF-P158 已 verified。
+- bank row tags handler 当前仍持有：
+  - target validation
+  - `affected_months` 计算
+  - response 中 `turnover_ledger_invalidated` / `workbench_invalidated` flags 注入
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Task:
+1. 引入显式 request boundary/facade，承接 bank row tags handler 的：
+   - target validation
+   - `affected_months` 计算
+   - response invalidation flags 注入
+2. handler 仅保留：
+   - auth/session
+   - JSON/body 读取
+   - request boundary 调用
+   - HTTP error mapping
+3. 不得顺手迁移 relation extra、tag selection 或进入 MG。
+4. 不得改变 bank row tags 的业务语义、refresh 语义或 facade/UoW 语义。
+
+Verification:
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md、turnover-ledger-write-uow-plan.md。
+2. 如果验证通过，可直接标记 PF-P159 为 verified。
+3. 生成下一条最小 prompt 建议，但本轮不进入 MG。
+```
+
+### 审查结论
+
+- PF-P159 边界正确：它只处理 bank row tags handler seam。
+- 这条切片比 relation extra 更轻，且与 PF-P157 / PF-P158 的 request boundary 模式一致。
+
+### PF-P159 执行结果
+
+- PF-P159 已完成并验证。
+- 新增 `TurnoverLedgerBankRowTagsRequestBoundaryFacade`。
+- `Application._handle_api_turnover_ledger_bank_row_tags_batch(...)` 不再直接持有：
+  - target validation
+  - `affected_months`
+  - invalidation flags 注入
+- 保持了 `facade is None -> legacy fallback facade` 的兼容路径。
+- 验证：
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，96 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+- 下一条建议：
+  - `PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate`
+
+## PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P159-MG - Turnover Ledger Write Handler Boundary Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须对 Turnover Ledger write handler boundary 这一整组切片做 cumulative merge gate，确认 scope、测试、文档和分支状态都满足合入主干的标准。
+
+Context:
+- 当前分支：`codex/turnover-ledger-post-builder-rebaseline-p155`
+- 本次 cumulative MG 覆盖完整 diff：
+  - `PF-P156 - Turnover Ledger Write Handler Boundary Characterization Tests`
+  - `PF-P157 - Turnover Ledger Confirm Handler Boundary Extraction`
+  - `PF-P158 - Turnover Ledger Withdraw Handler Boundary Extraction`
+  - `PF-P159 - Turnover Ledger Bank Row Tags Handler Boundary Extraction`
+- 本次不得扩大到 relation extra stale/idempotency 再治理，不得进入新的业务模块。
+
+Allowed Scope:
+- 允许修改：
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+- 允许执行 git merge 到 `main`、在 `main` 上重跑验证、以及 `git push origin main`。
+- 不允许新增新的生产代码实现，不允许顺手做 PF-P160。
+
+Required MG Checks:
+1. Branch and diff scope:
+   - `git status --short --branch`
+   - `git ls-files --others --exclude-standard`
+   - `git diff --check`
+   - `git diff --name-only main...HEAD`
+   - `git log --oneline main..HEAD`
+2. Expected changed files 白名单必须只包含：
+   - `backend/src/fin_ops_platform/app/server.py`
+   - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+   - `tests/test_turnover_ledger_api.py`
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+3. Verification:
+   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+4. Merge preparation:
+   - 先确认 `main` 已包含最新 `origin/main`
+   - 如用户授权 merge，则 merge 到 `main`
+   - merge 后必须在 `main` 上重跑同一组验证
+   - 只有 merge 后验证仍为绿，才允许 `git push origin main`
+
+Commit / Git Rules:
+- 严禁 `git add .`
+- 严禁 `git add -A`
+- 必须精确 `git add <具体文件>`
+- 若出现 unrelated dirty changes、merge conflict、或 scope 超白名单，必须停止
+
+Forbidden Scope:
+- 不得执行 Traffic Gate、部署、访问生产或修改 Nginx/feature flag。
+- 不得顺手生成或执行 PF-P160。
+- 不得修改与 Turnover Ledger write handler boundary 无关的代码。
+
+Post-Flight:
+1. 若验证通过且 merge/push 完成：
+   - 将 PF-P159-MG 标记为 verified
+   - 更新 migration-state-log.md、refactor-prompts.md、turnover-ledger-write-uow-plan.md
+2. push 完成后：
+   - 必须从最新 `main` 新建下一条 `codex/` 分支
+   - 再生成下一条 prompt，不得继续停留在 `main`
+```
+
+### 审查结论
+
+- PF-P159-MG 的边界正确：这是一个明确命名、可合并的 handler boundary 组，而不是单个 prompt 的零散 MG。
+- 它覆盖 PF-P156 到 PF-P159 的完整 diff，符合当前工作流规则。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
