@@ -325,8 +325,9 @@ class TurnoverLedgerTagSelectionLegacyFallbackFacade:
         actor_id: str,
         tenant_id: str,
         scope_keys: list[str],
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
-        _ = tenant_id
+        _ = tenant_id, idempotency_key
         result = self._app_settings_service.update_turnover_ledger_tag_selection(
             payload,
             actor_id=actor_id,
@@ -372,6 +373,8 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
         refresh_snapshot: Callable[[dict[str, object]], None],
         tenant_id: str,
         postgres_settings_repository_factory: Callable[[Any], Any],
+        postgres_idempotency_store_factory: Callable[[Any], Any],
+        local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
         self._state_store = state_store
         self._queue_repository = queue_repository
@@ -379,6 +382,8 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
         self._refresh_snapshot = refresh_snapshot
         self._tenant_id = tenant_id
         self._postgres_settings_repository_factory = postgres_settings_repository_factory
+        self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
+        self._local_idempotency_store_provider = local_idempotency_store_provider
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
@@ -394,6 +399,7 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
                 queue_repository=self._queue_repository,
                 tenant_id=self._tenant_id,
             )
+            idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
             local_adapters = TurnoverLedgerLocalTagSelectionAdapterSet(
                 state_store=self._state_store,
@@ -405,6 +411,7 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
                 queue_repository=self._queue_repository
             )
+            idempotency_store = self._local_idempotency_store_provider()
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=SimpleNamespace(),
@@ -413,6 +420,7 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
             bankdetail_port=SimpleNamespace(),
             dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+            idempotency_store=idempotency_store,
         )
         return TurnoverLedgerWriteFacade(
             uow=uow,
@@ -1200,6 +1208,7 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
         payload: dict[str, object],
         actor_id: str,
         tenant_id: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         facade = self._facade_provider()
         return dict(
@@ -1208,6 +1217,7 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
                 actor_id=actor_id,
                 tenant_id=tenant_id,
                 scope_keys=["all"],
+                idempotency_key=idempotency_key,
             )
             or {}
         )

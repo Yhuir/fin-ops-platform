@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate` 已完成并验证 |
-| 当前 active prompt | 无；下一条待生成 |
-| 最近 verified prompt | `PF-P182-MG - Turnover Ledger Bank Row Tags Durable Idempotency Cumulative Merge Gate` |
-| 当前分支 | `codex/turnover-ledger-bank-row-tags-consistency-p181` |
-| 最近验证 | PF-P182-MG branch verification：Pass；`git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（126 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（60 tests）；`compileall`：Pass；无 untracked 临时文件 |
-| 下一条允许任务 | 提交并合入 main；在 main 上重跑 PF-P182-MG verification，通过后 push `origin/main` |
+| 当前阶段 | `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate` planned |
+| 当前 active prompt | `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate` |
+| 最近 verified prompt | `PF-P184 - Turnover Ledger Tag Selection Durable Idempotency Integration` |
+| 当前分支 | `codex/turnover-ledger-tag-selection-idempotency-p183` |
+| 最近验证 | PF-P184 已 verified；`git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（128 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（61 tests）；`compileall`：Pass |
+| 下一条允许任务 | 执行 PF-P184-MG；统一覆盖 PF-P183/PF-P184 完整 diff，不新增业务实现、不迁移其它写路径 |
 
 ## Prompt 执行日志
 

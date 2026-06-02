@@ -1581,6 +1581,31 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.settings_port.saved, [])
         self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
+    def test_target_tag_selection_facade_passes_idempotency_before_settings_port(self) -> None:
+        idempotency_store = _RecordingIdempotencyStore()
+        uow, deps = self._build_uow(idempotency_store=idempotency_store)
+        facade = self._write_facade_class()(
+            uow=uow,
+            tag_selection_normalizer=_RecordingTagSelectionNormalizer(),
+        )
+
+        result = facade.update_tag_selection(
+            payload={"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+            idempotency_key="tag-selection-idem-1",
+        )
+
+        self.assertEqual(result["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(
+            [call["operation"] for call in idempotency_store.calls],
+            ["get", "for_transaction", "reserve", "commit"],
+        )
+        self.assertEqual(len(deps.settings_port.saved), 1)
+        self.assertIs(deps.settings_port.saved[0]["transaction"], deps.connection.transaction_obj)
+        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_ledger_tag_selection_changed")
+
     def test_relation_extra_write_facade_commits_extra_and_dirty_outbox_in_one_uow(self) -> None:
         # PF-P056 target contract: facade must remain service-layer only and delegate transaction scope to UoW.
         uow, deps = self._build_uow()

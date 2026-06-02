@@ -2995,6 +2995,8 @@ class Application:
             refresh_snapshot=self._refresh_local_app_settings_snapshot,
             tenant_id=self._workbench_reconciliation_tenant_id(),
             postgres_settings_repository_factory=lambda transaction: PostgresOpsTaxEtcRepository(transaction),
+            postgres_idempotency_store_factory=self._turnover_ledger_tag_selection_postgres_idempotency_store,
+            local_idempotency_store_provider=self._turnover_ledger_tag_selection_local_idempotency_store,
         ).build()
         if facade is None:
             return self._turnover_ledger_tag_selection_legacy_fallback_facade()
@@ -3087,6 +3089,19 @@ class Application:
         if idempotency_store is None:
             idempotency_store = InMemoryWorkbenchIdempotencyRepository()
             self._turnover_ledger_withdraw_idempotency_store = idempotency_store
+        return idempotency_store
+
+    def _turnover_ledger_tag_selection_postgres_idempotency_store(self, connection: object) -> object:
+        return self._workbench_write_idempotency_store(
+            "_turnover_ledger_tag_selection_idempotency_store",
+            connection,
+        )
+
+    def _turnover_ledger_tag_selection_local_idempotency_store(self) -> object:
+        idempotency_store = getattr(self, "_turnover_ledger_tag_selection_idempotency_store", None)
+        if idempotency_store is None:
+            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+            self._turnover_ledger_tag_selection_idempotency_store = idempotency_store
         return idempotency_store
 
     @staticmethod
@@ -12455,11 +12470,13 @@ class Application:
             return error
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
         facade = self._turnover_ledger_tag_selection_request_boundary_facade()
+        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
         try:
             result = facade.update_tag_selection_from_request(
                 payload=payload,
                 actor_id=actor,
                 tenant_id=tenant_id_for_session(session_response),
+                idempotency_key=idempotency_key,
             )
         except AppSettingsValidationError as exc:
             status = (
@@ -12468,6 +12485,8 @@ class Application:
                 else HTTPStatus.BAD_REQUEST
             )
             return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
         return self._json_response(HTTPStatus.OK, result)
 
     def _turnover_ledger_tag_selection_request_boundary_facade(self) -> TurnoverLedgerTagSelectionRequestBoundaryFacade:

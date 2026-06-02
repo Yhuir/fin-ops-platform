@@ -22115,6 +22115,313 @@ Post-Flight:
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
 - 下一步：commit、merge 到 main、main 复验、push origin/main。
 
+## PF-P183 - Turnover Ledger Tag Selection Durable Idempotency Contract Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P183 - Turnover Ledger Tag Selection Durable Idempotency Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的测试先行工程师。你必须只为 Turnover Ledger `tag-selection` 写 durable idempotency 目标/兼容测试，不实现生产逻辑。
+
+Context:
+- PF-P182-MG 已 verified 并合入 `main`。
+- 当前分支为 `codex/turnover-ledger-tag-selection-idempotency-p183`。
+- `tag_selection` 已通过 Turnover write UoW 保存 settings/audit，并在同一 UoW 中 enqueue turnover_ledger dirty/outbox。
+- `tag_selection` 当前已有 `expected_version` version conflict 语义；PF-P183 不改变它。
+- `tag_selection` facade/request boundary 当前仍没有 durable idempotency contract。
+
+Goal:
+只新增 tag-selection durable idempotency 目标契约测试，明确未来同一 `idempotency_key` + 同一 payload 必须 replay，不重复 settings save / audit / dirty-outbox refresh；同一 key + 不同 payload 必须返回 HTTP 409 `idempotency_key_conflict`；facade/UoW 必须在 settings port 前执行 idempotency reserve/replay/conflict 判定。
+
+Allowed Scope:
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- 文档：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+Required Test Work:
+1. API-level expectedFailure tests:
+   - `test_target_tag_selection_idempotency_key_replays_without_duplicate_settings_save_or_refresh`
+   - `test_target_tag_selection_idempotency_key_conflict_rejects_different_payload`
+   - 两个测试必须暂时标记为 `unittest.expectedFailure`。
+2. Facade/UoW expectedFailure test:
+   - `test_target_tag_selection_facade_passes_idempotency_before_settings_port`
+   - 必须表达未来 `TurnoverLedgerWriteFacade.update_tag_selection(..., idempotency_key=...)` 应在 settings port 前执行 idempotency store reserve/replay/conflict。
+3. Compatibility baseline:
+   - 保留现有 `expected_version` version conflict tests。
+   - 不得删除或放宽 `turnover_ledger_tag_selection_version_conflict` 断言。
+4. 文档回写：
+   - 在 `turnover-ledger-write-uow-plan.md` 记录 tag-selection 当前已有 version conflict/stale baseline，但尚无 durable idempotency；PF-P183 只新增 expectedFailure target tests。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 `server.py`、facade、adapters、UoW 或 repository。
+- 不得实现 idempotency。
+- 不得迁移 bank-row-tags、confirm、withdraw、relation extra 或其它写路径。
+- 不得新增 SQL migration、schema、deploy、Nginx、feature flag 或 Traffic Gate。
+
+Verification:
+必须执行：
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+
+Post-Flight:
+1. 更新 `migration-state-log.md`、`refactor-prompts.md` 和 `turnover-ledger-write-uow-plan.md`。
+2. 如果验证通过，将 PF-P183 标记为 `verified`。
+3. 下一条建议应为 `PF-P184 - Turnover Ledger Tag Selection Durable Idempotency Integration`，只移除 PF-P183 expectedFailure 并实现 tag-selection durable idempotency。
+```
+
+### 审查结论
+
+- PF-P183 边界正确：只新增 tag-selection durable idempotency 目标合同，不改生产逻辑。
+- expectedFailure 策略正确；它保护目标合同，同时不阻塞尚未实现的行为。
+- 本轮不改变现有 `expected_version` version conflict 语义。
+
+### PF-P183 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 tag selection API-level durable idempotency target tests：
+    - same key + same payload replay，不重复 settings save / dirty-outbox refresh；
+    - same key + different payload 返回 409 `idempotency_key_conflict`。
+  - 新增 facade/UoW target test，要求 `update_tag_selection(..., idempotency_key=...)` 在 settings port 前执行 idempotency get/reserve/commit。
+  - 三个 target tests 均保留为 `unittest.expectedFailure`，不阻塞默认 CI。
+- 验证：
+  - `git status --short --branch`：Pass
+  - `git ls-files --others --exclude-standard`：Pass
+  - `git diff --check`：Pass
+  - targeted PF-P183 tests：Pass（expected failures=3）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（128 tests，expected failures=2）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（61 tests，expected failures=1）
+- 下一条建议：`PF-P184 - Turnover Ledger Tag Selection Durable Idempotency Integration`。
+
+## PF-P184 - Turnover Ledger Tag Selection Durable Idempotency Integration
+
+状态：`planned`
+
+```text
+/goal
+PF-P184 - Turnover Ledger Tag Selection Durable Idempotency Integration
+
+Role:
+你是一位负责 Python-first 后端模块化重构的后端工程师。你必须只实现 Turnover Ledger `tag-selection` durable idempotency integration，让 PF-P183 的三个 expectedFailure 目标测试转为普通通过。
+
+Context:
+- PF-P183 已 verified。
+- 当前分支为 `codex/turnover-ledger-tag-selection-idempotency-p183`。
+- `tag-selection` 已经通过 `TurnoverLedgerWriteFacade.update_tag_selection(...)` 和 `TurnoverLedgerWriteUnitOfWork` 保存 settings/audit 并 enqueue turnover_ledger dirty/outbox。
+- 当前缺口：
+  - handler/request boundary 尚未读取 body `idempotency_key` / `idempotencyKey`；
+  - `TurnoverLedgerWriteFacade.update_tag_selection(...)` 尚不接受 idempotency key；
+  - tag-selection primary builder 尚未向 UoW 注入 idempotency store；
+  - handler 尚未把 Workbench idempotency conflict/in-progress/failed 映射为 HTTP 409。
+
+Goal:
+移除 PF-P183 三个 target tests 的 `unittest.expectedFailure`，并实现 tag-selection durable idempotency：
+- same `idempotency_key` + same payload replay 第一次 response；
+- same key + different payload 返回 HTTP 409 `idempotency_key_conflict`；
+- facade/UoW 在 settings port 前执行 idempotency get/reserve/commit。
+
+Allowed Scope:
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- 文档：
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+Required Implementation Work:
+1. Tests:
+   - 移除 PF-P183 三个 target tests 的 `@unittest.expectedFailure`。
+   - 不得放宽断言、删除断言或改成只断言 status code。
+2. HTTP / request boundary:
+   - `_handle_api_turnover_ledger_tag_selection_update(...)` 必须读取 `payload.get("idempotency_key")` 或 `payload.get("idempotencyKey")`，strip 后传入 request boundary。
+   - `TurnoverLedgerTagSelectionRequestBoundaryFacade.update_tag_selection_from_request(...)` 必须接受并转发 `idempotency_key`。
+   - handler 只做 HTTP mapping，不在 handler 内实现 idempotency 状态机。
+3. Facade command:
+   - `TurnoverLedgerWriteFacade.update_tag_selection(...)` 必须接受 `idempotency_key: str | None = None`。
+   - 有 key 时，command 必须携带 stable action name、idempotency key、request fingerprint 和 request payload。
+   - fingerprint 必须基于 tenant、actor、action 和 normalized/stable request payload；不得绑定后端瞬时生成的新 version，避免 replay 因 version 已变更误判 conflict。
+   - 无 key 时必须保持现有 action/idempotency 空值语义，兼容 baseline。
+4. UoW store injection:
+   - `TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder` 必须接收 granular idempotency store factories/provider。
+   - postgres path 使用 `_workbench_write_idempotency_store(...)` 派生的 store。
+   - local path 使用 `InMemoryWorkbenchIdempotencyRepository`，仅作为测试/开发语义；不得声明为 durable。
+5. Error mapping:
+   - handler 必须捕获 `WorkbenchIdempotencyKeyConflict`、`WorkbenchIdempotencyInProgress`、`WorkbenchIdempotencyFailed`，返回 HTTP 409 JSON，并保留 `error` code。
+   - 不得破坏现有 `turnover_ledger_tag_selection_version_conflict` 的 409 语义。
+
+Forbidden Scope:
+- 不得新增 SQL migration。
+- 不得修改 idempotency schema。
+- 不得迁移 confirm、withdraw、bank-row-tags、relation-extra 或其它写路径。
+- 不得修改 Workbench 写路径。
+- 不得新增 fallback/local transaction shim。
+- 不得修改部署、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+Post-Flight:
+1. 更新 `migration-state-log.md`、`refactor-prompts.md` 和 `turnover-ledger-write-uow-plan.md`。
+2. 如果验证通过，将 PF-P184 标记为 `verified`。
+3. 如果 PF-P183/PF-P184 diff 已达到可合并边界，下一条生成 cumulative MG，统一覆盖 tag-selection durable idempotency contract + integration。
+```
+
+### 审查结论
+
+- PF-P184 边界正确：只把 PF-P183 的 tag-selection durable idempotency target tests 转绿。
+- 实现范围限定在 tag-selection HTTP/request boundary、facade command 和 primary builder store injection。
+- 不迁移其它 Turnover 写路径，不改 schema/deploy/Traffic Gate。
+
+### PF-P184 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - PF-P183 三个 target tests 已从 `unittest.expectedFailure` 转为普通通过。
+  - tag-selection handler 读取 body `idempotency_key` / `idempotencyKey` 并传入 request boundary。
+  - `TurnoverLedgerWriteFacade.update_tag_selection(..., idempotency_key=...)` 生成 stable request fingerprint，并通过 UoW idempotency store reserve/replay/conflict。
+  - tag-selection primary builder 注入 postgres/local idempotency store。
+  - handler 对 Workbench idempotency conflict/in-progress/failed 返回 HTTP 409 标准 payload。
+  - 现有 `turnover_ledger_tag_selection_version_conflict` 语义保持不变。
+- 验证：
+  - targeted PF-P184 tests：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（128 tests）
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（61 tests）
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass
+  - `git status --short --branch` / `git ls-files --others --exclude-standard` / `git diff --check`：Pass
+- 下一条建议：`PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate`。
+
+## PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger tag-selection durable idempotency 切片，不新增业务实现。
+
+Context:
+- PF-P183 已 verified。
+- PF-P184 已 verified。
+- 当前分支应为 `codex/turnover-ledger-tag-selection-idempotency-p183`。
+- 本 MG 统一覆盖 PF-P183 + PF-P184 的完整 diff。
+
+Gate Scope:
+只覆盖：
+- tag-selection durable idempotency API target tests；
+- tag-selection facade/UoW idempotency target test；
+- tag-selection HTTP idempotency key extraction；
+- tag-selection request boundary forwarding；
+- tag-selection facade command idempotency fingerprint；
+- tag-selection primary builder idempotency store injection；
+- tag-selection idempotency 409 error mapping；
+- 文档回写。
+
+Allowed Changed Files:
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `tests/test_turnover_ledger_api.py`
+- `tests/test_turnover_ledger_uow_contract.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得迁移 confirm、withdraw、bank-row-tags、relation-extra 或其它 Turnover 写路径。
+- 不得新增 SQL migration。
+- 不得修改 idempotency repository schema。
+- 不得修改 Workbench 写路径。
+- 不得新增 fallback/local transaction shim。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或访问真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - `docs/architecture/backend-refactor/migration-state-log.md`
+   - `docs/architecture/backend-refactor/refactor-prompts.md`
+   - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+2. 必须确认 PF-P183、PF-P184 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认 `git diff --name-only main...HEAD` 加未提交 diff 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+Commit / Merge Rules:
+1. 必须只用精确文件路径 `git add`。
+2. commit message 建议：
+   - `test(turnover-ledger): enforce tag selection durable idempotency`
+3. 合入 main 前必须同步最新 `origin/main`：checkout main 后 `git pull --ff-only origin main`。
+4. 如果 pull/merge 出现冲突，停止并报告。
+5. 将当前分支 merge 到 main。
+6. 在 main 上重新执行完整 Verification 中的测试命令。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P184-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一条 prompt 分支。
+9. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 `migration-state-log.md`、`refactor-prompts.md` 和 `turnover-ledger-write-uow-plan.md`，记录 PF-P184-MG 执行结果。
+2. push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt。
+3. 不得在 main 或旧分支继续开发下一切片。
+```
+
+### 审查结论
+
+- PF-P184-MG 边界正确：只覆盖 PF-P183/PF-P184 tag-selection durable idempotency 切片。
+- 允许文件白名单与当前切片一致。
+- MG 明确禁止 Traffic Gate、schema、部署和其它写路径迁移。
+
 ## PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
 状态：`planned`
