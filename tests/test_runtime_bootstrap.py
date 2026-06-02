@@ -328,6 +328,89 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertTrue(all("from app.invoices" not in sql for sql in connection.fetch_all_sql))
         self.assertTrue(all("from app.bank_transactions" not in sql for sql in connection.fetch_all_sql))
 
+    def test_server_downstream_bank_tag_consumers_use_runtime_tag_reader_boundary(self) -> None:
+        source = Path("backend/src/fin_ops_platform/app/server.py").read_text(encoding="utf-8")
+
+        self.assertIn("def _bank_transaction_tag_reader", source)
+        self.assertNotIn("category_provider=self._bank_transaction_effective_category_provider", source)
+        self.assertNotIn("effective_category_provider=self._bank_transaction_effective_category_provider", source)
+        self.assertNotIn("self._bank_transaction_effective_category_provider.bulk_get_for_rows(", source)
+        self.assertIn("effective_category_provider=self._bank_transaction_tag_reader()", source)
+
+    def test_runtime_worker_handlers_do_not_construct_effective_category_provider(self) -> None:
+        source = Path("backend/src/fin_ops_platform/services/runtime_worker_handlers.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("BankTransactionEffectiveCategoryProvider", source)
+
+    def test_standalone_worker_wires_bank_tag_facade_to_tag_consuming_read_models(self) -> None:
+        source = Path("backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")
+
+        self.assertIn("BankTransactionTagReadFacade", source)
+        self.assertIn("SearchPendingSqlProjectionBuilder(", source)
+        self.assertIn("bank_transaction_tag_read_facade=bank_transaction_tag_read_facade", source)
+        self.assertIn("effective_category_provider=bank_transaction_tag_read_facade", source)
+        self.assertIn("TurnoverLedgerSqlProjectionBuilder(", source)
+
+    def test_non_tag_downstream_modules_do_not_depend_on_bank_tag_facade(self) -> None:
+        paths = [
+            Path("backend/src/fin_ops_platform/services/workbench_sql_projection.py"),
+            Path("backend/src/fin_ops_platform/services/matching.py"),
+            Path("backend/src/fin_ops_platform/services/reconciliation.py"),
+            Path("backend/src/fin_ops_platform/services/input_invoice_usage_service.py"),
+            Path("backend/src/fin_ops_platform/services/output_invoice_collection_service.py"),
+            Path("backend/src/fin_ops_platform/services/oa_pending_payment_service.py"),
+            Path("backend/src/fin_ops_platform/services/cost_statistics_service.py"),
+            Path("backend/src/fin_ops_platform/services/project_costing.py"),
+        ]
+        violations = [
+            str(path)
+            for path in paths
+            if "bank_transaction_tag_read_facade" in path.read_text(encoding="utf-8")
+            or "BankTransactionTagReadFacade" in path.read_text(encoding="utf-8")
+        ]
+
+        self.assertEqual(violations, [])
+
+    def test_bank_transaction_tag_reader_uses_facade_only_for_postgres_runtime(self) -> None:
+        app = object.__new__(server_module.Application)
+        provider = object()
+        facade = object()
+        app._bank_transaction_effective_category_provider = provider
+        app._bank_transaction_tag_read_facade = facade
+
+        app._bootstrap_mode = "production"
+        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
+        self.assertIs(app._bank_transaction_tag_reader(), facade)
+
+        app._bootstrap_mode = "legacy"
+        self.assertIs(app._bank_transaction_tag_reader(), provider)
+
+        app._bootstrap_mode = "production"
+        app._state_store = type("MongoStore", (), {"storage_backend": "mongo"})()
+        self.assertIs(app._bank_transaction_tag_reader(), provider)
+
+    def test_postgres_category_rebinding_keeps_downstream_services_on_facade(self) -> None:
+        app = object.__new__(server_module.Application)
+        facade = object()
+        provider = object()
+        app._bootstrap_mode = "production"
+        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
+        app._build_bank_transaction_tag_read_facade = lambda: facade
+        app._turnover_ledger_service = type("TurnoverService", (), {})()
+        app._live_workbench_service = type("LiveWorkbenchService", (), {})()
+        app._pending_invoice_query_service = type("PendingInvoiceService", (), {})()
+
+        app._bind_local_bank_transaction_category_runtime(
+            category_service=object(),
+            auto_category_service=object(),
+            effective_category_provider=provider,
+        )
+
+        self.assertIs(app._bank_transaction_effective_category_provider, provider)
+        self.assertIs(app._turnover_ledger_service._category_provider, facade)
+        self.assertIs(app._live_workbench_service._category_provider, facade)
+        self.assertIs(app._pending_invoice_query_service._effective_category_provider, facade)
+
 
 if __name__ == "__main__":
     unittest.main()

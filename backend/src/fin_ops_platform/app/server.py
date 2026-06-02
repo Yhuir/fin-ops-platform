@@ -86,6 +86,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 from fin_ops_platform.services.bank_transaction_effective_category_provider import (
     BankTransactionEffectiveCategoryProvider,
 )
+from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
 from fin_ops_platform.services.background_job_service import (
     BackgroundJobAccessError,
     BackgroundJobNotFoundError,
@@ -539,6 +540,28 @@ class Application:
     def _workbench_reconciliation_tenant_id() -> str:
         return str(os.getenv("FIN_OPS_TENANT_ID") or "default").strip() or "default"
 
+    def _build_bank_transaction_tag_read_facade(self) -> object | None:
+        if not self._requires_sql_read_model_runtime():
+            return None
+        repository = getattr(self._state_store, "read_model_repository", None)
+        required_methods = (
+            "get_bank_detail_tagged_rows_by_transaction_ids",
+            "list_bank_detail_tagged_rows_by_month",
+        )
+        if repository is None or not all(callable(getattr(repository, method_name, None)) for method_name in required_methods):
+            return None
+        return BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            tenant_id=self._workbench_reconciliation_tenant_id(),
+        )
+
+    def _bank_transaction_tag_reader(self) -> object:
+        facade = getattr(self, "_bank_transaction_tag_read_facade", None)
+        if self._requires_sql_read_model_runtime() and facade is not None:
+            return facade
+        return self._bank_transaction_effective_category_provider
+
     def _workbench_reconciliation_dirty_queue_repository(self):
         repository = getattr(self._state_store, "read_model_repository", None)
         required_methods = (
@@ -636,6 +659,7 @@ class Application:
             category_service=self._bank_transaction_category_service,
             auto_category_service=self._bank_transaction_auto_category_service,
         )
+        self._bank_transaction_tag_read_facade = self._build_bank_transaction_tag_read_facade()
         self._turnover_relation_service = TurnoverRelationService.from_snapshot(
             self._runtime_repository_snapshot(
                 persisted_state,
@@ -816,7 +840,7 @@ class Application:
             self._import_service,
             self._matching_service,
             bank_account_resolver=bank_account_resolver,
-            category_provider=self._bank_transaction_effective_category_provider,
+            category_provider=self._bank_transaction_tag_reader(),
         )
         self._bank_details_relation_tag_projection_service = BankDetailsRelationTagProjectionService(
             pair_relation_service=self._workbench_pair_relation_service,
@@ -842,7 +866,7 @@ class Application:
             pair_relation_service=self._workbench_pair_relation_service,
             category_service=self._bank_transaction_category_service,
             app_settings_provider=self._app_settings_service.get_pending_invoice_settings_payload,
-            effective_category_provider=self._bank_transaction_effective_category_provider,
+            effective_category_provider=self._bank_transaction_tag_reader(),
             oa_projection=oa_adapter,
             income_status_override_provider=self._pending_invoice_command_repository.latest_income_status_override,
         )
@@ -896,7 +920,7 @@ class Application:
             category_service=self._bank_transaction_category_service,
             relation_service=self._turnover_relation_service,
             extra_service=self._turnover_ledger_extra_service,
-            category_provider=self._bank_transaction_effective_category_provider,
+            category_provider=self._bank_transaction_tag_reader(),
             selected_tag_codes_provider=self._app_settings_service.turnover_ledger_selected_tag_codes,
         )
         self._turnover_ledger_query_service = TurnoverLedgerQueryService(
@@ -1214,9 +1238,12 @@ class Application:
             if not transaction_id:
                 continue
             transaction_payloads.append(payload)
-        categories_by_transaction_id = self._bank_transaction_effective_category_provider.bulk_get_for_rows(
-            transaction_payloads
-        )
+        try:
+            categories_by_transaction_id = self._bank_transaction_tag_reader().bulk_get_for_rows(transaction_payloads)
+        except RuntimeError as exc:
+            if str(exc) == "bank_detail_read_model_not_fresh" and self._requires_sql_read_model_runtime():
+                return []
+            raise
         for payload in transaction_payloads:
             transaction_id = str(payload.get("id") or "").strip()
             category = categories_by_transaction_id.get(transaction_id, {})
@@ -2865,6 +2892,14 @@ class Application:
         self._bank_transaction_category_service = category_service
         self._bank_transaction_auto_category_service = auto_category_service
         self._bank_transaction_effective_category_provider = effective_category_provider
+        self._bank_transaction_tag_read_facade = self._build_bank_transaction_tag_read_facade()
+        tag_reader = self._bank_transaction_tag_reader()
+        if getattr(self, "_turnover_ledger_service", None) is not None:
+            setattr(self._turnover_ledger_service, "_category_provider", tag_reader)
+        if getattr(self, "_live_workbench_service", None) is not None:
+            setattr(self._live_workbench_service, "_category_provider", tag_reader)
+        if getattr(self, "_pending_invoice_query_service", None) is not None:
+            setattr(self._pending_invoice_query_service, "_effective_category_provider", tag_reader)
 
     def _bind_local_turnover_relation_runtime(self, relation_service: object) -> None:
         self._turnover_relation_service = relation_service
@@ -2878,6 +2913,14 @@ class Application:
         self._bank_transaction_category_service = support.category_service
         self._bank_transaction_auto_category_service = support.auto_category_service
         self._bank_transaction_effective_category_provider = support.effective_category_provider
+        self._bank_transaction_tag_read_facade = self._build_bank_transaction_tag_read_facade()
+        tag_reader = self._bank_transaction_tag_reader()
+        if getattr(self, "_turnover_ledger_service", None) is not None:
+            setattr(self._turnover_ledger_service, "_category_provider", tag_reader)
+        if getattr(self, "_live_workbench_service", None) is not None:
+            setattr(self._live_workbench_service, "_category_provider", tag_reader)
+        if getattr(self, "_pending_invoice_query_service", None) is not None:
+            setattr(self._pending_invoice_query_service, "_effective_category_provider", tag_reader)
 
     def _replace_local_turnover_relation_snapshot(self, snapshot: dict[str, object]) -> None:
         support = self._turnover_ledger_local_runtime_support()
@@ -11879,7 +11922,7 @@ class Application:
     def _no_oa_bank_batch_application_service(self) -> NoOaBankBatchApplicationService:
         return NoOaBankBatchApplicationService(
             import_service=self._import_service,
-            effective_category_provider=self._bank_transaction_effective_category_provider,
+            effective_category_provider=self._bank_transaction_tag_reader(),
             no_oa_bank_batch_service=self._no_oa_bank_batch_service,
             app_settings_service=self._app_settings_service,
             bank_transaction_category_service=self._bank_transaction_category_service,
@@ -12455,7 +12498,15 @@ class Application:
             if not isinstance(payload, dict):
                 payload = {}
             rows.append(dict(payload, id=transaction_id))
-        categories = self._bank_transaction_effective_category_provider.bulk_get_for_rows(rows)
+        try:
+            categories = self._bank_transaction_tag_reader().bulk_get_for_rows(rows)
+        except RuntimeError as exc:
+            if str(exc) == "bank_detail_read_model_not_fresh" and self._requires_sql_read_model_runtime():
+                raise BankTransactionCategoryValidationError(
+                    "bank_detail_read_model_not_fresh",
+                    "银行明细标签读模型正在刷新，请稍后重试。",
+                ) from exc
+            raise
         for transaction_id in transaction_ids:
             category = categories.get(transaction_id) or {}
             code = str(category.get("category_code") or "").strip()

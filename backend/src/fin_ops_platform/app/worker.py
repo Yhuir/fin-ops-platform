@@ -20,6 +20,7 @@ from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlPr
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.bank_transaction_effective_category_provider import BankTransactionEffectiveCategoryProvider
+from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
 from fin_ops_platform.services.cost_tax_sql_projection import (
     CostStatisticsSqlProjectionBuilder,
     TaxOffsetSqlProjectionBuilder,
@@ -29,6 +30,7 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
 )
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
 from fin_ops_platform.services.etc_business_batch_application_service import ETC_BUSINESS_OA_DETECTION_EVENT_TYPE
 from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
@@ -141,6 +143,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     registration = _apply_registration_args(args, queue_settings=queue_settings)
     connection = PostgresConnection(settings) if settings is not None else None
     queue = RuntimeQueueRepository(connection) if connection is not None else SimpleNamespace()
+    read_model_repository = PostgresReadModelRepository(connection) if connection is not None else None
+    bank_transaction_tag_read_facade = (
+        BankTransactionTagReadFacade(
+            read_model_repository=read_model_repository,
+            queue_repository=queue,
+        )
+        if read_model_repository is not None
+        else None
+    )
     redis_helper = RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env())
     config = RuntimeWorkerConfig(
         worker_id=args.worker_id or RuntimeWorkerConfig().worker_id,
@@ -229,7 +240,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if "tax_offset.read_model.refresh" not in config.event_types:
             config.event_types.append("tax_offset.read_model.refresh")
     if args.enable_search_read_model_refresh or args.enable_pending_invoice_read_model_refresh:
-        projection_builder = SearchPendingSqlProjectionBuilder(connection=connection)
+        projection_builder = SearchPendingSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=read_model_repository,
+            bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
+        )
         refresh_service = SearchPendingReadModelRefreshService(
             projection_builder=projection_builder,
             queue_repository=queue,
@@ -274,7 +289,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             import_service=ImportNormalizationService(
                 fact_repository=state_store.import_fact_repository if state_store is not None else None
             ),
-            effective_category_provider=BankTransactionEffectiveCategoryProvider(
+            effective_category_provider=bank_transaction_tag_read_facade
+            or BankTransactionEffectiveCategoryProvider(
                 category_service=category_service,
                 auto_category_service=auto_category_service,
             ),
@@ -295,7 +311,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE not in config.event_types:
             config.event_types.append(NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE)
     if args.enable_turnover_ledger_read_model_refresh:
-        projection_builder = TurnoverLedgerSqlProjectionBuilder(connection=connection)
+        projection_builder = TurnoverLedgerSqlProjectionBuilder(
+            connection=connection,
+            bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
+        )
         refresh_service = TurnoverLedgerReadModelRefreshService(
             projection_builder=projection_builder,
             queue_repository=queue,

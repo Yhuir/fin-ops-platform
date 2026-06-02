@@ -499,7 +499,10 @@ class LiveWorkbenchService:
             return {}
 
         raw_records: Any
-        if hasattr(provider, "bulk_get_for_rows"):
+        category_records_by_transaction_ids = getattr(provider, "category_records_by_transaction_ids", None)
+        if callable(category_records_by_transaction_ids):
+            raw_records = category_records_by_transaction_ids(transaction_ids, require_fresh=False)
+        elif hasattr(provider, "bulk_get_for_rows"):
             raw_records = provider.bulk_get_for_rows(transactions)
         elif hasattr(provider, "bulk_get"):
             raw_records = provider.bulk_get(transaction_ids)

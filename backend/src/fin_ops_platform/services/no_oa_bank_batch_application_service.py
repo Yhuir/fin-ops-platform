@@ -484,7 +484,7 @@ class NoOaBankBatchApplicationService:
 
     def no_oa_bank_batch_source_versions(self) -> dict[str, object]:
         no_oa_selection = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
-        return {
+        source_versions = {
             **self._workbench_matching_source_versions_provider(),
             "no_oa_bank_batch_schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
             "no_oa_bank_batch_tag_selection_version": int(no_oa_selection.get("version") or 1),
@@ -496,6 +496,10 @@ class NoOaBankBatchApplicationService:
                 self._bank_transaction_category_service.snapshot()
             ),
         }
+        bank_detail_source_versions = getattr(self._effective_category_provider, "last_source_versions", None)
+        if isinstance(bank_detail_source_versions, dict) and bank_detail_source_versions:
+            source_versions["bank_detail_source_versions"] = dict(bank_detail_source_versions)
+        return source_versions
 
     def no_oa_bank_batch_stale_reasons(self, batches: object) -> list[str]:
         batch_rows = batches if isinstance(batches, list) else []

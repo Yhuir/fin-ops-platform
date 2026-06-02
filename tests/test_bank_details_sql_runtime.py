@@ -9,6 +9,8 @@ import unittest
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
 from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
 from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
+from fin_ops_platform.services.bank_transaction_effective_category_provider import BankTransactionEffectiveCategoryProvider
+from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
@@ -85,6 +87,30 @@ class CaptureBankDetailReadModelRepository:
         self.marked_scopes.append(dict(kwargs))
 
 
+class CaptureRuntimeQueueRepository:
+    def __init__(self) -> None:
+        self.enqueued: list[dict[str, object]] = []
+
+    def enqueue_read_model_refresh(self, **kwargs: object) -> RuntimeQueueEvent:
+        self.enqueued.append(dict(kwargs))
+        scope_type = str(kwargs.get("scope_type") or "")
+        scope_key = str(kwargs.get("scope_key") or "")
+        return RuntimeQueueEvent(
+            event_id=f"event-{len(self.enqueued)}",
+            tenant_id=str(kwargs.get("tenant_id") or "default"),
+            event_type=f"{scope_type}.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id=scope_key,
+            scope_type=scope_type,
+            scope_key=scope_key,
+            dedupe_key=f"{scope_type}.read_model.refresh:{scope_type}:{scope_key}",
+            payload={"scope_type": scope_type, "scope_key": scope_key},
+            attempts=0,
+            status="pending",
+            source_version=len(self.enqueued),
+        )
+
+
 def scope_row(scope_key: str, **overrides: object) -> dict[str, object]:
     row: dict[str, object] = {
         "scope_key": scope_key,
@@ -116,6 +142,352 @@ def runtime_event(scope_key: str) -> RuntimeQueueEvent:
         status="processing",
         source_version=7,
     )
+
+
+def bank_detail_projected_row(
+    transaction_id: str = "txn-001",
+    *,
+    scope_key: str = "2026-05",
+    direction: str = "expense",
+    category_code: str | None = "equipment_purchase",
+) -> dict[str, object]:
+    return {
+        "payload": {
+            "id": transaction_id,
+            "transaction_id": transaction_id,
+            "trade_time": "2026-05-03T10:00:00+08:00",
+            "trade_date": "2026-05-03",
+            "direction": direction,
+            "direction_label": "支" if direction == "expense" else "收",
+            "amount": "23053.31",
+            "signed_amount": "-23053.31" if direction == "expense" else "23053.31",
+            "counterparty_name": "云南辰飞机电工程有限公司",
+            "summary": "货款",
+            "purpose": "设备采购",
+            "bank_name": "光大银行",
+            "account_last4": "8826",
+            "effective_category_code": category_code,
+            "effective_category_label": "设备采购" if category_code else None,
+            "effective_category_primary_label": "货款" if category_code else None,
+            "effective_category_sub_label": "设备采购" if category_code else None,
+            "effective_category_third_label": None,
+            "effective_category_label_path": ["货款", "设备采购"] if category_code else [],
+            "effective_category_source": "auto_confirmation" if category_code else None,
+            "effective_turnover_role": "expense",
+            "effective_turnover_action_type": "purchase",
+            "effective_turnover_family": "operating",
+        },
+        "raw_payload": {"normalized_payload": {}},
+        "summary": "货款",
+        "purpose": "设备采购",
+        "scope_key": scope_key,
+    }
+
+
+class FakeBankTaggedReadRepository:
+    def __init__(
+        self,
+        *,
+        by_ids_payload: dict[str, object] | None = None,
+        by_month_payload: dict[str, object] | None = None,
+    ) -> None:
+        self.by_ids_payload = by_ids_payload
+        self.by_month_payload = by_month_payload
+        self.id_calls: list[list[str]] = []
+        self.month_calls: list[dict[str, object]] = []
+
+    def get_bank_detail_tagged_rows_by_transaction_ids(
+        self,
+        transaction_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        self.id_calls.append(list(transaction_ids))
+        return self.by_ids_payload
+
+    def list_bank_detail_tagged_rows_by_month(
+        self,
+        month: str,
+        *,
+        direction: str | None = None,
+        category_codes: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        self.month_calls.append(
+            {
+                "month": month,
+                "direction": direction,
+                "category_codes": list(category_codes or []),
+                "tenant_id": tenant_id,
+            }
+        )
+        return self.by_month_payload
+
+
+class FakeCategoryService:
+    def __init__(self, categories: dict[str, dict[str, object]] | None = None) -> None:
+        self.categories = categories or {}
+
+    def get(self, transaction_id: str) -> dict[str, object]:
+        return dict(self.categories.get(transaction_id) or {})
+
+    def bulk_get(self, transaction_ids: list[str]) -> dict[str, dict[str, object]]:
+        return {transaction_id: dict(self.categories.get(transaction_id) or {}) for transaction_id in transaction_ids}
+
+
+class FakeAutoCategoryService:
+    def __init__(self, suggestions: dict[str, dict[str, object]] | None = None) -> None:
+        self.suggestions = suggestions or {}
+
+    def suggestions_by_transaction_id(self, rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+        return {
+            str(row.get("id") or row.get("transaction_id") or ""): dict(
+                self.suggestions.get(str(row.get("id") or row.get("transaction_id") or "")) or {}
+            )
+            for row in rows
+        }
+
+
+class BankTransactionEffectiveCategoryProviderTests(unittest.TestCase):
+    def test_provider_docstring_states_legacy_on_demand_boundary(self) -> None:
+        doc = BankTransactionEffectiveCategoryProvider.__doc__ or ""
+
+        self.assertIn("legacy/local", doc)
+        self.assertIn("not the PostgreSQL production downstream read gateway", doc)
+
+    def test_provider_keeps_legacy_on_demand_effective_category_resolution(self) -> None:
+        provider = BankTransactionEffectiveCategoryProvider(
+            category_service=FakeCategoryService(
+                {
+                    "txn-confirmed": {
+                        "category_code": "equipment_purchase",
+                        "category_label": "设备采购",
+                        "category_path": ["货款", "设备采购"],
+                        "category_label_path": ["货款", "设备采购"],
+                        "category_primary_label": "货款",
+                        "category_sub_label": "设备采购",
+                        "source": "auto_confirmation",
+                        "category_version": 7,
+                    },
+                    "txn-turnover": {
+                        "category_code": "borrow_in_personal_pending_repayment",
+                        "category_label": "个人暂借款：待还款",
+                        "category_path": ["借入", "个人往来款", "待还款"],
+                        "category_label_path": ["借入", "个人往来款", "待还款"],
+                        "category_primary_label": "借入",
+                        "category_sub_label": "个人往来款",
+                        "category_third_label": "个人往来",
+                        "turnover_role": "external",
+                        "turnover_action_type": "borrow_in_principal",
+                        "turnover_family": "personal",
+                        "source": "turnover_ledger",
+                    },
+                }
+            ),
+            auto_category_service=FakeAutoCategoryService(
+                {
+                    "txn-auto": {
+                        "category_code": "equipment_purchase",
+                        "category_label": "设备采购",
+                        "category_path": ["货款", "设备采购"],
+                        "category_label_path": ["货款", "设备采购"],
+                        "category_primary_label": "货款",
+                        "category_sub_label": "设备采购",
+                    }
+                }
+            ),
+        )
+
+        categories = provider.bulk_get_for_rows(
+            [
+                {"id": "txn-auto", "txn_direction": "outflow", "amount": "100.00"},
+                {"id": "txn-confirmed", "txn_direction": "outflow", "amount": "200.00"},
+                {"id": "txn-turnover", "txn_direction": "inflow", "amount": "300.00"},
+                {"id": "txn-empty", "txn_direction": "outflow", "amount": "1.00"},
+            ]
+        )
+
+        self.assertEqual(categories["txn-auto"]["category_code"], "equipment_purchase")
+        self.assertEqual(categories["txn-auto"]["source"], "auto")
+        self.assertEqual(categories["txn-confirmed"]["category_code"], "equipment_purchase")
+        self.assertEqual(categories["txn-confirmed"]["source"], "manual_confirmation")
+        self.assertEqual(categories["txn-confirmed"]["category_version"], 7)
+        self.assertEqual(categories["txn-turnover"]["category_code"], "borrow_in_personal_pending_repayment")
+        self.assertEqual(categories["txn-turnover"]["effective_category_third_label"], "个人往来")
+        self.assertEqual(categories["txn-turnover"]["turnover_action_type"], "borrow_in_principal")
+        self.assertIsNone(categories["txn-empty"]["category_code"])
+
+    def test_provider_does_not_expose_read_model_freshness_contract(self) -> None:
+        provider = BankTransactionEffectiveCategoryProvider(
+            category_service=FakeCategoryService(),
+            auto_category_service=FakeAutoCategoryService(),
+        )
+
+        self.assertFalse(hasattr(provider, "last_source_versions"))
+        self.assertFalse(hasattr(provider, "get_by_transaction_ids"))
+        self.assertFalse(hasattr(provider, "list_by_month"))
+
+
+class BankTransactionTagReadFacadeTests(unittest.TestCase):
+    def test_get_by_transaction_ids_returns_standardized_fresh_tagged_rows(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "fresh",
+                "rows": [bank_detail_projected_row("txn-001")["payload"]],
+                "source_versions": {"bank_detail": 9},
+                "read_model_scope_keys": ["2026-05"],
+                "read_model_scope_signatures": {"2026-05": {"schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}},
+                "missing_transaction_ids": [],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.get_by_transaction_ids(["txn-001"])
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertFalse(payload["refresh_enqueued"])
+        self.assertEqual(payload["source_versions"], {"bank_detail": 9})
+        self.assertEqual(payload["scope_keys"], ["2026-05"])
+        self.assertEqual(queue.enqueued, [])
+        row = payload["rows"][0]
+        self.assertEqual(row["transaction_id"], "txn-001")
+        self.assertEqual(row["direction"], "expense")
+        self.assertEqual(row["effective_category_code"], "equipment_purchase")
+        self.assertEqual(row["effective_category_label_path"], ["货款", "设备采购"])
+        self.assertEqual(row["effective_turnover_action_type"], "purchase")
+
+    def test_get_by_transaction_ids_requires_fresh_before_returning_publishable_rows(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "stale",
+                "rows": [bank_detail_projected_row("txn-001")["payload"]],
+                "source_versions": {"bank_detail": 8},
+                "read_model_scope_keys": ["2026-05"],
+                "read_model_scope_signatures": {"2026-05": {"schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION - 1}},
+                "missing_transaction_ids": [],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.get_by_transaction_ids(["txn-001"], require_fresh=True, reason="unit_test")
+
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(payload["rows"], [])
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["scope_keys"], ["2026-05"])
+        self.assertEqual(queue.enqueued[0]["scope_type"], "bank_detail")
+        self.assertEqual(queue.enqueued[0]["scope_key"], "2026-05")
+        self.assertEqual(queue.enqueued[0]["reason"], "unit_test")
+        self.assertIn("read_model_not_fresh", payload["stale_reasons"])
+
+    def test_get_by_transaction_ids_treats_missing_projected_rows_as_non_fresh(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "fresh",
+                "rows": [bank_detail_projected_row("txn-001")["payload"]],
+                "source_versions": {"bank_detail": 9},
+                "read_model_scope_keys": ["2026-05"],
+                "read_model_scope_signatures": {"2026-05": {"schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}},
+                "missing_transaction_ids": ["txn-missing"],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.get_by_transaction_ids(["txn-001", "txn-missing"], require_fresh=True)
+
+        self.assertEqual(payload["status"], "missing")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["missing_transaction_ids"], ["txn-missing"])
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertIn("missing_transaction_rows", payload["stale_reasons"])
+
+    def test_get_by_transaction_ids_enqueues_hint_scope_when_all_projected_rows_are_missing(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "missing",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": [],
+                "read_model_scope_signatures": {},
+                "missing_transaction_ids": ["txn-missing"],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.get_by_transaction_ids(
+            ["txn-missing"],
+            require_fresh=True,
+            reason="unit_test_missing",
+            month_hint="2026-05",
+        )
+
+        self.assertEqual(payload["status"], "missing")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["scope_keys"], ["2026-05"])
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(queue.enqueued[0]["scope_key"], "2026-05")
+
+    def test_get_by_transaction_ids_enqueues_all_scope_when_missing_without_hint(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "missing",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": [],
+                "read_model_scope_signatures": {},
+                "missing_transaction_ids": ["txn-missing"],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.get_by_transaction_ids(["txn-missing"], require_fresh=True)
+
+        self.assertEqual(payload["status"], "missing")
+        self.assertEqual(payload["scope_keys"], ["all"])
+        self.assertEqual(queue.enqueued[0]["scope_key"], "all")
+
+    def test_list_by_month_allows_diagnostic_stale_rows_when_fresh_not_required(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_month_payload={
+                "read_model_status": "refreshing",
+                "rows": [bank_detail_projected_row("txn-001")["payload"]],
+                "source_versions": {"bank_detail": 8},
+                "read_model_scope_keys": ["2026-05"],
+                "read_model_scope_signatures": {"2026-05": {"schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}},
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.list_by_month("2026-05", direction="expense", require_fresh=False)
+
+        self.assertEqual(payload["status"], "refreshing")
+        self.assertEqual(len(payload["rows"]), 1)
+        self.assertFalse(payload["refresh_enqueued"])
+        self.assertEqual(repository.month_calls[0]["category_codes"], [])
 
 
 class BankDetailSqlRepositoryTests(unittest.TestCase):
@@ -241,6 +613,57 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn("effective_category_code is null", sql_text)
         self.assertNotIn("effective_category_code = %s", sql_text)
         self.assertNotIn("uncategorized", [param for call in connection.calls for param in call[2]])
+
+    def test_get_tagged_rows_by_transaction_ids_reads_only_bank_detail_projection(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [bank_detail_projected_row("txn-002"), bank_detail_projected_row("txn-001")],
+                [scope_row("2026-05")],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_bank_detail_tagged_rows_by_transaction_ids(
+            ["txn-001", "txn-missing", "txn-002"]
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual([row["transaction_id"] for row in payload["rows"]], ["txn-001", "txn-002"])
+        self.assertEqual(payload["missing_transaction_ids"], ["txn-missing"])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
+        self.assertEqual(payload["source_versions"], {"source_version": 3})
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("from read_model.bank_detail_rows", sql_text)
+        self.assertIn("transaction_id = any", sql_text)
+        self.assertNotIn("from app.bank_transactions", sql_text)
+
+    def test_list_tagged_rows_by_month_uses_direction_and_effective_category_filters(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-05")],
+                [bank_detail_projected_row("txn-001")],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_tagged_rows_by_month(
+            "2026-05",
+            direction="expense",
+            category_codes=["equipment_purchase"],
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
+        self.assertEqual(payload["rows"][0]["effective_category_code"], "equipment_purchase")
+        self.assertEqual(payload["source_versions"], {"source_version": 3})
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("from read_model.bank_detail_rows", sql_text)
+        self.assertIn("scope_month = %s::date", sql_text)
+        self.assertIn("direction = %s", sql_text)
+        self.assertIn("effective_category_code = any", sql_text)
+        self.assertNotIn("from app.bank_transactions", sql_text)
 
     def test_transactions_serve_previous_schema_rows_while_refreshing(self) -> None:
         connection = FakeConnection(

@@ -24,11 +24,13 @@ class TurnoverLedgerSqlProjectionBuilder:
         read_repository: Any | None = None,
         ledger_service: TurnoverLedgerService | None = None,
         source_versions_provider: Callable[[], dict[str, Any]] | None = None,
+        bank_transaction_tag_read_facade: Any | None = None,
     ) -> None:
         self._connection = connection
         self._read_repository = read_repository
         self._ledger_service = ledger_service
         self._source_versions_provider = source_versions_provider
+        self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
 
     def rebuild_turnover_ledger_read_model_scope(self, scope_key: str, *, source_version: object = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
@@ -132,7 +134,7 @@ class TurnoverLedgerSqlProjectionBuilder:
             transaction_exists=state_store.transaction_exists,
         )
         auto_category_service = BankTransactionAutoCategoryService(category_service=category_service)
-        category_provider = BankTransactionEffectiveCategoryProvider(
+        category_provider = self._bank_transaction_tag_read_facade or BankTransactionEffectiveCategoryProvider(
             category_service=category_service,
             auto_category_service=auto_category_service,
         )
@@ -155,10 +157,21 @@ class TurnoverLedgerSqlProjectionBuilder:
         return {
             "ledger_service": ledger_service,
             "read_repository": state_store.read_model_repository,
-            "source_versions_provider": lambda: build_turnover_ledger_source_versions(
-                relation_service=relation_service,
-                extra_snapshot_provider=extra_service.snapshot,
-                app_settings_service=app_settings_service,
-                bank_transaction_category_service=category_service,
+            "source_versions_provider": lambda: _with_bank_detail_source_versions(
+                build_turnover_ledger_source_versions(
+                    relation_service=relation_service,
+                    extra_snapshot_provider=extra_service.snapshot,
+                    app_settings_service=app_settings_service,
+                    bank_transaction_category_service=category_service,
+                ),
+                category_provider,
             ),
         }
+
+
+def _with_bank_detail_source_versions(source_versions: dict[str, Any], category_provider: Any) -> dict[str, Any]:
+    result = dict(source_versions)
+    provider_source_versions = getattr(category_provider, "last_source_versions", None)
+    if isinstance(provider_source_versions, dict):
+        result["bank_detail_source_versions"] = dict(provider_source_versions)
+    return result

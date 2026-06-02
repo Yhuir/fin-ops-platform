@@ -30,9 +30,17 @@ PENDING_INVOICE_FILTERS = EXPENSE_PENDING_INVOICE_FILTERS | INCOME_PENDING_INVOI
 
 
 class SearchPendingSqlProjectionBuilder:
-    def __init__(self, *, connection: Any, read_model_repository: PostgresReadModelRepository | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        connection: Any,
+        read_model_repository: PostgresReadModelRepository | None = None,
+        bank_transaction_tag_read_facade: Any | None = None,
+    ) -> None:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
+        self._pending_invoice_bank_tag_source_versions: dict[str, object] = {}
 
     def list_search_scope_shards(self, scope_key: str) -> list[str]:
         normalized_scope = str(scope_key or "").strip()
@@ -191,6 +199,7 @@ class SearchPendingSqlProjectionBuilder:
         txn_direction = "outflow" if direction == "expense" else "inflow"
         target_invoice_type = "input" if direction == "expense" else "output"
         tag_groups = self._pending_invoice_tag_groups(direction=direction)
+        bank_tag_rows_by_id = self._bank_tag_rows_by_transaction_id(direction=direction, month=month)
         rows = self._connection.fetch_all(
             """
             select
@@ -352,7 +361,8 @@ class SearchPendingSqlProjectionBuilder:
         )
         result: list[dict[str, object]] = []
         for row in rows:
-            category = row_payload(row, "category_payload")
+            transaction_id = str(row.get("transaction_id") or "").strip()
+            category = bank_tag_rows_by_id.get(transaction_id) or row_payload(row, "category_payload")
             category = category if isinstance(category, dict) else {}
             effective_category = pending_invoice_effective_category_payload(category)
             category_code = str(effective_category.get("category_code") or "").strip()
@@ -362,7 +372,6 @@ class SearchPendingSqlProjectionBuilder:
             invoices = row.get("invoices") if isinstance(row.get("invoices"), list) else []
             payment_summary = _payment_summary_from_invoices(invoices, paid_total=row.get("paid_total"))
             can_create_invoice = direction == "expense" and not invoices and filter_group != "no_invoice_required"
-            transaction_id = str(row.get("transaction_id") or "").strip()
             relation_case_ids = list(row.get("relation_case_ids") or [])
             oa_applicant = str(row.get("oa_applicant") or "").strip()
             oa_project_name = str(row.get("oa_project_name") or "").strip()
@@ -476,6 +485,30 @@ class SearchPendingSqlProjectionBuilder:
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
 
+    def _bank_tag_rows_by_transaction_id(self, *, direction: str, month: str) -> dict[str, dict[str, object]]:
+        self._pending_invoice_bank_tag_source_versions = {}
+        facade = self._bank_transaction_tag_read_facade
+        if facade is None:
+            return {}
+        list_by_month = getattr(facade, "list_by_month", None)
+        if not callable(list_by_month):
+            return {}
+        payload = list_by_month(
+            month,
+            direction=direction,
+            require_fresh=True,
+            reason="pending_invoice_sql_projection",
+        )
+        if not isinstance(payload, dict) or str(payload.get("status") or "") != "fresh":
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        self._pending_invoice_bank_tag_source_versions = dict(source_versions)
+        return {
+            transaction_id: _pending_invoice_category_payload_from_bank_tag_row(row)
+            for row in list(payload.get("rows") or [])
+            if isinstance(row, dict) and (transaction_id := str(row.get("transaction_id") or "").strip())
+        }
+
     def _pending_invoice_source_versions(self) -> dict[str, object]:
         settings = _settings_payload(self._connection)
         pending_groups = settings.get("pending_invoice_tag_groups")
@@ -488,6 +521,7 @@ class SearchPendingSqlProjectionBuilder:
             "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,
             "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
+            "bank_detail_source_versions": dict(self._pending_invoice_bank_tag_source_versions),
         }
 
 
@@ -565,6 +599,30 @@ def _status_label(status: str) -> str:
 
 def _filter_group_for_category(category_code: str, tag_groups: dict[str, set[str]], *, direction: str) -> str | None:
     return pending_invoice_group_for_category(category_code, tag_groups, direction=direction)
+
+
+def _pending_invoice_category_payload_from_bank_tag_row(row: dict[str, Any]) -> dict[str, object]:
+    label_path = list(row.get("effective_category_label_path") or [])
+    category_code = str(row.get("effective_category_code") or "").strip()
+    return {
+        "category_code": category_code,
+        "category_label": row.get("effective_category_label"),
+        "category_primary_label": row.get("effective_category_primary_label"),
+        "category_sub_label": row.get("effective_category_sub_label"),
+        "category_third_label": row.get("effective_category_third_label"),
+        "category_label_path": label_path,
+        "category_path": label_path,
+        "source": row.get("effective_category_source"),
+        "category_source": row.get("effective_category_source"),
+        "effective_category_code": category_code,
+        "effective_category_label": row.get("effective_category_label"),
+        "effective_category_primary_label": row.get("effective_category_primary_label"),
+        "effective_category_sub_label": row.get("effective_category_sub_label"),
+        "effective_category_third_label": row.get("effective_category_third_label"),
+        "effective_category_label_path": label_path,
+        "effective_category_path": label_path,
+        "effective_category_source": row.get("effective_category_source"),
+    }
 
 
 def _matched_rule_payload(

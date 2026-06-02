@@ -4,7 +4,10 @@ import unittest
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
-from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLedgerSqlProjectionBuilder
+from fin_ops_platform.services.turnover_ledger_sql_projection import (
+    TurnoverLedgerSqlProjectionBuilder,
+    _with_bank_detail_source_versions,
+)
 
 
 class FakeProjectionBuilder:
@@ -81,7 +84,40 @@ class FakeGroupedLedgerService:
         }
 
 
+class NonFreshLedgerService:
+    def list_grouped_ledger(self, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("bank_detail_read_model_not_fresh")
+
+
 class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
+    def test_projection_source_versions_include_bank_detail_source_versions(self) -> None:
+        class CategoryProvider:
+            last_source_versions = {"bank_detail": {"scope_key": "2026-04", "source_version": 12}}
+
+        self.assertEqual(
+            _with_bank_detail_source_versions(
+                {"turnover_ledger_schema_version": "test"},
+                CategoryProvider(),
+            ),
+            {
+                "turnover_ledger_schema_version": "test",
+                "bank_detail_source_versions": {"bank_detail": {"scope_key": "2026-04", "source_version": 12}},
+            },
+        )
+
+    def test_facade_non_fresh_error_does_not_save_turnover_read_model(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=NonFreshLedgerService(),  # type: ignore[arg-type]
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
+            builder.rebuild_turnover_ledger_read_model_scope("all", source_version=10)
+
+        self.assertIsNone(repository.saved_payload)
+
     def test_projection_preserves_group_breakdowns_tags_and_bank_labels(self) -> None:
         repository = FakeTurnoverReadRepository()
         builder = TurnoverLedgerSqlProjectionBuilder(

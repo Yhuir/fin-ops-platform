@@ -13,6 +13,19 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 
 
 class BankTransactionEffectiveCategoryProvider:
+    """Legacy/local on-demand effective category calculator.
+
+    This provider computes effective bank transaction categories from manual
+    category facts and current auto-category suggestions. It is intentionally
+    kept for legacy/local fallback and migration-compatible paths where the
+    PostgreSQL bank detail read model is unavailable.
+
+    It is not the PostgreSQL production downstream read gateway. Production
+    downstream modules that need bank transactions plus effective tags must read
+    through BankTransactionTagReadFacade, which consumes read_model.bank_detail_rows
+    and owns freshness/source_versions behavior.
+    """
+
     def __init__(
         self,
         *,

@@ -646,6 +646,128 @@ class PostgresReadModelRepository:
             **scope_summary,
         }
 
+    def get_bank_detail_tagged_rows_by_transaction_ids(
+        self,
+        transaction_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_ids = _dedupe_preserve_order(
+            text(transaction_id)
+            for transaction_id in list(transaction_ids or [])
+            if text(transaction_id)
+        )
+        if not normalized_ids:
+            return {
+                "rows": [],
+                "missing_transaction_ids": [],
+                "source_versions": {},
+                "read_model_status": "fresh",
+                "read_model_scope_keys": [],
+                "read_model_scope_signatures": {},
+            }
+        with self._connection.transaction() as connection:
+            rows = connection.fetch_all(
+                """
+                select payload, raw_payload, summary, purpose, scope_key, source_versions
+                from read_model.bank_detail_rows
+                where tenant_id = %s
+                  and transaction_id = any(%s)
+                order by array_position(%s::text[], transaction_id)
+                """,
+                (tenant_id, normalized_ids, normalized_ids),
+            )
+            unordered_payload_rows = [_bank_detail_row_payload(row) for row in rows]
+            payload_by_id = {
+                transaction_id: row
+                for row in unordered_payload_rows
+                if (transaction_id := text(row.get("transaction_id") or row.get("id")))
+            }
+            payload_rows = [
+                payload_by_id[transaction_id]
+                for transaction_id in normalized_ids
+                if transaction_id in payload_by_id
+            ]
+            row_ids = {text(row.get("transaction_id") or row.get("id")) for row in payload_rows}
+            missing_ids = [transaction_id for transaction_id in normalized_ids if transaction_id not in row_ids]
+            scope_keys = _dedupe_preserve_order(
+                text(row.get("scope_key")) or _bank_detail_month_text((row.get("trade_date") or row.get("trade_time")))
+                for row in payload_rows
+            )
+            if not scope_keys:
+                return {
+                    "rows": [],
+                    "missing_transaction_ids": missing_ids,
+                    "source_versions": {},
+                    "read_model_status": "missing",
+                    "read_model_scope_keys": [],
+                    "read_model_scope_signatures": {},
+                }
+            scope_summary = self.bank_detail_scope_summary(
+                scope_keys=scope_keys,
+                tenant_id=tenant_id,
+                connection=connection,
+            )
+        return {
+            "rows": payload_rows,
+            "missing_transaction_ids": missing_ids,
+            "source_versions": _source_versions_from_scope_summary(scope_summary),
+            **scope_summary,
+        }
+
+    def list_bank_detail_tagged_rows_by_month(
+        self,
+        month: str,
+        *,
+        direction: str | None = None,
+        category_codes: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_month = text(month)
+        if not normalized_month or not MONTH_SCOPE_RE.match(normalized_month):
+            raise ValueError("bank detail tagged row month must be YYYY-MM.")
+        with self._connection.transaction() as connection:
+            scope_summary = self.bank_detail_scope_summary(
+                scope_keys=[normalized_month],
+                tenant_id=tenant_id,
+                connection=connection,
+            )
+            if scope_summary["read_model_status"] == "missing":
+                return None
+            read_model_status = text(scope_summary.get("read_model_status")) or "fresh"
+            require_current_schema = read_model_status == "fresh"
+            where = ["tenant_id = %s", "scope_month = %s::date"]
+            params: list[Any] = [tenant_id, month_start(normalized_month)]
+            if require_current_schema:
+                where.append("schema_version = %s")
+                params.append(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION)
+            if normalized_direction := text(direction):
+                where.append("direction = %s")
+                params.append(normalized_direction)
+            normalized_category_codes = _dedupe_preserve_order(
+                text(category_code)
+                for category_code in list(category_codes or [])
+                if text(category_code)
+            )
+            if normalized_category_codes:
+                where.append("effective_category_code = any(%s)")
+                params.append(normalized_category_codes)
+            rows = connection.fetch_all(
+                f"""
+                select payload, raw_payload, summary, purpose, scope_key, source_versions
+                from read_model.bank_detail_rows
+                where {" and ".join(where)}
+                order by trade_time_sort desc, transaction_id desc
+                """,
+                tuple(params),
+            )
+        return {
+            "rows": [_bank_detail_row_payload(row) for row in rows],
+            "missing_transaction_ids": [],
+            "source_versions": _source_versions_from_scope_summary(scope_summary),
+            **scope_summary,
+        }
+
     def list_bank_account_balances(
         self,
         *,
@@ -7907,6 +8029,25 @@ def _source_version_value(source_versions: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _source_versions_from_scope_summary(scope_summary: dict[str, Any]) -> dict[str, Any]:
+    signatures = (
+        scope_summary.get("read_model_scope_signatures")
+        if isinstance(scope_summary.get("read_model_scope_signatures"), dict)
+        else {}
+    )
+    scope_keys = text_list(scope_summary.get("read_model_scope_keys"))
+    if len(scope_keys) == 1:
+        signature = signatures.get(scope_keys[0]) if isinstance(signatures.get(scope_keys[0]), dict) else {}
+        source_versions = signature.get("source_versions") if isinstance(signature.get("source_versions"), dict) else {}
+        return dict(source_versions)
+    result: dict[str, Any] = {}
+    for scope_key in scope_keys:
+        signature = signatures.get(scope_key) if isinstance(signatures.get(scope_key), dict) else {}
+        if isinstance(signature.get("source_versions"), dict):
+            result[scope_key] = dict(signature.get("source_versions"))
+    return result
 
 
 def _dedupe_preserve_order(values: Any) -> list[str]:

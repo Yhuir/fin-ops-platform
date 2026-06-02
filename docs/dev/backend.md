@@ -190,6 +190,13 @@ python3 -m fin_ops_platform.app.worker \
 
 `/api/search` 从 `read_model.search_index_rows` 查询，`/api/pending-invoices/rows` 从 `read_model.pending_invoice_rows` 分页查询。`/api/input-invoice-usage/rows` 从 `read_model.input_invoice_usage_rows` 查询，`/api/output-invoice-collections/rows` 从 `read_model.output_invoice_collection_rows` 查询；对应 filter-options 必须基于 SQL read model 行集生成。SQL miss/stale/schema-stale/source_versions 不匹配时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh；API 请求路径不得同步扫描全量发票、流水、OA 或关系数据。
 
+银行流水有效标签读取边界：
+
+- `bank_detail` SQL projection 是 producer：它根据银行流水事实、人工/确认标签和自动标签规则计算 `effective_category_*`，并写入 `read_model.bank_detail_rows`。
+- `BankTransactionTagReadFacade` 是 PostgreSQL runtime 下游 read gateway：pending invoice、turnover ledger、no-OA bank batch、live workbench 等需要“银行流水 + 有效标签”的下游只能通过它读取已投影结果，并由它处理 fresh/stale/missing、`source_versions` 和刷新 enqueue。
+- `BankTransactionEffectiveCategoryProvider` 只保留为 legacy/local/on-demand fallback。它可以在没有 PostgreSQL bank detail read model 的兼容路径即时计算有效标签，但不得作为 PostgreSQL 生产下游读取入口。
+- 只消费普通流水事实、不消费有效标签的模块不需要接入 Facade；不得为了复用而把 matching、reconciliation、invoice usage、output collection、OA pending payment、cost statistics、project costing 等模块改成依赖有效标签读取边界。
+
 进项发票使用/销项发票收款 read model worker：
 
 ```bash

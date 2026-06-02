@@ -33,6 +33,7 @@ def _pending_invoice_expected_source_versions() -> dict[str, object]:
         "bank_auto_tag_rules_version": 1,
         "oa_attachment_invoice_parser_version": "2026-05-28-attachment-status-v1:2026-05-11-evidence-v1",
         "oa_projection_sync_version": "2026-05-28-scope-replace-v1",
+        "bank_detail_source_versions": {},
     }
 
 
@@ -129,6 +130,83 @@ class PendingProjectionConnection:
                 }
             }
         return None
+
+
+class PendingProjectionFacadeConnection(PendingProjectionConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "bank_transaction_tags": {
+                        "version": 5,
+                        "definitions": [
+                            {"code": "service_fee", "label": "服务费", "status": "active"},
+                            {
+                                "code": "equipment_purchase",
+                                "label": "设备采购",
+                                "status": "active",
+                                "rules": {"match_fields": ["all_text"], "contains": ["设备采购"]},
+                            },
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "version": 5,
+                        "groups": {
+                            "requires_invoice": {"tag_codes": ["service_fee"]},
+                            "bank_statement_as_invoice": {"tag_codes": ["equipment_purchase"]},
+                            "no_invoice_required": {"tag_codes": []},
+                        },
+                    }
+                }
+            }
+        return None
+
+
+class CapturePendingInvoiceReadRepository:
+    def __init__(self) -> None:
+        self.saved: list[dict[str, object]] = []
+
+    def save_pending_invoice_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, object]],
+        source_versions: dict[str, object] | None = None,
+    ) -> None:
+        self.saved.append(
+            {
+                "scope_key": scope_key,
+                "rows": list(rows),
+                "source_versions": dict(source_versions or {}),
+            }
+        )
+
+
+class FakeBankTransactionTagFacade:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    def list_by_month(
+        self,
+        month: str,
+        *,
+        direction: str | None = None,
+        category_codes: list[str] | None = None,
+        require_fresh: bool = True,
+        reason: str = "downstream_bank_tag_read",
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "month": month,
+                "direction": direction,
+                "category_codes": list(category_codes or []),
+                "require_fresh": require_fresh,
+                "reason": reason,
+            }
+        )
+        return self.payload
 
 
 class PendingProjectionOaBankConnection:
@@ -1074,6 +1152,70 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("input_invoices", payload)
         self.assertIn("oa", payload)
         self.assertEqual(payload["bank_transaction"]["account_last4"], "1234")
+
+    def test_pending_invoice_sql_projection_uses_fresh_bank_tag_facade_category(self) -> None:
+        facade = FakeBankTransactionTagFacade(
+            {
+                "status": "fresh",
+                "rows": [
+                    {
+                        "transaction_id": "txn-1",
+                        "effective_category_code": "equipment_purchase",
+                        "effective_category_label": "设备采购",
+                        "effective_category_primary_label": "货款",
+                        "effective_category_sub_label": "设备采购",
+                        "effective_category_third_label": None,
+                        "effective_category_label_path": ["货款", "设备采购"],
+                        "effective_category_source": "auto_confirmation",
+                    }
+                ],
+                "source_versions": {"bank_detail": {"source_version": 9}},
+                "scope_keys": ["2026-05"],
+                "refresh_enqueued": False,
+                "stale_reasons": [],
+            }
+        )
+        builder = SearchPendingSqlProjectionBuilder(
+            connection=PendingProjectionFacadeConnection(),
+            bank_transaction_tag_read_facade=facade,
+        )
+
+        rows = builder._pending_invoice_rows(
+            direction="expense",
+            filter_name="bank_statement_as_invoice",
+            month="2026-05",
+        )
+
+        self.assertEqual(facade.calls[0]["require_fresh"], True)
+        self.assertEqual(facade.calls[0]["direction"], "expense")
+        payload = rows[0]["payload"]
+        self.assertEqual(payload["filter_group"], "bank_statement_as_invoice")
+        self.assertEqual(payload["bank_transaction"]["effective_tag_code"], "equipment_purchase")
+        self.assertEqual(payload["bank_transaction"]["effective_tag_label_path"], ["货款", "设备采购"])
+        self.assertEqual(payload["invoice_acquisition_status"]["matched_rule"]["tag_code"], "equipment_purchase")
+
+    def test_pending_invoice_sql_projection_refuses_to_publish_when_bank_tags_are_not_fresh(self) -> None:
+        read_repository = CapturePendingInvoiceReadRepository()
+        facade = FakeBankTransactionTagFacade(
+            {
+                "status": "stale",
+                "rows": [],
+                "source_versions": {"bank_detail": {"source_version": 8}},
+                "scope_keys": ["2026-05"],
+                "refresh_enqueued": True,
+                "stale_reasons": ["read_model_not_fresh"],
+            }
+        )
+        builder = SearchPendingSqlProjectionBuilder(
+            connection=PendingProjectionFacadeConnection(),
+            read_model_repository=read_repository,
+            bank_transaction_tag_read_facade=facade,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
+            builder.rebuild_pending_invoice_read_model_scope("expense:all:2026-05")
+
+        self.assertEqual(read_repository.saved, [])
 
     def test_pending_invoice_sql_projection_preserves_real_bank_and_oa_identity(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingProjectionOaBankConnection())
