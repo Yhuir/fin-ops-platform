@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping` 已 verified，待提交 |
-| 当前 active prompt | 无，等待提交 PF-P108 后生成 cumulative MG |
+| 当前阶段 | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
 | 最近 verified prompt | `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p107` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 提交 PF-P108；随后生成 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
+| 下一条允许任务 | 执行 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -8071,6 +8071,31 @@ PF-P108 verified。Relation extra HTTP endpoint 已支持 body `idempotency_key`
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
+
+### PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate
+
+状态：`planned`
+
+#### 范围
+
+- 只执行 relation extra idempotency 切片的 cumulative Merge Gate。
+- 统一覆盖 PF-P107、PF-P108 的完整 diff。
+- 不新增业务实现，不继续迁移其它 Turnover 写路径，不处理 SQL migration 或 Traffic Gate。
+
+#### 必须验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P108-MG planned。执行时必须确认 diff 只包含 PF-P107/PF-P108 允许文件。MG 通过后可 merge 到 `main`、在 `main` 上复验并 `git push origin main`；push 完成后必须从最新 `main` 新建下一条 `codex/` 分支。
 
 ## 维护规则
 

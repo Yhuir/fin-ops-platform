@@ -22026,3 +22026,98 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - 下一条建议：生成 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate`，统一覆盖 PF-P107 + PF-P108 完整 diff。
+
+## PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger relation extra idempotency 切片，不新增业务实现。
+
+Context:
+PF-P107 和 PF-P108 均已 verified。当前分支应为 `codex/turnover-ledger-next-slice-p107`，相对 `main` 的提交应包含：
+- `docs(turnover-ledger): add relation extra idempotency uow seam prompt`
+- `feat(turnover-ledger): add relation extra idempotency uow seam`
+- `docs(turnover-ledger): add relation extra idempotency http prompt`
+- `feat(turnover-ledger): wire relation extra idempotency http boundary`
+
+Gate Scope:
+本 MG 只覆盖 PF-P107 到 PF-P108 的完整 diff：
+- relation extra UoW idempotency store seam；
+- relation extra HTTP idempotency key extraction；
+- relation extra idempotency conflict/in-progress/failed HTTP 409 mapping；
+- relation extra API/UoW tests；
+- 文档回写。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+- tests/test_turnover_ledger_api.py
+- tests/test_turnover_ledger_uow_contract.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得迁移 confirm/withdraw/bank row tags/tag selection 等其它 Turnover 写路径。
+- 不得新增 SQL migration。
+- 不得修改 idempotency repository schema。
+- 不得修改 Workbench 写路径。
+- 不得新增 fallback/local transaction shim。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或访问真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P107、PF-P108 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认 `git diff --name-only main...HEAD` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+
+Commit / Merge Rules:
+1. 如果 MG prompt/状态机文档有变更，必须只用精确文件路径 `git add`。
+2. 允许提交 MG 文档变更，commit message 建议：
+   - `docs(turnover-ledger): add relation extra idempotency merge gate`
+3. 合入 main 前必须同步最新 `origin/main`：checkout main 后 `git pull --ff-only origin main`。
+4. 如果 pull/merge 出现冲突，停止并报告。
+5. 将当前分支 merge 到 main。
+6. 在 main 上重新执行完整 Verification 中的测试命令。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P108-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一条 prompt 分支。
+9. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P108-MG 执行结果。
+2. push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt。
+3. 不得在 main 或旧分支继续开发下一切片。
+```
+
+### 审查结论
+
+- PF-P108-MG 边界正确：只覆盖 PF-P107/PF-P108 relation extra idempotency 切片。
+- MG 明确不执行 Traffic Gate，不新增 migration，不迁移其它 Turnover 写路径。
+- 允许文件白名单与当前 `main...HEAD` diff 一致。

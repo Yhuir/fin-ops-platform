@@ -2879,7 +2879,7 @@ Relation extra 当前写路径：
 
 ## PF-P108 Relation Extra Idempotency HTTP Boundary and Error Mapping
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2925,3 +2925,24 @@ Relation extra 当前写路径：
 下一条：
 
 - 生成 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate`，统一覆盖 PF-P107 + PF-P108 完整 diff。
+
+## PF-P108-MG Relation Extra Idempotency Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 只执行 relation extra idempotency 切片的 cumulative Merge Gate。
+- 统一覆盖 PF-P107、PF-P108 的完整 diff。
+- 不新增业务实现，不迁移其它 Turnover 写路径，不新增 migration，不执行 Traffic Gate。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
