@@ -305,6 +305,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerTagSelectionLegacyFallbackFacade,
     TurnoverLedgerTagSelectionLegacyFallbackAdapterSet,
     TurnoverLedgerTagSelectionSettingsAdapter,
+    TurnoverLedgerWritePreconditionError,
     TurnoverLedgerWithdrawRequestBoundaryError,
     TurnoverLedgerWithdrawRequestBoundaryFacade,
     TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder,
@@ -12681,6 +12682,11 @@ class Application:
                 {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
             )
         except TurnoverLedgerWithdrawRequestBoundaryError as exc:
+            return self._json_response(
+                exc.status_code,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except TurnoverLedgerWritePreconditionError as exc:
             return self._json_response(
                 exc.status_code,
                 {"error": exc.error_code, "message": str(exc)},

@@ -1048,6 +1048,54 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [{"scope_type": "turnover_ledger", "scope_keys": ["all"], "reason": "turnover_relation_changed"}],
         )
 
+    def test_withdraw_stale_precondition_rejects_changed_relation_before_mutation_or_refresh(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            queue = _QueueRecorder()
+            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before stale withdraw"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+            current_detail = app._turnover_ledger_api_routes.get_relation(relation_id)
+            stale_detail = {
+                **current_detail,
+                "relation": {**dict(current_detail["relation"]), "version": 1},
+            }
+            changed_detail = {
+                **current_detail,
+                "relation": {**dict(current_detail["relation"]), "version": 2},
+            }
+            get_relation_calls: list[str] = []
+
+            def get_relation_with_version_change(requested_relation_id: str) -> dict[str, object]:
+                get_relation_calls.append(requested_relation_id)
+                if len(get_relation_calls) == 1:
+                    return stale_detail
+                return changed_detail
+
+            app._turnover_ledger_api_routes.get_relation = get_relation_with_version_change  # type: ignore[method-assign]
+            queue.enqueued.clear()
+            response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "stale withdraw should fail"}),
+            )
+            audit_log = app._turnover_relation_service.audit_log()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(json.loads(response.body)["error"], "turnover_relation_conflict")
+        self.assertEqual(get_relation_calls, [relation_id, relation_id])
+        self.assertEqual(
+            [(entry["action"], entry["new_status"]) for entry in audit_log],
+            [("confirm_relation", "confirmed")],
+        )
+        self.assertEqual(queue.enqueued, [])
+
     def test_confirm_write_facade_currently_has_no_stale_precondition_or_durable_idempotency_contract(self) -> None:
         uow = _RecordingTurnoverLedgerUow()
         facade = TurnoverLedgerWriteFacade(uow=uow)
@@ -1061,6 +1109,32 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
         command = uow.commands[0]
+        self.assertEqual(command.action_name, "confirm_relation")
+        self.assertEqual(command.expected_versions, {})
+        self.assertEqual(command.idempotency_key, "")
+        self.assertEqual(command.request_fingerprint, "")
+
+    def test_confirm_request_body_expected_versions_are_currently_not_forwarded_to_write_command(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            uow = _RecordingTurnoverLedgerUow()
+            app._turnover_ledger_confirm_write_facade_override = TurnoverLedgerWriteFacade(uow=uow)
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps(
+                    {
+                        "bank_row_ids": transaction_ids,
+                        "note": "confirm expected versions ignored today",
+                        "expected_versions": {"relation:turnover_rel_confirm": 99},
+                    }
+                ),
+            )
+            command = uow.commands[0]
+
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(command.action_name, "confirm_relation")
         self.assertEqual(command.expected_versions, {})
         self.assertEqual(command.idempotency_key, "")
@@ -1133,7 +1207,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
     def test_turnover_ledger_primary_write_builders_still_use_noop_local_stale_precondition_ports(self) -> None:
         builder_methods = [
             Application._turnover_ledger_tag_selection_write_facade.__globals__["TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder"].build,
-            Application._turnover_ledger_withdraw_write_facade.__globals__["TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder"].build,
             Application._turnover_ledger_confirm_write_facade.__globals__["TurnoverLedgerConfirmPrimaryWriteFacadeBuilder"].build,
             Application._turnover_ledger_bank_row_tags_write_facade.__globals__["TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder"].build,
             Application._turnover_ledger_relation_extra_write_facade.__globals__["TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder"].build,
@@ -1143,6 +1216,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             with self.subTest(builder=build_method.__qualname__):
                 source = inspect.getsource(build_method)
                 self.assertIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
+
+    def test_turnover_ledger_withdraw_builder_uses_relation_stale_precondition_port(self) -> None:
+        source = inspect.getsource(
+            Application._turnover_ledger_withdraw_write_facade.__globals__["TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder"].build
+        )
+
+        self.assertIn("TurnoverLedgerRelationStalePreconditionPort(", source)
+        self.assertIn("relation_detail_provider=self._routes.get_relation", source)
+        self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
 
     def test_turnover_ledger_local_runtime_helpers_delegate_to_support_boundary(self) -> None:
         helper_names = [
