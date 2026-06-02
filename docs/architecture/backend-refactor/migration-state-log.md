@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` 已执行并验证通过 |
 | 当前 active prompt | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` |
-| 最近 verified prompt | `PF-P124-MG - Turnover Ledger Fallback Facade Cumulative Merge Gate` |
+| 最近 verified prompt | `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` |
 | 当前分支 | `codex/turnover-ledger-relation-mutation-fallback-p125` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，63 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning` |
+| 下一条允许任务 | 生成并审查 `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction` |
 
 ## Prompt 执行日志
 
@@ -8841,7 +8841,7 @@ PF-P120 到 PF-P124 已形成一个可合并切片：fallback rebaseline、fallb
 
 ### PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8865,7 +8865,45 @@ PF-P120 到 PF-P124 已形成一个可合并切片：fallback rebaseline、fallb
 
 #### 下一条 Prompt 上下文
 
-TBD。
+Relation Mutation Side Effect Matrix：
+
+| 入口 / helper | direct side effects | 跨模块影响 | 当前测试覆盖 | 目标边界 |
+| --- | --- | --- | --- | --- |
+| confirm relation fallback | rebuild turnover relations from bank rows；route confirm；返回 affected_months；调用 `_after_turnover_relation_mutation(...)`。 | relation service/routes、Turnover Ledger persistence/read model、Workbench/Bankdetail invalidation。 | 已覆盖 success fallback、queue failure after direct confirm、target rollback、facade override skip after-mutation、Postgres facade readiness。 | handler 不应直接 rebuild 或调用 after-mutation；应由 confirm legacy fallback adapter/application service 承担。 |
+| withdraw relation fallback | handler 读取 relation detail，做 manual-only/already-withdrawn precheck，构造 affected_months/expected_versions；fallback route withdraw；调用 `_after_turnover_relation_mutation(...)`。 | relation routes、Turnover Ledger persistence/read model、Workbench/Bankdetail invalidation；还牵涉 stale/duplicate submit。 | 已覆盖 success fallback、queue failure after direct withdraw、target rollback、facade override skip after-mutation、Postgres facade readiness、duplicate submit。 | precheck 可暂留 handler；route withdraw + after-mutation 应迁入 withdraw legacy fallback adapter。 |
+| `_after_turnover_relation_mutation(...)` | persist relations pre-invalidation；invalidate Workbench after bank category months；persist relations again；clear Turnover Ledger read model；enqueue Turnover Ledger refresh。 | Workbench、Bankdetail、Turnover Ledger Read Model、StateStore/Postgres persistence。 | 通过 confirm/withdraw/bank row tags queue tests 间接覆盖；缺少独立 adapter-level contract。 | 不应长期作为 handler helper；应迁入 relation mutation fallback adapter 或专门 invalidation adapter，但必须分入口逐步迁移。 |
+
+Confirm vs Withdraw Boundary：
+
+- confirm 特有：输入是 `bank_row_ids`，fallback 前必须 rebuild relation service，route confirm 会产生 manual relation。
+- withdraw 特有：先读 relation detail；拒绝 system relation；拒绝 already withdrawn；构造 expected_versions；当前 stale/duplicate submit 相关行为不能在 cleanup 中改变。
+- 共同点：都要返回 `affected_months`，都依赖 relation mutation 后的 persistence / Workbench invalidation / Turnover Ledger refresh。
+
+Handler Thinness Gap：
+
+- confirm handler 仍直接调用 `rebuild_from_bank_rows(...)` 和 `_after_turnover_relation_mutation(...)`。
+- withdraw handler 仍直接调用 route withdraw 和 `_after_turnover_relation_mutation(...)`。
+- handler 可暂留：session/body parsing、bank_row_ids shape validation、withdraw manual-only / already-withdrawn precheck、expected_versions 构造、HTTP error mapping。
+- 应迁出：direct relation mutation、relation rebuild、after-mutation invalidation orchestration。
+
+Risk Register：
+
+- stale/duplicate submit：withdraw cleanup 不得破坏 duplicate submit 409/400 行为或 expected_versions 传入 facade path。
+- relation rebuild ordering：confirm fallback 必须保持 rebuild before route confirm。
+- Workbench/Bankdetail invalidation：`_after_turnover_relation_mutation(...)` 会触发跨模块 lifecycle，不能在 confirm/withdraw 一次性迁移。
+- relation persistence best-effort：当前 helper 两次 persist relation snapshot，后续 adapter 必须按测试锁定或明确收敛。
+- queue failure current behavior vs UoW target rollback：legacy fallback queue failure 当前发生在 mutation 后；UoW target 已有 rollback tests。cleanup 只移动边界，不改变语义。
+
+Verification：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P125|Relation Mutation Side Effect Matrix|after_turnover_relation_mutation" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
+
+#### 下一条 Prompt 上下文
+
+下一条应生成并审查 `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`。PF-P126 只处理 confirm relation fallback：先新增/调整 handler-thinness test，再把 direct rebuild/route confirm/after-mutation 从 handler 移入显式 confirm legacy fallback adapter；不得处理 withdraw、bank row tags 或 `_after_turnover_relation_mutation(...)` 全局重构。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

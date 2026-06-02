@@ -24073,7 +24073,7 @@ Post-Flight:
 
 ## PF-P125 - Turnover Ledger Relation Mutation Fallback Cleanup Planning
 
-状态：`planned`
+状态：`verified`
 
 ```text
 /goal
@@ -24155,6 +24155,29 @@ Post-Flight:
 
 - PF-P125 边界正确：只做 confirm/withdraw relation mutation fallback planning。
 - PF-P125 不修改 production code、不修改 tests、不处理 bank row tags、不执行 Traffic Gate。
+
+### PF-P125 执行结果
+
+Relation Mutation Side Effect Matrix：
+
+- confirm relation fallback：direct rebuild、route confirm、`_after_turnover_relation_mutation(...)`；测试已覆盖 success fallback、queue failure、target rollback、facade override skip after-mutation、Postgres facade readiness。
+- withdraw relation fallback：manual-only/already-withdrawn precheck、expected_versions 构造、route withdraw、`_after_turnover_relation_mutation(...)`；测试已覆盖 success fallback、queue failure、target rollback、duplicate submit、Postgres facade readiness。
+- `_after_turnover_relation_mutation(...)`：relation persistence、Workbench/Bankdetail invalidation、Turnover Ledger read model clear/enqueue；长期不应作为 handler helper，但不能一次性迁移全部入口。
+
+Minimal order：
+
+1. `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`
+2. 后续再处理 withdraw relation fallback。
+3. bank row tags fallback cleanup 继续暂缓。
+
+Verification：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `rg -n "PF-P125|Relation Mutation Side Effect Matrix|after_turnover_relation_mutation" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`：Pass。
+
+下一条最小 prompt：`PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`，只处理 confirm fallback。
 
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 

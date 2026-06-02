@@ -3803,7 +3803,7 @@ PF-P110 边界：
 
 ## PF-P125 Relation Mutation Fallback Cleanup Planning
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -3831,6 +3831,34 @@ PF-P110 边界：
 - `git ls-files --others --exclude-standard`
 - `git diff --check`
 - `rg -n "PF-P125|Relation Mutation Side Effect Matrix|after_turnover_relation_mutation" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+### Relation Mutation Side Effect Matrix
+
+| 入口 / helper | side effects | 当前测试 | 目标边界 |
+| --- | --- | --- | --- |
+| confirm relation fallback | rebuild relation、route confirm、after-mutation。 | success fallback、queue failure、target rollback、facade override、Postgres readiness。 | 先抽 confirm legacy fallback adapter。 |
+| withdraw relation fallback | relation detail precheck、manual-only/already-withdrawn、expected_versions、route withdraw、after-mutation。 | success fallback、queue failure、target rollback、duplicate submit、Postgres readiness。 | confirm 后再单独处理 withdraw。 |
+| `_after_turnover_relation_mutation(...)` | persist relations、Workbench/Bankdetail invalidation、Turnover Ledger clear/enqueue。 | 通过 API tests 间接覆盖。 | 长期迁入 relation mutation adapter/invalidation adapter，短期由 fallback adapter 接收 callable。 |
+
+### Confirm vs Withdraw Boundary
+
+- confirm 特有：rebuild before route confirm。
+- withdraw 特有：manual-only / already-withdrawn precheck 与 expected_versions。
+- 共同点：affected_months 与 after-mutation side effects。
+
+### Risk Register
+
+- withdraw stale/duplicate submit 不能在 confirm cleanup 中被碰。
+- confirm rebuild ordering 必须保留。
+- `_after_turnover_relation_mutation(...)` 的跨模块副作用不能一次性全局迁移。
+- legacy fallback queue failure 当前是 mutation 后失败；本阶段只移动边界，不改语义。
+
+下一条最小 prompt：
+
+- `PF-P126 - Turnover Ledger Confirm Relation Legacy Fallback Facade Extraction`
+- 只处理 confirm fallback；不处理 withdraw、bank row tags 或全局 after-mutation 重构。
 
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
