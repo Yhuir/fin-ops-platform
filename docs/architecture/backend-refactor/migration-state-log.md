@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` 已生成并审查，待执行 |
+| 当前阶段 | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` 已 verified 并合入 main |
 | 当前 active prompt | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P111 - Turnover Ledger Relation Extra Legacy Full Snapshot Fallback Cleanup` |
-| 当前分支 | `codex/turnover-ledger-next-slice-p109` |
+| 最近 verified prompt | `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` |
+| 当前分支 | `main` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate` |
+| 下一条允许任务 | 提交 PF-P111-MG post-flight 文档并 `git push origin main`；push 后从最新 main 新建下一条 codex 分支 |
 
 ## Prompt 执行日志
 
@@ -8249,7 +8249,7 @@ Verification：
 
 ### PF-P111-MG - Turnover Ledger Fallback Cleanup Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 #### 范围
 
@@ -8278,7 +8278,27 @@ Verification：
 
 #### 下一条 Prompt 上下文
 
-PF-P111-MG planned。MG 通过后合入 main、在 main 重跑验证、push origin/main，然后从最新 main 新建下一条 codex 分支。
+PF-P111-MG 已 verified：
+
+- Branch scope：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+  - `git diff --check`：Pass。
+  - `git diff --name-only main...HEAD`：只包含允许文件。
+  - `git log --oneline main..HEAD`：只包含 PF-P109/PF-P110/PF-P111 相关提交。
+- Branch verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
+- Merge：
+  - 已将 `codex/turnover-ledger-next-slice-p109` 合入 `main`。
+- Main verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
+- Traffic Gate：未执行；本切片不部署、不切流、不访问生产。
+
+下一步：提交本次 post-flight 文档并 `git push origin main`。push 后从最新 `main` 新建下一条 `codex/` 分支，再生成下一条 prompt。
 
 ## 维护规则
 

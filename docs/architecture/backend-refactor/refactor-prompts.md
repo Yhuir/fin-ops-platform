@@ -22191,6 +22191,37 @@ Post-Flight:
 - PF-P111-MG 边界正确：只覆盖 PF-P109/PF-P110/PF-P111 的 cumulative diff。
 - 该 MG 明确不执行 Traffic Gate，不扩大 fallback cleanup。
 
+### PF-P111-MG 执行结果
+
+状态：`verified`
+
+Scope：
+
+- `git diff --name-only main...HEAD`：只包含允许文件。
+- `git log --oneline main..HEAD`：只包含 PF-P109/PF-P110/PF-P111 相关提交。
+- `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+- `git diff --check`：Pass。
+
+Branch verification：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
+
+Main merge：
+
+- 已合入 `main`。
+- `main` 上重跑验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
+- Traffic Gate 未执行；本 MG 不部署、不切流、不访问生产。
+
+下一步：
+
+- 提交 PF-P111-MG post-flight 文档后执行 `git push origin main`。
+- push 后从最新 `main` 新建下一条 `codex/` 分支。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
