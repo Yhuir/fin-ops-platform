@@ -12791,6 +12791,23 @@ class Application:
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
         try:
             facade = self._turnover_ledger_relation_extra_write_facade()
+            expected_versions = payload.get("expected_versions")
+            if isinstance(expected_versions, dict):
+                expected_key = f"turnover_relation_extra:{relation_id}"
+                if expected_key in expected_versions:
+                    current_payload = self._turnover_ledger_read_facade.get_relation_extra(relation_id)
+                    current_extra = current_payload.get("extra") if isinstance(current_payload, dict) else None
+                    current_updated_at = ""
+                    if isinstance(current_extra, dict):
+                        current_updated_at = str(current_extra.get("updated_at") or "")
+                    if str(expected_versions.get(expected_key) or "") != current_updated_at:
+                        return self._json_response(
+                            HTTPStatus.CONFLICT,
+                            {
+                                "error": "turnover_relation_extra_conflict",
+                                "message": "往来款补充信息已更新，请刷新后重试。",
+                            },
+                        )
             if facade is None:
                 result = self._turnover_ledger_api_routes.update_relation_extra(
                     relation_id,
@@ -12804,6 +12821,7 @@ class Application:
                     actor_id=actor,
                     tenant_id=self._workbench_reconciliation_tenant_id(),
                     scope_keys=["all"],
+                    expected_versions=expected_versions if isinstance(expected_versions, dict) else None,
                 )
         except KeyError:
             return self._json_response(

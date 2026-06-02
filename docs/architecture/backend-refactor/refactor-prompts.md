@@ -21207,3 +21207,24 @@ Post-Flight:
 
 - PF-P103 是 PF-P102 后的最小实现步骤：只处理 relation extra expected_versions skeleton。
 - prompt 明确不处理 durable idempotency、fallback cleanup 或 local transaction shim，避免 scope creep。
+
+### 执行结果
+
+- 状态：`verified`。
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 已增加 optional `expected_versions` 参数，并透传到 `TurnoverLedgerWriteCommand.expected_versions`。
+- relation extra handler 在请求携带 `turnover_relation_extra:<relation_id>` expected version 时读取当前 `extra.updated_at`；若不匹配，返回 409 `turnover_relation_extra_conflict`。
+- stale conflict path 不执行 facade、extra save、dirty/outbox refresh。
+- 未携带 `expected_versions` 的 legacy relation extra PUT 行为保持不变。
+- PF-P102 的 2 条 target tests 已从 `unittest.expectedFailure` 转为普通通过。
+
+验证：
+
+- `git status --short --branch`：Pass，仅有 PF-P103 范围内 production/tests/docs 改动。
+- `git ls-files --others --exclude-standard`：Pass，无未跟踪文件。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+- `rg -n "PF-P103|turnover_relation_extra_conflict|turnover_relation_extra:|expected_versions|test_target_relation_extra_facade|test_target_relation_extra_stale|expectedFailure" backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py tests/test_turnover_ledger_api.py tests/test_turnover_ledger_uow_contract.py docs/architecture/backend-refactor`：Pass。
+
+下一条必须生成并执行 `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate`，统一覆盖 PF-P101 到 PF-P103 的完整 diff；不得直接进入 durable idempotency、fallback cleanup、local transaction shim extraction 或下一模块。

@@ -1223,7 +1223,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_target_relation_extra_facade_passes_expected_versions_before_repository(self) -> None:
         # PF-P102 target contract: stale relation extra checks must run before repository save.
         stale_precondition = _StalePreconditionPort(stale=True)

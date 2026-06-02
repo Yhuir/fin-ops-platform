@@ -97,6 +97,7 @@ class _RelationExtraWriteFacadeRecorder:
         actor_id: str,
         tenant_id: str,
         scope_keys: list[str],
+        expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -105,6 +106,7 @@ class _RelationExtraWriteFacadeRecorder:
                 "actor_id": actor_id,
                 "tenant_id": tenant_id,
                 "scope_keys": list(scope_keys),
+                "expected_versions": dict(expected_versions or {}),
             }
         )
         return {
@@ -1285,7 +1287,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
 
-    @unittest.expectedFailure
     def test_target_relation_extra_stale_expected_version_rejects_without_save_or_refresh(self) -> None:
         # PF-P102 target contract: stale relation extra writes should become conflict-safe.
         with TemporaryDirectory() as temp_dir:
@@ -1473,6 +1474,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "actor_id": "test_finops_user",
                     "tenant_id": "default",
                     "scope_keys": ["all"],
+                    "expected_versions": {},
                 }
             ],
         )

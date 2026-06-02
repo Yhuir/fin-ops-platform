@@ -2531,7 +2531,7 @@ Relation extra 当前写路径：
 
 ## PF-P103 Relation Extra Expected Versions Skeleton
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2545,3 +2545,30 @@ Relation extra 当前写路径：
 - 不处理 fallback cleanup。
 - 不抽离 local transaction shim。
 - 不新增 SQL migration。
+
+执行结果：
+
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 已增加 optional `expected_versions` 参数，并透传到 `TurnoverLedgerWriteCommand.expected_versions`。
+- relation extra handler 在请求携带 `turnover_relation_extra:<relation_id>` expected version 时读取当前 `extra.updated_at`；若不匹配，返回 409 `turnover_relation_extra_conflict`。
+- stale conflict path 不执行 facade、extra save、dirty/outbox refresh。
+- 未携带 `expected_versions` 的 legacy relation extra PUT 行为保持不变。
+- PF-P102 的 2 条 target tests 已转为普通通过。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，48 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，51 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+剩余 gap：
+
+- durable idempotency store 尚未处理。
+- fallback cleanup 尚未处理。
+- local transaction shim 尚未抽离。
+
+下一条：
+
+- 生成并执行 `PF-P103-MG - Turnover Ledger Relation Extra Expected Versions Cumulative Merge Gate`，统一覆盖 PF-P101 到 PF-P103 的完整 diff。
