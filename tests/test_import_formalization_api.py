@@ -291,6 +291,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             )
             session_payload = json.loads(session_response.body)
             self.assertEqual(session_payload["files"][0]["status"], "reverted")
+            app.shutdown_background_jobs()
 
 
 if __name__ == "__main__":
