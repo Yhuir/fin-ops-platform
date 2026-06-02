@@ -23298,6 +23298,29 @@ Post-Flight:
 - PF-P119 边界正确：只抽离 bank row tags local connection/port。
 - 该 prompt 不修改 handler facade None fallback，不修改 facade/UoW 语义，不执行 Traffic Gate。
 
+### PF-P119 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+  - `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+- 关键结果：
+  - 新增 `TurnoverLedgerLocalBankRowTagsConnection`，通过显式 category/relation snapshot provider、replace/save callbacks 保留 local rollback/save 行为。
+  - 新增 `TurnoverLedgerLocalBankdetailPort`，通过明确依赖保持 category apply -> relation rebuild 顺序。
+  - `server.py` 删除 `_local_turnover_ledger_bank_row_tags_connection(...)` 和 `_local_turnover_ledger_bankdetail_port(...)`，只负责组装细粒度依赖。
+  - handler facade None fallback 未修改。
+- 验证：
+  - `git status --short --branch`：Pass，仅包含 PF-P119 允许文件。
+  - `git ls-files --others --exclude-standard`：Pass，无 untracked 文件。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，56 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 下一条建议：生成 `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate`，统一覆盖 PF-P117/PF-P118/PF-P119 完整 diff。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
