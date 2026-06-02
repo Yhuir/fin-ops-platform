@@ -56,14 +56,127 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate` verified |
-| 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P184-MG - Turnover Ledger Tag Selection Durable Idempotency Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | PF-P184-MG 已合入 main，merge commit `1c9c4238`；main 复验 `git diff --check`：Pass；`tests.test_turnover_ledger_api`：Pass（128 tests）；`tests.test_turnover_ledger_uow_contract`：Pass（61 tests）；`compileall`：Pass |
-| 下一条允许任务 | push `origin/main`；push 后从最新 main 新建下一条 `codex/` 分支，并基于 Turnover Ledger 模块计划生成下一条 prompt |
+| 当前阶段 | `PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate` planned |
+| 当前 active prompt | `PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate` |
+| 最近 verified prompt | `PF-P187 - Turnover Ledger Relation Extra UoW Stale Precondition Integration` |
+| 当前分支 | `codex/turnover-ledger-next-boundary-p185` |
+| 最近验证 | PF-P187：`tests.test_turnover_ledger_api` Pass（129 tests）；`tests.test_turnover_ledger_uow_contract` Pass（62 tests）；`compileall` Pass；`git diff --check` Pass；无 untracked |
+| 下一条允许任务 | 执行 PF-P187-MG；统一覆盖 PF-P185 到 PF-P187 的完整 diff，验证后合入 main 并 push origin/main |
 
 ## Prompt 执行日志
+
+### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
+
+状态：`verified`
+
+范围：
+
+- 只做 Turnover Ledger 剩余写边界 rebaseline / planning 和文档回写。
+- 未修改 production code。
+- 未修改 tests。
+
+执行结果：
+
+- 使用 CodeGraph / static scan 重新盘点 Turnover Ledger 写 handler、request boundary、facade、adapter、UoW。
+- 确认 `TurnoverLedgerWriteUnitOfWork.run(...)` 已统一承接 idempotency reserve/replay/conflict、stale precondition、dirty/outbox enqueue。
+- 确认 confirm / withdraw 已通过真实 stale precondition port 接入 UoW。
+- 确认 relation extra 的 HTTP request boundary 当前会读取 current extra 并做 409 stale conflict，但 primary builder 仍注入 no-op stale precondition port；下一步应先补 UoW-level target contract tests。
+- 确认 bank row tags / tag selection 的 expected-version 语义仍在现有业务 service/normalizer 边界内，不应跨 Bankdetail/Settings 模块贸然迁移。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+- `git diff --check`：Pass。
+
+下一步：
+
+- `PF-P186 - Turnover Ledger Relation Extra UoW Stale Precondition Contract Tests`
+- 只新增 relation extra UoW stale precondition 目标契约测试，默认 CI 必须保持绿色，不修改生产代码。
+
+### PF-P186 - Turnover Ledger Relation Extra UoW Stale Precondition Contract Tests
+
+状态：`verified`
+
+范围：
+
+- 新增 relation extra UoW stale precondition target contract tests。
+- 使用 `unittest.expectedFailure` 保留尚未实现的目标语义，默认 CI 保持绿色。
+- 不修改 production code，不实现真实 stale precondition port。
+
+验收：
+
+- `tests.test_turnover_ledger_api` 通过。
+- `tests.test_turnover_ledger_uow_contract` 通过。
+- `git diff --check` 通过。
+- 无 untracked 临时文件。
+
+执行结果：
+
+- 新增 API/source-level target test，锁定 relation extra primary builder 未来不得继续注入 no-op stale precondition port。
+- 新增 builder/UoW-level target test，锁定 relation extra primary builder 产物必须把显式 relation-extra stale precondition port 注入 UoW。
+- 两个目标测试均使用 `unittest.expectedFailure`，默认 CI 保持绿色。
+- 未修改 production code。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests，expected failures=1）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests，expected failures=1）。
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+
+下一步：
+
+- `PF-P187 - Turnover Ledger Relation Extra UoW Stale Precondition Integration`
+- 只转绿 PF-P186 的两个 target tests；不得迁移其它写路径。
+
+### PF-P187 - Turnover Ledger Relation Extra UoW Stale Precondition Integration
+
+状态：`verified`
+
+范围：
+
+- 实现 relation extra primary builder 的显式 stale precondition port。
+- 移除 PF-P186 两个 target tests 的 `unittest.expectedFailure` 并转为普通通过。
+- 不迁移 bank row tags、tag selection、confirm、withdraw。
+
+执行结果：
+
+- 新增 `TurnoverLedgerRelationExtraStalePreconditionPort`，只依赖明确的 `current_extra_reader`。
+- `TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder` 接收 `current_extra_reader`，并将显式 relation-extra stale port 注入 UoW。
+- `server.py` composition root 仅传入 `self._turnover_ledger_read_facade.get_relation_extra`；request-boundary stale guard 保留为兼容防线。
+- relation extra handler 映射 UoW `TurnoverLedgerWritePreconditionError` 为 HTTP 409 JSON。
+- PF-P186 两个 target tests 已移除 `unittest.expectedFailure` 并转为普通通过。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass（129 tests）。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass（62 tests）。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：empty。
+
+下一步：
+
+- `PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate`
+- 统一覆盖 PF-P185/PF-P186/PF-P187。
+
+### PF-P187-MG - Turnover Ledger Relation Extra UoW Stale Precondition Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- PF-P185 relation extra remaining boundary rebaseline。
+- PF-P186 relation extra UoW stale precondition target tests。
+- PF-P187 relation extra stale precondition port integration。
+
+验收：
+
+- diff 只能包含 Turnover Ledger relation extra stale precondition 切片允许文件。
+- Turnover Ledger API/UoW tests 通过。
+- compileall 通过。
+- 无 untracked 临时文件。
 
 ### PF-P000 - Fresh Documentation Baseline
 

@@ -1721,6 +1721,41 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(len(uow.commands), 1)
         self.assertEqual(len(uow.extra_repository.extras), 1)
 
+    def test_target_relation_extra_primary_builder_injects_transactional_stale_precondition_port(self) -> None:
+        # PF-P186 target contract: the primary relation extra facade should not rely
+        # solely on request-boundary stale checks. The generated UoW must receive an
+        # explicit relation-extra stale port so expected_versions are checked in the
+        # same transaction before repository save and dirty/outbox enqueue.
+        adapters = self._write_adapters_module()
+        connection = _RecordingConnection()
+        queue_repository = SimpleNamespace(
+            enqueue_read_model_refresh_in_transaction=lambda **kwargs: kwargs,
+        )
+
+        builder = adapters.TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder(
+            state_store=SimpleNamespace(storage_backend="postgres", _connection=connection),
+            queue_repository=queue_repository,
+            routes=SimpleNamespace(),
+            replace_snapshot=lambda _snapshot: None,
+            emit_persistence_warning=lambda **_kwargs: None,
+            extra_service=SimpleNamespace(),
+            row_provider=lambda **_kwargs: {"relation_id": "turnover_rel_1"},
+            current_extra_reader=lambda _relation_id: {
+                "extra": {"relation_id": "turnover_rel_1", "updated_at": "2026-06-03T00:00:00+00:00"}
+            },
+            tenant_id="default",
+            postgres_extra_repository_factory=lambda _transaction: _RecordingExtraRepository(),
+            postgres_idempotency_store_factory=lambda _connection: InMemoryWorkbenchIdempotencyRepository(),
+            local_idempotency_store_provider=InMemoryWorkbenchIdempotencyRepository,
+        )
+
+        facade = builder.build()
+        self.assertIsNotNone(facade)
+        stale_port = getattr(getattr(facade, "_uow"), "_stale_precondition_port")
+
+        self.assertNotIsInstance(stale_port, SimpleNamespace)
+        self.assertRegex(type(stale_port).__name__, r"RelationExtra.*StalePreconditionPort")
+
     def test_relation_extra_write_facade_command_result_are_not_http_coupled(self) -> None:
         # PF-P056 target contract: command/result must not carry HTTP response or auth module dependencies.
         uow, _deps = self._build_uow()

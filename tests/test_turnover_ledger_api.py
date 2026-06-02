@@ -1407,13 +1407,25 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         builder_methods = [
             Application._turnover_ledger_tag_selection_write_facade.__globals__["TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder"].build,
             Application._turnover_ledger_bank_row_tags_write_facade.__globals__["TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder"].build,
-            Application._turnover_ledger_relation_extra_write_facade.__globals__["TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder"].build,
         ]
 
         for build_method in builder_methods:
             with self.subTest(builder=build_method.__qualname__):
                 source = inspect.getsource(build_method)
                 self.assertIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
+
+    def test_target_relation_extra_primary_builder_uses_explicit_stale_precondition_port(self) -> None:
+        # PF-P186 target contract: request-boundary stale checks are a compatibility
+        # guard; relation extra's primary UoW path should enforce the precondition
+        # inside the same transaction before extra repository save and dirty/outbox.
+        source = inspect.getsource(
+            Application._turnover_ledger_relation_extra_write_facade.__globals__[
+                "TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder"
+            ].build
+        )
+
+        self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
+        self.assertRegex(source, r"RelationExtra.*StalePreconditionPort")
 
     def test_turnover_ledger_withdraw_builder_uses_relation_stale_precondition_port(self) -> None:
         source = inspect.getsource(
