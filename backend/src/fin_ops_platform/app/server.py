@@ -274,6 +274,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankdetailWritePort,
     TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet,
     TurnoverLedgerBankRowTagsLegacyFallbackFacade,
+    TurnoverLedgerBankRowTagsRequestBoundaryFacade,
     TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder,
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
@@ -290,6 +291,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder,
     TurnoverLedgerConfirmLegacyFallbackAdapterSet,
     TurnoverLedgerConfirmLegacyFallbackFacade,
+    TurnoverLedgerConfirmRequestBoundaryFacade,
     TurnoverLedgerConfirmPrimaryWriteFacadeBuilder,
     TurnoverLedgerRelationMutationInvalidationLegacyAdapter,
     TurnoverLedgerRelationExtraLegacyFallbackAdapterSet,
@@ -298,6 +300,8 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerTagSelectionLegacyFallbackFacade,
     TurnoverLedgerTagSelectionLegacyFallbackAdapterSet,
     TurnoverLedgerTagSelectionSettingsAdapter,
+    TurnoverLedgerWithdrawRequestBoundaryError,
+    TurnoverLedgerWithdrawRequestBoundaryFacade,
     TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder,
     TurnoverLedgerWithdrawLegacyFallbackFacade,
 )
@@ -2757,6 +2761,12 @@ class Application:
             after_mutation=invalidation_adapter.after_relation_mutation,
         ).facade()
 
+    def _turnover_ledger_confirm_request_boundary_facade(self) -> TurnoverLedgerConfirmRequestBoundaryFacade:
+        return TurnoverLedgerConfirmRequestBoundaryFacade(
+            facade=self._turnover_ledger_confirm_write_facade(),
+            affected_months_resolver=self._bank_transaction_category_affected_months,
+        )
+
     def _turnover_ledger_withdraw_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerWithdrawLegacyFallbackFacade:
         override = getattr(self, "_turnover_ledger_withdraw_write_facade_override", None)
         if override is not None:
@@ -2782,6 +2792,13 @@ class Application:
         if facade is not None:
             return facade
         return self._turnover_ledger_withdraw_legacy_fallback_facade()
+
+    def _turnover_ledger_withdraw_request_boundary_facade(self) -> TurnoverLedgerWithdrawRequestBoundaryFacade:
+        return TurnoverLedgerWithdrawRequestBoundaryFacade(
+            facade=self._turnover_ledger_withdraw_write_facade(),
+            relation_detail_provider=self._turnover_ledger_api_routes.get_relation,
+            affected_months_resolver=self._bank_transaction_category_affected_months,
+        )
 
     def _turnover_ledger_withdraw_legacy_fallback_facade(self) -> TurnoverLedgerWithdrawLegacyFallbackFacade:
         invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
@@ -12368,23 +12385,13 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_turnover_bank_row_tag_update", "message": "each update must be an object."},
             )
-        transaction_ids = [
-            str(update.get("transaction_id") or "").strip()
-            for update in updates
-            if str(update.get("transaction_id") or "").strip()
-        ]
         try:
-            self._ensure_turnover_bank_row_tag_targets(transaction_ids)
             actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-            affected_months = self._bank_transaction_category_affected_months(transaction_ids)
-            facade = self._turnover_ledger_bank_row_tags_write_facade()
-            if facade is None:
-                facade = self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
-            result = facade.update_bank_row_tags_batch(
+            facade = self._turnover_ledger_bank_row_tags_request_boundary_facade()
+            result = facade.update_bank_row_tags_batch_from_request(
                 updates=updates,
                 actor_id=actor,
                 tenant_id=tenant_id_for_session(session_response),
-                affected_months=affected_months,
             )
         except BankTransactionCategoryConflictError as exc:
             return self._json_response(
@@ -12402,10 +12409,15 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": exc.error_code, "message": str(exc), "transaction_id": exc.transaction_id},
             )
-        result["affected_months"] = affected_months
-        result["turnover_ledger_invalidated"] = True
-        result["workbench_invalidated"] = True
         return self._json_response(HTTPStatus.OK, result)
+
+    def _turnover_ledger_bank_row_tags_request_boundary_facade(self) -> TurnoverLedgerBankRowTagsRequestBoundaryFacade:
+        return TurnoverLedgerBankRowTagsRequestBoundaryFacade(
+            facade_provider=self._turnover_ledger_bank_row_tags_write_facade,
+            legacy_fallback_provider=self._turnover_ledger_bank_row_tags_legacy_fallback_facade,
+            target_validator=self._ensure_turnover_bank_row_tag_targets,
+            affected_months_resolver=self._bank_transaction_category_affected_months,
+        )
 
     def _ensure_turnover_bank_row_tag_targets(self, transaction_ids: list[str]) -> None:
         if not transaction_ids:
@@ -12574,23 +12586,19 @@ class Application:
                 {"error": "invalid_bank_row_ids", "message": "bank_row_ids must be an array."},
             )
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
-        normalized_bank_row_ids = [str(row_id) for row_id in bank_row_ids]
-        affected_months = self._bank_transaction_category_affected_months(normalized_bank_row_ids)
-        facade = self._turnover_ledger_confirm_write_facade()
+        facade = self._turnover_ledger_confirm_request_boundary_facade()
         try:
-            result = facade.confirm_relation(
-                bank_row_ids=normalized_bank_row_ids,
+            result = facade.confirm_relation_from_request(
+                bank_row_ids=bank_row_ids,
                 actor_id=actor,
                 tenant_id=tenant_id_for_session(session_response),
                 note=str(payload.get("note")) if payload.get("note") is not None else None,
-                affected_months=affected_months,
             )
         except TurnoverRelationValidationError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": exc.error_code, "message": str(exc)},
             )
-        result["affected_months"] = affected_months
         return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_turnover_ledger_withdraw(
@@ -12607,51 +12615,28 @@ class Application:
             return error
         actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
         try:
-            detail = self._turnover_ledger_api_routes.get_relation(relation_id)
-            relation = dict(detail.get("relation") or {})
-            if str(relation.get("source") or "") != "manual":
-                return self._json_response(
-                    HTTPStatus.BAD_REQUEST,
-                    {
-                        "error": "system_relation_cannot_withdraw",
-                        "message": "系统自动生成的往来款关系不能直接撤回，请先人工确认或调整银行流水标签。",
-                    },
-                )
-            if str(relation.get("status") or "") == "withdrawn":
-                return self._json_response(
-                    HTTPStatus.CONFLICT,
-                    {
-                        "error": "relation_already_withdrawn",
-                        "message": "该往来款关系已撤回，请刷新后重试。",
-                    },
-                )
-            bank_row_ids = list(relation.get("bank_row_ids") or [])
-            affected_months = self._bank_transaction_category_affected_months([str(row_id) for row_id in bank_row_ids])
-            expected_versions = {}
-            try:
-                expected_versions[f"relation:{relation_id}"] = int(relation.get("version") or 0)
-            except (TypeError, ValueError):
-                expected_versions = {}
-            facade = self._turnover_ledger_withdraw_write_facade()
-            result = facade.withdraw_relation(
+            facade = self._turnover_ledger_withdraw_request_boundary_facade()
+            result = facade.withdraw_relation_from_request(
                 relation_id=relation_id,
                 actor_id=actor,
                 tenant_id=tenant_id_for_session(session_response),
                 note=str(payload.get("note")) if payload.get("note") is not None else None,
-                affected_months=affected_months,
-                expected_versions=expected_versions,
             )
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
             )
+        except TurnoverLedgerWithdrawRequestBoundaryError as exc:
+            return self._json_response(
+                exc.status_code,
+                {"error": exc.error_code, "message": str(exc)},
+            )
         except TurnoverRelationValidationError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": exc.error_code, "message": str(exc)},
             )
-        result["affected_months"] = affected_months
         return self._json_response(HTTPStatus.OK, result)
 
     def _turnover_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:

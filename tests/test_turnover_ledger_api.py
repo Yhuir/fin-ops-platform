@@ -182,6 +182,29 @@ class _RelationWriteFacadeRecorder:
         }
 
 
+class _BankRowTagsWriteFacadeRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def update_bank_row_tags_batch(
+        self,
+        *,
+        updates: list[dict[str, object]],
+        actor_id: str,
+        tenant_id: str,
+        affected_months: list[str],
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "updates": [dict(update) for update in list(updates or [])],
+                "actor_id": actor_id,
+                "tenant_id": tenant_id,
+                "affected_months": list(affected_months),
+            }
+        )
+        return {"updated": len(list(updates or []))}
+
+
 class TurnoverLedgerApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -1278,6 +1301,63 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
+    def test_bank_row_tags_handler_override_passes_affected_months_and_keeps_response_flags(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            facade = _BankRowTagsWriteFacadeRecorder()
+            app._turnover_ledger_bank_row_tags_write_facade_override = facade
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            },
+                            {
+                                "transaction_id": transaction_ids[1],
+                                "category_code": "borrow_in_company_repaid",
+                                "expected_version": 0,
+                            },
+                        ]
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["updated"], 2)
+        self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertTrue(payload["workbench_invalidated"])
+        self.assertEqual(
+            facade.calls,
+            [
+                {
+                    "updates": [
+                        {
+                            "transaction_id": transaction_ids[0],
+                            "category_code": "borrow_in_company_pending_repayment",
+                            "expected_version": 0,
+                        },
+                        {
+                            "transaction_id": transaction_ids[1],
+                            "category_code": "borrow_in_company_repaid",
+                            "expected_version": 0,
+                        },
+                    ],
+                    "actor_id": "test_finops_user",
+                    "tenant_id": "default",
+                    "affected_months": ["2026-02", "2026-03"],
+                }
+            ],
+        )
+
     def test_confirm_relation_legacy_fallback_facade_does_not_inline_relation_rebuild_closure(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_confirm_legacy_fallback_facade)
 
@@ -1341,6 +1421,26 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("save_bank_transaction_categories(", source)
         self.assertNotIn("rebuild_from_bank_rows(", source)
         self.assertNotIn("_after_turnover_relation_mutation(", source)
+
+    def test_bank_row_tags_handler_delegates_validation_affected_months_and_flags_to_request_facade(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_bank_row_tags_batch)
+
+        self.assertIn("facade = self._turnover_ledger_bank_row_tags_request_boundary_facade()", source)
+        self.assertIn("result = facade.update_bank_row_tags_batch_from_request(", source)
+        self.assertNotIn("_ensure_turnover_bank_row_tag_targets(transaction_ids)", source)
+        self.assertNotIn("affected_months = self._bank_transaction_category_affected_months(transaction_ids)", source)
+        self.assertNotIn('result["affected_months"] = affected_months', source)
+        self.assertNotIn('result["turnover_ledger_invalidated"] = True', source)
+        self.assertNotIn('result["workbench_invalidated"] = True', source)
+
+    def test_bank_row_tags_request_boundary_facade_wires_validation_affected_months_and_legacy_fallback(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_bank_row_tags_request_boundary_facade)
+
+        self.assertIn("TurnoverLedgerBankRowTagsRequestBoundaryFacade(", source)
+        self.assertIn("facade_provider=self._turnover_ledger_bank_row_tags_write_facade", source)
+        self.assertIn("legacy_fallback_provider=self._turnover_ledger_bank_row_tags_legacy_fallback_facade", source)
+        self.assertIn("target_validator=self._ensure_turnover_bank_row_tag_targets", source)
+        self.assertIn("affected_months_resolver=self._bank_transaction_category_affected_months", source)
 
     def test_turnover_bank_row_tags_write_facade_does_not_inline_local_snapshot_closures(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_bank_row_tags_write_facade)
@@ -2067,6 +2167,18 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("_clear_turnover_ledger_read_model_best_effort(", source)
         self.assertNotIn("_enqueue_turnover_ledger_read_model_refreshes(", source)
 
+    def test_relation_extra_handler_still_owns_expected_versions_and_idempotency_boundary(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_relation_extra_update)
+
+        self.assertIn('expected_versions = payload.get("expected_versions")', source)
+        self.assertIn(
+            'idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None',
+            source,
+        )
+        self.assertIn('expected_key = f"turnover_relation_extra:{relation_id}"', source)
+        self.assertIn("self._turnover_ledger_read_facade.get_relation_extra(relation_id)", source)
+        self.assertIn('"turnover_relation_extra_conflict"', source)
+
     def test_relation_extra_write_facade_does_not_inline_local_snapshot_closures(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_relation_extra_write_facade)
 
@@ -2197,6 +2309,47 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "tenant_id": "default",
                     "scope_keys": ["all"],
                     "expected_versions": {},
+                }
+            ],
+        )
+
+    def test_relation_extra_handler_override_passes_expected_versions_and_idempotency_key(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            facade = _RelationExtraWriteFacadeRecorder()
+            app._turnover_ledger_relation_extra_write_facade_override = facade  # type: ignore[attr-defined]
+
+            response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/relations/turnover_rel_facade/extra",
+                body=json.dumps(
+                    {
+                        "note": "handler boundary",
+                        "expected_versions": {"custom_scope": "v1"},
+                        "idempotency_key": " idem-123 ",
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["extra"]["note"], "handler boundary")
+        self.assertTrue(payload["turnover_ledger_invalidated"])
+        self.assertEqual(
+            facade.calls,
+            [
+                {
+                    "relation_id": "turnover_rel_facade",
+                    "payload": {
+                        "note": "handler boundary",
+                        "expected_versions": {"custom_scope": "v1"},
+                        "idempotency_key": " idem-123 ",
+                    },
+                    "actor_id": "test_finops_user",
+                    "tenant_id": "default",
+                    "scope_keys": ["all"],
+                    "expected_versions": {"custom_scope": "v1"},
+                    "idempotency_key": "idem-123",
                 }
             ],
         )
@@ -2533,6 +2686,21 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("if facade is not None", source)
         self.assertNotIn("rebuild_from_bank_rows(", source)
         self.assertNotIn("_after_turnover_relation_mutation(", source)
+
+    def test_confirm_handler_delegates_affected_months_boundary_to_request_facade(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_confirm)
+
+        self.assertIn("facade = self._turnover_ledger_confirm_request_boundary_facade()", source)
+        self.assertIn("result = facade.confirm_relation_from_request(", source)
+        self.assertNotIn("normalized_bank_row_ids = [str(row_id) for row_id in bank_row_ids]", source)
+        self.assertNotIn("affected_months = self._bank_transaction_category_affected_months(normalized_bank_row_ids)", source)
+        self.assertNotIn('result["affected_months"] = affected_months', source)
+
+    def test_confirm_request_boundary_facade_owns_affected_months_resolution_and_response_field(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_confirm_request_boundary_facade)
+
+        self.assertIn("TurnoverLedgerConfirmRequestBoundaryFacade(", source)
+        self.assertIn("affected_months_resolver=self._bank_transaction_category_affected_months", source)
 
     def test_confirm_relation_write_facade_does_not_inline_local_snapshot_or_rebuild_closures(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_confirm_write_facade)
@@ -2892,6 +3060,25 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("if facade is not None", source)
         self.assertNotIn("self._turnover_ledger_api_routes.withdraw_relation", source)
         self.assertNotIn("_after_turnover_relation_mutation(", source)
+
+    def test_withdraw_handler_delegates_precheck_expected_versions_and_affected_months_to_request_facade(self) -> None:
+        source = inspect.getsource(Application._handle_api_turnover_ledger_withdraw)
+
+        self.assertIn("facade = self._turnover_ledger_withdraw_request_boundary_facade()", source)
+        self.assertIn("result = facade.withdraw_relation_from_request(", source)
+        self.assertIn("except TurnoverLedgerWithdrawRequestBoundaryError as exc:", source)
+        self.assertNotIn("detail = self._turnover_ledger_api_routes.get_relation(relation_id)", source)
+        self.assertNotIn('if str(relation.get("source") or "") != "manual":', source)
+        self.assertNotIn('if str(relation.get("status") or "") == "withdrawn":', source)
+        self.assertNotIn('expected_versions[f"relation:{relation_id}"] = int(relation.get("version") or 0)', source)
+        self.assertNotIn('result["affected_months"] = affected_months', source)
+
+    def test_withdraw_request_boundary_facade_wires_relation_detail_and_affected_months_resolver(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_withdraw_request_boundary_facade)
+
+        self.assertIn("TurnoverLedgerWithdrawRequestBoundaryFacade(", source)
+        self.assertIn("relation_detail_provider=self._turnover_ledger_api_routes.get_relation", source)
+        self.assertIn("affected_months_resolver=self._bank_transaction_category_affected_months", source)
 
     def test_withdraw_relation_write_facade_does_not_inline_local_snapshot_closures(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_withdraw_write_facade)

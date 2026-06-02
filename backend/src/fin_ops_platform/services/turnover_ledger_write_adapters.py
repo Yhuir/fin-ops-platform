@@ -716,6 +716,148 @@ class TurnoverLedgerConfirmLegacyFallbackFacade:
         return dict(result or {})
 
 
+class TurnoverLedgerConfirmRequestBoundaryFacade:
+    def __init__(
+        self,
+        *,
+        facade: Any,
+        affected_months_resolver: Callable[[list[str]], list[str]],
+    ) -> None:
+        self._facade = facade
+        self._affected_months_resolver = affected_months_resolver
+
+    def confirm_relation_from_request(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+    ) -> dict[str, object]:
+        normalized_bank_row_ids = [
+            str(row_id).strip()
+            for row_id in list(bank_row_ids or [])
+            if str(row_id).strip()
+        ]
+        affected_months = self._affected_months_resolver(list(normalized_bank_row_ids))
+        result = self._facade.confirm_relation(
+            bank_row_ids=normalized_bank_row_ids,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            note=note,
+            affected_months=affected_months,
+        )
+        payload = dict(result or {})
+        payload["affected_months"] = list(affected_months)
+        return payload
+
+
+class TurnoverLedgerWithdrawRequestBoundaryError(ValueError):
+    def __init__(self, *, status_code: int, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
+
+
+class TurnoverLedgerWithdrawRequestBoundaryFacade:
+    def __init__(
+        self,
+        *,
+        facade: Any,
+        relation_detail_provider: Callable[[str], dict[str, object]],
+        affected_months_resolver: Callable[[list[str]], list[str]],
+    ) -> None:
+        self._facade = facade
+        self._relation_detail_provider = relation_detail_provider
+        self._affected_months_resolver = affected_months_resolver
+
+    def withdraw_relation_from_request(
+        self,
+        *,
+        relation_id: str,
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+    ) -> dict[str, object]:
+        detail = self._relation_detail_provider(relation_id)
+        relation = dict(detail.get("relation") or {})
+        if str(relation.get("source") or "") != "manual":
+            raise TurnoverLedgerWithdrawRequestBoundaryError(
+                status_code=400,
+                error_code="system_relation_cannot_withdraw",
+                message="系统自动生成的往来款关系不能直接撤回，请先人工确认或调整银行流水标签。",
+            )
+        if str(relation.get("status") or "") == "withdrawn":
+            raise TurnoverLedgerWithdrawRequestBoundaryError(
+                status_code=409,
+                error_code="relation_already_withdrawn",
+                message="该往来款关系已撤回，请刷新后重试。",
+            )
+        bank_row_ids = [str(row_id) for row_id in list(relation.get("bank_row_ids") or [])]
+        affected_months = self._affected_months_resolver(list(bank_row_ids))
+        expected_versions: dict[str, object] = {}
+        try:
+            expected_versions[f"relation:{relation_id}"] = int(relation.get("version") or 0)
+        except (TypeError, ValueError):
+            expected_versions = {}
+        result = self._facade.withdraw_relation(
+            relation_id=relation_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            note=note,
+            affected_months=affected_months,
+            expected_versions=expected_versions,
+        )
+        payload = dict(result or {})
+        payload["affected_months"] = list(affected_months)
+        return payload
+
+
+class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
+    def __init__(
+        self,
+        *,
+        facade_provider: Callable[[], Any],
+        legacy_fallback_provider: Callable[[], Any],
+        target_validator: Callable[[list[str]], None],
+        affected_months_resolver: Callable[[list[str]], list[str]],
+    ) -> None:
+        self._facade_provider = facade_provider
+        self._legacy_fallback_provider = legacy_fallback_provider
+        self._target_validator = target_validator
+        self._affected_months_resolver = affected_months_resolver
+
+    def update_bank_row_tags_batch_from_request(
+        self,
+        *,
+        updates: list[dict[str, object]],
+        actor_id: str,
+        tenant_id: str,
+    ) -> dict[str, object]:
+        normalized_updates = [dict(update) for update in list(updates or [])]
+        transaction_ids = [
+            str(update.get("transaction_id") or "").strip()
+            for update in normalized_updates
+            if str(update.get("transaction_id") or "").strip()
+        ]
+        self._target_validator(list(transaction_ids))
+        affected_months = self._affected_months_resolver(list(transaction_ids))
+        facade = self._facade_provider()
+        if facade is None:
+            facade = self._legacy_fallback_provider()
+        result = facade.update_bank_row_tags_batch(
+            updates=normalized_updates,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            affected_months=affected_months,
+        )
+        payload = dict(result or {})
+        payload["affected_months"] = list(affected_months)
+        payload["turnover_ledger_invalidated"] = True
+        payload["workbench_invalidated"] = True
+        return payload
+
+
 class TurnoverLedgerConfirmLegacyFallbackAdapterSet:
     def __init__(
         self,
