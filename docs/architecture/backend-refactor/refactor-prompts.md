@@ -21784,3 +21784,101 @@ Post-Flight:
   - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。
+
+## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
+
+状态：`planned`
+
+```text
+/goal
+PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须复用现有 Workbench idempotency primitive，为 Turnover Ledger relation extra 写路径建立最小 UoW idempotency store seam。
+
+Context:
+PF-P104 到 PF-P106 已 verified 并合入 main。当前已完成：
+- relation extra durable idempotency discovery/planning；
+- relation extra API replay/conflict target tests，其中两个 API-level tests 仍为 `unittest.expectedFailure`；
+- `TurnoverLedgerWriteCommand` 已携带 `idempotency_key` / `request_fingerprint`；
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 已可生成 `turnover_relation_extra_update` command identity/fingerprint；
+- `TurnoverLedgerWriteUnitOfWork` 当前只处理 stale precondition 与 dirty/outbox，不处理 idempotency store。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+   - backend/src/fin_ops_platform/services/workbench_uow.py
+   - backend/src/fin_ops_platform/services/workbench_idempotency.py
+   - tests/test_turnover_ledger_uow_contract.py
+   - tests/test_turnover_ledger_api.py
+2. 必须确认当前分支不是 `main`，且从最新 `main` 新建。
+3. 必须确认 PF-P106-MG 已 verified。
+
+Goal:
+建立 Turnover Ledger relation extra 的最小 idempotency store seam，让 UoW 层能够在 handler 执行前按 command idempotency identity/fingerprint 做 reserve/replay/conflict，但本轮不得接 HTTP handler，也不得让 API-level expectedFailure 转绿。
+
+Allowed Scope:
+- 可修改 `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`。
+- 可修改 `tests/test_turnover_ledger_uow_contract.py`。
+- 可更新：
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+  - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+- 只有确有必要时，才可对 `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py` 做保持兼容的小调整；不得改变已有 command payload/fingerprint contract。
+
+Required Implementation Work:
+1. TDD first:
+   - 在 `tests/test_turnover_ledger_uow_contract.py` 中新增或调整 UoW-level tests。
+   - 测试必须覆盖：
+     - same idempotency key + same fingerprint：replay committed response，不再次调用 handler，不重复写 dirty/outbox；
+     - same idempotency key + different fingerprint：抛出或映射为 `WorkbenchIdempotencyKeyConflict`；
+     - first request：reserve before handler，handler 成功后 commit response；
+     - reserved/in-progress：沿用 Workbench primitive 的 in-progress 语义。
+2. 实现最小 seam：
+   - `TurnoverLedgerWriteUnitOfWork.__init__` 可新增 optional `idempotency_store` 依赖，必须是细粒度依赖，不得传入 Application god object。
+   - `run(command, handler)` 必须从 command 的 `idempotency_key`、`tenant_id`、`actor_id`、`action_name`、`request_fingerprint` 识别 idempotency request。
+   - 必须复用 `fin_ops_platform.services.workbench_idempotency` 和/或 `workbench_uow.py` 中已有 primitive/semantics；不得复制一套新的 idempotency 状态机。
+   - 如 store 支持 transaction-bound adapter，必须在当前 UoW transaction 内使用；不得在 transaction 外写 durable idempotency record。
+3. 保持 API target tests：
+   - `tests/test_turnover_ledger_api.py` 中 relation extra API replay/conflict expectedFailure 本轮必须继续 expectedFailure。
+   - 不得通过修改 API test 期望来制造“通过”。
+
+Forbidden Scope:
+- 不得修改 `backend/src/fin_ops_platform/app/server.py`。
+- 不得读取 HTTP header/cookie。
+- 不得实现 API-level idempotency key extraction、HTTP replay、HTTP 409 mapping。
+- 不得新增 SQL migration 或修改 `app.workbench_idempotency_records` schema。
+- 不得接入真实 PostgreSQL idempotency repository。
+- 不得修改 Workbench 写路径语义。
+- 不得修改部署、Nginx、生产配置、feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录：
+   - PF-P107 status = implemented / verified / blocked；
+   - changed files；
+   - verification commands/results；
+   - API-level expectedFailure 是否仍保留；
+   - 下一条 prompt 建议。
+3. 未经 MG，不得 merge 到 main。
+```
+
+### 审查结论
+
+- PF-P107 边界正确：只建立 Turnover Ledger relation extra idempotency 的 UoW/store seam，不做 HTTP handler 接线。
+- 该 prompt 强制复用 Workbench idempotency primitive，符合“不重复造轮子”规则。
+- API-level replay/conflict expectedFailure 明确保留，避免一次性扩大到 handler 和真实 repository。

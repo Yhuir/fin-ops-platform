@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate` 已 verified，已 merge 到 `main`，待 push origin/main |
-| 当前 active prompt | 无，等待 push origin/main 后从最新 `main` 新建下一条 `codex/` 分支 |
+| 当前阶段 | `PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam` |
 | 最近 verified prompt | `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate` |
-| 当前分支 | `main` |
+| 当前分支 | `codex/turnover-ledger-next-slice-p107` |
 | 最近验证 | 分支与 `main` 均通过：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests；`python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
-| 下一条允许任务 | 提交 PF-P106-MG post-flight 文档更新并执行 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支 |
+| 下一条允许任务 | 执行 `PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam` |
 
 ## Prompt 执行日志
 
@@ -7974,6 +7974,31 @@ PF-P106 已 verified。当前分支已完成 PF-P104 discovery、PF-P105 tests�
 #### 下一条 Prompt 上下文
 
 PF-P106-MG 已 verified。先提交本次 post-flight 文档更新并 `git push origin main`。push 完成后必须从最新 `main` 新建下一条 `codex/` 分支，再生成并审查下一条 Turnover Ledger relation extra idempotency 后续 prompt。
+
+### PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
+
+状态：`planned`
+
+#### 范围
+
+- 只在 Turnover Ledger UoW 层建立 relation extra idempotency store seam。
+- 复用现有 Workbench idempotency primitive 和 helper，不新增平行实现。
+- 为 `TurnoverLedgerWriteUnitOfWork.run(...)` 增加最小 idempotency reservation/replay/conflict contract tests。
+- 不修改 `server.py`，不读取 HTTP header/cookie，不实现 API-level replay/conflict，不让 PF-P105 两个 API expectedFailure 转绿。
+- 不新增 SQL migration，不接入真实 PostgreSQL idempotency repository，不改其它 Turnover 写路径语义。
+
+#### 必须验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+#### 下一条 Prompt 上下文
+
+PF-P107 planned。执行时必须保持 Turnover Ledger relation extra idempotency UoW/store seam 的最小边界；如果 UoW contract tests 转绿但 API expectedFailure 仍保留，下一条可继续处理 handler idempotency key extraction 与 HTTP error mapping，或先做 cumulative MG，取决于 diff 大小。
 
 ## 维护规则
 

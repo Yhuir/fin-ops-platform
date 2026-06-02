@@ -2824,3 +2824,30 @@ Relation extra 当前写路径：
   - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：先 push `origin/main`，再从最新 `main` 新建下一条 `codex/` 分支，继续 relation extra idempotency 后续切片。
+
+## PF-P107 Relation Extra Idempotency UoW Store Seam
+
+状态：`planned`
+
+目标：
+
+- 建立 Turnover Ledger relation extra 的最小 UoW idempotency store seam。
+- 复用现有 Workbench idempotency primitive，不新建平行状态机。
+- 让 UoW 层能够按 command idempotency identity/fingerprint 做 reserve/replay/conflict。
+
+边界：
+
+- 可修改 `turnover_ledger_write_uow.py` 和 `tests/test_turnover_ledger_uow_contract.py`。
+- 不修改 `server.py`。
+- 不实现 API-level idempotency key extraction、HTTP replay 或 HTTP conflict mapping。
+- 不新增 SQL migration，不接入真实 PostgreSQL idempotency repository。
+- `tests/test_turnover_ledger_api.py` 中 relation extra API replay/conflict expectedFailure 必须继续保留。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
