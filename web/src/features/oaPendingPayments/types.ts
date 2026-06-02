@@ -46,6 +46,9 @@ export type OaPendingPaymentBankTransaction = {
   voucherKind: string;
   voucherNo: string;
   bankName: string;
+  accountNo?: string;
+  accountLast4?: string;
+  directionLabel?: string;
   accountName: string;
   tradeTime: string;
   debitAmount: string;
@@ -63,7 +66,21 @@ export type OaPendingPaymentBankTransaction = {
   relationCount: number;
   hasMultiple: boolean;
   detailMode?: "none" | "single" | "list";
-  summaries?: unknown[];
+  summaries?: OaPendingPaymentBankTransactionSummary[];
+};
+
+export type OaPendingPaymentBankTransactionSummary = {
+  bankTransactionId?: string | null;
+  bankName?: string;
+  accountNo?: string;
+  accountLast4?: string;
+  directionLabel?: string;
+  tradeTime?: string;
+  amount?: string;
+  counterpartyName?: string;
+  summary?: string;
+  remark?: string;
+  relationCaseId?: string;
 };
 
 export type OaPendingPaymentInvoice = {
@@ -75,7 +92,7 @@ export type OaPendingPaymentInvoice = {
   relationCount: number;
   hasMultiple: boolean;
   detailMode?: "none" | "single" | "list";
-  summaries?: unknown[];
+  summaries?: Array<Record<string, unknown>>;
 };
 
 export type OaPendingPaymentRow = {

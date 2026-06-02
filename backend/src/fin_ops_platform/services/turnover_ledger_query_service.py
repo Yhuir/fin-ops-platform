@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_query_gateway import ReadModelQueryGateway
 
 
 TURNOVER_LEDGER_SCOPE_TYPE = "turnover_ledger"
@@ -44,32 +44,27 @@ class TurnoverLedgerQueryService:
             page=page,
             page_size=page_size,
         )
-        if isinstance(read_model_payload, dict):
-            stale_reasons = source_version_mismatch_reasons(
-                expected=expected_source_versions,
-                actual=read_model_payload.get("source_versions") if isinstance(read_model_payload.get("source_versions"), dict) else {},
-            )
-            if not stale_reasons and str(read_model_payload.get("read_model_status") or "fresh") == "fresh":
-                return read_model_payload
-            refresh_enqueued = self._enqueue_refresh(reason="api_stale")
-            return self._stale_payload(
-                read_model_payload,
-                stale_reasons=stale_reasons,
-                refresh_reason="source_version_mismatch" if stale_reasons else "api_stale",
-                refresh_enqueued=refresh_enqueued,
-            )
 
-        if self._postgres_required():
-            refresh_enqueued = self._enqueue_refresh(reason="api_miss")
-            return self._empty_refreshing_payload(
-                family=family,
-                direction=direction,
-                status=status,
-                page=page,
-                page_size=page_size,
-                source_versions=expected_source_versions,
-                refresh_enqueued=refresh_enqueued,
+        if isinstance(read_model_payload, dict) or self._postgres_required():
+            result = ReadModelQueryGateway(queue_repository=self._refresh_queue_repository).load(
+                scope_type=TURNOVER_LEDGER_SCOPE_TYPE,
+                scope_key="all",
+                expected_source_versions=expected_source_versions,
+                load_view=lambda: read_model_payload,
+                payload_from_view=lambda view: view,
+                empty_payload_factory=lambda: self._empty_refreshing_payload(
+                    family=family,
+                    direction=direction,
+                    status=status,
+                    page=page,
+                    page_size=page_size,
+                    source_versions=expected_source_versions,
+                ),
+                missing_reason="api_miss",
+                stale_reason="api_stale",
+                source_mismatch_reason="api_stale",
             )
+            return result.payload
 
         payload = self._legacy_payload_builder(
             family=family,
@@ -114,29 +109,6 @@ class TurnoverLedgerQueryService:
         settings = self._settings_provider()
         return bool(settings.get("postgres_required")) if isinstance(settings, dict) else False
 
-    def _enqueue_refresh(self, *, reason: str) -> bool:
-        enqueue = getattr(self._refresh_queue_repository, "enqueue_read_model_refresh", None)
-        if callable(enqueue):
-            enqueue(scope_type=TURNOVER_LEDGER_SCOPE_TYPE, scope_key="all", reason=reason)
-            return True
-        return False
-
-    @staticmethod
-    def _stale_payload(
-        payload: dict[str, Any],
-        *,
-        stale_reasons: list[str],
-        refresh_reason: str,
-        refresh_enqueued: bool,
-    ) -> dict[str, Any]:
-        result = dict(payload)
-        result["read_model_status"] = "refreshing"
-        result["refresh_enqueued"] = refresh_enqueued
-        result["refresh_reason"] = refresh_reason
-        if stale_reasons:
-            result["read_model_stale_reasons"] = list(stale_reasons)
-        return result
-
     @staticmethod
     def _empty_refreshing_payload(
         *,
@@ -146,7 +118,6 @@ class TurnoverLedgerQueryService:
         page: int,
         page_size: int,
         source_versions: dict[str, Any],
-        refresh_enqueued: bool,
     ) -> dict[str, Any]:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 50), 1), 200)
@@ -166,7 +137,4 @@ class TurnoverLedgerQueryService:
             "pagination": {"page": normalized_page, "page_size": normalized_page_size, "total": 0},
             "filters": {"family": family or "all", "direction": direction or "all", "status": status},
             "source_versions": dict(source_versions),
-            "read_model_status": "refreshing",
-            "refresh_enqueued": refresh_enqueued,
-            "refresh_reason": "api_miss",
         }

@@ -72,6 +72,9 @@ type ApiOaSummary = Partial<{
   application_type: string | null;
   project_name: string | null;
   status: string | null;
+  form_no: string | null;
+  detail_available: boolean | null;
+  relation_case_id: string | null;
 }>;
 
 type ApiPendingInvoiceRow = {
@@ -452,7 +455,14 @@ function mapOa(value: ApiOaSummary | null | undefined): PendingInvoiceOaSummary 
     applicationType: stringValue(value?.application_type),
     projectName: stringValue(value?.project_name),
     status: stringValue(value?.status),
+    formNo: stringValue(value?.form_no),
+    detailAvailable: value?.detail_available !== false,
+    relationCaseId: stringValue(value?.relation_case_id),
   };
+}
+
+function isRealOaDetailId(value: string) {
+  return value.trim().startsWith("oa-");
 }
 
 function statusLabel(code: string) {
@@ -485,8 +495,10 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
   }
   const matchedRule = row.invoice_acquisition_status?.matched_rule;
   const oaPrimary = row.oa?.primary ? mapOa(row.oa.primary) : (
-    row.oa_applicant ? { id: "", applicant: row.oa_applicant, applicationType: "", projectName: "", status: "" } : null
+    row.oa_applicant ? { id: "", applicant: row.oa_applicant, applicationType: "", projectName: "", status: "", formNo: "", detailAvailable: false, relationCaseId: "" } : null
   );
+  const oaSummaries = (row.oa?.summaries ?? []).map(mapOa).filter((item) => item.id || item.applicant);
+  const oaDetailAvailable = row.oa?.detail_available !== false && Boolean(oaPrimary?.detailAvailable) && isRealOaDetailId(oaPrimary?.id ?? "");
   return {
     id,
     bankTransaction: mapBankTransaction(row.bank_transaction, id),
@@ -522,8 +534,8 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
       primary: oaPrimary,
       relationCount: numberValue(row.oa?.relation_count, oaPrimary ? 1 : 0),
       hasMultiple: row.oa?.has_multiple === true,
-      detailAvailable: row.oa?.detail_available !== false,
-      summaries: (row.oa?.summaries ?? []).map(mapOa).filter((item) => item.id || item.applicant),
+      detailAvailable: oaDetailAvailable,
+      summaries: oaSummaries,
     },
     invoices,
     oaApplicant: oaPrimary?.applicant || null,

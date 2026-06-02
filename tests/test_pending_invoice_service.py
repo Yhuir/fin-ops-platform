@@ -202,6 +202,58 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(detail_payload["oa_print_layout"]["approvals"][1]["signature"], "刘涵静")
         self.assertIn(["oa-pay-2048"], oa_projection.requested_row_ids)
 
+    def test_oa_detail_rejects_candidate_relation_case_id(self) -> None:
+        service = self._query_service(transactions=[])
+
+        with self.assertRaises(PendingInvoiceError) as context:
+            service.oa_detail("candidate:030404426078")
+
+        self.assertEqual(context.exception.error_code, "invalid_oa_detail_id")
+
+    def test_rows_keep_candidate_case_id_separate_from_real_oa_id(self) -> None:
+        vendor = self._counterparty("cp_vendor", "Vendor A")
+        txn = self._bank_transaction("txn_expense", TransactionDirection.OUTFLOW, "Vendor A", "118.00")
+        invoice = self._invoice("inv_input_1", InvoiceType.INPUT, "IN-001", vendor, seller_name="Vendor A", total_with_tax="118.00")
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="candidate:oa-bank-invoice",
+            row_ids=["oa-pay-2048", txn.id, invoice.id],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+        )
+        oa_projection = FakeOAProjection([
+            OAApplicationRecord(
+                id="oa-pay-2048",
+                month="2026-05",
+                section="已完成",
+                case_id="2048",
+                applicant="杨丽萍",
+                project_name="大理项目",
+                apply_type="支付申请",
+                amount="118.00",
+                counterparty_name="Vendor A",
+                reason="服务费",
+                relation_code="pending_match",
+                relation_label="待找流水与发票",
+                relation_tone="warn",
+            )
+        ])
+        service = self._query_service(
+            transactions=[txn],
+            invoices=[invoice],
+            pair_service=pair_service,
+            oa_projection=oa_projection,
+        )
+
+        payload = service.list_rows(direction="expense", filter="all")
+        row = payload["rows"][0]
+
+        self.assertEqual(row["oa"]["primary"]["id"], "oa-pay-2048")
+        self.assertEqual(row["oa"]["primary"]["relation_case_id"], "candidate:oa-bank-invoice")
+        self.assertEqual(row["relation_case_ids"], ["candidate:oa-bank-invoice"])
+        self.assertNotEqual(row["oa"]["primary"]["id"], row["relation_case_ids"][0])
+
     def test_income_relation_detail_uses_income_direction_and_output_invoices(self) -> None:
         customer = self._counterparty("cp_customer", "Customer A")
         txn = self._bank_transaction("txn_income", TransactionDirection.INFLOW, "Customer A", "118.00")

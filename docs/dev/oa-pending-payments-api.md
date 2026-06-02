@@ -33,6 +33,14 @@ Response:
 - `read_model_status` / `readModelStatus`
 - `source_versions` / `sourceVersions`
 
+Row payload notes:
+
+- `bankTransaction.accountNo`、`bankTransaction.accountLast4`、`bankTransaction.directionLabel` 是 `read_model.oa_pending_payment_rows.payload` JSON 字段，不是新增 SQL 列。
+- `bankTransaction.accountLast4` 优先来自导入时识别的银行账号后四位；缺失时从 `accountNo` 截取后四位。
+- `bankTransaction.directionLabel` 使用面向页面展示的中文收支方向，当前支出流水展示为 `支出`。
+- `bankTransaction.summaries` 可包含多条关联流水摘要；前端 `摘要/备注` 列按摘要和备注去重合并展示。
+- 进项发票方展示文案为 `进项发票方名称`，字段名仍为 `invoice.sellerName` / payload 中的 `sellerName`。
+
 ### `GET /api/oa-pending-payments/filter-options`
 
 返回当前查询上下文下可用筛选项。生产模式同样优先从 SQL read model 拉取全量分页结果，再用模块服务生成筛选项。

@@ -264,6 +264,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(json.loads(bank_response.body)["id"], "bank-api")
         self.assertEqual(invoice_response.status_code, 200)
         self.assertEqual(json.loads(invoice_response.body)["id"], "inv-api")
+        invoice_fields = json.loads(invoice_response.body)["sections"][0]["fields"]
+        self.assertIn({"label": "进项发票方名称", "value": "API供应商"}, invoice_fields)
         self.assertEqual(relation_response.status_code, 200)
         self.assertEqual(json.loads(relation_response.body)["kind"], "invoice")
         self.assertEqual(queue.refreshes, [])
@@ -469,6 +471,9 @@ def _read_model_row() -> dict[str, object]:
             "voucherKind": "电子转账凭证",
             "voucherNo": "voucher-api",
             "bankName": "建设银行",
+            "accountNo": "622200001234",
+            "accountLast4": "1234",
+            "directionLabel": "支出",
             "accountName": "云南溯源科技有限公司",
             "tradeTime": "2026-05-21 10:00:00",
             "debitAmount": "100.00",
@@ -489,6 +494,9 @@ def _read_model_row() -> dict[str, object]:
                     "bankTransactionId": "bank-api",
                     "accountDetailNo": "detail-no-api",
                     "bankName": "建设银行",
+                    "accountNo": "622200001234",
+                    "accountLast4": "1234",
+                    "directionLabel": "支出",
                     "tradeTime": "2026-05-21 10:00:00",
                     "amount": "100.00",
                     "counterpartyName": "API供应商",

@@ -11,6 +11,7 @@ from fin_ops_platform.services.pending_invoice_rules import (
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
 )
+from fin_ops_platform.services.pending_invoice_relation_identity import sanitize_pending_invoice_oa_summaries
 from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
     pending_invoice_status_payload,
@@ -363,8 +364,8 @@ class SearchPendingSqlProjectionBuilder:
             relation_case_ids = list(row.get("relation_case_ids") or [])
             oa_applicant = str(row.get("oa_applicant") or "").strip()
             oa_project_name = str(row.get("oa_project_name") or "").strip()
-            oa_summaries = row.get("oa_summaries") if isinstance(row.get("oa_summaries"), list) else []
-            if not oa_summaries and (oa_applicant or oa_project_name):
+            oa_summaries, invalid_oa_summary_ids = sanitize_pending_invoice_oa_summaries(row.get("oa_summaries"))
+            if not oa_summaries and not invalid_oa_summary_ids and (oa_applicant or oa_project_name):
                 oa_summaries = [
                     {
                         "id": "",
@@ -427,8 +428,11 @@ class SearchPendingSqlProjectionBuilder:
                 "primary": oa_summaries[0] if oa_summaries else None,
                 "relation_count": len(oa_summaries),
                 "has_multiple": len(oa_summaries) > 1,
+                "detail_available": any(bool(summary.get("detail_available")) for summary in oa_summaries),
                 "summaries": oa_summaries,
             }
+            if invalid_oa_summary_ids:
+                oa_payload["invalid_oa_summary_ids"] = invalid_oa_summary_ids
             payload = {
                 "id": transaction_id,
                 "bank_transaction": bank_transaction,
@@ -476,7 +480,7 @@ class SearchPendingSqlProjectionBuilder:
         pending_output_groups = settings.get("pending_output_invoice_tag_groups")
         bank_tags = settings.get("bank_transaction_tags")
         return {
-            "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
+            "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1",
             "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
             "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
             "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,

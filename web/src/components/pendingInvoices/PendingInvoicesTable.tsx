@@ -124,6 +124,11 @@ function shouldOpenManualInvoice(action: PendingInvoicePrimaryAction) {
   return ["manual_invoice", "create_invoice"].includes(action);
 }
 
+function canOpenOaDetail(row: PendingInvoiceRow) {
+  const primaryOa = row.oa.primary;
+  return Boolean(primaryOa?.id?.startsWith("oa-") && primaryOa.detailAvailable && row.oa.detailAvailable);
+}
+
 function ActionButtons({
   row,
   onOpenRelation,
@@ -358,6 +363,7 @@ function renderRow({
   const primaryOa = row.oa.primary;
   const invoiceExtraCount = Math.max(0, row.inputInvoices.relationCount - 1);
   const oaExtraCount = Math.max(0, row.oa.relationCount - 1);
+  const oaDetailAvailable = canOpenOaDetail(row);
 
   return (
     <TableRow key={row.id} hover>
@@ -511,7 +517,7 @@ function renderRow({
               <Button
                 size="small"
                 variant="text"
-                disabled={!primaryOa.id}
+                disabled={!oaDetailAvailable}
                 aria-label={`OA详情 ${primaryOa.applicant || primaryOa.id}`}
                 onClick={() => onOpenObjectDetail({ kind: "oa", id: primaryOa.id, rowId: row.id })}
               >

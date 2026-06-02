@@ -75,6 +75,15 @@
 - `input_invoices`
 - `oa`
 
+`oa.primary` 和 `oa.summaries[*]` 的 `id` 必须是真实 OA projection row id，例如 `oa-...`。工作台 relation case id、`candidate_key`、`candidate:...` 只能出现在 `relation_case_id` 或行级 `relation_case_ids`，不得作为 OA `id` 暴露给前端。OA 区域同时返回：
+
+| 字段 | 说明 |
+| --- | --- |
+| `oa.detail_available` | 当前主 OA 是否可打开详情；只有真实 OA row id 且 projection 可用时为 `true`。 |
+| `oa.primary.form_no` | OA 表单号；缺失时为空字符串。 |
+| `oa.primary.relation_case_id` | 产生该关联的工作台 relation case id，仅用于关系追溯。 |
+| `oa.primary.detail_available` | 该 OA summary 对应的详情 projection 是否可用。 |
+
 列表响应的 `summary.source_summary` 用于说明当前读模型中的流水方向边界：
 
 | 字段 | 说明 |
@@ -304,6 +313,8 @@ GET /api/pending-invoices/oa/{id}/detail
 
 详情接口返回对象完整字段。OA 无稳定投影时返回 `detail_available=false` 和原因。
 
+OA 详情 `id` 必须是真实 OA projection row id。传入 `candidate:...`、工作台 relation case id 或其他非 OA row id 时返回结构化 `400`，错误码为 `invalid_oa_detail_id`；真实 OA row id 但 projection 尚未同步时返回 `detail_available=false` 和同步原因，不回源 OA Mongo，也不使用 relation metadata 拼接完整表单。
+
 OA 详情必须优先从 OA projection / OA 只读适配层读取，不允许只用关联关系 metadata 拼接完整表单。支付申请类详情额外返回 `oa_print_layout`，用于前端按 OA 打印预览样式展示：
 
 ```json
@@ -390,6 +401,15 @@ GET /api/pending-invoices/export
 - API 热路径不得因 read model miss/stale 同步扫描全量事实。
 - SQL read model repository 未配置是运行时配置错误，接口返回 `503` 和 `pending_invoice_read_model_unavailable`，不得静默 fallback 到 `PendingInvoiceQueryService.list_rows`。
 - `rows`、`filter-options`、`export-preview`、`export` 都只通过 pending invoice read model service 判定 fresh/refreshing；只有 fresh 时才使用既有 query service 将 read model 行转换为筛选项或导出内容。
+
+OA identity 相关 schema 变更通过 `pending_invoice_read_model_schema_version` 推动旧 read model 自动 stale。生产诊断使用：
+
+```bash
+python -m fin_ops_platform.app.pending_invoice_oa_identity_backfill --json
+python -m fin_ops_platform.app.pending_invoice_oa_identity_backfill --enqueue --reason pending_invoice_oa_identity_backfill
+```
+
+诊断只检测并 enqueue 受影响 scope；当 source-of-truth relation 本身缺少 typed OA row id 时必须报告人工修复，不得猜测或自动补造 OA id。
 
 实现阶段需要扩展 SQL query columns 和索引，至少覆盖 `status_code`、`seller_name`、`invoice_total`、`oa_applicant`、`project_name` 和筛选/排序需要的日期金额字段。
 

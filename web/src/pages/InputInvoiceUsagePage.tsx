@@ -19,7 +19,6 @@ import {
   downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
   fetchInputInvoiceUsageExportPreview,
-  fetchInputInvoiceUsageFilterOptions,
   fetchInputInvoiceUsageInvoiceDetail,
   fetchInputInvoiceUsageOaDetail,
   fetchInputInvoiceUsagePaymentStatusRules,
@@ -28,7 +27,6 @@ import {
   createInputInvoiceUsageOaReverseBatch,
   createInputInvoiceUsageOaReverseDraft,
   manualInputInvoiceUsageOaReverseStatus,
-  nextSortDirection,
   previewInputInvoiceUsageOaReverse,
   refreshInputInvoiceUsageOaReverseStatus,
   revokeInputInvoiceUsageOaReverseDraft,
@@ -37,11 +35,8 @@ import {
 import type {
   InputInvoiceUsageDetailTarget,
   InputInvoiceUsageFilter,
-  InputInvoiceUsageFilterFieldConfig,
-  InputInvoiceUsageFilterOption,
   InputInvoiceUsageQuery,
   InputInvoiceUsageRow,
-  InputInvoiceUsageSortDirection,
 } from "../features/inputInvoiceUsage/types";
 
 const initialQuery: InputInvoiceUsageQuery = {
@@ -111,42 +106,10 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
     ...raw,
     page: Math.max(1, raw.page),
     pageSize: [20, 50, 100].includes(raw.pageSize) ? raw.pageSize : initialQuery.pageSize,
+    filters: [],
+    sortField: "",
+    sortDirection: "",
   };
-}
-
-function filterOptionsByField(fields: Array<InputInvoiceUsageFilterFieldConfig & { options?: InputInvoiceUsageFilterOption[] }>) {
-  return fields.reduce<Record<string, InputInvoiceUsageFilterOption[]>>((accumulator, field) => {
-    accumulator[field.field] = field.options ?? [];
-    return accumulator;
-  }, {});
-}
-
-function filterConfigsFromOptions(fields: Array<InputInvoiceUsageFilterFieldConfig & { options?: InputInvoiceUsageFilterOption[] }>) {
-  return fields.map(({ options: _options, ...field }) => field);
-}
-
-function normalizeFilterValue(filter: {
-  field: string;
-  operator: string;
-  value?: string | string[] | [string, string] | { min?: string; max?: string } | null;
-  values?: string[];
-}): InputInvoiceUsageFilter | null {
-  if (filter.operator === "in") {
-    const values = Array.isArray(filter.values) ? filter.values.filter(Boolean) : [];
-    return values.length > 0 ? { field: filter.field, operator: "in", values } : null;
-  }
-  if (filter.operator === "equals") {
-    const value = typeof filter.value === "string" ? filter.value : "";
-    return value ? { field: filter.field, operator: "equals", value } : null;
-  }
-  if (filter.operator === "contains") {
-    const value = typeof filter.value === "string" ? filter.value : "";
-    return value ? { field: filter.field, operator: "contains", value } : null;
-  }
-  if (filter.operator === "between") {
-    return { field: filter.field, operator: "between", value: filter.value ?? null };
-  }
-  return null;
 }
 
 export default function InputInvoiceUsagePage() {
@@ -165,8 +128,6 @@ export default function InputInvoiceUsagePage() {
   const setQuery = querySession.setValue;
   const [rows, setRows] = useState<InputInvoiceUsageRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [filterConfigs, setFilterConfigs] = useState<InputInvoiceUsageFilterFieldConfig[]>([]);
-  const [filterOptions, setFilterOptions] = useState<Record<string, InputInvoiceUsageFilterOption[]>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [readModelStatus, setReadModelStatus] = useState("");
@@ -200,30 +161,14 @@ export default function InputInvoiceUsagePage() {
       sortDirection: query.sortDirection,
       signal,
     };
-    Promise.all([
-      fetchInputInvoiceUsageRows(request),
-      fetchInputInvoiceUsageFilterOptions({
-        keyword: query.keyword,
-        invoiceDateFrom: query.invoiceDateFrom,
-        invoiceDateTo: query.invoiceDateTo,
-        month: query.month,
-        filters: query.filters,
-        signal,
-      }),
-    ])
-      .then(([payload, optionsPayload]) => {
+    fetchInputInvoiceUsageRows(request)
+      .then((payload) => {
         if (requestId !== requestIdRef.current) {
           return;
         }
         setRows(payload.rows);
         setTotal(payload.pagination.total);
-        setFilterConfigs(payload.filterConfig.length > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields));
-        setFilterOptions(filterOptionsByField(optionsPayload.fields));
-        setReadModelStatus(
-          payload.readModelStatus === "refreshing" || optionsPayload.readModelStatus === "refreshing"
-            ? "refreshing"
-            : payload.readModelStatus || optionsPayload.readModelStatus || "",
-        );
+        setReadModelStatus(payload.readModelStatus || "");
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -231,8 +176,6 @@ export default function InputInvoiceUsagePage() {
         }
         setRows([]);
         setTotal(0);
-        setFilterConfigs([]);
-        setFilterOptions({});
         setReadModelStatus("");
         setError(caught instanceof Error ? caught.message : "进项发票使用情况加载失败，请稍后重试。");
       })
@@ -275,40 +218,6 @@ export default function InputInvoiceUsagePage() {
       keyword: keywordDraft.trim(),
     }));
   }, [keywordDraft, setQuery]);
-
-  const handleSortChange = useCallback((field: string, direction?: InputInvoiceUsageSortDirection) => {
-    setQuery((current) => ({
-      ...current,
-      page: 1,
-      sortField: field,
-      sortDirection: direction ?? nextSortDirection(current.sortField, current.sortDirection, field),
-    }));
-  }, [setQuery]);
-
-  const handleFilterApply = useCallback((filter: {
-    field: string;
-    operator: string;
-    value?: string | string[] | [string, string] | { min?: string; max?: string } | null;
-    values?: string[];
-  }) => {
-    const normalized = normalizeFilterValue(filter);
-    setQuery((current) => {
-      const filters = current.filters.filter((item) => item.field !== filter.field);
-      return {
-        ...current,
-        page: 1,
-        filters: normalized ? [...filters, normalized] : filters,
-      };
-    });
-  }, [setQuery]);
-
-  const handleFilterClear = useCallback((field: string) => {
-    setQuery((current) => ({
-      ...current,
-      page: 1,
-      filters: current.filters.filter((filter) => filter.field !== field),
-    }));
-  }, [setQuery]);
 
   const handlePageChange = useCallback((page: number) => {
     setQuery((current) => ({ ...current, page }));
@@ -464,17 +373,9 @@ export default function InputInvoiceUsagePage() {
                 page={query.page}
                 pageSize={query.pageSize}
                 total={total}
-                sortField={query.sortField}
-                sortDirection={query.sortDirection}
-                filters={query.filters}
-                filterConfigs={filterConfigs}
-                filterOptions={filterOptions}
                 expandedCells={expandedCells}
                 onToggleCellExpand={handleToggleCellExpand}
                 onOpenDetail={handleOpenDetail}
-                onFilterApply={handleFilterApply}
-                onFilterClear={handleFilterClear}
-                onSortChange={handleSortChange}
                 onPageChange={handlePageChange}
                 onPageSizeChange={handlePageSizeChange}
               />

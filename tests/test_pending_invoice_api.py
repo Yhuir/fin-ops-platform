@@ -30,6 +30,78 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertTrue(payload["rows"][0]["can_create_invoice"])
         self.assertEqual(payload["rows"][0]["invoice_acquisition_status"]["code"], "paid_pending_invoice")
 
+    def test_rows_endpoint_returns_oa_detail_contract_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            class PendingInvoiceSqlReadRepository:
+                def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                    return {
+                        "direction": "expense",
+                        "filter": "all",
+                        "rows": [
+                            {
+                                "id": "txn-api-oa",
+                                "bank_transaction": {"id": "txn-api-oa", "counterparty_name": "Vendor API OA", "amount": "118.00"},
+                                "invoice_acquisition_status": {
+                                    "code": "paid_invoiced",
+                                    "label": "已支付已开票",
+                                    "primary_action": "none",
+                                },
+                                "input_invoices": {"primary": None, "relation_count": 0, "has_multiple": False, "summaries": []},
+                                "oa": {
+                                    "primary": {
+                                        "id": "oa-pay-api",
+                                        "applicant": "杨丽萍",
+                                        "application_type": "支付申请",
+                                        "project_name": "大理项目",
+                                        "status": "已完成",
+                                        "form_no": "2048",
+                                        "detail_available": True,
+                                        "relation_case_id": "candidate:api-oa-bank",
+                                    },
+                                    "relation_count": 1,
+                                    "has_multiple": False,
+                                    "detail_available": True,
+                                    "summaries": [],
+                                },
+                                "can_create_invoice": False,
+                                "available_actions": [],
+                                "relation_case_ids": ["candidate:api-oa-bank"],
+                            }
+                        ],
+                        "pagination": {"page": 1, "page_size": 50, "total": 1},
+                        "summary": {"total_rows": 1, "missing_invoice_rows": 0, "create_invoice_available_rows": 0, "source_summary": {}},
+                        "refresh_status": "fresh",
+                        "source_versions": pending_invoice_source_versions(
+                            app._app_settings_service.get_settings_payload(),
+                            attachment_invoice_parser_version=app._current_oa_attachment_invoice_parser_version(),
+                            oa_projection_sync_version=app._current_oa_projection_sync_version(),
+                        ),
+                    }
+
+            app._pending_invoice_sql_read_repository = PendingInvoiceSqlReadRepository()
+            if hasattr(app, "_pending_invoice_api_routes"):
+                delattr(app, "_pending_invoice_api_routes")
+
+            response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["rows"][0]["oa"]["detail_available"], True)
+        self.assertEqual(payload["rows"][0]["oa"]["primary"]["id"], "oa-pay-api")
+        self.assertEqual(payload["rows"][0]["oa"]["primary"]["relation_case_id"], "candidate:api-oa-bank")
+
+    def test_oa_detail_endpoint_rejects_candidate_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request("GET", "/api/pending-invoices/oa/candidate%3A030404426078/detail")
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_oa_detail_id")
+
     def test_detail_candidates_attach_rules_and_export_endpoints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

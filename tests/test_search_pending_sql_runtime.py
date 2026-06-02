@@ -27,7 +27,7 @@ class QueueRecorder:
 
 def _pending_invoice_expected_source_versions() -> dict[str, object]:
     return {
-        "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
+        "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1",
         "pending_invoice_tag_groups_version": 1,
         "pending_output_invoice_tag_groups_version": 1,
         "bank_auto_tag_rules_version": 1,
@@ -190,6 +190,51 @@ class PendingProjectionOaBankConnection:
                 }
             }
         return None
+
+
+class PendingProjectionCandidateOaConnection(PendingProjectionOaBankConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized:
+            return [
+                {
+                    "transaction_id": "txn-oa-bank",
+                    "counterparty_name_raw": "云南供应商",
+                    "trade_time": "2026-05-20 10:00:00",
+                    "txn_date": "2026-05-20",
+                    "amount": "118.00",
+                    "balance": "1000.00",
+                    "currency": "CNY",
+                    "summary": "转账",
+                    "remark": "服务费",
+                    "bank_serial_no": "SERIAL-1",
+                    "account_name": "云南溯源科技有限公司",
+                    "account_no": "622200001234",
+                    "bank_name": "招商银行",
+                    "bank_short_name": "招行",
+                    "counterparty_account_no": "622200009999",
+                    "counterparty_bank_name": "招商银行昆明分行",
+                    "category_payload": {"category_code": "service_fee", "category_label": "服务费"},
+                    "invoices": [],
+                    "paid_total": "0.00",
+                    "oa_summaries": [
+                        {
+                            "id": "candidate:wrong-oa-id",
+                            "applicant": "杨丽萍",
+                            "application_type": "支付申请",
+                            "project_name": "大理项目",
+                            "status": "已完成",
+                            "form_no": "2048",
+                            "detail_available": False,
+                            "relation_case_id": "candidate:oa-bank",
+                        }
+                    ],
+                    "oa_applicant": "杨丽萍",
+                    "oa_project_name": "大理项目",
+                    "relation_case_ids": ["candidate:oa-bank"],
+                }
+            ]
+        return []
 
 
 class PendingComplementProjectionConnection:
@@ -789,7 +834,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             queue_repository=QueueRecorder(),
             row_normalizer=lambda rows: rows,
             settings_provider=lambda: {},
-            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1"},
+            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1"},
         )
 
         with self.assertRaisesRegex(Exception, "Pending invoice SQL read repository is not configured"):
@@ -802,7 +847,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             row_normalizer=lambda rows: rows,
             settings_provider=lambda: {},
-            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1"},
+            source_versions_provider=lambda: {"pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1"},
         )
 
         payload = service.all_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
@@ -875,7 +920,18 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["bank_transaction"]["counterparty_account_no"], "622200009999")
         self.assertEqual(payload["oa"]["primary"]["id"], "oa-pay-2048")
         self.assertEqual(payload["oa"]["primary"]["relation_case_id"], "case-oa-bank")
+        self.assertTrue(payload["oa"]["detail_available"])
         self.assertTrue(payload["oa"]["primary"]["detail_available"])
+
+    def test_pending_invoice_sql_projection_does_not_expose_candidate_as_oa_id(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingProjectionCandidateOaConnection())
+
+        rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+
+        payload = rows[0]["payload"]
+        self.assertEqual(payload["relation_case_ids"], ["candidate:oa-bank"])
+        self.assertIsNone(payload["oa"]["primary"])
+        self.assertFalse(payload["oa"]["detail_available"])
 
     def test_pending_invoice_sql_projection_uses_active_complement_for_requires_invoice_filter(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingComplementProjectionConnection())

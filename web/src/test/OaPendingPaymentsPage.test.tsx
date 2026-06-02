@@ -29,6 +29,9 @@ const rowsPayload = {
         voucherKind: "电子转账凭证",
         voucherNo: "108102947921",
         bankName: "建设银行",
+        accountNo: "622200001234",
+        accountLast4: "1234",
+        directionLabel: "支出",
         accountName: "云南溯源科技有限公司",
         tradeTime: "20260105 09:50:25",
         debitAmount: "10000.00",
@@ -78,6 +81,9 @@ const rowsPayload = {
         voucherKind: "电子转账凭证",
         voucherNo: "multi-voucher",
         bankName: "建设银行",
+        accountNo: "622200005678",
+        accountLast4: "5678",
+        directionLabel: "支出",
         accountName: "云南溯源科技有限公司",
         tradeTime: "20260106 09:50:25",
         debitAmount: "15000.00",
@@ -93,6 +99,34 @@ const rowsPayload = {
         relationCount: 2,
         hasMultiple: true,
         detailMode: "list",
+        summaries: [
+          {
+            bankTransactionId: "bank-002",
+            bankName: "建设银行",
+            accountNo: "622200005678",
+            accountLast4: "5678",
+            directionLabel: "支出",
+            tradeTime: "20260106 09:50:25",
+            amount: "15000.00",
+            counterpartyName: "多流水供应商",
+            summary: "多流水转账",
+            remark: "多流水备注",
+            relationCaseId: "case-bank-002",
+          },
+          {
+            bankTransactionId: "bank-003",
+            bankName: "建设银行",
+            accountNo: "622200009999",
+            accountLast4: "9999",
+            directionLabel: "支出",
+            tradeTime: "20260106 11:20:00",
+            amount: "2000.00",
+            counterpartyName: "多流水供应商",
+            summary: "补充流水摘要",
+            remark: "补充流水备注",
+            relationCaseId: "case-bank-003",
+          },
+        ],
       },
       invoice: {
         primaryInvoiceId: "inv-002",
@@ -193,7 +227,7 @@ function installOaPendingPaymentsFetch(overrides?: {
         title: "发票详情",
         subtitle: "inv-001",
         detailAvailable: true,
-        sections: [{ title: "发票情况", fields: [{ label: "销方名称", value: "云南恒昆机电设备有限公司" }] }],
+        sections: [{ title: "发票情况", fields: [{ label: "进项发票方名称", value: "云南恒昆机电设备有限公司" }] }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/oa-pending-payments/rows/oa-payment-row-002/relation-details") {
@@ -233,6 +267,12 @@ function rowsRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch
     .filter((url) => url.pathname === "/api/oa-pending-payments/rows");
 }
 
+function rulesRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === "/api/pending-invoices/rules");
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -256,15 +296,24 @@ describe("OA pending payments page", () => {
     expect(document.querySelector(".MuiDataGrid-root")).not.toBeInTheDocument();
 
     const groupHeader = within(page).getAllByRole("row")[0];
-    for (const label of ["凭证信息", "OA情况", "支付状态", "支出流水", "发票情况"]) {
+    for (const label of ["OA情况", "支付状态", "支出流水", "发票情况"]) {
       expect(within(groupHeader).getByRole("columnheader", { name: label })).toBeInTheDocument();
     }
-    for (const label of ["OA申请人", "类型", "项目名称", "金额", "交易时间", "数电发票号码", "销方名称"]) {
+    expect(within(groupHeader).queryByRole("columnheader", { name: "凭证信息" })).not.toBeInTheDocument();
+    for (const label of ["OA申请人", "项目名称", "金额", "对方户名/交易时间", "金额/账户", "摘要/备注", "发票号码/发票方", "日期", "价税合计"]) {
       expect(within(page).getAllByText(label).length).toBeGreaterThan(0);
     }
+    expect(within(page).queryByRole("columnheader", { name: "类型" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("columnheader", { name: "OA详情" })).not.toBeInTheDocument();
+    expect(within(page).queryByText("销方名称")).not.toBeInTheDocument();
     expect(await within(page).findByText("张三")).toBeInTheDocument();
+    expect(within(page).getByText("报销")).toBeInTheDocument();
     expect(within(page).getByText("支付少了").closest(".oa-pending-payment-status-cell")).toBeInTheDocument();
     expect(within(page).getByText("26532000000123456789")).toBeInTheDocument();
+    expect(within(page).getAllByText("进项发票方名称").length).toBeGreaterThan(0);
+    expect(within(page).getByText("建设银行 1234")).toBeInTheDocument();
+    expect(within(page).getByText(/补充流水摘要/)).toBeInTheDocument();
+    expect(within(page).getByText(/补充流水备注/)).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
 
     await user.type(within(page).getByLabelText("全页面检索"), "张三");
@@ -335,6 +384,29 @@ describe("OA pending payments page", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/oa-pending-payments/rows/oa-payment-row-002/relation-details" && url.searchParams.get("kind") === "invoice";
     })).toBe(true);
+  });
+
+  test("keeps pending invoice rules drawer stable during parent refresh", async () => {
+    const fetchMock = installOaPendingPaymentsFetch();
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
+    await screen.findByText("待找发票规则设置");
+    expect(rulesRequests(fetchMock)).toHaveLength(1);
+
+    const initialRowsRequestCount = rowsRequests(fetchMock).length;
+    await user.click(within(page).getByRole("button", { name: "刷新", hidden: true }));
+
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).length).toBeGreaterThan(initialRowsRequestCount);
+    });
+    await waitFor(() => {
+      expect(within(page).getByRole("button", { name: "刷新", hidden: true })).not.toBeDisabled();
+    });
+    expect(rulesRequests(fetchMock)).toHaveLength(1);
   });
 
   test("shows read model refreshing status when rows are rebuilding", async () => {

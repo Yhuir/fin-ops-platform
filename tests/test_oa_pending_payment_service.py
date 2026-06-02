@@ -64,6 +64,9 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["oa-merged-b"]["paymentStatus"]["code"], "merged_paid")
         self.assertEqual(rows["oa-bad"]["paymentStatus"]["code"], "pending_review")
         self.assertEqual(rows["oa-paid"]["bankTransaction"]["primaryBankTransactionId"], "bank-paid")
+        self.assertEqual(rows["oa-paid"]["bankTransaction"]["accountNo"], "622200001234")
+        self.assertEqual(rows["oa-paid"]["bankTransaction"]["accountLast4"], "1234")
+        self.assertEqual(rows["oa-paid"]["bankTransaction"]["directionLabel"], "支出")
         self.assertEqual(rows["oa-paid"]["invoice"]["primaryInvoiceId"], "inv-paid")
         self.assertEqual(rows["oa-paid"]["invoice"]["digitalInvoiceNo"], "SD-001")
 
@@ -116,7 +119,11 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(service.oa_detail("oa-detail")["id"], "oa-detail")
         self.assertEqual(service.bank_transaction_detail("bank-detail")["id"], "bank-detail")
-        self.assertEqual(service.invoice_detail("inv-detail")["id"], "inv-detail")
+        invoice_detail = service.invoice_detail("inv-detail")
+        self.assertEqual(invoice_detail["id"], "inv-detail")
+        invoice_fields = invoice_detail["sections"][0]["fields"]
+        self.assertIn({"label": "进项发票方名称", "value": "详情供应商"}, invoice_fields)
+        self.assertNotIn("销方名称", [field["label"] for field in invoice_fields])
         bank_relations = service.row_relation_details(row_id, kind="bank")
         invoice_relations = service.row_relation_details(row_id, kind="invoice")
         self.assertEqual(bank_relations["kind"], "bank")

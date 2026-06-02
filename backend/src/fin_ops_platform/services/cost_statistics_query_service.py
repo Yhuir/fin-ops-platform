@@ -4,7 +4,13 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable
 
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.cost_statistics_read_model_service import (
+    COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+)
+from fin_ops_platform.services.read_model_query_gateway import (
+    ReadModelQueryGateway,
+    ReadModelRefreshQueueAdapter,
+)
 
 
 class CostStatisticsQueryService:
@@ -22,10 +28,16 @@ class CostStatisticsQueryService:
         self._cost_statistics_service = cost_statistics_service
         self._runtime_service = runtime_service
         self._read_model_service = read_model_service
-        self._redis_helper = redis_helper
         self._sql_read_repository = sql_read_repository
         self._requires_sql_read_model_runtime = requires_sql_read_model_runtime or (lambda: False)
         self._persist_read_models = persist_read_models
+        self._read_model_query_gateway = ReadModelQueryGateway(
+            queue_repository=ReadModelRefreshQueueAdapter(
+                scope_type="cost_statistics",
+                refresh_enqueuer=self._runtime_service.enqueue_read_model_refresh,
+            ),
+            redis_helper=redis_helper,
+        )
 
     def get_month_statistics(self, month: str, project_scope: str) -> tuple[dict[str, Any], bool]:
         normalized_project_scope = self._normalize_project_scope(project_scope)
@@ -101,49 +113,20 @@ class CostStatisticsQueryService:
         scope_key = self._runtime_service.request_scope_key(month, project_scope)
         expected_source_versions = self._runtime_service.expected_source_versions(scope_key)
         cache_key = self._runtime_service.redis_cache_key(scope_key, source_versions=expected_source_versions)
-        redis_helper = self._redis_helper
-        get_cached = getattr(redis_helper, "get_json", None)
-        if callable(get_cached):
-            cached = get_cached(cache_key)
-            if isinstance(cached, dict):
-                cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-                payload = dict(cached_payload)
-                payload["read_model_status"] = "fresh"
-                payload["read_model_scope_key"] = scope_key
-                return payload, True
-
-        view = get_view(scope_key=scope_key)
-        if not isinstance(view, dict):
-            self._runtime_service.enqueue_read_model_refresh(scope_key, reason="api_miss")
-            payload = self.empty_explorer_payload(month)
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
-        refresh_status = str(view.get("refresh_status") or "fresh")
-        stale_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions,
-            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            refresh_status = "stale"
-        if refresh_status != "fresh":
-            self._runtime_service.enqueue_read_model_refresh(
-                scope_key,
-                reason="api_source_versions_stale" if stale_reasons else "api_stale",
-            )
-        self._attach_read_model_metadata(
-            payload,
-            view=view,
+        result = self._read_model_query_gateway.load(
+            scope_type="cost_statistics",
             scope_key=scope_key,
-            refresh_status=refresh_status,
-            stale_reasons=stale_reasons,
+            expected_schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            expected_source_versions=expected_source_versions,
+            load_view=lambda: get_view(scope_key=scope_key),
+            empty_payload_factory=lambda: self.empty_explorer_payload(month),
+            cache_key=cache_key,
+            cache_ttl_seconds=self._runtime_service.redis_ttl_seconds(),
+            missing_reason="api_miss",
+            stale_reason="api_stale",
+            source_mismatch_reason="api_source_versions_stale",
         )
-        set_cached = getattr(redis_helper, "set_json", None)
-        if callable(set_cached) and refresh_status == "fresh":
-            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._runtime_service.redis_ttl_seconds())
-        return payload, False
+        return result.payload, result.cache_hit
 
     def get_month_from_sql_read_model(
         self,
@@ -156,50 +139,24 @@ class CostStatisticsQueryService:
         scope_key = self._runtime_service.request_scope_key(month, project_scope)
         expected_source_versions = self._runtime_service.expected_source_versions(scope_key)
         cache_key = self._runtime_service.month_redis_cache_key(scope_key, source_versions=expected_source_versions)
-        redis_helper = self._redis_helper
-        get_cached = getattr(redis_helper, "get_json", None)
-        if callable(get_cached):
-            cached = get_cached(cache_key)
-            if isinstance(cached, dict):
-                cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-                payload = dict(cached_payload)
-                payload["read_model_status"] = "fresh"
-                payload["read_model_scope_key"] = scope_key
-                return payload, True
-
-        view = get_view(scope_key=scope_key)
-        if not isinstance(view, dict):
-            self._runtime_service.enqueue_read_model_refresh(scope_key, reason="api_month_miss")
-            payload = self.empty_month_payload(month)
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        explorer_payload = view.get("payload") if isinstance(view.get("payload"), dict) else {}
-        payload = self.month_payload_from_explorer_payload(month, explorer_payload)
-        refresh_status = str(view.get("refresh_status") or "fresh")
-        stale_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions,
-            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
-        )
-        if stale_reasons:
-            refresh_status = "stale"
-        if refresh_status != "fresh":
-            self._runtime_service.enqueue_read_model_refresh(
-                scope_key,
-                reason="api_month_source_versions_stale" if stale_reasons else "api_month_stale",
-            )
-        self._attach_read_model_metadata(
-            payload,
-            view=view,
+        result = self._read_model_query_gateway.load(
+            scope_type="cost_statistics",
             scope_key=scope_key,
-            refresh_status=refresh_status,
-            stale_reasons=stale_reasons,
+            expected_schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            expected_source_versions=expected_source_versions,
+            load_view=lambda: get_view(scope_key=scope_key),
+            empty_payload_factory=lambda: self.empty_month_payload(month),
+            payload_from_view=lambda view: self.month_payload_from_explorer_payload(
+                month,
+                view.get("payload") if isinstance(view.get("payload"), dict) else {},
+            ),
+            cache_key=cache_key,
+            cache_ttl_seconds=self._runtime_service.redis_ttl_seconds(),
+            missing_reason="api_month_miss",
+            stale_reason="api_month_stale",
+            source_mismatch_reason="api_month_source_versions_stale",
         )
-        set_cached = getattr(redis_helper, "set_json", None)
-        if callable(set_cached) and refresh_status == "fresh":
-            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._runtime_service.redis_ttl_seconds())
-        return payload, False
+        return result.payload, result.cache_hit
 
     @staticmethod
     def month_payload_from_explorer_payload(
@@ -310,23 +267,6 @@ class CostStatisticsQueryService:
         if normalized_project_scope not in {"active", "all"}:
             raise ValueError("project_scope must be active or all")
         return normalized_project_scope
-
-    @staticmethod
-    def _attach_read_model_metadata(
-        payload: dict[str, Any],
-        *,
-        view: dict[str, Any],
-        scope_key: str,
-        refresh_status: str,
-        stale_reasons: list[str],
-    ) -> None:
-        payload["read_model_status"] = refresh_status
-        payload["read_model_scope_key"] = scope_key
-        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = stale_reasons
-        if view.get("generated_at"):
-            payload["read_model_generated_at"] = view.get("generated_at")
 
 
 def _plain_money(value: Decimal) -> str:

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_query_gateway import (
+    ReadModelQueryGateway,
+    ReadModelRedisBestEffortAdapter,
+    ReadModelRefreshQueueAdapter,
+)
+from fin_ops_platform.services.tax_offset_read_model_service import (
+    TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+)
 
 
 class TaxOffsetQueryService:
@@ -18,6 +25,16 @@ class TaxOffsetQueryService:
         self._runtime_service = runtime_service
         self._sql_read_repository = sql_read_repository
         self._requires_sql_read_model_runtime = requires_sql_read_model_runtime or (lambda: False)
+        self._read_model_query_gateway = ReadModelQueryGateway(
+            queue_repository=ReadModelRefreshQueueAdapter(
+                scope_type="tax_offset",
+                refresh_enqueuer=self._runtime_service.enqueue_read_model_refresh,
+            ),
+            redis_helper=ReadModelRedisBestEffortAdapter(
+                get_json=self._runtime_service.redis_get_json_best_effort,
+                set_json=self._runtime_service.redis_set_json_best_effort,
+            ),
+        )
 
     def get_month_payload(self, month: str) -> tuple[dict[str, Any], bool]:
         sql_result = self.get_month_from_sql_read_model(month)
@@ -91,124 +108,48 @@ class TaxOffsetQueryService:
         scope_key = self._runtime_service.request_scope_key(month)
         expected_source_versions = self._runtime_service.expected_source_versions()
         cache_key = self._runtime_service.redis_cache_key(scope_key, source_versions=expected_source_versions)
-        cached = self._runtime_service.redis_get_json_best_effort(cache_key)
-        if isinstance(cached, dict):
-            cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-            payload = dict(cached_payload)
-            payload["read_model_status"] = "fresh"
-            payload["read_model_scope_key"] = scope_key
-            return payload, True
-
-        view = get_view(scope_key=scope_key)
-        if not isinstance(view, dict):
-            self._runtime_service.enqueue_read_model_refresh(scope_key, reason="api_miss")
-            payload = self._runtime_service.empty_month_payload(month)
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
-        refresh_status, stale_reasons = self._read_model_refresh_status(view, expected_source_versions)
-        if refresh_status != "fresh":
-            self._runtime_service.enqueue_read_model_refresh(
-                scope_key,
-                reason="api_source_versions_stale" if stale_reasons else "api_stale",
-            )
-        self._attach_read_model_metadata(
-            payload,
-            view=view,
+        result = self._read_model_query_gateway.load(
+            scope_type="tax_offset",
             scope_key=scope_key,
-            refresh_status=refresh_status,
-            stale_reasons=stale_reasons,
+            expected_schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            expected_source_versions=expected_source_versions,
+            load_view=lambda: get_view(scope_key=scope_key),
+            empty_payload_factory=lambda: self._runtime_service.empty_month_payload(month),
+            cache_key=cache_key,
+            cache_ttl_seconds=self._runtime_service.redis_ttl_seconds(),
+            missing_reason="api_miss",
+            stale_reason="api_stale",
+            source_mismatch_reason="api_source_versions_stale",
         )
-        if refresh_status == "fresh":
-            self._runtime_service.redis_set_json_best_effort(
-                cache_key,
-                {"payload": payload},
-                ttl_seconds=self._runtime_service.redis_ttl_seconds(),
-            )
-        return payload, False
+        return result.payload, result.cache_hit
 
     def get_summary_payload(self, month: str) -> tuple[dict[str, Any], bool]:
         scope_key = self._runtime_service.request_scope_key(month)
         expected_source_versions = self._runtime_service.expected_source_versions()
         cache_key = self._runtime_service.summary_redis_cache_key(scope_key, source_versions=expected_source_versions)
-        cached = self._runtime_service.redis_get_json_best_effort(cache_key)
-        if isinstance(cached, dict):
-            cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-            payload = dict(cached_payload)
-            payload["read_model_status"] = "fresh"
-            payload["read_model_scope_key"] = scope_key
-            return payload, True
-
         get_view = getattr(self._sql_read_repository, "get_tax_offset_view", None)
         if not callable(get_view):
             full_payload, cache_hit = self.get_month_payload(month)
             return self._runtime_service.summary_payload(full_payload, scope_key=scope_key), cache_hit
 
-        view = get_view(scope_key=scope_key)
-        if not isinstance(view, dict):
-            self._runtime_service.enqueue_read_model_refresh(scope_key, reason="api_summary_miss")
-            payload = self._runtime_service.summary_payload(
+        result = self._read_model_query_gateway.load(
+            scope_type="tax_offset",
+            scope_key=scope_key,
+            expected_schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            expected_source_versions=expected_source_versions,
+            load_view=lambda: get_view(scope_key=scope_key),
+            empty_payload_factory=lambda: self._runtime_service.summary_payload(
                 self._runtime_service.empty_month_payload(month),
                 scope_key=scope_key,
-            )
-            payload["read_model_status"] = "refreshing"
-            return payload, False
-
-        full_payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
-        payload = self._runtime_service.summary_payload(full_payload, scope_key=scope_key)
-        refresh_status, stale_reasons = self._read_model_refresh_status(view, expected_source_versions)
-        if refresh_status != "fresh":
-            self._runtime_service.enqueue_read_model_refresh(
-                scope_key,
-                reason="api_summary_source_versions_stale" if stale_reasons else "api_summary_stale",
-            )
-        payload["read_model_status"] = refresh_status
-        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = stale_reasons
-        if view.get("generated_at"):
-            payload["read_model_generated_at"] = view.get("generated_at")
-        if view.get("schema_version"):
-            payload["read_model_schema_version"] = view.get("schema_version")
-        if refresh_status == "fresh":
-            self._runtime_service.redis_set_json_best_effort(
-                cache_key,
-                {"payload": payload},
-                ttl_seconds=self._runtime_service.redis_ttl_seconds(),
-            )
-        return payload, False
-
-    @staticmethod
-    def _read_model_refresh_status(
-        view: dict[str, Any],
-        expected_source_versions: dict[str, Any],
-    ) -> tuple[str, list[str]]:
-        refresh_status = str(view.get("refresh_status") or "fresh")
-        stale_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions,
-            actual=view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
+            ),
+            payload_from_view=lambda view: self._runtime_service.summary_payload(
+                dict(view.get("payload") if isinstance(view.get("payload"), dict) else {}),
+                scope_key=scope_key,
+            ),
+            cache_key=cache_key,
+            cache_ttl_seconds=self._runtime_service.redis_ttl_seconds(),
+            missing_reason="api_summary_miss",
+            stale_reason="api_summary_stale",
+            source_mismatch_reason="api_summary_source_versions_stale",
         )
-        if stale_reasons:
-            refresh_status = "stale"
-        return refresh_status, stale_reasons
-
-    @staticmethod
-    def _attach_read_model_metadata(
-        payload: dict[str, Any],
-        *,
-        view: dict[str, Any],
-        scope_key: str,
-        refresh_status: str,
-        stale_reasons: list[str],
-    ) -> None:
-        payload["read_model_status"] = refresh_status
-        payload["read_model_scope_key"] = scope_key
-        payload["source_versions"] = view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {}
-        if stale_reasons:
-            payload["read_model_stale_reasons"] = stale_reasons
-        if view.get("generated_at"):
-            payload["read_model_generated_at"] = view.get("generated_at")
-        if view.get("schema_version"):
-            payload["read_model_schema_version"] = view.get("schema_version")
+        return result.payload, result.cache_hit

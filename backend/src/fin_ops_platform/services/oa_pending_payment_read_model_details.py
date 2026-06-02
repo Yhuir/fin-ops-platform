@@ -91,7 +91,7 @@ def oa_pending_payment_invoice_detail_from_row(row: dict[str, Any], invoice_id: 
                 "title": "发票情况",
                 "fields": [
                     {"label": "数电发票号码", "value": invoice.get("digitalInvoiceNo")},
-                    {"label": "销方名称", "value": invoice.get("sellerName")},
+                    {"label": "进项发票方名称", "value": invoice.get("sellerName")},
                     {"label": "开票日期", "value": invoice.get("invoiceDate")},
                     {"label": "价税合计", "value": invoice.get("totalWithTax")},
                 ],
@@ -171,7 +171,7 @@ def _relation_detail_sections(kind: str, summaries: list[dict[str, Any]]) -> lis
             "title": f"发票 {index}",
             "fields": [
                 {"label": "数电发票号码", "value": summary.get("digitalInvoiceNo")},
-                {"label": "销方名称", "value": summary.get("sellerName")},
+                {"label": "进项发票方名称", "value": summary.get("sellerName")},
                 {"label": "开票日期", "value": summary.get("invoiceDate")},
                 {"label": "价税合计", "value": summary.get("totalWithTax")},
             ],

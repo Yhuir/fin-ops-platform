@@ -23,6 +23,11 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
     pending_invoice_status_payload,
 )
+from fin_ops_platform.services.pending_invoice_relation_identity import (
+    infer_pending_invoice_relation_row_type,
+    is_valid_pending_invoice_oa_row_id,
+    pending_invoice_relation_identity,
+)
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
@@ -603,17 +608,18 @@ class PendingInvoiceQueryService:
     def _oa_payload_from_relations(self, relations: list[dict[str, Any]]) -> dict[str, Any]:
         summaries: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
-        oa_ids = self._oa_ids_from_relations(relations)
+        oa_ids = pending_invoice_relation_identity(relations).oa_row_ids
         oa_records = self._oa_records_by_id(oa_ids)
         for relation in relations:
             row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
             row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
             metadata = self._first_relation_metadata(relation)
-            for row_id, row_type in zip(row_ids, row_types, strict=False):
+            for index, row_id in enumerate(row_ids):
+                row_type = row_types[index] if index < len(row_types) and row_types[index] else infer_pending_invoice_relation_row_type(row_id)
                 if row_type != "oa":
                     continue
                 oa_id = row_id.strip()
-                if not oa_id or oa_id in seen_ids:
+                if not is_valid_pending_invoice_oa_row_id(oa_id) or oa_id in seen_ids:
                     continue
                 seen_ids.add(oa_id)
                 record = oa_records.get(oa_id)
@@ -643,17 +649,7 @@ class PendingInvoiceQueryService:
 
     @staticmethod
     def _oa_ids_from_relations(relations: list[dict[str, Any]]) -> list[str]:
-        oa_ids: list[str] = []
-        seen: set[str] = set()
-        for relation in relations:
-            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
-            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
-            for row_id, row_type in zip(row_ids, row_types, strict=False):
-                normalized = row_id.strip()
-                if row_type == "oa" and normalized and normalized not in seen:
-                    seen.add(normalized)
-                    oa_ids.append(normalized)
-        return oa_ids
+        return pending_invoice_relation_identity(relations).oa_row_ids
 
     def _oa_records_by_id(self, oa_ids: list[str]) -> dict[str, OAApplicationRecord]:
         normalized_ids = [str(oa_id).strip() for oa_id in list(oa_ids or []) if str(oa_id).strip()]
@@ -1065,6 +1061,13 @@ class PendingInvoiceQueryService:
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
         normalized_oa_id = str(oa_id or "").strip()
+        if not is_valid_pending_invoice_oa_row_id(normalized_oa_id):
+            raise PendingInvoiceError(
+                "invalid_oa_detail_id",
+                "OA detail requires a real OA row id.",
+                status_code=HTTPStatus.BAD_REQUEST,
+                details={"oa_id": normalized_oa_id},
+            )
         active_relations = self._pair_relation_service.active_relations_for_row_ids([normalized_oa_id])
         records = self._oa_records_by_id([normalized_oa_id])
         record = records.get(normalized_oa_id)

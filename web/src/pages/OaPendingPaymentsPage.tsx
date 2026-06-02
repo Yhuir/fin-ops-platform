@@ -182,6 +182,13 @@ export default function OaPendingPaymentsPage() {
     });
   }, []);
 
+  const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
+
+  const saveExpensePendingInvoiceRules = useCallback(
+    (payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload, "expense"),
+    [],
+  );
+
   const actions = useMemo(() => (
     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
       <Button
@@ -309,8 +316,8 @@ export default function OaPendingPaymentsPage() {
       />
       <PendingInvoiceRulesDrawer
         open={rulesOpen}
-        loadRules={() => fetchPendingInvoiceRules("expense")}
-        saveRules={(payload) => savePendingInvoiceRules(payload, "expense")}
+        loadRules={loadExpensePendingInvoiceRules}
+        saveRules={saveExpensePendingInvoiceRules}
         onSaved={() => loadRows("refresh")}
         onClose={() => setRulesOpen(false)}
       />

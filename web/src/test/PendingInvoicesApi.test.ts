@@ -111,18 +111,21 @@ describe("pending invoices and tag settings API mapping", () => {
           },
           oa: {
             primary: {
-              id: "oa_001",
+              id: "oa-001",
               applicant: "张三",
               application_type: "支付",
               project_name: "维护项目",
               status: "进行中",
+              form_no: "2048",
+              detail_available: true,
+              relation_case_id: "candidate:api-oa-bank",
             },
             relation_count: 2,
             has_multiple: true,
             detail_available: true,
             summaries: [
-              { id: "oa_001", applicant: "张三", application_type: "支付", project_name: "维护项目", status: "进行中" },
-              { id: "oa_002", applicant: "李四", application_type: "报销", project_name: "维护项目二期", status: "已完成" },
+              { id: "oa-001", applicant: "张三", application_type: "支付", project_name: "维护项目", status: "进行中", form_no: "2048", detail_available: true, relation_case_id: "candidate:api-oa-bank" },
+              { id: "oa-002", applicant: "李四", application_type: "报销", project_name: "维护项目二期", status: "已完成", form_no: "2050", detail_available: true, relation_case_id: "candidate:api-oa-bank-2" },
             ],
           },
           can_create_invoice: false,
@@ -215,7 +218,7 @@ describe("pending invoices and tag settings API mapping", () => {
         relationCount: 2,
         hasMultiple: true,
         detailAvailable: true,
-        primary: { applicant: "张三", projectName: "维护项目" },
+        primary: { id: "oa-001", applicant: "张三", projectName: "维护项目", formNo: "2048", detailAvailable: true, relationCaseId: "candidate:api-oa-bank" },
       },
     });
     expect(payload.pagination).toEqual({ page: 2, pageSize: 25, total: 51 });

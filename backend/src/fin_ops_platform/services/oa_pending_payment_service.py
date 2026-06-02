@@ -35,7 +35,7 @@ FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "bank_counterparty_name": {"label": "对方户名", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
     "bank_summary": {"label": "摘要", "mode": "text", "operators": {"contains"}, "sortable": True},
     "invoice_no": {"label": "数电发票号码", "mode": "text", "operators": {"contains", "equals"}, "sortable": True},
-    "seller_name": {"label": "销方名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
+    "seller_name": {"label": "进项发票方名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
     "invoice_date": {"label": "开票日期", "mode": "date", "operators": {"between", "equals"}, "sortable": True},
     "invoice_total_with_tax": {"label": "价税合计", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
 }
@@ -285,7 +285,7 @@ class OaPendingPaymentQueryService:
                     "title": "发票情况",
                     "fields": [
                         {"label": "数电发票号码", "value": invoice.digital_invoice_no or invoice.invoice_no},
-                        {"label": "销方名称", "value": invoice.seller_name or invoice.counterparty.name},
+                        {"label": "进项发票方名称", "value": invoice.seller_name or invoice.counterparty.name},
                         {"label": "开票日期", "value": invoice.invoice_date},
                         {"label": "价税合计", "value": _money(_invoice_total(invoice))},
                         {"label": "买方名称", "value": invoice.buyer_name},
@@ -450,6 +450,8 @@ class OaPendingPaymentQueryService:
             "voucherKind": primary.get("voucherKind", ""),
             "voucherNo": primary.get("voucherNo", ""),
             "bankName": primary.get("bankName", ""),
+            "accountNo": primary.get("accountNo", ""),
+            "accountLast4": primary.get("accountLast4", ""),
             "accountName": primary.get("accountName", ""),
             "tradeTime": primary.get("tradeTime", ""),
             "debitAmount": primary.get("debitAmount", ""),
@@ -465,6 +467,7 @@ class OaPendingPaymentQueryService:
             "amount": primary.get("amount", ""),
             "paidTotal": _money(paid_total),
             "direction": primary.get("direction", ""),
+            "directionLabel": primary.get("directionLabel", ""),
             "relationCount": len(public_summaries),
             "hasMultiple": len(public_summaries) > 1,
             "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
@@ -485,6 +488,8 @@ class OaPendingPaymentQueryService:
             "voucherKind": bank.voucher_kind or "",
             "voucherNo": bank.voucher_no or "",
             "bankName": bank.imported_bank_name or "",
+            "accountNo": bank.account_no or "",
+            "accountLast4": bank.imported_bank_last4 or str(bank.account_no or "")[-4:],
             "accountName": bank.account_name or "",
             "tradeTime": bank.trade_time or bank.txn_date or "",
             "debitAmount": _debit_amount(bank),
@@ -499,6 +504,7 @@ class OaPendingPaymentQueryService:
             "remark": bank.remark or "",
             "amount": _money(bank_amount),
             "direction": _bank_direction(bank),
+            "directionLabel": _bank_direction_label(bank),
             "relationCaseId": relation.get("case_id", ""),
             "_sort": (diff, -timestamp, bank.id),
         }
@@ -824,6 +830,10 @@ def _bank_direction(transaction: BankTransaction) -> str:
     return "outflow" if "outflow" in value else "inflow"
 
 
+def _bank_direction_label(transaction: BankTransaction) -> str:
+    return "支出" if _bank_direction(transaction) == "outflow" else "收入"
+
+
 def _debit_amount(transaction: BankTransaction) -> str:
     return _money(transaction.amount) if _bank_direction(transaction) == "outflow" else "0.00"
 
@@ -867,7 +877,7 @@ def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str,
             "title": f"发票 {index}",
             "fields": [
                 {"label": "数电发票号码", "value": summary.get("digitalInvoiceNo")},
-                {"label": "销方名称", "value": summary.get("sellerName")},
+                {"label": "进项发票方名称", "value": summary.get("sellerName")},
                 {"label": "开票日期", "value": summary.get("invoiceDate")},
                 {"label": "价税合计", "value": summary.get("totalWithTax")},
             ],

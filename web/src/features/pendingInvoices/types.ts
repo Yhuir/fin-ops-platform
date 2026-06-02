@@ -201,6 +201,9 @@ export type PendingInvoiceOaSummary = {
   applicationType: string;
   projectName: string;
   status: string;
+  formNo: string;
+  detailAvailable: boolean;
+  relationCaseId: string;
 };
 
 export type PendingInvoiceOaZone = {

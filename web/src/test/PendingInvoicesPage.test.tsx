@@ -147,6 +147,60 @@ function upgradedRows() {
       can_create_invoice: false,
       available_actions: ["view_rules"],
     },
+    {
+      id: "txn-candidate-oa",
+      bank_transaction: {
+        id: "txn-candidate-oa",
+        counterparty_name: "候选OA供应商",
+        trade_time: "2026-05-05 11:00:00",
+        debit_amount: "400.00",
+        credit_amount: "0.00",
+        amount: "400.00",
+        bank_name: "建设银行",
+        account_name: "云南溯源科技有限公司",
+        account_last4: "8106",
+        summary: "候选关系",
+      },
+      invoice_acquisition_status: {
+        code: "paid_invoiced",
+        label: "已支付已开票",
+        reason: "候选关系已关联发票但 OA 投影不可用",
+        severity: "success",
+        primary_action: "view_relation",
+        matched_rule: null,
+      },
+      input_invoices: {
+        primary: {
+          id: "inv-candidate-oa",
+          digital_invoice_no: "DIG-CAND-OA",
+          issue_date: "2026-05-05",
+          seller_name: "候选OA供应商",
+          total_with_tax: "400.00",
+        },
+        relation_count: 1,
+        has_multiple: false,
+        summaries: [],
+        payment_summary: { paid_total: "400.00", invoice_total: "400.00", remaining_amount: "0.00", difference_amount: "0.00" },
+      },
+      oa: {
+        primary: {
+          id: "candidate:030404426078",
+          applicant: "赵六",
+          application_type: "支付",
+          project_name: "候选项目",
+          status: "",
+          detail_available: false,
+          relation_case_id: "candidate:030404426078",
+        },
+        relation_count: 1,
+        has_multiple: false,
+        detail_available: false,
+        summaries: [],
+      },
+      can_create_invoice: false,
+      available_actions: ["view_relation"],
+      relation_case_ids: ["candidate:030404426078"],
+    },
   ];
 }
 
@@ -573,6 +627,22 @@ describe("Pending invoices page", () => {
     expect(screen.getByText("预计导出 128 行")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "下载导出" }));
     expect(await screen.findByText("已生成 pending-invoices.xlsx")).toBeInTheDocument();
+  });
+
+  test("does not request OA detail when row only has a candidate relation id", async () => {
+    const fetchMock = installPendingInvoiceFetch();
+    renderAppAt("/pending-invoices");
+
+    const page = await screen.findByTestId("pending-invoices-page");
+    const candidateRow = await within(page).findByRole("row", { name: /候选OA供应商/ });
+    const oaDetailButton = within(candidateRow).getByRole("button", { name: /OA详情 赵六/ });
+
+    expect(oaDetailButton).toBeDisabled();
+
+    const candidateDetailRequests = fetchMock.mock.calls
+      .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+      .filter((url) => url.pathname.includes("/api/pending-invoices/oa/candidate"));
+    expect(candidateDetailRequests).toHaveLength(0);
   });
 
   test("renders hierarchical pending invoice rule blocks with mutual exclusion", async () => {
