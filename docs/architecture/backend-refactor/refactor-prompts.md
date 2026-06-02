@@ -23321,6 +23321,98 @@ Post-Flight:
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
 - 下一条建议：生成 `PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate`，统一覆盖 PF-P117/PF-P118/PF-P119 完整 diff。
 
+## PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P119-MG - Turnover Ledger Bank Row Tags Local Adapter Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Turnover Ledger bank row tags local shim 切片，不新增业务实现。
+
+Context:
+PF-P117、PF-P118、PF-P119 均已 verified。当前分支应为 `codex/turnover-ledger-bank-row-tags-local-shim-p117`，相对 `main` 的提交应包含：
+- `docs(turnover-ledger): add bank row tags local shim prompt`
+- `docs(turnover-ledger): map bank row tags local shim`
+- `docs(turnover-ledger): add bank row tags characterization prompt`
+- `test(turnover-ledger): characterize bank row tags local shim`
+- `docs(turnover-ledger): add bank row tags local adapter prompt`
+- `refactor(turnover-ledger): extract bank row tags local adapter`
+
+Gate Scope:
+本 MG 只覆盖 PF-P117 到 PF-P119 的完整 diff：
+- bank row tags local shim discovery；
+- bank row tags local shim characterization tests；
+- bank row tags local connection/port adapter extraction；
+- 文档回写。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- tests/test_turnover_ledger_api.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得修改 handler facade None fallback。
+- 不得修改 facade/UoW 语义。
+- 不得新增 SQL migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得修改前端、部署、Nginx、生产配置或 feature flag。
+- 不得执行 Traffic Gate、部署、访问生产或访问真实外部服务。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+2. 必须确认 PF-P117、PF-P118、PF-P119 均为 verified。
+3. 必须确认当前分支不是 `main`。
+4. 必须确认 `git diff --name-only main...HEAD` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only main...HEAD
+- git log --oneline main..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Commit / Merge Rules:
+1. 如果 MG prompt/状态机文档有变更，必须只用精确文件路径 `git add`。
+2. 允许提交 MG 文档变更，commit message 建议：
+   - `docs(turnover-ledger): add bank row tags local adapter merge gate`
+3. 合入 main 前必须同步最新 `origin/main`：checkout main 后 `git pull --ff-only origin main`。
+4. 如果 pull/merge 出现冲突，停止并报告。
+5. 将当前分支 merge 到 main。
+6. 在 main 上重新执行完整 Verification 中的测试命令。
+7. 如果 main 上验证失败，必须停止，不得 push。
+8. 如果 main 上验证通过，更新 migration-state-log.md：
+   - PF-P119-MG status = verified；
+   - 记录 merge commit、main 验证结果、未执行 Traffic Gate；
+   - 下一步要求 push origin/main 后，从最新 main 新建下一条 prompt 分支。
+9. 提交 main 上的 post-flight 状态机更新后，执行 `git push origin main`。
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md，记录 PF-P119-MG 执行结果。
+2. push 完成后，必须从最新 main 新建下一条 `codex/` 分支，再生成下一条 prompt。
+3. 不得在 main 或旧分支继续开发下一切片。
+```
+
+### 审查结论
+
+- PF-P119-MG 边界正确：只覆盖 PF-P117/PF-P118/PF-P119 bank row tags local shim diff。
+- MG 明确不修改 handler facade None fallback，不执行 Traffic Gate，不新增业务实现。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`
