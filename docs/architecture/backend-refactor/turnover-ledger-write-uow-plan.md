@@ -4299,6 +4299,24 @@ PF-P110 边界：
 - 进入 `PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate`。
 - 本组切片统一覆盖 PF-P131 / PF-P132 / PF-P133。
 
+## PF-P133-MG Relation Mutation Invalidation Cumulative Merge Gate
+
+状态：`verified`
+
+执行结果：
+
+- PF-P131 / PF-P132 / PF-P133 已作为同一切片完成 cumulative MG。
+- branch 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 该切片已合入 `main`，且 main 上同一组验证再次通过。
+
+下一步建议：
+
+- push `origin/main`。
+- 从最新 `main` 新建分支。
+- 生成并审查 `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction`，重新盘点 Turnover Ledger 剩余写路径的下一条最小切片。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P133 - Turnover Ledger Relation Mutation Invalidation Adapter Extraction` 已完成并验证 |
-| 当前 active prompt | `PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate` 已生成并审查，待执行 |
-| 最近 verified prompt | `PF-P133 - Turnover Ledger Relation Mutation Invalidation Adapter Extraction` |
-| 当前分支 | `codex/turnover-ledger-next-slice-p131` |
-| 最近验证 | `git status --short --branch`：Pass；`git ls-files --others --exclude-standard`：empty；`git diff --check`：Pass；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 执行 `PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate` |
+| 当前阶段 | `PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate` 已完成并验证 |
+| 当前 active prompt | `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` 待从最新 `main` 新建分支后生成并审查 |
+| 最近 verified prompt | `PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate` |
+| 当前分支 | `main` |
+| 最近验证 | branch 验证：`git diff --name-only main...HEAD` 白名单通过；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。main 验证同样通过。 |
+| 下一条允许任务 | push 完成后，从最新 `main` 新建分支，再生成并审查 `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction` |
 
 ## Prompt 执行日志
 
@@ -9553,6 +9553,40 @@ PF-P131 / PF-P132 / PF-P133 已形成完整的 relation mutation invalidation bo
 #### 下一条 Prompt 上下文
 
 若 PF-P133-MG 通过并合入 `main`、push `origin/main` 完成，则必须从最新 `main` 新建下一条 `codex/` 分支，再决定继续 Turnover Ledger 写路径下一切片或转向下一个模块。
+
+### PF-P133-MG - Turnover Ledger Relation Mutation Invalidation Cumulative Merge Gate
+
+状态：`verified`
+
+#### 范围
+
+- 统一覆盖 PF-P131、PF-P132、PF-P133。
+- 只处理 Turnover Ledger relation mutation invalidation boundary 切片。
+
+#### 执行摘要
+
+- branch 范围检查通过，`git diff --name-only main...HEAD` 只包含白名单 6 个文件。
+- branch 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests；
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- 已将 `codex/turnover-ledger-next-slice-p131` 合入 `main`。
+- main 验证再次通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，71 tests；
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+- Traffic Gate 未执行；未部署、未切流、未访问生产或真实外部服务。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+本组 relation mutation invalidation boundary 切片已经合入 `main`。下一步必须在 push `origin/main` 后，从最新 `main` 新建新分支，再生成 `PF-P134 - Turnover Ledger Remaining Write Path Rebaseline After Invalidation Extraction`。PF-P134 应只做 discovery/planning，重新盘点 Turnover Ledger 剩余写路径的优先级和下一条最小实现切片。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 
