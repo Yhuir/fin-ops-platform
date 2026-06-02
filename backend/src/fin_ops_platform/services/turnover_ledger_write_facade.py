@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
+
 
 @dataclass(frozen=True)
 class TurnoverLedgerWriteCommand:
@@ -10,6 +12,8 @@ class TurnoverLedgerWriteCommand:
     scope_keys: list[str] = field(default_factory=lambda: ["all"])
     refresh_requests: list[dict[str, object]] = field(default_factory=list)
     expected_versions: dict[str, object] = field(default_factory=dict)
+    idempotency_key: str = ""
+    request_fingerprint: str = ""
     actor_id: str = ""
     tenant_id: str = "default"
     payload: dict[str, object] = field(default_factory=dict)
@@ -45,19 +49,38 @@ class TurnoverLedgerWriteFacade:
         tenant_id: str,
         scope_keys: list[str] | None = None,
         expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         extra = self._extra_normalizer(
             relation_id=relation_id,
             payload=dict(payload),
             actor_id=actor_id,
         )
+        normalized_expected_versions = dict(expected_versions or {})
+        command_payload = {"relation_id": relation_id, "extra": dict(extra)}
+        normalized_idempotency_key = str(idempotency_key or "").strip()
+        request_fingerprint = ""
+        action_name = "turnover_relation_extra_update" if normalized_idempotency_key else "relation_extra_update"
+        if normalized_idempotency_key:
+            request_fingerprint = workbench_request_fingerprint(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action_name=action_name,
+                payload={
+                    "relation_id": relation_id,
+                    "extra": dict(extra),
+                    "expected_versions": dict(normalized_expected_versions),
+                },
+            )
         command = TurnoverLedgerWriteCommand(
-            action_name="relation_extra_update",
+            action_name=action_name,
             scope_keys=list(scope_keys or ["all"]),
-            expected_versions=dict(expected_versions or {}),
+            expected_versions=dict(normalized_expected_versions),
+            idempotency_key=normalized_idempotency_key,
+            request_fingerprint=request_fingerprint,
             actor_id=actor_id,
             tenant_id=tenant_id,
-            payload={"relation_id": relation_id, "extra": dict(extra)},
+            payload=command_payload,
         )
 
         def handler(context: Any) -> dict[str, object]:

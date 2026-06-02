@@ -1255,7 +1255,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    @unittest.expectedFailure
     def test_target_relation_extra_facade_passes_idempotency_before_repository(self) -> None:
         # PF-P105 target contract: durable idempotency should reserve/replay/conflict before repository save.
         class _CommandCapturingUoW:

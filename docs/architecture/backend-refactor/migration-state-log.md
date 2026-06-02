@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests` 已执行并 verified |
-| 当前 active prompt | `PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests` |
-| 最近 verified prompt | `PF-P105 - Turnover Ledger Relation Extra Durable Idempotency Characterization Tests` |
+| 当前阶段 | `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton` 已执行并 verified |
+| 当前 active prompt | `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton` |
+| 最近 verified prompt | `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton` |
 | 当前分支 | `codex/turnover-ledger-next-slice-p104` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests，1 expected failure |
-| 下一条允许任务 | 生成并审查 `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures；`python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass |
+| 下一条允许任务 | 生成并执行 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106 |
 
 ## Prompt 执行日志
 
@@ -7900,6 +7900,37 @@ PF-P104 已 verified。下一条应生成并审查 `PF-P105 - Turnover Ledger Re
 #### 下一条 Prompt 上下文
 
 PF-P105 已 verified。下一条应生成并审查 `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton`。PF-P106 只应实现最小 command/facade idempotency fields，让 facade/UoW target command test 转绿；不得直接实现 full replay/conflict HTTP behavior、PostgreSQL repository 接线、fallback cleanup 或 local transaction shim extraction。
+
+### PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton
+
+状态：`verified`
+
+#### 范围
+
+- 只实现 relation extra command/facade idempotency fields。
+- 不修改 `server.py`。
+- 不实现 API replay/conflict behavior。
+- 不接入 idempotency store/repository。
+- 不修改 `TurnoverLedgerWriteUnitOfWork.run`。
+
+#### 执行结果
+
+- `TurnoverLedgerWriteCommand` 新增 `idempotency_key` 和 `request_fingerprint` 字段。
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 新增 optional `idempotency_key` 参数。
+- relation extra idempotency command 使用 `workbench_request_fingerprint(...)` 计算 request fingerprint。
+- 有 idempotency key 时，command `action_name` 使用 `turnover_relation_extra_update`。
+- PF-P105 的 facade/UoW command target test 已从 `unittest.expectedFailure` 转为普通通过。
+- PF-P105 的两个 API-level replay/conflict target tests 继续保持 `unittest.expectedFailure`。
+
+#### 验证
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+#### 下一条 Prompt 上下文
+
+PF-P106 已 verified。当前分支已完成 PF-P104 discovery、PF-P105 tests、PF-P106 minimal command skeleton，建议下一条生成 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106 的完整 diff；不得继续扩大到 UoW idempotency store seam、API replay/conflict 或 fallback/local transaction shim。
 
 ## 维护规则
 

@@ -2743,3 +2743,43 @@ Relation extra 当前写路径：
 
 - 生成并审查 `PF-P106 - Turnover Ledger Relation Extra Idempotency Command Skeleton`。
 - PF-P106 只实现最小 command/facade idempotency fields，让 facade/UoW target command test 转绿；不得实现 full replay/conflict HTTP behavior。
+
+## PF-P106 Relation Extra Idempotency Command Skeleton
+
+状态：`planned`
+
+目标：
+
+- 只实现 relation extra command/facade idempotency fields。
+- 让 PF-P105 的 facade/UoW target command test 转为普通通过。
+- 保留 API replay/conflict target tests 为 `unittest.expectedFailure`。
+
+边界：
+
+- 不修改 `server.py`。
+- 不实现 API replay/conflict。
+- 不接入 idempotency store/repository。
+- 不修改 `TurnoverLedgerWriteUnitOfWork.run`。
+
+### PF-P106 执行结果
+
+状态：`verified`
+
+结果：
+
+- `TurnoverLedgerWriteCommand` 新增 `idempotency_key` 和 `request_fingerprint` 字段。
+- `TurnoverLedgerWriteFacade.update_relation_extra(...)` 新增 optional `idempotency_key` 参数。
+- relation extra idempotency command 使用 `workbench_request_fingerprint(...)` 计算 request fingerprint。
+- 有 idempotency key 时，command `action_name` 使用 `turnover_relation_extra_update`。
+- PF-P105 的 facade/UoW command target test 已转为普通通过。
+- 两个 API-level replay/conflict target tests 继续保持 `unittest.expectedFailure`。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，52 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条：
+
+- 生成 `PF-P106-MG - Turnover Ledger Relation Extra Durable Idempotency Contract Cumulative Merge Gate`，统一覆盖 PF-P104 到 PF-P106。
