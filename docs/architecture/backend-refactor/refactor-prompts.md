@@ -23208,6 +23208,96 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
 - 下一条建议：生成 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction`，只抽离 bank row tags local connection/port，不改 handler facade None fallback。
 
+## PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction
+
+状态：`planned`
+
+```text
+/goal
+PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须在 PF-P118 characterization tests 保护下，把 Turnover Ledger bank row tags local connection/port 从 `server.py` 迁到 adapter module，保持行为不变。
+
+Context:
+PF-P118 已 verified。当前测试已锁定：
+- local facade queue failure rollback category/relation snapshots；
+- local facade success save category/relation snapshots；
+- local bankdetail port apply -> relation rebuild 顺序；
+- facade None fallback legacy direct side effects。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+   - backend/src/fin_ops_platform/app/server.py
+   - backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+   - tests/test_turnover_ledger_api.py
+   - tests/test_turnover_ledger_uow_contract.py
+2. 必须确认 PF-P118 为 verified。
+3. 必须确认当前分支不是 `main`。
+
+Goal:
+将 bank row tags local transaction 和 local bankdetail port 迁入 `turnover_ledger_write_adapters.py`，让 `server.py` 只负责组装明确依赖。
+
+Required Implementation Work:
+1. 在 `turnover_ledger_write_adapters.py` 中新增：
+   - `TurnoverLedgerLocalBankRowTagsConnection`
+   - `TurnoverLedgerLocalBankdetailPort`
+2. `TurnoverLedgerLocalBankRowTagsConnection`：
+   - 接收 category snapshot provider、relation snapshot provider、replace category snapshot、replace relation snapshot、save category snapshot、save relation snapshot。
+   - failure path restore/save previous category and relation snapshots。
+   - success path save current category and relation snapshots。
+   - 不接收 `Application` 或 `state_store` god object。
+3. `TurnoverLedgerLocalBankdetailPort`：
+   - 接收 category service、relation service、bank rows provider。
+   - `apply_turnover_category_updates(...)` 先调用 category service apply，再调用 relation rebuild。
+   - 不接收 `Application`。
+   - 不把 Bankdetail 业务规则复制进 adapter；只编排既有 service 调用。
+4. 修改 `server.py`：
+   - bank row tags local path 使用新 adapter。
+   - 删除 `_local_turnover_ledger_bank_row_tags_connection(...)`。
+   - 删除 `_local_turnover_ledger_bankdetail_port(...)`。
+   - 不修改 `_handle_api_turnover_ledger_bank_row_tags_batch(...)` 的 facade None fallback。
+5. 保持 PF-P118 tests 全部通过。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/app/server.py
+- backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md
+
+Forbidden Scope:
+- 不得修改 tests，除非现有测试暴露与旧行为不一致。
+- 不得修改 handler facade None fallback。
+- 不得修改 facade/UoW 语义。
+- 不得新增 SQL migration。
+- 不得修改 Workbench、Bankdetail 或其它模块。
+- 不得执行 Traffic Gate、部署、访问生产或真实外部服务。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v
+- python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 turnover-ledger-write-uow-plan.md。
+2. 记录 changed files 和 verification results。
+3. 如验证通过，可标记 PF-P119 verified。
+4. PF-P117/PF-P118/PF-P119 已形成可合并切片，下一条应生成 cumulative MG。
+```
+
+### 审查结论
+
+- PF-P119 边界正确：只抽离 bank row tags local connection/port。
+- 该 prompt 不修改 handler facade None fallback，不修改 facade/UoW 语义，不执行 Traffic Gate。
+
 ## PF-P107 - Turnover Ledger Relation Extra Idempotency UoW Store Seam
 
 状态：`planned`

@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests` 已执行并验证通过 |
-| 当前 active prompt | 无 |
+| 当前阶段 | `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction` 已生成并审查，待执行 |
+| 当前 active prompt | `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction` |
 | 最近 verified prompt | `PF-P118 - Turnover Ledger Bank Row Tags Local Shim Characterization Tests` |
 | 当前分支 | `codex/turnover-ledger-bank-row-tags-local-shim-p117` |
 | 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass |
-| 下一条允许任务 | 生成并审查 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction` |
+| 下一条允许任务 | 执行 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction` |
 
 ## Prompt 执行日志
 
@@ -8395,6 +8395,33 @@ PF-P117 已确认 bank row tags local shim 仍需测试锁定后再抽离。下�
 #### 下一条 Prompt 上下文
 
 PF-P118 已完成 bank row tags local shim 抽离前的测试锁定。下一条可生成并审查 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction`：只把 `_local_turnover_ledger_bank_row_tags_connection(...)` 和 `_local_turnover_ledger_bankdetail_port(...)` 迁入 `turnover_ledger_write_adapters.py`，不得改 handler facade None fallback，且不得把 Bankdetail 业务规则搬入 Turnover adapter。
+
+### PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction
+
+状态：`planned`
+
+#### 范围
+
+- 抽离 bank row tags local connection 和 local bankdetail port。
+- 保持 PF-P118 锁定的 rollback/save/order/fallback 行为不变。
+- 不修改 handler facade None fallback。
+
+#### 允许文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

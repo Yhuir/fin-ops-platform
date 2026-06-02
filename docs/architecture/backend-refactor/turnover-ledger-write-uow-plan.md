@@ -3395,6 +3395,31 @@ PF-P110 边界：
 - 生成 `PF-P119 - Turnover Ledger Bank Row Tags Local Adapter Extraction`。
 - PF-P119 只抽离 `_local_turnover_ledger_bank_row_tags_connection(...)` 和 `_local_turnover_ledger_bankdetail_port(...)`，不得改 handler facade None fallback。
 
+## PF-P119 Bank Row Tags Local Adapter Extraction
+
+状态：`planned`
+
+目标：
+
+- 把 bank row tags local transaction/port 逻辑从 `server.py` 迁入 adapter module。
+- 保持 PF-P118 锁定的 rollback/save/order/fallback 行为不变。
+
+边界：
+
+- 只处理 bank row tags local connection 和 local bankdetail port。
+- 不修改 handler facade None fallback。
+- 不修改 facade/UoW 语义。
+- 不新增 SQL migration，不执行 Traffic Gate。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
