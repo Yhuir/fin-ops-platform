@@ -75,6 +75,13 @@ class TurnoverLedgerWriteFacade:
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=list(scope_keys or ["all"]),
+            refresh_requests=[
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_keys": list(scope_keys or ["all"]),
+                    "reason": "turnover_relation_extra_changed",
+                }
+            ],
             expected_versions=dict(normalized_expected_versions),
             idempotency_key=normalized_idempotency_key,
             request_fingerprint=request_fingerprint,

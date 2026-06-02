@@ -2624,7 +2624,7 @@ Relation extra 当前写路径：
 
 ## PF-P104 Relation Extra Durable Idempotency Discovery and Planning
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2709,7 +2709,7 @@ Relation extra 当前写路径：
 
 ## PF-P105 Relation Extra Durable Idempotency Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 目标：
 
@@ -2824,3 +2824,125 @@ Relation extra 当前写路径：
   - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：先 push `origin/main`，再从最新 `main` 新建下一条 `codex/` 分支，继续 relation extra idempotency 后续切片。
+
+## PF-P107 Relation Extra Idempotency UoW Store Seam
+
+状态：`planned`
+
+目标：
+
+- 建立 Turnover Ledger relation extra 的最小 UoW idempotency store seam。
+- 复用现有 Workbench idempotency primitive，不新建平行状态机。
+- 让 UoW 层能够按 command idempotency identity/fingerprint 做 reserve/replay/conflict。
+
+边界：
+
+- 可修改 `turnover_ledger_write_uow.py` 和 `tests/test_turnover_ledger_uow_contract.py`。
+- 不修改 `server.py`。
+- 不实现 API-level idempotency key extraction、HTTP replay 或 HTTP conflict mapping。
+- 不新增 SQL migration，不接入真实 PostgreSQL idempotency repository。
+- `tests/test_turnover_ledger_api.py` 中 relation extra API replay/conflict expectedFailure 必须继续保留。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+执行结果：
+
+- `TurnoverLedgerWriteUnitOfWork.__init__` 新增 optional `idempotency_store` 依赖，仍保持默认兼容。
+- `run(command, handler)` 现在在 command 带 `idempotency_key` 且 UoW 有 store 时执行 idempotency get/reserve/replay/conflict/in-progress/commit。
+- UoW idempotency reservation/commit 绑定当前 transaction-bound store。
+- 复用 Workbench idempotency primitive 和 helper，未新建平行状态机。
+- 新增 UoW contract tests：
+  - first request reserve before handler and commit response；
+  - committed replay without handler/dirty outbox；
+  - same key different fingerprint conflict before handler；
+  - reserved in-progress reject before handler。
+- 未修改 `server.py`。
+- `tests/test_turnover_ledger_api.py` 中两个 API-level relation extra replay/conflict expectedFailure 仍保留。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests，2 expected failures。
+- `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条：
+
+- 生成并审查 `PF-P108 - Turnover Ledger Relation Extra Idempotency HTTP Boundary and Error Mapping`。
+- PF-P108 只处理 handler 读取 body idempotency key、注入 facade/UoW、HTTP replay/conflict/in-progress mapping；不得新增 SQL migration、不得迁移其它 Turnover 写路径。
+
+## PF-P108 Relation Extra Idempotency HTTP Boundary and Error Mapping
+
+状态：`verified`
+
+目标：
+
+- 将 PF-P107 的 relation extra idempotency UoW seam 接到 HTTP boundary。
+- Handler 从 JSON body 读取 `idempotency_key` / `idempotencyKey` 并传给 facade。
+- postgres relation extra facade construction 复用 `_workbench_write_idempotency_store(...)` 注入 durable-capable store；local path 可使用 in-memory store 维持测试/开发 idempotency 语义，但不得声明为 durable。
+- 捕获 Workbench idempotency conflict/in-progress/failed 并返回 HTTP 409 JSON。
+- 让两个 relation extra API-level idempotency expectedFailure 转为普通通过。
+
+边界：
+
+- 可修改 `server.py` 的 relation extra handler 和 relation extra facade construction。
+- 可修改 `tests/test_turnover_ledger_api.py` 移除对应 expectedFailure。
+- 不新增 SQL migration，不修改 idempotency schema。
+- 不迁移其它 Turnover 写路径。
+- 不执行 Traffic Gate、部署、生产访问或真实外部服务访问。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+
+执行结果：
+
+- relation extra handler 从 body 读取 `idempotency_key` / `idempotencyKey` 并传入 facade。
+- relation extra facade construction 为 postgres path 注入 durable-capable idempotency store；local path 使用 in-memory store 保持测试/开发 idempotency 语义。
+- handler 捕获 Workbench idempotency conflict/in-progress/failed 并返回 HTTP 409 JSON。
+- 两个 relation extra API-level idempotency expectedFailure 已转为普通通过：
+  - same key/fingerprint replay 不重复 save/enqueue；
+  - same key/different payload 返回 409 `idempotency_key_conflict`。
+- relation extra refresh reason 固定为 `turnover_relation_extra_changed`。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，50 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass。
+
+下一条：
+
+- 生成 `PF-P108-MG - Turnover Ledger Relation Extra Idempotency Cumulative Merge Gate`，统一覆盖 PF-P107 + PF-P108 完整 diff。
+
+## PF-P108-MG Relation Extra Idempotency Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 只执行 relation extra idempotency 切片的 cumulative Merge Gate。
+- 统一覆盖 PF-P107、PF-P108 的完整 diff。
+- 不新增业务实现，不迁移其它 Turnover 写路径，不新增 migration，不执行 Traffic Gate。
+
+必须验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`

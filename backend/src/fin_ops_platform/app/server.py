@@ -324,7 +324,12 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
 )
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
-from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
+from fin_ops_platform.services.workbench_idempotency import (
+    InMemoryWorkbenchIdempotencyRepository,
+    WorkbenchIdempotencyFailed,
+    WorkbenchIdempotencyInProgress,
+    WorkbenchIdempotencyKeyConflict,
+)
 from fin_ops_platform.services.workbench_uow import RuntimeQueueReadModelRefreshWriter, WorkbenchWriteUnitOfWork
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     CASH_TURNOVER_DETECTED,
@@ -2634,6 +2639,10 @@ class Application:
                 queue_repository=queue_repository,
                 tenant_id=self._workbench_reconciliation_tenant_id(),
             )
+            idempotency_store = self._workbench_write_idempotency_store(
+                "_turnover_ledger_relation_extra_idempotency_store",
+                connection,
+            )
         else:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
@@ -2641,6 +2650,10 @@ class Application:
             connection = self._local_turnover_ledger_relation_extra_connection(state_store)
             extra_repository = self._local_turnover_ledger_extra_repository()
             dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            idempotency_store = getattr(self, "_turnover_ledger_relation_extra_idempotency_store", None)
+            if idempotency_store is None:
+                idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+                self._turnover_ledger_relation_extra_idempotency_store = idempotency_store
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=SimpleNamespace(),
@@ -2649,6 +2662,7 @@ class Application:
             bankdetail_port=SimpleNamespace(),
             dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
+            idempotency_store=idempotency_store,
         )
         return TurnoverLedgerWriteFacade(
             uow=uow,
@@ -12792,6 +12806,7 @@ class Application:
         try:
             facade = self._turnover_ledger_relation_extra_write_facade()
             expected_versions = payload.get("expected_versions")
+            idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
             if isinstance(expected_versions, dict):
                 expected_key = f"turnover_relation_extra:{relation_id}"
                 if expected_key in expected_versions:
@@ -12822,12 +12837,15 @@ class Application:
                     tenant_id=self._workbench_reconciliation_tenant_id(),
                     scope_keys=["all"],
                     expected_versions=expected_versions if isinstance(expected_versions, dict) else None,
+                    idempotency_key=idempotency_key,
                 )
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
             )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
         except (TurnoverLedgerExtraValidationError, ValueError) as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
