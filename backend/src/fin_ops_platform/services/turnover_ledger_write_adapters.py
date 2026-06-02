@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any, Callable
 
 
@@ -299,6 +301,96 @@ class TurnoverLedgerDirtyOutboxWriter:
                 )
             )
         return events
+
+
+class TurnoverLedgerLocalDirtyOutboxWriter:
+    def __init__(self, *, queue_repository: Any) -> None:
+        self._queue_repository = queue_repository
+
+    def enqueue_refresh(
+        self,
+        *,
+        transaction: Any,
+        scope_type: str,
+        scope_keys: list[str],
+        reason: str,
+        payload: dict[str, object] | None = None,
+    ) -> list[Any]:
+        _ = transaction, payload
+        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
+        events: list[Any] = []
+        refresh_reason = (
+            "turnover_relation_extra_changed"
+            if reason == "relation_extra_update"
+            else reason
+        )
+        for scope_key in list(scope_keys or ["all"]):
+            events.append(
+                enqueue(
+                    scope_type=scope_type,
+                    scope_key=str(scope_key or "all"),
+                    reason=refresh_reason,
+                )
+            )
+        return events
+
+
+class TurnoverLedgerLocalRelationExtraConnection:
+    def __init__(
+        self,
+        *,
+        extras_snapshot_provider: Callable[[], dict[str, object]],
+        replace_snapshot: Callable[[dict[str, object]], None],
+        save_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._extras_snapshot_provider = extras_snapshot_provider
+        self._replace_snapshot = replace_snapshot
+        self._save_snapshot = save_snapshot
+
+    @contextmanager
+    def transaction(self) -> Any:
+        previous_snapshot = dict(self._extras_snapshot_provider() or {})
+        try:
+            yield SimpleNamespace()
+        except Exception:
+            self._replace_snapshot(dict(previous_snapshot))
+            self._save_snapshot(dict(previous_snapshot))
+            raise
+        else:
+            current_snapshot = dict(self._extras_snapshot_provider() or {})
+            self._save_snapshot(current_snapshot)
+
+
+class TurnoverLedgerLocalExtraRepository:
+    def __init__(
+        self,
+        *,
+        extras_snapshot_provider: Callable[[], dict[str, object]],
+        replace_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._extras_snapshot_provider = extras_snapshot_provider
+        self._replace_snapshot = replace_snapshot
+
+    def save_extra(self, extra: dict[str, object], *, transaction: Any) -> None:
+        _ = transaction
+        relation_id = str(extra.get("relation_id") or "").strip()
+        if not relation_id:
+            raise ValueError("relation_id is required.")
+        current_snapshot = dict(self._extras_snapshot_provider() or {})
+        extras = [
+            dict(item)
+            for item in list(current_snapshot.get("extras") or [])
+            if isinstance(item, dict) and str(item.get("relation_id") or "").strip() != relation_id
+        ]
+        extras.append(dict(extra))
+        self._replace_snapshot(
+            {
+                "version": current_snapshot.get("version") or 1,
+                "extras": extras,
+            }
+        )
 
 
 class TurnoverLedgerExtraNormalizerAdapter:

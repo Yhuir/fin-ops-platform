@@ -275,6 +275,9 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerExtraNormalizerAdapter,
     TurnoverLedgerExtraRepositoryAdapter,
+    TurnoverLedgerLocalDirtyOutboxWriter,
+    TurnoverLedgerLocalExtraRepository,
+    TurnoverLedgerLocalRelationExtraConnection,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionSettingsAdapter,
 )
@@ -2647,9 +2650,19 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return None
-            connection = self._local_turnover_ledger_relation_extra_connection(state_store)
-            extra_repository = self._local_turnover_ledger_extra_repository()
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            connection = TurnoverLedgerLocalRelationExtraConnection(
+                extras_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
+                replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
+                save_snapshot=lambda snapshot: self._save_local_turnover_ledger_extras_snapshot(
+                    state_store,
+                    snapshot,
+                ),
+            )
+            extra_repository = TurnoverLedgerLocalExtraRepository(
+                extras_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
+                replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
+            )
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
             idempotency_store = getattr(self, "_turnover_ledger_relation_extra_idempotency_store", None)
             if idempotency_store is None:
                 idempotency_store = InMemoryWorkbenchIdempotencyRepository()
@@ -2705,7 +2718,7 @@ class Application:
                 return None
             connection = self._local_turnover_ledger_bank_row_tags_connection(state_store)
             bankdetail_port = self._local_turnover_ledger_bankdetail_port()
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=SimpleNamespace(),
@@ -2749,7 +2762,7 @@ class Application:
                 return None
             connection = self._local_turnover_ledger_confirm_connection(state_store)
             relation_repository = self._local_turnover_ledger_confirm_relation_repository()
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=relation_repository,
@@ -2793,7 +2806,7 @@ class Application:
                 return None
             connection = self._local_turnover_ledger_withdraw_connection(state_store)
             relation_repository = self._local_turnover_ledger_withdraw_relation_repository()
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=relation_repository,
@@ -3032,52 +3045,6 @@ class Application:
                 detail=str(exc),
             )
 
-    def _local_turnover_ledger_relation_extra_connection(self, state_store: object) -> object:
-        application = self
-
-        class _LocalRelationExtraConnection:
-            @contextmanager
-            def transaction(self) -> Any:
-                previous_snapshot = application._turnover_ledger_api_routes.extras_snapshot()
-                try:
-                    yield SimpleNamespace()
-                except Exception:
-                    application._replace_local_turnover_ledger_extra_snapshot(previous_snapshot)
-                    application._save_local_turnover_ledger_extras_snapshot(state_store, previous_snapshot)
-                    raise
-                else:
-                    current_snapshot = application._turnover_ledger_api_routes.extras_snapshot()
-                    application._save_local_turnover_ledger_extras_snapshot(state_store, current_snapshot)
-
-        return _LocalRelationExtraConnection()
-
-    def _local_turnover_ledger_extra_repository(self) -> object:
-        save_extra = self._save_local_turnover_ledger_relation_extra
-
-        class _LocalTurnoverLedgerExtraRepository:
-            def save_extra(self, extra: dict[str, object], *, transaction: object) -> None:
-                save_extra(extra)
-
-        return _LocalTurnoverLedgerExtraRepository()
-
-    def _save_local_turnover_ledger_relation_extra(self, extra: dict[str, object]) -> None:
-        relation_id = str(extra.get("relation_id") or "").strip()
-        if not relation_id:
-            raise ValueError("relation_id is required.")
-        current_snapshot = self._turnover_ledger_api_routes.extras_snapshot()
-        extras = [
-            dict(item)
-            for item in list(current_snapshot.get("extras") or [])
-            if isinstance(item, dict) and str(item.get("relation_id") or "").strip() != relation_id
-        ]
-        extras.append(dict(extra))
-        self._replace_local_turnover_ledger_extra_snapshot(
-            {
-                "version": current_snapshot.get("version") or 1,
-                "extras": extras,
-            }
-        )
-
     def _replace_local_turnover_ledger_extra_snapshot(self, snapshot: dict[str, object]) -> None:
         extra_service = self._build_turnover_ledger_extra_service(snapshot)
         self._turnover_ledger_extra_service = extra_service
@@ -3129,7 +3096,7 @@ class Application:
                     audit_event=audit_event,
                 )
             )
-            dirty_outbox_writer = self._local_turnover_ledger_dirty_outbox_writer(queue_repository)
+            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=SimpleNamespace(),
@@ -3177,39 +3144,6 @@ class Application:
                     raise
 
         return _LocalTagSelectionConnection()
-
-    @staticmethod
-    def _local_turnover_ledger_dirty_outbox_writer(queue_repository: object) -> object:
-        class _LocalTurnoverLedgerDirtyOutboxWriter:
-            def enqueue_refresh(
-                self,
-                *,
-                transaction: object,
-                scope_type: str,
-                scope_keys: list[str],
-                reason: str,
-                payload: dict[str, object] | None = None,
-            ) -> list[object]:
-                enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-                if not callable(enqueue):
-                    raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
-                events: list[object] = []
-                refresh_reason = (
-                    "turnover_relation_extra_changed"
-                    if reason == "relation_extra_update"
-                    else reason
-                )
-                for scope_key in list(scope_keys or ["all"]):
-                    events.append(
-                        enqueue(
-                            scope_type=scope_type,
-                            scope_key=str(scope_key or "all"),
-                            reason=refresh_reason,
-                        )
-                    )
-                return events
-
-        return _LocalTurnoverLedgerDirtyOutboxWriter()
 
     def _turnover_ledger_relation_extra_row_provider(
         self,

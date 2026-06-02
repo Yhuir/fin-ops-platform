@@ -3170,3 +3170,133 @@ PF-P110 边界：
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
   - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`：Pass。
 - Traffic Gate 未执行。
+
+## PF-P112 Local Shim Extraction Discovery and Planning
+
+状态：`verified`
+
+目标：
+
+- 盘点 Turnover Ledger local transaction shim、local port、local repository helper。
+- 设计抽离边界，避免继续让 `server.py` 承担 local adapter 细节。
+
+边界：
+
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests。
+- 不抽离 helper。
+
+必须输出：
+
+- Local shim inventory。
+- Extraction target recommendation。
+- Risk/blocker。
+- 下一条最小 prompt。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P112|Local Shim Extraction|local shim inventory|Extraction target" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+执行结果：
+
+- `_local_turnover_ledger_dirty_outbox_writer` 是最低风险抽离点：无 Application 依赖，只依赖 queue repository。
+- tag selection / relation extra / confirm / withdraw / bank row tags local transaction shim 仍通过闭包捕获 `Application`，需要后续按明确依赖逐步拆。
+- 下一条最小 prompt：`PF-P113 - Turnover Ledger Local Dirty Outbox Writer Extraction`。
+
+## PF-P113 Local Dirty Outbox Writer Extraction
+
+状态：`verified`
+
+目标：
+
+- 把 `_local_turnover_ledger_dirty_outbox_writer(...)` 从 `server.py` 抽为 `TurnoverLedgerLocalDirtyOutboxWriter` adapter。
+- 保持 local queue enqueue 和 reason mapping 行为不变。
+
+边界：
+
+- 只修改 `server.py`、`turnover_ledger_write_adapters.py` 和 backend-refactor 文档。
+- 不修改 local transaction shim。
+- 不修改 facade/UoW 行为。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- `TurnoverLedgerLocalDirtyOutboxWriter` 已迁入 `turnover_ledger_write_adapters.py`。
+- `server.py` 已删除旧 `_local_turnover_ledger_dirty_outbox_writer(...)` helper。
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+## PF-P114 Relation Extra Local Adapter Extraction
+
+状态：`verified`
+
+目标：
+
+- 把 relation extra local transaction/repository 逻辑从 `server.py` 迁入 adapter module。
+- 保持 local rollback、dedicated persistence、idempotency/stale 行为不变。
+
+边界：
+
+- 只处理 relation extra local adapter。
+- 不处理 confirm/withdraw/bank row tags/tag selection local shim。
+- 不修改 facade/UoW 行为。
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+执行结果：
+
+- `TurnoverLedgerLocalRelationExtraConnection` 已迁入 `turnover_ledger_write_adapters.py`。
+- `TurnoverLedgerLocalExtraRepository` 已迁入 `turnover_ledger_write_adapters.py`。
+- `server.py` 删除 relation extra local transaction/repository helper，只保留 adapter 组装所需 snapshot replace/save callbacks。
+- 验证通过：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，53 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`：Pass，56 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass。
+
+## PF-P114-MG Local Adapter Extraction Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一覆盖 PF-P112、PF-P113、PF-P114。
+- 只包含 local shim extraction discovery、local dirty outbox adapter、relation extra local adapter。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only main...HEAD`
+- `git log --oneline main..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_uow_contract -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
