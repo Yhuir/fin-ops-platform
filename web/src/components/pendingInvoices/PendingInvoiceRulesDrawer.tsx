@@ -162,7 +162,8 @@ export default function PendingInvoiceRulesDrawer({
       title={title}
       subtitle={payload ? `版本 ${payload.version}` : undefined}
       closeLabel="关闭规则抽屉"
-      width={1040}
+      width={1280}
+      contentSx={{ p: 2 }}
       onClose={onClose}
       footer={(
         <Stack direction="row" spacing={1} justifyContent="flex-end">
@@ -187,8 +188,8 @@ export default function PendingInvoiceRulesDrawer({
           data-testid="pending-invoice-rules-grid"
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(220px, 1fr))" },
-            gap: 1,
+            gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" },
+            gap: 0.85,
             alignItems: "start",
           }}
         >
@@ -387,26 +388,35 @@ function HierarchicalRuleBlock({
 }) {
   const tree = tagTree(tags);
   return (
-    <Paper role="group" aria-label={group.label} variant="outlined" sx={{ borderRadius: 1, p: 0.85, minWidth: 0 }}>
+    <Paper role="group" aria-label={group.label} variant="outlined" sx={{ borderRadius: 1, p: 0.75, minWidth: 0 }}>
       <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 0.55, fontSize: 13, lineHeight: 1.25 }}>
         {group.label}
       </Typography>
       {tree.length === 0 ? (
         <Typography variant="body2" color="text.secondary">暂无标签。</Typography>
       ) : (
-        <Stack spacing={0.4} sx={{ maxHeight: readonly ? 170 : 210, overflowY: "auto", pr: 0.4 }}>
+        <Stack data-testid="pending-invoice-rule-list" spacing={0.35} sx={{ overflowY: "visible" }}>
           {tree.map(({ primary, items }) => (
             <Stack key={primary} spacing={0.2}>
               <Typography variant="caption" color="text.secondary" fontWeight={800} sx={{ fontSize: 11, lineHeight: 1.25 }}>
                 {primary}
               </Typography>
-              <Stack spacing={0.1} sx={{ pl: 1 }}>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))",
+                  columnGap: 0.75,
+                  rowGap: 0.1,
+                  pl: 0.25,
+                  alignItems: "center",
+                }}
+              >
                 {items.map((tag) => {
                   const childLabel = tagChildLabel(tag);
                   const checked = selectedCodes.has(tag.code);
                   if (readonly) {
                     return (
-                      <Typography key={tag.code} variant="body2" sx={{ fontSize: 12, lineHeight: 1.45 }}>
+                      <Typography key={tag.code} variant="body2" sx={{ fontSize: 12, lineHeight: 1.35, minHeight: 20 }}>
                         {childLabel}
                       </Typography>
                     );
@@ -416,8 +426,9 @@ function HierarchicalRuleBlock({
                       key={tag.code}
                       sx={{
                         m: 0,
-                        minHeight: 24,
-                        "& .MuiFormControlLabel-label": { fontSize: 12, lineHeight: 1.25 },
+                        minHeight: 21,
+                        alignItems: "center",
+                        "& .MuiFormControlLabel-label": { fontSize: 12, lineHeight: 1.2 },
                       }}
                       control={(
                         <Checkbox
@@ -425,14 +436,14 @@ function HierarchicalRuleBlock({
                           checked={checked}
                           disabled={disabled || (!checked && assignedElsewhere.has(tag.code))}
                           onChange={() => onToggle?.(tag.code)}
-                          sx={{ p: 0.5 }}
+                          sx={{ p: 0.3 }}
                         />
                       )}
                       label={childLabel}
                     />
                   );
                 })}
-              </Stack>
+              </Box>
             </Stack>
           ))}
         </Stack>

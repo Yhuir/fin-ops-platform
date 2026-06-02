@@ -5,6 +5,7 @@ import Drawer from "@mui/material/Drawer";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import type { SxProps, Theme } from "@mui/material/styles";
 import type { ReactNode } from "react";
 
 type PendingInvoiceDrawerFrameProps = {
@@ -15,6 +16,7 @@ type PendingInvoiceDrawerFrameProps = {
   width?: number;
   children: ReactNode;
   footer?: ReactNode;
+  contentSx?: SxProps<Theme>;
   onClose: () => void;
 };
 
@@ -26,6 +28,7 @@ export default function PendingInvoiceDrawerFrame({
   width = 720,
   children,
   footer,
+  contentSx,
   onClose,
 }: PendingInvoiceDrawerFrameProps) {
   return (
@@ -53,7 +56,7 @@ export default function PendingInvoiceDrawerFrame({
           </IconButton>
         </Stack>
         <Divider />
-        <Stack spacing={2} sx={{ flex: 1, minHeight: 0, overflow: "auto", p: 2.5 }}>
+        <Stack spacing={2} sx={[{ flex: 1, minHeight: 0, overflow: "auto", p: 2.5 }, ...(Array.isArray(contentSx) ? contentSx : [contentSx])]}>
           {children}
         </Stack>
         {footer ? (

@@ -752,6 +752,11 @@ describe("Pending invoices page", () => {
     const bankStatementBlock = await screen.findByRole("group", { name: "流水代替发票" });
     const noInvoiceBlock = screen.getByRole("group", { name: "无需开票" });
     const requiresInvoiceBlock = screen.getByRole("group", { name: "需要开票" });
+    const ruleLists = screen.getAllByTestId("pending-invoice-rule-list");
+    expect(ruleLists).toHaveLength(3);
+    ruleLists.forEach((list) => {
+      expect(list).not.toHaveStyle({ overflowY: "auto" });
+    });
     expect(within(bankStatementBlock).getByText("费用")).toBeInTheDocument();
     expect(within(bankStatementBlock).queryByRole("checkbox", { name: "费用" })).not.toBeInTheDocument();
     const bankStatementFee = within(bankStatementBlock).getByRole("checkbox", { name: "手续费" });
