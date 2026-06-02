@@ -56,12 +56,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate` 已完成并验证 |
-| 当前 active prompt | 从最新 `main` 新建 `codex/` 分支后生成下一条 Turnover Ledger prompt |
-| 最近 verified prompt | `PF-P135-MG - Turnover Ledger Tag Selection Local Adapter Cumulative Merge Gate` |
-| 当前分支 | `main` |
-| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，72 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass；`git diff --name-only main...HEAD`：白名单通过 |
-| 下一条允许任务 | push `origin/main` 后，从最新 `main` 新建 `codex/` 分支，生成并审查下一条 Turnover Ledger discovery/planning prompt |
+| 当前阶段 | `PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction` 已完成并验证 |
+| 当前 active prompt | 从 `PF-P137` 结论决定下一条同组 local adapter prompt 或 cumulative MG |
+| 最近 verified prompt | `PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction` |
+| 当前分支 | `codex/turnover-ledger-next-slice-p136` |
+| 最近验证 | `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`：Pass，73 tests；`python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`：Pass；`git diff --check`：Pass |
+| 下一条允许任务 | 生成并审查 Turnover Ledger 下一条 local adapter prompt，或在达到可合并边界时生成 cumulative MG |
 
 ## Prompt 执行日志
 
@@ -9765,6 +9765,114 @@ PF-P134 + PF-P135 已形成一个完整的小切片：rebaseline -> local adapte
 #### 下一条 Prompt 上下文
 
 本组 tag selection local adapter 切片已经合入 `main`。下一步必须在 push `origin/main` 后，从最新 `main` 新建新分支，再生成新的 Turnover Ledger discovery/planning prompt，重新决定剩余写路径的最小下一刀，避免直接沿用 PF-P134 的旧优先级。
+
+### PF-P136 - Turnover Ledger Remaining Write Path Rebaseline After Tag Selection Extraction
+
+状态：`verified`
+
+#### 范围
+
+- 基于 PF-P135-MG 之后的最新 `main`，重新盘点 Turnover Ledger 剩余写路径。
+- 只做 discovery/planning 和文档回写。
+- 不修改 production code，不修改 tests，不进入 MG。
+
+#### 必须扫描
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_uow.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 必须输出
+
+- 最新 Remaining Write Path Matrix。
+- PF-P135 之后已稳定部分与剩余部分的边界。
+- 下一条最小实现 prompt，只能推荐一条。
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `rg -n "PF-P136|Remaining Write Path Rebaseline After Tag Selection Extraction|relation extra local adapter" docs/architecture/backend-refactor/migration-state-log.md docs/architecture/backend-refactor/refactor-prompts.md docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 执行摘要
+
+- 已确认 PF-P135 后，tag selection local path 已不再是最高优先级剩余 seam。
+- 已重新扫描 remaining write paths：
+  - `relation extra` local path 仍由 `server.py` 通过 `save_snapshot=lambda ...` 组装 `TurnoverLedgerLocalRelationExtraConnection`；
+  - `confirm` / `withdraw` local path 仍由 `server.py` 组装 relation snapshot/save/rebuild 依赖；
+  - `bank row tags` local path 仍包含 category snapshot、relation snapshot 与跨 Bankdetail/relation 的多依赖组装。
+- 已确认新的最小剩余 seam 是 `relation extra local adapter`：
+  - 只涉及 extra snapshot save/replace；
+  - 不涉及 relation rebuild；
+  - 不跨 Bankdetail；
+  - 风险显著低于 confirm / withdraw / bank row tags。
+
+#### Remaining Write Path Matrix
+
+| 写路径 | 当前状态 | 已完成切片 | 剩余问题 | 推荐优先级 |
+| --- | --- | --- | --- | --- |
+| relation extra | primary UoW、idempotency、explicit fallback、local extra repository 已稳定 | stale/idempotency/local extra adapter/handler-thinness/queue failure tests 已完成 | local connection 仍由 `server.py` 通过 `save_snapshot=lambda ...` 组装 | P1 |
+| confirm relation | primary UoW + explicit legacy fallback + invalidation seam 已稳定 | stale guard、duplicate submit、fallback adapter、UoW skeleton 已完成 | local relation connection/repository 仍由 `server.py` 组装，包含 rebuild 依赖 | P2 |
+| withdraw relation | primary UoW + explicit legacy fallback + invalidation seam 已稳定 | stale guard、duplicate submit、fallback adapter、UoW skeleton 已完成 | local relation connection/repository 仍由 `server.py` 组装，仍有 relation snapshot save seam | P3 |
+| bank row tags batch | explicit fallback facade + invalidation seam 已稳定 | local bankdetail port / local connection / fallback cleanup 已完成大半 | 仍跨 category snapshot、relation snapshot、Bankdetail 与 relation rebuild，复杂度最高 | P4 |
+
+#### 下一条 Prompt 上下文
+
+PF-P136 结论：下一条最小实现 prompt 应为 `PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction`。这一步只应抽离 `relation extra` local path 的 snapshot/save 组装，不得顺手改 confirm/withdraw/bank row tags。
+
+### PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction
+
+状态：`verified`
+
+#### 范围
+
+- 只抽离 relation extra local path 的 local adapter seam。
+- 把 `server.py` 中 relation extra local path 的 snapshot/save 组装尽量收束到 adapter module。
+- 不改 API contract，不改 stale/idempotency/queue failure 语义，不进入 MG。
+
+#### 允许改动
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 验证
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+
+#### 执行摘要
+
+- 已新增 `TurnoverLedgerLocalRelationExtraAdapterSet`，将 relation extra local path 的 snapshot/save/repository 组装从 `server.py` 移入 adapter module。
+- `server.py` 的 `_turnover_ledger_relation_extra_write_facade(...)` 不再直接内联 `save_snapshot=lambda ...`。
+- 新增 source-level guard test，锁定 relation extra write facade 不再内联 local snapshot/save closure。
+- 过程中发现一个真实语义回归风险：local extra save 必须保持“持久化失败仅记 warning，不改变成功响应路径”的旧合同；已在 adapter 内复用这一行为，而不是修改测试。
+- 原有 relation extra 行为保持不变：stale、idempotency、queue failure rollback、fallback facade、no direct clear 全部继续通过。
+
+#### 变更文件
+
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+- `tests/test_turnover_ledger_api.py`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `docs/architecture/backend-refactor/turnover-ledger-write-uow-plan.md`
+
+#### 下一条 Prompt 上下文
+
+PF-P136 / PF-P137 已形成一个新的 local adapter 子组：rebaseline -> relation extra extraction。下一步应在以下两者之间选择其一：
+- 继续同组 local adapter extraction（优先 `confirm relation local adapter seam`，其次 `withdraw relation local adapter seam`）；
+- 若希望先收口已完成的 local adapter 子组，再生成 cumulative MG，统一覆盖 PF-P136 / PF-P137。
 
 ### PF-P109 - Turnover Ledger Remaining Write Path Rebaseline / Fallback Cleanup Decision
 

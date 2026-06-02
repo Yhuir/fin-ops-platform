@@ -279,13 +279,10 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalBankdetailPort,
     TurnoverLedgerLocalBankRowTagsConnection,
     TurnoverLedgerLocalDirtyOutboxWriter,
-    TurnoverLedgerLocalExtraRepository,
     TurnoverLedgerLocalRelationConnection,
     TurnoverLedgerLocalRelationRepository,
-    TurnoverLedgerLocalRelationExtraConnection,
+    TurnoverLedgerLocalRelationExtraAdapterSet,
     TurnoverLedgerLocalTagSelectionAdapterSet,
-    TurnoverLedgerLocalTagSelectionConnection,
-    TurnoverLedgerLocalTagSelectionSettingsWriter,
     TurnoverLedgerConfirmLegacyFallbackFacade,
     TurnoverLedgerRelationMutationInvalidationLegacyAdapter,
     TurnoverLedgerRelationExtraLegacyFallbackFacade,
@@ -2673,18 +2670,14 @@ class Application:
             enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
                 return None
-            connection = TurnoverLedgerLocalRelationExtraConnection(
-                extras_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
+            local_adapters = TurnoverLedgerLocalRelationExtraAdapterSet(
+                state_store=state_store,
+                routes=self._turnover_ledger_api_routes,
                 replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
-                save_snapshot=lambda snapshot: self._save_local_turnover_ledger_extras_snapshot(
-                    state_store,
-                    snapshot,
-                ),
+                emit_persistence_warning=self._emit_workbench_persistence_warning,
             )
-            extra_repository = TurnoverLedgerLocalExtraRepository(
-                extras_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
-                replace_snapshot=self._replace_local_turnover_ledger_extra_snapshot,
-            )
+            connection = local_adapters.connection()
+            extra_repository = local_adapters.extra_repository()
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(queue_repository=queue_repository)
             idempotency_store = getattr(self, "_turnover_ledger_relation_extra_idempotency_store", None)
             if idempotency_store is None:

@@ -167,6 +167,52 @@ class TurnoverLedgerTagSelectionLegacyFallbackFacade:
         return result
 
 
+class TurnoverLedgerLocalRelationExtraAdapterSet:
+    def __init__(
+        self,
+        *,
+        state_store: Any,
+        routes: Any,
+        replace_snapshot: Callable[[dict[str, object]], None],
+        emit_persistence_warning: Callable[..., None],
+    ) -> None:
+        self._state_store = state_store
+        self._routes = routes
+        self._replace_snapshot = replace_snapshot
+        self._emit_persistence_warning = emit_persistence_warning
+
+    def connection(self) -> "TurnoverLedgerLocalRelationExtraConnection":
+        return TurnoverLedgerLocalRelationExtraConnection(
+            extras_snapshot_provider=self.extras_snapshot,
+            replace_snapshot=self._replace_snapshot,
+            save_snapshot=self.save_snapshot,
+        )
+
+    def extra_repository(self) -> "TurnoverLedgerLocalExtraRepository":
+        return TurnoverLedgerLocalExtraRepository(
+            extras_snapshot_provider=self.extras_snapshot,
+            replace_snapshot=self._replace_snapshot,
+        )
+
+    def extras_snapshot(self) -> dict[str, object]:
+        snapshot = getattr(self._routes, "extras_snapshot", None)
+        if callable(snapshot):
+            return dict(snapshot() or {})
+        return {}
+
+    def save_snapshot(self, snapshot: dict[str, object]) -> None:
+        save_extras = getattr(self._state_store, "save_turnover_ledger_extras", None)
+        if not callable(save_extras):
+            raise RuntimeError("state store must expose save_turnover_ledger_extras.")
+        try:
+            save_extras(dict(snapshot))
+        except Exception as exc:
+            self._emit_persistence_warning(
+                operation="turnover_ledger_extra_updated",
+                detail=str(exc),
+            )
+
+
 class TurnoverLedgerRelationExtraLegacyFallbackFacade:
     def __init__(
         self,

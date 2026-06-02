@@ -1981,6 +1981,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("_clear_turnover_ledger_read_model_best_effort(", source)
         self.assertNotIn("_enqueue_turnover_ledger_read_model_refreshes(", source)
 
+    def test_relation_extra_write_facade_does_not_inline_local_snapshot_closures(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_relation_extra_write_facade)
+
+        self.assertNotIn("save_snapshot=lambda", source)
+
     def test_relation_extra_fallback_adapter_keeps_legacy_update_persist_and_refresh(self) -> None:
         # PF-P124 target: unsupported postgres queue API uses explicit fallback adapter.
         with TemporaryDirectory() as temp_dir:

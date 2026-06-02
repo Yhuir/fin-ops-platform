@@ -4414,6 +4414,64 @@ Remaining write path matrix：
 - 下一条 prompt 必须从最新 `main` 新建分支后重新做 Turnover Ledger discovery/planning。
 - 不直接假定下一条仍是 PF-P134 时的旧优先级；需要基于最新代码事实重新选最小剩余 seam。
 
+## PF-P136 Remaining Write Path Rebaseline After Tag Selection Extraction
+
+状态：
+
+- verified
+
+结论：
+
+- PF-P135 后，tag selection local path 已不再是最高优先级剩余 seam。
+- 当前最小剩余 seam 已变为 `relation extra local path`：
+  - `server.py` 仍通过 `save_snapshot=lambda ...` 组装 `TurnoverLedgerLocalRelationExtraConnection`；
+  - 该路径不牵涉 relation rebuild；
+  - 不跨 Bankdetail；
+  - 风险小于 confirm / withdraw / bank row tags。
+
+最新优先级：
+
+1. relation extra local adapter seam
+2. confirm relation local adapter seam
+3. withdraw relation local adapter seam
+4. bank row tags local adapter seam
+
+下一步：
+
+- 生成并审查 `PF-P137 - Turnover Ledger Relation Extra Local Adapter Extraction`。
+- PF-P137 只抽离 relation extra local path 的 snapshot/save 组装，不顺手修改 confirm/withdraw/bank row tags。
+
+## PF-P137 Relation Extra Local Adapter Extraction
+
+状态：
+
+- verified
+
+目标：
+
+- 继续沿用 PF-P135 的 extraction 模式，把 relation extra local path 的 snapshot/save 组装迁入 adapter module。
+- 不改变 relation extra 的 stale / idempotency / queue failure rollback / no direct clear 合约。
+
+边界：
+
+- 只处理 relation extra local adapter。
+- 不碰 confirm / withdraw / bank row tags。
+
+结果：
+
+- 已新增 `TurnoverLedgerLocalRelationExtraAdapterSet`。
+- relation extra local path 的 snapshot/save/repository 组装已从 `server.py` 移入 adapter module。
+- `server.py` 不再内联 `save_snapshot=lambda ...`。
+- 新增 guard test：
+  - `test_relation_extra_write_facade_does_not_inline_local_snapshot_closures`
+- 保持旧合同：
+  - local extra save 持久化失败仍然只是 warning，不影响成功响应路径。
+
+下一步：
+
+- 继续同组 local adapter extraction 时，优先 `confirm relation local adapter seam`。
+- 若希望先收口当前子组，可生成覆盖 PF-P136 / PF-P137 的 cumulative MG。
+
 ## PF-P112 Local Shim Extraction Discovery and Planning
 
 状态：`verified`
