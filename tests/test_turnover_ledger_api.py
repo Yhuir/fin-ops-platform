@@ -121,6 +121,66 @@ class _RelationExtraWriteFacadeRecorder:
         }
 
 
+class _RelationWriteFacadeRecorder:
+    def __init__(self) -> None:
+        self.confirm_calls: list[dict[str, object]] = []
+        self.withdraw_calls: list[dict[str, object]] = []
+
+    def confirm_relation(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        affected_months: list[str],
+    ) -> dict[str, object]:
+        self.confirm_calls.append(
+            {
+                "bank_row_ids": list(bank_row_ids),
+                "actor_id": actor_id,
+                "tenant_id": tenant_id,
+                "note": note,
+                "affected_months": list(affected_months),
+            }
+        )
+        return {
+            "relation": {
+                "relation_id": "turnover_rel_facade_confirm",
+                "status": "confirmed",
+                "source": "manual",
+            }
+        }
+
+    def withdraw_relation(
+        self,
+        *,
+        relation_id: str,
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        affected_months: list[str],
+        expected_versions: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        self.withdraw_calls.append(
+            {
+                "relation_id": relation_id,
+                "actor_id": actor_id,
+                "tenant_id": tenant_id,
+                "note": note,
+                "affected_months": list(affected_months),
+                "expected_versions": dict(expected_versions or {}),
+            }
+        )
+        return {
+            "relation": {
+                "relation_id": relation_id,
+                "status": "withdrawn",
+                "source": "manual",
+            }
+        }
+
+
 class TurnoverLedgerApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -1549,7 +1609,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
 
-    def test_relation_extra_fallback_persists_full_snapshot_when_dedicated_store_method_is_missing(self) -> None:
+    def test_relation_extra_missing_dedicated_store_method_does_not_load_full_snapshot(self) -> None:
         class LegacyBootstrapRecorder:
             def __init__(self) -> None:
                 self.reasons: list[str] = []
@@ -1580,12 +1640,39 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
             app._persist_turnover_ledger_extras_best_effort(operation="test_legacy_fallback")
 
-        self.assertEqual(legacy_bootstrap.reasons, ["legacy_turnover_ledger_extras_fallback_persist"])
-        self.assertIsNotNone(legacy_store.saved_payload)
-        self.assertEqual(legacy_store.saved_payload["existing"], "payload")  # type: ignore[index]
-        extras = legacy_store.saved_payload["turnover_ledger_extras"]["extras"]  # type: ignore[index]
-        self.assertEqual(extras[0]["relation_id"], "turnover_rel_legacy")
-        self.assertEqual(extras[0]["note"], "legacy fallback")
+        self.assertEqual(legacy_bootstrap.reasons, [])
+        self.assertIsNone(legacy_store.saved_payload)
+
+    def test_relation_extra_best_effort_uses_dedicated_store_without_full_snapshot_fallback(self) -> None:
+        # PF-P110 characterization: dedicated extras persistence must not hit legacy full snapshot fallback.
+        class DedicatedStateStore:
+            def __init__(self) -> None:
+                self.saved_extras: dict[str, object] | None = None
+
+            def save_turnover_ledger_extras(self, snapshot: dict[str, object]) -> None:
+                self.saved_extras = dict(snapshot)
+
+        class FailingLegacyBootstrap:
+            def load_full_snapshot(self, *, reason: str) -> dict[str, object]:
+                raise AssertionError(f"legacy full snapshot fallback should not run: {reason}")
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._turnover_ledger_api_routes._extra_service.upsert(  # type: ignore[attr-defined]
+                "turnover_rel_dedicated",
+                {"note": "dedicated store"},
+                actor="tester",
+            )
+            dedicated_store = DedicatedStateStore()
+            app._state_store = dedicated_store  # type: ignore[assignment]
+            app._legacy_bootstrap = FailingLegacyBootstrap()  # type: ignore[assignment]
+
+            app._persist_turnover_ledger_extras_best_effort(operation="test_dedicated_store")
+
+        self.assertIsNotNone(dedicated_store.saved_extras)
+        extras = dedicated_store.saved_extras["extras"]  # type: ignore[index]
+        self.assertEqual(extras[0]["relation_id"], "turnover_rel_dedicated")
+        self.assertEqual(extras[0]["note"], "dedicated store")
 
     def test_relation_extra_put_rejects_invalid_payload(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1938,6 +2025,42 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual([item[:3] for item in queue.transactional], [("turnover_ledger", "all", "turnover_relation_changed")])
         self.assertEqual(queue.enqueued, [])
 
+    def test_confirm_relation_facade_override_skips_legacy_after_mutation_side_effects(self) -> None:
+        # PF-P110 characterization: facade path must not call handler fallback invalidation orchestration.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            facade = _RelationWriteFacadeRecorder()
+            app._turnover_ledger_confirm_write_facade_override = facade
+
+            def unexpected_after_mutation(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("legacy after-mutation side effect should not run on confirm facade path")
+
+            app._after_turnover_relation_mutation = unexpected_after_mutation  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "facade confirm"}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["relation"]["relation_id"], "turnover_rel_facade_confirm")
+        self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(
+            facade.confirm_calls,
+            [
+                {
+                    "bank_row_ids": transaction_ids,
+                    "actor_id": "test_finops_user",
+                    "tenant_id": "default",
+                    "note": "facade confirm",
+                    "affected_months": ["2026-02", "2026-03"],
+                }
+            ],
+        )
+
     def test_withdraw_duplicate_submit_rejects_after_first_withdraw_without_second_refresh(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -2064,6 +2187,42 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual([item[:3] for item in queue.transactional], [("turnover_ledger", "all", "turnover_relation_changed")])
         self.assertEqual(queue.enqueued, [])
+
+    def test_withdraw_relation_facade_override_skips_legacy_after_mutation_side_effects(self) -> None:
+        # PF-P110 characterization: facade path must not call direct fallback invalidation orchestration.
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before facade withdraw"}),
+            )
+            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+            facade = _RelationWriteFacadeRecorder()
+            app._turnover_ledger_withdraw_write_facade_override = facade
+
+            def unexpected_after_mutation(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("legacy after-mutation side effect should not run on withdraw facade path")
+
+            app._after_turnover_relation_mutation = unexpected_after_mutation  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "facade withdraw"}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["relation"]["relation_id"], relation_id)
+        self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(len(facade.withdraw_calls), 1)
+        self.assertEqual(facade.withdraw_calls[0]["relation_id"], relation_id)
+        self.assertEqual(facade.withdraw_calls[0]["note"], "facade withdraw")
+        self.assertEqual(facade.withdraw_calls[0]["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(facade.withdraw_calls[0]["expected_versions"], {f"relation:{relation_id}": 1})
 
     def test_withdraw_relation_queue_failure_happens_after_relation_withdraw_and_read_model_clear(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

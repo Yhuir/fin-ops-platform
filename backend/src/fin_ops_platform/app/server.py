@@ -15246,9 +15246,10 @@ class Application:
             if callable(save_extras):
                 save_extras(snapshot)
                 return
-            current_payload = self._legacy_bootstrap.load_full_snapshot(reason="legacy_turnover_ledger_extras_fallback_persist")
-            current_payload["turnover_ledger_extras"] = snapshot
-            self._state_store.save(current_payload)
+            self._emit_workbench_persistence_warning(
+                operation=operation,
+                detail="state store does not expose save_turnover_ledger_extras.",
+            )
         except Exception as exc:
             self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
 
