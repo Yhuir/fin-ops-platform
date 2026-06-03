@@ -372,13 +372,14 @@ class BatchAccountingApiTests(unittest.TestCase):
 
     def test_unsubmitted_list_excludes_bank_rows_already_linked_elsewhere(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_pair_relation_service.create_active_relation(
-            case_id="CASE-OTHER-LINK",
-            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            row_types=["bank", "oa"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
-        )
+        relation = {
+            "case_id": "CASE-OTHER-LINK",
+            "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
+            "row_types": ["bank", "oa"],
+            "relation_mode": "manual_confirmed",
+            "special_metadata": {"bank_row_id": "txn_imported_202601_batch_001"},
+        }
+        app._workbench_relation_facade = FakeBatchRelationFacade(relation)
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
         payload = json.loads(response.body)
@@ -864,7 +865,8 @@ class BatchAccountingApiTests(unittest.TestCase):
             [row["id"] for row in relation_payload["invoice_rows"]],
             ["oa-att-inv-oa-exp-ba-001-01", "oa-att-inv-oa-exp-ba-002-01"],
         )
-        self.assertEqual(facade.calls[0]["month"], "2026-01")
+        month_calls = [call for call in facade.calls if call.get("month") == "2026-01"]
+        self.assertTrue(month_calls)
         self.assertIn({"row_ids": ["txn_imported_202601_batch_001"], "require_fresh": False, "reason": "batch_accounting_submitted_relations"}, facade.calls)
 
     def test_submitted_list_exposes_mismatch_note_and_amount_check(self) -> None:

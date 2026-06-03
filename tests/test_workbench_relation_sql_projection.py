@@ -30,7 +30,11 @@ class CaptureWorkbenchRelationRepository:
 
 
 class WorkbenchRelationProjectionConnection:
+    def __init__(self) -> None:
+        self.sql_statements: list[str] = []
+
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        self.sql_statements.append(sql)
         normalized = " ".join(sql.lower().split())
         if "from app.bank_transactions" in normalized:
             return [
@@ -133,8 +137,9 @@ class WorkbenchRelationProjectionConnection:
 class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
     def test_rebuild_writes_linked_and_unlinked_relation_rows(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
+        connection = WorkbenchRelationProjectionConnection()
         builder = WorkbenchRelationSqlProjectionBuilder(
-            connection=WorkbenchRelationProjectionConnection(),
+            connection=connection,
             read_model_repository=repository,
         )
 
@@ -161,6 +166,8 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         )
         self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
         self.assertEqual(rows_by_id["txn-unlinked"]["group_ids"], [])
+        self.assertTrue(any("gen.generation_id = r.generation_id" in sql for sql in connection.sql_statements))
+        self.assertFalse(any("gen.id = r.generation_id" in sql for sql in connection.sql_statements))
 
 
 if __name__ == "__main__":

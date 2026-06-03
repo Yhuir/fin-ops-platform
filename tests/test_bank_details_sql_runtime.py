@@ -638,6 +638,33 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn("transaction_id = any", sql_text)
         self.assertNotIn("from app.bank_transactions", sql_text)
 
+    def test_get_tagged_rows_by_transaction_ids_matches_payload_legacy_ids(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [
+                    {
+                        **bank_detail_projected_row("uuid-001"),
+                        "payload": {
+                            **bank_detail_projected_row("legacy-001")["payload"],
+                            "id": "legacy-001",
+                        },
+                    }
+                ],
+                [scope_row("2026-05")],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_bank_detail_tagged_rows_by_transaction_ids(["legacy-001"])
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual([row["transaction_id"] for row in payload["rows"]], ["legacy-001"])
+        self.assertEqual(payload["missing_transaction_ids"], [])
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("payload->>'id' = any", sql_text)
+        self.assertIn("payload->>'transaction_id' = any", sql_text)
+
     def test_list_tagged_rows_by_month_uses_direction_and_effective_category_filters(self) -> None:
         connection = FakeConnection(
             rows=[

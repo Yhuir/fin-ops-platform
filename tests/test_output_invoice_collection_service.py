@@ -11,6 +11,7 @@ from fin_ops_platform.services.output_invoice_collection_service import (
     OutputInvoiceCollectionQueryService,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
 class RepositoryOnlyOutputInvoiceFacts:
@@ -60,7 +61,6 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         repository = RepositoryOnlyOutputInvoiceFacts([invoice])
         service = OutputInvoiceCollectionQueryService(
             import_service=ImportNormalizationService(fact_repository=repository),
-            pair_relation_service=WorkbenchPairRelationService(),
         )
 
         payload = service.list_rows()
@@ -83,7 +83,11 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self._relation(pair_service, "case-output-postgres-1", [invoices[0].id, bank.id], amount_matched=True)
         service = OutputInvoiceCollectionQueryService(
             import_service=ImportNormalizationService(fact_repository=repository),
-            pair_relation_service=pair_service,
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=pair_service,
+                transactions=[bank],
+                invoices=invoices,
+            ),
         )
 
         payload = service.list_rows(page_size=20)
@@ -101,7 +105,6 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         repository = RepositoryOnlyOutputInvoiceFacts(invoices)
         service = OutputInvoiceCollectionQueryService(
             import_service=ImportNormalizationService(fact_repository=repository),
-            pair_relation_service=WorkbenchPairRelationService(),
         )
 
         payload = service.filter_options()
@@ -415,5 +418,9 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
                 existing_invoices=invoices,
                 existing_transactions=transactions or [],
             ),
-            pair_relation_service=pair_service or WorkbenchPairRelationService(),
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=pair_service or WorkbenchPairRelationService(),
+                transactions=list(transactions or []),
+                invoices=list(invoices),
+            ),
         )

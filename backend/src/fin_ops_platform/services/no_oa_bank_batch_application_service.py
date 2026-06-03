@@ -120,12 +120,23 @@ class NoOaBankBatchApplicationService:
                     "batches": self.resolve_labels(read_model_batches),
                     "read_model_status": "fresh",
                 }
-        self.refresh_batches()
         summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
-        batches = self._no_oa_bank_batch_service.list_batches(filters)
+        read_batches = self._no_oa_bank_batch_service.list_batches(filters)
+        if summary_batches or read_batches:
+            return {
+                "summary": self.summary(summary_batches),
+                "batches": self.resolve_labels(read_batches),
+                "read_model_status": "fresh",
+            }
+        refresh_reason = "api_no_oa_read_model_unavailable"
+        refresh_enqueued = self.enqueue_background_refresh(["all"], reason=refresh_reason)
         return {
-            "summary": self.summary(summary_batches),
-            "batches": self.resolve_labels(batches),
+            "summary": self.summary([]),
+            "batches": [],
+            "read_model_status": "unavailable",
+            "read_model_stale_reasons": [],
+            "refresh_enqueued": refresh_enqueued,
+            "refresh_reason": refresh_reason,
         }
 
     def tag_selection_payload(self) -> dict[str, Any]:

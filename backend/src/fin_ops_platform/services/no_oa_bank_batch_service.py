@@ -755,6 +755,73 @@ class NoOaBankBatchService:
                 affected_months=self._batch_affected_months(consolidated_batch),
                 migrated_batch_ids=[consolidated_batch_id],
             )
+        self._dedupe_consolidated_single_side_batches()
+
+    def _dedupe_consolidated_single_side_batches(self) -> None:
+        duplicate_groups: dict[tuple[str, str, tuple[str, ...]], list[dict[str, Any]]] = {}
+        for batch in self._batches.values():
+            evidence = batch.get("evidence") if isinstance(batch.get("evidence"), dict) else {}
+            if (
+                str(batch.get("status") or "") != "submitted"
+                or str(batch.get("batch_type") or "") not in SINGLE_SIDE_BATCH_TYPES
+                or evidence.get("consolidation_source") != "submitted_no_oa_single_side_batches"
+            ):
+                continue
+            row_ids = tuple(sorted(str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id)))
+            if not row_ids:
+                continue
+            key = (str(batch.get("batch_type") or ""), str(batch.get("scope_month") or ""), row_ids)
+            duplicate_groups.setdefault(key, []).append(deepcopy(batch))
+
+        for _key, batches in duplicate_groups.items():
+            if len(batches) <= 1:
+                continue
+            retained = max(
+                batches,
+                key=lambda batch: (
+                    1 if ":" in str(batch.get("account_key") or "") else 0,
+                    len(str(batch.get("account_key") or "")),
+                    str(batch.get("updated_at") or batch.get("created_at") or ""),
+                    str(batch.get("batch_id") or ""),
+                ),
+            )
+            retained_batch_id = str(retained.get("batch_id") or "")
+            deduped_at = self._timestamp()
+            changed_case_ids: list[str] = []
+            for batch in batches:
+                batch_id = str(batch.get("batch_id") or "")
+                if not batch_id or batch_id == retained_batch_id:
+                    continue
+                existing = deepcopy(self._batches.get(batch_id) or {})
+                if not existing:
+                    continue
+                existing.update(
+                    {
+                        "status": "superseded",
+                        "superseded_by_batch_id": retained_batch_id,
+                        "updated_at": deduped_at,
+                        "version": int(existing.get("version") or 1) + 1,
+                    }
+                )
+                evidence = deepcopy(existing.get("evidence")) if isinstance(existing.get("evidence"), dict) else {}
+                existing["evidence"] = {
+                    **evidence,
+                    "superseded_by_batch_id": retained_batch_id,
+                    "superseded_at": deduped_at,
+                    "dedupe_source": "submitted_no_oa_single_side_batches",
+                }
+                self._batches[batch_id] = self._normalize_batch(existing)
+                relation_case_id = str(existing.get("relation_case_id") or "")
+                if relation_case_id:
+                    cancelled = self._pair_relation_service.cancel_relation(relation_case_id, cancelled_at=deduped_at)
+                    if cancelled is not None:
+                        changed_case_ids.append(relation_case_id)
+            if changed_case_ids:
+                self._merge_legacy_migration_result(
+                    changed_case_ids=changed_case_ids,
+                    affected_months=self._batch_affected_months(retained),
+                    migrated_batch_ids=[retained_batch_id],
+                )
 
     def _prune_submitted_single_side_batches_for_category_drift(
         self,

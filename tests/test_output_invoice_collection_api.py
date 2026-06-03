@@ -366,7 +366,6 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         app._workbench_pair_relation_service = relation_service
         app._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=import_service,
-            pair_relation_service=relation_service,
             relation_facade=FakeOutputRelationFacade(relation_service.list_active_relations()),
             lifecycle_repository=getattr(app, "_output_invoice_collection_lifecycle_repository", None),
         )

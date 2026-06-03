@@ -158,7 +158,7 @@ class WorkbenchRelationSqlProjectionBuilder:
             select r.row_id, r.scope_month, r.payload, r.raw_payload
             from read_model.workbench_rows r
             join read_model.workbench_generations gen
-              on gen.id = r.generation_id
+              on gen.generation_id = r.generation_id
              and gen.tenant_id = %s
              and gen.scope_key = r.scope_key
              and gen.status = 'active'

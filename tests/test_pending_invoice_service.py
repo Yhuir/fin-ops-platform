@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Callable
 import unittest
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
@@ -247,6 +248,26 @@ class FakeWorkbenchRelationFacade:
             "refresh_enqueued": False,
             "stale_reasons": [],
         }
+
+
+class LiveWorkbenchRelationFacade:
+    def __init__(
+        self,
+        *,
+        pair_service: WorkbenchPairRelationService,
+        import_service_provider: Callable[[], ImportNormalizationService],
+    ) -> None:
+        self._pair_service = pair_service
+        self._import_service_provider = import_service_provider
+
+    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+        import_service = self._import_service_provider()
+        facade = FakeWorkbenchRelationFacade.from_pair_service(
+            pair_service=self._pair_service,
+            transactions=import_service.list_transactions(month="all"),
+            invoices=import_service.list_invoices(),
+        )
+        return facade.get_by_row_ids(row_ids, **kwargs)
 
 
 class PendingInvoiceQueryServiceTests(unittest.TestCase):
@@ -1306,6 +1327,10 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
+            relation_facade=LiveWorkbenchRelationFacade(
+                pair_service=self.pair_service,
+                import_service_provider=lambda: self.import_service,
+            ),
         )
 
     def test_preview_validates_without_writes_and_returns_identity_relation_impact(self) -> None:
@@ -1484,6 +1509,10 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
+            relation_facade=LiveWorkbenchRelationFacade(
+                pair_service=self.pair_service,
+                import_service_provider=lambda: self.import_service,
+            ),
         )
 
         preview = self.service.preview_attach_existing_invoice(
@@ -1556,6 +1585,10 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
+            relation_facade=LiveWorkbenchRelationFacade(
+                pair_service=self.pair_service,
+                import_service_provider=lambda: self.import_service,
+            ),
         )
 
         preview = self.service.preview_attach_existing_invoice(

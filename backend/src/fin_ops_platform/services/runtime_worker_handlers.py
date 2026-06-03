@@ -106,7 +106,7 @@ class ImportRuntimeProcessorFactory:
         lifecycle = _RuntimeWorkerDerivedLifecycle(
             queue_repository=self._queue_repository,
             state_store=state_store,
-            search_service=SearchService(),
+            search_service=_runtime_search_service(import_service),
             workbench_source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
         )
         persist_import_state = _persist_import_state_callback(
@@ -219,7 +219,7 @@ class EtcBusinessOaDetectionWorkerFactory:
         lifecycle = _RuntimeWorkerDerivedLifecycle(
             queue_repository=self._queue_repository,
             state_store=state_store,
-            search_service=SearchService(),
+            search_service=_runtime_search_service(import_service),
             workbench_source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
         )
         return EtcBusinessBatchApplicationService(
@@ -457,6 +457,23 @@ def build_etc_business_oa_detection_handler(service: Any) -> Callable[[Any], dic
     return lambda event: handle_etc_business_oa_detection_event(service, event)
 
 
+def _runtime_search_service(import_service: ImportNormalizationService) -> SearchService:
+    return SearchService(known_months_loader=lambda: _known_import_months(import_service))
+
+
+def _known_import_months(import_service: ImportNormalizationService) -> list[str]:
+    months: set[str] = set()
+    for transaction in import_service.list_transactions(month="all"):
+        value = str(transaction.txn_date or transaction.trade_time or "").strip()[:7]
+        if SEARCH_MONTH_RE.match(value):
+            months.add(value)
+    for invoice in import_service.list_invoices(month="all"):
+        value = str(invoice.invoice_date or "").strip()[:7]
+        if SEARCH_MONTH_RE.match(value):
+            months.add(value)
+    return sorted(months, reverse=True)
+
+
 def build_workbench_matching_dirty_scope_worker(
     *,
     dirty_queue: Any,
@@ -624,6 +641,24 @@ def _sync_etc_import_result_to_canonical_invoices(import_service: Any) -> Callab
     def sync(result: Any) -> list[str]:
         changed_months: set[str] = set()
         for etc_invoice in list(getattr(result, "invoices", None) or getattr(result, "imported_invoices", None) or []):
+            invoice = import_service.upsert_etc_invoice(etc_invoice)
+            for date_value in (
+                getattr(invoice, "invoice_date", None),
+                getattr(etc_invoice, "issue_date", None),
+                getattr(etc_invoice, "passage_start_date", None),
+                getattr(etc_invoice, "passage_end_date", None),
+            ):
+                if isinstance(date_value, str) and SEARCH_MONTH_RE.match(date_value[:7]):
+                    changed_months.add(date_value[:7])
+        return sorted(changed_months)
+
+    return sync
+
+
+def _sync_etc_invoices_to_canonical_invoices(import_service: Any) -> Callable[[list[Any]], list[str]]:
+    def sync(etc_invoices: list[Any]) -> list[str]:
+        changed_months: set[str] = set()
+        for etc_invoice in list(etc_invoices or []):
             invoice = import_service.upsert_etc_invoice(etc_invoice)
             for date_value in (
                 getattr(invoice, "invoice_date", None),

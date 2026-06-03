@@ -18,9 +18,8 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     PaymentStatusEvaluationContext,
     StaticInputInvoiceUsagePaymentRulesProvider,
 )
-from fin_ops_platform.services.invoice_relation_query_context import InvoiceRelationQueryContext
+from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
@@ -85,7 +84,7 @@ class InputInvoiceUsageQueryService:
     Source-of-truth boundaries:
     - input invoices and line items come from ImportNormalizationService Invoice facts;
     - bank summaries/details come from ImportNormalizationService BankTransaction facts;
-    - relation evidence comes only from active WorkbenchPairRelationService facts;
+    - relation evidence comes only from WorkbenchRelationReadFacade distribution;
     - OA summaries/details come from the injected OA projection when available. Without a
       stable projection, OA detail is represented as detailAvailable=false.
     """
@@ -94,14 +93,12 @@ class InputInvoiceUsageQueryService:
         self,
         *,
         import_service: ImportNormalizationService,
-        pair_relation_service: WorkbenchPairRelationService | None = None,
         relation_facade: WorkbenchRelationReadFacade | None = None,
         oa_projection: Any | None = None,
         payment_rules_provider: InputInvoiceUsagePaymentRulesProvider | None = None,
         require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
-        self._pair_relation_service = pair_relation_service
         self._relation_facade = relation_facade
         self._oa_projection = oa_projection
         self._payment_rules_provider = payment_rules_provider or StaticInputInvoiceUsagePaymentRulesProvider()
@@ -227,10 +224,9 @@ class InputInvoiceUsageQueryService:
             },
         }
 
-    def _query_context(self, *, month_hint: str | None = None) -> InvoiceRelationQueryContext:
-        return InvoiceRelationQueryContext(
+    def _query_context(self, *, month_hint: str | None = None) -> DistributedInvoiceRelationContext:
+        return DistributedInvoiceRelationContext(
             import_service=self._import_service,
-            pair_relation_service=self._pair_relation_service,
             relation_facade=self._relation_facade,
             oa_projection=self._oa_projection,
             month_hint=month_hint,
@@ -240,7 +236,7 @@ class InputInvoiceUsageQueryService:
     def _filtered_sorted_rows(
         self,
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
         keyword: str | None,
         invoice_date_from: str | None,
         invoice_date_to: str | None,
@@ -396,7 +392,7 @@ class InputInvoiceUsageQueryService:
     def payment_status_rules(self) -> dict[str, Any]:
         return self._payment_rules_provider.payment_status_rules_payload(can_save=True)
 
-    def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext) -> list[dict[str, Any]]:
+    def _build_rows(self, *, month: str | None, context: DistributedInvoiceRelationContext) -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
         context.preload_relation_rows([line.id for group in groups for line in group["line_items"]])
         context.preload_oa_records_from_relations(
@@ -408,7 +404,7 @@ class InputInvoiceUsageQueryService:
         self,
         *,
         month: str | None = None,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> list[dict[str, Any]]:
         source_month = str(month).strip() if month not in (None, "") else "all"
         invoices = [
@@ -429,7 +425,7 @@ class InputInvoiceUsageQueryService:
         self,
         invoice_id: str,
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any] | None:
         normalized_id = str(invoice_id)
         for group in self._invoice_groups(month=None, context=context):
@@ -437,18 +433,18 @@ class InputInvoiceUsageQueryService:
                 return group
         return None
 
-    def _row_by_id(self, row_id: str, *, context: InvoiceRelationQueryContext) -> dict[str, Any] | None:
+    def _row_by_id(self, row_id: str, *, context: DistributedInvoiceRelationContext) -> dict[str, Any] | None:
         normalized_id = str(row_id)
         for row in self._build_rows(month=None, context=context):
             if row["id"] == normalized_id:
                 return row
         return None
 
-    def _row_payload(self, group: dict[str, Any], *, context: InvoiceRelationQueryContext) -> dict[str, Any]:
+    def _row_payload(self, group: dict[str, Any], *, context: DistributedInvoiceRelationContext) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
         invoice_ids = [line.id for line in line_items]
-        relations = context.active_relations_for_row_ids(invoice_ids)
+        relations = context.distributed_relations_for_row_ids(invoice_ids)
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
         oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
         payment_status = self._payment_status(primary, line_items, relations, oa_payload, bank_payload, context=context)
@@ -490,7 +486,7 @@ class InputInvoiceUsageQueryService:
         line_items: list[Invoice],
         relations: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
         bank_map = context.bank_transactions_by_id()
         summaries = []
@@ -551,7 +547,7 @@ class InputInvoiceUsageQueryService:
         line_items: list[Invoice],
         relations: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
         oa_ids = []
         for relation in relations:
@@ -610,7 +606,7 @@ class InputInvoiceUsageQueryService:
         oa_payload: dict[str, Any],
         bank_payload: dict[str, Any],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, str]:
         has_oa = int(oa_payload.get("relationCount") or 0) > 0
         has_bank = int(bank_payload.get("relationCount") or 0) > 0
@@ -633,7 +629,7 @@ class InputInvoiceUsageQueryService:
         line_items: list[Invoice],
         relations: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> bool:
         invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
         bank_map = context.bank_transactions_by_id()
@@ -658,7 +654,7 @@ class InputInvoiceUsageQueryService:
         line_items: list[Invoice],
         relations: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> bool:
         invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
         for relation in relations:

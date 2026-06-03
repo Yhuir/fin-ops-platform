@@ -341,6 +341,8 @@ class RuntimeBootstrapTests(unittest.TestCase):
         source = Path("backend/src/fin_ops_platform/services/runtime_worker_handlers.py").read_text(encoding="utf-8")
 
         self.assertNotIn("BankTransactionEffectiveCategoryProvider", source)
+        self.assertNotIn("SearchService()", source)
+        self.assertIn("_runtime_search_service(import_service)", source)
 
     def test_standalone_worker_wires_bank_tag_facade_to_tag_consuming_read_models(self) -> None:
         source = Path("backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")

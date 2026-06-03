@@ -672,17 +672,20 @@ class PostgresReadModelRepository:
                 select payload, raw_payload, summary, purpose, scope_key, source_versions
                 from read_model.bank_detail_rows
                 where tenant_id = %s
-                  and transaction_id = any(%s)
-                order by array_position(%s::text[], transaction_id)
+                  and (
+                    transaction_id = any(%s)
+                    or payload->>'id' = any(%s)
+                    or payload->>'transaction_id' = any(%s)
+                  )
                 """,
-                (tenant_id, normalized_ids, normalized_ids),
+                (tenant_id, normalized_ids, normalized_ids, normalized_ids),
             )
             unordered_payload_rows = [_bank_detail_row_payload(row) for row in rows]
-            payload_by_id = {
-                transaction_id: row
-                for row in unordered_payload_rows
-                if (transaction_id := text(row.get("transaction_id") or row.get("id")))
-            }
+            payload_by_id: dict[str, dict[str, Any]] = {}
+            for row in unordered_payload_rows:
+                for row_identity in (row.get("transaction_id"), row.get("id")):
+                    if transaction_id := text(row_identity):
+                        payload_by_id.setdefault(transaction_id, row)
             payload_rows = [
                 payload_by_id[transaction_id]
                 for transaction_id in normalized_ids

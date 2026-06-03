@@ -17,11 +17,13 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
 class StaticOAProjection:
     def __init__(self, records: list[OAApplicationRecord]) -> None:
         self.records = records
+        self.records_by_id = {record.id: record for record in records}
         self.write_calls: list[str] = []
 
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
@@ -271,7 +273,12 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         app._workbench_pair_relation_service = relation_service
         app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=import_service,
-            pair_relation_service=relation_service,
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=relation_service,
+                transactions=list(transactions or []),
+                invoices=list(invoices),
+                oa_projection=oa_projection,
+            ),
             oa_projection=oa_projection,
         )
 

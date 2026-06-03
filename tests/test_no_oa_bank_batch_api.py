@@ -155,6 +155,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         transaction.bank_text_fields = []
 
     def _list_batches(self, app, query: str = ""):
+        app._no_oa_bank_batch_application_service().refresh_batches()
         response = app.handle_request("GET", f"/api/no-oa-bank-batches{query}")
         self.assertEqual(response.status_code, 200, response.body)
         return json.loads(response.body)

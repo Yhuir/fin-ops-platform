@@ -12,11 +12,13 @@ from fin_ops_platform.services.input_invoice_usage_service import (
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
 class StaticOAProjection:
     def __init__(self, records: list[OAApplicationRecord]) -> None:
         self.records = records
+        self.records_by_id = {record.id: record for record in records}
         self.write_calls: list[object] = []
 
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
@@ -77,7 +79,6 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         repository = RepositoryOnlyInvoiceFacts([invoice])
         service = InputInvoiceUsageQueryService(
             import_service=ImportNormalizationService(fact_repository=repository),
-            pair_relation_service=WorkbenchPairRelationService(),
         )
 
         payload = service.list_rows()
@@ -100,7 +101,11 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self._relation(pair_service, "case-postgres-1", [invoices[0].id, bank.id], amount_matched=True)
         service = InputInvoiceUsageQueryService(
             import_service=ImportNormalizationService(fact_repository=repository),
-            pair_relation_service=pair_service,
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=pair_service,
+                transactions=[bank],
+                invoices=invoices,
+            ),
         )
 
         payload = service.list_rows(page_size=20)
@@ -118,7 +123,6 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         repository = RepositoryOnlyInvoiceFacts(invoices)
         service = InputInvoiceUsageQueryService(
             import_service=ImportNormalizationService(fact_repository=repository),
-            pair_relation_service=WorkbenchPairRelationService(),
         )
 
         payload = service.filter_options()
@@ -457,6 +461,11 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 existing_invoices=invoices,
                 existing_transactions=transactions or [],
             ),
-            pair_relation_service=pair_service or WorkbenchPairRelationService(),
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=pair_service or WorkbenchPairRelationService(),
+                transactions=list(transactions or []),
+                invoices=list(invoices),
+                oa_projection=oa_projection,
+            ),
             oa_projection=oa_projection,
         )

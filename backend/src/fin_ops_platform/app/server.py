@@ -351,6 +351,7 @@ from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as 
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
+from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
@@ -869,10 +870,7 @@ class Application:
             category_provider=self._bank_transaction_tag_reader(),
         )
         self._bank_details_relation_tag_projection_service = BankDetailsRelationTagProjectionService(
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_facade=self._workbench_relation_read_facade(),
-            candidate_match_service=self._workbench_candidate_match_service,
-            workbench_read_model_provider=self._bank_details_relation_tag_workbench_read_model,
         )
         self._bank_details_service = BankDetailsService(
             self._import_service,
@@ -905,7 +903,6 @@ class Application:
         )
         self._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=oa_adapter,
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
@@ -913,14 +910,12 @@ class Application:
         )
         self._oa_pending_payment_query_service = OaPendingPaymentQueryService(
             import_service=self._import_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=oa_adapter,
             require_fresh_relations=False,
         )
         self._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_facade=self._workbench_relation_read_facade(),
             lifecycle_repository=self._output_invoice_collection_lifecycle_repository,
             require_fresh_relations=False,
@@ -945,6 +940,7 @@ class Application:
                 transaction_id,
                 direction=direction,
             ),
+            relation_facade=self._workbench_relation_read_facade(),
         )
         self._turnover_ledger_extra_service = self._build_turnover_ledger_extra_service(
             persisted_state.get("turnover_ledger_extras")
@@ -2126,6 +2122,7 @@ class Application:
         runtime_infrastructure = storage_summary.get("runtime_infrastructure")
         if not isinstance(runtime_infrastructure, dict):
             runtime_infrastructure = {}
+        workbench_relation_read_model = self._workbench_relation_readiness_payload(runtime_infrastructure)
         status = "ready" if runtime_release["consistent"] and production_runtime_guard["consistent"] else "not_ready"
         return {
             "service": "fin-ops-platform-api",
@@ -2308,7 +2305,55 @@ class Application:
             ],
             "storage": storage_summary,
             "runtime_infrastructure": runtime_infrastructure,
+            "workbench_relation_read_model": workbench_relation_read_model,
             "future_modules": [],
+        }
+
+    @staticmethod
+    def _workbench_relation_readiness_payload(runtime_infrastructure: dict[str, object]) -> dict[str, object]:
+        dirty_backlog = 0
+        stale_scopes: list[dict[str, object]] = []
+        for row in list(runtime_infrastructure.get("dirty_scopes_by_scope") or []):
+            if not isinstance(row, dict) or str(row.get("scope_type") or "") != "workbench_relation":
+                continue
+            row_status = str(row.get("status") or "")
+            count = int(row.get("count") or 0)
+            if row_status in {"pending", "processing"}:
+                dirty_backlog += count
+            if row_status != "done":
+                stale_scopes.append(
+                    {
+                        "scope_key": str(row.get("scope_key") or ""),
+                        "status": row_status,
+                        "count": count,
+                        "oldest_age_seconds": row.get("oldest_age_seconds"),
+                    }
+                )
+        last_failure_reason = None
+        for row in list(runtime_infrastructure.get("pending_outbox_events_by_scope") or []):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("event_type") or "") != "workbench_relation.read_model.refresh":
+                continue
+            if str(row.get("status") or "") not in {"failed", "dead_lettered"}:
+                continue
+            last_failure_reason = str(row.get("last_error") or "").strip() or None
+            break
+        if last_failure_reason:
+            relation_status = "failed"
+        elif stale_scopes:
+            relation_status = "refreshing"
+        else:
+            relation_status = "ready"
+        return {
+            "status": relation_status,
+            "dirty_backlog": dirty_backlog,
+            "stale_scopes": stale_scopes,
+            "last_refresh_at": None,
+            "last_failure_reason": last_failure_reason,
+            "source_versions": {
+                "workbench_relation_schema_version": WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
+            },
         }
 
     def _production_runtime_guard_summary(
@@ -7844,7 +7889,6 @@ class Application:
             return service
         service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=getattr(self, "_workbench_query_service", None),
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
@@ -8389,7 +8433,6 @@ class Application:
             return service
         service = OaPendingPaymentQueryService(
             import_service=self._import_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=getattr(self, "_workbench_query_service", None),
             require_fresh_relations=False,
@@ -8512,7 +8555,6 @@ class Application:
             self._output_invoice_collection_lifecycle_repository = lifecycle_repository
         service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
-            pair_relation_service=self._workbench_pair_relation_service,
             relation_facade=self._workbench_relation_read_facade(),
             lifecycle_repository=lifecycle_repository,
             require_fresh_relations=False,

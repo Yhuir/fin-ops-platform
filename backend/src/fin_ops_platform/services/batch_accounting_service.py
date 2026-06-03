@@ -30,6 +30,7 @@ class _WorkbenchContext:
     bank_rows: list[dict[str, Any]]
     open_oa_rows: list[dict[str, Any]]
     invoice_ids_by_oa_id: dict[str, list[str]]
+    linked_row_ids: set[str]
     eligible_bank_rows: list[dict[str, Any]]
     eligible_oa_rows: list[dict[str, Any]]
 
@@ -148,6 +149,8 @@ class BatchAccountingService:
             oa_row = eligible_oa_by_id.get(oa_row_id)
             if not isinstance(oa_row, dict):
                 raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据不符合批量账务提交条件。")
+            if self._pair_relation_service.get_active_relation_by_row_id(oa_row_id) is not None:
+                raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据已有关联关系，请刷新后重试。")
             selected_oa_rows.append(oa_row)
 
         bank_amount = self._bank_expense_amount(bank_row)
@@ -419,14 +422,29 @@ class BatchAccountingService:
                 rows_by_id[str(row.get("id"))] = row
             if section == "open":
                 self._index_group_invoice_links(group_oa_rows, invoice_rows, invoice_ids_by_oa_id)
-        eligible_bank_rows = [row for row in bank_rows if self._is_batch_bank_row(row, bank_year, require_unlinked=True)]
-        eligible_oa_rows = [row for row in open_oa_rows if self._is_eligible_oa_row(row, oa_year)]
+        linked_row_ids = self._linked_distribution_row_ids([*bank_rows, *open_oa_rows])
+        eligible_bank_rows = [
+            row
+            for row in bank_rows
+            if self._is_batch_bank_row(
+                row,
+                bank_year,
+                require_unlinked=True,
+                linked_row_ids=linked_row_ids,
+            )
+        ]
+        eligible_oa_rows = [
+            row
+            for row in open_oa_rows
+            if self._is_eligible_oa_row(row, oa_year, linked_row_ids=linked_row_ids)
+        ]
         return _WorkbenchContext(
             rows_by_id=rows_by_id,
             groups=groups,
             bank_rows=bank_rows,
             open_oa_rows=open_oa_rows,
             invoice_ids_by_oa_id=invoice_ids_by_oa_id,
+            linked_row_ids=linked_row_ids,
             eligible_bank_rows=eligible_bank_rows,
             eligible_oa_rows=eligible_oa_rows,
         )
@@ -471,7 +489,14 @@ class BatchAccountingService:
             if linked_oa_id:
                 invoice_ids_by_oa_id.setdefault(linked_oa_id, []).append(invoice_id)
 
-    def _is_batch_bank_row(self, row: dict[str, Any], year: str, *, require_unlinked: bool) -> bool:
+    def _is_batch_bank_row(
+        self,
+        row: dict[str, Any],
+        year: str,
+        *,
+        require_unlinked: bool,
+        linked_row_ids: set[str] | None = None,
+    ) -> bool:
         row_id = str(row.get("id") or "").strip()
         if not row_id:
             return False
@@ -483,12 +508,18 @@ class BatchAccountingService:
             return False
         if self._bank_expense_amount(row) <= Decimal("0.00"):
             return False
-        if require_unlinked and self._pair_relation_service.get_active_relation_by_row_id(row_id) is not None:
+        if require_unlinked and row_id in (linked_row_ids or set()):
             return False
         return True
 
-    def _is_eligible_oa_row(self, row: dict[str, Any], year: str) -> bool:
-        if not self._is_eligible_oa_row_for_submission(row):
+    def _is_eligible_oa_row(
+        self,
+        row: dict[str, Any],
+        year: str,
+        *,
+        linked_row_ids: set[str] | None = None,
+    ) -> bool:
+        if not self._is_eligible_oa_row_for_submission(row, linked_row_ids=linked_row_ids):
             return False
         return self._row_year_matches(
             row,
@@ -497,11 +528,16 @@ class BatchAccountingService:
             nested_date_keys=("申请日期", "单据日期", "日期"),
         )
 
-    def _is_eligible_oa_row_for_submission(self, row: dict[str, Any]) -> bool:
+    def _is_eligible_oa_row_for_submission(
+        self,
+        row: dict[str, Any],
+        *,
+        linked_row_ids: set[str] | None = None,
+    ) -> bool:
         row_id = str(row.get("id") or "").strip()
         if not row_id:
             return False
-        if self._pair_relation_service.get_active_relation_by_row_id(row_id) is not None:
+        if row_id in (linked_row_ids or set()):
             return False
         if str(row.get("type") or "oa") != "oa" and self._row_type_for_row_id(row_id) != "oa":
             return False
@@ -510,6 +546,36 @@ class BatchAccountingService:
         if not self._contains_daily_reimbursement(row):
             return False
         return True
+
+    def _linked_distribution_row_ids(self, rows: list[dict[str, Any]]) -> set[str]:
+        row_ids = self._dedupe(
+            str(row.get("id") or "").strip()
+            for row in list(rows or [])
+            if isinstance(row, dict) and str(row.get("id") or "").strip()
+        )
+        if not row_ids or self._relation_facade is None:
+            return set()
+        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        if not callable(reader):
+            return set()
+        try:
+            payload = reader(row_ids, require_fresh=False, reason="batch_accounting_unsubmitted_relations")
+        except TypeError:
+            payload = reader(row_ids)
+        if not isinstance(payload, dict):
+            return set()
+        linked: set[str] = set()
+        for row in list(payload.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            row_id = str(row.get("row_id") or "").strip()
+            if not row_id:
+                continue
+            group_ids = [str(group_id).strip() for group_id in list(row.get("group_ids") or []) if str(group_id).strip()]
+            relation_status = str(row.get("relation_status") or "").strip()
+            if group_ids or relation_status in {"linked", "partial", "conflict", "stale_source"}:
+                linked.add(row_id)
+        return linked
 
     def _submitted_relations(self, year: str, context: _WorkbenchContext) -> list[dict[str, Any]]:
         if self._relation_facade is None:

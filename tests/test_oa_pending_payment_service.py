@@ -12,11 +12,13 @@ from fin_ops_platform.services.oa_pending_payment_service import (
     OaPendingPaymentQueryService,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
 class StaticOAProjection:
     def __init__(self, records: list[OAApplicationRecord]) -> None:
         self.records = records
+        self.records_by_id = {record.id: record for record in records}
 
     def list_all_application_records(self) -> list[OAApplicationRecord]:
         return list(self.records)
@@ -190,13 +192,19 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         invoices: list[Invoice] | None = None,
         pair_service: WorkbenchPairRelationService | None = None,
     ) -> OaPendingPaymentQueryService:
+        projection = StaticOAProjection(oa_records)
         return OaPendingPaymentQueryService(
             import_service=ImportNormalizationService(
                 existing_transactions=transactions or [],
                 existing_invoices=invoices or [],
             ),
-            pair_relation_service=pair_service or WorkbenchPairRelationService(),
-            oa_projection=StaticOAProjection(oa_records),
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=pair_service or WorkbenchPairRelationService(),
+                transactions=list(transactions or []),
+                invoices=list(invoices or []),
+                oa_projection=projection,
+            ),
+            oa_projection=projection,
         )
 
     @staticmethod

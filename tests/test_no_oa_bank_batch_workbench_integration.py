@@ -14,6 +14,66 @@ def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[
     ]
 
 
+class PairSnapshotRelationFacade:
+    def __init__(self, pair_service: object) -> None:
+        self._pair_service = pair_service
+
+    def list_by_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+        groups: list[dict[str, object]] = []
+        rows: list[dict[str, object]] = []
+        for relation in list(self._pair_service.list_active_relations()):
+            if str(relation.get("month_scope") or month) != month:
+                continue
+            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
+            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+            case_id = str(relation.get("case_id") or "")
+            groups.append(
+                {
+                    "group_id": case_id,
+                    "scope_month": month,
+                    "payload": {
+                        "group_id": case_id,
+                        "row_ids": row_ids,
+                        "row_types": row_types,
+                        "relation_mode": str(relation.get("relation_mode") or ""),
+                        "special_metadata": dict(relation.get("special_metadata") or {})
+                        if isinstance(relation.get("special_metadata"), dict)
+                        else {},
+                    },
+                }
+            )
+            rows.extend(
+                {
+                    "row_id": row_id,
+                    "row_type": "bank_transaction" if row_type == "bank" else row_type,
+                    "group_ids": [case_id],
+                }
+                for row_id, row_type in zip(row_ids, row_types, strict=False)
+            )
+        return {
+            "status": "fresh",
+            "rows": rows,
+            "groups": groups,
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": [month],
+        }
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        wanted = {str(row_id) for row_id in row_ids}
+        payload = self.list_by_month("2026-02")
+        group_ids = {
+            str(group_id)
+            for row in list(payload["rows"])
+            if str(row.get("row_id") or "") in wanted
+            for group_id in list(row.get("group_ids") or [])
+        }
+        return {
+            **payload,
+            "rows": [row for row in list(payload["rows"]) if str(row.get("row_id") or "") in wanted],
+            "groups": [group for group in list(payload["groups"]) if str(group.get("group_id") or "") in group_ids],
+        }
+
+
 class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
     def test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh(self) -> None:
         class StaleNoOaReadRepository:
@@ -378,17 +438,18 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
                 month_scope="2026-02",
             )
 
-        first_response = app.handle_request("GET", "/api/no-oa-bank-batches?bucket=submitted")
-        second_response = app.handle_request("GET", "/api/no-oa-bank-batches?bucket=submitted")
-        no_oa_payload = json.loads(second_response.body)
-        salary_batches = [batch for batch in no_oa_payload["batches"] if batch["batch_type"] == "salary"]
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        app._no_oa_bank_batch_application_service().refresh_batches()
+        salary_batches = [
+            batch
+            for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
+            if batch["batch_type"] == "salary"
+        ]
         app._invalidate_workbench_read_models()
         workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_group = workbench_payload["paired"]["groups"][0]
         active_relations = app._workbench_pair_relation_service.list_active_relations()
 
-        self.assertEqual(first_response.status_code, 200)
-        self.assertEqual(second_response.status_code, 200)
         self.assertEqual(len(salary_batches), 1)
         salary_batch = salary_batches[0]
         self.assertEqual(salary_batch["status"], "submitted")
@@ -491,8 +552,15 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
                 display_tags=["免OA", "工资"],
             )
 
-        no_oa_payload = json.loads(app.handle_request("GET", "/api/no-oa-bank-batches?bucket=submitted").body)
-        salary_batches = [batch for batch in no_oa_payload["batches"] if batch["batch_type"] == "salary"]
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        app._no_oa_bank_batch_application_service().refresh_batches()
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        app._no_oa_bank_batch_application_service().refresh_batches()
+        salary_batches = [
+            batch
+            for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
+            if batch["batch_type"] == "salary"
+        ]
         app._invalidate_workbench_read_models()
         workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_group = workbench_payload["paired"]["groups"][0]
@@ -587,8 +655,12 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             month_scope="2026-02",
         )
 
-        no_oa_payload = json.loads(app.handle_request("GET", "/api/no-oa-bank-batches?bucket=submitted").body)
-        submitted_by_type = {batch["batch_type"]: batch for batch in no_oa_payload["batches"]}
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        app._no_oa_bank_batch_application_service().refresh_batches()
+        submitted_by_type = {
+            batch["batch_type"]: batch
+            for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
+        }
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_groups = payload["paired"]["groups"]
         active_modes = [

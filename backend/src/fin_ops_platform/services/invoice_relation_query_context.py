@@ -13,11 +13,11 @@ from fin_ops_platform.services.workbench_relation_distribution_mapper import (
 from fin_ops_platform.services.workbench_relation_read_facade import FRESH_WORKBENCH_RELATION_STATUS, WorkbenchRelationReadFacade
 
 
-class InvoiceRelationQueryContext:
-    """Request-scoped fact index for invoice relation query pages.
+class DistributedInvoiceRelationContext:
+    """Request-scoped distributed relation index for invoice relation query pages.
 
     The input-invoice usage and output-invoice collection pages both need the same
-    cross-fact reads: invoice rows, active workbench relations, bank transactions,
+    cross-fact reads: invoice rows, distributed workbench relations, bank transactions,
     and sometimes OA projection records. Keeping those indexes in one query context
     prevents per-row repository scans while preserving the existing service
     contracts.
@@ -27,7 +27,6 @@ class InvoiceRelationQueryContext:
         self,
         *,
         import_service: ImportNormalizationService,
-        pair_relation_service: Any | None = None,
         relation_facade: WorkbenchRelationReadFacade | None = None,
         oa_projection: Any | None = None,
         month_hint: str | None = None,
@@ -55,7 +54,7 @@ class InvoiceRelationQueryContext:
             }
         return self._bank_transactions_by_id
 
-    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+    def distributed_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         resolved_row_ids = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
         if not resolved_row_ids:
             return []
@@ -72,7 +71,7 @@ class InvoiceRelationQueryContext:
                 "rowTypes": list(relation.get("row_types") or []),
                 "amountCheck": deepcopy(relation.get("amount_check") or {}),
             }
-            for relation in self.active_relations_for_row_ids([row_id])
+            for relation in self.distributed_relations_for_row_ids([row_id])
         ]
 
     def oa_records_by_id(self, oa_ids: list[str]) -> dict[str, OAApplicationRecord]:
@@ -91,7 +90,7 @@ class InvoiceRelationQueryContext:
     def preload_oa_records_from_relations(self, row_ids: list[str]) -> None:
         oa_ids: list[str] = []
         seen: set[str] = set()
-        for relation in self.active_relations_for_row_ids(row_ids):
+        for relation in self.distributed_relations_for_row_ids(row_ids):
             for row_id, row_type in self.typed_relation_rows(relation):
                 if row_type == "oa" and row_id not in seen:
                     seen.add(row_id)

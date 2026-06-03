@@ -13,9 +13,8 @@ from urllib.parse import unquote
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.invoice_relation_query_context import InvoiceRelationQueryContext
+from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
@@ -65,20 +64,18 @@ class OaPendingPaymentQueryService:
     Data ownership mirrors the refactored invoice relation pages:
     - OA rows come from the OA projection;
     - bank transactions and invoices come from normalized import facts;
-    - relationship evidence comes only from active Workbench pair relations.
+    - relationship evidence comes only from WorkbenchRelationReadFacade distribution.
     """
 
     def __init__(
         self,
         *,
         import_service: ImportNormalizationService,
-        pair_relation_service: WorkbenchPairRelationService | None = None,
         relation_facade: WorkbenchRelationReadFacade | None = None,
         oa_projection: Any | None = None,
         require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
-        self._pair_relation_service = pair_relation_service
         self._relation_facade = relation_facade
         self._oa_projection = oa_projection
         self._require_fresh_relations = require_fresh_relations
@@ -329,10 +326,9 @@ class OaPendingPaymentQueryService:
     def source_versions() -> dict[str, Any]:
         return {"oa_pending_payment": SOURCE_VERSION}
 
-    def _query_context(self, *, month_hint: str | None = None) -> InvoiceRelationQueryContext:
-        return InvoiceRelationQueryContext(
+    def _query_context(self, *, month_hint: str | None = None) -> DistributedInvoiceRelationContext:
+        return DistributedInvoiceRelationContext(
             import_service=self._import_service,
-            pair_relation_service=self._pair_relation_service,
             relation_facade=self._relation_facade,
             oa_projection=self._oa_projection,
             month_hint=month_hint,
@@ -342,7 +338,7 @@ class OaPendingPaymentQueryService:
     def _filtered_sorted_rows(
         self,
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
         keyword: str | None,
         month: str | None,
         trade_date_from: str | None,
@@ -360,7 +356,7 @@ class OaPendingPaymentQueryService:
         rows.sort(key=lambda row: self._sort_value(row, sort_field), reverse=sort_direction == "desc")
         return rows
 
-    def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext) -> list[dict[str, Any]]:
+    def _build_rows(self, *, month: str | None, context: DistributedInvoiceRelationContext) -> list[dict[str, Any]]:
         records = self._oa_records(month=month)
         context.preload_relation_rows([record.id for record in records])
         oa_by_id = {record.id: record for record in records}
@@ -368,7 +364,7 @@ class OaPendingPaymentQueryService:
         invoices_by_id = self._input_invoices_by_id()
         rows = []
         for record in records:
-            relations = context.active_relations_for_row_ids([record.id])
+            relations = context.distributed_relations_for_row_ids([record.id])
             bank_payload = self._bank_relation_payload(record, relations=relations, bank_by_id=bank_by_id)
             invoice_payload = self._invoice_relation_payload(record, relations=relations, invoices_by_id=invoices_by_id)
             payment_status = self._payment_status(
@@ -442,7 +438,7 @@ class OaPendingPaymentQueryService:
         non_outflow_relation_count = 0
         oa_amount = _parse_decimal(record.amount) or ZERO
         for relation in relations:
-            for row_id, row_type in InvoiceRelationQueryContext.typed_relation_rows(relation):
+            for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
                 if row_type != "bank":
                     continue
                 bank = bank_by_id.get(row_id)
@@ -536,7 +532,7 @@ class OaPendingPaymentQueryService:
         seen: set[str] = set()
         oa_amount = _parse_decimal(record.amount) or ZERO
         for relation in relations:
-            for row_id, row_type in InvoiceRelationQueryContext.typed_relation_rows(relation):
+            for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
                 if row_type != "invoice":
                     continue
                 invoice = invoices_by_id.get(row_id)
@@ -579,7 +575,7 @@ class OaPendingPaymentQueryService:
         *,
         bank_by_id: dict[str, BankTransaction],
         oa_by_id: dict[str, OAApplicationRecord],
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, str]:
         oa_amount = _parse_decimal(record.amount)
         if oa_amount is None:
@@ -616,15 +612,15 @@ class OaPendingPaymentQueryService:
         *,
         bank_by_id: dict[str, BankTransaction],
         oa_by_id: dict[str, OAApplicationRecord],
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> bool:
         for bank_id in bank_ids:
             bank = bank_by_id.get(bank_id)
             if bank is None:
                 continue
             related_oa_ids: list[str] = []
-            for relation in context.active_relations_for_row_ids([bank_id]):
-                for row_id, row_type in InvoiceRelationQueryContext.typed_relation_rows(relation):
+            for relation in context.distributed_relations_for_row_ids([bank_id]):
+                for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
                     if row_type == "oa" and row_id not in related_oa_ids:
                         related_oa_ids.append(row_id)
             if len(related_oa_ids) < 2 or oa_id not in related_oa_ids:
@@ -793,7 +789,7 @@ class OaPendingPaymentQueryService:
             "statusCounts": status_counts,
         }
 
-    def _row_by_id(self, row_id: str, *, context: InvoiceRelationQueryContext) -> dict[str, Any] | None:
+    def _row_by_id(self, row_id: str, *, context: DistributedInvoiceRelationContext) -> dict[str, Any] | None:
         normalized_row_id = str(row_id or "").strip()
         for row in self._build_rows(month=None, context=context):
             if row["id"] == normalized_row_id:

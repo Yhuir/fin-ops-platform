@@ -23,6 +23,7 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 class StaticOAProjection:
     def __init__(self, records: list[OAApplicationRecord]) -> None:
         self.records = records
+        self.records_by_id = {record.id: record for record in records}
 
     def list_all_application_records(self) -> list[OAApplicationRecord]:
         return list(self.records)
@@ -107,7 +108,6 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             import_service = ImportNormalizationService(existing_transactions=[bank])
             service = OaPendingPaymentQueryService(
                 import_service=import_service,
-                pair_relation_service=pair_service,
                 relation_facade=FakeRelationFacade(pair_service.list_active_relations()),
                 oa_projection=StaticOAProjection([self._oa("oa-api", "张三", "100.00")]),
             )
@@ -139,7 +139,6 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             service = OaPendingPaymentQueryService(
                 import_service=ImportNormalizationService(),
-                pair_relation_service=WorkbenchPairRelationService(),
                 oa_projection=StaticOAProjection([]),
             )
             app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(service)
@@ -458,7 +457,6 @@ def _read_model_routes(
 def _empty_query_service() -> OaPendingPaymentQueryService:
     return OaPendingPaymentQueryService(
         import_service=ImportNormalizationService(),
-        pair_relation_service=WorkbenchPairRelationService(),
         oa_projection=StaticOAProjection([]),
     )
 

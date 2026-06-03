@@ -9,9 +9,6 @@ from fin_ops_platform.services.bank_details_relation_tag_projection_service impo
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
-from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 class _ImportServiceStub:
@@ -63,6 +60,23 @@ class _BankAccountRepository:
     def list_bank_transaction_accounts(self, **kwargs: object) -> list[dict[str, object]]:
         self.calls.append(dict(kwargs))
         return list(self.rows)
+
+
+class _RelationDistributionFacade:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self._rows = rows
+        self.calls: list[list[str]] = []
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        wanted = {str(row_id) for row_id in row_ids}
+        self.calls.append(list(row_ids))
+        return {
+            "status": "fresh",
+            "rows": [dict(row) for row in self._rows if str(row.get("row_id") or "") in wanted],
+            "groups": [],
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": ["2026-04"],
+        }
 
 
 class BankDetailsServiceTests(unittest.TestCase):
@@ -429,190 +443,44 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["relation_tags"], ["有oa", "无发票"])
         self.assertEqual(row["relation_case_id"], "CASE-OA")
 
-    def test_relation_tag_projection_keeps_no_oa_relation_over_candidates_and_groups(self) -> None:
-        pair_relation_service = WorkbenchPairRelationService()
-        pair_relation_service.create_active_relation(
-            case_id="NO-OA-CASE",
-            row_ids=["txn-no-oa"],
-            row_types=["bank"],
-            relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
-            created_by="tester",
+    def test_relation_tag_projection_uses_relation_distribution_row(self) -> None:
+        facade = _RelationDistributionFacade(
+            [
+                {
+                    "row_id": "txn-shared",
+                    "row_type": "bank_transaction",
+                    "group_ids": ["CASE-DISTRIBUTED"],
+                    "linked_oa": [{"id": "oa-linked"}],
+                    "linked_input_invoices": [{"id": "inv-linked"}],
+                    "linked_output_invoices": [],
+                }
+            ]
         )
-        candidate_match_service = WorkbenchCandidateMatchService()
-        candidate_match_service.upsert_candidate(
-            {
-                "scope_month": "2026-04",
-                "candidate_type": "oa_bank",
-                "status": "incomplete",
-                "confidence": "medium",
-                "rule_code": "oa_bank_exact_amount",
-                "row_ids": ["oa-no-oa-candidate", "txn-no-oa"],
-                "oa_row_ids": ["oa-no-oa-candidate"],
-                "bank_row_ids": ["txn-no-oa"],
-                "invoice_row_ids": [],
-                "amount": "100.00",
-                "amount_delta": "0.00",
-                "explanation": "candidate should not override explicit no OA",
-                "conflict_candidate_keys": [],
-                "source_versions": {},
-            }
-        )
-        service = BankDetailsRelationTagProjectionService(
-            pair_relation_service=pair_relation_service,
-            candidate_match_service=candidate_match_service,
-            workbench_read_model_provider=lambda: {
-                "scope_key": "all",
-                "generated_at": "2026-05-15T00:00:00",
-                "source_versions": {},
-                "payload": {
-                    "open": {
-                        "groups": [
-                            {
-                                "group_id": "candidate:no-oa-group",
-                                "oa_rows": [{"id": "oa-no-oa-group", "type": "oa"}],
-                                "bank_rows": [{"id": "txn-no-oa", "type": "bank"}],
-                                "invoice_rows": [],
-                            }
-                        ]
-                    }
-                },
-            },
-        )
+        service = BankDetailsRelationTagProjectionService(relation_facade=facade)
 
-        self.assertEqual(
-            service.relation_tag_for_transaction("txn-no-oa"),
-            {"case_id": "NO-OA-CASE", "row_types": ["bank"]},
-        )
-
-    def test_relation_tag_projection_merges_missing_types_without_replacing_active_case(self) -> None:
-        pair_relation_service = WorkbenchPairRelationService()
-        pair_relation_service.create_active_relation(
-            case_id="CASE-INVOICE-ACTIVE",
-            row_ids=["txn-with-invoice", "inv-active"],
-            row_types=["bank", "invoice"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
-        )
-        candidate_match_service = WorkbenchCandidateMatchService()
-        candidate_match_service.upsert_candidate(
-            {
-                "scope_month": "2026-04",
-                "candidate_type": "oa_bank",
-                "status": "incomplete",
-                "confidence": "medium",
-                "rule_code": "oa_bank_exact_amount",
-                "row_ids": ["oa-candidate", "txn-with-invoice"],
-                "oa_row_ids": ["oa-candidate"],
-                "bank_row_ids": ["txn-with-invoice"],
-                "invoice_row_ids": [],
-                "amount": "100.00",
-                "amount_delta": "0.00",
-                "explanation": "candidate supplies OA while active relation supplies invoice",
-                "conflict_candidate_keys": [],
-                "source_versions": {},
-            }
-        )
-        service = BankDetailsRelationTagProjectionService(
-            pair_relation_service=pair_relation_service,
-            candidate_match_service=candidate_match_service,
-            workbench_read_model_provider=lambda: {
-                "scope_key": "all",
-                "generated_at": "2026-05-15T00:00:00",
-                "source_versions": {},
-                "payload": {},
-            },
-        )
-
-        self.assertEqual(
-            service.relation_tag_for_transaction("txn-with-invoice"),
-            {"case_id": "CASE-INVOICE-ACTIVE", "row_types": ["bank", "invoice", "oa"]},
-        )
-
-    def test_relation_tag_projection_uses_workbench_candidate_priority_without_mixing_cases(self) -> None:
-        pair_relation_service = WorkbenchPairRelationService()
-        candidate_match_service = WorkbenchCandidateMatchService()
-        low_priority = candidate_match_service.upsert_candidate(
-            {
-                "scope_month": "2026-04",
-                "candidate_type": "oa_bank",
-                "status": "incomplete",
-                "confidence": "medium",
-                "rule_code": "oa_bank_exact_amount",
-                "row_ids": ["oa-low", "txn-shared"],
-                "oa_row_ids": ["oa-low"],
-                "bank_row_ids": ["txn-shared"],
-                "invoice_row_ids": [],
-                "amount": "100.00",
-                "amount_delta": "0.00",
-                "explanation": "lower priority incomplete candidate",
-                "conflict_candidate_keys": [],
-                "source_versions": {},
-            }
-        )
-        high_priority = candidate_match_service.upsert_candidate(
-            {
-                "scope_month": "2026-04",
-                "candidate_type": "oa_bank_invoice",
-                "status": "auto_closed",
-                "confidence": "high",
-                "rule_code": "same_amount",
-                "row_ids": ["oa-high", "txn-shared", "inv-high"],
-                "oa_row_ids": ["oa-high"],
-                "bank_row_ids": ["txn-shared"],
-                "invoice_row_ids": ["inv-high"],
-                "amount": "100.00",
-                "amount_delta": "0.00",
-                "explanation": "higher priority complete candidate",
-                "conflict_candidate_keys": [],
-                "source_versions": {},
-            }
-        )
-        service = BankDetailsRelationTagProjectionService(
-            pair_relation_service=pair_relation_service,
-            candidate_match_service=candidate_match_service,
-        )
-
-        self.assertNotEqual(low_priority["candidate_key"], high_priority["candidate_key"])
         self.assertEqual(
             service.relation_tag_for_transaction("txn-shared"),
-            {"case_id": high_priority["candidate_key"], "row_types": ["bank", "invoice", "oa"]},
+            {"case_id": "CASE-DISTRIBUTED", "row_types": ["bank", "invoice", "oa"]},
         )
+        self.assertEqual(facade.calls, [["txn-shared"]])
 
-    def test_relation_tag_projection_degrades_when_workbench_read_model_provider_fails(self) -> None:
-        pair_relation_service = WorkbenchPairRelationService()
-        candidate_match_service = WorkbenchCandidateMatchService()
-        candidate = candidate_match_service.upsert_candidate(
-            {
-                "scope_month": "2026-04",
-                "candidate_type": "oa_bank",
-                "status": "incomplete",
-                "confidence": "medium",
-                "rule_code": "oa_bank_exact_amount",
-                "row_ids": ["oa-fallback", "txn-fallback"],
-                "oa_row_ids": ["oa-fallback"],
-                "bank_row_ids": ["txn-fallback"],
-                "invoice_row_ids": [],
-                "amount": "100.00",
-                "amount_delta": "0.00",
-                "explanation": "candidate remains usable without read model",
-                "conflict_candidate_keys": [],
-                "source_versions": {},
-            }
-        )
-
-        def raise_read_model_error() -> dict[str, object]:
-            raise RuntimeError("workbench read model unavailable")
-
+    def test_relation_tag_projection_returns_none_for_unlinked_distribution_row(self) -> None:
         service = BankDetailsRelationTagProjectionService(
-            pair_relation_service=pair_relation_service,
-            candidate_match_service=candidate_match_service,
-            workbench_read_model_provider=raise_read_model_error,
+            relation_facade=_RelationDistributionFacade(
+                [
+                    {
+                        "row_id": "txn-unlinked",
+                        "row_type": "bank_transaction",
+                        "group_ids": [],
+                        "linked_oa": [],
+                        "linked_input_invoices": [],
+                        "linked_output_invoices": [],
+                    }
+                ]
+            )
         )
 
-        self.assertEqual(
-            service.relation_tag_for_transaction("txn-fallback"),
-            {"case_id": candidate["candidate_key"], "row_types": ["bank", "oa"]},
-        )
+        self.assertIsNone(service.relation_tag_for_transaction("txn-unlinked"))
 
     def test_transactions_use_batch_relation_provider_once_and_degrade_on_failure(self) -> None:
         calls: list[list[str]] = []

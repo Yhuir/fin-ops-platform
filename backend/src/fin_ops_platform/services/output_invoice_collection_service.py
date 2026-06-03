@@ -13,13 +13,12 @@ from urllib.parse import unquote
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.invoice_relation_query_context import InvoiceRelationQueryContext
+from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.output_invoice_collection_models import (
     OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
     RED_REFUND_STATUS_CODES,
 )
 from fin_ops_platform.services.output_invoice_collection_status_service import OutputInvoiceCollectionStatusOverlayService
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
@@ -323,7 +322,6 @@ class OutputInvoiceCollectionQueryService:
         self,
         *,
         import_service: ImportNormalizationService,
-        pair_relation_service: WorkbenchPairRelationService | None = None,
         relation_facade: WorkbenchRelationReadFacade | None = None,
         status_rule_service: OutputInvoiceCollectionStatusRuleService | None = None,
         receipt_preview_service: OutputInvoiceReceiptPreviewService | None = None,
@@ -332,7 +330,6 @@ class OutputInvoiceCollectionQueryService:
         require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
-        self._pair_relation_service = pair_relation_service
         self._relation_facade = relation_facade
         self._status_rule_service = status_rule_service or OutputInvoiceCollectionStatusRuleService()
         self._receipt_preview_service = receipt_preview_service or OutputInvoiceReceiptPreviewService()
@@ -477,10 +474,9 @@ class OutputInvoiceCollectionQueryService:
             "sourceVersion": SOURCE_VERSION,
         }
 
-    def _query_context(self, *, month_hint: str | None = None) -> InvoiceRelationQueryContext:
-        return InvoiceRelationQueryContext(
+    def _query_context(self, *, month_hint: str | None = None) -> DistributedInvoiceRelationContext:
+        return DistributedInvoiceRelationContext(
             import_service=self._import_service,
-            pair_relation_service=self._pair_relation_service,
             relation_facade=self._relation_facade,
             month_hint=month_hint,
             require_fresh_relations=self._require_fresh_relations,
@@ -489,7 +485,7 @@ class OutputInvoiceCollectionQueryService:
     def _filtered_sorted_rows(
         self,
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
         keyword: str | None,
         invoice_date_from: str | None,
         invoice_date_to: str | None,
@@ -681,7 +677,7 @@ class OutputInvoiceCollectionQueryService:
             for field, config in FILTER_CONFIG.items()
         ]
 
-    def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext, tenant_id: str = "default") -> list[dict[str, Any]]:
+    def _build_rows(self, *, month: str | None, context: DistributedInvoiceRelationContext, tenant_id: str = "default") -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
         context.preload_relation_rows([line.id for group in groups for line in group["line_items"]])
         rows = [self._row_payload(group, groups, context=context) for group in groups]
@@ -699,7 +695,7 @@ class OutputInvoiceCollectionQueryService:
         self,
         *,
         month: str | None = None,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> list[dict[str, Any]]:
         source_month = str(month).strip() if month not in (None, "") else "all"
         invoices = [
@@ -720,7 +716,7 @@ class OutputInvoiceCollectionQueryService:
         self,
         invoice_id: str,
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any] | None:
         normalized_id = str(invoice_id)
         for group in self._invoice_groups(month=None, context=context):
@@ -728,7 +724,7 @@ class OutputInvoiceCollectionQueryService:
                 return group
         return None
 
-    def _row_by_id(self, row_id: str, *, context: InvoiceRelationQueryContext, tenant_id: str = "default") -> dict[str, Any] | None:
+    def _row_by_id(self, row_id: str, *, context: DistributedInvoiceRelationContext, tenant_id: str = "default") -> dict[str, Any] | None:
         normalized_id = str(row_id)
         for row in self._build_rows(month=None, context=context, tenant_id=tenant_id):
             if row["id"] == normalized_id:
@@ -739,7 +735,7 @@ class OutputInvoiceCollectionQueryService:
         self,
         invoice_id: str,
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
         tenant_id: str = "default",
     ) -> dict[str, Any] | None:
         normalized_id = str(invoice_id)
@@ -753,12 +749,12 @@ class OutputInvoiceCollectionQueryService:
         group: dict[str, Any],
         all_groups: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
         invoice_ids = [line.id for line in line_items]
-        relations = context.active_relations_for_row_ids(invoice_ids)
+        relations = context.distributed_relations_for_row_ids(invoice_ids)
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
         red_payload = self._red_invoice_relation_payload(group, all_groups, context=context)
         related_groups = [
@@ -770,7 +766,7 @@ class OutputInvoiceCollectionQueryService:
         related_bank_summaries = []
         for related_group in related_groups:
             related_ids = [line.id for line in related_group["line_items"]]
-            related_relations = context.active_relations_for_row_ids(related_ids)
+            related_relations = context.distributed_relations_for_row_ids(related_ids)
             related_bank_summaries.extend(
                 self._bank_relation_payload(
                     related_group["primary"],
@@ -839,7 +835,7 @@ class OutputInvoiceCollectionQueryService:
         line_items: list[Invoice],
         relations: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
         bank_map = context.bank_transactions_by_id()
         summaries = []
@@ -905,7 +901,7 @@ class OutputInvoiceCollectionQueryService:
         group: dict[str, Any],
         all_groups: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
@@ -955,7 +951,7 @@ class OutputInvoiceCollectionQueryService:
         candidate_group: dict[str, Any],
         all_groups: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> bool:
         current_primary: Invoice = current_group["primary"]
         candidate_primary: Invoice = candidate_group["primary"]
@@ -979,7 +975,7 @@ class OutputInvoiceCollectionQueryService:
         negative_group: dict[str, Any],
         all_groups: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any] | None:
         negative_primary: Invoice = negative_group["primary"]
         negative_total = sum((_invoice_total(line) for line in negative_group["line_items"]), start=ZERO)
@@ -1007,7 +1003,7 @@ class OutputInvoiceCollectionQueryService:
         positive_group: dict[str, Any],
         negative_group: dict[str, Any],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> tuple[int, float, str]:
         positive_total = abs(sum((_invoice_total(line) for line in positive_group["line_items"]), start=ZERO))
         positive_banks = self._group_bank_summaries(positive_group, context=context)
@@ -1027,10 +1023,10 @@ class OutputInvoiceCollectionQueryService:
         negative_date = _sortable_time(negative_group["primary"].invoice_date)
         return (priority, abs(negative_date - positive_date), str(positive_group["identity_key"]))
 
-    def _group_bank_summaries(self, group: dict[str, Any], *, context: InvoiceRelationQueryContext) -> list[dict[str, Any]]:
+    def _group_bank_summaries(self, group: dict[str, Any], *, context: DistributedInvoiceRelationContext) -> list[dict[str, Any]]:
         line_items = group["line_items"]
         invoice_ids = [line.id for line in line_items]
-        relations = context.active_relations_for_row_ids(invoice_ids)
+        relations = context.distributed_relations_for_row_ids(invoice_ids)
         return self._bank_relation_payload(group["primary"], line_items, relations, context=context)["summaries"]
 
     @staticmethod
@@ -1191,7 +1187,7 @@ class OutputInvoiceCollectionQueryService:
         line_items: list[Invoice],
         relations: list[dict[str, Any]],
         *,
-        context: InvoiceRelationQueryContext,
+        context: DistributedInvoiceRelationContext,
     ) -> bool:
         invoice_total = abs(sum((_invoice_total(line) for line in line_items), start=ZERO))
         bank_map = context.bank_transactions_by_id()

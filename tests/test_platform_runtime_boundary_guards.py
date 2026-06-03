@@ -99,6 +99,8 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
         func = node.func
         if isinstance(func, ast.Attribute) and func.attr in {
             "active_relations_for_row_ids",
+            "get_active_relation_by_case_id",
+            "get_active_relation_by_row_id",
             "list_active_relations",
             "load_workbench_pair_relations",
         }:
@@ -127,14 +129,19 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
             "backend/src/fin_ops_platform/services/batch_accounting_service.py": {
                 "BatchAccountingService._submit_unlocked",
                 "BatchAccountingService.repair_legacy_case_id_collisions",
+                "BatchAccountingService.withdraw",
+                "BatchAccountingService._withdraw_unlocked",
             },
             "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py": {
                 "NoOaBankBatchApplicationService.submit_selected_rows",
                 "NoOaBankBatchApplicationService._validate_internal_transfer_selection",
                 "NoOaBankBatchApplicationService._restore_snapshots",
+                "NoOaBankBatchApplicationService.pair_relation_snapshot_by_case_id",
             },
             "backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py": {
+                "NoOaBankBatchService.submit_batch",
                 "NoOaBankBatchService._repair_submitted_no_oa_relation_consistency",
+                "NoOaBankBatchService._has_active_no_oa_relation",
             },
         }
         qualified = f"{class_name}.{function_name}" if class_name and function_name else function_name
@@ -381,6 +388,37 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             visitor = _ForbiddenRelationReadVisitor(path=path)
             visitor.visit(_parse(path))
             violations.extend(visitor.violations)
+
+        self.assertEqual(violations, [])
+
+    def test_downstream_relation_query_services_do_not_accept_pair_relation_service(self) -> None:
+        downstream_query_service_paths = {
+            SERVICES_ROOT / "input_invoice_usage_service.py",
+            SERVICES_ROOT / "oa_pending_payment_service.py",
+            SERVICES_ROOT / "output_invoice_collection_service.py",
+            SERVICES_ROOT / "invoice_relation_query_context.py",
+            SERVICES_ROOT / "bank_details_relation_tag_projection_service.py",
+        }
+        violations: list[str] = []
+
+        for path in sorted(downstream_query_service_paths):
+            if not path.exists():
+                violations.append(f"{_relative(path)} is missing")
+                continue
+            tree = _parse(path)
+            rel_path = _relative(path)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    arg_names = [arg.arg for arg in [*node.args.args, *node.args.kwonlyargs]]
+                    if "pair_relation_service" in arg_names:
+                        violations.append(f"{rel_path}:{node.lineno} {node.name} accepts pair_relation_service")
+                    if node.name == "active_relations_for_row_ids":
+                        violations.append(f"{rel_path}:{node.lineno} exposes legacy active_relations_for_row_ids")
+                if (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module == "fin_ops_platform.services.workbench_pair_relation_service"
+                ):
+                    violations.append(f"{rel_path}:{node.lineno} imports WorkbenchPairRelationService")
 
         self.assertEqual(violations, [])
 
