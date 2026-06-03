@@ -108,6 +108,19 @@ python3 -m fin_ops_platform.tools.reconcile_workbench_read_model --scope-key 202
 
 该工具只用于迁移校验，会在工具进程内调用旧 builder 生成 row id 集合，并与 `read_model.workbench_rows` 对比；不要把旧 builder 重新放回 API 请求路径。
 
+## 工作台关系分发 read model 边界
+
+OA、银行流水、进项发票、销项发票之间的两两/三栏关系上下文统一由 `workbench_relation` read model 分发：
+
+- 手工确认关系事实源仍是 `app.workbench_pair_relations`；确定性自动关系来自 `read_model.workbench_reconciliation_decisions` 中 `paired` 状态的决策。分发 read model 不改写关系事实，只把 active 手工关系、paired 自动决策和对象详情投影成标准只读上下文。
+- 标准表是 `read_model.workbench_relation_scopes`、`read_model.workbench_relation_groups` 和 `read_model.workbench_relation_rows`。groups 保存一组关系，rows 给每个 OA/流水/发票对象一行。
+- `WorkbenchRelationReadFacade` 是下游页面唯一读取入口。待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细关系标签等页面不得再直接 join `app.workbench_pair_relations`、`app.invoices`、OA projection 或 OA 附件票缓存来拼关系。
+- 分发 rows 必须覆盖无关联对象：`relation_status='unlinked'`、`group_ids=[]`、`linked_*=[]`。页面需要显示空 OA/空发票时直接消费空数组，不再自行补空。
+- OA 附件发票只从 `read_model.workbench_rows.source_kind='oa_attachment_invoice'` 纳入 `linked_input_invoices`；付款凭证、未知附件、解析失败附件不得进入发票关系。
+- standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-relation-read-model-refresh` claim `workbench_relation.read_model.refresh` 后按 `YYYY-MM` shard 重建。`all` 只展开为月份 shard，不在 API 热路径同步扫描事实。
+- 写入或撤回 pair relation 时，事务内 writer 必须标记 `workbench_relation` dirty/outbox，并触发待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细、搜索、成本、税金和免 OA 批次等下游 read model 重新收敛。自动决策 upsert/expire 也必须标记对应月份的 `workbench_relation` dirty。
+- 该机制不是关联台 UI payload 复用。各页面保留自己的 SQL read model、筛选、状态、权限和导出，只消费统一关系上下文作为上游事实。
+
 ## 成本统计 SQL read model 边界
 
 `/api/cost-statistics/explorer` 和 `/api/cost-statistics` month summary 的生产读取边界是 `read_model.cost_statistics_read_models`：
@@ -151,7 +164,7 @@ python3 -m fin_ops_platform.tools.reconcile_tax_offset_read_model --month 2026-0
 - API 只做结构化 SQL 查询和分页；read model miss/stale 时 enqueue `search.read_model.refresh` 或 `pending_invoice.read_model.refresh`，不在请求里同步扫描全量发票、流水、OA 或关系数据。
 - `read_model.search_index_rows` 按 `scope_month`、`source_kind`、`status` 和 trigram `searchable_text/project_name/counterparty_name` 建索引，用于全局搜索和跳转 payload。
 - `read_model.pending_invoice_rows` 按 `direction/filter_group/trade_date` 建分页索引，并用 trigram `searchable_text` 支持关键字过滤。
-- standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh` claim durable queue 后，从 facts、工作台关系和银行标签设置构建 read model。
+- standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh` claim durable queue 后，从 facts、`WorkbenchRelationReadFacade` 和银行标签设置构建 read model。
 - 补票、银行标签设置、pair relation、row override、exception case、导入 facts 等影响结果的写路径必须标记 search/pending invoice dirty scope。
 
 ## OA projection SQL 边界

@@ -85,6 +85,37 @@ class AppHealthServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["workbench_read_model"]["status"], "stale")
         self.assertEqual(snapshot["metrics"]["dirty_scope_age_seconds"], {"all": 321.0})
 
+    def test_workbench_relation_read_model_health_exposes_backlog_and_failure(self) -> None:
+        service = AppHealthService()
+
+        snapshot = service.build_snapshot(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            oa_sync_payload={
+                "status": "synced",
+                "dirty_scopes": [],
+                "workbench_relation_read_model": {
+                    "status": "stale",
+                    "dirty_backlog": 2,
+                    "stale_scopes": ["2026-01", "2026-02"],
+                    "last_refresh_at": "2026-06-03T10:00:00+00:00",
+                    "last_failure_reason": "projection_failed",
+                    "source_versions": {"workbench_relation_schema_version": "test"},
+                },
+            },
+            state_store_info={},
+            rebuild_scheduled=False,
+            duration_ms=1,
+        )
+
+        relation = snapshot["workbench_relation_read_model"]
+        self.assertEqual(relation["status"], "stale")
+        self.assertEqual(relation["dirty_backlog"], 2)
+        self.assertEqual(relation["stale_scopes"], ["2026-01", "2026-02"])
+        self.assertEqual(relation["last_failure_reason"], "projection_failed")
+        self.assertEqual(snapshot["metrics"]["workbench_relation_dirty_backlog"], 2)
+        self.assertEqual(snapshot["metrics"]["workbench_relation_stale_scope_count"], 2)
+
     def test_workbench_matching_dirty_scope_marks_busy_and_exposes_last_error(self) -> None:
         service = AppHealthService()
 

@@ -637,8 +637,23 @@ class PostgresCoreRepository:
         scope_keys = self._changed_import_scope_keys(snapshot)
         if not scope_keys:
             return
+        scope_types = (
+            "workbench_relation",
+            "workbench",
+            "bank_detail",
+            "pending_invoice",
+            "input_invoice_usage",
+            "output_invoice_collection",
+            "oa_pending_payment",
+            "no_oa_bank_batch",
+            "cost_statistics",
+            "cost",
+            "tax_offset",
+            "tax",
+            "search",
+        )
         for scope_key in scope_keys:
-            for scope_type in ("workbench", "cost", "tax", "search"):
+            for scope_type in scope_types:
                 payload = {"source": "import_facts", "scope_type": scope_type, "scope_key": scope_key}
                 connection.execute(
                     """

@@ -85,6 +85,170 @@ class FakeOAProjection:
         return [self.records_by_id[row_id] for row_id in normalized if row_id in self.records_by_id]
 
 
+class FakeWorkbenchRelationFacade:
+    def __init__(self, rows: list[dict[str, object]], groups: list[dict[str, object]] | None = None) -> None:
+        self.rows_by_id = {str(row.get("row_id")): row for row in rows}
+        self.groups_by_id = {str(group.get("group_id")): group for group in list(groups or [])}
+        self.calls: list[list[str]] = []
+
+    @classmethod
+    def from_pair_service(
+        cls,
+        *,
+        pair_service: WorkbenchPairRelationService,
+        transactions: list[BankTransaction],
+        invoices: list[Invoice],
+        oa_projection: FakeOAProjection | None = None,
+    ) -> "FakeWorkbenchRelationFacade":
+        transactions_by_id = {transaction.id: transaction for transaction in transactions}
+        invoices_by_id = {invoice.id: invoice for invoice in invoices}
+        rows_by_id: dict[str, dict[str, object]] = {}
+        groups: list[dict[str, object]] = []
+        oa_records = getattr(oa_projection, "records_by_id", {}) if oa_projection is not None else {}
+        for relation in pair_service.list_active_relations():
+            if not isinstance(relation, dict):
+                continue
+            case_id = str(relation.get("case_id") or "")
+            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
+            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+            linked_bank: list[dict[str, object]] = []
+            linked_input: list[dict[str, object]] = []
+            linked_output: list[dict[str, object]] = []
+            linked_oa: list[dict[str, object]] = []
+            metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
+            groups.append(
+                {
+                    "group_id": case_id,
+                    "payload": {
+                        "group_id": case_id,
+                        "row_ids": row_ids,
+                        "row_types": row_types,
+                        "relation_mode": str(relation.get("relation_mode") or "manual_confirmed"),
+                        "special_metadata": dict(metadata),
+                        "amount_check": dict(relation.get("amount_check") or {}) if isinstance(relation.get("amount_check"), dict) else {},
+                    },
+                    "oa_row_ids": [row_id for index, row_id in enumerate(row_ids) if index < len(row_types) and row_types[index] == "oa"],
+                    "bank_transaction_ids": [row_id for index, row_id in enumerate(row_ids) if index < len(row_types) and row_types[index] == "bank"],
+                    "input_invoice_ids": [
+                        row_id
+                        for index, row_id in enumerate(row_ids)
+                        if index < len(row_types)
+                        and row_types[index] == "invoice"
+                        and row_id in invoices_by_id
+                        and invoices_by_id[row_id].invoice_type == InvoiceType.INPUT
+                    ],
+                    "output_invoice_ids": [
+                        row_id
+                        for index, row_id in enumerate(row_ids)
+                        if index < len(row_types)
+                        and row_types[index] == "invoice"
+                        and row_id in invoices_by_id
+                        and invoices_by_id[row_id].invoice_type == InvoiceType.OUTPUT
+                    ],
+                }
+            )
+            for index, row_id in enumerate(row_ids):
+                row_type = row_types[index] if index < len(row_types) else ""
+                if row_type == "bank" and row_id in transactions_by_id:
+                    transaction = transactions_by_id[row_id]
+                    linked_bank.append(
+                        {
+                            "id": row_id,
+                            "amount": f"{transaction.amount:.2f}",
+                            "trade_time": transaction.trade_time or transaction.txn_date,
+                            "counterparty_name": transaction.counterparty_name_raw,
+                            "relation_case_id": case_id,
+                        }
+                    )
+                elif row_type == "invoice" and row_id in invoices_by_id:
+                    invoice = invoices_by_id[row_id]
+                    invoice_payload = {
+                        "id": row_id,
+                        "invoice_no": invoice.invoice_no,
+                        "digital_invoice_no": invoice.digital_invoice_no,
+                        "issue_date": invoice.invoice_date,
+                        "total_with_tax": f"{(invoice.total_with_tax if invoice.total_with_tax is not None else invoice.amount):.2f}",
+                        "seller_name": invoice.seller_name,
+                        "buyer_name": invoice.buyer_name,
+                        "relation_case_id": case_id,
+                    }
+                    if invoice.invoice_type == InvoiceType.OUTPUT:
+                        linked_output.append(invoice_payload)
+                    else:
+                        linked_input.append(invoice_payload)
+                elif row_type == "oa":
+                    record = oa_records.get(row_id) if isinstance(oa_records, dict) else None
+                    linked_oa.append(
+                        {
+                            "id": row_id,
+                            "applicant": getattr(record, "applicant", "") or str(metadata.get("applicant") or metadata.get("oa_applicant") or ""),
+                            "application_type": getattr(record, "apply_type", "") or str(metadata.get("application_type") or ""),
+                            "project_name": getattr(record, "project_name", "") or str(metadata.get("project_name") or ""),
+                            "status": getattr(record, "section", "") or str(metadata.get("status") or ""),
+                            "form_no": getattr(record, "case_id", "") or str(metadata.get("form_no") or ""),
+                            "detail_available": record is not None,
+                            "relation_case_id": case_id,
+                        }
+                    )
+            for row_id in row_ids:
+                row = rows_by_id.setdefault(
+                    row_id,
+                    {
+                        "row_id": row_id,
+                        "row_type": "bank_transaction",
+                        "group_ids": [],
+                        "linked_oa": [],
+                        "linked_bank_transactions": [],
+                        "linked_input_invoices": [],
+                        "linked_output_invoices": [],
+                    },
+                )
+                row["group_ids"] = [*list(row.get("group_ids") or []), case_id]
+                row["linked_oa"] = [*list(row.get("linked_oa") or []), *linked_oa]
+                row["linked_bank_transactions"] = [*list(row.get("linked_bank_transactions") or []), *linked_bank]
+                row["linked_input_invoices"] = [*list(row.get("linked_input_invoices") or []), *linked_input]
+                row["linked_output_invoices"] = [*list(row.get("linked_output_invoices") or []), *linked_output]
+        return cls(list(rows_by_id.values()), groups=groups)
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        normalized = [str(row_id).strip() for row_id in row_ids if str(row_id).strip()]
+        self.calls.append(normalized)
+        rows = [self.rows_by_id[row_id] for row_id in normalized if row_id in self.rows_by_id]
+        group_ids: list[str] = []
+        for row in rows:
+            for group_id in list(row.get("group_ids") or []):
+                group_text = str(group_id).strip()
+                if group_text and group_text not in group_ids:
+                    group_ids.append(group_text)
+        groups = [
+            self.groups_by_id[group_id]
+            if group_id in self.groups_by_id
+            else {
+                "group_id": group_id,
+                "payload": {
+                    "group_id": group_id,
+                    "row_ids": [],
+                    "row_types": [],
+                    "relation_mode": "manual_confirmed",
+                },
+                "oa_row_ids": [],
+                "bank_transaction_ids": [],
+                "input_invoice_ids": [],
+                "output_invoice_ids": [],
+            }
+            for group_id in group_ids
+        ]
+        return {
+            "status": "fresh",
+            "rows": rows,
+            "groups": groups,
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": ["2026-05"],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+
 class PendingInvoiceQueryServiceTests(unittest.TestCase):
     def test_expense_rows_use_input_invoices_and_keep_multiple_invoices_in_one_bank_row(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
@@ -209,6 +373,92 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             service.oa_detail("candidate:030404426078")
 
         self.assertEqual(context.exception.error_code, "invalid_oa_detail_id")
+
+    def test_relation_detail_uses_workbench_relation_distribution_for_oa_attachment_invoices(self) -> None:
+        vendor = self._counterparty("cp_vendor", "Vendor A")
+        txn = self._bank_transaction("txn_expense", TransactionDirection.OUTFLOW, "Vendor A", "196.00")
+        inv_1 = self._invoice("oa-att-inv-001", InvoiceType.INPUT, "ATT-001", vendor, seller_name="Vendor A", total_with_tax="70.00")
+        inv_2 = self._invoice("oa-att-inv-002", InvoiceType.INPUT, "ATT-002", vendor, seller_name="Vendor A", total_with_tax="126.00")
+        pair_service = WorkbenchPairRelationService()
+        relation_facade = FakeWorkbenchRelationFacade([
+            {
+                "row_id": txn.id,
+                "row_type": "bank_transaction",
+                "group_ids": ["case_tmw_196"],
+                "linked_oa": [
+                    {
+                        "id": "oa-tmw-196",
+                        "applicant": "田孟维",
+                        "project_name": "云南溯源科技",
+                        "application_type": "日常报销",
+                        "relation_case_id": "case_tmw_196",
+                        "detail_available": True,
+                    }
+                ],
+                "linked_bank_transactions": [
+                    {"id": txn.id, "amount": "196.00", "direction": "outflow", "relation_case_id": "case_tmw_196"}
+                ],
+                "linked_input_invoices": [
+                    {"id": inv_1.id, "invoice_no": "ATT-001", "seller_name": "Vendor A", "total_with_tax": "70.00", "relation_case_id": "case_tmw_196"},
+                    {"id": inv_2.id, "invoice_no": "ATT-002", "seller_name": "Vendor A", "total_with_tax": "126.00", "relation_case_id": "case_tmw_196"},
+                ],
+                "linked_output_invoices": [],
+            }
+        ])
+        service = self._query_service(
+            transactions=[txn],
+            invoices=[inv_1, inv_2],
+            pair_service=pair_service,
+            relation_facade=relation_facade,
+        )
+
+        detail = service.relation_detail(transaction_id=txn.id, direction="expense")
+
+        self.assertEqual([invoice["id"] for invoice in detail["related_invoices"]], ["oa-att-inv-001", "oa-att-inv-002"])
+        self.assertEqual([oa["id"] for oa in detail["related_oa"]], ["oa-tmw-196"])
+        self.assertEqual(detail["relation_case_ids"], ["case_tmw_196"])
+        self.assertIn([txn.id], relation_facade.calls)
+
+    def test_oa_detail_uses_workbench_relation_distribution_case_id(self) -> None:
+        relation_facade = FakeWorkbenchRelationFacade([
+            {
+                "row_id": "oa-pay-2048",
+                "row_type": "oa",
+                "group_ids": ["case_distributed_oa"],
+                "linked_oa": [{"id": "oa-pay-2048", "relation_case_id": "case_distributed_oa"}],
+                "linked_bank_transactions": [],
+                "linked_input_invoices": [],
+                "linked_output_invoices": [],
+            }
+        ])
+        oa_projection = FakeOAProjection([
+            OAApplicationRecord(
+                id="oa-pay-2048",
+                month="2026-05",
+                section="已完成",
+                case_id="2048",
+                applicant="杨丽萍",
+                project_name="大理项目",
+                apply_type="支付申请",
+                amount="7680.00",
+                counterparty_name="Vendor A",
+                reason="服务费",
+                relation_code="pending_match",
+                relation_label="待找流水与发票",
+                relation_tone="warn",
+            )
+        ])
+        service = self._query_service(
+            transactions=[],
+            pair_service=WorkbenchPairRelationService(),
+            relation_facade=relation_facade,
+            oa_projection=oa_projection,
+        )
+
+        detail_payload = service.oa_detail("oa-pay-2048")
+
+        self.assertEqual(detail_payload["oa"]["relation_case_id"], "case_distributed_oa")
+        self.assertIn(["oa-pay-2048"], relation_facade.calls)
 
     def test_rows_keep_candidate_case_id_separate_from_real_oa_id(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
@@ -981,6 +1231,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         bank_account_mappings: list[dict[str, str]] | None = None,
         oa_projection: object | None = None,
         income_status_override_provider: object | None = None,
+        relation_facade: object | None = None,
     ) -> PendingInvoiceQueryService:
         resolved_import_service = import_service or ImportNormalizationService(
             existing_transactions=transactions,
@@ -1010,14 +1261,24 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
                 },
             },
         }
+        resolved_pair_service = pair_service or WorkbenchPairRelationService()
+        resolved_relation_facade = relation_facade
+        if resolved_relation_facade is None:
+            resolved_relation_facade = FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=resolved_pair_service,
+                transactions=list(transactions or []),
+                invoices=list(invoices or []),
+                oa_projection=oa_projection,
+            )
         return PendingInvoiceQueryService(
             import_service=resolved_import_service,
-            pair_relation_service=pair_service or WorkbenchPairRelationService(),
+            pair_relation_service=resolved_pair_service,
             category_service=category_service or BankTransactionCategoryService(),
             app_settings_provider=lambda: settings_payload,
             effective_category_provider=effective_category_provider,
             oa_projection=oa_projection,
             income_status_override_provider=income_status_override_provider,
+            relation_facade=resolved_relation_facade,
         )
 
 

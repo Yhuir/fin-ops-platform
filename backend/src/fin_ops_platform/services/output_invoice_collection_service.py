@@ -20,6 +20,7 @@ from fin_ops_platform.services.output_invoice_collection_models import (
 )
 from fin_ops_platform.services.output_invoice_collection_status_service import OutputInvoiceCollectionStatusOverlayService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
 ZERO = Decimal("0.00")
@@ -322,18 +323,22 @@ class OutputInvoiceCollectionQueryService:
         self,
         *,
         import_service: ImportNormalizationService,
-        pair_relation_service: WorkbenchPairRelationService,
+        pair_relation_service: WorkbenchPairRelationService | None = None,
+        relation_facade: WorkbenchRelationReadFacade | None = None,
         status_rule_service: OutputInvoiceCollectionStatusRuleService | None = None,
         receipt_preview_service: OutputInvoiceReceiptPreviewService | None = None,
         lifecycle_repository: Any | None = None,
         status_overlay_service: OutputInvoiceCollectionStatusOverlayService | None = None,
+        require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
+        self._relation_facade = relation_facade
         self._status_rule_service = status_rule_service or OutputInvoiceCollectionStatusRuleService()
         self._receipt_preview_service = receipt_preview_service or OutputInvoiceReceiptPreviewService()
         self._lifecycle_repository = lifecycle_repository
         self._status_overlay_service = status_overlay_service or OutputInvoiceCollectionStatusOverlayService()
+        self._require_fresh_relations = require_fresh_relations
 
     def list_rows(
         self,
@@ -353,7 +358,7 @@ class OutputInvoiceCollectionQueryService:
         page_limit = _parse_positive_int(page_size, "page_size", maximum=200)
         parsed_filters = self._parse_filters(filters)
         normalized_sort_field, normalized_sort_direction = self._parse_sort(sort_field, sort_direction)
-        context = self._query_context()
+        context = self._query_context(month_hint=month)
 
         rows = self._filtered_sorted_rows(
             context=context,
@@ -472,10 +477,13 @@ class OutputInvoiceCollectionQueryService:
             "sourceVersion": SOURCE_VERSION,
         }
 
-    def _query_context(self) -> InvoiceRelationQueryContext:
+    def _query_context(self, *, month_hint: str | None = None) -> InvoiceRelationQueryContext:
         return InvoiceRelationQueryContext(
             import_service=self._import_service,
             pair_relation_service=self._pair_relation_service,
+            relation_facade=self._relation_facade,
+            month_hint=month_hint,
+            require_fresh_relations=self._require_fresh_relations,
         )
 
     def _filtered_sorted_rows(
@@ -675,6 +683,7 @@ class OutputInvoiceCollectionQueryService:
 
     def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext, tenant_id: str = "default") -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
+        context.preload_relation_rows([line.id for group in groups for line in group["line_items"]])
         rows = [self._row_payload(group, groups, context=context) for group in groups]
         return self.apply_lifecycle_overlays_to_rows(rows, tenant_id=tenant_id)
 
@@ -1410,19 +1419,6 @@ class OutputInvoiceCollectionQueryService:
     def _relation_amount_check_is_matched(relation: dict[str, Any]) -> bool:
         amount_check = relation.get("amount_check")
         return isinstance(amount_check, dict) and amount_check.get("matched") is True
-
-    def _relation_summaries_for_row(self, row_id: str) -> list[dict[str, Any]]:
-        return [
-            {
-                "caseId": relation.get("case_id", ""),
-                "relationMode": relation.get("relation_mode", ""),
-                "rowIds": list(relation.get("row_ids") or []),
-                "rowTypes": list(relation.get("row_types") or []),
-                "amountCheck": deepcopy(relation.get("amount_check") or {}),
-            }
-            for relation in self._pair_relation_service.active_relations_for_row_ids([row_id])
-        ]
-
 
 def _parse_positive_int(value: int | str | None, field: str, *, maximum: int | None = None) -> int:
     try:

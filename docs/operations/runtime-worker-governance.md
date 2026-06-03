@@ -251,3 +251,18 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 - outbox event 不再 failed/dead-letter。
 - dirty scope 进入 done 或明确仍在 processing。
 - API 返回 fresh，或在 worker 尚未完成时返回明确 refreshing。
+
+## 统一关系分发回填顺序
+
+涉及 OA、银行流水、进项发票、销项发票通用关系展示的页面，必须先回填 `workbench_relation`
+read model，再回填页面自己的 read model。推荐顺序：
+
+1. 启动并检查 `workbench-relation` worker，确认
+   `workbench_relation.read_model.refresh` 可 claim。
+2. 对历史月份 enqueue `workbench_relation` scope；`all` 只作为 fan-out 入口，实际重建必须落到
+   `YYYY-MM` shard。
+3. 等 `read_model.workbench_relation_rows/groups` 对目标月份 fresh 后，再 enqueue
+   `pending_invoice`、`bank_detail`、`input_invoice_usage`、`output_invoice_collection`、
+   `oa_pending_payment`、`no_oa_bank_batch`、`cost_statistics`、`tax_offset`、`search`。
+4. 页面验证以 facade/read model 状态为准：如果 `workbench_relation` stale 或 missing，下游页面不能用
+   `app.workbench_pair_relations` 同步补数据伪装 fresh。

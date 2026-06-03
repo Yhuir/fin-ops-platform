@@ -6,6 +6,7 @@ from http import HTTPStatus
 import json
 from pathlib import Path
 import tempfile
+from typing import Any
 import unittest
 from urllib.parse import quote
 
@@ -16,6 +17,50 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_usage_collection_source_versions import output_invoice_collection_source_versions
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
+
+class FakeOutputRelationFacade:
+    def __init__(self, relations: list[dict[str, Any]]) -> None:
+        self.relations = [dict(relation) for relation in relations]
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: Any) -> dict[str, Any]:
+        wanted = {str(row_id) for row_id in row_ids}
+        groups = [self._group(relation) for relation in self.relations if wanted & set(relation.get("row_ids") or [])]
+        return self._payload(groups)
+
+    def list_by_month(self, _month: str, **_kwargs: Any) -> dict[str, Any]:
+        return self._payload([self._group(relation) for relation in self.relations])
+
+    def _payload(self, groups: list[dict[str, Any]]) -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        for group in groups:
+            group_id = str(group["group_id"])
+            payload = group["payload"]
+            for row_id, row_type in zip(payload["row_ids"], payload["row_types"]):
+                rows.append({"row_id": row_id, "row_type": row_type, "relation_status": "linked", "group_ids": [group_id]})
+        return {"status": "fresh", "rows": rows, "groups": groups, "source_versions": {}, "read_model_scope_keys": []}
+
+    @staticmethod
+    def _group(relation: dict[str, Any]) -> dict[str, Any]:
+        case_id = str(relation.get("case_id") or "")
+        row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
+        row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+        return {
+            "group_id": case_id,
+            "scope_month": relation.get("month_scope") or "2026-05",
+            "oa_row_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "oa"],
+            "bank_transaction_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "bank"],
+            "input_invoice_ids": [],
+            "output_invoice_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "invoice"],
+            "payload": {
+                "case_id": case_id,
+                "row_ids": row_ids,
+                "row_types": row_types,
+                "relation_mode": relation.get("relation_mode") or "",
+                "amount_check": dict(relation.get("amount_check") or {}),
+                "special_metadata": dict(relation.get("special_metadata") or {}),
+            },
+        }
 
 
 class OutputInvoiceCollectionApiTests(unittest.TestCase):
@@ -322,6 +367,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         app._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=import_service,
             pair_relation_service=relation_service,
+            relation_facade=FakeOutputRelationFacade(relation_service.list_active_relations()),
             lifecycle_repository=getattr(app, "_output_invoice_collection_lifecycle_repository", None),
         )
 

@@ -1,5 +1,14 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import AccountBalanceWalletOutlinedIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
+import AssignmentLateOutlinedIcon from "@mui/icons-material/AssignmentLateOutlined";
+import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
+import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
+import InputOutlinedIcon from "@mui/icons-material/InputOutlined";
+import MoveToInboxOutlinedIcon from "@mui/icons-material/MoveToInboxOutlined";
+import OutputOutlinedIcon from "@mui/icons-material/OutputOutlined";
+import PlaylistAddCheckOutlinedIcon from "@mui/icons-material/PlaylistAddCheckOutlined";
+import TollOutlinedIcon from "@mui/icons-material/TollOutlined";
 
 import App from "../app/App";
 import { sidebarGroups } from "../components/shell/sidebarItems";
@@ -24,6 +33,34 @@ describe("Finance operations shell", () => {
     expect(financeLabels?.[bankDetailsIndex + 5]).toBe("免OA流水批量处理");
     expect(financeLabels?.[bankDetailsIndex + 6]).toBe("批量账务");
     expect(financeLabels?.[bankDetailsIndex + 7]).toBe("外部往来款管理");
+  });
+
+  test("assigns sidebar icons from each page's business facts", () => {
+    const sidebarItems = sidebarGroups.flatMap((group) => group.items);
+    const iconByLabel = new Map(sidebarItems.map((item) => [item.label, item.icon]));
+
+    expect(iconByLabel.get("待找发票")).toBe(AssignmentLateOutlinedIcon);
+    expect(iconByLabel.get("进项发票使用情况")).toBe(InputOutlinedIcon);
+    expect(iconByLabel.get("OA待付款核对")).toBe(FactCheckOutlinedIcon);
+    expect(iconByLabel.get("销项发票收款情况")).toBe(OutputOutlinedIcon);
+    expect(iconByLabel.get("免OA流水批量处理")).toBe(PlaylistAddCheckOutlinedIcon);
+    expect(iconByLabel.get("批量账务")).toBe(AccountBalanceWalletOutlinedIcon);
+    expect(iconByLabel.get("ETC票据管理")).toBe(TollOutlinedIcon);
+    expect(iconByLabel.get("银行流水导入")).toBe(MoveToInboxOutlinedIcon);
+    expect(iconByLabel.get("发票导入")).toBe(DescriptionOutlinedIcon);
+
+    expect(new Set([
+      iconByLabel.get("待找发票"),
+      iconByLabel.get("进项发票使用情况"),
+      iconByLabel.get("OA待付款核对"),
+      iconByLabel.get("销项发票收款情况"),
+    ])).toHaveLength(4);
+    expect(new Set([
+      iconByLabel.get("银行明细"),
+      iconByLabel.get("免OA流水批量处理"),
+      iconByLabel.get("批量账务"),
+      iconByLabel.get("银行流水导入"),
+    ])).toHaveLength(4);
   });
 
   test("loads the workbench as an all-time view and keeps the month picker scoped to tax offset", async () => {

@@ -1434,24 +1434,32 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(row["category_code"], "salary")
         self.assertEqual(row["category_label"], "工资")
 
-    def test_relation_tags_use_pair_relation_row_types_for_oa_attachment_invoices(self) -> None:
-        connection = FakeConnection(
-            rows=[
-                [
-                    {
-                        "case_id": "CASE-AUTO-0003",
-                        "row_ids": [
-                            "txn_imported_1242",
-                            "oa-exp-1964",
-                            "oa-att-inv-oa-exp-1964-96685fdf79d36cc6",
-                        ],
-                        "row_types": ["bank", "oa", "invoice"],
-                    }
-                ],
-                [],
-            ]
-        )
-        builder = BankDetailSqlProjectionBuilder(connection=connection)
+    def test_relation_tags_use_workbench_relation_distribution_for_oa_attachment_invoices(self) -> None:
+        relation_facade = type(
+            "RelationFacade",
+            (),
+            {
+                "last_source_versions": {},
+                "list_by_month": lambda _self, *_args, **_kwargs: {
+                    "status": "fresh",
+                    "rows": [
+                        {
+                            "row_id": "txn_imported_1242",
+                            "group_ids": ["CASE-AUTO-0003"],
+                            "linked_oa": [{"id": "oa-exp-1964"}],
+                            "linked_input_invoices": [{"id": "oa-att-inv-oa-exp-1964-96685fdf79d36cc6"}],
+                            "linked_output_invoices": [],
+                        }
+                    ],
+                    "groups": [],
+                    "source_versions": {},
+                    "read_model_scope_keys": ["2026-01"],
+                    "refresh_enqueued": False,
+                    "stale_reasons": [],
+                },
+            },
+        )()
+        builder = BankDetailSqlProjectionBuilder(connection=FakeConnection(), workbench_relation_read_facade=relation_facade)
 
         tags = builder._load_relation_tags(["txn_imported_1242"])  # noqa: SLF001
 

@@ -24,6 +24,7 @@ class NoOaBankBatchReadModelRefreshService:
         state_store: Any,
         queue_repository: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
+        relation_facade: Any | None = None,
     ) -> None:
         self._state_store = state_store
         self._queue_repository = queue_repository
@@ -38,6 +39,7 @@ class NoOaBankBatchReadModelRefreshService:
             state_store=state_store,
             workbench_matching_source_versions_provider=workbench_matching_source_versions_provider,
             queue_repository=queue_repository,
+            relation_facade=relation_facade,
         )
         self._no_oa_bank_batch_service = no_oa_bank_batch_service
 

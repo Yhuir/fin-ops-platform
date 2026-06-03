@@ -57,6 +57,26 @@ class EmptyTransactionConnection:
         return []
 
 
+class FreshEmptyWorkbenchRelationFacade:
+    @property
+    def last_source_versions(self) -> dict[str, object]:
+        return {}
+
+    def list_by_month(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "status": "fresh",
+            "rows": [],
+            "groups": [],
+            "source_versions": {},
+            "read_model_scope_keys": [],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+    def get_by_row_ids(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        return self.list_by_month()
+
+
 class InvoiceReadModelConnection:
     def __init__(
         self,
@@ -530,7 +550,10 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
     def test_projection_builder_persists_invoice_relation_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
-        builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=EmptyTransactionConnection())
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
+        )
         builder._core_repository = ProjectionCoreRepository(
             invoices=[
                 self._invoice("input-invoice-1", InvoiceType.INPUT),

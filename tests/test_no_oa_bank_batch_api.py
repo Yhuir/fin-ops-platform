@@ -25,6 +25,69 @@ AUTO_CATEGORY_TEXT_BY_CODE = {
 }
 
 
+class FakeNoOaRelationFacade:
+    def __init__(self, relations: list[dict[str, object]]) -> None:
+        self._relations = list(relations)
+        self.last_source_versions = {"schema_version": 52}
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        normalized = {str(row_id) for row_id in row_ids}
+        rows = [
+            self._row_payload(row_id, relation)
+            for relation in self._relations
+            for row_id in list(relation.get("row_ids") or [])
+            if str(row_id) in normalized
+        ]
+        return {"status": "fresh", "rows": rows, "groups": self._groups(), "source_versions": self.last_source_versions}
+
+    def list_by_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+        groups = [
+            group
+            for group in self._groups()
+            if str(group.get("scope_month") or group.get("scope_key") or "").startswith(month)
+        ]
+        return {"status": "fresh", "rows": [], "groups": groups, "source_versions": self.last_source_versions}
+
+    def _groups(self) -> list[dict[str, object]]:
+        groups: list[dict[str, object]] = []
+        for relation in self._relations:
+            case_id = str(relation.get("case_id") or "")
+            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
+            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+            metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
+            groups.append(
+                {
+                    "group_id": case_id,
+                    "scope_month": str(relation.get("month_scope") or "2026-03"),
+                    "scope_key": str(relation.get("month_scope") or "2026-03")[:7],
+                    "bank_transaction_ids": row_ids,
+                    "payload": {
+                        "group_id": case_id,
+                        "relation_mode": str(relation.get("relation_mode") or "no_oa_bank_batch"),
+                        "row_ids": row_ids,
+                        "row_types": row_types,
+                        "special_metadata": dict(metadata),
+                        "amount_check": dict(relation.get("amount_check") or {}) if isinstance(relation.get("amount_check"), dict) else {},
+                    },
+                }
+            )
+        return groups
+
+    @staticmethod
+    def _row_payload(row_id: object, relation: dict[str, object]) -> dict[str, object]:
+        case_id = str(relation.get("case_id") or "")
+        return {
+            "row_id": str(row_id),
+            "row_type": "bank_transaction",
+            "relation_status": "linked",
+            "group_ids": [case_id],
+            "linked_oa": [],
+            "linked_bank_transactions": [{"id": str(item), "relation_case_id": case_id} for item in list(relation.get("row_ids") or [])],
+            "linked_input_invoices": [],
+            "linked_output_invoices": [],
+        }
+
+
 def bank_transaction(
     transaction_id: str,
     *,
@@ -214,6 +277,52 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["category_label_path"], ["费用", "手续费"])
         self.assertEqual(payload["rows"][0]["category_source"], "auto")
 
+    def test_detail_rows_include_workbench_relation_distribution_status(self) -> None:
+        class RelationFacade:
+            def __init__(self) -> None:
+                self.last_source_versions = {"schema_version": 52, "source_version": 8}
+                self.calls: list[list[str]] = []
+
+            def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+                normalized = [str(row_id) for row_id in row_ids]
+                self.calls.append(normalized)
+                return {
+                    "status": "fresh",
+                    "rows": [
+                        {
+                            "row_id": "bank-202603-fee-1",
+                            "row_type": "bank_transaction",
+                            "relation_status": "linked",
+                            "group_ids": ["case_no_oa_linked"],
+                            "linked_oa": [{"id": "oa-no-oa-1"}],
+                            "linked_input_invoices": [{"id": "inv-no-oa-1"}],
+                            "linked_output_invoices": [],
+                            "linked_bank_transactions": [{"id": "bank-202603-fee-1"}],
+                        }
+                    ],
+                    "groups": [],
+                    "source_versions": self.last_source_versions,
+                    "read_model_scope_keys": ["2026-03"],
+                    "refresh_enqueued": False,
+                    "stale_reasons": [],
+                }
+
+        app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
+        relation_facade = RelationFacade()
+        app._workbench_relation_facade = relation_facade
+        batch_id = self._list_batches(app)["batches"][0]["batch_id"]
+
+        response = app.handle_request("GET", f"/api/no-oa-bank-batches/{batch_id}")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["rows"][0]["relation_status"], "linked")
+        self.assertEqual(payload["rows"][0]["relation_case_ids"], ["case_no_oa_linked"])
+        self.assertEqual(payload["rows"][0]["linked_oa_count"], 1)
+        self.assertEqual(payload["rows"][0]["linked_invoice_count"], 1)
+        self.assertEqual(payload["workbench_relation_source_versions"], {"schema_version": 52, "source_version": 8})
+        self.assertEqual(relation_facade.calls[0], ["bank-202603-fee-1"])
+
     def test_list_summary_and_submitted_batches_use_current_bank_auto_tag_labels_after_rename(self) -> None:
         app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
         draft_batch = self._list_batches(app)["batches"][0]
@@ -282,12 +391,18 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             body=json.dumps({"expected_version": fee_batch["version"]}),
         )
         submitted = json.loads(submit_response.body)["batch"]
+        app._workbench_relation_facade = FakeNoOaRelationFacade(app._workbench_pair_relation_service.list_active_relations())
         submitted_payload = self._list_batches(app, "?bucket=submitted")
         self.assertEqual([batch["batch_id"] for batch in submitted_payload["batches"]], [submitted["batch_id"]])
         self.assertEqual(submitted_payload["summary"]["submitted_count"], 1)
         self.assertEqual(submitted_payload["summary"]["draft_count"], 1)
         self._replace_transaction_text(app, "bank-202603-fee-1", "其他流水")
-        stale = self._list_batches(app, "?bucket=unsubmitted")["batches"][0]
+        app._workbench_relation_facade = FakeNoOaRelationFacade([])
+        stale = next(
+            batch
+            for batch in self._list_batches(app, "?bucket=unsubmitted")["batches"]
+            if batch["batch_id"] == submitted["batch_id"]
+        )
         withdraw_response = app.handle_request(
             "POST",
             f"/api/no-oa-bank-batches/{stale['batch_id']}/withdraw",

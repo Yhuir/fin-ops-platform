@@ -18,7 +18,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_status_payload,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
-from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
+from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
@@ -36,11 +36,14 @@ class SearchPendingSqlProjectionBuilder:
         connection: Any,
         read_model_repository: PostgresReadModelRepository | None = None,
         bank_transaction_tag_read_facade: Any | None = None,
+        workbench_relation_read_facade: Any | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
+        self._workbench_relation_read_facade = workbench_relation_read_facade
         self._pending_invoice_bank_tag_source_versions: dict[str, object] = {}
+        self._pending_invoice_relation_source_versions: dict[str, object] = {}
 
     def list_search_scope_shards(self, scope_key: str) -> list[str]:
         normalized_scope = str(scope_key or "").strip()
@@ -240,13 +243,13 @@ class SearchPendingSqlProjectionBuilder:
                 t.txn_direction,
                 t.txn_month,
                 c.raw_payload as category_payload,
-                coalesce(inv.invoices, '[]'::jsonb) as invoices,
-                coalesce(pay.paid_total, 0)::text as paid_total,
-                coalesce(rel.oa_applicant, '') as oa_applicant,
-                coalesce(rel.oa_project_name, '') as oa_project_name,
-                coalesce(rel.oa_summaries, '[]'::jsonb) as oa_summaries,
+                '[]'::jsonb as invoices,
+                '0' as paid_total,
+                '' as oa_applicant,
+                '' as oa_project_name,
+                '[]'::jsonb as oa_summaries,
                 iso.income_status_override,
-                coalesce(rel.case_ids, array[]::text[]) as relation_case_ids
+                array[]::text[] as relation_case_ids
             from app.bank_transactions t
             left join lateral (
                 select raw_payload
@@ -256,93 +259,6 @@ class SearchPendingSqlProjectionBuilder:
                 order by c.updated_at desc
                 limit 1
             ) c on true
-            left join lateral (
-                select
-                    jsonb_agg(
-                        jsonb_build_object(
-                            'id', coalesce(i.legacy_mongo_id, i.id::text),
-                            'invoice_no', i.invoice_no,
-                            'digital_invoice_no', i.digital_invoice_no,
-                            'issue_date', i.invoice_date,
-                            'total_with_tax', coalesce(i.total_with_tax, i.amount)::text,
-                            'seller_name', i.seller_name,
-                            'buyer_name', i.buyer_name,
-                            'invoice_type', i.invoice_type,
-                            'counterparty_display_name', case when %s = 'expense' then i.seller_name else i.buyer_name end
-                        )
-                        order by i.invoice_date nulls last, i.invoice_no
-                    ) as invoices
-                from app.workbench_pair_relations pr
-                join app.invoices i
-                  on coalesce(i.legacy_mongo_id, i.id::text) = any(pr.row_ids)
-                 and i.invoice_type = %s
-                where pr.status = 'active'
-                  and coalesce(t.legacy_mongo_id, t.id::text) = any(pr.row_ids)
-            ) inv on true
-            left join lateral (
-                select coalesce(sum(paid.amount), 0) as paid_total
-                from (
-                    select distinct coalesce(tb.legacy_mongo_id, tb.id::text) as bank_row_id, tb.amount
-                    from app.workbench_pair_relations pr
-                    join app.bank_transactions tb
-                      on coalesce(tb.legacy_mongo_id, tb.id::text) = any(pr.row_ids)
-                    where pr.status = 'active'
-                      and exists (
-                          select 1
-                          from jsonb_array_elements(coalesce(inv.invoices, '[]'::jsonb)) invoice_item
-                          where invoice_item->>'id' = any(pr.row_ids)
-                      )
-                ) paid
-            ) pay on true
-            left join lateral (
-                select
-                    array_agg(distinct pr.case_id) as case_ids,
-                    jsonb_agg(
-                        distinct jsonb_build_object(
-                            'id', coalesce(oa_app.row_id, oa_link.oa_id),
-                            'applicant', coalesce(oa_app.applicant, relation_meta.oa_applicant, ''),
-                            'application_type', coalesce(oa_app.form_type, ''),
-                            'project_name', coalesce(oa_app.project_name, relation_meta.oa_project_name, ''),
-                            'status', coalesce(oa_app.status, ''),
-                            'form_no', coalesce(oa_app.form_id, ''),
-                            'detail_available', oa_app.row_id is not null,
-                            'relation_case_id', pr.case_id
-                        )
-                    ) filter (where oa_link.oa_id is not null) as oa_summaries,
-                    max(coalesce(
-                        oa_app.applicant,
-                        relation_meta.oa_applicant
-                    )) as oa_applicant,
-                    max(coalesce(
-                        oa_app.project_name,
-                        relation_meta.oa_project_name
-                    )) as oa_project_name
-                from app.workbench_pair_relations pr
-                left join lateral (
-                    select
-                        coalesce(
-                            pr.raw_payload->'normalized_payload'->'special_metadata'->>'oa_applicant',
-                            pr.raw_payload->'normalized_payload'->'special_metadata'->>'applicant',
-                            pr.raw_payload->'normalized_payload'->'evidence'->>'oa_applicant',
-                            pr.raw_payload->'normalized_payload'->'evidence'->>'applicant'
-                        ) as oa_applicant,
-                        coalesce(
-                            pr.raw_payload->'normalized_payload'->'special_metadata'->>'oa_project_name',
-                            pr.raw_payload->'normalized_payload'->'special_metadata'->>'project_name',
-                            pr.raw_payload->'normalized_payload'->'evidence'->>'oa_project_name',
-                            pr.raw_payload->'normalized_payload'->'evidence'->>'project_name'
-                        ) as oa_project_name
-                ) relation_meta on true
-                left join lateral (
-                    select row_id as oa_id
-                    from unnest(pr.row_ids, pr.row_types) as relation_rows(row_id, row_type)
-                    where row_type = 'oa'
-                ) oa_link on true
-                left join app.oa_applications oa_app
-                  on oa_app.row_id = oa_link.oa_id
-                where pr.status = 'active'
-                  and coalesce(t.legacy_mongo_id, t.id::text) = any(pr.row_ids)
-            ) rel on true
             left join lateral (
                 select command_payload->'income_status_override' as income_status_override
                 from app.pending_invoice_manual_invoice_commands command
@@ -357,11 +273,16 @@ class SearchPendingSqlProjectionBuilder:
               and t.txn_month = %s::date
             order by coalesce(t.trade_time, t.txn_date::timestamptz) desc, transaction_id
             """,
-            (direction, target_invoice_type, txn_direction, month_start(month)),
+            (txn_direction, month_start(month)),
         )
         result: list[dict[str, object]] = []
+        relation_rows_by_id = self._workbench_relation_rows_by_transaction_id(
+            row_ids=[str(row.get("transaction_id") or "").strip() for row in rows],
+            month=month,
+        )
         for row in rows:
             transaction_id = str(row.get("transaction_id") or "").strip()
+            relation_context = relation_rows_by_id.get(transaction_id) or {}
             category = bank_tag_rows_by_id.get(transaction_id) or row_payload(row, "category_payload")
             category = category if isinstance(category, dict) else {}
             effective_category = pending_invoice_effective_category_payload(category)
@@ -369,13 +290,27 @@ class SearchPendingSqlProjectionBuilder:
             filter_group = _filter_group_for_category(category_code, tag_groups, direction=direction) or "all"
             if filter_name != "all" and filter_group != filter_name:
                 continue
-            invoices = row.get("invoices") if isinstance(row.get("invoices"), list) else []
-            payment_summary = _payment_summary_from_invoices(invoices, paid_total=row.get("paid_total"))
+            invoices = _relation_invoice_summaries(relation_context, target_invoice_type=target_invoice_type)
+            if not invoices:
+                invoices = row.get("invoices") if isinstance(row.get("invoices"), list) else []
+            paid_total = _relation_paid_total(relation_context) if relation_context else row.get("paid_total")
+            payment_summary = _payment_summary_from_invoices(invoices, paid_total=paid_total)
             can_create_invoice = direction == "expense" and not invoices and filter_group != "no_invoice_required"
-            relation_case_ids = list(row.get("relation_case_ids") or [])
-            oa_applicant = str(row.get("oa_applicant") or "").strip()
-            oa_project_name = str(row.get("oa_project_name") or "").strip()
-            oa_summaries, invalid_oa_summary_ids = sanitize_pending_invoice_oa_summaries(row.get("oa_summaries"))
+            relation_case_ids = _relation_case_ids(relation_context) or list(row.get("relation_case_ids") or [])
+            relation_oa_summaries = _relation_oa_summaries(relation_context)
+            oa_applicant = str(
+                (relation_oa_summaries[0].get("applicant") if relation_oa_summaries else None)
+                or row.get("oa_applicant")
+                or ""
+            ).strip()
+            oa_project_name = str(
+                (relation_oa_summaries[0].get("project_name") if relation_oa_summaries else None)
+                or row.get("oa_project_name")
+                or ""
+            ).strip()
+            oa_summaries, invalid_oa_summary_ids = sanitize_pending_invoice_oa_summaries(
+                relation_oa_summaries or row.get("oa_summaries")
+            )
             if not oa_summaries and not invalid_oa_summary_ids and (oa_applicant or oa_project_name):
                 oa_summaries = [
                     {
@@ -509,6 +444,34 @@ class SearchPendingSqlProjectionBuilder:
             if isinstance(row, dict) and (transaction_id := str(row.get("transaction_id") or "").strip())
         }
 
+    def _workbench_relation_rows_by_transaction_id(self, *, row_ids: list[str], month: str) -> dict[str, dict[str, object]]:
+        self._pending_invoice_relation_source_versions = {}
+        facade = self._workbench_relation_read_facade
+        if facade is None:
+            return {}
+        get_by_row_ids = getattr(facade, "get_by_row_ids", None)
+        if not callable(get_by_row_ids):
+            return {}
+        transaction_ids = _dedupe_preserve_order(text(row_id) for row_id in row_ids)
+        if not transaction_ids:
+            return {}
+        payload = get_by_row_ids(
+            transaction_ids,
+            require_fresh=True,
+            reason="pending_invoice_sql_projection",
+            month_hint=month,
+            scope_keys_hint=[month],
+        )
+        if not isinstance(payload, dict) or str(payload.get("status") or "") != "fresh":
+            raise RuntimeError("workbench_relation_read_model_not_fresh")
+        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        self._pending_invoice_relation_source_versions = dict(source_versions)
+        return {
+            row_id: row
+            for row in list(payload.get("rows") or [])
+            if isinstance(row, dict) and (row_id := str(row.get("row_id") or "").strip()) in transaction_ids
+        }
+
     def _pending_invoice_source_versions(self) -> dict[str, object]:
         settings = _settings_payload(self._connection)
         pending_groups = settings.get("pending_invoice_tag_groups")
@@ -522,6 +485,7 @@ class SearchPendingSqlProjectionBuilder:
             "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
             "bank_detail_source_versions": dict(self._pending_invoice_bank_tag_source_versions),
+            "workbench_relation_source_versions": dict(self._pending_invoice_relation_source_versions),
         }
 
 
@@ -532,6 +496,99 @@ def _parse_pending_invoice_scope_key(scope_key: str) -> tuple[str, str, str | No
     month = parts[2] if len(parts) > 2 and parts[2] else ""
     normalized_month = month[:7] if MONTH_RE.match(month[:7]) else None
     return direction, filter_name, normalized_month
+
+
+def _relation_invoice_summaries(relation_context: dict[str, object], *, target_invoice_type: str) -> list[dict[str, object]]:
+    if not isinstance(relation_context, dict):
+        return []
+    key = "linked_input_invoices" if target_invoice_type == "input" else "linked_output_invoices"
+    summaries: list[dict[str, object]] = []
+    for invoice in list(relation_context.get(key) or []):
+        if not isinstance(invoice, dict):
+            continue
+        invoice_id = text(invoice.get("id") or invoice.get("invoice_id") or invoice.get("row_id"))
+        if not invoice_id:
+            continue
+        seller_name = text(invoice.get("seller_name"))
+        buyer_name = text(invoice.get("buyer_name"))
+        summaries.append(
+            {
+                "id": invoice_id,
+                "invoice_no": text(invoice.get("invoice_no")),
+                "digital_invoice_no": text(invoice.get("digital_invoice_no")),
+                "issue_date": text(invoice.get("issue_date") or invoice.get("invoice_date")),
+                "total_with_tax": text(invoice.get("total_with_tax") or invoice.get("amount")),
+                "seller_name": seller_name,
+                "seller_tax_no": text(invoice.get("seller_tax_no")),
+                "buyer_name": buyer_name,
+                "buyer_tax_no": text(invoice.get("buyer_tax_no")),
+                "invoice_type": text(invoice.get("invoice_type")) or target_invoice_type,
+                "source_kind": text(invoice.get("source_kind")),
+                "counterparty_display_name": seller_name if target_invoice_type == "input" else buyer_name,
+            }
+        )
+    return summaries
+
+
+def _relation_oa_summaries(relation_context: dict[str, object]) -> list[dict[str, object]]:
+    if not isinstance(relation_context, dict):
+        return []
+    summaries: list[dict[str, object]] = []
+    for oa in list(relation_context.get("linked_oa") or []):
+        if not isinstance(oa, dict):
+            continue
+        oa_id = text(oa.get("id") or oa.get("oa_id") or oa.get("row_id"))
+        if not oa_id:
+            continue
+        summaries.append(
+            {
+                "id": oa_id,
+                "applicant": text(oa.get("applicant")),
+                "application_type": text(oa.get("application_type") or oa.get("form_type")),
+                "project_name": text(oa.get("project_name")),
+                "status": text(oa.get("status")),
+                "form_no": text(oa.get("form_no") or oa.get("form_id")),
+                "detail_available": bool(oa.get("detail_available", True)),
+                "relation_case_id": text(oa.get("relation_case_id")),
+            }
+        )
+    return summaries
+
+
+def _relation_case_ids(relation_context: dict[str, object]) -> list[str]:
+    if not isinstance(relation_context, dict):
+        return []
+    case_ids = _dedupe_preserve_order(text(value) for value in list(relation_context.get("group_ids") or []))
+    for oa in list(relation_context.get("linked_oa") or []):
+        if isinstance(oa, dict):
+            case_ids.extend(value for value in [text(oa.get("relation_case_id"))] if value and value not in case_ids)
+    return case_ids
+
+
+def _relation_paid_total(relation_context: dict[str, object]) -> str:
+    if not isinstance(relation_context, dict):
+        return "0.00"
+    total = sum(
+        (
+            _decimal_from_text(bank.get("amount"))
+            for bank in list(relation_context.get("linked_bank_transactions") or [])
+            if isinstance(bank, dict)
+        ),
+        start=Decimal("0.00"),
+    )
+    return _decimal_to_str(total)
+
+
+def _dedupe_preserve_order(values: object) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = text(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def _pending_invoice_filters_for_direction(direction: str) -> set[str]:

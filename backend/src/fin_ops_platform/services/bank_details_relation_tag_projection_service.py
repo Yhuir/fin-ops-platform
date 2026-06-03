@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
-from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
 DETERMINED_CANDIDATE_STATUSES = {"auto_closed", "incomplete"}
@@ -15,13 +13,12 @@ class BankDetailsRelationTagProjectionService:
     def __init__(
         self,
         *,
-        pair_relation_service: WorkbenchPairRelationService,
-        candidate_match_service: WorkbenchCandidateMatchService,
-        workbench_read_model_provider: Callable[[], dict[str, Any]] | None = None,
+        relation_facade: WorkbenchRelationReadFacade | None = None,
+        pair_relation_service: Any | None = None,
+        candidate_match_service: Any | None = None,
+        workbench_read_model_provider: Any | None = None,
     ) -> None:
-        self._pair_relation_service = pair_relation_service
-        self._candidate_match_service = candidate_match_service
-        self._workbench_read_model_provider = workbench_read_model_provider
+        self._relation_facade = relation_facade
         self._index_cache_key = ""
         self._index_cache: dict[str, dict[str, Any]] = {}
 
@@ -33,8 +30,7 @@ class BankDetailsRelationTagProjectionService:
         resolved_transaction_id = str(transaction_id or "").strip()
         if not resolved_transaction_id:
             return None
-        relation = self._relation_tag_index().get(resolved_transaction_id)
-        return dict(relation) if isinstance(relation, dict) else None
+        return self.relation_tags_for_transactions([resolved_transaction_id]).get(resolved_transaction_id)
 
     def relation_tags_for_transactions(self, transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
         normalized_ids = [
@@ -44,77 +40,35 @@ class BankDetailsRelationTagProjectionService:
         ]
         if not normalized_ids:
             return {}
-        index = self._relation_tag_index()
-        return {
-            transaction_id: dict(relation)
-            for transaction_id in normalized_ids
-            if isinstance(relation := index.get(transaction_id), dict)
-        }
+        return self._relation_tags_from_distribution(normalized_ids)
 
-    def _relation_tag_index(self) -> dict[str, dict[str, Any]]:
-        read_model = self._workbench_read_model()
-        pair_relation_snapshot = self._pair_relation_service.snapshot()
-        candidate_snapshot = self._candidate_match_service.snapshot()
-        cache_key = WorkbenchReadModelService.snapshot_version(
-            {
-                "read_model": {
-                    "scope_key": read_model.get("scope_key"),
-                    "generated_at": read_model.get("generated_at"),
-                    "source_versions": read_model.get("source_versions"),
-                },
-                "pair_relations": pair_relation_snapshot,
-                "candidate_matches": candidate_snapshot,
-            }
+    def _relation_tags_from_distribution(self, transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
+        if self._relation_facade is None:
+            return {}
+        get_by_row_ids = getattr(self._relation_facade, "get_by_row_ids", None)
+        if not callable(get_by_row_ids):
+            return {}
+        payload = get_by_row_ids(
+            transaction_ids,
+            require_fresh=False,
+            reason="bank_details_relation_tag_projection",
         )
-        if cache_key == self._index_cache_key:
-            return self._index_cache
-
-        index: dict[str, dict[str, Any]] = {}
-        no_oa_locked_row_ids: set[str] = set()
-
-        for relation in self._pair_relation_service.list_active_relations():
-            if not isinstance(relation, dict):
+        result: dict[str, dict[str, Any]] = {}
+        for row in list(payload.get("rows") or []):
+            if not isinstance(row, dict):
                 continue
-            row_ids = self._normalized_ids(relation.get("row_ids"))
-            row_types = self._normalized_texts(relation.get("row_types"))
-            case_id = str(relation.get("case_id") or "").strip()
-            relation_mode = str(relation.get("relation_mode") or "").strip()
-            if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
-                no_oa_locked_row_ids.update(row_ids)
-            for row_id in row_ids:
-                self._merge_index_entry(
-                    index,
-                    row_id=row_id,
-                    row_types=row_types,
-                    case_id=case_id,
-                    replace=True,
-                )
-
-        self._merge_candidate_relation_tags(
-            index,
-            candidate_snapshot=candidate_snapshot,
-            locked_row_ids=no_oa_locked_row_ids,
-        )
-        payload = read_model.get("payload")
-        if isinstance(payload, dict):
-            self._merge_grouped_relation_tags(
-                index,
-                payload,
-                locked_row_ids=no_oa_locked_row_ids,
-            )
-
-        self._index_cache_key = cache_key
-        self._index_cache = index
-        return index
-
-    def _workbench_read_model(self) -> dict[str, Any]:
-        if self._workbench_read_model_provider is None:
-            return {}
-        try:
-            read_model = self._workbench_read_model_provider()
-        except Exception:
-            return {}
-        return read_model if isinstance(read_model, dict) else {}
+            row_id = str(row.get("row_id") or "").strip()
+            if row_id not in transaction_ids:
+                continue
+            row_types = {"bank"}
+            if list(row.get("linked_oa") or []):
+                row_types.add("oa")
+            if list(row.get("linked_input_invoices") or []) or list(row.get("linked_output_invoices") or []):
+                row_types.add("invoice")
+            case_id = next((str(group_id).strip() for group_id in list(row.get("group_ids") or []) if str(group_id).strip()), "")
+            if case_id or len(row_types) > 1:
+                result[row_id] = {"case_id": case_id, "row_types": sorted(row_types)}
+        return result
 
     def _merge_candidate_relation_tags(
         self,

@@ -451,7 +451,16 @@ def test_save_imports_marks_read_models_dirty_and_outbox_event() -> None:
     joined_sql = "\n".join(connection.executed_sql) + "\n" + repr(connection.executed_params).lower()
     assert "insert into job.read_model_dirty_scopes" in joined_sql
     assert "insert into job.outbox_events" in joined_sql
+    assert "workbench_relation" in joined_sql
     assert "workbench" in joined_sql
+    assert "bank_detail" in joined_sql
+    assert "pending_invoice" in joined_sql
+    assert "input_invoice_usage" in joined_sql
+    assert "output_invoice_collection" in joined_sql
+    assert "oa_pending_payment" in joined_sql
+    assert "no_oa_bank_batch" in joined_sql
+    assert "cost_statistics" in joined_sql
     assert "cost" in joined_sql
+    assert "tax_offset" in joined_sql
     assert "tax" in joined_sql
     assert "search" in joined_sql

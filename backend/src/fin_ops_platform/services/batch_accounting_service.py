@@ -8,6 +8,7 @@ from threading import RLock
 from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 
 
 BATCH_ACCOUNTING_SOURCE = "batch_accounting"
@@ -41,11 +42,13 @@ class BatchAccountingService:
         pair_relation_service: WorkbenchPairRelationService,
         batch_workbench_loader: Callable[[str, str], dict[str, Any] | None] | None = None,
         case_id_provider: Callable[[str], str] | None = None,
+        relation_facade: Any | None = None,
     ) -> None:
         self._grouped_workbench_loader = grouped_workbench_loader
         self._pair_relation_service = pair_relation_service
         self._batch_workbench_loader = batch_workbench_loader
         self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
+        self._relation_facade = relation_facade
         self._mutation_lock = RLock()
 
     def build_payload(
@@ -509,18 +512,43 @@ class BatchAccountingService:
         return True
 
     def _submitted_relations(self, year: str, context: _WorkbenchContext) -> list[dict[str, Any]]:
+        if self._relation_facade is None:
+            return []
+        list_by_month = getattr(self._relation_facade, "list_by_month", None)
+        if not callable(list_by_month):
+            return []
         relations: list[dict[str, Any]] = []
-        for relation in self._pair_relation_service.list_active_relations():
-            if not self._is_batch_accounting_relation(relation):
-                continue
-            metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
-            bank_row_id = str(metadata.get("bank_row_id") or "").strip()
-            bank_row = context.rows_by_id.get(bank_row_id)
-            if str(metadata.get("year") or "").strip() == year or (
-                isinstance(bank_row, dict) and self._row_year_matches(bank_row, year, keys=("trade_time", "pay_receive_time", "txn_date"))
-            ):
-                relations.append(relation)
+        seen_case_ids: set[str] = set()
+        for month in self._month_scope_keys_for_year(year):
+            try:
+                payload = list_by_month(
+                    month,
+                    row_types=["bank_transaction"],
+                    require_fresh=False,
+                    reason="batch_accounting_submitted_relations",
+                )
+            except TypeError:
+                payload = list_by_month(month)
+            for relation in relation_dicts_from_distribution_payload(payload):
+                case_id = str(relation.get("case_id") or "").strip()
+                if not case_id or case_id in seen_case_ids or not self._is_batch_accounting_relation(relation):
+                    continue
+                metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
+                bank_row_id = str(metadata.get("bank_row_id") or "").strip() or self._bank_row_id_for_relation(relation)
+                bank_row = context.rows_by_id.get(bank_row_id)
+                if str(metadata.get("year") or metadata.get("bank_year") or "").strip() == year or (
+                    isinstance(bank_row, dict) and self._row_year_matches(bank_row, year, keys=("trade_time", "pay_receive_time", "txn_date"))
+                ):
+                    relations.append(relation)
+                    seen_case_ids.add(case_id)
         return relations
+
+    @staticmethod
+    def _month_scope_keys_for_year(year: str) -> list[str]:
+        normalized_year = str(year or "").strip()
+        if re.fullmatch(r"\d{4}", normalized_year):
+            return [f"{normalized_year}-{month:02d}" for month in range(1, 13)]
+        return ["all"]
 
     def _submitted_payload(
         self,
@@ -529,14 +557,11 @@ class BatchAccountingService:
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         bank_rows: list[dict[str, Any]] = []
         relations_by_bank_row_id: dict[str, Any] = {}
+        bank_row_ids = [self._bank_row_id_for_relation(relation) for relation in relations]
+        distribution_rows = self._distribution_rows_by_bank_id(bank_row_ids)
         for relation in relations:
             metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
-            bank_row_id = str(metadata.get("bank_row_id") or "").strip()
-            if not bank_row_id:
-                bank_row_id = next(
-                    (str(row_id) for row_id in list(relation.get("row_ids") or []) if self._row_type_for_row_id(str(row_id)) == "bank"),
-                    "",
-                )
+            bank_row_id = self._bank_row_id_for_relation(relation)
             if not bank_row_id:
                 continue
             bank_row = context.rows_by_id.get(bank_row_id, {"id": bank_row_id, "type": "bank"})
@@ -544,17 +569,93 @@ class BatchAccountingService:
             bank_rows.append(bank_payload)
             oa_row_ids = [str(row_id) for row_id in list(metadata.get("oa_row_ids") or []) if str(row_id).strip()]
             invoice_row_ids = [str(row_id) for row_id in list(metadata.get("invoice_row_ids") or []) if str(row_id).strip()]
+            distribution_row = distribution_rows.get(bank_row_id)
+            if distribution_row is not None:
+                oa_rows = self._oa_rows_from_distribution(distribution_row, context)
+                invoice_rows = self._invoice_rows_from_distribution(distribution_row, context)
+            else:
+                oa_rows = [self._oa_row_payload(context.rows_by_id.get(row_id, {"id": row_id, "type": "oa"}), []) for row_id in oa_row_ids]
+                invoice_rows = [
+                    deepcopy(context.rows_by_id.get(row_id, {"id": row_id, "type": "invoice"}))
+                    for row_id in invoice_row_ids
+                ]
             relations_by_bank_row_id[bank_row_id] = {
                 "relation_id": str(relation.get("case_id") or ""),
                 "relation": deepcopy(relation),
-                "oa_rows": [self._oa_row_payload(context.rows_by_id.get(row_id, {"id": row_id, "type": "oa"}), []) for row_id in oa_row_ids],
-                "invoice_rows": [
-                    deepcopy(context.rows_by_id.get(row_id, {"id": row_id, "type": "invoice"}))
-                    for row_id in invoice_row_ids
-                ],
+                "oa_rows": oa_rows,
+                "invoice_rows": invoice_rows,
                 "metadata": deepcopy(metadata),
             }
         return bank_rows, relations_by_bank_row_id
+
+    def _bank_row_id_for_relation(self, relation: dict[str, Any]) -> str:
+        metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
+        bank_row_id = str(metadata.get("bank_row_id") or "").strip()
+        if bank_row_id:
+            return bank_row_id
+        return next(
+            (str(row_id) for row_id in list(relation.get("row_ids") or []) if self._row_type_for_row_id(str(row_id)) == "bank"),
+            "",
+        )
+
+    def _distribution_rows_by_bank_id(self, bank_row_ids: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_ids = []
+        seen: set[str] = set()
+        for row_id in bank_row_ids:
+            text = str(row_id or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                normalized_ids.append(text)
+        if not normalized_ids or self._relation_facade is None:
+            return {}
+        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        if not callable(reader):
+            return {}
+        try:
+            payload = reader(normalized_ids, require_fresh=False, reason="batch_accounting_submitted_relations")
+        except TypeError:
+            payload = reader(normalized_ids)
+        if not isinstance(payload, dict):
+            return {}
+        rows: dict[str, dict[str, Any]] = {}
+        for row in list(payload.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            row_id = str(row.get("row_id") or "").strip()
+            if row_id:
+                rows[row_id] = row
+        return rows
+
+    def _oa_rows_from_distribution(self, row: dict[str, Any], context: _WorkbenchContext) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in list(row.get("linked_oa") or []):
+            if not isinstance(item, dict):
+                continue
+            row_id = str(item.get("id") or item.get("oa_id") or "").strip()
+            if not row_id or row_id in seen:
+                continue
+            seen.add(row_id)
+            source = dict(context.rows_by_id.get(row_id, {"id": row_id, "type": "oa"}))
+            source.update({key: value for key, value in item.items() if value not in (None, "")})
+            payloads.append(self._oa_row_payload(source, []))
+        return payloads
+
+    def _invoice_rows_from_distribution(self, row: dict[str, Any], context: _WorkbenchContext) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for key in ("linked_input_invoices", "linked_output_invoices"):
+            for item in list(row.get(key) or []):
+                if not isinstance(item, dict):
+                    continue
+                row_id = str(item.get("id") or item.get("invoice_id") or "").strip()
+                if not row_id or row_id in seen:
+                    continue
+                seen.add(row_id)
+                source = dict(context.rows_by_id.get(row_id, {"id": row_id, "type": "invoice"}))
+                source.update({item_key: value for item_key, value in item.items() if value not in (None, "")})
+                payloads.append(source)
+        return payloads
 
     def _bank_row_payload(self, row: dict[str, Any], *, relation_id: str = "") -> dict[str, Any]:
         amount = self._bank_expense_amount(row)

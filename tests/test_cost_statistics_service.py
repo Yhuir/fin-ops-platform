@@ -6,6 +6,47 @@ from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
 
 
+class FakeCostRelationFacade:
+    last_source_versions = {"schema_version": 52}
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        normalized = [str(row_id) for row_id in row_ids]
+        self.calls.append(normalized)
+        return {
+            "status": "fresh",
+            "rows": [
+                {
+                    "row_id": "txn-cost-001",
+                    "row_type": "bank_transaction",
+                    "relation_status": "linked",
+                    "group_ids": ["group-cost-001"],
+                    "linked_oa": [
+                        {
+                            "id": "oa-cost-001",
+                            "applicant": "成本申请人",
+                            "project_name": "云南溯源科技",
+                            "expense_type": "设备货款及材料费",
+                            "expense_content": "PLC 模块采购",
+                        }
+                    ],
+                    "linked_input_invoices": [
+                        {"id": "inv-cost-001", "invoice_no": "COST-001", "total_with_tax": "1000.00"}
+                    ],
+                    "linked_output_invoices": [],
+                    "linked_bank_transactions": [{"id": "txn-cost-001", "amount": "1000.00"}],
+                }
+            ],
+            "groups": [],
+            "source_versions": self.last_source_versions,
+            "read_model_scope_keys": ["2026-03"],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+
 class CostStatisticsServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         existing_transactions = [
@@ -282,6 +323,28 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(payload["transaction"]["expense_content"], "PLC 模块采购")
         self.assertEqual(payload["transaction"]["amount"], "1,000.00")
         self.assertIn("detail_fields", payload["transaction"])
+
+    def test_transaction_detail_includes_workbench_relation_distribution_context(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        relation_facade = FakeCostRelationFacade()
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: self.grouped_payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+            relation_facade=relation_facade,
+        )
+
+        payload = service.get_transaction_detail("txn-cost-001")
+        explorer = service.get_explorer("2026-03")
+
+        self.assertEqual(payload["transaction"]["amount"], "1,000.00")
+        self.assertEqual(payload["transaction"]["relation_status"], "linked")
+        self.assertEqual(payload["transaction"]["relation_case_ids"], ["group-cost-001"])
+        self.assertEqual([item["id"] for item in payload["relation_context"]["linked_oa"]], ["oa-cost-001"])
+        self.assertEqual([item["id"] for item in payload["relation_context"]["linked_input_invoices"]], ["inv-cost-001"])
+        self.assertEqual(explorer["summary"]["total_amount"], "1,250.00")
+        self.assertEqual(relation_facade.calls[0], ["txn-cost-001"])
 
     def test_group_cost_context_treats_dash_placeholders_as_empty_and_falls_back_to_detail_fields(self) -> None:
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService

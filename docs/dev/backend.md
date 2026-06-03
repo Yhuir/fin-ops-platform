@@ -21,6 +21,8 @@ backend/src/fin_ops_platform/
 - `services/runtime_redis.py`：Redis 短 TTL cache、wakeup 和辅助锁 helper。
 - `services/object_storage.py`：S3-compatible object storage repository 接口与配置骨架。
 - `services/workbench_read_model_refresh.py`：`workbench.read_model.refresh` worker handler，按 dirty scope 重建工作台 SQL read model。
+- `services/workbench_relation_read_model_refresh.py`：`workbench_relation.read_model.refresh` worker handler，按月份 shard 重建 OA/流水/发票统一关系分发 read model。
+- `services/workbench_relation_read_facade.py`：下游页面读取 OA/流水/发票关系上下文的统一 fresh gate；页面 read model 不直接拼 `workbench_pair_relations`。
 - `services/cost_statistics_read_model_refresh.py`：`cost_statistics.read_model.refresh` worker handler，按 dirty scope 重建成本统计 SQL read model。
 - `services/mongo_oa_adapter.py`：OA Mongo 只读适配。
 - `tools/check_import_fact_consistency.py`：导入事实 SQL cutover 后的批次、发票、流水、文件引用一致性检查。
@@ -44,6 +46,7 @@ backend/src/fin_ops_platform/
 - 不在路由层写复杂规则。
 - 不直接读写 OA 原始集合，必须走 adapter。
 - 影响工作台展示的写操作必须考虑 read model 和 search cache 失效。
+- 影响 OA/流水/发票关联关系的写操作必须标记 `workbench_relation` dirty/enqueue；下游页面必须通过 `WorkbenchRelationReadFacade` 消费关系上下文。
 - 导入确认必须重新校验幂等性。
 - 导入事实读取必须优先走 PostgreSQL `import_fact_repository`；发票、银行流水、批次和导入文件列表不得在生产 API path 通过 `imports` snapshot 全量加载后分页。
 - 关联台自动决策重构完成后，工作台读取必须优先消费 PostgreSQL `app.workbench_pair_relations` 手工事实、`read_model.workbench_reconciliation_decisions` 自动决策，以及 `read_model.workbench_rows` / `read_model.workbench_groups` / `read_model.workbench_group_rows` 投影；迁移期旧 `read_model.workbench_candidate_matches` 只能作为替换前的现行实现或 shadow 对账来源，不得继续扩展成新的展示事实源；`/api/workbench` 不得在生产请求路径调用 `_build_raw_workbench_payload()` 同步 rebuild。
@@ -95,6 +98,33 @@ python3 -m fin_ops_platform.app.worker \
 `read_model.workbench_reconciliation_decisions`。它必须和
 `workbench.read_model.refresh` worker 同时长期运行；只有 read-model worker
 不会生成新的自动配对决策。
+
+工作台关系分发 read model worker：
+
+```bash
+FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
+PYTHONPATH=backend/src \
+python3 -m fin_ops_platform.app.worker \
+  --enable-workbench-relation-read-model-refresh \
+  --worker-kind workbench-relation-read-model \
+  --event-type workbench_relation.read_model.refresh \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 120 \
+  --statement-timeout-seconds 60 \
+  --max-attempts 5
+```
+
+`read_model.workbench_relation_rows` 给每个对象保留一行，包含 `linked_oa`、
+`linked_bank_transactions`、`linked_input_invoices`、`linked_output_invoices`。
+无关联对象也必须存在，状态为 `unlinked` 且 linked arrays 为空。待找发票、
+OA 待付款、进项发票使用、销项发票收款、银行明细关系标签等页面 read model worker 只能通过
+`WorkbenchRelationReadFacade` 消费这些上下文；不得新增页面直接 SQL join
+`app.workbench_pair_relations` 生成自己的关系口径。
+
+手工确认/撤回关系会在事务内标记 `workbench_relation`、待找发票、OA 待付款、
+进项发票使用、销项发票收款、银行明细、搜索、成本、税金和免 OA 批次等 read model
+dirty scope。`read_model.workbench_reconciliation_decisions` 中 `paired` 自动决策也会进入
+分发 producer；决策 upsert/expire 后必须标记对应月份的 `workbench_relation` dirty。
 
 Queue 配置边界：
 
@@ -188,7 +218,7 @@ python3 -m fin_ops_platform.app.worker \
   --statement-timeout-seconds 30
 ```
 
-`/api/search` 从 `read_model.search_index_rows` 查询，`/api/pending-invoices/rows` 从 `read_model.pending_invoice_rows` 分页查询。`/api/input-invoice-usage/rows` 从 `read_model.input_invoice_usage_rows` 查询，`/api/output-invoice-collections/rows` 从 `read_model.output_invoice_collection_rows` 查询；对应 filter-options 必须基于 SQL read model 行集生成。SQL miss/stale/schema-stale/source_versions 不匹配时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh；API 请求路径不得同步扫描全量发票、流水、OA 或关系数据。
+`/api/search` 从 `read_model.search_index_rows` 查询，`/api/pending-invoices/rows` 从 `read_model.pending_invoice_rows` 分页查询。待找发票 projection 的 OA/发票关联事实来自 `WorkbenchRelationReadFacade`；分发 read model 不 fresh 时 pending projection 失败并等待 durable refresh，不回退同步扫描 `workbench_pair_relations`。`/api/input-invoice-usage/rows` 从 `read_model.input_invoice_usage_rows` 查询，`/api/output-invoice-collections/rows` 从 `read_model.output_invoice_collection_rows` 查询；对应 filter-options 必须基于 SQL read model 行集生成。SQL miss/stale/schema-stale/source_versions 不匹配时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh；API 请求路径不得同步扫描全量发票、流水、OA 或关系数据。
 
 银行流水有效标签读取边界：
 

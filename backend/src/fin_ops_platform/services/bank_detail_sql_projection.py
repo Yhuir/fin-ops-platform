@@ -16,6 +16,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 )
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, int_value, text, text_list
 from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, PostgresReadModelRepository
+from fin_ops_platform.services.workbench_relation_read_facade import FRESH_WORKBENCH_RELATION_STATUS, WorkbenchRelationReadFacade
 
 PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 SUMMARY_TEXT_LABELS = ("摘要",)
@@ -30,10 +31,15 @@ class BankDetailSqlProjectionBuilder:
         connection: Any,
         read_model_repository: PostgresReadModelRepository | None = None,
         auto_category_service: BankTransactionAutoCategoryService | None = None,
+        workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._auto_category_service = auto_category_service or BankTransactionAutoCategoryService()
+        self._require_fresh_relation_tags = workbench_relation_read_facade is not None
+        self._workbench_relation_read_facade = workbench_relation_read_facade or WorkbenchRelationReadFacade(
+            read_model_repository=self._read_model_repository,
+        )
         self._bank_auto_tag_rules_version = 1
 
     def list_bank_detail_scope_shards(self, scope_key: str) -> list[str]:
@@ -70,7 +76,7 @@ class BankDetailSqlProjectionBuilder:
             return {"scope_key": normalized_scope_key, "row_count": 0}
         transaction_ids = [str(row["id"]) for row in transaction_rows]
         manual_categories = self._load_manual_categories(transaction_rows)
-        relations = self._load_relation_tags(transaction_ids)
+        relations = self._load_relation_tags(scope_key=normalized_scope_key, transaction_ids=transaction_ids)
         auto_categories = self._auto_category_service.suggestions_by_transaction_id(auto_category_context_rows)
         auto_category_context_by_id = {
             str(row.get("id")): row
@@ -238,39 +244,48 @@ class BankDetailSqlProjectionBuilder:
             }
         return result
 
-    def _load_relation_tags(self, transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
+    def _load_relation_tags(
+        self,
+        transaction_ids: list[str] | None = None,
+        *,
+        scope_key: str = "all",
+    ) -> dict[str, dict[str, Any]]:
+        transaction_ids = list(transaction_ids or [])
         if not transaction_ids:
             return {}
-        relation_rows = self._connection.fetch_all(
-            """
-            select case_id, row_ids, row_types, special_metadata
-            from app.workbench_pair_relations
-            where status = 'active'
-              and row_ids && %s
-            """,
-            (transaction_ids,),
+        if not self._require_fresh_relation_tags:
+            return {}
+        result_payload = self._workbench_relation_read_facade.list_by_month(
+            scope_key,
+            row_types=["bank_transaction"],
+            require_fresh=True,
+            reason="bank_detail_relation_tags_read",
         )
+        if str(result_payload.get("status") or "") != FRESH_WORKBENCH_RELATION_STATUS:
+            if not self._require_fresh_relation_tags:
+                return {}
+            raise RuntimeError(
+                "workbench_relation_read_model_not_fresh"
+                f": status={result_payload.get('status')}, scope_key={scope_key}, "
+                f"reasons={','.join(str(item) for item in list(result_payload.get('stale_reasons') or []))}"
+            )
         result: dict[str, dict[str, Any]] = {}
         transaction_id_set = set(transaction_ids)
-        for row in relation_rows:
-            row_ids = text_list(row.get("row_ids"))
-            row_types = text_list(row.get("row_types"))
-            bank_ids = [row_id for row_id in row_ids if row_id in transaction_id_set]
-            has_oa = _relation_has_row_type(row_types, "oa") or any(_looks_like_oa_row(row_id) for row_id in row_ids)
-            has_invoice = _relation_has_row_type(row_types, "invoice") or any(
-                _looks_like_invoice_row(row_id) for row_id in row_ids
+        for row in list(result_payload.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            bank_ids = [text(row.get("row_id")) or ""]
+            bank_ids = [bank_id for bank_id in bank_ids if bank_id in transaction_id_set]
+            has_oa = bool(list(row.get("linked_oa") or []))
+            has_invoice = bool(list(row.get("linked_input_invoices") or [])) or bool(
+                list(row.get("linked_output_invoices") or [])
             )
-            special_metadata = row.get("special_metadata") if isinstance(row.get("special_metadata"), dict) else {}
-            if not has_oa and text_list(special_metadata.get("oa_row_ids")):
-                has_oa = True
-            if not has_invoice and text_list(special_metadata.get("invoice_row_ids")):
-                has_invoice = True
             self._merge_relation_tags(
                 result,
                 bank_ids=bank_ids,
                 has_oa=has_oa,
                 has_invoice=has_invoice,
-                case_id=text(row.get("case_id")),
+                case_id=next((group_id for group_id in text_list(row.get("group_ids")) if group_id), None),
             )
         return result
 
@@ -510,6 +525,7 @@ class BankDetailSqlProjectionBuilder:
             "source_version": source_version,
             "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
             "bank_auto_tag_rules_version": self._bank_auto_tag_rules_version,
+            "workbench_relation_source_versions": self._workbench_relation_read_facade.last_source_versions,
             "row_count": row_count,
         }
 

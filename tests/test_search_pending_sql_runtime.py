@@ -214,6 +214,32 @@ class FakeBankTransactionTagFacade:
         return self.payload
 
 
+class FakeWorkbenchRelationReadFacade:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    def get_by_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        require_fresh: bool = True,
+        reason: str = "downstream_workbench_relation_read",
+        month_hint: str | None = None,
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "row_ids": list(row_ids),
+                "require_fresh": require_fresh,
+                "reason": reason,
+                "month_hint": month_hint,
+                "scope_keys_hint": list(scope_keys_hint or []),
+            }
+        )
+        return self.payload
+
+
 class PendingProjectionOaBankConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -1267,6 +1293,81 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("input_invoices", payload)
         self.assertIn("oa", payload)
         self.assertEqual(payload["bank_transaction"]["account_last4"], "1234")
+
+    def test_pending_invoice_sql_projection_consumes_workbench_relation_distribution(self) -> None:
+        relation_facade = FakeWorkbenchRelationReadFacade(
+            {
+                "status": "fresh",
+                "rows": [
+                    {
+                        "row_id": "txn-1",
+                        "row_type": "bank_transaction",
+                        "relation_status": "linked",
+                        "group_ids": ["case-tian-196"],
+                        "linked_oa": [
+                            {
+                                "id": "oa-tian-196",
+                                "applicant": "田孟维",
+                                "application_type": "日常报销",
+                                "project_name": "云南溯源科技; 大理卷烟厂余...",
+                                "detail_available": True,
+                                "relation_case_id": "case-tian-196",
+                            }
+                        ],
+                        "linked_bank_transactions": [{"id": "txn-1", "amount": "196.00"}],
+                        "linked_input_invoices": [
+                            {
+                                "id": "oa-att-inv-70",
+                                "invoice_no": "9132019MA1XM5TX71",
+                                "digital_invoice_no": "",
+                                "issue_date": "2026-01-20",
+                                "seller_name": "中科视拓（南京）科技有限公司",
+                                "seller_tax_no": "9132019MA1XM5TX71",
+                                "buyer_name": "云南溯源科技有限公司",
+                                "total_with_tax": "70.00",
+                                "invoice_type": "input",
+                                "source_kind": "oa_attachment_invoice",
+                            },
+                            {
+                                "id": "oa-att-inv-126",
+                                "invoice_no": "92532324MAC296HG5K",
+                                "digital_invoice_no": "",
+                                "issue_date": "2026-01-20",
+                                "seller_name": "南华县沙桥镇润华清真饭店",
+                                "seller_tax_no": "92532324MAC296HG5K",
+                                "buyer_name": "云南溯源科技有限公司",
+                                "total_with_tax": "126.00",
+                                "invoice_type": "input",
+                                "source_kind": "oa_attachment_invoice",
+                            },
+                        ],
+                        "linked_output_invoices": [],
+                    }
+                ],
+                "groups": [{"group_id": "case-tian-196", "relation_kind": "oa_bank_input_invoice"}],
+                "source_versions": {"workbench_relation_schema_version": "test"},
+                "read_model_scope_keys": ["2026-05"],
+            }
+        )
+        builder = SearchPendingSqlProjectionBuilder(
+            connection=PendingProjectionConnection(),
+            workbench_relation_read_facade=relation_facade,
+        )
+
+        rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+
+        payload = rows[0]["payload"]
+        self.assertEqual(payload["input_invoices"]["relation_count"], 2)
+        self.assertEqual(
+            [invoice["id"] for invoice in payload["input_invoices"]["summaries"]],
+            ["oa-att-inv-70", "oa-att-inv-126"],
+        )
+        self.assertEqual(payload["input_invoices"]["payment_summary"]["invoice_total"], "196.00")
+        self.assertEqual(payload["invoice_acquisition_status"]["code"], "paid_invoiced")
+        self.assertEqual(payload["oa"]["primary"]["id"], "oa-tian-196")
+        self.assertEqual(payload["oa"]["relation_count"], 1)
+        self.assertEqual(payload["relation_case_ids"], ["case-tian-196"])
+        self.assertEqual(relation_facade.calls[0]["reason"], "pending_invoice_sql_projection")
 
     def test_pending_invoice_sql_projection_uses_fresh_bank_tag_facade_category(self) -> None:
         facade = FakeBankTransactionTagFacade(

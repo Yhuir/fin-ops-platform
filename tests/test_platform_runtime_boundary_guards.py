@@ -59,6 +59,96 @@ def _attribute_calls(tree: ast.Module, names: set[str]) -> list[str]:
     return calls
 
 
+def _attribute_chain(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _attribute_chain(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return ""
+
+
+class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
+    def __init__(self, *, path: Path) -> None:
+        self._path = path
+        self._class_stack: list[str] = []
+        self._function_stack: list[str] = []
+        self.violations: list[str] = []
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._class_stack.append(node.name)
+        self.generic_visit(node)
+        self._class_stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._function_stack.append(node.name)
+        self.generic_visit(node)
+        self._function_stack.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.visit_FunctionDef(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        call_name = self._forbidden_call_name(node)
+        if call_name and not self._is_allowed_context(call_name):
+            owner = ".".join([*self._class_stack, *self._function_stack]) or "<module>"
+            self.violations.append(f"{_relative(self._path)}:{node.lineno} {owner} calls {call_name}")
+        self.generic_visit(node)
+
+    def _forbidden_call_name(self, node: ast.Call) -> str:
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in {
+            "active_relations_for_row_ids",
+            "list_active_relations",
+            "load_workbench_pair_relations",
+        }:
+            if _attribute_chain(func.value).endswith("._pair_relation_service"):
+                return func.attr
+            if func.attr == "load_workbench_pair_relations":
+                return func.attr
+        if isinstance(func, ast.Attribute) and func.attr == "from_snapshot":
+            value = func.value
+            if isinstance(value, ast.Name) and value.id == "WorkbenchPairRelationService":
+                return "WorkbenchPairRelationService.from_snapshot"
+        return ""
+
+    def _is_allowed_context(self, call_name: str) -> bool:
+        rel_path = _relative(self._path)
+        class_name = self._class_stack[-1] if self._class_stack else ""
+        function_name = self._function_stack[-1] if self._function_stack else ""
+        allowed_methods = {
+            "backend/src/fin_ops_platform/services/pending_invoice_service.py": {
+                "PendingInvoiceApplicationService._create_relation",
+                "PendingInvoiceApplicationService._create_attach_existing_relation",
+                "PendingInvoiceApplicationService._attach_existing_conflicts",
+                "PendingInvoiceApplicationService._paid_total_for_invoice",
+                "PendingInvoiceApplicationService._invoice_has_pending_relation",
+            },
+            "backend/src/fin_ops_platform/services/batch_accounting_service.py": {
+                "BatchAccountingService._submit_unlocked",
+                "BatchAccountingService.repair_legacy_case_id_collisions",
+            },
+            "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py": {
+                "NoOaBankBatchApplicationService.submit_selected_rows",
+                "NoOaBankBatchApplicationService._validate_internal_transfer_selection",
+                "NoOaBankBatchApplicationService._restore_snapshots",
+            },
+            "backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py": {
+                "NoOaBankBatchService._repair_submitted_no_oa_relation_consistency",
+            },
+        }
+        qualified = f"{class_name}.{function_name}" if class_name and function_name else function_name
+        if qualified in allowed_methods.get(rel_path, set()):
+            return True
+        return call_name == "load_workbench_pair_relations" and rel_path in {
+            "backend/src/fin_ops_platform/app/worker.py",
+            "backend/src/fin_ops_platform/services/runtime_worker_handlers.py",
+            "backend/src/fin_ops_platform/services/postgres_state_store.py",
+            "backend/src/fin_ops_platform/services/shadow_read_psql_store.py",
+            "backend/src/fin_ops_platform/services/state_store.py",
+        }
+
+
 def _sql_write_table_references(source: str) -> list[str]:
     normalized = " ".join(source.lower().split())
     patterns = (
@@ -255,6 +345,45 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_downstream_relation_read_models_use_workbench_relation_distribution(self) -> None:
+        downstream_paths = {
+            SERVICES_ROOT / "search_pending_sql_projection.py",
+            SERVICES_ROOT / "invoice_usage_collection_sql_projection.py",
+            SERVICES_ROOT / "invoice_relation_query_context.py",
+            SERVICES_ROOT / "input_invoice_usage_service.py",
+            SERVICES_ROOT / "output_invoice_collection_service.py",
+            SERVICES_ROOT / "oa_pending_payment_service.py",
+            SERVICES_ROOT / "bank_detail_sql_projection.py",
+            SERVICES_ROOT / "bank_details_relation_tag_projection_service.py",
+            SERVICES_ROOT / "pending_invoice_service.py",
+            SERVICES_ROOT / "batch_accounting_service.py",
+            SERVICES_ROOT / "no_oa_bank_batch_application_service.py",
+            SERVICES_ROOT / "no_oa_bank_batch_service.py",
+            SERVICES_ROOT / "cost_tax_sql_projection.py",
+            SERVICES_ROOT / "cost_statistics_service.py",
+        }
+        forbidden_snippets = {
+            "from app.workbench_pair_relations",
+        }
+        violations: list[str] = []
+
+        for path in sorted(downstream_paths):
+            if not path.exists():
+                violations.append(f"{_relative(path)} is missing")
+                continue
+            source = path.read_text(encoding="utf-8")
+            normalized_source = " ".join(source.split())
+            rel_path = _relative(path)
+            for snippet in sorted(forbidden_snippets):
+                actual_count = normalized_source.count(snippet)
+                if actual_count:
+                    violations.append(f"{rel_path} contains {snippet} {actual_count} time(s)")
+            visitor = _ForbiddenRelationReadVisitor(path=path)
+            visitor.visit(_parse(path))
+            violations.extend(visitor.violations)
+
+        self.assertEqual(violations, [])
+
     def test_oa_mongo_adapter_direct_use_is_allowlisted(self) -> None:
         allowed_paths = {
             "backend/src/fin_ops_platform/app/oa_attachment_audit.py",
@@ -263,6 +392,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/services/etc_oa_detection.py",
             "backend/src/fin_ops_platform/services/oa_manual_import_service.py",
             "backend/src/fin_ops_platform/services/search_pending_sql_projection.py",
+            "backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py",
             "backend/src/fin_ops_platform/services/workbench_sql_projection.py",
         }
         known_violations = {
@@ -382,6 +512,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_business_code_does_not_write_outbox_or_dirty_scopes_directly(self) -> None:
         allowed_paths = {
             "backend/src/fin_ops_platform/services/postgres_repositories/core.py",
+            "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
+            "backend/src/fin_ops_platform/services/postgres_repositories/workbench.py",
             "backend/src/fin_ops_platform/services/runtime_queue.py",
         }
         violations: list[str] = []

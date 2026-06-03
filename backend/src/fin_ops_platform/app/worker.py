@@ -78,6 +78,12 @@ from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetRea
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
 from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLedgerSqlProjectionBuilder
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
+from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
+from fin_ops_platform.services.workbench_relation_read_model_refresh import (
+    WORKBENCH_RELATION_REFRESH_EVENT_TYPE,
+    WorkbenchRelationReadModelRefreshService,
+)
+from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
 from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
@@ -107,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-events-per-iteration", type=int, default=1, help="Maximum events to drain before an idle sleep.")
     parser.add_argument("--enable-file-object-migration", action="store_true", help="Register GridFS to object storage migration handler.")
     parser.add_argument("--enable-workbench-read-model-refresh", action="store_true", help="Register workbench SQL read model refresh handler.")
+    parser.add_argument("--enable-workbench-relation-read-model-refresh", action="store_true", help="Register workbench relation distribution read model refresh handler.")
     parser.add_argument("--enable-cost-statistics-read-model-refresh", action="store_true", help="Register cost statistics SQL read model refresh handler.")
     parser.add_argument("--enable-tax-offset-read-model-refresh", action="store_true", help="Register tax offset SQL read model refresh handler.")
     parser.add_argument("--enable-search-read-model-refresh", action="store_true", help="Register search SQL read model refresh handler.")
@@ -146,6 +153,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     read_model_repository = PostgresReadModelRepository(connection) if connection is not None else None
     bank_transaction_tag_read_facade = (
         BankTransactionTagReadFacade(
+            read_model_repository=read_model_repository,
+            queue_repository=queue,
+        )
+        if read_model_repository is not None
+        else None
+    )
+    workbench_relation_read_facade = (
+        WorkbenchRelationReadFacade(
             read_model_repository=read_model_repository,
             queue_repository=queue,
         )
@@ -224,6 +239,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers["workbench.read_model.refresh"] = refresh_service.handle_runtime_event
         if "workbench.read_model.refresh" not in config.event_types:
             config.event_types.append("workbench.read_model.refresh")
+    if args.enable_workbench_relation_read_model_refresh:
+        projection_builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=read_model_repository,
+        )
+        refresh_service = WorkbenchRelationReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue,
+        )
+        handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event
+        if WORKBENCH_RELATION_REFRESH_EVENT_TYPE not in config.event_types:
+            config.event_types.append(WORKBENCH_RELATION_REFRESH_EVENT_TYPE)
     if args.enable_cost_statistics_read_model_refresh:
         projection_builder = CostStatisticsSqlProjectionBuilder(connection=connection, redis_helper=redis_helper)
         refresh_service = CostStatisticsReadModelRefreshService(
@@ -244,6 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             connection=connection,
             read_model_repository=read_model_repository,
             bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
+            workbench_relation_read_facade=workbench_relation_read_facade,
         )
         refresh_service = SearchPendingReadModelRefreshService(
             projection_builder=projection_builder,
@@ -258,7 +286,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if "pending_invoice.read_model.refresh" not in config.event_types:
                 config.event_types.append("pending_invoice.read_model.refresh")
     if args.enable_bank_detail_read_model_refresh:
-        projection_builder = BankDetailSqlProjectionBuilder(connection=connection)
+        projection_builder = BankDetailSqlProjectionBuilder(
+            connection=connection,
+            workbench_relation_read_facade=workbench_relation_read_facade,
+        )
         refresh_service = BankDetailReadModelRefreshService(
             projection_builder=projection_builder,
             queue_repository=queue,
@@ -306,6 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             workbench_matching_source_versions_provider=lambda: _no_oa_workbench_matching_source_versions(
                 app_settings_service
             ),
+            relation_facade=workbench_relation_read_facade,
         )
         handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event
         if NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE not in config.event_types:
@@ -336,7 +368,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         or args.enable_output_invoice_collection_read_model_refresh
         or args.enable_oa_pending_payment_read_model_refresh
     ):
-        projection_builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=connection)
+        projection_builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=connection,
+            workbench_relation_read_facade=workbench_relation_read_facade,
+        )
         refresh_service = InvoiceUsageCollectionReadModelRefreshService(
             projection_builder=projection_builder,
             queue_repository=queue,

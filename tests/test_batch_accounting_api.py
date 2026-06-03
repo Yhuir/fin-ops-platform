@@ -9,6 +9,120 @@ from fin_ops_platform.services.batch_accounting_service import BatchAccountingSe
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
+class FakeBatchRelationFacade:
+    def __init__(self, relation: dict[str, object] | None = None) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._relation = relation
+
+    def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
+        self.calls.append({"month": month, **kwargs})
+        if month != "2026-01":
+            return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
+        return self._payload()
+
+    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+        self.calls.append({"row_ids": list(row_ids), **kwargs})
+        payload = self._payload()
+        payload["rows"] = [
+            row
+            for row in list(payload["rows"])
+            if str(row.get("row_id") or "") in {str(row_id) for row_id in row_ids}
+        ]
+        return payload
+
+    def _payload(self) -> dict[str, object]:
+        if isinstance(self._relation, dict):
+            metadata = self._relation.get("special_metadata") if isinstance(self._relation.get("special_metadata"), dict) else {}
+            row_ids = [str(row_id) for row_id in list(self._relation.get("row_ids") or [])]
+            row_types = [str(row_type) for row_type in list(self._relation.get("row_types") or [])]
+            group_id = str(self._relation.get("case_id") or "")
+            bank_row_id = str(metadata.get("bank_row_id") or row_ids[0] if row_ids else "")
+            linked_oa = [{"id": row_id} for index, row_id in enumerate(row_ids) if index < len(row_types) and row_types[index] == "oa"]
+            linked_invoices = [{"id": row_id} for index, row_id in enumerate(row_ids) if index < len(row_types) and row_types[index] == "invoice"]
+            return {
+                "status": "fresh",
+                "rows": [
+                    {
+                        "row_id": bank_row_id,
+                        "row_type": "bank_transaction",
+                        "group_ids": [group_id],
+                        "linked_oa": linked_oa,
+                        "linked_bank_transactions": [{"id": bank_row_id}],
+                        "linked_input_invoices": linked_invoices,
+                        "linked_output_invoices": [],
+                    }
+                ],
+                "groups": [
+                    {
+                        "group_id": group_id,
+                        "payload": {
+                            "group_id": group_id,
+                            "relation_mode": str(self._relation.get("relation_mode") or "manual_confirmed"),
+                            "special_metadata": dict(metadata),
+                            "row_ids": row_ids,
+                            "row_types": row_types,
+                            "note": str(self._relation.get("note") or ""),
+                            "amount_check": dict(self._relation.get("amount_check") or {}) if isinstance(self._relation.get("amount_check"), dict) else {},
+                        },
+                    }
+                ],
+                "source_versions": {"schema_version": 52},
+                "read_model_scope_keys": ["2026-01"],
+                "refresh_enqueued": False,
+                "stale_reasons": [],
+            }
+        return {
+            "status": "fresh",
+            "rows": [
+                {
+                    "row_id": "txn_imported_202601_batch_001",
+                    "row_type": "bank_transaction",
+                    "group_ids": ["CASE-BATCH-txn_imported_202601_batch_001"],
+                    "linked_oa": [
+                        {"id": "oa-exp-ba-001", "applicant": "刘晨", "project_name": "品牌广告投放"},
+                        {"id": "oa-exp-ba-002", "applicant": "王明", "project_name": "品牌广告投放"},
+                    ],
+                    "linked_bank_transactions": [
+                        {"id": "txn_imported_202601_batch_001", "amount": "1200.00", "direction": "outflow"}
+                    ],
+                    "linked_input_invoices": [
+                        {"id": "oa-att-inv-oa-exp-ba-001-01", "total_with_tax": "700.00"},
+                        {"id": "oa-att-inv-oa-exp-ba-002-01", "total_with_tax": "500.00"},
+                    ],
+                    "linked_output_invoices": [],
+                }
+            ],
+            "groups": [
+                {
+                    "group_id": "CASE-BATCH-txn_imported_202601_batch_001",
+                    "payload": {
+                        "group_id": "CASE-BATCH-txn_imported_202601_batch_001",
+                        "relation_mode": "manual_confirmed",
+                        "special_metadata": {
+                            "source": "batch_accounting",
+                            "bank_row_id": "txn_imported_202601_batch_001",
+                            "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                            "invoice_row_ids": ["oa-att-inv-oa-exp-ba-001-01", "oa-att-inv-oa-exp-ba-002-01"],
+                            "year": "2026",
+                        },
+                        "row_ids": [
+                            "txn_imported_202601_batch_001",
+                            "oa-exp-ba-001",
+                            "oa-exp-ba-002",
+                            "oa-att-inv-oa-exp-ba-001-01",
+                            "oa-att-inv-oa-exp-ba-002-01",
+                        ],
+                        "row_types": ["bank", "oa", "oa", "invoice", "invoice"],
+                    },
+                }
+            ],
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": ["2026-01"],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+
 class BatchAccountingApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -701,6 +815,9 @@ class BatchAccountingApiTests(unittest.TestCase):
             ),
         )
         self.assertEqual(submit_response.status_code, 200, submit_response.body)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001")
+        self.assertIsNotNone(relation)
+        app._workbench_relation_facade = FakeBatchRelationFacade(relation)
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
         payload = json.loads(response.body)
@@ -715,9 +832,47 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in relation_payload["invoice_rows"]], ["oa-att-inv-oa-exp-ba-001-01"])
         self.assertEqual(payload["summary"]["submitted_count"], 1)
 
+    def test_submitted_list_relation_bucket_uses_workbench_relation_distribution(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="CASE-BATCH-txn_imported_202601_batch_001",
+            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
+            row_types=["bank", "oa"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            month_scope="2026-01",
+            special_metadata={
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_202601_batch_001",
+                "oa_row_ids": ["oa-exp-ba-001"],
+                "invoice_row_ids": [],
+                "year": "2026",
+            },
+        )
+        facade = FakeBatchRelationFacade()
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            pair_relation_service=pair_service,
+            relation_facade=facade,
+        )
+
+        payload = service.build_payload(year="2026", bucket="submitted")
+
+        relation_payload = payload["relations_by_bank_row_id"]["txn_imported_202601_batch_001"]
+        self.assertEqual([row["id"] for row in relation_payload["oa_rows"]], ["oa-exp-ba-001", "oa-exp-ba-002"])
+        self.assertEqual(
+            [row["id"] for row in relation_payload["invoice_rows"]],
+            ["oa-att-inv-oa-exp-ba-001-01", "oa-att-inv-oa-exp-ba-002-01"],
+        )
+        self.assertEqual(facade.calls[0]["month"], "2026-01")
+        self.assertIn({"row_ids": ["txn_imported_202601_batch_001"], "require_fresh": False, "reason": "batch_accounting_submitted_relations"}, facade.calls)
+
     def test_submitted_list_exposes_mismatch_note_and_amount_check(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
         self._submit_batch_mismatch_with_note(app, note="财务确认差额闭环")
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001")
+        self.assertIsNotNone(relation)
+        app._workbench_relation_facade = FakeBatchRelationFacade(relation)
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
         payload = json.loads(response.body)

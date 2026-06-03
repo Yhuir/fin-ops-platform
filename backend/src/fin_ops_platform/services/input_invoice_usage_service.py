@@ -21,6 +21,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
 from fin_ops_platform.services.invoice_relation_query_context import InvoiceRelationQueryContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
 ZERO = Decimal("0.00")
@@ -93,14 +94,18 @@ class InputInvoiceUsageQueryService:
         self,
         *,
         import_service: ImportNormalizationService,
-        pair_relation_service: WorkbenchPairRelationService,
+        pair_relation_service: WorkbenchPairRelationService | None = None,
+        relation_facade: WorkbenchRelationReadFacade | None = None,
         oa_projection: Any | None = None,
         payment_rules_provider: InputInvoiceUsagePaymentRulesProvider | None = None,
+        require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
+        self._relation_facade = relation_facade
         self._oa_projection = oa_projection
         self._payment_rules_provider = payment_rules_provider or StaticInputInvoiceUsagePaymentRulesProvider()
+        self._require_fresh_relations = require_fresh_relations
 
     def list_rows(
         self,
@@ -119,7 +124,7 @@ class InputInvoiceUsageQueryService:
         page_limit = _parse_positive_int(page_size, "page_size", maximum=200)
         parsed_filters = self._parse_filters(filters)
         normalized_sort_field, normalized_sort_direction = self._parse_sort(sort_field, sort_direction)
-        context = self._query_context()
+        context = self._query_context(month_hint=month)
 
         rows = self._filtered_sorted_rows(
             context=context,
@@ -222,11 +227,14 @@ class InputInvoiceUsageQueryService:
             },
         }
 
-    def _query_context(self) -> InvoiceRelationQueryContext:
+    def _query_context(self, *, month_hint: str | None = None) -> InvoiceRelationQueryContext:
         return InvoiceRelationQueryContext(
             import_service=self._import_service,
             pair_relation_service=self._pair_relation_service,
+            relation_facade=self._relation_facade,
             oa_projection=self._oa_projection,
+            month_hint=month_hint,
+            require_fresh_relations=self._require_fresh_relations,
         )
 
     def _filtered_sorted_rows(
@@ -390,6 +398,7 @@ class InputInvoiceUsageQueryService:
 
     def _build_rows(self, *, month: str | None, context: InvoiceRelationQueryContext) -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
+        context.preload_relation_rows([line.id for group in groups for line in group["line_items"]])
         context.preload_oa_records_from_relations(
             [line.id for group in groups for line in group["line_items"]]
         )
@@ -881,19 +890,6 @@ class InputInvoiceUsageQueryService:
             if row_id in {typed_row_id for typed_row_id, _ in self._typed_relation_rows(relation)}:
                 return relation
         return None
-
-    def _relation_summaries_for_row(self, row_id: str) -> list[dict[str, Any]]:
-        return [
-            {
-                "caseId": relation.get("case_id", ""),
-                "relationMode": relation.get("relation_mode", ""),
-                "rowIds": list(relation.get("row_ids") or []),
-                "rowTypes": list(relation.get("row_types") or []),
-                "amountCheck": deepcopy(relation.get("amount_check") or {}),
-            }
-            for relation in self._pair_relation_service.active_relations_for_row_ids([row_id])
-        ]
-
 
 def _parse_positive_int(value: int | str | None, field: str, *, maximum: int | None = None) -> int:
     try:

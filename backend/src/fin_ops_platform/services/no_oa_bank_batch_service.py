@@ -119,8 +119,7 @@ class NoOaBankBatchService:
             rows=rows,
             categories=categories,
         )
-        current_active_relations = self._pair_relation_service.list_active_relations()
-        effective_active_relations = self._effective_active_relations_after_migration(active_relations, current_active_relations)
+        effective_active_relations = self._effective_active_relations_after_migration(active_relations, active_relations)
         occupied_row_ids = self._active_relation_row_ids(effective_active_relations)
         no_oa_occupied_row_ids = self._active_no_oa_relation_row_ids(effective_active_relations)
         relation_backed_submitted_batches = self._relation_backed_submitted_batches(

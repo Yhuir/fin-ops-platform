@@ -20,6 +20,7 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
 from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
@@ -50,6 +51,7 @@ class NoOaBankBatchApplicationService:
         expand_workbench_read_model_scope_keys_for_base_scopes: Callable[[list[str]], list[str]] | None = None,
         search_cache_clearer: Callable[[], Any] | None = None,
         queue_repository: Any | None = None,
+        relation_facade: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._effective_category_provider = effective_category_provider
@@ -71,6 +73,7 @@ class NoOaBankBatchApplicationService:
         )
         self._search_cache_clearer = search_cache_clearer or (lambda: None)
         self._queue_repository = queue_repository
+        self._relation_facade = relation_facade
 
     def list_batches_payload(self, query: dict[str, list[str]]) -> dict[str, object]:
         filters = {
@@ -144,15 +147,20 @@ class NoOaBankBatchApplicationService:
         bank_rows = self.no_oa_bank_transaction_rows_by_ids(row_ids)
         categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
         rows_by_id = {str(row.get("id")): row for row in bank_rows if str(row.get("id") or "").strip()}
+        relation_rows_by_id = self._workbench_relation_rows_by_id(row_ids)
         return {
             "batch": self.resolve_labels([batch])[0],
-            "rows": self.detail_rows(row_ids, rows_by_id, categories_by_transaction_id),
+            "rows": self._apply_relation_status_to_detail_rows(
+                self.detail_rows(row_ids, rows_by_id, categories_by_transaction_id),
+                relation_rows_by_id,
+            ),
             "tag_counts": batch.get("tag_counts") if isinstance(batch.get("tag_counts"), dict) else {},
             "direction_counts": batch.get("direction_counts") if isinstance(batch.get("direction_counts"), dict) else {},
             "categories_by_transaction_id": {
                 row_id: categories_by_transaction_id.get(row_id, {})
                 for row_id in row_ids
             },
+            "workbench_relation_source_versions": self._workbench_relation_source_versions(),
         }
 
     def submit_batch(
@@ -241,7 +249,7 @@ class NoOaBankBatchApplicationService:
         self._no_oa_bank_batch_service.build_batches(
             bank_rows,
             categories_by_transaction_id,
-            self._pair_relation_service.list_active_relations(),
+            self._workbench_relation_active_relations_for_bank_rows(bank_rows),
             self.no_oa_bank_batch_source_versions(),
             eligible_batch_types=self.selected_tag_codes(),
         )
@@ -499,7 +507,132 @@ class NoOaBankBatchApplicationService:
         bank_detail_source_versions = getattr(self._effective_category_provider, "last_source_versions", None)
         if isinstance(bank_detail_source_versions, dict) and bank_detail_source_versions:
             source_versions["bank_detail_source_versions"] = dict(bank_detail_source_versions)
+        workbench_relation_source_versions = self._workbench_relation_source_versions()
+        if workbench_relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = workbench_relation_source_versions
         return source_versions
+
+    def _workbench_relation_source_versions(self) -> dict[str, object]:
+        source_versions = getattr(self._relation_facade, "last_source_versions", None)
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
+
+    def _workbench_relation_rows_by_id(self, row_ids: list[str]) -> dict[str, dict[str, object]]:
+        normalized_ids: list[str] = []
+        seen: set[str] = set()
+        for row_id in row_ids:
+            text = str(row_id or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                normalized_ids.append(text)
+        if not normalized_ids or self._relation_facade is None:
+            return {}
+        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        if not callable(reader):
+            return {}
+        try:
+            payload = reader(normalized_ids, require_fresh=False, reason="no_oa_bank_batch_detail_relations")
+        except TypeError:
+            payload = reader(normalized_ids)
+        if not isinstance(payload, dict):
+            return {}
+        rows_by_id: dict[str, dict[str, object]] = {}
+        for row in list(payload.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            row_id = str(row.get("row_id") or "").strip()
+            if row_id:
+                rows_by_id[row_id] = row
+        return rows_by_id
+
+    def _workbench_relation_active_relations_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        if self._relation_facade is None:
+            return []
+        list_by_month = getattr(self._relation_facade, "list_by_month", None)
+        if not callable(list_by_month):
+            return []
+        months = self._months_for_bank_rows(bank_rows)
+        relations_by_case_id: dict[str, dict[str, object]] = {}
+        for month in months:
+            try:
+                payload = list_by_month(
+                    month,
+                    row_types=["bank_transaction"],
+                    require_fresh=False,
+                    reason="no_oa_bank_batch_build_relations",
+                )
+            except TypeError:
+                payload = list_by_month(month)
+            for relation in relation_dicts_from_distribution_payload(payload if isinstance(payload, dict) else {}):
+                case_id = str(relation.get("case_id") or "").strip()
+                if case_id:
+                    relations_by_case_id[case_id] = relation
+        return list(relations_by_case_id.values())
+
+    @classmethod
+    def _months_for_bank_rows(cls, bank_rows: list[dict[str, object]]) -> list[str]:
+        months: list[str] = []
+        seen: set[str] = set()
+        for row in list(bank_rows or []):
+            if not isinstance(row, dict):
+                continue
+            month = cls._month_from_bank_row(row)
+            if month and month not in seen:
+                seen.add(month)
+                months.append(month)
+        return sorted(months)
+
+    @staticmethod
+    def _month_from_bank_row(row: dict[str, object]) -> str:
+        for key in ("scope_month", "txn_month", "trade_time", "pay_receive_time", "txn_date", "transaction_date", "date"):
+            value = str(row.get(key) or "").strip()
+            if len(value) >= 7 and re.match(r"^\d{4}-\d{2}", value):
+                return value[:7]
+        return ""
+
+    @staticmethod
+    def _apply_relation_status_to_detail_rows(
+        rows: list[dict[str, object]],
+        relation_rows_by_id: dict[str, dict[str, object]],
+    ) -> list[dict[str, object]]:
+        enriched: list[dict[str, object]] = []
+        for row in rows:
+            next_row = dict(row)
+            row_id = str(next_row.get("id") or "").strip()
+            relation_row = relation_rows_by_id.get(row_id) if row_id else None
+            if relation_row is None:
+                next_row.update(
+                    {
+                        "relation_status": "unlinked",
+                        "relation_case_ids": [],
+                        "linked_oa_count": 0,
+                        "linked_invoice_count": 0,
+                    }
+                )
+            else:
+                group_ids = [
+                    str(group_id).strip()
+                    for group_id in list(relation_row.get("group_ids") or [])
+                    if str(group_id).strip()
+                ]
+                input_invoices = [item for item in list(relation_row.get("linked_input_invoices") or []) if isinstance(item, dict)]
+                output_invoices = [item for item in list(relation_row.get("linked_output_invoices") or []) if isinstance(item, dict)]
+                linked_oa = [item for item in list(relation_row.get("linked_oa") or []) if isinstance(item, dict)]
+                next_row.update(
+                    {
+                        "relation_status": str(relation_row.get("relation_status") or ("linked" if group_ids else "unlinked")),
+                        "relation_case_ids": list(dict.fromkeys(group_ids)),
+                        "linked_oa_count": len({str(item.get("id") or item.get("oa_id") or "").strip() for item in linked_oa if str(item.get("id") or item.get("oa_id") or "").strip()}),
+                        "linked_invoice_count": len(
+                            {
+                                str(item.get("id") or item.get("invoice_id") or "").strip()
+                                for item in [*input_invoices, *output_invoices]
+                                if str(item.get("id") or item.get("invoice_id") or "").strip()
+                            }
+                        ),
+                    }
+                )
+            enriched.append(next_row)
+        return enriched
 
     def no_oa_bank_batch_stale_reasons(self, batches: object) -> list[str]:
         batch_rows = batches if isinstance(batches, list) else []
@@ -651,7 +784,7 @@ class NoOaBankBatchApplicationService:
         refreshed = self._no_oa_bank_batch_service.build_batches(
             bank_rows,
             categories_by_transaction_id,
-            self._pair_relation_service.list_active_relations(),
+            self._workbench_relation_active_relations_for_bank_rows(bank_rows),
             self.no_oa_bank_batch_source_versions(),
             eligible_batch_types=self.selected_tag_codes(),
         )

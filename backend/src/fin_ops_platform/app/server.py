@@ -350,6 +350,7 @@ from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_P
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
@@ -562,6 +563,30 @@ class Application:
         if self._requires_sql_read_model_runtime() and facade is not None:
             return facade
         return self._bank_transaction_effective_category_provider
+
+    def _workbench_relation_read_facade(self) -> WorkbenchRelationReadFacade | None:
+        facade = getattr(self, "_workbench_relation_facade", None)
+        if isinstance(facade, WorkbenchRelationReadFacade):
+            return facade
+        if facade is not None and callable(getattr(facade, "get_by_row_ids", None)):
+            return facade
+        if not self._requires_sql_read_model_runtime():
+            return None
+        repository = getattr(self._state_store, "read_model_repository", None)
+        required_methods = (
+            "get_workbench_relation_rows_by_ids",
+            "list_workbench_relation_rows",
+            "get_workbench_relation_groups_by_ids",
+        )
+        if repository is None or not all(callable(getattr(repository, method_name, None)) for method_name in required_methods):
+            return None
+        facade = WorkbenchRelationReadFacade(
+            read_model_repository=repository,
+            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            tenant_id=self._workbench_reconciliation_tenant_id(),
+        )
+        self._workbench_relation_facade = facade
+        return facade
 
     def _workbench_reconciliation_dirty_queue_repository(self):
         repository = getattr(self._state_store, "read_model_repository", None)
@@ -845,6 +870,7 @@ class Application:
         )
         self._bank_details_relation_tag_projection_service = BankDetailsRelationTagProjectionService(
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_facade=self._workbench_relation_read_facade(),
             candidate_match_service=self._workbench_candidate_match_service,
             workbench_read_model_provider=self._bank_details_relation_tag_workbench_read_model,
         )
@@ -870,6 +896,7 @@ class Application:
             effective_category_provider=self._bank_transaction_tag_reader(),
             oa_projection=oa_adapter,
             income_status_override_provider=self._pending_invoice_command_repository.latest_income_status_override,
+            relation_facade=self._workbench_relation_read_facade(),
         )
         self._pending_invoice_lifecycle_service = PendingInvoiceLifecycleService(
             audit_service=self._audit_service,
@@ -879,18 +906,24 @@ class Application:
         self._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_facade=self._workbench_relation_read_facade(),
             oa_projection=oa_adapter,
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
+            require_fresh_relations=False,
         )
         self._oa_pending_payment_query_service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_facade=self._workbench_relation_read_facade(),
             oa_projection=oa_adapter,
+            require_fresh_relations=False,
         )
         self._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_facade=self._workbench_relation_read_facade(),
             lifecycle_repository=self._output_invoice_collection_lifecycle_repository,
+            require_fresh_relations=False,
         )
         self._output_invoice_collection_lifecycle_service = OutputInvoiceCollectionLifecycleService(
             repository=self._output_invoice_collection_lifecycle_repository,
@@ -1012,6 +1045,7 @@ class Application:
             row_detail_loader=self._get_api_workbench_row_detail_payload,
             raw_workbench_loader=self._build_raw_workbench_payload,
             project_active_checker=self._app_settings_service.is_project_active,
+            relation_facade=self._workbench_relation_read_facade(),
         )
         self._configure_cost_statistics_application_services()
         self._search_service = SearchService(
@@ -7811,8 +7845,10 @@ class Application:
         service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_facade=self._workbench_relation_read_facade(),
             oa_projection=getattr(self, "_workbench_query_service", None),
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
+            require_fresh_relations=False,
         )
         self._input_invoice_usage_query_service = service
         return service
@@ -8354,7 +8390,9 @@ class Application:
         service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_facade=self._workbench_relation_read_facade(),
             oa_projection=getattr(self, "_workbench_query_service", None),
+            require_fresh_relations=False,
         )
         self._oa_pending_payment_query_service = service
         return service
@@ -8475,7 +8513,9 @@ class Application:
         service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_facade=self._workbench_relation_read_facade(),
             lifecycle_repository=lifecycle_repository,
+            require_fresh_relations=False,
         )
         self._output_invoice_collection_query_service = service
         return service
@@ -12011,6 +12051,7 @@ class Application:
             expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
             search_cache_clearer=self._search_service.clear_cache,
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            relation_facade=self._workbench_relation_read_facade(),
         )
 
     def _no_oa_bank_batch_routes(self) -> NoOaBankBatchApiRoutes:
@@ -12117,6 +12158,7 @@ class Application:
             grouped_workbench_loader=lambda month: self._build_api_workbench_payload(month),
             pair_relation_service=self._workbench_pair_relation_service,
             batch_workbench_loader=batch_workbench_loader,
+            relation_facade=self._workbench_relation_read_facade(),
         )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:

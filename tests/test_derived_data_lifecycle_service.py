@@ -22,6 +22,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             [domain["domain"] for domain in plan["domains"]],
             [
                 "workbench_read_model",
+                "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
@@ -46,6 +47,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "bank_account_balance_read_model",
                 "bank_detail_read_model",
                 "workbench_read_model",
+                "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "cost_statistics_read_model",
                 "search_cache",
@@ -64,6 +66,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             [
                 "bank_detail_read_model",
                 "workbench_read_model",
+                "workbench_relation_read_model",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "pending_invoice_read_model",
@@ -81,6 +84,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
 
         self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in pair_plan["domains"]])
         self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in exception_plan["domains"]])
+        self.assertIn("workbench_relation_read_model", [domain["domain"] for domain in pair_plan["domains"]])
+        self.assertIn("workbench_relation_read_model", [domain["domain"] for domain in exception_plan["domains"]])
         self.assertIn("workbench_matching", pair_plan["will_enqueue_jobs"])
         self.assertIn("workbench_matching", exception_plan["will_enqueue_jobs"])
 
@@ -91,6 +96,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
 
         self.assertEqual(plan["affected_scopes"], ["2026-01", "all"])
         self.assertIn("bank_detail_read_model", [domain["domain"] for domain in plan["domains"]])
+        self.assertIn("workbench_relation_read_model", [domain["domain"] for domain in plan["domains"]])
 
     def test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill(self) -> None:
         service = DerivedDataLifecycleService()
@@ -112,6 +118,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             [
                 "bank_detail_read_model",
                 "workbench_read_model",
+                "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "pending_invoice_read_model",
                 "tax_offset_read_model",
@@ -168,6 +175,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             [
                 "oa_adapter_records_cache",
                 "workbench_read_model",
+                "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
@@ -284,6 +292,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             DERIVED_DATA_DOMAINS,
             (
                 "workbench_read_model",
+                "workbench_relation_read_model",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "cost_statistics_read_model",

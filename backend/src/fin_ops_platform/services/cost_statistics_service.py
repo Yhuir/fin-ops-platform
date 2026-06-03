@@ -34,11 +34,13 @@ class CostStatisticsService:
         row_detail_loader: Callable[[str], dict[str, Any]],
         raw_workbench_loader: Callable[[str], dict[str, Any]] | None = None,
         project_active_checker: Callable[[str | None, str], bool] | None = None,
+        relation_facade: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._grouped_workbench_loader = grouped_workbench_loader
         self._row_detail_loader = row_detail_loader
         self._project_active_checker = project_active_checker or (lambda project_id, project_name: True)
+        self._relation_facade = relation_facade
         self._project_detail_export_service = ProjectDetailExportService(
             import_service,
             grouped_workbench_loader=grouped_workbench_loader,
@@ -445,6 +447,19 @@ class CostStatisticsService:
             raise KeyError(transaction_id)
         raw_detail = self._row_detail_loader(transaction_id)
         row_detail = raw_detail.get("row", raw_detail) if isinstance(raw_detail, dict) else {}
+        relation_context = self._relation_context_for_transaction(transaction_id)
+        relation_case_ids = [
+            str(group_id).strip()
+            for group_id in list(relation_context.get("group_ids") or [])
+            if str(group_id).strip()
+        ]
+        linked_oa = [item for item in list(relation_context.get("linked_oa") or []) if isinstance(item, dict)]
+        linked_input_invoices = [
+            item for item in list(relation_context.get("linked_input_invoices") or []) if isinstance(item, dict)
+        ]
+        linked_output_invoices = [
+            item for item in list(relation_context.get("linked_output_invoices") or []) if isinstance(item, dict)
+        ]
         return {
             "month": month,
             "transaction": {
@@ -461,8 +476,52 @@ class CostStatisticsService:
                 "oa_applicant": entry["oa_applicant"],
                 "summary_fields": dict(row_detail.get("summary_fields", {})),
                 "detail_fields": dict(row_detail.get("detail_fields", {})),
+                "relation_status": str(relation_context.get("relation_status") or ("linked" if relation_case_ids else "unlinked")),
+                "relation_case_ids": list(dict.fromkeys(relation_case_ids)),
+                "linked_oa_count": len({str(item.get("id") or item.get("oa_id") or "").strip() for item in linked_oa if str(item.get("id") or item.get("oa_id") or "").strip()}),
+                "linked_invoice_count": len(
+                    {
+                        str(item.get("id") or item.get("invoice_id") or "").strip()
+                        for item in [*linked_input_invoices, *linked_output_invoices]
+                        if str(item.get("id") or item.get("invoice_id") or "").strip()
+                    }
+                ),
+            },
+            "relation_context": {
+                "row_id": str(relation_context.get("row_id") or transaction_id),
+                "row_type": str(relation_context.get("row_type") or "bank_transaction"),
+                "relation_status": str(relation_context.get("relation_status") or ("linked" if relation_case_ids else "unlinked")),
+                "group_ids": list(dict.fromkeys(relation_case_ids)),
+                "linked_oa": linked_oa,
+                "linked_bank_transactions": [
+                    item for item in list(relation_context.get("linked_bank_transactions") or []) if isinstance(item, dict)
+                ],
+                "linked_input_invoices": linked_input_invoices,
+                "linked_output_invoices": linked_output_invoices,
             },
         }
+
+    def _relation_context_for_transaction(self, transaction_id: str) -> dict[str, Any]:
+        normalized_transaction_id = str(transaction_id or "").strip()
+        if not normalized_transaction_id or self._relation_facade is None:
+            return {}
+        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        if not callable(reader):
+            return {}
+        try:
+            payload = reader(
+                [normalized_transaction_id],
+                require_fresh=False,
+                reason="cost_statistics_transaction_detail_relations",
+            )
+        except TypeError:
+            payload = reader([normalized_transaction_id])
+        if not isinstance(payload, dict):
+            return {}
+        for row in list(payload.get("rows") or []):
+            if isinstance(row, dict) and str(row.get("row_id") or "").strip() == normalized_transaction_id:
+                return row
+        return {}
 
     def export_view(
         self,
