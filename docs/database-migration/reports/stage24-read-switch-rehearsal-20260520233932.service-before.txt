@@ -1,8 +1,0 @@
-MainPID=452671
-ExecMainStartTimestamp=Wed 2026-05-20 16:07:52 CST
-ExecStart={ path=/opt/fin-ops/venv/bin/python ; argv[]=/opt/fin-ops/venv/bin/python -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001 ; ignore_errors=no ; start_time=[Wed 2026-05-20 16:07:52 CST] ; stop_time=[n/a] ; pid=452671 ; code=(null) ; status=0/0 }
-WorkingDirectory=/opt/fin-ops/current
-User=root
-Group=
-ActiveState=active
-SubState=running

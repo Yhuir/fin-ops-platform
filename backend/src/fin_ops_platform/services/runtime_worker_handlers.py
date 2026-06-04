@@ -297,8 +297,10 @@ class _RuntimeWorkerDerivedLifecycle:
             plan,
             executors={
                 "workbench_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench", reason),
+                "workbench_relation_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench_relation", reason),
                 "workbench_candidate_matches": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
                 "workbench_matching_dirty_scopes": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
+                "invoice_lifecycle_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "invoice_lifecycle", reason),
                 "cost_statistics_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "cost_statistics", reason),
                 "tax_offset_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "tax_offset", reason),
                 "tax_offset_month_cache": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
@@ -394,6 +396,8 @@ class _RuntimeWorkerDerivedLifecycle:
         if callable(save_tax_certified_imports):
             save_tax_certified_imports(tax_certified_import_service.snapshot())
         self._enqueue_scopes("workbench", ["all"], reason="import_state_changed")
+        self._enqueue_scopes("workbench_relation", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+        self._enqueue_scopes("invoice_lifecycle", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes("search", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes("pending_invoice", ["expense:all", "income:all", "income:cash_income"], reason="import_state_changed")
         self._enqueue_scopes(
@@ -551,11 +555,9 @@ def _canonical_invoice_key_exists(import_service: Any) -> Callable[[str], bool]:
         normalized = str(canonical_key or "").strip()
         if not normalized:
             return False
-        for invoice in import_service.list_invoices():
-            if str(getattr(invoice, "source_unique_key", "") or "").strip() == normalized:
-                return True
-            if str(getattr(invoice, "digital_invoice_no", "") or "").strip() == normalized:
-                return True
+        exists_method = getattr(import_service, "canonical_invoice_key_exists", None)
+        if callable(exists_method):
+            return bool(exists_method(normalized))
         return False
 
     return exists

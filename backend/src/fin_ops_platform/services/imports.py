@@ -14,8 +14,8 @@ from fin_ops_platform.domain.models import (
     ImportedBatchRowResult,
     Invoice,
 )
-from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService
-from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
+from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
 ZERO = Decimal("0.00")
@@ -73,6 +73,28 @@ class ImportPreview:
         return self.batch.status
 
 
+class _ImportObjectIdentityRepository:
+    def __init__(self, import_service: "ImportNormalizationService") -> None:
+        self._import_service = import_service
+
+    def find_invoice_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> Invoice | None:
+        return self._import_service._find_invoice_by_identity(
+            source_unique_key=canonical_key,
+            data_fingerprint=suspected_key,
+        )
+
+    def find_bank_transaction_by_identity(self, *, canonical_key: str | None = None) -> BankTransaction | None:
+        return self._import_service._find_transaction_by_identity(source_unique_key=canonical_key)
+
+    def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
+        return self.find_invoice_by_identity(canonical_key=canonical_key) is not None
+
+
 class ImportNormalizationService:
     def __init__(
         self,
@@ -81,6 +103,8 @@ class ImportNormalizationService:
         existing_transactions: list[BankTransaction] | None = None,
         id_registry: Any | None = None,
         fact_repository: Any | None = None,
+        identity_policy: FinancialObjectIdentityPolicy | None = None,
+        dedup_decision_service: ObjectDedupDecisionService | None = None,
     ) -> None:
         self._batch_counter = 0
         self._row_counter = 0
@@ -89,8 +113,7 @@ class ImportNormalizationService:
         self._counterparty_counter = 0
         self._id_registry = id_registry
         self._fact_repository = fact_repository
-        self._invoice_identity_service = InvoiceIdentityService()
-        self._bank_transaction_identity_service = BankTransactionIdentityService()
+        self._object_identity_policy = identity_policy or FinancialObjectIdentityPolicy()
 
         self._batches: dict[str, ImportPreview] = {}
         self._invoices_by_id: dict[str, Invoice] = {}
@@ -106,6 +129,11 @@ class ImportNormalizationService:
             self._register_invoice(invoice)
         for transaction in existing_transactions or []:
             self._register_transaction(transaction)
+        self._object_identity_repository = _ImportObjectIdentityRepository(self)
+        self._dedup_decision_service = dedup_decision_service or ObjectDedupDecisionService(
+            identity_policy=self._object_identity_policy,
+            object_identity_repository=self._object_identity_repository,
+        )
 
     @classmethod
     def from_snapshot(
@@ -240,30 +268,16 @@ class ImportNormalizationService:
         normalized: dict[str, Any],
     ) -> None:
         source_unique_key = normalized.get("source_unique_key")
-        data_fingerprint = normalized.get("data_fingerprint")
-
-        existing = self._find_invoice_by_identity(source_unique_key=source_unique_key, data_fingerprint=data_fingerprint)
+        decision = self._dedup_decision_service.decide_invoice_confirm(normalized)
+        existing = decision.matched_object if isinstance(decision.matched_object, Invoice) else None
         if source_unique_key and existing is not None:
-            linked_invoice_id = existing.id
             normalized["previous_invoice_status_from_source"] = existing.invoice_status_from_source
             normalized["previous_source_batch_id"] = existing.source_batch_id
-            incoming_status = normalized.get("invoice_status_from_source")
-            row_result.linked_object_type = "invoice"
-            row_result.linked_object_id = linked_invoice_id
-            if incoming_status and incoming_status != existing.invoice_status_from_source:
-                row_result.decision = ImportDecision.STATUS_UPDATED
-                row_result.decision_reason = "Unique business key matched an existing invoice during confirm with a changed source status."
-            else:
-                row_result.decision = ImportDecision.DUPLICATE_SKIPPED
-                row_result.decision_reason = "Unique business key matched an existing invoice during confirm."
-            return
-
-        if not source_unique_key and data_fingerprint and existing is not None:
-            linked_invoice_id = existing.id
-            row_result.linked_object_type = "invoice"
-            row_result.linked_object_id = linked_invoice_id
-            row_result.decision = ImportDecision.SUSPECTED_DUPLICATE
-            row_result.decision_reason = "Fingerprint matched an existing invoice during confirm without a stable official unique key."
+        if decision.linked_object_id:
+            row_result.linked_object_type = decision.linked_object_type
+            row_result.linked_object_id = decision.linked_object_id
+            row_result.decision = ImportDecision(decision.decision)
+            row_result.decision_reason = decision.decision_reason
 
     def get_batch(self, batch_id: str) -> ImportPreview:
         return self._batches[batch_id]
@@ -459,36 +473,40 @@ class ImportNormalizationService:
     ) -> tuple[ImportDecision | None, str | None, str | None]:
         source_unique_key = normalized.get("source_unique_key")
         if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
-            data_fingerprint = normalized.get("data_fingerprint")
-            existing = self._find_invoice_by_identity(source_unique_key=source_unique_key, data_fingerprint=data_fingerprint)
-            if source_unique_key and existing is not None:
-                linked_invoice_id = existing.id
-                incoming_status = normalized.get("invoice_status_from_source")
-                if incoming_status and incoming_status != existing.invoice_status_from_source:
-                    return ImportDecision.STATUS_UPDATED, "invoice", linked_invoice_id
-                return ImportDecision.DUPLICATE_SKIPPED, "invoice", linked_invoice_id
-            if not source_unique_key and data_fingerprint and existing is not None:
-                return ImportDecision.SUSPECTED_DUPLICATE, "invoice", existing.id
-            return ImportDecision.CREATED, None, None
+            decision = self._dedup_decision_service.decide_invoice_import(normalized)
+        else:
+            decision = self._dedup_decision_service.decide_bank_transaction_import(normalized)
+        return ImportDecision(decision.decision), decision.linked_object_type, decision.linked_object_id
 
-        existing_transaction = self._find_transaction_by_identity(source_unique_key=source_unique_key)
-        if source_unique_key and existing_transaction is not None:
-            return ImportDecision.DUPLICATE_SKIPPED, "bank_transaction", existing_transaction.id
-        return ImportDecision.CREATED, None, None
+    def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
+        return self._dedup_decision_service.canonical_invoice_key_exists(canonical_key)
+
+    def find_invoice_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> Invoice | None:
+        return self._object_identity_repository.find_invoice_by_identity(
+            canonical_key=canonical_key,
+            suspected_key=suspected_key,
+        )
 
     def has_imported_records(self) -> bool:
         return bool(self._invoices_by_id or self._transactions_by_id)
 
     def upsert_etc_invoice(self, etc_invoice: Any) -> Invoice:
         normalized = self._normalize_etc_invoice(etc_invoice)
-        source_unique_key = normalized.get("source_unique_key")
-        data_fingerprint = normalized.get("data_fingerprint")
-        linked_invoice_id = self._invoice_unique_index.get(source_unique_key) if source_unique_key else None
-        if linked_invoice_id is None and not source_unique_key and data_fingerprint:
-            linked_invoice_id = self._invoice_fingerprint_index.get(data_fingerprint)
+        decision = self._dedup_decision_service.decide_invoice_import(normalized)
+        linked_invoice_id = decision.linked_object_id
 
         if linked_invoice_id is not None:
-            invoice = self._invoices_by_id[linked_invoice_id]
+            invoice = self._ensure_invoice_loaded(linked_invoice_id)
+            if invoice is None and isinstance(decision.matched_object, Invoice):
+                invoice = decision.matched_object
+                self._register_invoice(invoice)
+            if invoice is None:
+                raise KeyError(linked_invoice_id)
             self._merge_invoice_from_etc_normalized(invoice, normalized)
             return invoice
 
@@ -614,11 +632,9 @@ class ImportNormalizationService:
             if parsed_value is not None:
                 normalized[source_key] = self._format_decimal(parsed_value)
 
-        identity = self._invoice_identity_service.identity_for_mapping(normalized)
+        identity = self._object_identity_policy.identify_invoice_mapping(normalized)
         source_unique_key = identity.canonical_key
         data_fingerprint = identity.suspected_key
-        if normalized_name and invoice_date and amount is not None:
-            data_fingerprint = data_fingerprint or self._build_invoice_fingerprint(normalized_name, invoice_date, amount)
         normalized["source_unique_key"] = source_unique_key
         normalized["data_fingerprint"] = data_fingerprint
         normalized["invoice_type"] = InvoiceType.OUTPUT.value if batch_type == BatchType.OUTPUT_INVOICE else InvoiceType.INPUT.value
@@ -638,26 +654,14 @@ class ImportNormalizationService:
                 raw_payload=dict(raw_row),
             )
 
-        linked_invoice_id = None
-        decision = ImportDecision.CREATED
-        reason = "Ready to create new invoice."
-
-        existing = self._find_invoice_by_identity(source_unique_key=source_unique_key, data_fingerprint=data_fingerprint)
+        dedup_decision = self._dedup_decision_service.decide_invoice_import(normalized)
+        linked_invoice_id = dedup_decision.linked_object_id
+        decision = ImportDecision(dedup_decision.decision)
+        reason = dedup_decision.decision_reason
+        existing = dedup_decision.matched_object if isinstance(dedup_decision.matched_object, Invoice) else None
         if source_unique_key and existing is not None:
-            linked_invoice_id = existing.id
             normalized["previous_invoice_status_from_source"] = existing.invoice_status_from_source
             normalized["previous_source_batch_id"] = existing.source_batch_id
-            incoming_status = normalized.get("invoice_status_from_source")
-            if incoming_status and incoming_status != existing.invoice_status_from_source:
-                decision = ImportDecision.STATUS_UPDATED
-                reason = "Unique business key matched an existing invoice with a changed source status."
-            else:
-                decision = ImportDecision.DUPLICATE_SKIPPED
-                reason = "Unique business key matched an existing invoice with no source status change."
-        elif not source_unique_key and data_fingerprint and existing is not None:
-            linked_invoice_id = existing.id
-            decision = ImportDecision.SUSPECTED_DUPLICATE
-            reason = "Fingerprint matched an existing invoice without a stable official unique key."
 
         return normalized, ImportedBatchRowResult(
             id=self._next_row_id(),
@@ -745,10 +749,10 @@ class ImportNormalizationService:
         if signed_amount is not None:
             normalized["signed_amount"] = self._format_decimal(signed_amount)
 
-        identity = self._bank_transaction_identity_service.identity_for_mapping(normalized)
+        identity = self._object_identity_policy.identify_bank_transaction_mapping(normalized)
         if not txn_date and identity.components.get("trade_time"):
             normalized["txn_date"] = identity.components["trade_time"][:10]
-        source_unique_key = identity.identity_key
+        source_unique_key = identity.canonical_key
         data_fingerprint = None
         normalized["source_unique_key"] = source_unique_key
         normalized["data_fingerprint"] = data_fingerprint
@@ -769,14 +773,10 @@ class ImportNormalizationService:
                 **row_display_fields,
             )
 
-        linked_txn_id = None
-        decision = ImportDecision.CREATED
-        reason = "Ready to create new bank transaction."
-        existing_transaction = self._find_transaction_by_identity(source_unique_key=source_unique_key)
-        if source_unique_key and existing_transaction is not None:
-            linked_txn_id = existing_transaction.id
-            decision = ImportDecision.DUPLICATE_SKIPPED
-            reason = "Bank transaction identity matched an existing transaction."
+        dedup_decision = self._dedup_decision_service.decide_bank_transaction_import(normalized)
+        linked_txn_id = dedup_decision.linked_object_id
+        decision = ImportDecision(dedup_decision.decision)
+        reason = dedup_decision.decision_reason
 
         return normalized, ImportedBatchRowResult(
             id=self._next_row_id(),
@@ -929,7 +929,7 @@ class ImportNormalizationService:
     def _register_invoice(self, invoice: Invoice) -> None:
         self._ensure_invoice_metadata_fields(invoice)
         if not invoice.source_unique_key:
-            invoice.source_unique_key = self._invoice_identity_service.canonical_key_for_invoice(invoice)
+            invoice.source_unique_key = self._object_identity_policy.identify_invoice(invoice).canonical_key
         self._invoices_by_id[invoice.id] = invoice
         self._get_or_create_counterparty(invoice.counterparty.name, existing=invoice.counterparty)
         if invoice.source_unique_key:
@@ -939,7 +939,7 @@ class ImportNormalizationService:
 
     def _register_transaction(self, transaction: BankTransaction) -> None:
         self._ensure_transaction_metadata_fields(transaction)
-        canonical_key = self._bank_transaction_identity_service.canonical_key_for_transaction(transaction)
+        canonical_key = self._object_identity_policy.identify_bank_transaction(transaction).canonical_key
         if canonical_key:
             transaction.source_unique_key = canonical_key
         self._transactions_by_id[transaction.id] = transaction
@@ -985,7 +985,7 @@ class ImportNormalizationService:
         return counterparty
 
     def _build_invoice_unique_key(self, normalized: dict[str, Any]) -> str | None:
-        return self._invoice_identity_service.canonical_key_for_mapping(normalized)
+        return self._object_identity_policy.identify_invoice_mapping(normalized).canonical_key
 
     def _normalize_etc_invoice(self, etc_invoice: Any) -> dict[str, Any]:
         invoice_number = self._string_or_none(getattr(etc_invoice, "invoice_number", None))
@@ -1019,15 +1019,9 @@ class ImportNormalizationService:
             "source_unique_key": None,
             "data_fingerprint": None,
         }
-        identity = self._invoice_identity_service.identity_for_mapping(normalized)
+        identity = self._object_identity_policy.identify_etc_invoice_mapping(normalized)
         normalized["source_unique_key"] = identity.canonical_key
         normalized["data_fingerprint"] = identity.suspected_key
-        if normalized["normalized_counterparty_name"] and normalized.get("invoice_date") and amount is not None:
-            normalized["data_fingerprint"] = normalized["data_fingerprint"] or self._build_invoice_fingerprint(
-                normalized["normalized_counterparty_name"],
-                str(normalized["invoice_date"]),
-                amount,
-            )
         normalized["workbench_visibility"] = (
             "hidden_after_etc_submission"
             if normalized.get("etc_submission_status") == "submitted"
@@ -1229,14 +1223,10 @@ class ImportNormalizationService:
         return "ETC" in tags or "ETC" in invoice_source or "ETC" in invoice_kind
 
     @staticmethod
-    def _build_invoice_fingerprint(normalized_name: str, invoice_date: str, amount: Decimal) -> str:
-        return f"invoice:{normalized_name}:{invoice_date}:{amount.quantize(CENT)}"
-
-    @staticmethod
     def _transaction_row_result_display_fields(normalized: dict[str, Any], identity: Any) -> dict[str, str | None]:
         components = getattr(identity, "components", {}) or {}
         return {
-            "identity_kind": "stable" if getattr(identity, "identity_key", None) else None,
+            "identity_kind": "stable" if getattr(identity, "canonical_key", None) else None,
             "account_no": normalized.get("account_no"),
             "trade_time": (
                 components.get("trade_time")

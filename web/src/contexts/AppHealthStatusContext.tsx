@@ -19,6 +19,8 @@ import {
   type AppHealthBroadcast,
 } from "../features/appHealth/broadcast";
 import { resolveAppHealthStatus } from "../features/appHealth/resolveAppHealthStatus";
+import { mapAppStatusOverview } from "../features/appStatus/api";
+import type { AppStatusOverview } from "../features/appStatus/types";
 import type {
   ApiAppHealthJobSummary,
   ApiAppHealthPayload,
@@ -48,6 +50,7 @@ const defaultSources: AppHealthSources = {
 const defaultStatus = resolveAppHealthStatus(defaultSources);
 
 const AppHealthStatusContext = createContext<AppHealthStatus | null>(null);
+const AppStatusOverviewContext = createContext<AppStatusOverview | null>(null);
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
@@ -434,6 +437,33 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
   }, [applyAppHealthSnapshot, session.status, sseUnavailable]);
 
   const value = useMemo<AppHealthStatus>(() => {
+    const appStatus = mapAppStatusOverview(apiPayload?.app_status);
+    if (appStatus) {
+      return {
+        level: appStatus.overall.level,
+        reason: appStatus.overall.reason,
+        details: appStatus.domains
+          .filter((domain) => domain.level !== "ok")
+          .map((domain) => domain.reason)
+          .slice(0, 3),
+        blocksMutations: canMutateData ? appStatus.overall.blocksMutations : true,
+        sources: {
+          session: sessionSourceFromLocal(session.status),
+          backgroundJobs: appStatus.backgroundTasks.some((task) => task.status === "queued" || task.status === "running")
+            ? "running"
+            : appStatus.backgroundTasks.some((task) => task.attention || task.status === "failed" || task.status === "partial_success")
+              ? "attention"
+              : "idle",
+          importProgress: "idle",
+          oaSync: "unknown",
+          workbench: appStatus.domains.some((domain) => domain.key === "workbench" && domain.level === "blocked")
+            ? "error"
+            : appStatus.domains.some((domain) => domain.key === "workbench" && domain.level === "busy")
+              ? "stale"
+              : "ready",
+        },
+      };
+    }
     const localSessionSource = sessionSourceFromLocal(session.status);
     const sessionSource =
       remoteSessionSource && localSessionSource === "authenticated"
@@ -474,7 +504,13 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
     workbenchStatus?.reason,
   ]);
 
-  return <AppHealthStatusContext.Provider value={value}>{children}</AppHealthStatusContext.Provider>;
+  const appStatusOverview = useMemo(() => mapAppStatusOverview(apiPayload?.app_status), [apiPayload]);
+
+  return (
+    <AppStatusOverviewContext.Provider value={appStatusOverview}>
+      <AppHealthStatusContext.Provider value={value}>{children}</AppHealthStatusContext.Provider>
+    </AppStatusOverviewContext.Provider>
+  );
 }
 
 export function useAppHealthStatus() {
@@ -489,4 +525,8 @@ export function useCanMutateWithHealth() {
   const { canMutateData } = useSessionPermissions();
   const healthStatus = useAppHealthStatus();
   return canMutateData && !healthStatus.blocksMutations;
+}
+
+export function useAppStatusOverview() {
+  return useContext(AppStatusOverviewContext);
 }

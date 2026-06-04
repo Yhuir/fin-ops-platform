@@ -59,6 +59,7 @@ class ExistingEtcBatchLinkService:
         etc_service: EtcService,
         import_service: Any,
         pair_relation_service: Any,
+        object_identity_repository: Any | None = None,
         sync_import_result_to_canonical_invoices: Callable[[Any], list[str]] | None = None,
         sync_etc_invoices_to_canonical_invoices: Callable[[list[Any]], list[str]] | None = None,
         refresh_after_etc_invoice_sync: Callable[[list[str], str], None] | None = None,
@@ -69,6 +70,7 @@ class ExistingEtcBatchLinkService:
         self._etc_service = etc_service
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
+        self._object_identity_repository = object_identity_repository or import_service
         self._sync_import_result_to_canonical_invoices = sync_import_result_to_canonical_invoices or (lambda _result: [])
         self._sync_etc_invoices_to_canonical_invoices = sync_etc_invoices_to_canonical_invoices or (lambda _invoices: [])
         self._refresh_after_etc_invoice_sync = refresh_after_etc_invoice_sync or (lambda _months, _reason: None)
@@ -214,17 +216,14 @@ class ExistingEtcBatchLinkService:
         return normalized
 
     def _canonical_invoices_by_number(self, invoice_numbers: list[str]) -> dict[str, Any]:
-        wanted = set(invoice_numbers)
         invoices_by_number: dict[str, Any] = {}
-        for invoice in self._import_service.list_invoices():
-            for value in (
-                getattr(invoice, "digital_invoice_no", None),
-                getattr(invoice, "invoice_no", None),
-                getattr(invoice, "source_unique_key", None),
-            ):
-                invoice_number = str(value or "").strip()
-                if invoice_number in wanted:
-                    invoices_by_number.setdefault(invoice_number, invoice)
+        finder = getattr(self._object_identity_repository, "find_invoice_by_identity", None)
+        if not callable(finder):
+            return invoices_by_number
+        for invoice_number in invoice_numbers:
+            invoice = finder(canonical_key=invoice_number)
+            if invoice is not None:
+                invoices_by_number.setdefault(invoice_number, invoice)
         return invoices_by_number
 
     def _canonical_invoice_record(self, invoice: Any) -> dict[str, object]:

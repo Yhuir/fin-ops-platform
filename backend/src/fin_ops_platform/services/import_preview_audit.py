@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from fin_ops_platform.domain.enums import ImportDecision
 from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
 PLACEHOLDER_EMPTY_VALUES = {"", "--", "—", "-", "——", "nan", "NaN", "None"}
@@ -113,30 +114,37 @@ class RecordIdentityStrategy(Protocol):
 class InvoiceIdentityStrategy:
     record_type = "invoice"
 
-    def __init__(self, identity_service: InvoiceIdentityService | None = None) -> None:
-        self._identity_service = identity_service or InvoiceIdentityService()
+    def __init__(
+        self,
+        identity_service: InvoiceIdentityService | None = None,
+        identity_policy: FinancialObjectIdentityPolicy | None = None,
+    ) -> None:
+        self._identity_policy = identity_policy or FinancialObjectIdentityPolicy(invoice_identity_service=identity_service)
 
     def identify(self, values: dict[str, Any]) -> ImportRecordIdentity:
         normalized = {key: clean_placeholder(value) for key, value in values.items()}
-        canonical_key = self._identity_service.canonical_key_for_mapping(normalized)
-        if canonical_key:
-            return ImportRecordIdentity(record_type=self.record_type, identity_key=canonical_key, identity_kind="stable")
-        suspected_key = self._identity_service.suspected_key_for_mapping(normalized)
-        if suspected_key:
-            return ImportRecordIdentity(record_type=self.record_type, identity_key=suspected_key, identity_kind="suspected")
+        identity = self._identity_policy.identify_invoice_mapping(normalized, object_type=self.record_type)
+        if identity.canonical_key:
+            return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.canonical_key, identity_kind="stable")
+        if identity.suspected_key:
+            return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.suspected_key, identity_kind="suspected")
         return ImportRecordIdentity(record_type=self.record_type, identity_key=None, identity_kind=None)
 
 
 class BankTransactionIdentityStrategy:
     record_type = "bank_transaction"
 
-    def __init__(self, identity_service: BankTransactionIdentityService | None = None) -> None:
-        self._identity_service = identity_service or BankTransactionIdentityService()
+    def __init__(
+        self,
+        identity_service: BankTransactionIdentityService | None = None,
+        identity_policy: FinancialObjectIdentityPolicy | None = None,
+    ) -> None:
+        self._identity_policy = identity_policy or FinancialObjectIdentityPolicy(bank_transaction_identity_service=identity_service)
 
     def identify(self, values: dict[str, Any]) -> ImportRecordIdentity:
-        identity = self._identity_service.identity_for_mapping(values)
-        if identity.identity_key:
-            return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.identity_key, identity_kind="stable")
+        identity = self._identity_policy.identify_bank_transaction_mapping(values)
+        if identity.canonical_key:
+            return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.canonical_key, identity_kind="stable")
         return ImportRecordIdentity(record_type=self.record_type, identity_key=None, identity_kind=None)
 
 

@@ -210,7 +210,7 @@ python3 -m fin_ops_platform.tools.run_runtime_convergence_closure \
   --json \
   --require-real-infra \
   --run-unit-tests \
-  --output docs/database-migration/reports/runtime-convergence-closure-require-real-infra.json
+  --output /tmp/finops-runtime-convergence-closure-require-real-infra.json
 ```
 
 报告语义：

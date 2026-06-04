@@ -77,11 +77,26 @@ def _load_specs(path: Path) -> list[ExistingEtcBatchLinkSpec]:
 
 def _dry_run_spec(app: Any, spec: ExistingEtcBatchLinkSpec) -> dict[str, object]:
     relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(spec.case_id)
-    canonical_numbers = _canonical_invoice_numbers(app, set(spec.invoice_numbers))
+    identity_repository = _object_identity_repository(app)
+    if identity_repository is None:
+        return {
+            "label": spec.label,
+            "status": "attention",
+            "error": "identity_repository_unavailable",
+            "case_id": spec.case_id,
+            "external_batch_id": spec.external_batch_id,
+            "active_relation_found": isinstance(relation, dict),
+            "requested_invoice_count": len(spec.invoice_numbers),
+            "found_invoice_count": 0,
+            "invoice_total": "0.00",
+            "missing_invoice_numbers": list(spec.invoice_numbers),
+        }
+    canonical_by_number = _canonical_invoices_by_number(identity_repository, list(spec.invoice_numbers))
+    canonical_numbers = set(canonical_by_number)
     etc_numbers = {invoice.invoice_number for invoice in app._etc_service.list_invoices_by_numbers(list(spec.invoice_numbers))}
     found_numbers = sorted(set(canonical_numbers).union(etc_numbers))
     missing_numbers = [invoice_number for invoice_number in spec.invoice_numbers if invoice_number not in found_numbers]
-    invoice_total = _invoice_total(app, found_numbers)
+    invoice_total = _invoice_total(app, canonical_by_number, found_numbers)
     return {
         "label": spec.label,
         "status": "ready" if isinstance(relation, dict) and not missing_numbers else "attention",
@@ -95,35 +110,38 @@ def _dry_run_spec(app: Any, spec: ExistingEtcBatchLinkSpec) -> dict[str, object]
     }
 
 
-def _canonical_invoice_numbers(app: Any, wanted: set[str]) -> set[str]:
-    found: set[str] = set()
-    for invoice in app._import_service.list_invoices():
-        for value in (
-            getattr(invoice, "digital_invoice_no", None),
-            getattr(invoice, "invoice_no", None),
-            getattr(invoice, "source_unique_key", None),
-        ):
-            invoice_number = str(value or "").strip()
-            if invoice_number in wanted:
-                found.add(invoice_number)
-    return found
+def _object_identity_repository(app: Any) -> Any | None:
+    repository = getattr(app, "_import_fact_repository", None)
+    finder = getattr(repository, "find_invoice_by_identity", None)
+    if callable(finder):
+        return repository
+    repository = getattr(app, "_import_service", None)
+    finder = getattr(repository, "find_invoice_by_identity", None)
+    return repository if callable(finder) else None
 
 
-def _invoice_total(app: Any, invoice_numbers: list[str]) -> Decimal:
+def _canonical_invoices_by_number(identity_repository: Any, invoice_numbers: list[str]) -> dict[str, Any]:
+    finder = getattr(identity_repository, "find_invoice_by_identity", None)
+    if not callable(finder):
+        return {}
+    invoices_by_number: dict[str, Any] = {}
+    for raw_number in invoice_numbers:
+        invoice_number = str(raw_number or "").strip()
+        if not invoice_number:
+            continue
+        invoice = finder(canonical_key=invoice_number)
+        if invoice is not None:
+            invoices_by_number.setdefault(invoice_number, invoice)
+    return invoices_by_number
+
+
+def _invoice_total(app: Any, canonical_by_number: dict[str, Any], invoice_numbers: list[str]) -> Decimal:
     numbers = set(invoice_numbers)
     total = Decimal("0.00")
-    counted: set[str] = set()
-    for invoice in app._import_service.list_invoices():
-        invoice_identifiers = {
-            str(getattr(invoice, "digital_invoice_no", "") or "").strip(),
-            str(getattr(invoice, "invoice_no", "") or "").strip(),
-            str(getattr(invoice, "source_unique_key", "") or "").strip(),
-        }
-        if numbers.isdisjoint(invoice_identifiers):
-            continue
+    counted = set(canonical_by_number)
+    for invoice in canonical_by_number.values():
         amount = getattr(invoice, "total_with_tax", None) or getattr(invoice, "amount", None) or Decimal("0.00")
         total += Decimal(str(amount))
-        counted.update(identifier for identifier in invoice_identifiers if identifier in numbers)
     missing_canonical_numbers = sorted(numbers - counted)
     for invoice in app._etc_service.list_invoices_by_numbers(missing_canonical_numbers):
         total += Decimal(str(invoice.total_amount))

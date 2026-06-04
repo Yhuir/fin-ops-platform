@@ -10,13 +10,11 @@ import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
-import SvgIcon from "@mui/material/SvgIcon";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { Link, NavLink, useLocation } from "react-router-dom";
 
-import type { WorkbenchShellStatus } from "../../contexts/AppChromeContext";
-import type { AppHealthStatus } from "../../features/appHealth/types";
+import AppStatusIndicator from "./AppStatusIndicator";
 import { sidebarGroups } from "./sidebarItems";
 
 export const expandedSidebarWidth = 232;
@@ -32,34 +30,9 @@ type AppSidebarProps = {
   isCompact: boolean;
   mobileOpen: boolean;
   expanded: boolean;
-  healthStatus: AppHealthStatus;
-  workbenchStatus: WorkbenchShellStatus | null;
   onCloseMobile: () => void;
   onToggleExpanded: () => void;
 };
-
-type SidebarBrandStatus = {
-  level: "ok" | "pending" | "error";
-  reason: string;
-  details: string[];
-  percent?: number | null;
-};
-
-function toSidebarBrandStatus(healthStatus: AppHealthStatus, workbenchStatus: AppSidebarProps["workbenchStatus"]): SidebarBrandStatus {
-  if (healthStatus.level === "blocked") {
-    return { level: "error", reason: healthStatus.reason, details: healthStatus.details };
-  }
-  if (workbenchStatus?.level === "error") {
-    return { level: "error", reason: workbenchStatus.reason, details: [] };
-  }
-  if (workbenchStatus?.level === "pending") {
-    return { level: "pending", reason: workbenchStatus.reason, details: [], percent: workbenchStatus.percent };
-  }
-  if (healthStatus.level === "busy") {
-    return { level: "pending", reason: healthStatus.reason, details: healthStatus.details };
-  }
-  return { level: "ok", reason: healthStatus.reason, details: healthStatus.details };
-}
 
 function isSidebarItemActive(pathname: string, search: string, to: string, end?: boolean) {
   const [targetPath, targetSearch = ""] = to.split("?");
@@ -72,48 +45,16 @@ function isSidebarItemActive(pathname: string, search: string, to: string, end?:
   return pathname === targetPath || pathname.startsWith(`${targetPath}/`);
 }
 
-function SidebarBrandStatusMark({ status }: { status: SidebarBrandStatus }) {
-  const tooltipTitle = [status.reason, ...status.details].filter(Boolean).slice(0, 3).join("\n");
-  const pendingPercent = status.level === "pending" && typeof status.percent === "number"
-    ? Math.max(0, Math.min(100, Math.round(status.percent)))
-    : null;
-  return (
-    <Tooltip title={tooltipTitle} placement="right">
-      <span
-        aria-label={status.reason}
-        aria-live="polite"
-        className={`app-sidebar-brand-mark ${status.level}`}
-        data-status-reason={status.reason}
-        role="status"
-      >
-        {pendingPercent === null ? (
-          <SvgIcon className="app-sidebar-brand-status-icon" viewBox="0 0 100 100" aria-hidden="true">
-            <circle className="app-sidebar-brand-status-track" cx="50" cy="50" r="37" />
-            <circle className="app-sidebar-brand-status-sweep" cx="50" cy="50" r="37" />
-          </SvgIcon>
-        ) : (
-          <span className="app-sidebar-brand-status-percent" aria-hidden="true">
-            {pendingPercent}%
-          </span>
-        )}
-      </span>
-    </Tooltip>
-  );
-}
-
 export default function AppSidebar({
   embedded,
   isCompact,
   mobileOpen,
   expanded,
-  healthStatus,
-  workbenchStatus,
   onCloseMobile,
   onToggleExpanded,
 }: AppSidebarProps) {
   const location = useLocation();
   const width = expanded ? expandedSidebarWidth : collapsedSidebarWidth;
-  const brandStatus = toSidebarBrandStatus(healthStatus, workbenchStatus);
   const showExpandedContent = expanded || isCompact;
 
   const drawerContent = (
@@ -125,7 +66,7 @@ export default function AppSidebar({
         justifyContent={showExpandedContent ? "space-between" : "center"}
       >
         <Stack className="app-sidebar-brand-lockup" direction="row" alignItems="center" spacing={showExpandedContent ? 1 : 0}>
-          <SidebarBrandStatusMark status={brandStatus} />
+          <AppStatusIndicator />
           <Collapse
             in={showExpandedContent}
             orientation="horizontal"

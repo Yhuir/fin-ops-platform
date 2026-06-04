@@ -21,6 +21,8 @@
 - `backend-refactor/migration-state-log.md`：AI 状态机，记录 prompt 完成度、验证结果和下一步上下文。
 - `backend-refactor/refactor-prompts.md`：经过审查的可执行 prompt 库。
 
-## 历史资料
+## 当前 App 架构
 
-- 旧方案和阶段性计划已归档到 `../archive/legacy-docs/` 与 `../archive/superpowers/`。
+- `../app-architecture/README.md`：当前 app 架构维护入口。
+- `../app-architecture/pages.md`：页面、API client、刷新来源和页面间影响关系。
+- `../app-architecture/runtime-and-ownership.md`：运行时调用链、dirty/outbox、read model、worker 和模块 owner。

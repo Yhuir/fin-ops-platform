@@ -292,13 +292,30 @@ class PostgresCoreRepository:
         source_unique_key: str | None = None,
         data_fingerprint: str | None = None,
     ) -> Invoice | None:
+        return self.find_invoice_by_identity(canonical_key=source_unique_key, suspected_key=data_fingerprint)
+
+    def find_invoice_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> Invoice | None:
+        source_unique_key = canonical_key
+        data_fingerprint = suspected_key
         if source_unique_key:
-            return self._fetch_invoice_by_clause("source_unique_key = %s", (source_unique_key,))
+            return self._fetch_invoice_by_clause(
+                "(source_unique_key = %s or digital_invoice_no = %s)",
+                (source_unique_key, source_unique_key),
+            )
         if data_fingerprint:
             return self._fetch_invoice_by_clause("data_fingerprint = %s", (data_fingerprint,))
         return None
 
     def find_transaction_identity(self, *, source_unique_key: str) -> BankTransaction | None:
+        return self.find_bank_transaction_by_identity(canonical_key=source_unique_key)
+
+    def find_bank_transaction_by_identity(self, *, canonical_key: str | None = None) -> BankTransaction | None:
+        source_unique_key = canonical_key
         if not source_unique_key:
             return None
         row = self._connection.fetch_one(
@@ -316,6 +333,21 @@ class PostgresCoreRepository:
             (source_unique_key,),
         )
         return self._transaction_from_row(row) if row else None
+
+    def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
+        normalized_key = self._text(canonical_key)
+        if not normalized_key:
+            return False
+        row = self._connection.fetch_one(
+            """
+            select 1 as exists
+            from app.invoices
+            where source_unique_key = %s or digital_invoice_no = %s
+            limit 1
+            """,
+            (normalized_key, normalized_key),
+        )
+        return bool(row)
 
     def get_invoice(self, invoice_id: str) -> Invoice | None:
         normalized_invoice_id = self._text(invoice_id)
@@ -642,6 +674,7 @@ class PostgresCoreRepository:
             "workbench",
             "bank_detail",
             "pending_invoice",
+            "invoice_lifecycle",
             "input_invoice_usage",
             "output_invoice_collection",
             "oa_pending_payment",

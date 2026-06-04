@@ -11,11 +11,14 @@ import warnings
 
 from openpyxl import load_workbook
 
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+
 
 MONTH_FROM_FILENAME_RE = re.compile(r"(\d{4})年(\d{1,2})月")
 COMPACT_MONTH_RE = re.compile(r"^\d{6}$")
 CERTIFIED_SELECTION_STATUSES = {"已勾选", "已认证"}
 ALLOWED_INVOICE_STATUSES = {"正常"}
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 @dataclass(slots=True)
@@ -676,11 +679,14 @@ def _build_unique_key(
     issue_date: str | None,
     tax_amount: str | None,
 ) -> str:
-    if digital_invoice_no:
-        return f"digital:{digital_invoice_no}"
-    if invoice_code and invoice_no:
-        return f"invoice:{invoice_code}:{invoice_no}"
-    seller_part = seller_tax_no or seller_name or "unknown-seller"
-    issue_part = issue_date or "unknown-date"
-    tax_part = tax_amount or "0.00"
-    return f"fallback:{seller_part}:{issue_part}:{tax_part}"
+    return OBJECT_IDENTITY_POLICY.tax_certified_unique_key(
+        {
+            "digital_invoice_no": digital_invoice_no,
+            "invoice_code": invoice_code,
+            "invoice_no": invoice_no,
+            "seller_tax_no": seller_tax_no,
+            "seller_name": seller_name,
+            "issue_date": issue_date,
+            "tax_amount": tax_amount,
+        }
+    )

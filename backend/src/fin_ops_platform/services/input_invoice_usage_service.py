@@ -15,10 +15,11 @@ from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     InputInvoiceUsagePaymentRulesProvider,
-    PaymentStatusEvaluationContext,
     StaticInputInvoiceUsagePaymentRulesProvider,
 )
+from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
@@ -27,6 +28,7 @@ ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 READ_MODEL_STATUS = "live_query"
 SOURCE_VERSION = "input-invoice-usage:v1"
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
@@ -96,12 +98,16 @@ class InputInvoiceUsageQueryService:
         relation_facade: WorkbenchRelationReadFacade | None = None,
         oa_projection: Any | None = None,
         payment_rules_provider: InputInvoiceUsagePaymentRulesProvider | None = None,
+        lifecycle_policy: Any | None = None,
         require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
         self._relation_facade = relation_facade
         self._oa_projection = oa_projection
         self._payment_rules_provider = payment_rules_provider or StaticInputInvoiceUsagePaymentRulesProvider()
+        self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy(
+            input_payment_rules_provider=self._payment_rules_provider,
+        )
         self._require_fresh_relations = require_fresh_relations
 
     def list_rows(
@@ -612,16 +618,12 @@ class InputInvoiceUsageQueryService:
         has_bank = int(bank_payload.get("relationCount") or 0) > 0
         applicant = str(oa_payload.get("applicantName") or "")
         fully_matched = self._has_fully_matched_relation(line_items, relations, context=context)
-        if has_oa and has_bank and not fully_matched:
-            return _payment_status("pending", "待处理", "有 OA 和流水，但关联台不能证明发票、OA、流水完全匹配", "pending_default")
-        return self._payment_rules_provider.evaluate(
-            PaymentStatusEvaluationContext(
-                has_oa=has_oa,
-                has_bank=has_bank,
-                applicant_name=applicant,
-                fully_matched=fully_matched,
-                invoice_oa_amount_matched=self._has_invoice_oa_amount_match(line_items, relations, context=context),
-            )
+        return self._lifecycle_policy.evaluate_input_invoice_payment(
+            has_oa=has_oa,
+            has_bank=has_bank,
+            applicant_name=applicant,
+            fully_matched=fully_matched,
+            invoice_oa_amount_matched=self._has_invoice_oa_amount_match(line_items, relations, context=context),
         )
 
     def _has_fully_matched_relation(
@@ -835,14 +837,7 @@ class InputInvoiceUsageQueryService:
 
     @staticmethod
     def _identity_key(invoice: Invoice) -> str:
-        digital = str(invoice.digital_invoice_no or "").strip()
-        if digital:
-            return f"digital:{digital}"
-        invoice_code = str(invoice.invoice_code or "").strip()
-        invoice_no = str(invoice.invoice_no or "").strip()
-        if invoice_code and invoice_no:
-            return f"code_no:{invoice_code}:{invoice_no}"
-        return f"id:{invoice.id}"
+        return OBJECT_IDENTITY_POLICY.legacy_invoice_identity_key(invoice)
 
     @staticmethod
     def _line_item_payload(invoice: Invoice) -> dict[str, Any]:

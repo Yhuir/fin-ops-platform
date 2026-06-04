@@ -2072,6 +2072,305 @@ class PostgresReadModelRepository:
 
         run_in_transaction(self._connection, write)
 
+    def save_invoice_lifecycle_rows(
+        self,
+        *,
+        scope_key: str,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+        tenant_id: str = "default",
+    ) -> None:
+        normalized_scope_key = text(scope_key) or ""
+        if not normalized_scope_key:
+            raise ValueError("invoice lifecycle scope_key is required.")
+        scope_month = month_start(normalized_scope_key)
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+        rows_to_save = [row for row in list(rows or []) if isinstance(row, dict)]
+
+        def write(connection: Any) -> None:
+            connection.execute(
+                "delete from read_model.invoice_lifecycle_rows where tenant_id = %s and scope_key = %s",
+                (tenant_id, normalized_scope_key),
+            )
+            for row in rows_to_save:
+                payload = _invoice_lifecycle_row_payload(row)
+                row_scope_month = month_start(payload.get("scope_month") or normalized_scope_key) or scope_month
+                connection.execute(
+                    """
+                    insert into read_model.invoice_lifecycle_rows(
+                        tenant_id, subject_id, subject_type, scope_key, scope_month, invoice_identity_key,
+                        lifecycle_status, acquisition_status, payment_status, collection_status, certification_status,
+                        source_versions, payload, raw_payload, generated_at
+                    )
+                    values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()))
+                    on conflict (tenant_id, subject_type, subject_id) do update set
+                        scope_key = excluded.scope_key,
+                        scope_month = excluded.scope_month,
+                        invoice_identity_key = excluded.invoice_identity_key,
+                        lifecycle_status = excluded.lifecycle_status,
+                        acquisition_status = excluded.acquisition_status,
+                        payment_status = excluded.payment_status,
+                        collection_status = excluded.collection_status,
+                        certification_status = excluded.certification_status,
+                        source_versions = excluded.source_versions,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        generated_at = excluded.generated_at,
+                        updated_at = now()
+                    """,
+                    (
+                        tenant_id,
+                        text(payload.get("subject_id")),
+                        text(payload.get("subject_type")),
+                        normalized_scope_key,
+                        row_scope_month,
+                        text(payload.get("invoice_identity_key")),
+                        text(payload.get("lifecycle_status")) or "unknown",
+                        jsonb(payload.get("acquisition_status") if isinstance(payload.get("acquisition_status"), dict) else {}),
+                        jsonb(payload.get("payment_status") if isinstance(payload.get("payment_status"), dict) else {}),
+                        jsonb(payload.get("collection_status") if isinstance(payload.get("collection_status"), dict) else {}),
+                        jsonb(payload.get("certification_status") if isinstance(payload.get("certification_status"), dict) else {}),
+                        jsonb(normalized_source_versions),
+                        jsonb(payload),
+                        jsonb({"normalized_payload": payload, "source_versions": normalized_source_versions}),
+                        text(row.get("generated_at")),
+                    ),
+                )
+            self._upsert_invoice_lifecycle_scope(
+                connection,
+                tenant_id=tenant_id,
+                scope_key=normalized_scope_key,
+                scope_month=scope_month,
+                row_count=len(rows_to_save),
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+    def mark_invoice_lifecycle_scope(
+        self,
+        *,
+        scope_key: str,
+        row_count: int = 0,
+        source_versions: dict[str, Any] | None = None,
+        tenant_id: str = "default",
+    ) -> None:
+        normalized_scope_key = text(scope_key) or ""
+        if not normalized_scope_key:
+            raise ValueError("invoice lifecycle scope_key is required.")
+        normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
+
+        def write(connection: Any) -> None:
+            connection.execute(
+                "delete from read_model.invoice_lifecycle_rows where tenant_id = %s and scope_key = %s",
+                (tenant_id, normalized_scope_key),
+            )
+            self._upsert_invoice_lifecycle_scope(
+                connection,
+                tenant_id=tenant_id,
+                scope_key=normalized_scope_key,
+                scope_month=month_start(normalized_scope_key),
+                row_count=row_count,
+                source_versions=normalized_source_versions,
+            )
+
+        run_in_transaction(self._connection, write)
+
+    def get_invoice_lifecycle_rows_by_subject_ids(
+        self,
+        subject_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_ids = _dedupe_preserve_order(text(subject_id) for subject_id in list(subject_ids or []))
+        if not normalized_ids:
+            return {
+                "read_model_status": "fresh",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": [],
+                "stale_reasons": [],
+            }
+        rows = self._connection.fetch_all(
+            """
+            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
+                   acquisition_status, payment_status, collection_status, certification_status,
+                   source_versions, payload, raw_payload
+            from read_model.invoice_lifecycle_rows
+            where tenant_id = %s
+              and subject_id = any(%s)
+            order by array_position(%s::text[], subject_id), subject_type
+            """,
+            (tenant_id, normalized_ids, normalized_ids),
+        )
+        if not rows:
+            return None
+        returned_ids = {text(row.get("subject_id")) for row in rows if text(row.get("subject_id"))}
+        if len(returned_ids) < len(normalized_ids):
+            return {
+                "read_model_status": "missing",
+                "rows": [],
+                "source_versions": _source_versions_from_relation_records(rows),
+                "read_model_scope_keys": _dedupe_preserve_order(text(row.get("scope_key")) for row in rows),
+                "stale_reasons": ["missing_invoice_lifecycle_rows"],
+            }
+        return self._invoice_lifecycle_payload_from_rows(rows=rows, tenant_id=tenant_id)
+
+    def get_invoice_lifecycle_rows_by_identity_keys(
+        self,
+        invoice_identity_keys: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_keys = _dedupe_preserve_order(text(key) for key in list(invoice_identity_keys or []))
+        if not normalized_keys:
+            return {
+                "read_model_status": "fresh",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": [],
+                "stale_reasons": [],
+            }
+        rows = self._connection.fetch_all(
+            """
+            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
+                   acquisition_status, payment_status, collection_status, certification_status,
+                   source_versions, payload, raw_payload
+            from read_model.invoice_lifecycle_rows
+            where tenant_id = %s
+              and invoice_identity_key = any(%s)
+            order by array_position(%s::text[], invoice_identity_key), subject_type, subject_id
+            """,
+            (tenant_id, normalized_keys, normalized_keys),
+        )
+        if not rows:
+            return None
+        return self._invoice_lifecycle_payload_from_rows(rows=rows, tenant_id=tenant_id)
+
+    def list_invoice_lifecycle_rows(
+        self,
+        *,
+        month: str,
+        subject_types: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_month = text(month) or ""
+        if not normalized_month:
+            return None
+        scope_row = self._invoice_lifecycle_scope_row(scope_key=normalized_month, tenant_id=tenant_id)
+        if scope_row is None:
+            return None
+        where = ["tenant_id = %s", "scope_key = %s"]
+        params: list[Any] = [tenant_id, normalized_month]
+        normalized_subject_types = _dedupe_preserve_order(text(subject_type) for subject_type in list(subject_types or []))
+        if normalized_subject_types:
+            where.append("subject_type = any(%s)")
+            params.append(normalized_subject_types)
+        rows = self._connection.fetch_all(
+            f"""
+            select subject_id, subject_type, scope_key, scope_month, invoice_identity_key, lifecycle_status,
+                   acquisition_status, payment_status, collection_status, certification_status,
+                   source_versions, payload, raw_payload
+            from read_model.invoice_lifecycle_rows
+            where {" and ".join(where)}
+            order by subject_type, subject_id
+            """,
+            tuple(params),
+        )
+        return self._invoice_lifecycle_payload_from_rows(
+            rows=rows,
+            tenant_id=tenant_id,
+            fallback_source_versions=scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {},
+            fallback_scope_keys=[normalized_month],
+        )
+
+    def _invoice_lifecycle_scope_row(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        executor = connection or self._connection
+        return executor.fetch_one(
+            """
+            select scope_key, row_count, source_versions, cache_status
+            from read_model.invoice_lifecycle_scopes
+            where tenant_id = %s
+              and scope_key = %s
+            """,
+            (tenant_id, scope_key),
+        )
+
+    def _invoice_lifecycle_payload_from_rows(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        tenant_id: str,
+        fallback_source_versions: dict[str, Any] | None = None,
+        fallback_scope_keys: list[str] | None = None,
+    ) -> dict[str, Any]:
+        scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in rows) or list(fallback_scope_keys or [])
+        status = "fresh"
+        stale_reasons: list[str] = []
+        source_versions = dict(fallback_source_versions or {})
+        for scope_key in scope_keys:
+            scope_row = self._invoice_lifecycle_scope_row(scope_key=scope_key, tenant_id=tenant_id)
+            if scope_row is None:
+                status = "missing"
+                stale_reasons.append(f"missing_scope:{scope_key}")
+                continue
+            scope_status = self._refresh_status(scope_type="invoice_lifecycle", scope_key=scope_key)
+            if scope_status != "fresh":
+                status = "refreshing" if scope_status == "refreshing" else "stale"
+                stale_reasons.append(f"{scope_status}:{scope_key}")
+            if not source_versions and isinstance(scope_row.get("source_versions"), dict):
+                source_versions = dict(scope_row.get("source_versions"))
+        if not source_versions:
+            source_versions = _source_versions_from_relation_records(rows)
+        return {
+            "read_model_status": status,
+            "rows": [_invoice_lifecycle_row_payload(row) for row in rows],
+            "source_versions": source_versions,
+            "read_model_scope_keys": scope_keys,
+            "stale_reasons": stale_reasons,
+        }
+
+    @staticmethod
+    def _upsert_invoice_lifecycle_scope(
+        connection: Any,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        scope_month: date | str | None,
+        row_count: int,
+        source_versions: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            insert into read_model.invoice_lifecycle_scopes(
+                tenant_id, scope_key, scope_month, row_count, generated_at, cache_status, source_versions, raw_payload
+            )
+            values (%s, %s, %s::date, %s, now(), 'fresh', %s, %s)
+            on conflict (tenant_id, scope_key) do update set
+                scope_month = excluded.scope_month,
+                row_count = excluded.row_count,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                source_versions = excluded.source_versions,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                tenant_id,
+                scope_key,
+                scope_month,
+                max(int_value(row_count, 0), 0),
+                jsonb(source_versions),
+                jsonb({"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
+            ),
+        )
+
     def save_workbench_relation_distribution(
         self,
         *,
@@ -6964,6 +7263,41 @@ def _oa_pending_payment_read_model_record(row: dict[str, Any], scope_key: str) -
         "payload": jsonb(payload),
         "raw_payload": jsonb({"source": "oa_pending_payment", "source_versions": payload.get("sourceVersions")}),
     }
+
+
+def _invoice_lifecycle_row_payload(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else None
+    if payload is not None and text(payload.get("subject_id")) and text(payload.get("subject_type")):
+        return dict(payload)
+    acquisition_status = row.get("acquisition_status") if isinstance(row.get("acquisition_status"), dict) else {}
+    payment_status = row.get("payment_status") if isinstance(row.get("payment_status"), dict) else {}
+    collection_status = row.get("collection_status") if isinstance(row.get("collection_status"), dict) else {}
+    certification_status = row.get("certification_status") if isinstance(row.get("certification_status"), dict) else {}
+    return {
+        "subject_id": text(row.get("subject_id")),
+        "subject_type": text(row.get("subject_type")),
+        "scope_key": text(row.get("scope_key")),
+        "scope_month": text(row.get("scope_month")),
+        "invoice_identity_key": text(row.get("invoice_identity_key")),
+        "lifecycle_status": text(row.get("lifecycle_status")) or _first_lifecycle_code(
+            acquisition_status,
+            payment_status,
+            collection_status,
+            certification_status,
+        ),
+        "acquisition_status": acquisition_status,
+        "payment_status": payment_status,
+        "collection_status": collection_status,
+        "certification_status": certification_status,
+    }
+
+
+def _first_lifecycle_code(*statuses: dict[str, Any]) -> str:
+    for status in statuses:
+        code = text(status.get("code")) if isinstance(status, dict) else ""
+        if code:
+            return code
+    return "unknown"
 
 
 def _base_invoice_relation_record(payload: dict[str, Any], scope_key: str) -> dict[str, Any]:

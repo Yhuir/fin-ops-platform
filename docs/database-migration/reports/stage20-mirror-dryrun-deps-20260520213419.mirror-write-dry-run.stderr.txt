@@ -1,1 +1,0 @@
-ERROR: [Errno 13] Permission denied: '/tmp/stage19A-production-retry-20260520202738/.runtime/fin_ops_platform/postgres_files'

@@ -20,6 +20,7 @@ class DeployRuntimeExampleTests(unittest.TestCase):
     def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
         env_example = (REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example").read_text()
 
+        self.assertIn("invoice_lifecycle.read_model.refresh", env_example)
         self.assertIn("input_invoice_usage.read_model.refresh", env_example)
         self.assertIn("output_invoice_collection.read_model.refresh", env_example)
         self.assertIn("oa_pending_payment.read_model.refresh", env_example)

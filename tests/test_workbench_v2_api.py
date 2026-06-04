@@ -220,6 +220,28 @@ class MutatingRecordDict(dict):
             yield row
 
 
+class RelationDistributionFacadeStub:
+    def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
+        self.rows = list(rows or [])
+        self.calls: list[dict[str, object]] = []
+
+    def set_rows(self, rows: list[dict[str, object]]) -> None:
+        self.rows = list(rows)
+
+    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+        wanted = {str(row_id) for row_id in row_ids}
+        self.calls.append({"row_ids": list(row_ids), "kwargs": dict(kwargs)})
+        return {
+            "status": "fresh",
+            "rows": [dict(row) for row in self.rows if str(row.get("row_id") or "") in wanted],
+            "groups": [],
+            "source_versions": {"schema_version": "test"},
+            "read_model_scope_keys": ["2026-03", "2026-04", "2026-05"],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+
 class WorkbenchV2ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -258,6 +280,15 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         app._import_service.confirm_import(preview.id)
         return app._import_service.list_transactions()[-1].id
+
+    def _install_bank_relation_distribution(
+        self,
+        app: Application,
+        rows: list[dict[str, object]],
+    ) -> RelationDistributionFacadeStub:
+        facade = RelationDistributionFacadeStub(rows)
+        app._bank_details_relation_tag_projection_service._relation_facade = facade
+        return facade
 
     def test_application_restores_workbench_candidate_match_service_from_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -551,6 +582,19 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="工行附言",
             )
+            facade = self._install_bank_relation_distribution(
+                app,
+                [
+                    {
+                        "row_id": transaction_id,
+                        "row_type": "bank_transaction",
+                        "group_ids": ["CASE-BANK-DETAIL-EXPORT"],
+                        "linked_oa": [{"id": "oa-export"}],
+                        "linked_input_invoices": [],
+                        "linked_output_invoices": [],
+                    }
+                ],
+            )
 
             response = app.handle_request(
                 "GET",
@@ -577,6 +621,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(sheet["N2"].value, "无发票")
         self.assertEqual(sheet["Q2"].value, "工行附言")
         self.assertEqual(sheet["R2"].value, transaction_id)
+        self.assertEqual(facade.calls[0]["kwargs"]["reason"], "bank_details_relation_tag_projection")
         self.assertEqual(audit_entries[-1]["action"], "bank_detail_export_downloaded")
         self.assertEqual(audit_entries[-1]["entity_type"], "bank_detail_export")
         self.assertEqual(audit_entries[-1]["metadata"]["row_count"], 1)
@@ -662,6 +707,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 remark="项目款",
             )
             row_ids = ["oa-bank-details-001", transaction_id, "iv-bank-details-001"]
+            facade = self._install_bank_relation_distribution(app, [])
 
             confirm_response = app.handle_request(
                 "POST",
@@ -675,6 +721,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ),
             )
+            facade.set_rows(
+                [
+                    {
+                        "row_id": transaction_id,
+                        "row_type": "bank_transaction",
+                        "group_ids": ["CASE-BANK-DETAILS"],
+                        "linked_oa": [{"id": "oa-bank-details-001"}],
+                        "linked_input_invoices": [{"id": "iv-bank-details-001"}],
+                        "linked_output_invoices": [],
+                    }
+                ]
+            )
             with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
                 linked_response = app.handle_request(
                     "GET",
@@ -684,6 +742,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "POST",
                 "/api/workbench/actions/cancel-link",
                 json.dumps({"month": "2026-05", "row_id": transaction_id, "comment": "取消测试关联"}),
+            )
+            facade.set_rows(
+                [
+                    {
+                        "row_id": transaction_id,
+                        "row_type": "bank_transaction",
+                        "group_ids": [],
+                        "linked_oa": [],
+                        "linked_input_invoices": [],
+                        "linked_output_invoices": [],
+                    }
+                ]
             )
             with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
                 unlinked_response = app.handle_request(
@@ -704,6 +774,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(linked_row["invoice_relation_tag"], "有发票")
         self.assertEqual(linked_row["relation_tags"], ["有oa", "有发票"])
         self.assertEqual(linked_row["relation_case_id"], "CASE-BANK-DETAILS")
+        self.assertEqual(facade.calls[0]["kwargs"]["reason"], "bank_details_relation_tag_projection")
 
         self.assertEqual(cancel_response.status_code, 200, cancel_response.body)
         cancel_payload = json.loads(cancel_response.body)
@@ -755,12 +826,13 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         payload = json.loads(response.body)
         row = next(row for row in payload["rows"] if row["id"] == transaction_id)
-        self.assertEqual(row["oa_relation_tag"], "有oa")
+        self.assertEqual(candidate["bank_row_ids"], [transaction_id])
+        self.assertEqual(row["oa_relation_tag"], "无oa")
         self.assertEqual(row["invoice_relation_tag"], "无发票")
-        self.assertEqual(row["relation_tags"], ["有oa", "无发票"])
-        self.assertEqual(row["relation_case_id"], candidate["candidate_key"])
+        self.assertEqual(row["relation_tags"], ["无oa", "无发票"])
+        self.assertNotIn("relation_case_id", row)
 
-    def test_bank_details_api_projects_attached_workbench_group_oa_without_invoice_tags(self) -> None:
+    def test_bank_details_api_ignores_raw_workbench_group_relation_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_id = self._create_imported_bank_transaction(
@@ -810,7 +882,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 },
             }
 
-            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            self.assertIn(candidate_case_id, json.dumps(raw_payload, ensure_ascii=False))
+            with patch.object(
+                app,
+                "_build_raw_workbench_payload",
+                side_effect=AssertionError("bank details relation tags must not read raw workbench payload"),
+            ):
                 response = app.handle_request(
                     "GET",
                     "/api/bank-details/transactions?date_from=2026-03-12&date_to=2026-03-12&page_size=500",
@@ -819,10 +896,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         payload = json.loads(response.body)
         row = next(row for row in payload["rows"] if row["id"] == transaction_id)
-        self.assertEqual(row["oa_relation_tag"], "有oa")
+        self.assertEqual(row["oa_relation_tag"], "无oa")
         self.assertEqual(row["invoice_relation_tag"], "无发票")
-        self.assertEqual(row["relation_tags"], ["有oa", "无发票"])
-        self.assertEqual(row["relation_case_id"], candidate_case_id)
+        self.assertEqual(row["relation_tags"], ["无oa", "无发票"])
+        self.assertNotIn("relation_case_id", row)
 
     def test_disabled_manual_clear_does_not_suppress_auto_in_bank_details_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

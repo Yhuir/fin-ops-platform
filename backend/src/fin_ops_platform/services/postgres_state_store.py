@@ -167,6 +167,49 @@ class PostgresStateStore:
             summary["runtime_infrastructure"] = {"status": "error", "error": str(exc)}
         return summary
 
+    def app_status_runtime_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
+        try:
+            return RuntimeMonitoringRepository(self._connection).app_status_runtime_snapshot()
+        except Exception as exc:  # pragma: no cover - app status should degrade instead of hiding runtime failures.
+            payload = {
+                "status": "unavailable",
+                "last_error": str(exc) or exc.__class__.__name__,
+            }
+            return {
+                "read_model_statuses": {"__runtime__": dict(payload)},
+                "worker_statuses": {"__runtime__": dict(payload)},
+                "outbox_statuses": {"__runtime__": dict(payload)},
+            }
+
+    def record_read_model_readiness(
+        self,
+        *,
+        read_model_key: str,
+        scope_type: str,
+        scope_key: str,
+        status: str,
+        tenant_id: str = "default",
+        schema_version: str = "",
+        source_versions: dict[str, Any] | None = None,
+        row_count: int | None = None,
+        generated_at: object | None = None,
+        last_error: str | None = None,
+        raw_payload: dict[str, Any] | None = None,
+    ) -> None:
+        RuntimeMonitoringRepository(self._connection).record_read_model_readiness(
+            read_model_key=read_model_key,
+            scope_type=scope_type,
+            scope_key=scope_key,
+            status=status,
+            tenant_id=tenant_id,
+            schema_version=schema_version,
+            source_versions=source_versions,
+            row_count=row_count,
+            generated_at=generated_at,
+            last_error=last_error,
+            raw_payload=raw_payload,
+        )
+
     @property
     def oa_projection_repository(self) -> PostgresOAProjectionRepository:
         return self._oa_projection_repository

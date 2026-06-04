@@ -7,12 +7,13 @@ import json
 from typing import Any
 
 from fin_ops_platform.services.imports import clean_string
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
 AUDIT_START_DATE = date(2026, 1, 1)
-FORMAL_INVOICE_EVIDENCE_TYPES = {"tax_invoice", "machine_invoice", "non_tax_receipt"}
 PAYMENT_RECEIPT_EVIDENCE_TYPE = "payment_receipt"
 PARSER_FAILURE_STATUSES = {"download_failed", "parse_failed"}
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 def audit_oa_attachment_records(
@@ -48,7 +49,7 @@ def audit_oa_attachment_record(record: Any, *, start_date: date = AUDIT_START_DA
     formal_invoices = [
         evidence
         for evidence in evidences
-        if clean_string(evidence.get("evidence_type") or "") in FORMAL_INVOICE_EVIDENCE_TYPES
+        if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence)
     ]
     payment_receipts = [
         evidence

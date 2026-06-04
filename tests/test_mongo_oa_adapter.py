@@ -4,6 +4,7 @@ from unittest.mock import patch
 from pymongo.errors import ServerSelectionTimeoutError
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
 class MemoryAttachmentInvoiceCache:
@@ -294,6 +295,20 @@ class CountingFailingMongoOAAdapter(FailingMongoOAAdapter):
 
 
 class MongoOAAdapterTests(unittest.TestCase):
+    def test_attachment_invoice_dedupe_keys_delegate_to_identity_policy(self) -> None:
+        invoice = {
+            "digital_invoice_no": "26372000000990000001",
+            "invoice_code": "053002200111",
+            "invoice_no": "40512344",
+            "seller_name": "云南顺丰速运有限公司",
+            "total_with_tax": "12.00",
+        }
+
+        self.assertEqual(
+            MongoOAAdapter._attachment_invoice_dedupe_keys(invoice),
+            FinancialObjectIdentityPolicy().oa_attachment_invoice_dedupe_keys(invoice),
+        )
+
     def test_list_application_records_returns_empty_when_mongo_is_unavailable(self) -> None:
         adapter = FailingMongoOAAdapter()
 

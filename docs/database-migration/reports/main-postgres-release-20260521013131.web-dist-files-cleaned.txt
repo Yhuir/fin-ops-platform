@@ -1,3 +1,0 @@
-/www/wwwroot/fin-ops/dist/assets/index-DfttJVfg.css
-/www/wwwroot/fin-ops/dist/assets/index-fYF9Z0lE.js
-/www/wwwroot/fin-ops/dist/index.html

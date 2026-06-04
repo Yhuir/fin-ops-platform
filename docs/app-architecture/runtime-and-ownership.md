@@ -1,0 +1,106 @@
+# 运行时调用链与模块归属
+
+本文维护当前 app 的运行时序、read model/worker 边界和模块 owner。它回答“请求如何到达事实源”“写入如何触发派生数据刷新”“哪个模块负责维护某类事实”。
+
+## 总体调用链
+
+```mermaid
+flowchart LR
+  UI["React pages"] --> API["Flask routes"]
+  API --> Service["Application / domain services"]
+  Service --> Repo["Repositories / SQL stores"]
+  Repo --> PG["PostgreSQL"]
+  Service --> Lifecycle["DerivedDataLifecycleService"]
+  Lifecycle --> Queue["RuntimeQueueRepository"]
+  Queue --> Outbox["job.outbox_events / job.read_model_dirty_scopes"]
+  Worker["Runtime workers"] --> Outbox
+  Worker --> Projection["SQL read models"]
+  UI --> Gateway["ReadModelQueryGateway"]
+  Gateway --> Projection
+  Gateway --> Queue
+```
+
+## 读请求
+
+1. 页面调用 `web/src/features/*/api.ts`。
+2. Flask route 完成 HTTP 参数解析、权限映射和响应 shape。
+3. 查询型 service 或 `ReadModelQueryGateway` 判断 read model 是否 fresh。
+4. fresh 时读取 SQL projection 或 repository；stale/missing 时返回状态并按需 enqueue refresh。
+5. 页面根据 `read_model_status`、`refreshing`、`stale`、`job` 等字段展示加载、刷新或不可用状态。
+
+页面不能自行假设 read model fresh，也不能为了“有数据”绕过 freshness gate。
+
+## 写请求
+
+1. Route 只做 HTTP contract、auth/permission、依赖组装和错误映射。
+2. Application/domain service 校验业务规则，调用 repository 做原子写入。
+3. 写入产生业务事件或 dirty scope。
+4. `DerivedDataLifecycleService` 统一判断哪些 read model、缓存或页面事实被影响。
+5. 通过 durable queue/outbox 记录 refresh 请求；worker 异步重建 projection。
+6. API 返回写入结果、受影响月份/对象、版本、job 或 refresh 状态。
+
+写模型、权限认证、冲突校验不做“分发 read model”；它们保留明确 command/service 边界。
+
+## Worker 与队列
+
+- durable truth：PostgreSQL 的 `job.outbox_events` 与 `job.read_model_dirty_scopes`。
+- queue API：`RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或事务内 writer。
+- worker registry：`runtime_worker_registry.py` 定义 worker 名称、scope、manifest、health 可见性。
+- RabbitMQ 只能作为可选 wakeup/transport，不能成为 read model 状态事实源。
+- Redis 只能缓存通过 fresh gate 后的 payload，不能缓存或伪造 freshness。
+
+## App Health / SSE
+
+App Health 读取后台任务、worker、queue 和 read model 状态，给页面提供可见的刷新、stale、失败和重试信号。SSE 或轮询只负责通知 UI 更新状态，不替代 durable queue。
+
+## Global Runtime Status Plane
+
+Global Runtime Status Plane 是 App Health 之上的用户可见全局投影。它由后端 `AppStatusOverviewService` 生成，输入只来自 session、后台任务、read model dirty scopes、outbox、worker heartbeat、runtime registry、依赖和 alert。React 页面不向它上报当前路由 loading，也不负责推导全局状态。
+
+Runtime facts 的 read-side repository 是 `RuntimeMonitoringRepository.app_status_runtime_snapshot()`。PostgreSQL state store 通过公开方法暴露该 snapshot；`server.py` 只做 `/api/app-health` snapshot 组装，不能直接读取 state store 私有连接，也不能把 `job.*` 或 `read_model.*` SQL 写进 app status service。`AppStatusOverviewService` 只接收已归一化的 runtime facts 并执行状态优先级判定，不执行 rebuild、不写 queue、不调用页面 API。
+
+```mermaid
+flowchart LR
+  Pages["React pages"] --> Provider["AppStatusProvider"]
+  Provider --> HealthAPI["/api/app-health.app_status"]
+  HealthAPI --> Plane["AppStatusOverviewService"]
+  Plane --> Registry["Domain Status Registry"]
+  Plane --> Jobs["Background jobs"]
+  Plane --> RuntimeRepo["RuntimeMonitoringRepository"]
+  RuntimeRepo --> Dirty["job.read_model_dirty_scopes"]
+  RuntimeRepo --> Outbox["job.outbox_events"]
+  RuntimeRepo --> Readiness["read_model.app_status_readiness"]
+  RuntimeRepo --> Heartbeat["job.runtime_worker_heartbeats"]
+```
+
+左上角 App Status Icon 和 hover 面板只消费 `app_status`，因此切换页面不改变 icon 或 hover 内容。页面局部 table/drawer/form loading 只在页面内展示；如果页面背后的 read model 或 worker 未 ready，则由后端全局投影把对应 domain 标记为 busy 或 blocked。
+
+`read_model.app_status_readiness` 是全局绿色状态的 read model 证明层。普通 read model refresh worker/service 在成功、失败、schema/source mismatch 时通过 repository 公共方法记录 `read_model_key`、scope、status、schema/source version、row count、生成时间和错误原因。`workbench` 使用 active generation/readiness metadata 作为等价证明，不机械套普通 projection 表。空业务结果允许 green，但必须有 readiness scope 记录；没有 readiness 记录的 registry read model 必须输出 `missing`，不能被空 dirty scope 推断为 ready。
+
+runtime snapshot 读取失败不能被解释成 ready。critical read model failed/unavailable、required worker missing/mismatch/stale、关键依赖 missing/unavailable 或 session 不可用会把全局状态升级到 blocked/red；readiness missing/refreshing/stale/schema_mismatch/source_mismatch、dirty scope、outbox backlog、后台任务 queued/running/attention 和非阻塞 stale 会保持 busy/yellow。
+
+Registry 强一致由测试保护：domain registry 的 `read_model_keys` 必须存在于 `AppStatusReadModelRegistry`，`worker_instances` 必须存在于 `runtime_worker_registry`，`job_types` 必须存在于 app status background job registry 或 runtime state policy，`dependencies` 必须存在于 app status dependency registry。新增页面、read model、worker、job type 或 dependency 时，如果没有同步 registry 和测试，不能上线。
+
+## 模块归属
+
+| 模块域 | Route owner | Service / policy owner | Read model / worker owner | 文档入口 |
+| --- | --- | --- | --- | --- |
+| 银企核销 / 关联台 | reconciliation/workbench routes、部分 legacy `server.py` handler | reconciliation service、workbench service、relationship policy | workbench active generation、相关 SQL projection | `docs/product-specs/reconciliation-and-workbench.md` |
+| 银行明细 / 标签 | bank detail routes | bank detail service、tagging/classification policy | bank detail read model refresh | `docs/product-specs/bank-turnover-and-no-oa.md` |
+| 待找发票 / 发票生命周期 | pending invoice / invoice routes | invoice lifecycle policy、pending invoice query service | invoice usage / collection read models | `docs/product-specs/invoice-lifecycle.md` |
+| OA 待付款 | OA pending payment routes | OA reconciliation/query service | OA pending payment SQL projection | `docs/product-specs/invoice-lifecycle.md` |
+| ETC / 导入 | import and ETC routes | import service、ETC business batch service | import jobs、ETC batch state | `docs/product-specs/imports-and-etc.md` |
+| 成本 / 税金 | cost/tax routes | cost attribution policy、tax offset service | cost/tax read models | `docs/product-specs/cost-tax.md` |
+| 设置 / 健康 | settings/app health routes | settings service、runtime health service | runtime workers、queue health | `docs/product-specs/platform-settings-health.md` |
+| 对象 identity/dedup | object identity routes/service | identity/dedup policy | repair/backfill worker if needed | `docs/operations/object-identity-dedup.md` |
+
+## 仍需关注的 legacy 边界
+
+- `server.py` 仍有部分 route handler 和 dependency wiring，需要按 `docs/architecture/backend-refactor/` 的 Python-first 方向继续拆分。
+- service 构造必须接收明确依赖，不把整个 `Application` 注入 service。
+- repository 可以知道 SQL 表结构；业务 service 不应散落 SQL。
+- worker 不依赖 `Application`、HTTP response、cookie/header 或 auth module。
+
+## 维护要求
+
+新增 read model、worker、dirty cascade、queue job、runtime health 指标或跨模块 service owner 时，更新本文。若变更属于长期重构计划进度，只更新 `docs/architecture/backend-refactor/migration-state-log.md`；若改变当前生产事实，还必须更新对应产品、开发或运维文档。

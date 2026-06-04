@@ -1,6 +1,6 @@
 # ETC 业务批次上线与运维检查
 
-本文档覆盖 ETC 业务批次、OA 自动检测和历史迁移的部署、回滚、后台恢复和 smoke 检查。产品事实源见 [`../product-specs/tax-offset-and-etc.md`](../product-specs/tax-offset-and-etc.md)，API 契约见 [`../dev/etc-business-batches-api.md`](../dev/etc-business-batches-api.md)，设计依据见 [`../superpowers/specs/2026-05-19-etc-business-batch-oa-auto-detection-design.md`](../superpowers/specs/2026-05-19-etc-business-batch-oa-auto-detection-design.md)。
+本文档覆盖 ETC 业务批次、OA 自动检测和历史迁移的部署、回滚、后台恢复和 smoke 检查。产品事实源见 [`../product-specs/imports-and-etc.md`](../product-specs/imports-and-etc.md)，API 契约见 [`../dev/api-contracts.md`](../dev/api-contracts.md)。
 
 ## 发布前检查
 

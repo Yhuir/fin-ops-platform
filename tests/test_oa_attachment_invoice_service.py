@@ -4,6 +4,7 @@ from zipfile import ZipFile
 from unittest.mock import patch
 
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
 PNG_INVOICE_TEXT = """
@@ -594,6 +595,35 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
             invoices = service.parse_files([file_entry])
 
         self.assertEqual(invoices, [])
+
+    def test_invoice_evidence_dedupe_key_delegates_to_identity_policy(self) -> None:
+        evidence = {
+            "evidence_type": "tax_invoice",
+            "digital_invoice_no": "26372000000990000001",
+            "invoice_code": "053002200111",
+            "invoice_no": "40512344",
+            "seller_name": "云南顺丰速运有限公司",
+            "total_with_tax": "12.00",
+        }
+        policy_key_kind, policy_key_value = FinancialObjectIdentityPolicy().oa_attachment_invoice_dedupe_keys(evidence)[0]
+
+        self.assertEqual(
+            OAAttachmentInvoiceService._evidence_dedupe_key(evidence),
+            f"{policy_key_kind}:{policy_key_value}",
+        )
+
+    def test_payment_receipt_evidence_dedupe_stays_outside_invoice_identity(self) -> None:
+        receipt = {
+            "evidence_type": "payment_receipt",
+            "document_kind": "wechat_etc_payment",
+            "transaction_no": "4200003046202603030281812965",
+            "amount": "23.00",
+        }
+
+        self.assertEqual(
+            OAAttachmentInvoiceService._evidence_dedupe_key(receipt),
+            "payment_receipt:transaction_no:4200003046202603030281812965",
+        )
 
     def test_parse_invoice_text_accepts_non_tax_payment_receipt(self) -> None:
         service = OAAttachmentInvoiceService()

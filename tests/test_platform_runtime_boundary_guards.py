@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = REPO_ROOT / "backend" / "src" / "fin_ops_platform"
 APP_ROOT = SOURCE_ROOT / "app"
 SERVICES_ROOT = SOURCE_ROOT / "services"
+TOOLS_ROOT = SOURCE_ROOT / "tools"
 
 
 def _relative(path: Path) -> str:
@@ -65,6 +66,13 @@ def _attribute_chain(node: ast.AST) -> str:
     if isinstance(node, ast.Attribute):
         prefix = _attribute_chain(node.value)
         return f"{prefix}.{node.attr}" if prefix else node.attr
+    return ""
+
+
+def _function_source(tree: ast.Module, source: str, function_name: str) -> str:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+            return ast.get_source_segment(source, node) or ""
     return ""
 
 
@@ -419,6 +427,164 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                     and node.module == "fin_ops_platform.services.workbench_pair_relation_service"
                 ):
                     violations.append(f"{rel_path}:{node.lineno} imports WorkbenchPairRelationService")
+
+        self.assertEqual(violations, [])
+
+    def test_bank_details_relation_tags_only_read_relation_distribution_facade(self) -> None:
+        path = SERVICES_ROOT / "bank_details_relation_tag_projection_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        violations: list[str] = []
+
+        forbidden_snippets = {
+            "_build_raw_workbench_payload",
+            "WorkbenchCandidateMatchService",
+            "workbench_candidate_match_service",
+            "candidate_match",
+            "workbench_pair_relation_service",
+            "WorkbenchPairRelationService",
+            "load_workbench_pair_relations",
+            "list_active_relations",
+            "active_relations_for_row_ids",
+            "get_active_relation_by_row_id",
+            "get_active_relation_by_case_id",
+            "list_by_month(",
+            "relation_groups_by_ids(",
+        }
+        for snippet in sorted(forbidden_snippets):
+            if snippet in source:
+                violations.append(f"{_relative(path)} contains forbidden bank relation tag source {snippet}")
+
+        facade_method = _function_source(tree, source, "_relation_tags_from_distribution")
+        if "get_by_row_ids" not in facade_method:
+            violations.append(f"{_relative(path)} does not read relation tags through WorkbenchRelationReadFacade.get_by_row_ids")
+
+        self.assertEqual(violations, [])
+
+    def test_financial_object_identity_rules_are_centralized(self) -> None:
+        allowed_private_identity_wrappers = {
+            "backend/src/fin_ops_platform/services/input_invoice_usage_service.py",
+            "backend/src/fin_ops_platform/services/output_invoice_collection_service.py",
+        }
+        allowed_identity_rule_modules = {
+            "backend/src/fin_ops_platform/services/object_identity_policy.py",
+            "backend/src/fin_ops_platform/services/invoice_identity_service.py",
+            "backend/src/fin_ops_platform/services/bank_transaction_identity_service.py",
+        }
+        violations: list[str] = []
+
+        for path in _python_files(APP_ROOT, SERVICES_ROOT):
+            rel_path = _relative(path)
+            if rel_path in allowed_identity_rule_modules:
+                continue
+            tree = _parse(path)
+            source = path.read_text(encoding="utf-8")
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_identity_key":
+                    body_source = ast.get_source_segment(source, node) or ""
+                    if rel_path not in allowed_private_identity_wrappers:
+                        violations.append(f"{rel_path}:{node.lineno} defines private _identity_key")
+                    elif "legacy_invoice_identity_key" not in body_source:
+                        violations.append(f"{rel_path}:{node.lineno} _identity_key does not delegate to FinancialObjectIdentityPolicy")
+            if rel_path == "backend/src/fin_ops_platform/app/server.py":
+                canonical_method = _function_source(tree, source, "_canonical_invoice_key_exists_for_etc_import")
+                if "list_invoices(" in canonical_method or "source_unique_key" in canonical_method:
+                    violations.append("backend/src/fin_ops_platform/app/server.py owns canonical invoice key scan")
+            if rel_path == "backend/src/fin_ops_platform/services/existing_etc_batch_link_service.py":
+                canonical_method = _function_source(tree, source, "_canonical_invoices_by_number")
+                if "list_invoices(" in canonical_method:
+                    violations.append(f"{rel_path} scans invoices for canonical ETC identity lookup")
+            if rel_path == "backend/src/fin_ops_platform/services/tax_certified_import_service.py":
+                unique_key_method = _function_source(tree, source, "_build_unique_key")
+                if "tax_certified_unique_key" not in unique_key_method:
+                    violations.append(f"{rel_path} _build_unique_key does not delegate to FinancialObjectIdentityPolicy")
+                for literal in ('"digital:', '"invoice:', '"fallback:', "f\"digital:", "f\"invoice:", "f\"fallback:"):
+                    if literal in unique_key_method:
+                        violations.append(f"{rel_path} _build_unique_key locally owns identity literal {literal}")
+
+        self.assertEqual(violations, [])
+
+    def test_oa_attachment_invoice_identity_and_etc_dry_run_do_not_reintroduce_private_rules(self) -> None:
+        violations: list[str] = []
+
+        mongo_path = SERVICES_ROOT / "mongo_oa_adapter.py"
+        mongo_source = mongo_path.read_text(encoding="utf-8")
+        mongo_tree = _parse(mongo_path)
+        mongo_method = _function_source(mongo_tree, mongo_source, "_attachment_invoice_dedupe_keys")
+        if "oa_attachment_invoice_dedupe_keys" not in mongo_method:
+            violations.append(f"{_relative(mongo_path)} _attachment_invoice_dedupe_keys does not delegate to FinancialObjectIdentityPolicy")
+        for forbidden in ("invoice:digital_invoice_no", "invoice:code_no", "invoice:fallback", "digital_invoice_no", "invoice_code", "invoice_no"):
+            if forbidden in mongo_method and forbidden != "oa_attachment_invoice_dedupe_keys":
+                violations.append(f"{_relative(mongo_path)} _attachment_invoice_dedupe_keys locally owns {forbidden}")
+
+        attachment_service_path = SERVICES_ROOT / "oa_attachment_invoice_service.py"
+        attachment_source = attachment_service_path.read_text(encoding="utf-8")
+        attachment_tree = _parse(attachment_service_path)
+        invoice_method = _function_source(attachment_tree, attachment_source, "_invoice_evidence_dedupe_key")
+        if "oa_attachment_invoice_dedupe_keys" not in invoice_method:
+            violations.append(f"{_relative(attachment_service_path)} _invoice_evidence_dedupe_key does not delegate to FinancialObjectIdentityPolicy")
+        evidence_method = _function_source(attachment_tree, attachment_source, "_evidence_dedupe_key")
+        for forbidden in ("invoice:digital_invoice_no", "invoice:code_no", "invoice:fallback"):
+            if forbidden in evidence_method or forbidden in invoice_method:
+                violations.append(f"{_relative(attachment_service_path)} owns private attachment invoice identity literal {forbidden}")
+
+        for path in _python_files(SERVICES_ROOT):
+            rel_path = _relative(path)
+            if rel_path in {
+                "backend/src/fin_ops_platform/services/object_identity_policy.py",
+                "backend/src/fin_ops_platform/services/mongo_oa_adapter.py",
+                "backend/src/fin_ops_platform/services/oa_attachment_invoice_service.py",
+            }:
+                continue
+            for node in ast.walk(_parse(path)):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
+                    "_attachment_invoice_dedupe_key",
+                    "_attachment_invoice_dedupe_keys",
+                    "_invoice_dedupe_key",
+                }:
+                    violations.append(f"{rel_path}:{node.lineno} defines private invoice dedupe helper {node.name}")
+
+        etc_tool_path = TOOLS_ROOT / "link_existing_etc_batches.py"
+        etc_tool_source = etc_tool_path.read_text(encoding="utf-8")
+        if "list_invoices(" in etc_tool_source:
+            violations.append(f"{_relative(etc_tool_path)} dry-run scans canonical invoices with list_invoices()")
+        audit_tool_path = TOOLS_ROOT / "audit_object_identity.py"
+        audit_tool_source = audit_tool_path.read_text(encoding="utf-8")
+        if "invoice_evidence_types" in audit_tool_source or "document_kind.endswith" in audit_tool_source:
+            violations.append(f"{_relative(audit_tool_path)} owns private OA attachment invoice evidence classification")
+        for path in _python_files(SERVICES_ROOT, TOOLS_ROOT):
+            rel_path = _relative(path)
+            if rel_path == "backend/src/fin_ops_platform/services/object_identity_policy.py":
+                continue
+            source = path.read_text(encoding="utf-8")
+            for constant_name in (
+                "FORMAL_INVOICE_EVIDENCE_TYPES",
+                "OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES",
+                "ATTACHMENT_INVOICE_EVIDENCE_TYPES",
+            ):
+                if f"{constant_name} =" in source:
+                    violations.append(f"{rel_path} defines private OA attachment invoice evidence type set {constant_name}")
+
+        self.assertEqual(violations, [])
+
+    def test_business_services_do_not_directly_query_identity_sql(self) -> None:
+        allowed_sql_paths = {
+            "backend/src/fin_ops_platform/services/postgres_repositories/core.py",
+            "backend/src/fin_ops_platform/services/object_identity_policy.py",
+            "backend/src/fin_ops_platform/services/object_dedup_decision_service.py",
+        }
+        violations: list[str] = []
+
+        for path in _python_files(SERVICES_ROOT):
+            rel_path = _relative(path)
+            if rel_path in allowed_sql_paths or "/postgres_repositories/" in rel_path:
+                continue
+            source = path.read_text(encoding="utf-8")
+            normalized = " ".join(source.lower().split())
+            if " from app.invoices" in normalized and ("source_unique_key" in normalized or "data_fingerprint" in normalized):
+                violations.append(f"{rel_path} directly queries invoice identity SQL")
+            if " from app.bank_transactions" in normalized and ("source_unique_key" in normalized or "data_fingerprint" in normalized):
+                violations.append(f"{rel_path} directly queries bank transaction identity SQL")
 
         self.assertEqual(violations, [])
 

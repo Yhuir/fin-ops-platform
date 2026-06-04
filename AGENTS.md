@@ -7,23 +7,28 @@
 1. `README.md`：项目定位、运行入口和文档地图。
 2. `ARCHITECTURE.md`：系统边界、模块关系、数据流和演进方向。
 3. `docs/index.md`：长期文档索引。
-4. `docs/product-specs/index.md`：按业务专题阅读需求。
-5. `docs/dev/index.md`：按开发任务查接口、测试和本地运行说明。
-6. `docs/operations/index.md`：部署、数据重置、备份、监控和故障处理。
+4. `docs/app-architecture/README.md`：当前 app 架构、页面、运行时序和跨页面影响关系。
+5. `docs/product-specs/index.md`：按业务专题阅读需求。
+6. `docs/dev/index.md`：按开发任务查接口、测试和本地运行说明。
+7. `docs/operations/index.md`：部署、数据重置、备份、监控和故障处理。
 
 ## 文档事实源
 
 - 产品和业务口径以 `docs/product-specs/` 为准。
+- 当前 app 页面、运行时调用链、read model/worker 和页面间影响关系以 `docs/app-architecture/` 为准。
 - 系统边界和长期技术决策以 `ARCHITECTURE.md` 和 `docs/architecture/` 为准。
 - 运行、测试、接口契约以 `docs/dev/`、`backend/README.md`、`web/README.md` 为准。
 - 部署和生产操作以 `docs/operations/` 与 `deploy/oa/README.md` 为准。
-- 历史 prompt、旧计划和旧设计只在 `docs/archive/` 追溯，不作为当前需求或架构依据。
+- 历史 prompt、旧计划和阶段执行记录不作为当前需求或架构依据；仍有价值的结论应提炼到长期文档。
 
 ## 写文档约定
 
 - 文档默认使用中文。
-- 新功能先补 `docs/product-specs/` 或对应开发文档，再改代码。
-- 不把新的 Codex prompt 写进主文档树；如需保留，放入 `docs/archive/prompts/`。
+- 每次功能、API、架构、read model/worker、运维、权限审计或数据流相关变更，都必须先做 docs impact assessment。
+- 只有影响长期事实源时才更新 docs：业务口径更新 `docs/product-specs/`，页面/API/运行时更新 `docs/app-architecture/` 或 `docs/dev/`，部署/数据安全/worker 更新 `docs/operations/`。
+- 纯内部实现、测试修复、无边界变化的小重构可以不改 docs，但最终说明必须写明 `docs 不适用`。
+- 长期重构可以维护状态机或 state log，例如 `docs/architecture/backend-refactor/migration-state-log.md`；state log 只记录进度和决策，不替代产品、API、架构或运维事实源。
+- 不把新的 Codex prompt 写进主文档树。
 - 不在根目录散放临时 Excel、PDF、ZIP、截图或导出物。
 - 大文件样例放本地 `fixtures/`，不要让自动化测试依赖真实业务文件。
 

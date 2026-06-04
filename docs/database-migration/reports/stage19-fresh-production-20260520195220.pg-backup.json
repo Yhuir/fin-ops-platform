@@ -1,6 +1,0 @@
-{
-  "backup_dir": "/data/backups/postgres/stage19-fresh-production-20260520195220",
-  "dump_bytes": 13318124,
-  "dump_path": "/data/backups/postgres/stage19-fresh-production-20260520195220/fin_ops_stage19-fresh-production-20260520195220.dump",
-  "dump_sha256": "508e7670a0990f52c71fb0e2f8051b62b82d1c06097212f5731687244a755aff"
-}

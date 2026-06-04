@@ -12,6 +12,7 @@ from fin_ops_platform.domain.enums import BatchType, ImportDecision, InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.pending_invoice_rules import (
     PENDING_INVOICE_CASH_INCOME_GROUP,
@@ -145,6 +146,7 @@ class PendingInvoiceQueryService:
         oa_projection: Any | None = None,
         income_status_override_provider: Callable[[str], dict[str, Any] | None] | None = None,
         relation_facade: Any | None = None,
+        lifecycle_policy: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
@@ -154,6 +156,7 @@ class PendingInvoiceQueryService:
         self._oa_projection = oa_projection
         self._income_status_override_provider = income_status_override_provider
         self._relation_facade = relation_facade
+        self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy()
 
     def clear_cache(self) -> None:
         return None
@@ -448,7 +451,7 @@ class PendingInvoiceQueryService:
         payment_summary = self._payment_summary_from_distribution(relation_row, invoices) if relation_row is not None else self._empty_payment_summary(invoices)
         oa_summaries = self._oa_summaries_from_distribution(relation_row) if relation_row is not None else []
         oa_payload = self._oa_payload_from_summaries(oa_summaries)
-        status_payload = pending_invoice_status_payload(
+        status_payload = self._lifecycle_policy.evaluate_pending_invoice_acquisition(
             direction=direction,
             group=group,
             has_invoices=bool(invoices),
