@@ -247,6 +247,11 @@ body.workbench-focus-mode .global-header {
   color: #1f9d55;
 }
 
+.app-sidebar-brand-mark:focus-visible {
+  outline: 2px solid #1769aa;
+  outline-offset: 3px;
+}
+
 .app-sidebar-brand-mark.pending {
   color: #b7791f;
 }
@@ -301,6 +306,38 @@ body.workbench-focus-mode .global-header {
   to {
     stroke-dashoffset: -324.6;
   }
+}
+
+.app-status-popover {
+  border: 1px solid #d8e1eb;
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(16, 42, 67, 0.16);
+}
+
+.app-status-task-link,
+.app-status-domain-link {
+  display: block;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-status-task-link {
+  padding: 9px;
+  border: 1px solid #d8e1eb;
+  background: #f9fbfe;
+}
+
+.app-status-domain-link {
+  padding: 7px 8px;
+}
+
+.app-status-task-link:hover,
+.app-status-domain-link:hover,
+.app-status-task-link:focus-visible,
+.app-status-domain-link:focus-visible {
+  background: #eef7ff;
+  outline: none;
 }
 
 .app-sidebar-brand-text {

@@ -8,11 +8,26 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.tax_certified_import_service import (
     TaxCertifiedImportService,
     UploadedCertifiedImportFile,
+    _build_unique_key,
 )
 from tests.mock_import_files import CERTIFIED_FEB, CERTIFIED_JAN
 
 
 class TaxCertifiedImportServiceTests(unittest.TestCase):
+    def test_unique_key_fallback_delegates_to_object_identity_policy(self) -> None:
+        self.assertEqual(
+            _build_unique_key(
+                digital_invoice_no=None,
+                invoice_code=None,
+                invoice_no=None,
+                seller_tax_no="91500226MA60KH3C0Q",
+                seller_name="重庆市供应商",
+                issue_date="2026-01-10",
+                tax_amount="10",
+            ),
+            "fallback:91500226MA60KH3C0Q:2026-01-10:10.00",
+        )
+
     def test_preview_files_parses_certified_invoice_template_and_filters_certified_rows(self) -> None:
         with TemporaryDirectory() as temp_dir:
             store = ApplicationStateStore(Path(temp_dir))

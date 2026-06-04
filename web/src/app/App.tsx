@@ -10,8 +10,8 @@ import AppSidebar from "../components/shell/AppSidebar";
 import { collapsedSidebarWidth, expandedSidebarWidth } from "../components/shell/AppSidebar";
 import AppTopBar from "../components/shell/AppTopBar";
 import BackgroundProgressBlock from "../components/common/BackgroundProgressBlock";
-import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
-import { AppHealthStatusProvider, useAppHealthStatus } from "../contexts/AppHealthStatusContext";
+import { AppChromeProvider } from "../contexts/AppChromeContext";
+import { AppHealthStatusProvider } from "../contexts/AppHealthStatusContext";
 import { ImportWorkflowDraftProvider } from "../contexts/ImportWorkflowDraftContext";
 import { ImportProgressProvider } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
@@ -50,8 +50,6 @@ function persistSidebarState(storageKey: string, expanded: boolean) {
 }
 
 function AppShell() {
-  const { workbenchStatus } = useAppChrome();
-  const healthStatus = useAppHealthStatus();
   const {
     primaryJob,
     extraCount,
@@ -97,8 +95,6 @@ function AppShell() {
         isCompact={isCompact}
         mobileOpen={mobileOpen}
         expanded={sidebarExpanded}
-        healthStatus={healthStatus}
-        workbenchStatus={workbenchStatus}
         onCloseMobile={() => setMobileOpen(false)}
         onToggleExpanded={toggleSidebarExpanded}
       />

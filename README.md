@@ -53,6 +53,7 @@ cd web && npm run build
 - 可靠性基线：`RELIABILITY.md`
 - 安全和权限：`SECURITY.md`
 - 文档地图：`docs/index.md`
+- 当前 app 架构：`docs/app-architecture/README.md`
 - 产品规格：`docs/product-specs/index.md`
 - 开发文档：`docs/dev/index.md`
 - 运维文档：`docs/operations/index.md`
@@ -72,4 +73,4 @@ scripts/        开发和运行脚本
 
 ## 归档说明
 
-历史 prompt、旧计划和旧设计已经移入 `docs/archive/`。它们只用于追溯，不作为当前需求、架构或验收标准。
+历史 prompt、旧计划和阶段执行记录不再保留为当前文档入口。仍有价值的结论已提炼到长期文档，原始业务源少量保留在 `docs/references/`。

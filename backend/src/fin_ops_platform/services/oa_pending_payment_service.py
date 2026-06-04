@@ -13,6 +13,7 @@ from urllib.parse import unquote
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
@@ -73,11 +74,13 @@ class OaPendingPaymentQueryService:
         import_service: ImportNormalizationService,
         relation_facade: WorkbenchRelationReadFacade | None = None,
         oa_projection: Any | None = None,
+        lifecycle_policy: Any | None = None,
         require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
         self._relation_facade = relation_facade
         self._oa_projection = oa_projection
+        self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy()
         self._require_fresh_relations = require_fresh_relations
 
     def list_rows(
@@ -579,30 +582,32 @@ class OaPendingPaymentQueryService:
     ) -> dict[str, str]:
         oa_amount = _parse_decimal(record.amount)
         if oa_amount is None:
-            return _status("pending_review", "待核对", "OA金额缺失或无法解析")
+            return self._lifecycle_policy.evaluate_oa_payment(oa_amount=None, paid_total=ZERO, has_bank=False)
         bank_ids = [str(summary.get("bankTransactionId") or "") for summary in list(bank_payload.get("summaries") or [])]
         bank_ids = [bank_id for bank_id in bank_ids if bank_id]
         if not bank_ids:
-            if int(bank_payload.get("missingBankRelationCount") or 0) > 0:
-                return _status("pending_review", "待核对", "关联流水事实缺失或证据不完整")
-            if int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0:
-                return _status("pending_review", "待核对", "关联流水不是支出流水，证据不完整")
-            return _status("unpaid", "未支付", "未关联支出流水")
-        if self._is_merged_payment(
+            return self._lifecycle_policy.evaluate_oa_payment(
+                oa_amount=oa_amount,
+                paid_total=ZERO,
+                has_bank=False,
+                has_missing_bank_relation=int(bank_payload.get("missingBankRelationCount") or 0) > 0,
+                has_non_outflow_bank_relation=int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0,
+            )
+        merged_payment = self._is_merged_payment(
             record.id,
             bank_ids,
             relations,
             bank_by_id=bank_by_id,
             oa_by_id=oa_by_id,
             context=context,
-        ):
-            return _status("merged_paid", "已支付（多条OA合并支付）", "多条OA共享同一支出流水且合计金额匹配")
+        )
         paid_total = sum((abs(_decimal(bank_by_id[bank_id].amount)) for bank_id in bank_ids if bank_id in bank_by_id), start=ZERO)
-        if _within_cent(paid_total, oa_amount):
-            return _status("paid", "已支付", "支出流水合计等于OA金额")
-        if paid_total < oa_amount:
-            return _status("partially_paid", "支付少了", "支出流水合计小于OA金额")
-        return _status("overpaid", "支付多了", "支出流水合计大于OA金额")
+        return self._lifecycle_policy.evaluate_oa_payment(
+            oa_amount=oa_amount,
+            paid_total=paid_total,
+            has_bank=True,
+            merged_payment=merged_payment,
+        )
 
     def _is_merged_payment(
         self,

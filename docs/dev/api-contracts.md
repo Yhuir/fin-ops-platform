@@ -14,14 +14,40 @@
 - `/api/workbench*`：关联工作台查询、详情、动作、异常、设置。
 - `/imports/*`：导入预览、确认、模板、批次和文件会话。
 - `/api/no-oa-bank-batches/*`：免 OA 批次。
-- `/api/etc/business-batches*`：ETC 用户可见业务批次、补充导入、OA 草稿、OA 自动检测、人工兜底和撤销草稿。详细合同见 `etc-business-batches-api.md`。
+- `/api/etc/business-batches*`：ETC 用户可见业务批次、补充导入、OA 草稿、OA 自动检测、人工兜底和撤销草稿。
 - `/api/tax-offset*`：税金抵扣和已认证导入。
 - `/api/cost-statistics*`：成本统计、下钻和导出。
 - `/api/bank-details*`：银行明细、自动分类展示和 XLSX 导出。
-- `/api/pending-invoices*`：待找发票列表、筛选、关系明细、候选进项发票、规则和导出。详细合同见 `pending-invoices-api.md`。
+- `/api/pending-invoices*`：待找发票列表、筛选、关系明细、候选进项发票、规则和导出。
 - `/api/background-jobs*`：后台任务。
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
+
+## App Health 全局状态 API
+
+`GET /api/app-health` 保留既有字段，并新增 `app_status` 作为 Global Runtime Status Plane 的用户可见投影。SSE `/api/app-health/stream` 的 `app_health` 事件必须携带同样的 `app_status` shape。
+
+`app_status` 字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `version` | app status contract 版本，当前为 `1`。 |
+| `generated_at` | 后端生成时间。 |
+| `overall.level` | `ok`、`busy` 或 `blocked`。 |
+| `overall.color` | `green`、`yellow` 或 `red`，供全局 icon 使用。 |
+| `overall.reason` | 全局状态原因。 |
+| `overall.blocks_mutations` | 当前全局状态是否应阻断写入。 |
+| `domains[]` | 所有页面数据域状态。 |
+| `background_tasks[]` | 用户可见后台任务进度投影。 |
+| `alerts[]` | 当前 active 运行告警摘要。 |
+
+`domains[*]` 至少包含 `key`、`label`、`route`、`level`、`status`、`reason`、`details`、`read_models`、`workers`、`job_ids` 和 `updated_at`。`status` 必须来自后端规则集：`ready`、`loading`、`refreshing`、`stale`、`missing`、`schema_mismatch`、`source_mismatch`、`failed` 或 `unavailable`。页面切换不能改变这些字段；只有后端 runtime facts 变化才改变全局状态。
+
+read model readiness details 可以放入 `domains[*].details`，用于 hover 面板展示 schema/source/readiness 错误、missing readiness 或 dependency 缺失原因。空业务结果不等于 missing；只有 readiness 记录缺失、schema/source mismatch、dirty scope/outbox/worker/dependency 事实才改变全局状态。
+
+`background_tasks[*]` 至少包含 `job_id`、`type`、`status`、`label`、`short_label`、`message`、`phase`、`current`、`total`、`percent`、`affected_domains`、`affected_scopes`、`affected_months`、`route`、`attention` 和 `updated_at`。没有真实百分比的 worker/read model refresh 不得伪造 percent，可返回 `null`。`file_import` 等泛化类型必须优先使用 payload 中的 `affected_domains`，否则按 source/import type 映射到单一 import domain，不能默认影响所有导入页。
+
+前端必须对 `overall.level/color/reason`、domain `key/level/status/reason`、task `job_id/status` 做 fail-closed 校验。关键字段缺失或非法时，不能把 payload 默认解释为 `ok/green/ready`。
 
 ## 免 OA 流水批量处理 API
 
@@ -424,7 +450,42 @@
 
 ## 工作台 DTO
 
-工作台 DTO 的详细结构见 `reconciliation-workbench-v2-data-contracts.md`。
+工作台 DTO 必须保留稳定的分页、summary、group、relation、exception、read model status 和 source version 字段。新增字段只能向后兼容添加；删除、重命名或改变含义需要同步更新前端 DTO、测试和本文档。
+
+## 发票生命周期状态
+
+待找发票、进项发票使用情况、OA 待付款核对、销项发票收款情况和税金抵扣的 lifecycle 字段保持原响应 shape：
+
+- 待找发票：`invoice_acquisition_status`
+- 进项发票使用情况：`paymentStatus`
+- OA 待付款核对：`paymentStatus`
+- 销项发票收款情况：`collectionStatus`
+- 税金抵扣：`certified_status` / `is_locked_certified`
+
+这些字段的规则来源必须是 `InvoiceLifecyclePolicy`；跨页面分发使用 `invoice_lifecycle` read boundary。新增页面不得在 API、query service 或 worker 中私有定义发票生命周期状态。
+
+## 待找发票 API
+
+`/api/pending-invoices*` 维护支出流水发票获取状态、候选进项发票、规则建议、人工关系和导出。
+
+契约要求：
+
+- 列表响应必须包含 rows、summary、filters、read model 状态和可解释的状态字段。
+- filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项。
+- 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限。
+- 写入类接口需要返回 affected months/objects、version 或 job，供页面局部刷新和跨页事件使用。
+- 导出字段应与当前筛选和权限一致，不能绕过列表口径。
+
+## OA 待付款 API
+
+`/api/oa-pending-payments*` 维护 OA 待付款、付款流水和进项发票关系核对。
+
+契约要求：
+
+- rows、filter-options 和详情接口使用同一 SQL read model 或同一 query service 事实源。
+- 响应必须表达 `read_model_status`、stale/refreshing 详情和必要的 refresh job。
+- 详情接口返回 OA、付款流水、发票、候选关系和异常原因。
+- 外部依赖或 read model 不可用时返回明确业务错误或 stale 状态，不返回 HTML 或空 body。
 
 ### 工作台 read model 刷新状态
 
@@ -469,7 +530,12 @@ SSE 事件流。支持事件：
 
 ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-batches*` 作为新增契约层。它取代前端直接拼接 `EtcImportBatch` 和 `EtcBatch` 的展示口径，旧 `/api/etc/batches*` 只作为过渡兼容入口，不应继续扩展。
 
-详细状态枚举、错误码、权限、幂等和撤销草稿/释放发票规则见 [`etc-business-batches-api.md`](etc-business-batches-api.md)。设计依据见 [`../superpowers/specs/2026-05-19-etc-business-batch-oa-auto-detection-design.md`](../superpowers/specs/2026-05-19-etc-business-batch-oa-auto-detection-design.md)。
+契约要求：
+
+- 响应必须区分导入批次、业务批次、OA 草稿、自动检测结果和人工兜底状态。
+- 幂等 key、重复提交、撤销草稿和释放发票规则必须由后端校验。
+- 权限不足、状态冲突、发票占用、OA 草稿失败和撤销失败需要返回稳定错误码。
+- dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。
 
 ## AppHealth 运维 Dashboard API
 

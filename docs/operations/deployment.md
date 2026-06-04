@@ -1,5 +1,14 @@
 # 部署
 
+## 本地与服务器一致性
+
+本地开发可以使用轻量依赖，但生产部署必须保持运行时语义一致：
+
+- 前端 base path、后端 API prefix、OA iframe/session、Nginx 代理路径必须和服务器一致。
+- PostgreSQL durable queue、read model freshness、worker registry 和 App Health 状态不能在服务器上被旁路。
+- SSH tunnel 或本地代理只用于调试，不作为生产路径。
+- 部署 smoke 必须验证 API 返回 JSON、页面能加载、App Health 可读、关键 read model 不被伪装为 fresh。
+
 ## 推荐路径
 
 当前推荐 OA 同域部署：
@@ -67,6 +76,8 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 | --- | --- | --- |
 | `worker-oa-sync` | `oa.sync` | `--enable-oa-sync --event-type oa.sync` |
 | `worker-workbench` | `workbench.read_model.refresh` | `--enable-workbench-read-model-refresh --event-type workbench.read_model.refresh` |
+| `worker-workbench-relation` | `workbench_relation.read_model.refresh` | `--enable-workbench-relation-read-model-refresh --event-type workbench_relation.read_model.refresh` |
+| `worker-invoice-lifecycle` | `invoice_lifecycle.read_model.refresh` | `--enable-invoice-lifecycle-read-model-refresh --event-type invoice_lifecycle.read_model.refresh` |
 | `worker-bank-detail` | `bank_detail.read_model.refresh` | `--enable-bank-detail-read-model-refresh --event-type bank_detail.read_model.refresh --max-events-per-iteration 24` |
 | `worker-no-oa-bank-batch` | `no_oa_bank_batch.read_model.refresh` | `--enable-no-oa-bank-batch-read-model-refresh --event-type no_oa_bank_batch.read_model.refresh --max-events-per-iteration 24` |
 | `worker-turnover-ledger` | `turnover_ledger.read_model.refresh` | `--enable-turnover-ledger-read-model-refresh --event-type turnover_ledger.read_model.refresh --max-events-per-iteration 12` |
@@ -90,6 +101,8 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`
 - `deploy/oa/env/fin-ops.worker.oa-sync.env.example`
 - `deploy/oa/env/fin-ops.worker.workbench.env.example`
+- `deploy/oa/env/fin-ops.worker.workbench-relation.env.example`
+- `deploy/oa/env/fin-ops.worker.invoice-lifecycle.env.example`
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
 - `deploy/oa/env/fin-ops.worker.bank-detail.env.example`
 - `deploy/oa/env/fin-ops.worker.no-oa-bank-batch.env.example`
@@ -128,6 +141,8 @@ sudo visudo -cf /etc/sudoers.d/finops-runtime-workers
 ```bash
 fin-ops-worker@oa-sync.service
 fin-ops-worker@workbench.service
+fin-ops-worker@workbench-relation.service
+fin-ops-worker@invoice-lifecycle.service
 fin-ops-worker@workbench-matching.service
 fin-ops-worker@bank-detail.service
 fin-ops-worker@no-oa-bank-batch.service

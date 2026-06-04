@@ -1,1 +1,0 @@
-/opt/fin-ops/venv/bin/python: Error while finding module specification for 'fin_ops_platform.tools.run_controlled_mirror_write_rehearsal' (ModuleNotFoundError: No module named 'fin_ops_platform')

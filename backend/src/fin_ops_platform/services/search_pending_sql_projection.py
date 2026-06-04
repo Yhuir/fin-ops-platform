@@ -17,6 +17,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
     pending_invoice_status_payload,
 )
+from fin_ops_platform.services.invoice_lifecycle_policy import INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -479,6 +480,7 @@ class SearchPendingSqlProjectionBuilder:
         bank_tags = settings.get("bank_transaction_tags")
         return {
             "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v1",
+            "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
             "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
             "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
             "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,

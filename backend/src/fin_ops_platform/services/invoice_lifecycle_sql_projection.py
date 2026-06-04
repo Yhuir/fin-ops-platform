@@ -1,0 +1,301 @@
+from __future__ import annotations
+
+from typing import Any
+
+from fin_ops_platform.domain.enums import InvoiceType
+from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    AppSettingsInputInvoiceUsagePaymentRulesProvider,
+    PostgresInputInvoiceUsagePaymentRulesStateStore,
+)
+from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
+from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
+from fin_ops_platform.services.invoice_usage_collection_source_versions import (
+    input_invoice_usage_source_versions,
+    oa_pending_payment_source_versions,
+    output_invoice_collection_source_versions,
+)
+from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
+from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
+from fin_ops_platform.services.postgres_repositories import (
+    PostgresCoreRepository,
+    PostgresOAProjectionRepository,
+    PostgresReadModelRepository,
+)
+from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
+    build_output_invoice_collection_lifecycle_repository,
+)
+from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE
+from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
+from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
+
+
+class InvoiceLifecycleSqlProjectionBuilder:
+    """Build the invoice lifecycle distribution read model outside API hot paths."""
+
+    def __init__(
+        self,
+        *,
+        connection: Any,
+        read_model_repository: PostgresReadModelRepository | None = None,
+        workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None,
+    ) -> None:
+        self._connection = connection
+        self._core_repository = PostgresCoreRepository(connection)
+        self._read_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._oa_projection_repository = PostgresOAProjectionRepository(connection)
+        self._workbench_relation_read_facade = workbench_relation_read_facade or WorkbenchRelationReadFacade(
+            read_model_repository=self._read_repository,
+        )
+        self._payment_rules_provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
+            state_store=PostgresInputInvoiceUsagePaymentRulesStateStore(connection),
+        )
+        self._policy = InvoiceLifecyclePolicy(input_payment_rules_provider=self._payment_rules_provider)
+
+    def list_invoice_lifecycle_scope_shards(self, scope_key: str) -> list[str]:
+        normalized_scope_key = str(scope_key or "").strip()
+        if MONTH_SCOPE_RE.match(normalized_scope_key):
+            return [normalized_scope_key]
+        months: set[str] = set()
+        months.update(self._invoice_month_shards(invoice_type=InvoiceType.INPUT))
+        months.update(self._invoice_month_shards(invoice_type=InvoiceType.OUTPUT))
+        months.update(self._oa_month_shards())
+        months.update(self._bank_transaction_month_shards())
+        return sorted(months, reverse=True)
+
+    def rebuild_invoice_lifecycle_read_model_scope(self, scope_key: str) -> dict[str, object]:
+        normalized_scope_key = self._month_scope(scope_key)
+        rows = []
+        rows.extend(self._pending_invoice_lifecycle_rows(normalized_scope_key))
+        rows.extend(self._input_invoice_lifecycle_rows(normalized_scope_key))
+        rows.extend(self._output_invoice_lifecycle_rows(normalized_scope_key))
+        rows.extend(self._oa_pending_payment_lifecycle_rows(normalized_scope_key))
+        source_versions = self._source_versions()
+        self._read_repository.save_invoice_lifecycle_rows(
+            scope_key=normalized_scope_key,
+            rows=rows,
+            source_versions=source_versions,
+        )
+        return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
+
+    def mark_invoice_lifecycle_scope_empty(self, scope_key: str) -> None:
+        mark_scope = getattr(self._read_repository, "mark_invoice_lifecycle_scope", None)
+        if callable(mark_scope):
+            mark_scope(scope_key=scope_key, row_count=0, source_versions=self._source_versions())
+
+    def _pending_invoice_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
+        builder = SearchPendingSqlProjectionBuilder(
+            connection=self._connection,
+            read_model_repository=self._read_repository,
+            workbench_relation_read_facade=self._workbench_relation_read_facade,
+        )
+        rows: list[dict[str, Any]] = []
+        for direction in ("expense", "income"):
+            for row in builder._pending_invoice_rows(direction=direction, filter_name="all", month=month):
+                bank = row.get("bank_transaction") if isinstance(row.get("bank_transaction"), dict) else {}
+                status = row.get("invoice_acquisition_status") if isinstance(row.get("invoice_acquisition_status"), dict) else {}
+                subject_id = str(row.get("id") or bank.get("id") or "").strip()
+                if not subject_id:
+                    continue
+                rows.append(
+                    {
+                        "subject_id": subject_id,
+                        "subject_type": "bank_transaction",
+                        "scope_key": month,
+                        "scope_month": month,
+                        "lifecycle_status": _status_code(status),
+                        "acquisition_status": status,
+                        "payment_status": {},
+                        "collection_status": {},
+                        "certification_status": {},
+                    }
+                )
+        return rows
+
+    def _input_invoice_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
+        service = InputInvoiceUsageQueryService(
+            import_service=self._import_service(),
+            relation_facade=self._workbench_relation_read_facade,
+            oa_projection=self._oa_projection_repository,
+            payment_rules_provider=self._payment_rules_provider,
+            lifecycle_policy=self._policy,
+            require_fresh_relations=True,
+        )
+        context = service._query_context(month_hint=month)
+        page_rows = service._filtered_sorted_rows(
+            context=context,
+            month=month,
+            keyword=None,
+            invoice_date_from=None,
+            invoice_date_to=None,
+            filters=[],
+            sort_field="invoice_date",
+            sort_direction="desc",
+        )
+        rows = []
+        for row in page_rows:
+            status = row.get("paymentStatus") if isinstance(row.get("paymentStatus"), dict) else {}
+            subject_id = str(row.get("invoiceId") or "").strip()
+            if not subject_id:
+                continue
+            rows.append(
+                {
+                    "subject_id": subject_id,
+                    "subject_type": "input_invoice",
+                    "scope_key": month,
+                    "scope_month": month,
+                    "invoice_identity_key": row.get("invoiceIdentityKey"),
+                    "lifecycle_status": _status_code(status),
+                    "acquisition_status": {},
+                    "payment_status": status,
+                    "collection_status": {},
+                    "certification_status": {},
+                }
+            )
+        return rows
+
+    def _output_invoice_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
+        service = OutputInvoiceCollectionQueryService(
+            import_service=self._import_service(),
+            relation_facade=self._workbench_relation_read_facade,
+            lifecycle_repository=build_output_invoice_collection_lifecycle_repository(self._connection),
+            lifecycle_policy=self._policy,
+            require_fresh_relations=True,
+        )
+        context = service._query_context(month_hint=month)
+        page_rows = service._filtered_sorted_rows(
+            context=context,
+            month=month,
+            keyword=None,
+            invoice_date_from=None,
+            invoice_date_to=None,
+            filters=[],
+            sort_field="invoice_date",
+            sort_direction="desc",
+        )
+        rows = []
+        for row in page_rows:
+            status = row.get("collectionStatus") if isinstance(row.get("collectionStatus"), dict) else {}
+            subject_id = str(row.get("invoiceId") or "").strip()
+            if not subject_id:
+                continue
+            rows.append(
+                {
+                    "subject_id": subject_id,
+                    "subject_type": "output_invoice",
+                    "scope_key": month,
+                    "scope_month": month,
+                    "invoice_identity_key": row.get("invoiceIdentityKey"),
+                    "lifecycle_status": _status_code(status),
+                    "acquisition_status": {},
+                    "payment_status": {},
+                    "collection_status": status,
+                    "certification_status": {},
+                }
+            )
+        return rows
+
+    def _oa_pending_payment_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
+        service = OaPendingPaymentQueryService(
+            import_service=self._import_service(),
+            relation_facade=self._workbench_relation_read_facade,
+            oa_projection=self._oa_projection_repository,
+            lifecycle_policy=self._policy,
+            require_fresh_relations=True,
+        )
+        context = service._query_context(month_hint=month)
+        page_rows = service._filtered_sorted_rows(
+            context=context,
+            month=month,
+            keyword=None,
+            trade_date_from=None,
+            trade_date_to=None,
+            filters=[],
+            sort_field="bank_trade_time",
+            sort_direction="desc",
+        )
+        rows = []
+        for row in page_rows:
+            oa = row.get("oa") if isinstance(row.get("oa"), dict) else {}
+            status = row.get("paymentStatus") if isinstance(row.get("paymentStatus"), dict) else {}
+            subject_id = str(oa.get("id") or row.get("id") or "").strip()
+            if not subject_id:
+                continue
+            rows.append(
+                {
+                    "subject_id": subject_id,
+                    "subject_type": "oa_application",
+                    "scope_key": month,
+                    "scope_month": month,
+                    "lifecycle_status": _status_code(status),
+                    "acquisition_status": {},
+                    "payment_status": status,
+                    "collection_status": {},
+                    "certification_status": {},
+                }
+            )
+        return rows
+
+    def _source_versions(self) -> dict[str, object]:
+        source_versions: dict[str, object] = {
+            **self._policy.source_versions(),
+            "invoice_lifecycle_read_model_schema_version": 1,
+            "input_invoice_usage_source_versions": input_invoice_usage_source_versions(
+                payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
+            ),
+            "output_invoice_collection_source_versions": output_invoice_collection_source_versions(),
+            "oa_pending_payment_source_versions": oa_pending_payment_source_versions(),
+        }
+        if self._workbench_relation_read_facade.last_source_versions:
+            source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
+        return source_versions
+
+    def _import_service(self) -> ImportNormalizationService:
+        return ImportNormalizationService.from_snapshot(None, fact_repository=self._core_repository)
+
+    def _invoice_month_shards(self, *, invoice_type: InvoiceType) -> list[str]:
+        rows = self._connection.fetch_all(
+            """
+            select distinct to_char(coalesce(invoice_month, date_trunc('month', invoice_date)), 'YYYY-MM') as scope_key
+            from app.invoices
+            where invoice_type = %s
+              and coalesce(invoice_month, invoice_date) is not null
+            order by scope_key desc
+            """,
+            (invoice_type.value,),
+        )
+        return [str(row.get("scope_key")) for row in rows if MONTH_SCOPE_RE.match(str(row.get("scope_key") or ""))]
+
+    def _oa_month_shards(self) -> list[str]:
+        rows = self._connection.fetch_all(
+            """
+            select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+            from app.oa_applications
+            where scope_month is not null
+            order by scope_key desc
+            """
+        )
+        return [str(row.get("scope_key")) for row in rows if MONTH_SCOPE_RE.match(str(row.get("scope_key") or ""))]
+
+    def _bank_transaction_month_shards(self) -> list[str]:
+        rows = self._connection.fetch_all(
+            """
+            select distinct to_char(txn_month, 'YYYY-MM') as scope_key
+            from app.bank_transactions
+            where txn_month is not null
+              and status <> 'deleted'
+            order by scope_key desc
+            """
+        )
+        return [str(row.get("scope_key")) for row in rows if MONTH_SCOPE_RE.match(str(row.get("scope_key") or ""))]
+
+    @staticmethod
+    def _month_scope(scope_key: str) -> str:
+        normalized_scope_key = str(scope_key or "").strip()
+        if not MONTH_SCOPE_RE.match(normalized_scope_key):
+            raise ValueError(f"invoice lifecycle scope must be a YYYY-MM shard: {scope_key}")
+        return normalized_scope_key
+
+
+def _status_code(status: dict[str, Any]) -> str:
+    return str(status.get("code") or "unknown").strip() or "unknown"

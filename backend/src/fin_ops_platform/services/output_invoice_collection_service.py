@@ -13,7 +13,9 @@ from urllib.parse import unquote
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.output_invoice_collection_models import (
     OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
     RED_REFUND_STATUS_CODES,
@@ -26,6 +28,7 @@ ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 READ_MODEL_STATUS = "live_query"
 SOURCE_VERSION = OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
@@ -327,6 +330,7 @@ class OutputInvoiceCollectionQueryService:
         receipt_preview_service: OutputInvoiceReceiptPreviewService | None = None,
         lifecycle_repository: Any | None = None,
         status_overlay_service: OutputInvoiceCollectionStatusOverlayService | None = None,
+        lifecycle_policy: Any | None = None,
         require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
@@ -335,6 +339,9 @@ class OutputInvoiceCollectionQueryService:
         self._receipt_preview_service = receipt_preview_service or OutputInvoiceReceiptPreviewService()
         self._lifecycle_repository = lifecycle_repository
         self._status_overlay_service = status_overlay_service or OutputInvoiceCollectionStatusOverlayService()
+        self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy(
+            output_collection_status_rule_service=self._status_rule_service,
+        )
         self._require_fresh_relations = require_fresh_relations
 
     def list_rows(
@@ -777,7 +784,7 @@ class OutputInvoiceCollectionQueryService:
             )
         related_inflow_total = self._bank_total(related_bank_summaries + bank_payload["summaries"], direction="inflow")
         related_outflow_total = self._bank_total(related_bank_summaries + bank_payload["summaries"], direction="outflow")
-        collection_status = self._status_rule_service.classify(
+        collection_status = self._lifecycle_policy.evaluate_output_invoice_collection(
             invoice_total=sum((_invoice_total(line) for line in line_items), start=ZERO),
             own_inflow_total=own_inflow_total,
             related_inflow_total=related_inflow_total,
@@ -1374,14 +1381,7 @@ class OutputInvoiceCollectionQueryService:
 
     @staticmethod
     def _identity_key(invoice: Invoice) -> str:
-        digital = str(invoice.digital_invoice_no or "").strip()
-        if digital:
-            return f"digital:{digital}"
-        invoice_code = str(invoice.invoice_code or "").strip()
-        invoice_no = str(invoice.invoice_no or "").strip()
-        if invoice_code and invoice_no:
-            return f"code_no:{invoice_code}:{invoice_no}"
-        return f"id:{invoice.id}"
+        return OBJECT_IDENTITY_POLICY.legacy_invoice_identity_key(invoice)
 
     @staticmethod
     def _line_item_payload(invoice: Invoice) -> dict[str, Any]:

@@ -40,6 +40,11 @@ from fin_ops_platform.services.invoice_usage_collection_read_model_refresh impor
     InvoiceUsageCollectionReadModelRefreshService,
 )
 from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
+from fin_ops_platform.services.invoice_lifecycle_read_model_refresh import (
+    INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE,
+    InvoiceLifecycleReadModelRefreshService,
+)
+from fin_ops_platform.services.invoice_lifecycle_sql_projection import InvoiceLifecycleSqlProjectionBuilder
 from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
 from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
@@ -118,6 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-tax-offset-read-model-refresh", action="store_true", help="Register tax offset SQL read model refresh handler.")
     parser.add_argument("--enable-search-read-model-refresh", action="store_true", help="Register search SQL read model refresh handler.")
     parser.add_argument("--enable-pending-invoice-read-model-refresh", action="store_true", help="Register pending invoice SQL read model refresh handler.")
+    parser.add_argument("--enable-invoice-lifecycle-read-model-refresh", action="store_true", help="Register invoice lifecycle SQL read model refresh handler.")
     parser.add_argument("--enable-bank-account-balance-read-model-refresh", action="store_true", help="Register bank account balance SQL read model refresh handler.")
     parser.add_argument("--enable-bank-detail-read-model-refresh", action="store_true", help="Register bank detail SQL read model refresh handler.")
     parser.add_argument("--enable-no-oa-bank-batch-read-model-refresh", action="store_true", help="Register no-OA bank batch SQL read model refresh handler.")
@@ -363,6 +369,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers["bank_account_balance.read_model.refresh"] = refresh_service.handle_runtime_event
         if "bank_account_balance.read_model.refresh" not in config.event_types:
             config.event_types.append("bank_account_balance.read_model.refresh")
+    if args.enable_invoice_lifecycle_read_model_refresh:
+        projection_builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=read_model_repository,
+            workbench_relation_read_facade=workbench_relation_read_facade,
+        )
+        refresh_service = InvoiceLifecycleReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue,
+        )
+        handlers[INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event
+        if INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE not in config.event_types:
+            config.event_types.append(INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE)
     if (
         args.enable_input_invoice_usage_read_model_refresh
         or args.enable_output_invoice_collection_read_model_refresh

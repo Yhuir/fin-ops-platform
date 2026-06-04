@@ -1,7 +1,0 @@
-MainPID=452671
-ExecMainStartTimestamp=Wed 2026-05-20 16:07:52 CST
-EnvironmentFiles=/opt/fin-ops/fin-ops.env (ignore_errors=no)
-ActiveState=active
-SubState=running
-FragmentPath=/etc/systemd/system/fin-ops.service
-DropInPaths=/etc/systemd/system/fin-ops.service.d/10-fin-ops-env.conf

@@ -49,6 +49,7 @@ export type ApiAppHealthPayload = {
   status?: string;
   generated_at?: string;
   version?: number;
+  app_status?: unknown;
   session?: {
     status?: string;
   };

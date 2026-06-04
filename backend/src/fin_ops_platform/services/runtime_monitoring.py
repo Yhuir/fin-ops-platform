@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from fin_ops_platform.services.app_status_read_model_registry import (
+    APP_STATUS_READ_MODEL_REGISTRY,
+    read_model_by_scope_type,
+)
 from fin_ops_platform.services.rabbitmq_runtime import rabbitmq_event_routes
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueSettings
 from fin_ops_platform.services.runtime_worker_registry import (
@@ -20,6 +25,246 @@ class RuntimeMonitoringRepository:
     def __init__(self, connection: Any, rabbitmq_metrics_provider: Any | None = None) -> None:
         self._connection = connection
         self._rabbitmq_metrics_provider = rabbitmq_metrics_provider
+
+    def app_status_runtime_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
+        try:
+            return {
+                "read_model_statuses": self._app_status_read_model_statuses(),
+                "outbox_statuses": self._app_status_outbox_statuses(),
+                "worker_statuses": self._app_status_worker_statuses(),
+            }
+        except Exception as exc:
+            payload = {
+                "status": "unavailable",
+                "last_error": str(exc) or exc.__class__.__name__,
+            }
+            return {
+                "read_model_statuses": {"__runtime__": dict(payload)},
+                "outbox_statuses": {"__runtime__": dict(payload)},
+                "worker_statuses": {"__runtime__": dict(payload)},
+            }
+
+    def record_read_model_readiness(
+        self,
+        *,
+        read_model_key: str,
+        scope_type: str,
+        scope_key: str,
+        status: str,
+        tenant_id: str = "default",
+        schema_version: str = "",
+        source_versions: dict[str, Any] | None = None,
+        row_count: int | None = None,
+        generated_at: object | None = None,
+        last_error: str | None = None,
+        raw_payload: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status not in {
+            "fresh",
+            "missing",
+            "refreshing",
+            "stale",
+            "schema_mismatch",
+            "source_mismatch",
+            "failed",
+            "unavailable",
+        }:
+            raise ValueError(f"Unsupported read model readiness status: {status!r}.")
+        self._connection.execute(
+            """
+            insert into read_model.app_status_readiness (
+                tenant_id,
+                read_model_key,
+                scope_type,
+                scope_key,
+                status,
+                schema_version,
+                source_versions,
+                row_count,
+                generated_at,
+                last_error,
+                raw_payload,
+                updated_at
+            ) values (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s::jsonb,
+                %s,
+                %s,
+                %s,
+                %s::jsonb,
+                now()
+            )
+            on conflict (tenant_id, read_model_key, scope_type, scope_key)
+            do update set
+                status = excluded.status,
+                schema_version = excluded.schema_version,
+                source_versions = excluded.source_versions,
+                row_count = excluded.row_count,
+                generated_at = excluded.generated_at,
+                last_error = excluded.last_error,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                str(tenant_id or "default"),
+                str(read_model_key or "").strip(),
+                str(scope_type or "").strip(),
+                str(scope_key or "").strip(),
+                normalized_status,
+                str(schema_version or ""),
+                _json_payload(source_versions or {}),
+                row_count,
+                generated_at,
+                last_error,
+                _json_payload(raw_payload or {}),
+            ),
+        )
+
+    def _app_status_read_model_statuses(self) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = self._app_status_readiness_statuses()
+        definitions_by_scope = read_model_by_scope_type()
+        rows = self._connection.fetch_all(
+            """
+            select
+                scope_type,
+                status,
+                count(*)::bigint as count,
+                max(last_error) as last_error,
+                max(updated_at)::text as updated_at
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and status in ('pending', 'processing', 'failed')
+            group by scope_type, status
+            """
+        )
+        for row in rows:
+            scope_type = str(row.get("scope_type") or "").strip()
+            if not scope_type:
+                continue
+            read_model_key = definitions_by_scope.get(scope_type).key if scope_type in definitions_by_scope else scope_type
+            current = grouped.setdefault(read_model_key, {"status": "missing", "count": 0, "details": []})
+            current["count"] = int(current.get("count") or 0) + (_optional_int(row.get("count")) or 0)
+            current["status"] = _max_app_status(
+                str(current.get("status") or "missing"),
+                _app_status_dirty_scope_status(row.get("status")),
+            )
+            last_error = str(row.get("last_error") or "").strip()
+            if last_error:
+                current["last_error"] = last_error
+            updated_at = str(row.get("updated_at") or "").strip()
+            if updated_at:
+                current["updated_at"] = updated_at
+        for key, definition in APP_STATUS_READ_MODEL_REGISTRY.items():
+            grouped.setdefault(
+                key,
+                {
+                    "status": "missing",
+                    "reason": "readiness record missing",
+                    "scope_type": definition.scope_type,
+                    "count": 0,
+                },
+            )
+        return grouped
+
+    def _app_status_readiness_statuses(self) -> dict[str, dict[str, Any]]:
+        rows = self._connection.fetch_all(
+            """
+            select
+                read_model_key,
+                scope_type,
+                scope_key,
+                status,
+                schema_version,
+                source_versions,
+                row_count,
+                generated_at::text as generated_at,
+                updated_at::text as updated_at,
+                last_error
+            from read_model.app_status_readiness
+            where tenant_id = 'default'
+            """
+        )
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            key = str(row.get("read_model_key") or "").strip()
+            if not key:
+                continue
+            status = str(row.get("status") or "missing").strip().lower() or "missing"
+            current = grouped.setdefault(
+                key,
+                {
+                    "status": "fresh",
+                    "count": 0,
+                    "scope_type": row.get("scope_type"),
+                    "scope_key": row.get("scope_key"),
+                    "schema_version": row.get("schema_version"),
+                    "source_versions": row.get("source_versions"),
+                    "row_count": row.get("row_count"),
+                    "generated_at": row.get("generated_at"),
+                    "updated_at": row.get("updated_at"),
+                    "last_error": row.get("last_error"),
+                },
+            )
+            current["status"] = _max_app_status(str(current.get("status") or "fresh"), status)
+            current["count"] = int(current.get("count") or 0) + 1
+            if row.get("last_error"):
+                current["last_error"] = row.get("last_error")
+            if row.get("updated_at"):
+                current["updated_at"] = row.get("updated_at")
+            if row.get("generated_at"):
+                current["generated_at"] = row.get("generated_at")
+        return grouped
+
+    def _app_status_outbox_statuses(self) -> dict[str, dict[str, Any]]:
+        rows = self._connection.fetch_all(
+            """
+            select
+                event_type,
+                status,
+                count(*)::bigint as count,
+                max(updated_at)::text as updated_at
+            from job.outbox_events
+            where status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
+            group by event_type, status
+            """
+        )
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            event_type = str(row.get("event_type") or "").strip()
+            if not event_type:
+                continue
+            current = grouped.setdefault(event_type, {"status": "ready", "count": 0})
+            current["count"] = int(current.get("count") or 0) + (_optional_int(row.get("count")) or 0)
+            current["status"] = _max_app_outbox_status(
+                str(current.get("status") or "ready"),
+                str(row.get("status") or ""),
+            )
+            updated_at = str(row.get("updated_at") or "").strip()
+            if updated_at:
+                current["updated_at"] = updated_at
+        return grouped
+
+    def _app_status_worker_statuses(self) -> dict[str, dict[str, Any]]:
+        statuses: dict[str, dict[str, Any]] = {}
+        for row in self.dashboard_worker_metrics():
+            instance = str(row.get("worker_instance") or "").strip()
+            if not instance:
+                continue
+            statuses[instance] = {
+                "status": _app_status_worker_status(row.get("status")),
+                "worker_id": row.get("worker_id"),
+                "worker_kind": row.get("worker_kind"),
+                "heartbeat_lag_seconds": row.get("heartbeat_lag_seconds"),
+                "warning_code": row.get("warning_code"),
+                "required": row.get("required"),
+            }
+        return statuses
 
     def health_summary(self, *, stale_after_seconds: int = 300) -> dict[str, Any]:
         queue_rows = self._connection.fetch_all(
@@ -645,6 +890,10 @@ def _optional_int(value: object) -> int | None:
         return None
 
 
+def _json_payload(value: dict[str, Any]) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
 def _optional_float(value: object) -> float | None:
     if value is None:
         return None
@@ -652,6 +901,48 @@ def _optional_float(value: object) -> float | None:
         return round(float(value), 3)
     except (TypeError, ValueError):
         return None
+
+
+def _app_status_dirty_scope_status(value: object) -> str:
+    status = str(value or "").strip()
+    if status == "failed":
+        return "failed"
+    if status in {"pending", "processing"}:
+        return "refreshing"
+    return "ready"
+
+
+def _max_app_status(left: str, right: str) -> str:
+    rank = {
+        "ready": 0,
+        "fresh": 0,
+        "refreshing": 1,
+        "missing": 1,
+        "stale": 2,
+        "schema_mismatch": 2,
+        "source_mismatch": 2,
+        "failed": 3,
+        "unavailable": 4,
+    }
+    return right if rank.get(right, 0) > rank.get(left, 0) else left
+
+
+def _max_app_outbox_status(left: str, right: str) -> str:
+    normalized = "failed" if right in {"publish_failed", "failed", "dead_lettered"} else right
+    normalized = "publishing" if normalized == "processing" else normalized
+    rank = {"ready": 0, "pending": 1, "publishing": 2, "failed": 3}
+    return normalized if rank.get(normalized, 0) > rank.get(left, 0) else left
+
+
+def _app_status_worker_status(value: object) -> str:
+    status = str(value or "").strip()
+    if status == "available":
+        return "ready"
+    if status in {"missing", "mismatch"}:
+        return "unavailable"
+    if status == "stale":
+        return "stale"
+    return status or "ready"
 
 
 def _worker_metric_row(

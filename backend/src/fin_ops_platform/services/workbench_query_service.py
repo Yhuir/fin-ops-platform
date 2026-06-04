@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
-from hashlib import sha1
 from threading import RLock
 from typing import Any
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.oa_adapter import (
     ETC_BATCH_SOURCE,
     ETC_BATCH_TAG,
@@ -27,7 +27,7 @@ OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS = {
     OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND,
     OA_ATTACHMENT_UNKNOWN_SOURCE_KIND,
 }
-OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES = {"tax_invoice", "machine_invoice", "non_tax_receipt"}
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 class WorkbenchQueryService:
@@ -630,54 +630,11 @@ class WorkbenchQueryService:
 
     @classmethod
     def _attachment_invoice_stable_identity(cls, attachment_invoice: dict[str, Any] | None) -> str:
-        if not isinstance(attachment_invoice, dict):
-            return ""
-        identity_parts = [
-            cls._clean_identity_part(attachment_invoice.get("evidence_id")),
-            cls._clean_identity_part(attachment_invoice.get("evidence_type")),
-            cls._clean_identity_part(attachment_invoice.get("document_kind")),
-            cls._clean_identity_part(attachment_invoice.get("source_expense_item_id")),
-            cls._clean_identity_part(attachment_invoice.get("source_attachment_key")),
-            cls._clean_identity_part(attachment_invoice.get("source_region_key")),
-            cls._clean_identity_part(attachment_invoice.get("digital_invoice_no")),
-            cls._clean_identity_part(attachment_invoice.get("invoice_no")),
-            cls._clean_identity_part(attachment_invoice.get("invoice_code")),
-            cls._clean_identity_part(attachment_invoice.get("transaction_no")),
-            cls._clean_identity_part(attachment_invoice.get("merchant_order_no")),
-            cls._clean_identity_part(attachment_invoice.get("issue_date")),
-            cls._clean_identity_part(attachment_invoice.get("paid_at")),
-            cls._clean_identity_part(attachment_invoice.get("total_with_tax")),
-            cls._clean_identity_part(attachment_invoice.get("net_amount")),
-            cls._clean_identity_part(attachment_invoice.get("amount")),
-            cls._clean_identity_part(attachment_invoice.get("tax_amount")),
-            cls._clean_identity_part(attachment_invoice.get("source_attachment_name")),
-            cls._clean_identity_part(attachment_invoice.get("attachment_name")),
-        ]
-        material = "|".join(part for part in identity_parts if part)
-        if not material:
-            return ""
-        return sha1(material.encode("utf-8")).hexdigest()[:16]
+        return OBJECT_IDENTITY_POLICY.oa_attachment_invoice_stable_identity(attachment_invoice)
 
     @classmethod
     def _attachment_invoice_candidate_identity(cls, attachment_invoice: dict[str, Any]) -> str:
-        identity_parts = [
-            cls._clean_identity_part(attachment_invoice.get("source_attachment_key")),
-            cls._clean_identity_part(attachment_invoice.get("source_expense_item_id")),
-            cls._clean_identity_part(attachment_invoice.get("digital_invoice_no")),
-            cls._clean_identity_part(attachment_invoice.get("invoice_no")),
-            cls._clean_identity_part(attachment_invoice.get("invoice_code")),
-            cls._clean_identity_part(attachment_invoice.get("seller_tax_no")),
-            cls._clean_identity_part(attachment_invoice.get("seller_name")),
-            cls._clean_identity_part(attachment_invoice.get("buyer_tax_no")),
-            cls._clean_identity_part(attachment_invoice.get("buyer_name")),
-            cls._clean_identity_part(attachment_invoice.get("total_with_tax")),
-            cls._clean_identity_part(attachment_invoice.get("amount")),
-            cls._clean_identity_part(attachment_invoice.get("tax_amount")),
-        ]
-        material = "|".join(part for part in identity_parts if part)
-        if material:
-            return sha1(material.encode("utf-8")).hexdigest()[:16]
-        return cls._attachment_invoice_stable_identity(attachment_invoice)
+        return OBJECT_IDENTITY_POLICY.oa_attachment_invoice_candidate_identity(attachment_invoice)
 
     @staticmethod
     def _clean_identity_part(value: Any) -> str:
@@ -831,7 +788,7 @@ class WorkbenchQueryService:
                 if WorkbenchQueryService._attachment_evidence_has_invoice_identity(attachment_evidence)
                 else OA_ATTACHMENT_UNKNOWN_SOURCE_KIND
             )
-        if evidence_type in OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES:
+        if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(attachment_evidence):
             return OA_ATTACHMENT_INVOICE_SOURCE_KIND
         if evidence_type == "payment_receipt":
             return OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND
@@ -839,19 +796,7 @@ class WorkbenchQueryService:
 
     @staticmethod
     def _attachment_evidence_has_invoice_identity(attachment_evidence: dict[str, Any]) -> bool:
-        for key in (
-            "invoice_no",
-            "digital_invoice_no",
-            "invoice_code",
-            "seller_tax_no",
-            "seller_name",
-            "buyer_tax_no",
-            "buyer_name",
-        ):
-            value = str(attachment_evidence.get(key) or "").strip()
-            if value and value not in {"—", "--"}:
-                return True
-        return False
+        return OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(attachment_evidence)
 
     def _attachment_invoice_detail_fields(
         self,

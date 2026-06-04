@@ -1,8 +1,0 @@
-{
-  "export_dir": "/data/exports/fin_ops/fin_ops_app_export_20260520115838_e5c03820",
-  "export_id": "fin_ops_app_export_20260520115838_e5c03820",
-  "manifest": "/data/exports/fin_ops/fin_ops_app_export_20260520115838_e5c03820/manifest.json",
-  "manifest_sha256": "00a3bf36bc20f57a8719a3e37ff786d9e0a79d93d3df5f5a0fd0989ae2099632",
-  "status": "completed",
-  "total_records": 12300
-}

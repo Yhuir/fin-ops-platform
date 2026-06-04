@@ -112,6 +112,18 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         read_model_scope_type="search",
     ),
     RuntimeWorkerRegistration(
+        instance_name="invoice-lifecycle",
+        worker_kind="invoice-lifecycle-read-model",
+        handler_flags=("--enable-invoice-lifecycle-read-model-refresh",),
+        event_types=("invoice_lifecycle.read_model.refresh",),
+        required=True,
+        rabbitmq_eligible=True,
+        env_example="fin-ops.worker.invoice-lifecycle.env.example",
+        rabbitmq_env_example="fin-ops.worker.invoice-lifecycle-rabbitmq.env.example",
+        read_model_key="invoice_lifecycle",
+        read_model_scope_type="invoice_lifecycle",
+    ),
+    RuntimeWorkerRegistration(
         instance_name="invoice-usage-collection",
         worker_kind="invoice-usage-collection-read-model",
         handler_flags=(

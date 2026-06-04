@@ -7,6 +7,7 @@ from threading import Lock
 from typing import Any, Callable
 from uuid import uuid4
 
+from fin_ops_platform.services.app_status_job_registry import APP_STATUS_BACKGROUND_JOB_REGISTRY
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
@@ -46,7 +47,7 @@ class BackgroundJob:
     phase: str
     current: int
     total: int
-    percent: int
+    percent: int | None
     message: str
     result_summary: dict[str, object]
     error: str | None
@@ -63,7 +64,18 @@ class BackgroundJob:
     superseded_at: str | None
 
     def to_payload(self) -> dict[str, object]:
-        return asdict(self)
+        payload = asdict(self)
+        source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+        affected_domains = _string_list(source.get("affected_domains") if isinstance(source, dict) else None)
+        route = str(source.get("route") or "").strip() if isinstance(source, dict) else ""
+        definition = APP_STATUS_BACKGROUND_JOB_REGISTRY.get(self.type)
+        if not affected_domains and definition is not None:
+            affected_domains = list(definition.affected_domains)
+        if not route and definition is not None:
+            route = definition.route
+        payload["affected_domains"] = affected_domains
+        payload["route"] = route or "/operations/app-health"
+        return payload
 
 
 class BackgroundJobNotFoundError(KeyError):
@@ -534,6 +546,11 @@ class BackgroundJobService:
         if status not in BACKGROUND_JOB_STATUSES:
             status = "queued"
         current, total, percent = cls._normalize_progress(payload.get("current", 0), payload.get("total", 0))
+        source = cls._sanitize_mapping(payload.get("source") if isinstance(payload.get("source"), dict) else {})
+        if "affected_domains" not in source and isinstance(payload.get("affected_domains"), list):
+            source["affected_domains"] = [str(item) for item in payload.get("affected_domains", [])]
+        if "route" not in source and payload.get("route") not in (None, ""):
+            source["route"] = str(payload.get("route"))
         job = BackgroundJob(
             job_id=str(payload.get("job_id") or payload.get("id") or ""),
             type=str(payload.get("type") or ""),
@@ -550,7 +567,7 @@ class BackgroundJobService:
             result_summary=cls._sanitize_mapping(payload.get("result_summary") if isinstance(payload.get("result_summary"), dict) else {}),
             error=str(payload.get("error")) if payload.get("error") not in (None, "") else None,
             idempotency_key=str(payload.get("idempotency_key")) if payload.get("idempotency_key") not in (None, "") else None,
-            source=cls._sanitize_mapping(payload.get("source") if isinstance(payload.get("source"), dict) else {}),
+            source=source,
             affected_scopes=[str(item) for item in payload.get("affected_scopes", [])] if isinstance(payload.get("affected_scopes"), list) else [],
             affected_months=[str(item) for item in payload.get("affected_months", [])] if isinstance(payload.get("affected_months"), list) else [],
             created_at=str(payload.get("created_at") or now),
@@ -688,3 +705,9 @@ class BackgroundJobService:
     @staticmethod
     def _new_job_id() -> str:
         return f"job_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]

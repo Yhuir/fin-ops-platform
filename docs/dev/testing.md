@@ -28,7 +28,7 @@ npm run build
 
 ```bash
 find docs -maxdepth 3 -type f -name '*.md' | sort
-rg -n "docs/superpowers|docs/product/|OA 集成当前 app 技术方案" README.md docs backend web deploy -g '*.md'
+rg -n "docs/product/|OA 集成当前 app 技术方案" README.md docs backend web deploy -g '*.md'
 ```
 
 如果只是文档重排，不要求运行业务测试；但必须检查路径和索引不会继续指向已移动位置。

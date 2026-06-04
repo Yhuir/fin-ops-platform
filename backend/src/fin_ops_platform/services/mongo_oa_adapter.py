@@ -33,6 +33,7 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import (
     attachment_invoice_cache_parser_version,
 )
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -65,7 +66,7 @@ ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS = (
     "source_attachment_key",
     "source_attachment_name",
 )
-ATTACHMENT_INVOICE_EVIDENCE_TYPES = {"tax_invoice", "machine_invoice", "non_tax_receipt"}
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 EXPENSE_TYPE_CANDIDATE_KEYS = (
     "feeType",
@@ -2079,19 +2080,7 @@ class MongoOAAdapter(OAAdapter):
 
     @staticmethod
     def _is_attachment_invoice_evidence(evidence: dict[str, object]) -> bool:
-        evidence_type = clean_string(evidence.get("evidence_type") or "")
-        if evidence_type in ATTACHMENT_INVOICE_EVIDENCE_TYPES:
-            return True
-        if evidence_type:
-            return False
-        return bool(
-            clean_string(
-                evidence.get("digital_invoice_no")
-                or evidence.get("invoice_no")
-                or evidence.get("invoice_code")
-                or ""
-            )
-        )
+        return OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence)
 
     def _schedule_attachment_invoice_parse(
         self,
@@ -2920,9 +2909,7 @@ class MongoOAAdapter(OAAdapter):
     @staticmethod
     def _attachment_evidence_dedupe_key(evidence: dict[str, object]) -> tuple[str, str]:
         evidence_type = clean_string(evidence.get("evidence_type") or "")
-        if evidence_type in ATTACHMENT_INVOICE_EVIDENCE_TYPES or (
-            not evidence_type and MongoOAAdapter._is_attachment_invoice_evidence(evidence)
-        ):
+        if MongoOAAdapter._is_attachment_invoice_evidence(evidence):
             return MongoOAAdapter._attachment_invoice_dedupe_key(evidence)
         if evidence_type == "payment_receipt":
             transaction_no = clean_string(evidence.get("transaction_no") or "")
@@ -2962,30 +2949,7 @@ class MongoOAAdapter(OAAdapter):
 
     @staticmethod
     def _attachment_invoice_dedupe_keys(invoice: dict[str, object]) -> list[tuple[str, str]]:
-        keys: list[tuple[str, str]] = []
-        digital_invoice_no = clean_string(invoice.get("digital_invoice_no") or "")
-        if digital_invoice_no:
-            keys.append(("invoice:digital_invoice_no", digital_invoice_no))
-        invoice_code = clean_string(invoice.get("invoice_code") or "")
-        invoice_no = clean_string(invoice.get("invoice_no") or "")
-        if invoice_code and invoice_no:
-            keys.append(("invoice:code_no", f"{invoice_code}:{invoice_no}"))
-        fallback = {
-            "document_kind": clean_string(invoice.get("document_kind") or ""),
-            "invoice_no": invoice_no,
-            "invoice_code": invoice_code,
-            "amount": clean_string(invoice.get("total_with_tax") or invoice.get("amount") or ""),
-            "seller_name": clean_string(invoice.get("seller_name") or ""),
-            "issue_date": clean_string(invoice.get("issue_date") or ""),
-        }
-        if not invoice_no and not invoice_code:
-            fallback["source_attachment_name"] = clean_string(invoice.get("source_attachment_name") or invoice.get("attachment_name") or "")
-            fallback["source_region_key"] = clean_string(invoice.get("source_region_key") or "")
-        keys.append((
-            "invoice:fallback",
-            json.dumps(fallback, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-        ))
-        return keys
+        return OBJECT_IDENTITY_POLICY.oa_attachment_invoice_dedupe_keys(invoice)
 
     def _sync_import_settings_cache(self) -> None:
         settings = self._current_import_settings()

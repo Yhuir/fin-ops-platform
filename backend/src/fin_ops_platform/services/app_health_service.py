@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 import json
 from typing import Any
 
+from fin_ops_platform.services.app_status_dependency_registry import APP_STATUS_DEPENDENCY_REGISTRY
+
 
 APP_HEALTH_SCHEMA_VERSION = 1
 REBUILD_JOB_TYPES = {
@@ -81,6 +83,21 @@ class AppHealthService:
                 "backend": state_store_info.get("backend", "memory"),
             },
         }
+        for dependency_key in APP_STATUS_DEPENDENCY_REGISTRY:
+            if dependency_key in dependencies:
+                continue
+            if dependency_key == "postgres":
+                dependencies[dependency_key] = {
+                    "status": "available",
+                    "backend": state_store_info.get("backend", "memory"),
+                }
+            elif dependency_key == "oa_mongo":
+                dependencies[dependency_key] = {
+                    "status": "unavailable" if oa_sync_unavailable else "available",
+                    "message": oa_sync_payload.get("message"),
+                }
+            else:
+                dependencies[dependency_key] = {"status": "available"}
         dependency_unavailable = any(
             isinstance(dependency, dict) and dependency.get("status") == "unavailable"
             for dependency in dependencies.values()

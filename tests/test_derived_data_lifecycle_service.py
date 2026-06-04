@@ -24,6 +24,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_read_model",
                 "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
+                "invoice_lifecycle_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "cost_statistics_read_model",
@@ -34,6 +35,32 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
         self.assertIn("cost_statistics_cache_warmup", plan["will_enqueue_jobs"])
         json.dumps(plan)
+
+    def test_invoice_lifecycle_domain_precedes_downstream_invoice_pages(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        for event in [
+            "invoice_import_confirmed",
+            "pair_relation_changed",
+            "pending_invoice_manual_invoice_confirmed",
+            "tax_certified_import_confirmed",
+        ]:
+            with self.subTest(event=event):
+                domains = [domain["domain"] for domain in service.plan_event(event, months=["2026-03"])["domains"]]
+
+                self.assertIn("invoice_lifecycle_read_model", domains)
+                lifecycle_index = domains.index("invoice_lifecycle_read_model")
+                downstream_indexes = [
+                    domains.index(domain)
+                    for domain in [
+                        "pending_invoice_read_model",
+                        "tax_offset_read_model",
+                        "cost_statistics_read_model",
+                        "search_cache",
+                    ]
+                    if domain in domains
+                ]
+                self.assertTrue(all(lifecycle_index < index for index in downstream_indexes))
 
     def test_bank_import_confirmed_maps_workbench_candidate_cost_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()
@@ -49,6 +76,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_read_model",
                 "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
+                "invoice_lifecycle_read_model",
                 "cost_statistics_read_model",
                 "search_cache",
             ],
@@ -69,6 +97,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_relation_read_model",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
+                "invoice_lifecycle_read_model",
                 "pending_invoice_read_model",
                 "cost_statistics_read_model",
                 "search_cache",
@@ -120,6 +149,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_read_model",
                 "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
+                "invoice_lifecycle_read_model",
                 "pending_invoice_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
@@ -177,6 +207,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_read_model",
                 "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
+                "invoice_lifecycle_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "cost_statistics_read_model",
@@ -295,6 +326,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_relation_read_model",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
+                "invoice_lifecycle_read_model",
                 "cost_statistics_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",

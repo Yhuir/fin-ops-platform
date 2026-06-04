@@ -5,6 +5,18 @@
 read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写入任务、记录 heartbeat、
 暴露健康状态和给出运维提示。
 
+本文同时维护 read model production audit、SQL-native hardening、bank detail/read model backfill、
+invoice usage/output collection backfill、App Health/workbench performance 和 worker 运维治理的长期结论。
+阶段报告和一次性执行记录不再单独保留。
+
+## Hardening 基线
+
+- SQL-native read model 必须有 source version guard，避免读取旧 projection 并标记为 fresh。
+- rebuild/backfill 应按 scope 批量执行，避免逐行重建。
+- 请求线程不做高成本 live rebuild；miss/stale 返回 refresh 状态并 enqueue。
+- 关键 query 需要保留 EXPLAIN/性能观测入口；性能结论进入 `monitoring.md` 或本文，而不是保留一次性 audit。
+- Redis payload 必须在 fresh gate 后写入，并设置可解释 TTL。
+
 ## 管理边界
 
 - App 负责：通过 `RuntimeQueueRepository` 写入 `job.outbox_events`、`job.read_model_dirty_scopes`，
@@ -252,17 +264,21 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 - dirty scope 进入 done 或明确仍在 processing。
 - API 返回 fresh，或在 worker 尚未完成时返回明确 refreshing。
 
-## 统一关系分发回填顺序
+## 统一关系与发票生命周期分发回填顺序
 
-涉及 OA、银行流水、进项发票、销项发票通用关系展示的页面，必须先回填 `workbench_relation`
-read model，再回填页面自己的 read model。推荐顺序：
+涉及 OA、银行流水、进项发票、销项发票通用关系展示和发票生命周期展示的页面，必须先回填
+`workbench_relation` read model，再回填 `invoice_lifecycle` read model，最后回填页面自己的 read model。推荐顺序：
 
 1. 启动并检查 `workbench-relation` worker，确认
    `workbench_relation.read_model.refresh` 可 claim。
 2. 对历史月份 enqueue `workbench_relation` scope；`all` 只作为 fan-out 入口，实际重建必须落到
    `YYYY-MM` shard。
-3. 等 `read_model.workbench_relation_rows/groups` 对目标月份 fresh 后，再 enqueue
+3. 启动并检查 `invoice-lifecycle` worker，确认
+   `invoice_lifecycle.read_model.refresh` 可 claim。
+4. 等 `read_model.workbench_relation_rows/groups` 对目标月份 fresh 后，再 enqueue
+   `invoice_lifecycle` scope；`all` 同样只作为 fan-out 入口。
+5. 等 `read_model.invoice_lifecycle_rows` 对目标月份 fresh 后，再 enqueue
    `pending_invoice`、`bank_detail`、`input_invoice_usage`、`output_invoice_collection`、
    `oa_pending_payment`、`no_oa_bank_batch`、`cost_statistics`、`tax_offset`、`search`。
-4. 页面验证以 facade/read model 状态为准：如果 `workbench_relation` stale 或 missing，下游页面不能用
-   `app.workbench_pair_relations` 同步补数据伪装 fresh。
+6. 页面验证以 facade/read model 状态为准：如果 `workbench_relation` 或 `invoice_lifecycle` stale/missing，
+   下游页面不能用旧 SQL、pair relation snapshot 或页面私有 lifecycle 规则同步补数据伪装 fresh。

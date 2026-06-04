@@ -1,1 +1,0 @@
-pg_dump: error: could not open output file "/data/backups/postgres/stage20-mirror-execute-20260520224717/stage20-mirror-execute-20260520224717.runtime-targets.dump": Permission denied

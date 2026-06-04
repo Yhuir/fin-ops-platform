@@ -61,6 +61,7 @@ from fin_ops_platform.services.access_control_service import AccessControlServic
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder, request_database_timing
 from fin_ops_platform.services.app_health_alert_service import AppHealthAlertService
 from fin_ops_platform.services.app_health_service import AppHealthService
+from fin_ops_platform.services.app_status_overview_service import AppStatusOverviewService
 from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
     AppSettingsValidationError,
@@ -166,6 +167,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
 )
+from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
 )
@@ -895,6 +897,7 @@ class Application:
             oa_projection=oa_adapter,
             income_status_override_provider=self._pending_invoice_command_repository.latest_income_status_override,
             relation_facade=self._workbench_relation_read_facade(),
+            lifecycle_policy=self._invoice_lifecycle_policy(),
         )
         self._pending_invoice_lifecycle_service = PendingInvoiceLifecycleService(
             audit_service=self._audit_service,
@@ -906,18 +909,21 @@ class Application:
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=oa_adapter,
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
+            lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
         self._oa_pending_payment_query_service = OaPendingPaymentQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=oa_adapter,
+            lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
         self._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
             lifecycle_repository=self._output_invoice_collection_lifecycle_repository,
+            lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
         self._output_invoice_collection_lifecycle_service = OutputInvoiceCollectionLifecycleService(
@@ -1011,6 +1017,7 @@ class Application:
             oa_manual_import_create_processor=self._process_oa_manual_import_create_job,
         )
         self._app_health_service = AppHealthService()
+        self._app_status_overview_service = AppStatusOverviewService()
         self._app_health_alert_service = AppHealthAlertService.from_snapshot(
             self._state_store.load_app_health_alerts() if self._state_store is not None else {}
         )
@@ -3842,8 +3849,33 @@ class Application:
             alerts=alerts,
         )
         self._apply_workbench_generation_health(snapshot)
+        runtime_statuses = self._app_status_runtime_statuses()
+        snapshot["app_status"] = self._app_status_overview_service.build_overview(
+            session=session,
+            active_jobs=active_jobs,
+            attention_jobs=attention_jobs,
+            app_health_snapshot=snapshot,
+            read_model_statuses=runtime_statuses["read_model_statuses"],
+            worker_statuses=runtime_statuses["worker_statuses"],
+            outbox_statuses=runtime_statuses["outbox_statuses"],
+        )
         self._emit_app_health_timing(snapshot)
         return snapshot
+
+    def _app_status_runtime_statuses(self) -> dict[str, dict[str, dict[str, object]] | None]:
+        snapshot_provider = getattr(self._state_store, "app_status_runtime_snapshot", None) if self._state_store is not None else None
+        if not callable(snapshot_provider):
+            return {
+                "read_model_statuses": None,
+                "worker_statuses": {},
+                "outbox_statuses": {},
+            }
+        snapshot = snapshot_provider()
+        return snapshot if isinstance(snapshot, dict) else {
+            "read_model_statuses": None,
+            "worker_statuses": {},
+            "outbox_statuses": {},
+        }
 
     def _apply_workbench_generation_health(self, snapshot: dict[str, object]) -> None:
         repository = getattr(self, "_workbench_sql_read_repository", None)
@@ -5371,12 +5403,7 @@ class Application:
         normalized_key = str(canonical_key or "").strip()
         if not normalized_key:
             return False
-        for invoice in self._import_service.list_invoices():
-            if str(getattr(invoice, "source_unique_key", "") or "").strip() == normalized_key:
-                return True
-            if str(getattr(invoice, "digital_invoice_no", "") or "").strip() == normalized_key:
-                return True
-        return False
+        return bool(self._import_service.canonical_invoice_key_exists(normalized_key))
 
     def _sync_etc_invoices_to_canonical_invoices(self, etc_invoices: list[object]) -> list[str]:
         changed_months: set[str] = set()
@@ -7892,10 +7919,21 @@ class Application:
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=getattr(self, "_workbench_query_service", None),
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
+            lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
         self._input_invoice_usage_query_service = service
         return service
+
+    def _invoice_lifecycle_policy(self) -> InvoiceLifecyclePolicy:
+        policy = getattr(self, "_invoice_lifecycle_policy_instance", None)
+        if isinstance(policy, InvoiceLifecyclePolicy):
+            return policy
+        policy = InvoiceLifecyclePolicy(
+            input_payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
+        )
+        self._invoice_lifecycle_policy_instance = policy
+        return policy
 
     def _input_invoice_usage_export_service(self) -> InputInvoiceUsageExportService:
         service = getattr(self, "_input_invoice_usage_export_service_instance", None)
@@ -8435,6 +8473,7 @@ class Application:
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=getattr(self, "_workbench_query_service", None),
+            lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
         self._oa_pending_payment_query_service = service
@@ -8557,6 +8596,7 @@ class Application:
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
             lifecycle_repository=lifecycle_repository,
+            lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
         self._output_invoice_collection_query_service = service

@@ -10,6 +10,7 @@ from typing import Any
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
@@ -27,7 +28,6 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
 )
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_query_service import (
-    OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES,
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     WorkbenchQueryService,
 )
@@ -38,6 +38,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-05-25-oa-attachment-source-groups"
 ETC_BATCH_TAG = "ETC批量提交"
 
@@ -1592,15 +1593,12 @@ def _is_formal_attachment_invoice_evidence(evidence: dict[str, Any]) -> bool:
     source_kind = str(evidence.get("source_kind") or "").strip()
     if source_kind:
         return source_kind == OA_ATTACHMENT_INVOICE_SOURCE_KIND
-    evidence_type = str(evidence.get("evidence_type") or "").strip()
-    if evidence_type:
-        return evidence_type in OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES
-    return WorkbenchQueryService._attachment_evidence_has_invoice_identity(evidence)
+    return OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence)
 
 
 def _looks_like_invoice_artifact(evidence: dict[str, Any]) -> bool:
     evidence_type = str(evidence.get("evidence_type") or "").strip()
-    if evidence_type in OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES:
+    if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence):
         return True
     document_kind = str(evidence.get("document_kind") or "").strip()
     if "发票" in document_kind:

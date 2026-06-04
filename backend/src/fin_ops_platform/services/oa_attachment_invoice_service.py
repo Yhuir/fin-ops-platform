@@ -33,6 +33,7 @@ except Exception:  # pragma: no cover - optional dependency fallback
     RapidOCR = None
 
 from fin_ops_platform.services.imports import clean_string
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
 INVOICE_CODE_RE = re.compile(r"发票代码:([0-9A-Za-z]+)")
@@ -56,7 +57,7 @@ COMPANY_NAME_RE = re.compile(
 
 SUPPORTED_SUFFIXES = {"pdf", "jpg", "jpeg", "png", "docx"}
 SUPPORTED_DOCX_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
-INVOICE_EVIDENCE_TYPES = {"tax_invoice", "machine_invoice", "non_tax_receipt"}
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 class OAAttachmentInvoiceService:
@@ -80,7 +81,7 @@ class OAAttachmentInvoiceService:
         return [
             dict(evidence)
             for evidence in self.parse_evidences(files)
-            if clean_string(evidence.get("evidence_type") or "") in INVOICE_EVIDENCE_TYPES
+            if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence)
         ]
 
     def parse_evidences(self, files: list[dict[str, object]]) -> list[dict[str, str]]:
@@ -188,7 +189,7 @@ class OAAttachmentInvoiceService:
         return [
             dict(evidence)
             for evidence in self._parse_single_file_evidences(file_entry)
-            if clean_string(evidence.get("evidence_type") or "") in INVOICE_EVIDENCE_TYPES
+            if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence)
         ]
 
     def _parse_single_file_evidences(self, file_entry: dict[str, object]) -> list[dict[str, str]]:
@@ -221,13 +222,6 @@ class OAAttachmentInvoiceService:
         return [self._extract_image_text(content)]
 
     @staticmethod
-    def _invoice_dedupe_key(invoice: dict[str, str]) -> str:
-        return "|".join(
-            clean_string(invoice.get(key) or "")
-            for key in ("invoice_no", "issue_date", "total_with_tax", "attachment_name")
-        )
-
-    @staticmethod
     def _evidence_dedupe_key(evidence: dict[str, str]) -> str:
         evidence_type = clean_string(evidence.get("evidence_type") or "")
         if evidence_type == "payment_receipt":
@@ -241,22 +235,17 @@ class OAAttachmentInvoiceService:
                 clean_string(evidence.get(key) or "")
                 for key in ("evidence_type", "document_kind", "amount", "merchant_name", "paid_at", "attachment_name")
             )
-        if evidence_type in INVOICE_EVIDENCE_TYPES:
-            return "|".join(
-                clean_string(evidence.get(key) or "")
-                for key in (
-                    "evidence_type",
-                    "digital_invoice_no",
-                    "invoice_code",
-                    "invoice_no",
-                    "issue_date",
-                    "total_with_tax",
-                    "amount",
-                    "source_region_key",
-                    "attachment_name",
-                )
-            )
+        if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence):
+            return OAAttachmentInvoiceService._invoice_evidence_dedupe_key(evidence)
         return "|".join(clean_string(evidence.get(key) or "") for key in sorted(evidence))
+
+    @staticmethod
+    def _invoice_evidence_dedupe_key(evidence: dict[str, str]) -> str:
+        keys = OBJECT_IDENTITY_POLICY.oa_attachment_invoice_dedupe_keys(evidence)
+        if not keys:
+            return ""
+        key_kind, key_value = keys[0]
+        return f"{key_kind}:{key_value}"
 
     def _download_content(self, url: str) -> bytes | None:
         request = Request(url, headers={"User-Agent": "fin-ops-platform/oa-attachment-parser"})
