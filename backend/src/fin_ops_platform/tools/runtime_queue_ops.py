@@ -6,6 +6,7 @@ import sys
 from collections.abc import Sequence
 from typing import Any, TextIO
 
+from fin_ops_platform.services.app_status_read_model_registry import read_model_by_refresh_event_type
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 
@@ -23,6 +24,10 @@ def build_parser() -> argparse.ArgumentParser:
     requeue = subparsers.add_parser("requeue", help="Requeue failed/dead-lettered PostgreSQL event.")
     requeue.add_argument("--event-id", required=True)
     requeue.add_argument("--reason", default="operator_repair")
+
+    resolve = subparsers.add_parser("resolve-dead-letter", help="Resolve an obsolete read-model dead-letter after readiness has converged.")
+    resolve.add_argument("--event-id", required=True)
+    resolve.add_argument("--reason", default="operator_resolved")
 
     republish = subparsers.add_parser("republish", help="Mark a pending event as unpublished for RabbitMQ redispatch.")
     republish.add_argument("--event-id", required=True)
@@ -49,7 +54,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None, std
 
     if args.command == "inspect":
         row = _inspect_event(connection, args.event_id)
-        print(json.dumps({"event": row}, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        print(json.dumps({"event": row}, default=str, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
         return 0 if row else 1
     if args.command == "requeue":
         updated = repository.requeue_event(args.event_id, reason=args.reason)
@@ -59,6 +64,10 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None, std
         updated = repository.reset_publish_state(args.event_id, reason=args.reason)
         print(json.dumps({"event_id": args.event_id, "republish_requested": updated}, ensure_ascii=False, sort_keys=True), file=stdout)
         return 0 if updated else 1
+    if args.command == "resolve-dead-letter":
+        result = _resolve_dead_letter(connection, repository, event_id=args.event_id, reason=args.reason)
+        print(json.dumps(result, default=str, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        return 0 if result.get("resolved") else 1
     if args.command == "replay-unpublished":
         result = _replay_unpublished(connection, limit=args.limit, execute=args.execute)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
@@ -81,8 +90,12 @@ def _inspect_event(connection: PostgresConnection, event_id: str) -> dict[str, A
           id::text as event_id,
           tenant_id,
           event_type,
+          aggregate_type,
+          aggregate_id,
           scope_type,
           scope_key,
+          dedupe_key,
+          payload,
           source_version,
           priority,
           status,
@@ -112,6 +125,68 @@ def _inspect_event(connection: PostgresConnection, event_id: str) -> dict[str, A
         """,
         (event_id,),
     )
+
+
+def _resolve_dead_letter(
+    connection: PostgresConnection,
+    repository: RuntimeQueueRepository,
+    *,
+    event_id: str,
+    reason: str,
+) -> dict[str, Any]:
+    event = _inspect_event(connection, event_id)
+    if not event:
+        return {"event_id": event_id, "resolved": False, "reason": "event_not_found"}
+    if event.get("status") != "dead_lettered":
+        return {"event_id": event_id, "resolved": False, "reason": "event_not_dead_lettered", "status": event.get("status")}
+    definition = read_model_by_refresh_event_type().get(str(event.get("event_type") or ""))
+    if definition is None:
+        return {"event_id": event_id, "resolved": False, "reason": "event_type_not_read_model", "event_type": event.get("event_type")}
+    readiness = connection.fetch_one(
+        """
+        select count(*)::integer as fresh_count
+        from read_model.app_status_readiness
+        where tenant_id = %s
+          and read_model_key = %s
+          and status = 'fresh'
+        """,
+        (str(event.get("tenant_id") or "default"), definition.key),
+    )
+    fresh_count = _int_value((readiness or {}).get("fresh_count"))
+    if fresh_count <= 0:
+        return {
+            "event_id": event_id,
+            "resolved": False,
+            "reason": "readiness_not_fresh",
+            "read_model_key": definition.key,
+        }
+    dirty = connection.fetch_one(
+        """
+        select count(*)::integer as active_count
+        from job.read_model_dirty_scopes
+        where tenant_id = %s
+          and scope_type = %s
+          and status in ('pending', 'processing', 'failed')
+        """,
+        (str(event.get("tenant_id") or "default"), definition.scope_type),
+    )
+    active_dirty_count = _int_value((dirty or {}).get("active_count"))
+    if active_dirty_count > 0:
+        return {
+            "event_id": event_id,
+            "resolved": False,
+            "reason": "active_dirty_scope_exists",
+            "read_model_key": definition.key,
+            "active_dirty_count": active_dirty_count,
+        }
+    resolved = repository.resolve_dead_letter_event(event_id, reason=reason)
+    return {
+        "event_id": event_id,
+        "resolved": resolved,
+        "reason": reason if resolved else "update_did_not_match",
+        "event_type": event.get("event_type"),
+        "read_model_key": definition.key,
+    }
 
 
 def _replay_unpublished(connection: PostgresConnection, *, limit: int, execute: bool) -> dict[str, Any]:
@@ -167,6 +242,13 @@ def _jsonb(connection: PostgresConnection, payload: dict[str, Any]) -> Any:
 
         return Jsonb(payload)
     return payload
+
+
+def _int_value(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 if __name__ == "__main__":

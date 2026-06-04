@@ -287,6 +287,25 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
     --reason operator_repair
 ```
 
+如果 dead-letter 来自历史 invalid-scope 事件，且当前版本已经通过真实 readiness convergence 证明对应
+read model fresh，可以使用受控 resolve，而不是重放必然再次失败的旧事件：
+
+```bash
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-dead-letter \
+    --event-id <uuid> \
+    --reason readiness_converged_obsolete_invalid_scope
+```
+
+`resolve-dead-letter` 只适用于注册的 read model refresh event。命令会先检查：
+
+- 事件当前必须仍是 `dead_lettered`。
+- 对应 `read_model_key` 在 `read_model.app_status_readiness` 中已经有 `fresh` 证明。
+- 同一 `scope_type` 没有 `pending`、`processing` 或 `failed` dirty scope。
+
+不满足这些条件时命令必须拒绝处理。禁止直接 SQL 把 `dead_lettered` 改成 `done`；需要保留
+`raw_payload.operator_resolution` 审计记录。
+
 重放后必须确认：
 
 - 对应 worker heartbeat fresh 且 `warning_code` 为空。

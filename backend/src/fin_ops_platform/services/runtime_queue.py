@@ -1004,6 +1004,32 @@ class RuntimeQueueRepository:
             )
         return row is not None
 
+    def resolve_dead_letter_event(self, event_id: str, *, reason: str = "operator_resolved") -> bool:
+        normalized_reason = str(reason or "").strip() or "operator_resolved"
+        with self._connection.transaction() as transaction:
+            row = transaction.fetch_one(
+                """
+                update job.outbox_events
+                set
+                    status = 'done',
+                    processed_at = coalesce(processed_at, now()),
+                    updated_at = now(),
+                    locked_by = null,
+                    locked_at = null,
+                    raw_payload = jsonb_set(
+                        coalesce(raw_payload, '{}'::jsonb),
+                        '{operator_resolution}',
+                        jsonb_build_object('reason', %s::text, 'resolved_at', now()),
+                        true
+                    )
+                where id = %s
+                  and status = 'dead_lettered'
+                returning id
+                """,
+                (normalized_reason, event_id),
+            )
+        return row is not None
+
     def set_statement_timeout_seconds(self, seconds: int | None) -> None:
         setter = getattr(self._connection, "set_statement_timeout_ms", None)
         if not callable(setter):

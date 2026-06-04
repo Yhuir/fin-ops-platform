@@ -802,6 +802,21 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("jsonb_build_object('reason', %s::text, 'requeued_at', now())", normalized_sql)
         self.assertEqual(params, ("operator_repair", "event-1"))
 
+    def test_resolve_dead_letter_event_marks_done_with_operator_resolution(self) -> None:
+        transaction = FakeTransaction(rows=[{"id": "event-1"}])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        self.assertTrue(repository.resolve_dead_letter_event("event-1", reason="readiness_converged"))
+
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("status = 'done'", normalized_sql)
+        self.assertIn("processed_at = coalesce(processed_at, now())", normalized_sql)
+        self.assertIn("operator_resolution", normalized_sql)
+        self.assertIn("where id = %s", normalized_sql)
+        self.assertIn("status = 'dead_lettered'", normalized_sql)
+        self.assertEqual(params, ("readiness_converged", "event-1"))
+
     def test_retry_is_explicit_alias_for_retryable_failure(self) -> None:
         transaction = FakeTransaction(rows=[event_row(status="pending")])
         repository = RuntimeQueueRepository(FakeConnection(transaction))
