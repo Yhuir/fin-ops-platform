@@ -177,6 +177,36 @@ worker readiness 不是 systemd active。发布脚本会等待：
 默认等待 90 秒，可用 `FINOPS_WORKER_READY_TIMEOUT_SECONDS` 调整。超时应视为发布失败，不能继续把
 “进程已启动”当成“worker 已就绪”。
 
+## App Status Readiness Convergence
+
+`read_model.app_status_readiness` 是全局状态 icon 允许变绿的 read model 证明层。上线该表或新增 read model 后，不能用批量 `insert fresh` 伪造状态；必须先用真实 read model 表、active generation、schema/source version 和 row count 做 convergence。
+
+发布或迁移后的固定顺序：
+
+1. 部署包含 `ReadModelReadinessReporter` 和 backfill tool 的版本。
+2. 执行 dry-run：
+
+   ```bash
+   cd /opt/fin-ops/current
+   set -a
+   source /etc/fin-ops/fin-ops.api.env
+   set +a
+   PYTHONPATH=/opt/fin-ops/current/backend/src \
+     /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.app_status_readiness_backfill --dry-run
+   ```
+
+3. 如果 dry-run 输出 `schema_mismatch`、`source_mismatch`、`failed` 或 `missing`，先修复对应 projection/refresh/rebuild 原因；不要把这些状态改写成 `fresh`。
+4. dry-run 判定合理后再 apply：
+
+   ```bash
+   PYTHONPATH=/opt/fin-ops/current/backend/src \
+     /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.app_status_readiness_backfill --apply
+   ```
+
+5. 只读核对 `read_model.app_status_readiness`、`job.read_model_dirty_scopes`、`job.outbox_events`、`job.runtime_worker_heartbeats` 和 `/api/app-health.app_status`。如果还有 dirty scope、outbox backlog、worker stale/missing 或 dependency issue，global icon 仍应保持 yellow/red。
+
+空业务结果可以是 `fresh`，但必须有真实生成事实；没有 readiness 记录的 read model 必须显示 `missing`，不能因为当前没有 dirty scope 而显示 ready。
+
 ## 健康字段
 
 `/health` 中的 `runtime_infrastructure` 是 App 对 worker 的管理入口。关键字段：

@@ -58,6 +58,8 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PRO
 from fin_ops_platform.services.postgres_state_store import LegacyGridFSFileReader, PostgresStateStore
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
+from fin_ops_platform.services.read_model_readiness import ReadModelReadinessReporter
+from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
 from fin_ops_platform.services.runtime_worker_handlers import (
@@ -188,6 +190,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_attempts=args.max_attempts,
         worker_kind=args.worker_kind or _infer_worker_kind(args),
     )
+    readiness_reporter = (
+        ReadModelReadinessReporter(readiness_repository=RuntimeMonitoringRepository(connection))
+        if connection is not None
+        else None
+    )
+
+    def _read_model_handler(handler: Any) -> Any:
+        return readiness_reporter.wrap_handler(handler) if readiness_reporter is not None else handler
+
     handlers = {}
     if args.enable_file_object_migration:
         object_storage_settings = ObjectStorageSettings.from_env()
@@ -242,7 +253,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.enable_workbench_read_model_refresh:
         projection_builder = WorkbenchSqlProjectionBuilder(connection=connection)
         refresh_service = WorkbenchReadModelRefreshService(projection_builder=projection_builder, queue_repository=queue)
-        handlers["workbench.read_model.refresh"] = refresh_service.handle_runtime_event
+        handlers["workbench.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
         if "workbench.read_model.refresh" not in config.event_types:
             config.event_types.append("workbench.read_model.refresh")
     if args.enable_workbench_relation_read_model_refresh:
@@ -254,7 +265,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             projection_builder=projection_builder,
             queue_repository=queue,
         )
-        handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event
+        handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
         if WORKBENCH_RELATION_REFRESH_EVENT_TYPE not in config.event_types:
             config.event_types.append(WORKBENCH_RELATION_REFRESH_EVENT_TYPE)
     if args.enable_cost_statistics_read_model_refresh:
@@ -263,13 +274,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             projection_builder=projection_builder,
             queue_repository=queue,
         )
-        handlers["cost_statistics.read_model.refresh"] = refresh_service.handle_runtime_event
+        handlers["cost_statistics.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
         if "cost_statistics.read_model.refresh" not in config.event_types:
             config.event_types.append("cost_statistics.read_model.refresh")
     if args.enable_tax_offset_read_model_refresh:
         projection_builder = TaxOffsetSqlProjectionBuilder(connection=connection, redis_helper=redis_helper)
         refresh_service = TaxOffsetReadModelRefreshService(projection_builder=projection_builder, queue_repository=queue)
-        handlers["tax_offset.read_model.refresh"] = refresh_service.handle_runtime_event
+        handlers["tax_offset.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
         if "tax_offset.read_model.refresh" not in config.event_types:
             config.event_types.append("tax_offset.read_model.refresh")
     if args.enable_search_read_model_refresh or args.enable_pending_invoice_read_model_refresh:
@@ -284,11 +295,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             queue_repository=queue,
         )
         if args.enable_search_read_model_refresh:
-            handlers["search.read_model.refresh"] = refresh_service.handle_runtime_event
+            handlers["search.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
             if "search.read_model.refresh" not in config.event_types:
                 config.event_types.append("search.read_model.refresh")
         if args.enable_pending_invoice_read_model_refresh:
-            handlers["pending_invoice.read_model.refresh"] = refresh_service.handle_runtime_event
+            handlers["pending_invoice.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
             if "pending_invoice.read_model.refresh" not in config.event_types:
                 config.event_types.append("pending_invoice.read_model.refresh")
     if args.enable_bank_detail_read_model_refresh:
@@ -300,7 +311,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             projection_builder=projection_builder,
             queue_repository=queue,
         )
-        handlers["bank_detail.read_model.refresh"] = refresh_service.handle_runtime_event
+        handlers["bank_detail.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
         if "bank_detail.read_model.refresh" not in config.event_types:
             config.event_types.append("bank_detail.read_model.refresh")
     if args.enable_no_oa_bank_batch_read_model_refresh:
@@ -345,7 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             relation_facade=workbench_relation_read_facade,
         )
-        handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event
+        handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
         if NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE not in config.event_types:
             config.event_types.append(NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE)
     if args.enable_turnover_ledger_read_model_refresh:
@@ -357,7 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             projection_builder=projection_builder,
             queue_repository=queue,
         )
-        handlers["turnover_ledger.read_model.refresh"] = refresh_service.handle_runtime_event
+        handlers["turnover_ledger.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
         if "turnover_ledger.read_model.refresh" not in config.event_types:
             config.event_types.append("turnover_ledger.read_model.refresh")
     if args.enable_bank_account_balance_read_model_refresh:
@@ -366,7 +377,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             projection_builder=projection_builder,
             queue_repository=queue,
         )
-        handlers["bank_account_balance.read_model.refresh"] = refresh_service.handle_runtime_event
+        handlers["bank_account_balance.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
         if "bank_account_balance.read_model.refresh" not in config.event_types:
             config.event_types.append("bank_account_balance.read_model.refresh")
     if args.enable_invoice_lifecycle_read_model_refresh:
@@ -379,7 +390,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             projection_builder=projection_builder,
             queue_repository=queue,
         )
-        handlers[INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE] = refresh_service.handle_runtime_event
+        handlers[INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
         if INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE not in config.event_types:
             config.event_types.append(INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE)
     if (
@@ -396,15 +407,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             queue_repository=queue,
         )
         if args.enable_input_invoice_usage_read_model_refresh:
-            handlers["input_invoice_usage.read_model.refresh"] = refresh_service.handle_runtime_event
+            handlers["input_invoice_usage.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
             if "input_invoice_usage.read_model.refresh" not in config.event_types:
                 config.event_types.append("input_invoice_usage.read_model.refresh")
         if args.enable_output_invoice_collection_read_model_refresh:
-            handlers["output_invoice_collection.read_model.refresh"] = refresh_service.handle_runtime_event
+            handlers["output_invoice_collection.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
             if "output_invoice_collection.read_model.refresh" not in config.event_types:
                 config.event_types.append("output_invoice_collection.read_model.refresh")
         if args.enable_oa_pending_payment_read_model_refresh:
-            handlers["oa_pending_payment.read_model.refresh"] = refresh_service.handle_runtime_event
+            handlers["oa_pending_payment.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
             if "oa_pending_payment.read_model.refresh" not in config.event_types:
                 config.event_types.append("oa_pending_payment.read_model.refresh")
     if args.enable_import_job_processing:

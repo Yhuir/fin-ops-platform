@@ -126,6 +126,9 @@ class RuntimeMonitoringRepository:
             ),
         )
 
+    def app_status_readiness_backfill_fact(self, read_model_key: str, *, tenant_id: str = "default") -> dict[str, Any] | None:
+        return _app_status_readiness_backfill_fact(self._connection, read_model_key, tenant_id=tenant_id)
+
     def _app_status_read_model_statuses(self) -> dict[str, dict[str, Any]]:
         grouped: dict[str, dict[str, Any]] = self._app_status_readiness_statuses()
         definitions_by_scope = read_model_by_scope_type()
@@ -1008,3 +1011,164 @@ def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item or "").strip()]
+
+
+def _app_status_readiness_backfill_fact(connection: Any, read_model_key: str, *, tenant_id: str) -> dict[str, Any] | None:
+    if read_model_key == "workbench":
+        return connection.fetch_one(
+            """
+            select
+                'all' as scope_key,
+                case status when 'active' then 'fresh' when 'failed' then 'failed' else 'missing' end as status,
+                row_count,
+                schema_version,
+                source_versions,
+                activated_at::text as generated_at,
+                last_error
+            from read_model.workbench_generations
+            where tenant_id = %s
+              and scope_key = 'all'
+            order by case status when 'active' then 0 when 'failed' then 1 else 2 end, updated_at desc
+            limit 1
+            """,
+            (tenant_id,),
+        )
+    scope_spec = APP_STATUS_READINESS_BACKFILL_SCOPE_TABLES.get(read_model_key)
+    if scope_spec:
+        tenant_where = "tenant_id = %s" if scope_spec["tenant_scoped"] else "true"
+        params = (tenant_id,) if scope_spec["tenant_scoped"] else ()
+        return connection.fetch_one(
+            f"""
+            select
+                scope_key,
+                {scope_spec["status_expr"]} as status,
+                row_count,
+                {scope_spec["schema_expr"]} as schema_version,
+                source_versions,
+                generated_at::text as generated_at,
+                {scope_spec["last_error_expr"]} as last_error
+            from {scope_spec["table"]}
+            where {tenant_where}
+            order by case {scope_spec["status_expr"]} when 'fresh' then 0 else 1 end,
+                     generated_at desc nulls last,
+                     updated_at desc
+            limit 1
+            """,
+            params,
+        )
+    if read_model_key == "bank_account_balance":
+        return connection.fetch_one(
+            """
+            select
+                'all' as scope_key,
+                'fresh' as status,
+                count(*)::integer as row_count,
+                max(schema_version)::text as schema_version,
+                coalesce((array_agg(source_versions order by generated_at desc))[1], '{}'::jsonb) as source_versions,
+                max(generated_at)::text as generated_at,
+                '' as last_error
+            from read_model.bank_account_balances
+            where tenant_id = %s
+            having count(*) >= 0 and max(generated_at) is not null
+            """,
+            (tenant_id,),
+        )
+    row_spec = APP_STATUS_READINESS_BACKFILL_ROW_TABLES.get(read_model_key)
+    if row_spec:
+        return connection.fetch_one(
+            f"""
+            select
+                'all' as scope_key,
+                {row_spec["status_expr"]} as status,
+                count(*)::integer as row_count,
+                {row_spec["schema_expr"]} as schema_version,
+                coalesce((array_agg(source_versions order by generated_at desc))[1], '{{}}'::jsonb) as source_versions,
+                max(generated_at)::text as generated_at,
+                '' as last_error
+            from {row_spec["table"]}
+            having count(*) >= 0 and max(generated_at) is not null
+            """
+        )
+    return None
+
+
+APP_STATUS_READINESS_BACKFILL_SCOPE_TABLES = {
+    "bank_detail": {
+        "table": "read_model.bank_detail_scopes",
+        "tenant_scoped": True,
+        "status_expr": "coalesce(nullif(status, ''), 'fresh')",
+        "schema_expr": "coalesce(schema_version::text, '')",
+        "last_error_expr": "coalesce(last_error, '')",
+    },
+    "workbench_relation": {
+        "table": "read_model.workbench_relation_scopes",
+        "tenant_scoped": True,
+        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
+        "schema_expr": "''",
+        "last_error_expr": "''",
+    },
+    "invoice_lifecycle": {
+        "table": "read_model.invoice_lifecycle_scopes",
+        "tenant_scoped": True,
+        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
+        "schema_expr": "''",
+        "last_error_expr": "''",
+    },
+    "input_invoice_usage": {
+        "table": "read_model.input_invoice_usage_scopes",
+        "tenant_scoped": False,
+        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
+        "schema_expr": "''",
+        "last_error_expr": "''",
+    },
+    "output_invoice_collection": {
+        "table": "read_model.output_invoice_collection_scopes",
+        "tenant_scoped": False,
+        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
+        "schema_expr": "''",
+        "last_error_expr": "''",
+    },
+    "oa_pending_payment": {
+        "table": "read_model.oa_pending_payment_scopes",
+        "tenant_scoped": False,
+        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
+        "schema_expr": "''",
+        "last_error_expr": "''",
+    },
+    "pending_invoice": {
+        "table": "read_model.pending_invoice_scopes",
+        "tenant_scoped": False,
+        "status_expr": "coalesce(nullif(cache_status, ''), 'fresh')",
+        "schema_expr": "''",
+        "last_error_expr": "''",
+    },
+}
+
+
+APP_STATUS_READINESS_BACKFILL_ROW_TABLES = {
+    "search": {
+        "table": "read_model.search_index_rows",
+        "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
+        "schema_expr": "''",
+    },
+    "cost_statistics": {
+        "table": "read_model.cost_statistics_read_models",
+        "status_expr": "'fresh'",
+        "schema_expr": "''",
+    },
+    "tax_offset": {
+        "table": "read_model.tax_offset_read_models",
+        "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
+        "schema_expr": "coalesce((array_agg(schema_version order by generated_at desc))[1], '')",
+    },
+    "no_oa_bank_batch": {
+        "table": "read_model.no_oa_bank_batch_rows",
+        "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
+        "schema_expr": "''",
+    },
+    "turnover_ledger": {
+        "table": "read_model.turnover_ledger_rows",
+        "status_expr": "coalesce((array_agg(coalesce(nullif(cache_status, ''), 'fresh') order by generated_at desc))[1], 'fresh')",
+        "schema_expr": "''",
+    },
+}
