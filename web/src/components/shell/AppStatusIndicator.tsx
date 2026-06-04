@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
+import ClickAwayListener from "@mui/material/ClickAwayListener";
 import Divider from "@mui/material/Divider";
 import LinearProgress from "@mui/material/LinearProgress";
-import Popover from "@mui/material/Popover";
+import Paper from "@mui/material/Paper";
+import Popper from "@mui/material/Popper";
 import Stack from "@mui/material/Stack";
 import SvgIcon from "@mui/material/SvgIcon";
 import Typography from "@mui/material/Typography";
@@ -52,6 +54,48 @@ function taskStatusLabel(task: AppStatusTask) {
   return task.status || "后台任务";
 }
 
+function overallStatusLabel(level: string) {
+  if (level === "blocked") {
+    return "阻断";
+  }
+  if (level === "busy") {
+    return "同步中";
+  }
+  return "正常";
+}
+
+function domainStatusLabel(status: string) {
+  if (status === "ready") {
+    return "就绪";
+  }
+  if (status === "missing") {
+    return "缺失";
+  }
+  if (status === "refreshing" || status === "loading" || status === "processing") {
+    return "同步";
+  }
+  if (status === "stale") {
+    return "过期";
+  }
+  if (status === "schema_mismatch") {
+    return "结构";
+  }
+  if (status === "source_mismatch") {
+    return "版本";
+  }
+  if (status === "failed") {
+    return "失败";
+  }
+  if (status === "unavailable") {
+    return "不可用";
+  }
+  return status || "状态";
+}
+
+function domainDebugTitle(domain: AppStatusDomain) {
+  return [domain.label, domain.reason, ...domain.details].filter(Boolean).join(" · ");
+}
+
 export default function AppStatusIndicator() {
   const healthStatus = useAppHealthStatus();
   const appStatus = useAppStatusOverview();
@@ -62,6 +106,11 @@ export default function AppStatusIndicator() {
   const level = appStatus?.overall.level ?? healthStatus.level;
   const tone = toneFromLevel(level);
   const open = Boolean(anchorEl);
+  const popperId = "global-app-status-popover";
+  const tasks = appStatus?.backgroundTasks ?? [];
+  const domains = appStatus?.domains ?? [];
+  const busyDomainCount = domains.filter((domain) => domain.level === "busy").length;
+  const blockedDomainCount = domains.filter((domain) => domain.level === "blocked").length;
 
   const clearCloseTimer = () => {
     if (closeTimerRef.current !== null) {
@@ -107,6 +156,9 @@ export default function AppStatusIndicator() {
     <>
       <span
         aria-label={reason}
+        aria-controls={open ? popperId : undefined}
+        aria-expanded={open}
+        aria-haspopup="dialog"
         aria-live="polite"
         className={`app-sidebar-brand-mark ${tone}`}
         data-status-reason={reason}
@@ -127,87 +179,101 @@ export default function AppStatusIndicator() {
           <circle className="app-sidebar-brand-status-sweep" cx="50" cy="50" r="37" />
         </SvgIcon>
       </span>
-      <Popover
+      <Popper
+        id={popperId}
         open={open}
         anchorEl={anchorEl}
-        onClose={closePopover}
-        anchorOrigin={{ vertical: "center", horizontal: "right" }}
-        transformOrigin={{ vertical: "top", horizontal: "left" }}
-        slotProps={{
-          paper: {
-            className: "app-status-popover",
-            onMouseEnter: clearCloseTimer,
-            onMouseLeave: scheduleClose,
-            onKeyDown: (event) => {
+        placement="right-start"
+        modifiers={[
+          { name: "offset", options: { offset: [8, -4] } },
+          { name: "preventOverflow", options: { padding: 16 } },
+        ]}
+        sx={{ zIndex: (theme) => theme.zIndex.modal + 1 }}
+      >
+        <ClickAwayListener mouseEvent="onMouseDown" touchEvent="onTouchStart" onClickAway={closePopover}>
+          <Paper
+            aria-label="全局运行状态"
+            className="app-status-popover"
+            elevation={8}
+            role="dialog"
+            tabIndex={-1}
+            onMouseEnter={clearCloseTimer}
+            onMouseLeave={scheduleClose}
+            onKeyDown={(event) => {
               if (event.key === "Escape") {
                 closePopover();
               }
-            },
-          },
-        }}
-      >
-        <Stack spacing={1.5} sx={{ width: 360, maxWidth: "calc(100vw - 32px)", p: 2 }}>
-          <Stack spacing={0.5}>
-            <Typography component="h2" fontWeight={800}>全局运行状态</Typography>
-            <Typography color="text.secondary" variant="body2">{reason}</Typography>
-            {appStatus?.generatedAt ? (
-              <Typography color="text.secondary" variant="caption">更新于 {appStatus.generatedAt}</Typography>
-            ) : null}
-          </Stack>
+            }}
+          >
+            <Stack spacing={1} sx={{ width: 480, maxWidth: "calc(100vw - 32px)", p: 1.25 }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+                <Stack minWidth={0} spacing={0.25}>
+                  <Typography component="h2" fontWeight={800} variant="body2">运行状态</Typography>
+                  <Typography color="text.secondary" noWrap variant="caption">{reason}</Typography>
+                </Stack>
+                <Chip size="small" color={tone === "error" ? "error" : tone === "pending" ? "warning" : "success"} label={overallStatusLabel(level)} />
+              </Stack>
 
-          <Divider />
-
-          <Stack spacing={1}>
-            <Typography fontWeight={700} variant="body2">后台任务</Typography>
-            {appStatus && appStatus.backgroundTasks.length > 0 ? (
-              appStatus.backgroundTasks.map((task) => (
-                <Box key={task.jobId} component={RouterLink} to={task.route} className="app-status-task-link">
-                  <Stack spacing={0.5}>
-                    <Stack direction="row" justifyContent="space-between" gap={1}>
-                      <Typography fontWeight={700} variant="body2">{task.shortLabel}</Typography>
-                      <Chip size="small" label={taskStatusLabel(task)} />
-                    </Stack>
-                    {task.message ? <Typography color="text.secondary" variant="caption">{task.message}</Typography> : null}
-                    {task.percent !== null ? <LinearProgress variant="determinate" value={task.percent} /> : null}
-                  </Stack>
-                </Box>
-              ))
-            ) : (
-              <Typography color="text.secondary" variant="body2">当前没有后台任务。</Typography>
-            )}
-          </Stack>
-
-          <Divider />
-
-          <Stack spacing={1}>
-            <Typography fontWeight={700} variant="body2">数据域</Typography>
-            {appStatus?.domains.map((domain) => (
-              <Box key={domain.key} component={RouterLink} to={domain.route} className="app-status-domain-link">
-                <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
-                  <Stack minWidth={0}>
-                    <Typography noWrap fontWeight={700} variant="body2">{domain.label}</Typography>
-                    <Typography color="text.secondary" variant="caption">{domain.reason}</Typography>
-                    {domain.details.map((detail) => (
-                      <Typography key={detail} color="text.secondary" noWrap variant="caption">
-                        {detail}
-                      </Typography>
+              {tasks.length > 0 ? (
+                <>
+                  <Divider />
+                  <Stack spacing={0.75}>
+                    <Typography color="text.secondary" fontWeight={700} variant="caption">任务</Typography>
+                    {tasks.map((task) => (
+                    <Box key={task.jobId} component={RouterLink} to={task.route} className="app-status-task-link">
+                      <Stack spacing={0.4}>
+                        <Stack direction="row" justifyContent="space-between" gap={1}>
+                          <Typography noWrap fontWeight={700} variant="caption">{task.shortLabel}</Typography>
+                          <Chip size="small" label={taskStatusLabel(task)} />
+                        </Stack>
+                        {task.percent !== null ? <LinearProgress variant="determinate" value={task.percent} /> : null}
+                      </Stack>
+                    </Box>
                     ))}
                   </Stack>
-                  <Chip size="small" color={domainTone(domain)} label={domain.status} />
+                </>
+              ) : null}
+
+              <Divider />
+
+              <Stack spacing={0.75}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+                  <Typography color="text.secondary" fontWeight={700} variant="caption">数据域</Typography>
+                  <Stack direction="row" gap={0.5}>
+                    {blockedDomainCount > 0 ? <Chip size="small" color="error" label={`阻断 ${blockedDomainCount}`} /> : null}
+                    {busyDomainCount > 0 ? <Chip size="small" color="warning" label={`同步 ${busyDomainCount}`} /> : null}
+                    {blockedDomainCount === 0 && busyDomainCount === 0 ? <Chip size="small" color="success" label={`就绪 ${domains.length}`} /> : null}
+                  </Stack>
                 </Stack>
-              </Box>
-            ))}
-          </Stack>
+                <Box className="app-status-domain-grid">
+                  {domains.map((domain) => (
+                    <Box
+                      key={domain.key}
+                      aria-label={`${domain.label} ${domainStatusLabel(domain.status)}`}
+                      component={RouterLink}
+                      to={domain.route}
+                      title={domainDebugTitle(domain)}
+                      className="app-status-domain-link"
+                    >
+                      <Typography noWrap fontWeight={700} variant="caption">{domain.label}</Typography>
+                      <Chip className="app-status-domain-chip" size="small" color={domainTone(domain)} label={domainStatusLabel(domain.status)} />
+                    </Box>
+                  ))}
+                </Box>
+              </Stack>
 
-          <Divider />
-
-          {canAdminAccess ? (
-            <Typography component={RouterLink} to="/operations/app-health" variant="body2">
-              查看 App Health
-            </Typography>
-          ) : null}
-        </Stack>
-      </Popover>
+              {canAdminAccess ? (
+                <>
+                  <Divider />
+                  <Typography component={RouterLink} to="/operations/app-health" variant="caption">
+                    App Health
+                  </Typography>
+                </>
+              ) : null}
+            </Stack>
+          </Paper>
+        </ClickAwayListener>
+      </Popper>
     </>
   );
 }

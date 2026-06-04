@@ -311,25 +311,47 @@ body.workbench-focus-mode .global-header {
 .app-status-popover {
   border: 1px solid #d8e1eb;
   border-radius: 8px;
-  box-shadow: 0 18px 42px rgba(16, 42, 67, 0.16);
+  box-shadow: 0 14px 34px rgba(16, 42, 67, 0.14);
 }
 
 .app-status-task-link,
 .app-status-domain-link {
-  display: block;
   border-radius: 8px;
   color: inherit;
   text-decoration: none;
 }
 
 .app-status-task-link {
-  padding: 9px;
+  display: block;
+  padding: 6px 7px;
   border: 1px solid #d8e1eb;
   background: #f9fbfe;
 }
 
+.app-status-domain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 6px;
+}
+
 .app-status-domain-link {
-  padding: 7px 8px;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.app-status-domain-chip {
+  flex: 0 0 auto;
+  height: 20px;
+}
+
+.app-status-domain-chip .MuiChip-label {
+  padding-right: 6px;
+  padding-left: 6px;
 }
 
 .app-status-task-link:hover,

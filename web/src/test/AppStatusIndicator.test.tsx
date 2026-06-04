@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { installMockApiFetch } from "./apiMock";
@@ -38,6 +38,19 @@ const globalAppStatus = {
       read_models: [],
       workers: ["import"],
       job_ids: ["job_etc_001"],
+      updated_at: "2026-06-04T10:00:00+08:00",
+    },
+    {
+      key: "tax_offset",
+      label: "税金抵扣",
+      route: "/tax-offset",
+      level: "busy",
+      status: "missing",
+      reason: "税金抵扣正在同步",
+      details: ["readiness record missing"],
+      read_models: ["tax_offset"],
+      workers: ["cost-tax"],
+      job_ids: [],
       updated_at: "2026-06-04T10:00:00+08:00",
     },
   ],
@@ -85,18 +98,26 @@ describe("global app status indicator", () => {
 
     await user.hover(indicator);
 
-    expect(await screen.findByText("全局运行状态")).toBeInTheDocument();
-    expect(screen.getByText("正在导入 ETC发票 3/31")).toBeInTheDocument();
-    expect(screen.getByText("银行明细已同步")).toBeInTheDocument();
-    expect(screen.getByText("bank_detail readiness fresh, schema v1")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "查看 App Health" })).not.toBeInTheDocument();
+    expect(await screen.findByText("运行状态")).toBeInTheDocument();
+    expect(document.querySelector(".MuiPopover-root")).not.toBeInTheDocument();
+    const statusDialog = screen.getByRole("dialog", { name: "全局运行状态" });
+    expect(within(statusDialog).getByText("正在导入 ETC发票 3/31")).toBeInTheDocument();
+    expect(within(statusDialog).getByText("银行明细")).toBeInTheDocument();
+    expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();
+    expect(screen.queryByText("银行明细已同步")).not.toBeInTheDocument();
+    expect(screen.queryByText("bank_detail readiness fresh, schema v1")).not.toBeInTheDocument();
+    expect(screen.queryByText("readiness record missing")).not.toBeInTheDocument();
+    expect(screen.queryByText(/更新于/)).not.toBeInTheDocument();
+    expect(screen.queryByText("当前没有后台任务。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "App Health" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("link", { name: /银行明细/ }));
+    await user.click(within(statusDialog).getByRole("link", { name: /银行明细/ }));
 
     await waitFor(() => {
-      expect(screen.getByText("全局运行状态")).toBeInTheDocument();
-      expect(screen.getByText("正在导入 ETC发票 3/31")).toBeInTheDocument();
-      expect(screen.getByText("银行明细已同步")).toBeInTheDocument();
+      const stableDialog = screen.getByRole("dialog", { name: "全局运行状态" });
+      expect(within(stableDialog).getByText("运行状态")).toBeInTheDocument();
+      expect(within(stableDialog).getByText("正在导入 ETC发票 3/31")).toBeInTheDocument();
+      expect(within(stableDialog).getByText("银行明细")).toBeInTheDocument();
     });
 
     await user.keyboard("{Escape}");
@@ -127,7 +148,7 @@ describe("global app status indicator", () => {
 
     await user.hover(indicator);
 
-    expect(await screen.findByRole("link", { name: "查看 App Health" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "App Health" })).toBeInTheDocument();
 
     await user.unhover(indicator);
 
