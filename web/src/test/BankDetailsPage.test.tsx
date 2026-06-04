@@ -455,7 +455,7 @@ describe("Bank details page", () => {
     expect(saveCall).toBeFalsy();
   });
 
-  test("keeps the read-model refresh banner stable while retaining the last fresh rows", async () => {
+  test("retains the last fresh rows while read-model refresh details stay hidden", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       bankDetailAccountReadModelStatuses: ["fresh"],
@@ -477,7 +477,7 @@ describe("Bank details page", () => {
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
 
-    expect(screen.getByText("银行明细读模型正在刷新，已显示当前可用数据。")).toBeInTheDocument();
+    expect(screen.queryByText("银行明细读模型正在刷新，已显示当前可用数据。")).not.toBeInTheDocument();
     expect(screen.queryByText("规则已保存，银行明细已刷新。")).not.toBeInTheDocument();
     expect(within(page).getByText("云南溯源科技有限公司")).toBeInTheDocument();
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
@@ -485,7 +485,7 @@ describe("Bank details page", () => {
 
   test("does not replace a fresh total balance with a stale post-rule-save account payload", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({
+    const fetchMock = installMockApiFetch({
       bankDetailAccountReadModelStatuses: ["stale"],
       bankDetailPostSaveAccountsTotalBalance: "116395.83",
       bankDetailTransactionReadModelStatuses: ["stale"],
@@ -501,8 +501,12 @@ describe("Bank details page", () => {
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(screen.getByText("银行明细读模型待刷新，已显示当前可用数据。")).toBeInTheDocument();
+      expect(fetchMock.mock.calls.some(([input, init]) => (
+        new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
+        && String(init?.method || "GET").toUpperCase() === "PUT"
+      ))).toBe(true);
     });
+    expect(screen.queryByText("银行明细读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
     expect(within(page).queryAllByText("116,395.83")).toHaveLength(0);
   });
@@ -517,7 +521,7 @@ describe("Bank details page", () => {
     const page = await screen.findByTestId("bank-details-page");
 
     expect(await within(page).findByText("云南溯源科技有限公司")).toBeInTheDocument();
-    expect(within(page).getByText("银行明细读模型版本正在升级，已显示当前可用数据。")).toBeInTheDocument();
+    expect(within(page).queryByText("银行明细读模型版本正在升级，已显示当前可用数据。")).not.toBeInTheDocument();
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 

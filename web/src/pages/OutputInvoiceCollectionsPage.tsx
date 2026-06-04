@@ -11,6 +11,7 @@ import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import StatePanel from "../components/common/StatePanel";
 import CollectionStatusReminderDrawer from "../components/outputInvoiceCollections/CollectionStatusReminderDrawer";
 import CollectionStatusRulesDrawer from "../components/outputInvoiceCollections/CollectionStatusRulesDrawer";
 import OutputInvoiceCollectionDetailDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer";
@@ -492,6 +493,7 @@ export default function OutputInvoiceCollectionsPage() {
       </Button>
     </Stack>
   ), [canAdminAccess, handleOpenWorkflow, loadRows, refreshing]);
+  const isEmpty = !loading && !error && rows.length === 0;
 
   return (
     <>
@@ -548,9 +550,6 @@ export default function OutputInvoiceCollectionsPage() {
             <SummaryTile label="待出收据数" value={String(summary.receiptPendingCount)} />
           </Stack>
           {error ? <Alert severity="error">{error}</Alert> : null}
-          {readModelStatus === "refreshing" ? (
-            <Alert severity="info">销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。</Alert>
-          ) : null}
           {loading ? (
             <Stack spacing={1.25} aria-label="销项发票收款情况加载中">
               <Skeleton variant="rounded" height={44} />
@@ -558,26 +557,29 @@ export default function OutputInvoiceCollectionsPage() {
               <Skeleton variant="rounded" height={96} />
             </Stack>
           ) : (
-            <OutputInvoiceCollectionsTable
-              rows={rows}
-              page={query.page}
-              pageSize={query.pageSize}
-              total={total}
-              sortField={query.sortField}
-              sortDirection={query.sortDirection}
-              filters={query.filters}
-              filterConfigs={filterConfigs}
-              filterOptions={filterOptions}
-              expandedCells={expandedCells}
-              onToggleCellExpand={handleToggleCellExpand}
-              onOpenDetail={handleOpenDetail}
-              onOpenWorkflow={handleOpenWorkflow}
-              onFilterApply={handleFilterApply}
-              onFilterClear={handleFilterClear}
-              onSortChange={handleSortChange}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
+            <>
+              {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
+              <OutputInvoiceCollectionsTable
+                rows={rows}
+                page={query.page}
+                pageSize={query.pageSize}
+                total={total}
+                sortField={query.sortField}
+                sortDirection={query.sortDirection}
+                filters={query.filters}
+                filterConfigs={filterConfigs}
+                filterOptions={filterOptions}
+                expandedCells={expandedCells}
+                onToggleCellExpand={handleToggleCellExpand}
+                onOpenDetail={handleOpenDetail}
+                onOpenWorkflow={handleOpenWorkflow}
+                onFilterApply={handleFilterApply}
+                onFilterClear={handleFilterClear}
+                onSortChange={handleSortChange}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+              />
+            </>
           )}
         </Stack>
       </PageScaffold>

@@ -173,19 +173,6 @@ function statusBucketFor(batch: NoOaBankBatch): NoOaBankBatchStatusBucket {
   return "unsubmitted";
 }
 
-function readModelStatusMessage(status: NoOaBankBatchReadModelStatus) {
-  if (status === "schema_mismatch") {
-    return "免OA流水读模型版本正在升级，已显示当前可用数据。";
-  }
-  if (status === "stale") {
-    return "免OA流水读模型待刷新，已显示当前可用数据。";
-  }
-  if (status === "missing") {
-    return "免OA流水读模型正在初始化。";
-  }
-  return "免OA流水读模型正在刷新，已显示当前可用数据。";
-}
-
 function BatchStatusChip({ status }: { status: string }) {
   const meta = STATUS_META[status as NoOaBankBatchStatus] ?? { label: status, color: "default" as const };
   return <Chip color={meta.color} label={meta.label} size="small" />;
@@ -918,10 +905,6 @@ export default function NoOaBankBatchPage() {
           ) : null}
         </Stack>
       </Box>
-
-      {readModelNeedsRefresh && !error ? (
-        <StatePanel tone="loading" compact>{readModelStatusMessage(readModelStatus)}</StatePanel>
-      ) : null}
 
       {error ? <StatePanel tone="error" title={error} /> : null}
 

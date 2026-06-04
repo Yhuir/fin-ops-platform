@@ -342,7 +342,7 @@ afterEach(() => {
 });
 
 describe("Output invoice collections page", () => {
-  test("surfaces read model refresh state instead of silently showing an empty table", async () => {
+  test("uses a standard empty state while read model refresh details stay hidden", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/output-invoice-collections/rows") {
@@ -364,7 +364,8 @@ describe("Output invoice collections page", () => {
     renderAuthenticatedAppAt("/output-invoice-collections");
 
     const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(within(page).queryByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
   });
 
   test("adds sidebar route and renders grouped MUI Table layout without fake export", async () => {

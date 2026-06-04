@@ -87,6 +87,23 @@ export function useSession() {
 
 export function useSessionPermissions() {
   const session = useSession();
+  return sessionPermissionsFromContext(session);
+}
+
+export function useOptionalSessionPermissions() {
+  const session = useContext(SessionContext);
+  if (session === null) {
+    return {
+      accessTier: "denied",
+      canAccessApp: false,
+      canMutateData: false,
+      canAdminAccess: false,
+    } as const;
+  }
+  return sessionPermissionsFromContext(session);
+}
+
+function sessionPermissionsFromContext(session: SessionContextValue) {
   const authenticatedSession = session.status === "authenticated" ? session.session : null;
   return {
     accessTier: authenticatedSession?.accessTier ?? "denied",

@@ -12,7 +12,7 @@ import Typography from "@mui/material/Typography";
 import { Link as RouterLink } from "react-router-dom";
 
 import { useAppHealthStatus, useAppStatusOverview } from "../../contexts/AppHealthStatusContext";
-import { useSessionPermissions } from "../../contexts/SessionContext";
+import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
 import type { AppStatusDomain, AppStatusTask } from "../../features/appStatus/types";
 
 function toneFromLevel(level: string) {
@@ -66,7 +66,7 @@ function overallStatusLabel(level: string) {
 
 function domainStatusLabel(status: string) {
   if (status === "ready") {
-    return "就绪";
+    return "已同步";
   }
   if (status === "missing") {
     return "缺失";
@@ -99,7 +99,7 @@ function domainDebugTitle(domain: AppStatusDomain) {
 export default function AppStatusIndicator() {
   const healthStatus = useAppHealthStatus();
   const appStatus = useAppStatusOverview();
-  const { canAdminAccess } = useSessionPermissions();
+  const { canAdminAccess } = useOptionalSessionPermissions();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const reason = appStatus?.overall.reason ?? healthStatus.reason;
@@ -242,7 +242,7 @@ export default function AppStatusIndicator() {
                   <Stack direction="row" gap={0.5}>
                     {blockedDomainCount > 0 ? <Chip size="small" color="error" label={`阻断 ${blockedDomainCount}`} /> : null}
                     {busyDomainCount > 0 ? <Chip size="small" color="warning" label={`同步 ${busyDomainCount}`} /> : null}
-                    {blockedDomainCount === 0 && busyDomainCount === 0 ? <Chip size="small" color="success" label={`就绪 ${domains.length}`} /> : null}
+                    {blockedDomainCount === 0 && busyDomainCount === 0 ? <Chip size="small" color="success" label={`已同步 ${domains.length}`} /> : null}
                   </Stack>
                 </Stack>
                 <Box className="app-status-domain-grid">

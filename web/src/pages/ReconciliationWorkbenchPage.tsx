@@ -287,23 +287,13 @@ function workbenchRefreshStatusMessage(status: WorkbenchRefreshStatus | null) {
   if (!status) {
     return null;
   }
-  const progress = status.totalCount !== null && status.totalCount > 0 && status.processedCount !== null
-    ? ` ${status.processedCount}/${status.totalCount}`
-    : "";
-  const lag = status.workerLagSeconds !== null ? `，worker 延迟 ${Math.round(status.workerLagSeconds)} 秒` : "";
-  if (status.readModelStatus === "fresh") {
-    return `数据已最新${lag}`;
-  }
   if (status.readModelStatus === "failed") {
     return `关联台刷新失败${status.lastError ? `：${status.lastError}` : ""}`;
   }
   if (status.readModelStatus === "unavailable") {
     return "关联台读模型不可用";
   }
-  if (status.readModelStatus === "stale") {
-    return `关联台数据已过期，正在刷新${progress}${lag}`;
-  }
-  return `关联台正在刷新${progress}${lag}`;
+  return null;
 }
 
 function workbenchRefreshStatusPanelTone(status: WorkbenchRefreshStatus | null) {
@@ -1124,13 +1114,6 @@ export default function ReconciliationWorkbenchPage() {
       setWorkbenchStatus({
         level: "error",
         reason: workbenchRefreshStatusMessage(workbenchRefreshStatus) ?? "关联台刷新失败",
-      });
-      return;
-    }
-    if (workbenchRefreshStatus?.readModelStatus === "refreshing" || workbenchRefreshStatus?.readModelStatus === "stale") {
-      setWorkbenchStatus({
-        level: "pending",
-        reason: workbenchRefreshStatusMessage(workbenchRefreshStatus) ?? "关联台正在刷新",
       });
       return;
     }

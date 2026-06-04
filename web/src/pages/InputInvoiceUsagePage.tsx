@@ -9,6 +9,7 @@ import TextField from "@mui/material/TextField";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import InputInvoiceUsageExportDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageExportDrawer";
 import InputInvoiceUsageTable from "../components/inputInvoiceUsage/InputInvoiceUsageTable";
@@ -330,6 +331,7 @@ export default function InputInvoiceUsagePage() {
       </Button>
     </Stack>
   ), [loadRows, refreshing, setQuery]);
+  const isEmpty = !loading && !error && rows.length === 0;
 
   return (
     <>
@@ -358,9 +360,6 @@ export default function InputInvoiceUsagePage() {
               </Button>
             </Stack>
             {error ? <Alert severity="error">{error}</Alert> : null}
-            {readModelStatus === "refreshing" ? (
-              <Alert severity="info">进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。</Alert>
-            ) : null}
             {loading ? (
               <Stack spacing={1.25} aria-label="进项发票使用情况加载中">
                 <Skeleton variant="rounded" height={44} />
@@ -368,17 +367,20 @@ export default function InputInvoiceUsagePage() {
                 <Skeleton variant="rounded" height={96} />
               </Stack>
             ) : (
-              <InputInvoiceUsageTable
-                rows={rows}
-                page={query.page}
-                pageSize={query.pageSize}
-                total={total}
-                expandedCells={expandedCells}
-                onToggleCellExpand={handleToggleCellExpand}
-                onOpenDetail={handleOpenDetail}
-                onPageChange={handlePageChange}
-                onPageSizeChange={handlePageSizeChange}
-              />
+              <>
+                {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
+                <InputInvoiceUsageTable
+                  rows={rows}
+                  page={query.page}
+                  pageSize={query.pageSize}
+                  total={total}
+                  expandedCells={expandedCells}
+                  onToggleCellExpand={handleToggleCellExpand}
+                  onOpenDetail={handleOpenDetail}
+                  onPageChange={handlePageChange}
+                  onPageSizeChange={handlePageSizeChange}
+                />
+              </>
             )}
           </Stack>
         </PageScaffold>

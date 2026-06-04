@@ -726,7 +726,8 @@ describe("NoOaBankBatchPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("免OA流水读模型待刷新，已显示当前可用数据。")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(listCallCount).toBeGreaterThan(1);
     }, { timeout: 2500 });

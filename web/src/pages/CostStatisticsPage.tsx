@@ -421,7 +421,6 @@ export default function CostStatisticsPage() {
   );
   const [transactionDetail, setTransactionDetail] = useState<CostTransactionDetail | null>(null);
   const [isExplorerLoading, setIsExplorerLoading] = useState(true);
-  const [isExplorerRefreshing, setIsExplorerRefreshing] = useState(false);
   const [detailLoadingMessage, setDetailLoadingMessage] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -558,9 +557,8 @@ export default function CostStatisticsPage() {
       if (cachedPayload) {
         setExplorerData(cachedPayload);
         setIsExplorerLoading(false);
-        setIsExplorerRefreshing(true);
       } else if (hasVisibleData) {
-        setIsExplorerRefreshing(true);
+        setIsExplorerLoading(false);
       } else {
         setIsExplorerLoading(true);
       }
@@ -580,7 +578,6 @@ export default function CostStatisticsPage() {
       } finally {
         if (!controller.signal.aborted) {
           setIsExplorerLoading(false);
-          setIsExplorerRefreshing(false);
         }
       }
     }
@@ -874,19 +871,7 @@ export default function CostStatisticsPage() {
 
   const readModelStatus = explorerData?.readModelStatus;
   const isReadModelRefreshing = readModelStatus === "refreshing";
-  const isReadModelStale = readModelStatus === "stale";
   const isReadModelUnavailable = readModelStatus === "unavailable";
-  const readModelStaleReasons = explorerData?.readModelStaleReasons ?? [];
-  const readModelPendingLabel = isReadModelRefreshing
-    ? "成本统计读模型正在刷新，当前结果生成后会自动更新。"
-    : isReadModelUnavailable
-      ? "成本统计读模型暂不可用，刷新队列恢复后会自动重建。"
-      : null;
-  const readModelPendingTableLabel = isReadModelRefreshing
-    ? "读模型刷新中。"
-    : isReadModelUnavailable
-      ? "读模型暂不可用。"
-      : null;
 
   const isRootEmpty = !isExplorerLoading && !loadError && explorerData && !isReadModelRefreshing && !isReadModelUnavailable
     ? viewMode === "time"
@@ -1399,7 +1384,6 @@ export default function CostStatisticsPage() {
             {viewMode === "project" ? <strong>从左到右依次展开：项目名 / 费用类型 / 流水，支持按范围重新统计</strong> : null}
             {viewMode === "bank" ? <strong>从左到右依次展开：银行账户 / 项目名 / 流水，支持按范围重新统计</strong> : null}
             {viewMode === "expenseType" ? <strong>按费用类型查看 {expenseTypeScopeLabel} 的对应流水</strong> : null}
-            {isExplorerRefreshing ? <span className="cost-toolbar-refreshing">正在更新统计...</span> : null}
           </div>
         </div>
 
@@ -1408,17 +1392,8 @@ export default function CostStatisticsPage() {
           <div className="state-panel">正在加载成本统计数据...</div>
         ) : null}
         {detailLoadingMessage ? <div className="state-panel">{detailLoadingMessage}</div> : null}
-        {isReadModelRefreshing ? (
-          <div className="state-panel">成本统计读模型正在刷新，当前结果生成后会自动更新。</div>
-        ) : null}
-        {isReadModelStale ? (
-          <div className="state-panel">
-            成本统计读模型已过期，正在排队刷新，当前显示最近一次结果。
-            {readModelStaleReasons.length > 0 ? ` 原因：${Array.from(new Set(readModelStaleReasons)).join("、")}` : ""}
-          </div>
-        ) : null}
         {isReadModelUnavailable ? (
-          <div className="state-panel error">成本统计读模型暂不可用，刷新队列恢复后会自动重建。</div>
+          <div className="state-panel error">成本统计数据暂不可用。</div>
         ) : null}
         {exportFeedback && !isExportCenterOpen ? (
           <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
@@ -1435,7 +1410,7 @@ export default function CostStatisticsPage() {
           </div>
         ) : null}
 
-        {!isExplorerLoading && explorerData ? (
+        {!isExplorerLoading && explorerData && !isReadModelRefreshing ? (
           <>
             {viewMode === "time" ? (
               <div className="cost-analysis-layout time-layout single-column">
@@ -1541,7 +1516,7 @@ export default function CostStatisticsPage() {
                     columns={timeColumns}
                     rows={filteredTimeRows}
                     getRowKey={(row) => row.transactionId}
-                    emptyLabel={readModelPendingTableLabel ?? "当前时间范围没有可用于成本统计的支出流水。"}
+                    emptyLabel="当前时间范围没有可用于成本统计的支出流水。"
                     onRowClick={(row) => void openTransactionDetail(row, "time")}
                     getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                   />

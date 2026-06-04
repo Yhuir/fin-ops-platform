@@ -120,7 +120,7 @@ export default function InputInvoiceUsageExportDrawer({
             </Stack>
           ) : null}
           {error ? <Alert severity="error">{error}</Alert> : null}
-          {refreshing ? <Alert severity="info">{preview?.message || "读模型正在刷新，请稍后再导出。"}</Alert> : null}
+          {refreshing ? <Alert severity="info">导出数据准备中，请稍后再试。</Alert> : null}
           {downloadedFileName ? <Alert severity="success">已生成 {downloadedFileName}</Alert> : null}
           {preview ? (
             <>

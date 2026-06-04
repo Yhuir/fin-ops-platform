@@ -103,7 +103,9 @@ describe("global app status indicator", () => {
     const statusDialog = screen.getByRole("dialog", { name: "全局运行状态" });
     expect(within(statusDialog).getByText("正在导入 ETC发票 3/31")).toBeInTheDocument();
     expect(within(statusDialog).getByText("银行明细")).toBeInTheDocument();
+    expect(within(statusDialog).getByRole("link", { name: "银行明细 已同步" })).toBeInTheDocument();
     expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();
+    expect(within(statusDialog).queryByText("就绪")).not.toBeInTheDocument();
     expect(screen.queryByText("银行明细已同步")).not.toBeInTheDocument();
     expect(screen.queryByText("bank_detail readiness fresh, schema v1")).not.toBeInTheDocument();
     expect(screen.queryByText("readiness record missing")).not.toBeInTheDocument();

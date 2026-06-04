@@ -409,7 +409,7 @@ describe("OA pending payments page", () => {
     expect(rulesRequests(fetchMock)).toHaveLength(1);
   });
 
-  test("shows read model refreshing status when rows are rebuilding", async () => {
+  test("uses a standard empty state while read model refresh details stay hidden", async () => {
     installOaPendingPaymentsFetch({
       rowsPayload: {
         ...rowsPayload,
@@ -425,8 +425,9 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    expect(await within(page).findByText(/OA 待付款核对数据正在刷新/)).toBeInTheDocument();
-    expect(within(page).getByText(/oa_pending_payment_source_version_missing/)).toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(within(page).queryByText(/OA 待付款核对数据正在刷新/)).not.toBeInTheDocument();
+    expect(within(page).queryByText(/oa_pending_payment_source_version_missing/)).not.toBeInTheDocument();
   });
 
   test("shows neutral unavailable detail state while detail read model is refreshing", async () => {

@@ -162,7 +162,7 @@ afterEach(() => {
 });
 
 describe("Input invoice usage page", () => {
-  test("surfaces read model refresh state instead of silently showing an empty table", async () => {
+  test("uses a standard empty state while read model refresh details stay hidden", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/input-invoice-usage/rows") {
@@ -192,7 +192,8 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。")).toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(within(page).queryByText("进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
   });
 
   test("adds sidebar route and renders the dense MUI Table layout without DataGrid", async () => {

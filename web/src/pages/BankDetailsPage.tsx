@@ -306,19 +306,6 @@ function combinedReadModelStatus(
   return "fresh";
 }
 
-function readModelStatusMessage(status: BankDetailReadModelStatus) {
-  if (status === "schema_mismatch") {
-    return "银行明细读模型版本正在升级，已显示当前可用数据。";
-  }
-  if (status === "stale") {
-    return "银行明细读模型待刷新，已显示当前可用数据。";
-  }
-  if (status === "missing") {
-    return "银行明细读模型正在初始化。";
-  }
-  return "银行明细读模型正在刷新，已显示当前可用数据。";
-}
-
 type BankDetailsTableToolbarProps = {
   effectiveCategoryCounts: BankTransactionCategoryCounts;
   visibleCategorySummary: CategorySummaryItem[];
@@ -1937,9 +1924,6 @@ export default function BankDetailsPage() {
       <Stack className="bank-details-workbench" spacing={1}>
         {error ? <StatePanel tone="error">{error}</StatePanel> : null}
         {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
-        {readModelNeedsRefresh && !error ? (
-          <StatePanel tone="loading" compact>{readModelStatusMessage(readModelStatus)}</StatePanel>
-        ) : null}
         {rulesFeedback ? <StatePanel tone="success" compact>{rulesFeedback}</StatePanel> : null}
         {!loading && !readModelNeedsRefresh && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>

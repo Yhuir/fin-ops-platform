@@ -339,22 +339,7 @@ export default function TaxOffsetPage() {
   const hasVisibleMonthData = Boolean(monthData);
   const headerStatusMessage = importFeedback
     ?? planFeedback
-    ?? (isCalculating
-      ? "正在根据计划勾选项重新试算税金抵扣结果..."
-      : isSavingPlan
-        ? "正在保存本月税金抵扣计划..."
-      : isRefreshing
-        ? "正在同步最新已认证结果与计划状态..."
-        : hasVisibleMonthData && isLoading
-          ? `正在加载 ${currentMonth} 的税金抵扣计划与已认证结果...`
-          : null);
-  const readModelMetadata = monthData
-    ? [
-      monthData.readModelGeneratedAt ? `生成时间：${monthData.readModelGeneratedAt}` : null,
-      monthData.readModelScopeKey ? `范围：${monthData.readModelScopeKey}` : null,
-      ...(monthData.readModelStaleReasons ?? []).map((reason) => `过期原因：${reason}`),
-    ].filter((item): item is string => Boolean(item))
-    : [];
+    ?? null;
 
   const handleCertifiedImportComplete = useCallback(
     async (result: TaxCertifiedImportConfirmedResult) => {
@@ -421,14 +406,6 @@ export default function TaxOffsetPage() {
       {loadError ? <StatePanel tone="error">{loadError}</StatePanel> : null}
       {!hasVisibleMonthData && isLoading ? (
         <StatePanel tone="loading">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</StatePanel>
-      ) : null}
-      {isReadModelRefreshing ? (
-        <StatePanel tone="loading">税金抵扣读模型正在刷新，页面会自动重试。</StatePanel>
-      ) : null}
-      {readModelMetadata.length > 0 ? (
-        <Alert className="page-note page-note-info" severity={isReadModelRefreshing ? "warning" : "info"}>
-          {readModelMetadata.join("；")}
-        </Alert>
       ) : null}
       {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
 

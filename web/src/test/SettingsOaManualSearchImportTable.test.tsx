@@ -244,7 +244,7 @@ describe("OaManualSearchImportTable", () => {
     expect(screen.getByRole("button", { name: "导入已选OA项" })).toBeDisabled();
   });
 
-  test("publishes staged OA import progress to the shell status mark", async () => {
+  test("keeps staged OA import progress out of the global shell status mark", async () => {
     const user = userEvent.setup();
     const importDeferred = deferredResponse();
     installFetchMock({ manualImportResponse: importDeferred.promise });
@@ -255,16 +255,17 @@ describe("OaManualSearchImportTable", () => {
     await user.click(within(completedRow).getByLabelText("选择 OA oa-exp-1981"));
     await user.click(screen.getByRole("button", { name: "导入已选OA项" }));
 
-    const importingStatus = await screen.findByRole("status", { name: "OA导入 10%：准备导入已选 OA" });
-    expect(importingStatus).toHaveTextContent("10%");
-    const stagedStatus = await screen.findByRole("status", { name: "OA导入 35%：解析 OA 附件发票" });
-    await user.hover(stagedStatus);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("OA导入 35%：解析 OA 附件发票");
+    await waitFor(() => {
+      expect(screen.queryByRole("status", { name: "OA导入 10%：准备导入已选 OA" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("status", { name: "OA导入 35%：解析 OA 附件发票" })).not.toBeInTheDocument();
+    });
 
     importDeferred.resolve(successfulImportResponse());
 
-    const completedStatus = await screen.findByRole("status", { name: "OA导入 100%：导入完成" });
-    expect(completedStatus).toHaveTextContent("100%");
+    await waitFor(() => {
+      expect(screen.queryByRole("status", { name: "OA导入 100%：导入完成" })).not.toBeInTheDocument();
+    });
+    expect(await screen.findByText("已导入")).toBeInTheDocument();
     await waitFor(
       () => {
         expect(screen.queryByRole("status", { name: "OA导入 100%：导入完成" })).not.toBeInTheDocument();

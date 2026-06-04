@@ -9,6 +9,7 @@ import TextField from "@mui/material/TextField";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
@@ -23,10 +24,8 @@ import type {
   OaPendingPaymentFieldConfig,
   OaPendingPaymentFilter,
   OaPendingPaymentFilterOption,
-  OaPendingPaymentFilterOptionsResponse,
   OaPendingPaymentQuery,
   OaPendingPaymentRow,
-  OaPendingPaymentRowsResponse,
   OaPendingPaymentSortDirection,
   OaPendingPaymentSummary,
 } from "../features/oaPendingPayments/types";
@@ -55,15 +54,6 @@ function filterConfigsFromOptions(fields: Array<OaPendingPaymentFieldConfig & { 
   return fields.map(({ options: _options, ...field }) => field);
 }
 
-function resolveReadModelStatus(payload: OaPendingPaymentRowsResponse, optionsPayload: OaPendingPaymentFilterOptionsResponse) {
-  const rowStatus = payload.readModelStatus ?? payload.read_model_status ?? "";
-  const optionStatus = optionsPayload.readModelStatus ?? optionsPayload.read_model_status ?? "";
-  if (rowStatus === "refreshing" || optionStatus === "refreshing") {
-    return "refreshing";
-  }
-  return rowStatus || optionStatus;
-}
-
 export default function OaPendingPaymentsPage() {
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
@@ -74,8 +64,6 @@ export default function OaPendingPaymentsPage() {
   const [keywordDraft, setKeywordDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [readModelStatus, setReadModelStatus] = useState("");
-  const [readModelStaleReasons, setReadModelStaleReasons] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -110,11 +98,6 @@ export default function OaPendingPaymentsPage() {
         setSummary(payload.summary ?? { rowCount: payload.pagination?.total ?? 0 });
         setFilterConfigs((payload.filterConfig?.length ?? 0) > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields ?? []));
         setFilterOptions(filterOptionsByField(optionsPayload.fields ?? []));
-        setReadModelStatus(resolveReadModelStatus(payload, optionsPayload));
-        setReadModelStaleReasons([
-          ...(payload.read_model_stale_reasons ?? []),
-          ...(optionsPayload.read_model_stale_reasons ?? []),
-        ]);
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -123,8 +106,6 @@ export default function OaPendingPaymentsPage() {
         setRows([]);
         setTotal(0);
         setSummary({ rowCount: 0 });
-        setReadModelStatus("");
-        setReadModelStaleReasons([]);
         setError(caught instanceof Error ? caught.message : "OA 待付款核对加载失败。");
       })
       .finally(() => {
@@ -209,6 +190,7 @@ export default function OaPendingPaymentsPage() {
       </Button>
     </Stack>
   ), [loadRows, refreshing]);
+  const isEmpty = !loading && !error && rows.length === 0;
 
   return (
     <>
@@ -275,12 +257,6 @@ export default function OaPendingPaymentsPage() {
               </TextField>
             </Stack>
             {error ? <Alert severity="error">{error}</Alert> : null}
-            {readModelStatus === "refreshing" || readModelStatus === "stale" ? (
-              <Alert severity="info">
-                OA 待付款核对数据正在刷新，当前结果可能为空或不是最新，请稍后重试。
-                {readModelStaleReasons.length > 0 ? ` 原因：${Array.from(new Set(readModelStaleReasons)).join("、")}` : ""}
-              </Alert>
-            ) : null}
             {loading ? (
               <Stack spacing={1.25} aria-label="OA待付款核对加载中">
                 <Skeleton variant="rounded" height={44} />
@@ -288,21 +264,24 @@ export default function OaPendingPaymentsPage() {
                 <Skeleton variant="rounded" height={96} />
               </Stack>
             ) : (
-              <OaPendingPaymentsTable
-                rows={rows}
-                page={query.page}
-                pageSize={query.pageSize}
-                total={total || summary.rowCount}
-                filterConfigs={filterConfigs}
-                filterOptions={filterOptions}
-                filters={query.filters}
-                onFilterApply={handleFilterApply}
-                onFilterClear={handleFilterClear}
-                onSortChange={handleSortChange}
-                onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
-                onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
-                onOpenDetail={setDetailTarget}
-              />
+              <>
+                {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
+                <OaPendingPaymentsTable
+                  rows={rows}
+                  page={query.page}
+                  pageSize={query.pageSize}
+                  total={total || summary.rowCount}
+                  filterConfigs={filterConfigs}
+                  filterOptions={filterOptions}
+                  filters={query.filters}
+                  onFilterApply={handleFilterApply}
+                  onFilterClear={handleFilterClear}
+                  onSortChange={handleSortChange}
+                  onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
+                  onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
+                  onOpenDetail={setDetailTarget}
+                />
+              </>
             )}
           </Stack>
         </PageScaffold>

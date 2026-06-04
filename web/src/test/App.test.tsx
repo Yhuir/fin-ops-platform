@@ -195,7 +195,7 @@ describe("Finance operations shell", () => {
     expect(document.querySelector(".page-body.embedded")).not.toBeNull();
   });
 
-  test("shows OA status in the shell header and warns when OA data is incomplete", async () => {
+  test("keeps global status independent while warning when OA data is incomplete", async () => {
     window.history.pushState({}, "", "/");
     installMockApiFetch({
       workbenchOaStatus: {
@@ -206,8 +206,8 @@ describe("Finance operations shell", () => {
 
     render(<App />);
 
-    const statusIndicator = await screen.findByRole("status", { name: "OA 连接失败" }, { timeout: WORKBENCH_RENDER_TIMEOUT });
-    expect(statusIndicator).toHaveClass("error");
+    const statusIndicator = await screen.findByRole("status", { name: "系统状态正常" }, { timeout: WORKBENCH_RENDER_TIMEOUT });
+    expect(statusIndicator).toHaveClass("ok");
     expect(statusIndicator.textContent).toBe("");
     expect(screen.getByText("OA 连接失败，本次结果未包含完整 OA 数据。")).toBeInTheDocument();
   });

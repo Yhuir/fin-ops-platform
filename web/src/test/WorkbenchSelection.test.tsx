@@ -1413,20 +1413,21 @@ describe("Workbench row selection and detail modal", () => {
     });
   });
 
-  test("OA connection errors mark the global status icon red with the failure reason", async () => {
+  test("OA connection errors keep the global status icon independent while warning in the page", async () => {
     installMockApiFetch({
       workbenchOaStatus: { code: "error", message: "OA连接失败，请检查会话或网络" },
     });
     renderAppAt("/");
 
-    const statusIndicator = await screen.findByRole("status", { name: "OA连接失败，请检查会话或网络" });
+    const statusIndicator = await screen.findByRole("status", { name: "系统状态正常" });
 
-    expect(statusIndicator).toHaveClass("error");
+    expect(statusIndicator).toHaveClass("ok");
     expect(statusIndicator.textContent).toBe("");
     expect(document.querySelector(".global-status-text")).toBeNull();
+    expect(await screen.findByText("OA连接失败，请检查会话或网络，本次结果未包含完整 OA 数据。")).toBeInTheDocument();
   });
 
-  test("OA sync polling marks refreshing status and coalesces synced refreshes", async () => {
+  test("OA sync polling keeps the global status icon independent from local refresh messages", async () => {
     const fetchMock = installMockApiFetch({
       workbenchOaSyncStatuses: [
         {
@@ -1490,20 +1491,14 @@ describe("Workbench row selection and detail modal", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/status"))).toBe(true);
 
     await waitFor(() => {
-      const refreshingIndicator = screen.getByRole("status", { name: "OA 正在同步，关联台稍后更新" });
-      expect(refreshingIndicator).toHaveClass("pending");
+      expect(screen.getByRole("status", { name: "系统状态正常" })).toHaveClass("ok");
+      expect(screen.queryByRole("status", { name: "OA 正在同步，关联台稍后更新" })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
 
-    const initialWorkbenchFetchCount = fetchMock.mock.calls.filter(([url]) =>
-      isWorkbenchSummaryRequest(url as RequestInfo | URL),
-    ).length;
-
     await waitFor(() => {
-      const workbenchFetchCount = fetchMock.mock.calls.filter(([url]) =>
-        isWorkbenchSummaryRequest(url as RequestInfo | URL),
-      ).length;
       expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/oa-sync/status")).length).toBeGreaterThan(2);
-      expect(workbenchFetchCount).toBe(initialWorkbenchFetchCount + 1);
+      expect(screen.getByRole("status", { name: "系统状态正常" })).toHaveClass("ok");
+      expect(screen.queryByRole("status", { name: "OA 正在同步，关联台稍后更新" })).not.toBeInTheDocument();
     }, { timeout: 8_000 });
   });
 
