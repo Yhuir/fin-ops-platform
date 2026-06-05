@@ -60,12 +60,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Bankdetail category UoW adapter planning/tests Merge Gate |
-| 当前 active prompt | `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate` |
-| 最近 verified prompt | `PF-P205 - Bankdetail Category UoW Adapter Characterization Tests` |
-| 当前分支 | `codex/bankdetail-write-uow-application-planning-p204` |
-| 最近验证 | PF-P205 targeted tests 通过；未执行 Traffic Gate |
-| 下一条允许任务 | 生成并执行 `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate` |
+| 当前阶段 | Bankdetail category UoW adapter tests merged to dev |
+| 当前 active prompt | 空 |
+| 最近 verified prompt | `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate` |
+| 当前分支 | `dev` |
+| 最近验证 | PF-P205-MG 已合入 `dev`；merge commit `21c6411f`；`dev` 上 targeted tests 通过；未执行 Traffic Gate |
+| 下一条允许任务 | push `origin/dev`；push 后从最新 `dev` 新建 `codex/` 分支，生成 `PF-P206 - Bankdetail Category UoW Adapter Integration` |
 
 ## Prompt 执行日志
 
@@ -856,6 +856,38 @@ MG 步骤：
 下一步：
 
 - 生成并执行 `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate`。
+
+### PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate
+
+状态：`verified`
+
+范围：
+
+- 统一验证并合入 PF-P204/PF-P205。
+- 覆盖 Bankdetail write UoW application integration planning 和 category callback/adapter characterization tests。
+- 合入目标是 `dev`，不是 `main`。
+- 不修改 production code。
+- 不执行 Traffic Gate、部署或生产配置变更。
+
+执行结果：
+
+- 功能分支 commit：`54135c05 test(bankdetail): lock category uow adapter seam`。
+- 已合入 `dev`。
+- Merge commit：`21c6411f`。
+
+`dev` 上验证：
+
+- `git status --short --branch`：Pass，`dev...origin/dev [ahead 2]`。
+- `git ls-files --others --exclude-standard`：Pass，empty。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，44 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`：Pass，6 tests。
+
+下一步：
+
+- 提交本次 post-flight 文档更新并 push `origin/dev`。
+- push 后从最新 `dev` 新建下一条 `codex/` 分支。
+- 下一条建议：`PF-P206 - Bankdetail Category UoW Adapter Integration`。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 

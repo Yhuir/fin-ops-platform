@@ -828,3 +828,23 @@ PF-P205 验证：
 下一条建议：
 
 - `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate`
+
+## PF-P205-MG Category UoW Adapter Planning and Tests Merge Gate
+
+PF-P205-MG 已将 PF-P204/PF-P205 合入 `dev`。
+
+合入内容：
+
+- Bankdetail write UoW application integration planning。
+- Category callback/adapter characterization tests。
+
+当前边界：
+
+- 没有修改 production code。
+- 真实 category write path 尚未接入 `BankdetailWriteUnitOfWork`。
+- 下一步可以在新分支生成 `PF-P206 - Bankdetail Category UoW Adapter Integration`，但必须只做最小 adapter integration，不处理 auto-tag 或 No OA。
+
+`dev` 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，44 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`：Pass，6 tests。

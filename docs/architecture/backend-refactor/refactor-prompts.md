@@ -14842,7 +14842,7 @@ Post-Flight:
 
 ## PF-P054 - Turnover Ledger Minimal UoW Skeleton
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -22944,6 +22944,33 @@ Post-Flight:
 
 - PF-P205-MG 边界正确：只覆盖 planning + tests，不含 production code。
 - MG 合入 `dev`，不合入 `main`，不部署、不切流。
+
+### PF-P205-MG 执行结果
+
+- 状态：`verified`
+- 分支：`codex/bankdetail-write-uow-application-planning-p204`
+- 功能分支 commit：`54135c05 test(bankdetail): lock category uow adapter seam`
+- Merge target：`dev`
+- Merge commit：`21c6411f`
+- 合入范围：
+  - `tests/test_bank_details_sql_runtime.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- Branch verification：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，empty。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，44 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`：Pass，6 tests。
+- Dev verification：
+  - `git status --short --branch`：Pass，`dev...origin/dev [ahead 2]`。
+  - `git ls-files --others --exclude-standard`：Pass，empty。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，44 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`：Pass，6 tests。
+- Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
+- 下一步：提交 post-flight 文档更新并 push `origin/dev`；push 后从最新 `dev` 新建分支，下一条建议 `PF-P206 - Bankdetail Category UoW Adapter Integration`。
 
 ## PF-P190 - Bankdetail / No OA Batch Discovery and Planning
 
