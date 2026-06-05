@@ -60,12 +60,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Dev integration branch bootstrap complete; ready for next module |
-| 当前 active prompt | `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests` |
-| 当前分支 | `codex/bankdetail-no-oa-discovery-p190` |
-| 最近验证 | PF-P195 No OA mutation side-effect characterization tests 通过；未修改 production code；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `PF-P195-MG`，合入目标为 `dev`，不得合入或 push `main` |
+| 当前阶段 | Bankdetail / No OA discovery and characterization baseline merged to dev |
+| 当前 active prompt | 空 |
+| 最近 verified prompt | `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate` |
+| 当前分支 | `dev` |
+| 最近验证 | PF-P195-MG 已合入 `dev`；merge commit `4c56b99c`；`dev` 上 targeted tests 通过；未执行 Traffic Gate |
+| 下一条允许任务 | push `origin/dev`；push 完成后从最新 `dev` 新建 `codex/` 分支，生成下一条 Bankdetail / No OA prompt |
 
 ## Prompt 执行日志
 
@@ -373,7 +373,7 @@ MG 步骤：
 
 ### PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -404,6 +404,30 @@ MG 步骤：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v`
+
+执行结果：
+
+- PF-P195-MG 已合入 `dev`。
+- Merge commit：`4c56b99c`。
+- 合入范围只包含 Bankdetail / No OA discovery 文档和 characterization tests。
+- 未修改 production code。
+- 未修改 schema。
+- 未执行 Traffic Gate、部署、Nginx 或生产配置变更。
+
+`dev` 上验证：
+
+- `git status --short --branch`：Pass，`dev...origin/dev [ahead 7]`。
+- `git ls-files --others --exclude-standard`：Pass，empty。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v`：Pass，10 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v`：Pass，51 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v`：Pass，43 tests。
+
+下一步：
+
+- 提交本次 post-flight 文档更新并 push `origin/dev`。
+- push 后从最新 `dev` 创建下一条 `codex/` 分支。
+- 下一条建议：`PF-P196 - Bankdetail / No OA Account Balance and Backfill Smoke Planning`，或继续 Bankdetail write UoW readiness；必须先确认 `dev` 是否落后 `main`。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 

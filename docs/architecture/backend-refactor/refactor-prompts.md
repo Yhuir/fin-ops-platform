@@ -22511,6 +22511,27 @@ Post-Flight:
 - 允许文件白名单与当前 `dev...HEAD` diff 一致。
 - MG 明确只合入 `dev`，不触碰 `main`。
 
+### PF-P195-MG 执行结果
+
+- 状态：`verified`
+- 合入目标：`dev`
+- Merge commit：`4c56b99c`
+- 合入范围：
+  - Bankdetail / No OA discovery 文档；
+  - route facade characterization tests；
+  - Bankdetail read model missing refresh tests；
+  - auto-tag side-effect tests；
+  - No OA application service mutation side-effect tests。
+- `dev` 上验证：
+  - `git status --short --branch`：Pass，`dev...origin/dev [ahead 7]`
+  - `git ls-files --others --exclude-standard`：Pass，empty
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v`：Pass，10 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v`：Pass，51 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v`：Pass，43 tests
+- Traffic Gate：未执行；未部署、未切流、未访问生产。
+- 下一步：push `origin/dev` 后，从最新 `dev` 新建下一条 `codex/` 分支。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`
