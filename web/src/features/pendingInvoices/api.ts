@@ -179,6 +179,8 @@ type ApiPendingInvoiceRowsResponse = {
 type ApiPendingInvoiceRulesPayload = {
   version?: number | string | null;
   direction?: string | null;
+  read_model_status?: string | null;
+  derived_data_lifecycle?: Record<string, unknown> | null;
   permissions?: { can_save?: boolean | null } | null;
   available_tags?: ApiTagDefinition[] | null;
   bank_transaction_tags?: ApiTagDictionary | null;
@@ -703,6 +705,7 @@ function mapRulesPayload(payload: ApiPendingInvoiceRulesPayload): PendingInvoice
   return {
     version: numberValue(payload.version),
     direction: stringValue(payload.direction, "expense") as PendingInvoiceRulesPayload["direction"],
+    readModelStatus: stringValue(payload.read_model_status, "fresh") as PendingInvoiceRulesPayload["readModelStatus"],
     availableTags,
     groups: {
       requiresInvoice: mapRuleGroup(payload, "requires_invoice"),
@@ -726,6 +729,8 @@ function rulesRequestBody(payload: PendingInvoiceRulesPayload) {
     groups.bank_statement_as_invoice = { tag_codes: payload.groups.bankStatementAsInvoice.tagCodes };
   }
   const body = {
+    version: payload.version,
+    direction: payload.direction,
     groups: {
       ...groups,
     },

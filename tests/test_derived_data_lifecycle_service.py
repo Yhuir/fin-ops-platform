@@ -42,6 +42,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         for event in [
             "invoice_import_confirmed",
             "pair_relation_changed",
+            "pending_invoice_rules_changed",
             "pending_invoice_manual_invoice_confirmed",
             "tax_certified_import_confirmed",
         ]:
@@ -104,6 +105,34 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             ],
         )
         self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
+
+    def test_pending_invoice_rules_changed_maps_only_invoice_related_domains(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("pending_invoice_rules_changed", scope_keys=["all"])
+
+        domains = [domain["domain"] for domain in plan["domains"]]
+        self.assertEqual(
+            domains,
+            [
+                "workbench_read_model",
+                "workbench_relation_read_model",
+                "workbench_candidate_matches",
+                "workbench_matching_dirty_scopes",
+                "invoice_lifecycle_read_model",
+                "pending_invoice_read_model",
+                "tax_offset_read_model",
+                "tax_offset_month_cache",
+                "cost_statistics_read_model",
+                "search_cache",
+            ],
+        )
+        self.assertNotIn("turnover_ledger", domains)
+        self.assertNotIn("no_oa_bank_batch_read_model", domains)
+        self.assertNotIn("bank_account_balance_read_model", domains)
+        self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
+        self.assertIn("tax_offset_cache_warmup", plan["will_enqueue_jobs"])
+        self.assertIn("cost_statistics_cache_warmup", plan["will_enqueue_jobs"])
 
     def test_pair_and_exception_changes_mark_workbench_matching_dirty_scopes(self) -> None:
         service = DerivedDataLifecycleService()
@@ -305,6 +334,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "exception_case_changed",
                 "bank_transaction_category_changed",
                 "bank_auto_tag_rules_changed",
+                "pending_invoice_rules_changed",
                 "pending_invoice_manual_invoice_confirmed",
                 "pending_invoice_attach_existing_invoice_confirmed",
                 "pending_invoice_income_status_override_confirmed",

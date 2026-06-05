@@ -141,10 +141,15 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
 class RepositoryRecordingConnection:
     def __init__(self) -> None:
         self.execute_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
 
     def execute(self, sql: str, params: tuple = ()) -> int:
         self.execute_calls.append((" ".join(sql.lower().split()), params))
         return 1
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, int]:
+        self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
+        return {"source_version": 1}
 
 
 if __name__ == "__main__":

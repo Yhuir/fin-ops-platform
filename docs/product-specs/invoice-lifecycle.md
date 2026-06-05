@@ -37,6 +37,19 @@
 - 右侧工作流支持候选查看、人工确认、撤回和导出。
 - 更新后必须影响税金抵扣、OA 待付款、关联台和成本统计。
 
+### 待找发票规则事实源
+
+待找发票规则是独立规则集事实，不是银行标签设置的附属版本：
+
+- `bank_transaction_tags.version` 只代表银行明细自动标签定义、自动匹配规则、归档/新增/重命名等标签事实。
+- `pending_invoice_tag_groups.version` 只代表支出待找发票规则版本。
+- `pending_output_invoice_tag_groups.version` 只代表收入待找发票规则版本。
+- `requires_invoice` 是 active tag complement，由后端根据当前 active 标签和用户可编辑分组实时派生，不作为用户可编辑事实持久化。
+
+将“外部往来款付款”等银行标签纳入 `no_invoice_required` 是合法的待找发票规则配置。它只改变待找发票/发票生命周期口径，不改变外部往来款台账准入，也不触发免 OA 批次重建。
+
+规则保存成功后发布 `pending_invoice_rules_changed`，刷新 `invoice_lifecycle`、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和搜索 read model。该事件不得刷新外部往来款台账、免 OA 批次或银行账户余额。
+
 ## OA 待付款核对
 
 OA 待付款核对页用于对齐 OA 单据、付款流水和进项发票：

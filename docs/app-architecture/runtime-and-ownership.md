@@ -41,6 +41,18 @@ flowchart LR
 
 写模型、权限认证、冲突校验不做“分发 read model”；它们保留明确 command/service 边界。
 
+### 待找发票规则写入
+
+待找发票规则保存走独立规则集边界：
+
+1. `PendingInvoiceRulesApplicationService.update_rules(...)` 只接收 HTTP route 映射后的 direction、payload 和 actor。
+2. `AppSettingsService.update_pending_invoice_rule_groups(...)` 校验当前 direction 的规则 `version`、归一化分组、递增对应规则版本并写审计。
+3. 保存事件返回 `event_type=pending_invoice_rules_changed`、`direction`、`old_version`、`new_version`、`affected_groups` 和 `actor_id`。
+4. API finalizer 只清必要内存 cache，并把 `pending_invoice_rules_changed` 交给 `DerivedDataLifecycleService`。
+5. lifecycle executor 通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或 workbench dirty queue 入队相关 read model refresh；API server 不同步重建发票生命周期、待找发票、成本、税金、OA 或关联台 read model。
+
+该事件的影响域必须保持低耦合：刷新 `invoice_lifecycle`、`pending_invoice`、workbench、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和 search；不刷新 `turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。App Health 只根据这些 read model 的 readiness/dirty/outbox/worker 事实判定页面 busy 或 blocked，不能因为规则版本变化把无关页面标红。
+
 ## Worker 与队列
 
 - durable truth：PostgreSQL 的 `job.outbox_events` 与 `job.read_model_dirty_scopes`。
@@ -87,7 +99,7 @@ Registry 强一致由测试保护：domain registry 的 `read_model_keys` 必须
 | --- | --- | --- | --- | --- |
 | 银企核销 / 关联台 | reconciliation/workbench routes、部分 legacy `server.py` handler | reconciliation service、workbench service、relationship policy | workbench active generation、相关 SQL projection | `docs/product-specs/reconciliation-and-workbench.md` |
 | 银行明细 / 标签 | bank detail routes | bank detail service、tagging/classification policy | bank detail read model refresh | `docs/product-specs/bank-turnover-and-no-oa.md` |
-| 待找发票 / 发票生命周期 | pending invoice / invoice routes | invoice lifecycle policy、pending invoice query service | invoice usage / collection read models | `docs/product-specs/invoice-lifecycle.md` |
+| 待找发票 / 发票生命周期 | pending invoice / invoice routes | pending invoice rules service、invoice lifecycle policy、pending invoice query service | invoice lifecycle、pending invoice、invoice usage / collection read models | `docs/product-specs/invoice-lifecycle.md` |
 | OA 待付款 | OA pending payment routes | OA reconciliation/query service | OA pending payment SQL projection | `docs/product-specs/invoice-lifecycle.md` |
 | ETC / 导入 | import and ETC routes | import service、ETC business batch service | import jobs、ETC batch state | `docs/product-specs/imports-and-etc.md` |
 | 成本 / 税金 | cost/tax routes | cost attribution policy、tax offset service | cost/tax read models | `docs/product-specs/cost-tax.md` |

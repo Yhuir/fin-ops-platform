@@ -17,6 +17,7 @@ DERIVED_DATA_EVENTS = (
     "exception_case_changed",
     "bank_transaction_category_changed",
     "bank_auto_tag_rules_changed",
+    "pending_invoice_rules_changed",
     "pending_invoice_manual_invoice_confirmed",
     "pending_invoice_attach_existing_invoice_confirmed",
     "pending_invoice_income_status_override_confirmed",
@@ -218,6 +219,18 @@ class DerivedDataLifecycleService:
             "cost_statistics_read_model",
             "search_cache",
         ),
+        "pending_invoice_rules_changed": (
+            "workbench_read_model",
+            "workbench_relation_read_model",
+            "workbench_candidate_matches",
+            "workbench_matching_dirty_scopes",
+            "invoice_lifecycle_read_model",
+            "pending_invoice_read_model",
+            "tax_offset_read_model",
+            "tax_offset_month_cache",
+            "cost_statistics_read_model",
+            "search_cache",
+        ),
         "pending_invoice_manual_invoice_confirmed": (
             "bank_detail_read_model",
             "workbench_read_model",
@@ -367,6 +380,11 @@ class DerivedDataLifecycleService:
             "cost_statistics_cache_warmup",
         ),
         "pending_invoice_attach_existing_invoice_confirmed": (
+            "workbench_matching",
+            "tax_offset_cache_warmup",
+            "cost_statistics_cache_warmup",
+        ),
+        "pending_invoice_rules_changed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
             "cost_statistics_cache_warmup",

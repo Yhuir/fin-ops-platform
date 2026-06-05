@@ -127,7 +127,8 @@ class PendingInvoiceApiRoutes:
                 actor_id=_actor_id(session, "pending_invoice_rules"),
             )
         except AppSettingsValidationError as exc:
-            return HTTPStatus.BAD_REQUEST, {"error": exc.error_code, "message": str(exc)}
+            status = HTTPStatus.CONFLICT if str(exc.error_code).endswith("_version_conflict") else HTTPStatus.BAD_REQUEST
+            return status, {"error": exc.error_code, "message": str(exc)}
         except ValueError as exc:
             return HTTPStatus.BAD_REQUEST, {
                 "error": "invalid_pending_invoice_rules_request",

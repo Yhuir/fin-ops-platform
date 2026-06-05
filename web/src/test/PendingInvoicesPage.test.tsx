@@ -307,6 +307,7 @@ function installPendingInvoiceFetch(options: {
   rowsPayload?: (url: URL) => Array<Record<string, unknown>>;
   readModelStatus?: string;
   onRulesSaved?: () => void;
+  rulesSaveResponse?: (body: Record<string, unknown>, url: URL) => Response;
 } = {}) {
   const baseFetch = installMockApiFetch();
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -343,9 +344,15 @@ function installPendingInvoiceFetch(options: {
       });
     }
     if (url.pathname === "/api/pending-invoices/rules" && method === "PUT") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      if (options.rulesSaveResponse) {
+        return options.rulesSaveResponse(body, url);
+      }
       options.onRulesSaved?.();
       return new Response(JSON.stringify({
         version: 8,
+        direction: url.searchParams.get("direction") ?? "expense",
+        read_model_status: "refreshing",
         permissions: { can_save: true },
         bank_transaction_tags: {
           version: 8,
@@ -700,12 +707,13 @@ describe("Pending invoices page", () => {
     expect(screen.getAllByText("手续费").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "保存规则" }));
     await waitFor(() => {
-      const rulesPut = fetchMock.mock.calls.some(([input, init]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/pending-invoices/rules" && (init?.method ?? "GET").toUpperCase() === "PUT";
-      });
-      expect(rulesPut).toBe(true);
+      expect(pendingInvoiceRulesRequests(fetchMock, "PUT").length).toBeGreaterThan(0);
     });
+    const rulesPut = pendingInvoiceRulesRequests(fetchMock, "PUT")[0];
+    const rulesBody = JSON.parse(String(rulesPut[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(rulesBody).toMatchObject({ version: 7, direction: "expense" });
+    expect(await screen.findByText("规则已保存，相关数据正在刷新。")).toBeInTheDocument();
+    expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(1);
     await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "收入待找发票规则设置" }));
@@ -722,6 +730,40 @@ describe("Pending invoices page", () => {
     expect(screen.getByText("预计导出 128 行")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "下载导出" }));
     expect(await screen.findByText("已生成 pending-invoices.xlsx")).toBeInTheDocument();
+  });
+
+  test("keeps pending invoice rule draft and shows conflict feedback on stale version", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installPendingInvoiceFetch({
+      rulesSaveResponse: () => new Response(JSON.stringify({
+        error: "pending_invoice_tag_groups_version_conflict",
+        message: "待找发票规则已变化，请刷新后重试。",
+      }), { status: 409, headers: { "Content-Type": "application/json" } }),
+    });
+    renderAppAt("/pending-invoices");
+
+    const page = await screen.findByTestId("pending-invoices-page");
+    await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
+    expect(await screen.findByRole("heading", { name: "支出待找发票规则设置" })).toBeInTheDocument();
+
+    const noInvoiceGroup = screen.getByRole("group", { name: "无需开票" });
+    const mealCheckbox = within(noInvoiceGroup).getByRole("checkbox", { name: "餐饮" });
+    await user.click(mealCheckbox);
+    expect(mealCheckbox).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "保存规则" }));
+    expect(await screen.findByText("规则已被其他人更新。请刷新规则后再保存，当前勾选内容已保留。")).toBeInTheDocument();
+    expect(within(noInvoiceGroup).getByRole("checkbox", { name: "餐饮" })).toBeChecked();
+
+    const rulesPut = pendingInvoiceRulesRequests(fetchMock, "PUT")[0];
+    const rulesBody = JSON.parse(String(rulesPut[1]?.body ?? "{}")) as {
+      version?: number;
+      direction?: string;
+      groups?: Record<string, { tag_codes?: string[] }>;
+    };
+    expect(rulesBody.version).toBe(7);
+    expect(rulesBody.direction).toBe("expense");
+    expect(rulesBody.groups?.no_invoice_required?.tag_codes).toEqual(["salary", "custom_meal"]);
   });
 
   test("does not request OA detail when row only has a candidate relation id", async () => {

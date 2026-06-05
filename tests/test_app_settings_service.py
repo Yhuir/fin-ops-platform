@@ -227,6 +227,9 @@ class AppSettingsServiceTests(unittest.TestCase):
                 {"expected_version": turnover_selection["version"], "selected_tag_codes": [turnover_code]},
                 actor_id="settings-owner",
             )
+            pending_rules_version_before_replacement = app._app_settings_service.get_settings_payload()[
+                "pending_invoice_tag_groups"
+            ]["version"]
 
             result = app._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
                 fixture,
@@ -235,8 +238,9 @@ class AppSettingsServiceTests(unittest.TestCase):
 
             settings = app._app_settings_service.get_settings_payload()
 
-        self.assertEqual(result["version"], current["bank_transaction_tags"]["version"] + 2)
+        self.assertEqual(result["version"], current["bank_transaction_tags"]["version"] + 1)
         self.assertEqual(settings["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"], [])
+        self.assertEqual(settings["pending_invoice_tag_groups"]["version"], pending_rules_version_before_replacement + 1)
         self.assertEqual(settings["no_oa_bank_batch_tag_selection"]["selected_tag_codes"], [])
         self.assertEqual(
             settings["no_oa_bank_batch_tag_selection"]["version"],
@@ -361,7 +365,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         )
         self.assertEqual(payload["pending_invoice_tag_groups"]["version"], 1)
 
-    def test_bank_transaction_tags_and_pending_invoice_mapping_changes_increment_version(self) -> None:
+    def test_pending_invoice_rule_changes_increment_only_rule_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             initial = app._app_settings_service.get_settings_payload()
@@ -402,12 +406,48 @@ class AppSettingsServiceTests(unittest.TestCase):
                     }
                 },
                 actor_id="settings-owner",
-            )
+        )
 
         self.assertEqual(tag_changed["bank_transaction_tags"]["version"], 2)
-        self.assertEqual(tag_changed["pending_invoice_tag_groups"]["version"], 2)
-        self.assertEqual(mapping_changed["bank_transaction_tags"]["version"], 3)
-        self.assertEqual(mapping_changed["pending_invoice_tag_groups"]["version"], 3)
+        self.assertEqual(tag_changed["pending_invoice_tag_groups"]["version"], initial["pending_invoice_tag_groups"]["version"])
+        self.assertEqual(mapping_changed["bank_transaction_tags"]["version"], 2)
+        self.assertEqual(mapping_changed["pending_invoice_tag_groups"]["version"], initial["pending_invoice_tag_groups"]["version"] + 1)
+        self.assertEqual(mapping_changed["pending_output_invoice_tag_groups"]["version"], initial["pending_output_invoice_tag_groups"]["version"])
+
+    def test_income_and_expense_pending_invoice_rule_versions_are_independent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            initial = app._app_settings_service.get_settings_payload()
+
+            expense_changed = app._app_settings_service.update_pending_invoice_rule_groups(
+                direction="expense",
+                editable_groups={
+                    "groups": {
+                        "bank_statement_as_invoice": {"tag_codes": []},
+                        "no_invoice_required": {"tag_codes": ["fee"]},
+                    }
+                },
+                expected_version=initial["pending_invoice_tag_groups"]["version"],
+                actor_id="settings-owner",
+            )["settings"]
+            income_changed = app._app_settings_service.update_pending_invoice_rule_groups(
+                direction="income",
+                editable_groups={
+                    "groups": {
+                        "no_invoice_required": {"tag_codes": ["salary"]},
+                        "cash_income": {"tag_codes": []},
+                    }
+                },
+                expected_version=expense_changed["pending_output_invoice_tag_groups"]["version"],
+                actor_id="settings-owner",
+            )["settings"]
+
+        self.assertEqual(expense_changed["bank_transaction_tags"]["version"], initial["bank_transaction_tags"]["version"])
+        self.assertEqual(expense_changed["pending_invoice_tag_groups"]["version"], initial["pending_invoice_tag_groups"]["version"] + 1)
+        self.assertEqual(expense_changed["pending_output_invoice_tag_groups"]["version"], initial["pending_output_invoice_tag_groups"]["version"])
+        self.assertEqual(income_changed["bank_transaction_tags"]["version"], initial["bank_transaction_tags"]["version"])
+        self.assertEqual(income_changed["pending_invoice_tag_groups"]["version"], expense_changed["pending_invoice_tag_groups"]["version"])
+        self.assertEqual(income_changed["pending_output_invoice_tag_groups"]["version"], initial["pending_output_invoice_tag_groups"]["version"] + 1)
 
     def test_settings_accepts_frontend_tags_alias_before_pending_invoice_mapping_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

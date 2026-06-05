@@ -3,6 +3,7 @@ import { afterEach, vi } from "vitest";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   try {
     const prefix = "finops:pageSession:v1:";
     Object.keys(window.sessionStorage).forEach((key) => {

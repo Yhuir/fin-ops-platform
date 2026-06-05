@@ -513,7 +513,10 @@ export default function PendingInvoicesPage() {
         saveRules={saveRules}
         title={rulesDirection === "income" ? "收入待找发票规则设置" : "支出待找发票规则设置"}
         refreshToken={rulesTagRefreshToken}
-        onSaved={() => setRefreshToken((current) => current + 1)}
+        onSaved={(savedPayload) => {
+          setReadModelStatus(savedPayload.readModelStatus ?? "refreshing");
+          setRefreshToken((current) => current + 1);
+        }}
         onClose={closeDrawer}
       />
       <PendingInvoiceRelationDrawer

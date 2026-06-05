@@ -153,7 +153,7 @@ class CostStatisticsRuntimeService:
             return ["all"]
         return []
 
-    def invalidate_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
+    def invalidate_read_models(self, *, schedule_warmup: bool = True, persist_empty: bool = True) -> list[str]:
         if self._read_model_service is None:
             return []
         clear = getattr(self._read_model_service, "clear", None)
@@ -161,11 +161,12 @@ class CostStatisticsRuntimeService:
         if not callable(clear) or not callable(snapshot):
             return []
         deleted_scope_keys = clear()
-        self._persist(
-            snapshot=snapshot(),
-            changed_scope_keys=deleted_scope_keys,
-            operation="invalidate_cost_statistics_read_models",
-        )
+        if deleted_scope_keys or persist_empty:
+            self._persist(
+                snapshot=snapshot(),
+                changed_scope_keys=deleted_scope_keys,
+                operation="invalidate_cost_statistics_read_models",
+            )
         if not schedule_warmup:
             return deleted_scope_keys
         warmup_months = self.warmup_months_from_read_model_scope_keys(deleted_scope_keys) or ["all"]
@@ -179,6 +180,7 @@ class CostStatisticsRuntimeService:
         *,
         reason: str = "",
         schedule_warmup: bool = True,
+        persist_empty: bool = True,
     ) -> list[str]:
         if self._read_model_service is None:
             return []
@@ -204,11 +206,12 @@ class CostStatisticsRuntimeService:
                 include_all=True,
             )
             warmup_months = ["all"]
-        self._persist(
-            snapshot=snapshot(),
-            changed_scope_keys=deleted_scope_keys,
-            operation=reason or "invalidate_cost_statistics_read_model_scopes",
-        )
+        if deleted_scope_keys or persist_empty:
+            self._persist(
+                snapshot=snapshot(),
+                changed_scope_keys=deleted_scope_keys,
+                operation=reason or "invalidate_cost_statistics_read_model_scopes",
+            )
         if schedule_warmup:
             enqueued = self.enqueue_refresh_for_months(
                 warmup_months,

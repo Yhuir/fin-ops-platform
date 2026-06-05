@@ -108,6 +108,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             body=json.dumps({"expected_version": selection_payload["version"], "selected_tag_codes": ["fee"]}),
             headers={"Content-Type": "application/json"},
         )
+        app._no_oa_bank_batch_application_service().refresh_batches()
+        app._workbench_sql_read_repository = None
         enabled_batches = _json(app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted"))
 
         self.assertEqual(save_response.status_code, 200)

@@ -23,6 +23,55 @@
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
 
+## 待找发票规则 API
+
+`GET /api/pending-invoices/rules?direction=expense|income`
+
+返回指定方向的待找发票规则集。`direction=expense` 使用 `pending_invoice_tag_groups.version`；`direction=income` 使用 `pending_output_invoice_tag_groups.version`。该 `version` 是规则集自己的乐观锁版本，不等于 `bank_transaction_tags.version`。银行明细自动标签版本只代表标签定义和自动匹配规则事实。
+
+响应字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `version` | 当前 direction 的待找发票规则版本。 |
+| `direction` | `expense` 或 `income`。 |
+| `available_tags` | 当前可配置的 active 银行明细自动标签候选。 |
+| `groups` | 当前规则分组。支出可编辑 `bank_statement_as_invoice`、`no_invoice_required`；收入可编辑 `no_invoice_required`、`cash_income`。 |
+| `groups.requires_invoice` | active tag complement，由后端实时派生，不是用户可编辑持久事实。 |
+| `permissions.can_save` | 当前用户是否可保存规则。 |
+
+`PUT /api/pending-invoices/rules?direction=expense|income`
+
+请求示例：
+
+```json
+{
+  "version": 7,
+  "direction": "expense",
+  "groups": {
+    "bank_statement_as_invoice": {"tag_codes": ["bank_receipt_fee"]},
+    "no_invoice_required": {"tag_codes": ["external_turnover_payment"]}
+  }
+}
+```
+
+保存规则：
+
+- `version` 使用当前 direction 的规则版本做乐观锁；支出版本冲突返回 `409 pending_invoice_tag_groups_version_conflict`，收入版本冲突返回 `409 pending_output_invoice_tag_groups_version_conflict`。
+- 未知标签、归档标签、重复映射必须 fail fast，不写审计、不触发 lifecycle。
+- `requires_invoice` 即使出现在请求中也会被忽略；它始终是 active tag complement。
+- 保存成功只递增对应规则集版本，不递增 `bank_transaction_tags.version`。支出和收入规则版本互不影响。
+- 银行标签归档如果自动剥离待找发票规则引用，必须同时递增银行标签版本和被影响的待找发票规则版本。
+
+成功响应返回新的规则 payload，并额外携带：
+
+| 字段 | 说明 |
+| --- | --- |
+| `read_model_status` | 保存后固定表示相关 read model 正在刷新，通常为 `refreshing`。 |
+| `derived_data_lifecycle` | `pending_invoice_rules_changed` lifecycle 执行摘要，包含 affected domains、skipped domains、invalidated scopes 和 enqueued jobs。 |
+
+规则变更只通过 `pending_invoice_rules_changed` 进入派生数据生命周期。该事件刷新发票生命周期、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和搜索相关 read model；不得刷新 `turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。
+
 ## App Health 全局状态 API
 
 `GET /api/app-health` 保留既有字段，并新增 `app_status` 作为 Global Runtime Status Plane 的用户可见投影。SSE `/api/app-health/stream` 的 `app_health` 事件必须携带同样的 `app_status` shape。

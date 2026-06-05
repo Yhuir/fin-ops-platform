@@ -119,7 +119,11 @@ class NoOaBankBatchService:
             rows=rows,
             categories=categories,
         )
-        effective_active_relations = self._effective_active_relations_after_migration(active_relations, active_relations)
+        effective_active_relations = self._effective_active_relations_after_migration(
+            active_relations,
+            rows,
+            categories,
+        )
         occupied_row_ids = self._active_relation_row_ids(effective_active_relations)
         no_oa_occupied_row_ids = self._active_no_oa_relation_row_ids(effective_active_relations)
         relation_backed_submitted_batches = self._relation_backed_submitted_batches(
@@ -274,31 +278,65 @@ class NoOaBankBatchService:
     def _effective_active_relations_after_migration(
         self,
         original_active_relations: list[dict[str, Any]],
-        current_active_relations: list[dict[str, Any]],
+        rows: list[dict[str, Any]],
+        categories: dict[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        current_case_ids = {
-            str(relation.get("case_id") or "").strip()
-            for relation in list(current_active_relations or [])
-            if isinstance(relation, dict)
-        }
         migrated_case_ids = {
             str(case_id).strip()
             for case_id in list(self._last_legacy_migration_result.get("changed_case_ids") or [])
             if str(case_id).strip()
         }
-        effective_relations = [
-            deepcopy(relation)
-            for relation in list(current_active_relations or [])
-            if isinstance(relation, dict)
-        ]
+        effective_by_case_id: dict[str, dict[str, Any]] = {}
         for relation in list(original_active_relations or []):
             if not isinstance(relation, dict):
                 continue
             case_id = str(relation.get("case_id") or "").strip()
-            if case_id and (case_id in current_case_ids or case_id in migrated_case_ids):
+            if case_id and case_id in migrated_case_ids:
                 continue
-            effective_relations.append(deepcopy(relation))
-        return effective_relations
+            effective_by_case_id[case_id] = deepcopy(relation)
+
+        for relation in self._submitted_batch_relation_facts(rows, categories):
+            case_id = str(relation.get("case_id") or "").strip()
+            if case_id:
+                effective_by_case_id[case_id] = relation
+        return list(effective_by_case_id.values())
+
+    def _submitted_batch_relation_facts(
+        self,
+        rows: list[dict[str, Any]],
+        categories: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        facts: list[dict[str, Any]] = []
+        for batch in self._batches.values():
+            if str(batch.get("status") or "") != "submitted":
+                continue
+            if not self._submitted_batch_still_current(batch, rows, categories):
+                continue
+            relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+            row_ids = [
+                str(row_id).strip()
+                for row_id in list(batch.get("row_ids") or [])
+                if str(row_id).strip()
+            ]
+            if not relation_case_id or not row_ids:
+                continue
+            facts.append(
+                {
+                    "case_id": relation_case_id,
+                    "row_ids": row_ids,
+                    "row_types": ["bank" for _ in row_ids],
+                    "relation_mode": NO_OA_BANK_BATCH_RELATION_MODE,
+                    "status": "active",
+                    "month_scope": str(batch.get("scope_month") or "all"),
+                    "created_by": str(batch.get("submitted_by") or batch.get("created_by") or ""),
+                    "created_at": str(batch.get("submitted_at") or batch.get("created_at") or self._timestamp()),
+                    "updated_at": str(batch.get("updated_at") or batch.get("submitted_at") or self._timestamp()),
+                    "special_metadata": self._no_oa_relation_metadata(batch),
+                    "evidence": deepcopy(batch.get("evidence") if isinstance(batch.get("evidence"), dict) else {}),
+                    "display_tags": self._display_tags(str(batch.get("batch_type") or "")),
+                }
+            )
+        return facts
 
     def list_batches(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         resolved_filters = filters if isinstance(filters, dict) else {}

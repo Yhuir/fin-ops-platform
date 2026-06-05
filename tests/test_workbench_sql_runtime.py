@@ -4254,9 +4254,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                 "source_attachment_key": "attachment-key-1",
                                 "filename": "发票.pdf",
                             },
+                            "cache_source_attachment_key": "attachment-key-1",
                             "cache_invoices": [
                                 {
                                     "source_attachment_key": "attachment-key-1",
+                                    "invoice_no": "INV-ATTACHMENT-1",
                                     "seller_name": "供应商A",
                                     "buyer_name": "云南溯源科技有限公司",
                                     "amount": "165.35",
@@ -4320,9 +4322,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                 "source_attachment_key": "shared-attachment-key",
                                 "filename": "发票.pdf",
                             },
+                            "cache_source_attachment_key": "shared-attachment-key",
                             "cache_invoices": [
                                 {
                                     "source_attachment_key": "shared-attachment-key",
+                                    "invoice_no": "INV-SHARED-1",
                                     "seller_name": "供应商A",
                                     "buyer_name": "云南溯源科技有限公司",
                                     "amount": "165.35",

@@ -25,6 +25,7 @@ from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.pending_invoice_rules import (
     PENDING_INVOICE_GROUP_LABELS_BY_DIRECTION,
     active_pending_invoice_rule_tags,
+    normalize_pending_invoice_direction,
 )
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.state_store import ApplicationStateStore
@@ -207,12 +208,12 @@ class AppSettingsService:
             ),
             "pending_invoice_tag_groups": self._public_pending_invoice_tag_groups(
                 self._snapshot["pending_invoice_tag_groups"],
-                version=int(self._snapshot["bank_transaction_tags"]["version"]),
+                version=int(self._snapshot["pending_invoice_tag_groups"].get("version") or 1),
                 group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
             ),
             "pending_output_invoice_tag_groups": self._public_pending_invoice_tag_groups(
                 self._snapshot["pending_output_invoice_tag_groups"],
-                version=int(self._snapshot["bank_transaction_tags"]["version"]),
+                version=int(self._snapshot["pending_output_invoice_tag_groups"].get("version") or 1),
                 group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
             ),
             INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: self.get_input_invoice_usage_payment_status_rules_payload(
@@ -311,11 +312,7 @@ class AppSettingsService:
             actor_id=actor_id,
         )
         if tag_settings_event is not None:
-            version = int(previous_snapshot["bank_transaction_tags"]["version"]) + 1
-            normalized_snapshot["bank_transaction_tags"]["version"] = version
-            normalized_snapshot["pending_invoice_tag_groups"]["version"] = version
-            normalized_snapshot["pending_output_invoice_tag_groups"]["version"] = version
-            tag_settings_event["new_version"] = version
+            self._apply_tag_settings_versions(previous_snapshot, normalized_snapshot, tag_settings_event)
         if self._oa_role_sync_service is not None:
             self._oa_role_sync_service.sync_access_control(normalized_snapshot)
         try:
@@ -333,6 +330,83 @@ class AppSettingsService:
                 after_bank_transaction_tag_settings_saved(dict(tag_settings_event))
         self._restore_manual_projects()
         return self.get_settings_payload()
+
+    def update_pending_invoice_rule_groups(
+        self,
+        *,
+        direction: str,
+        editable_groups: dict[str, Any],
+        expected_version: int | None,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        previous_snapshot = dict(self._snapshot)
+        normalized_direction = normalize_pending_invoice_direction(direction)
+        settings_key = (
+            "pending_output_invoice_tag_groups"
+            if normalized_direction == "income"
+            else "pending_invoice_tag_groups"
+        )
+        group_labels = (
+            PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS
+            if normalized_direction == "income"
+            else PENDING_INVOICE_TAG_GROUP_LABELS
+        )
+        previous_groups = previous_snapshot[settings_key]
+        previous_version = int(previous_groups.get("version") or 1)
+        if expected_version is not None and int(expected_version) != previous_version:
+            raise AppSettingsValidationError(
+                f"{settings_key}_version_conflict",
+                "Pending invoice rule settings version conflict.",
+            )
+        raw_groups = dict(editable_groups if isinstance(editable_groups, dict) else {})
+        raw_groups.setdefault("version", previous_version)
+        normalized_groups = self._normalize_pending_invoice_tag_groups(
+            raw_groups,
+            bank_transaction_tags=previous_snapshot["bank_transaction_tags"],
+            validate=True,
+            group_labels=group_labels,
+        )
+        affected_groups = self._affected_pending_invoice_groups(
+            previous_groups,
+            normalized_groups,
+            group_labels=group_labels,
+        )
+        if not affected_groups:
+            return {
+                "settings": self.get_settings_payload(),
+                "event": None,
+            }
+        new_version = previous_version + 1
+        normalized_groups["version"] = new_version
+        normalized_snapshot = {
+            **previous_snapshot,
+            settings_key: normalized_groups,
+        }
+        if self._state_store is not None:
+            self._state_store.save_app_settings(normalized_snapshot)
+        self._snapshot = normalized_snapshot
+        self._configure_category_service(normalized_snapshot)
+        self._restore_manual_projects()
+        event = {
+            "event_type": "pending_invoice_rules_changed",
+            "actor_id": str(actor_id or "pending_invoice_rules").strip() or "pending_invoice_rules",
+            "direction": normalized_direction,
+            "settings_key": settings_key,
+            "old_version": previous_version,
+            "new_version": new_version,
+            "affected_groups": [
+                f"income:{group_id}" if normalized_direction == "income" else group_id
+                for group_id in affected_groups
+            ],
+            "before_summary": self._tag_settings_summary(previous_snapshot),
+            "after_summary": self._tag_settings_summary(normalized_snapshot),
+        }
+        self._record_pending_invoice_rules_audit(event)
+        return {
+            "settings": self.get_settings_payload(),
+            "event": event,
+        }
 
     def get_bank_auto_tag_rules_payload(
         self,
@@ -393,11 +467,19 @@ class AppSettingsService:
         next_snapshot["bank_transaction_tags"] = next_tags
         next_snapshot["pending_invoice_tag_groups"] = {
             **next_pending_invoice_groups,
-            "version": int(next_tags["version"]),
+            "version": (
+                int(previous_snapshot["pending_invoice_tag_groups"].get("version") or 1) + 1
+                if detached_pending_invoice_references
+                else int(previous_snapshot["pending_invoice_tag_groups"].get("version") or 1)
+            ),
         }
         next_snapshot["pending_output_invoice_tag_groups"] = {
             **next_pending_output_invoice_groups,
-            "version": int(next_tags["version"]),
+            "version": (
+                int(previous_snapshot["pending_output_invoice_tag_groups"].get("version") or 1) + 1
+                if detached_pending_output_invoice_references
+                else int(previous_snapshot["pending_output_invoice_tag_groups"].get("version") or 1)
+            ),
         }
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
         next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
@@ -465,11 +547,19 @@ class AppSettingsService:
         next_snapshot["bank_transaction_tags"] = next_tags
         next_snapshot["pending_invoice_tag_groups"] = {
             **next_pending_invoice_groups,
-            "version": int(next_tags["version"]),
+            "version": (
+                int(previous_snapshot["pending_invoice_tag_groups"].get("version") or 1) + 1
+                if detached_pending_invoice_references
+                else int(previous_snapshot["pending_invoice_tag_groups"].get("version") or 1)
+            ),
         }
         next_snapshot["pending_output_invoice_tag_groups"] = {
             **next_pending_output_invoice_groups,
-            "version": int(next_tags["version"]),
+            "version": (
+                int(previous_snapshot["pending_output_invoice_tag_groups"].get("version") or 1) + 1
+                if detached_pending_output_invoice_references
+                else int(previous_snapshot["pending_output_invoice_tag_groups"].get("version") or 1)
+            ),
         }
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
         next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
@@ -1547,6 +1637,47 @@ class AppSettingsService:
             "new_version": int(next_snapshot["bank_transaction_tags"]["version"]),
         }
 
+    def _apply_tag_settings_versions(
+        self,
+        previous_snapshot: dict[str, Any],
+        normalized_snapshot: dict[str, Any],
+        event: dict[str, Any],
+    ) -> None:
+        if event.get("tags_changed"):
+            normalized_snapshot["bank_transaction_tags"]["version"] = (
+                int(previous_snapshot["bank_transaction_tags"].get("version") or 1) + 1
+            )
+        else:
+            normalized_snapshot["bank_transaction_tags"]["version"] = int(
+                previous_snapshot["bank_transaction_tags"].get("version") or 1
+            )
+        affected_expense_groups = self._affected_pending_invoice_groups(
+            previous_snapshot["pending_invoice_tag_groups"],
+            normalized_snapshot["pending_invoice_tag_groups"],
+            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
+        )
+        affected_income_groups = self._affected_pending_invoice_groups(
+            previous_snapshot["pending_output_invoice_tag_groups"],
+            normalized_snapshot["pending_output_invoice_tag_groups"],
+            group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
+        )
+        normalized_snapshot["pending_invoice_tag_groups"]["version"] = (
+            int(previous_snapshot["pending_invoice_tag_groups"].get("version") or 1) + 1
+            if affected_expense_groups
+            else int(previous_snapshot["pending_invoice_tag_groups"].get("version") or 1)
+        )
+        normalized_snapshot["pending_output_invoice_tag_groups"]["version"] = (
+            int(previous_snapshot["pending_output_invoice_tag_groups"].get("version") or 1) + 1
+            if affected_income_groups
+            else int(previous_snapshot["pending_output_invoice_tag_groups"].get("version") or 1)
+        )
+        event["new_version"] = int(normalized_snapshot["bank_transaction_tags"]["version"])
+        event["new_versions"] = {
+            "bank_transaction_tags": int(normalized_snapshot["bank_transaction_tags"]["version"]),
+            "pending_invoice_tag_groups": int(normalized_snapshot["pending_invoice_tag_groups"]["version"]),
+            "pending_output_invoice_tag_groups": int(normalized_snapshot["pending_output_invoice_tag_groups"]["version"]),
+        }
+
     @staticmethod
     def _affected_pending_invoice_groups(
         previous_groups_payload: dict[str, Any],
@@ -1628,6 +1759,24 @@ class AppSettingsService:
                 entity_id="pending_invoice_tag_groups",
                 metadata=metadata,
             )
+
+    def _record_pending_invoice_rules_audit(self, event: dict[str, Any]) -> None:
+        if self._audit_service is None:
+            return
+        self._audit_service.record_action(
+            actor_id=str(event["actor_id"]),
+            action="pending_invoice_rule_groups_updated",
+            entity_type="app_settings",
+            entity_id=str(event.get("settings_key") or "pending_invoice_tag_groups"),
+            metadata={
+                "direction": str(event.get("direction") or "expense"),
+                "old_version": int(event.get("old_version") or 0),
+                "new_version": int(event.get("new_version") or 0),
+                "affected_groups": list(event.get("affected_groups") or []),
+                "before_summary": event.get("before_summary"),
+                "after_summary": event.get("after_summary"),
+            },
+        )
 
     def _record_bank_auto_tag_rules_audit(self, event: dict[str, Any]) -> None:
         if self._audit_service is None:

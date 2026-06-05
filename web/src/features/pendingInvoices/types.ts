@@ -106,6 +106,7 @@ export type PendingInvoiceRuleGroup = {
 export type PendingInvoiceRulesPayload = {
   version: number;
   direction: PendingInvoiceDirection;
+  readModelStatus?: PendingInvoiceReadModelStatus;
   availableTags: PendingInvoiceRuleTag[];
   groups: {
     requiresInvoice: PendingInvoiceRuleGroup;

@@ -18,7 +18,7 @@ type PendingInvoiceRulesDrawerProps = {
   saveRules: (payload: PendingInvoiceRulesPayload) => Promise<PendingInvoiceRulesPayload>;
   title?: string;
   refreshToken?: number;
-  onSaved: () => void;
+  onSaved: (payload: PendingInvoiceRulesPayload) => void;
   onClose: () => void;
 };
 
@@ -147,10 +147,10 @@ export default function PendingInvoiceRulesDrawer({
       const savedPayload = await saveRules(payload);
       setPayload(savedPayload);
       setBaselinePayload(savedPayload);
-      setRefreshNotice(null);
-      onSaved();
+      setRefreshNotice(savedPayload.readModelStatus === "refreshing" ? "规则已保存，相关数据正在刷新。" : "规则已保存。");
+      onSaved(savedPayload);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "规则保存失败");
+      setError(resolveRuleSaveErrorMessage(reason));
     } finally {
       setSaving(false);
     }
@@ -216,6 +216,21 @@ export default function PendingInvoiceRulesDrawer({
       ) : null}
     </PendingInvoiceDrawerFrame>
   );
+}
+
+function resolveRuleSaveErrorMessage(reason: unknown) {
+  const status = reason && typeof reason === "object" ? Number((reason as { status?: unknown }).status) : 0;
+  const code = reason && typeof reason === "object" ? String((reason as { code?: unknown }).code ?? "") : "";
+  if (
+    status === 409
+    && (
+      code === "pending_invoice_tag_groups_version_conflict"
+      || code === "pending_output_invoice_tag_groups_version_conflict"
+    )
+  ) {
+    return "规则已被其他人更新。请刷新规则后再保存，当前勾选内容已保留。";
+  }
+  return reason instanceof Error ? reason.message : "规则保存失败";
 }
 
 function updateRuleGroup(

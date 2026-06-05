@@ -9265,9 +9265,8 @@ class Application:
         )
         rules_service = PendingInvoiceRulesApplicationService(
             settings_gateway=AppSettingsPendingInvoiceRulesGateway(settings_service),
-            persist_callback=self._persist_state if getattr(self, "_state_store", None) is not None else None,
             invalidate_read_model_scopes=read_model_service.invalidate_base_scopes,
-            after_bank_transaction_tag_settings_saved=getattr(self, "_finalize_bank_transaction_tag_settings_update", None),
+            after_pending_invoice_rule_settings_saved=getattr(self, "_finalize_pending_invoice_rule_settings_update", None),
         )
         routes = PendingInvoiceApiRoutes(
             query_service=query_service,
@@ -13078,6 +13077,31 @@ class Application:
         self._enqueue_turnover_ledger_read_model_refreshes(
             ["all"],
             reason="bank_transaction_tag_settings_changed",
+        )
+
+    def _finalize_pending_invoice_rule_settings_update(self, event: dict[str, object]) -> dict[str, object]:
+        pending_invoice_service = getattr(self, "_pending_invoice_query_service", None)
+        for method_name in ("clear_cache", "invalidate_cache", "refresh"):
+            method = getattr(pending_invoice_service, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except TypeError:
+                    method(event)
+                break
+        self._search_service.clear_cache()
+        return self._execute_derived_data_lifecycle_event(
+            "pending_invoice_rules_changed",
+            scope_keys=["all"],
+            include_all=True,
+            schedule_cost_warmup=False,
+            metadata={
+                "reason": "pending_invoice_rules_changed",
+                "direction": event.get("direction"),
+                "old_version": event.get("old_version"),
+                "new_version": event.get("new_version"),
+                "affected_groups": list(event.get("affected_groups") or []),
+            },
         )
 
     def _finalize_bank_auto_tag_rules_update(self, event: dict[str, object]) -> None:
@@ -17821,8 +17845,10 @@ class Application:
             plan,
             executors={
                 "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
+                "workbench_relation_read_model": self._derived_lifecycle_workbench_relation_read_model_executor,
                 "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
                 "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
+                "invoice_lifecycle_read_model": self._derived_lifecycle_invoice_lifecycle_executor,
                 "cost_statistics_read_model": lambda domain_plan: self._derived_lifecycle_cost_statistics_executor(
                     domain_plan,
                     schedule_warmup=schedule_cost_warmup,
@@ -17846,11 +17872,18 @@ class Application:
             deleted_scope_keys = list(self._workbench_read_model_service.snapshot().get("read_models", {}).keys())
             for scope_key in deleted_scope_keys:
                 self._workbench_read_model_service.delete_read_model(scope_key)
-            self._persist_workbench_read_models_best_effort(
-                snapshot=self._workbench_read_model_service.snapshot(),
-                changed_scope_keys=deleted_scope_keys,
-                operation="derived_lifecycle_workbench_read_model",
+            self._enqueue_workbench_read_model_refresh(
+                "all",
+                reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_read_model"),
             )
+            if deleted_scope_keys:
+                self._persist_workbench_read_models_best_effort(
+                    snapshot=self._workbench_read_model_service.snapshot(),
+                    changed_scope_keys=deleted_scope_keys,
+                    operation="derived_lifecycle_workbench_read_model",
+                )
+            if not deleted_scope_keys:
+                deleted_scope_keys = ["all"]
         else:
             deleted_scope_keys = self._invalidate_workbench_read_model_scopes(
                 scope_keys,
@@ -17872,6 +17905,48 @@ class Application:
             "invalidated_scopes": deleted_scope_keys,
         }
 
+    def _derived_lifecycle_workbench_relation_read_model_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        target_scope_keys = scope_keys or ["all"]
+        enqueued = self._enqueue_generic_read_model_refreshes(
+            "workbench_relation",
+            target_scope_keys,
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_relation"),
+        )
+        return {
+            "deleted_counts": {"workbench_relation_read_models": 0},
+            "invalidated_scopes": target_scope_keys,
+            "enqueued_jobs": ["workbench_relation.read_model.refresh"] if enqueued else [],
+        }
+
+    def _derived_lifecycle_invoice_lifecycle_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        target_scope_keys = scope_keys or ["all"]
+        enqueued = self._enqueue_generic_read_model_refreshes(
+            "invoice_lifecycle",
+            target_scope_keys,
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_invoice_lifecycle"),
+        )
+        return {
+            "deleted_counts": {"invoice_lifecycle_read_models": 0},
+            "invalidated_scopes": target_scope_keys,
+            "enqueued_jobs": ["invoice_lifecycle.read_model.refresh"] if enqueued else [],
+        }
+
+    def _enqueue_generic_read_model_refreshes(self, scope_type: str, scope_keys: list[str], *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueued = False
+        for scope_key in scope_keys:
+            normalized_scope_key = str(scope_key or "").strip()
+            if not normalized_scope_key:
+                continue
+            enqueue(scope_type=scope_type, scope_key=normalized_scope_key, reason=reason)
+            enqueued = True
+        return enqueued
+
     def _derived_lifecycle_candidate_matches_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
         months = self._months_from_lifecycle_scope_keys(scope_keys)
@@ -17885,7 +17960,8 @@ class Application:
             )
         elif "all" in scope_keys:
             deleted_candidate_keys = self._workbench_candidate_match_service.clear()
-            self._persist_workbench_candidate_matches_best_effort(operation="derived_lifecycle_candidate_matches")
+            if deleted_candidate_keys:
+                self._persist_workbench_candidate_matches_best_effort(operation="derived_lifecycle_candidate_matches")
         else:
             deleted_candidate_keys = []
         return {
@@ -17917,17 +17993,38 @@ class Application:
         schedule_warmup: bool,
     ) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
+        reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")
+        persist_empty = reason != "pending_invoice_rules_changed"
         if "all" in scope_keys:
-            deleted_scope_keys = self._invalidate_cost_statistics_read_models(schedule_warmup=schedule_warmup)
+            deleted_scope_keys = self._invalidate_cost_statistics_read_models(
+                schedule_warmup=schedule_warmup,
+                persist_empty=persist_empty,
+            )
         else:
             deleted_scope_keys = self._invalidate_cost_statistics_read_model_scopes(
                 scope_keys,
-                reason=str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics"),
+                reason=reason,
+                schedule_warmup=schedule_warmup,
+                persist_empty=persist_empty,
             )
+        enqueued_jobs: list[str] = []
+        if not schedule_warmup:
+            target_scope_keys = ["all"] if "all" in scope_keys else scope_keys
+            enqueued = self._enqueue_generic_read_model_refreshes(
+                "cost_statistics",
+                target_scope_keys or ["all"],
+                reason=reason,
+            )
+            if enqueued:
+                enqueued_jobs.append("cost_statistics.read_model.refresh")
+            if not deleted_scope_keys:
+                deleted_scope_keys = list(target_scope_keys or ["all"])
+        elif schedule_warmup:
+            enqueued_jobs.append("cost_statistics_cache_warmup")
         return {
             "deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,
-            "enqueued_jobs": [] if not schedule_warmup else ["cost_statistics_cache_warmup"],
+            "enqueued_jobs": enqueued_jobs,
         }
 
     def _derived_lifecycle_tax_offset_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
@@ -18169,8 +18266,16 @@ class Application:
                 invalidated.append(f"oa_pending_payment:{scope_key}")
         return invalidated
 
-    def _invalidate_cost_statistics_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
-        return self._cost_statistics_runtime().invalidate_read_models(schedule_warmup=schedule_warmup)
+    def _invalidate_cost_statistics_read_models(
+        self,
+        *,
+        schedule_warmup: bool = True,
+        persist_empty: bool = True,
+    ) -> list[str]:
+        return self._cost_statistics_runtime().invalidate_read_models(
+            schedule_warmup=schedule_warmup,
+            persist_empty=persist_empty,
+        )
 
     def _invalidate_cost_statistics_read_model_scopes(
         self,
@@ -18178,11 +18283,13 @@ class Application:
         *,
         reason: str = "",
         schedule_warmup: bool = True,
+        persist_empty: bool = True,
     ) -> list[str]:
         return self._cost_statistics_runtime().invalidate_read_model_scopes(
             scope_keys,
             reason=reason,
             schedule_warmup=schedule_warmup,
+            persist_empty=persist_empty,
         )
 
     def _enqueue_cost_statistics_refresh_for_months(self, months: list[str], *, reason: str) -> bool:

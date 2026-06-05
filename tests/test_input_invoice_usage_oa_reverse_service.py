@@ -17,6 +17,7 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
 class StaticOAProjection:
@@ -331,7 +332,12 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
     ) -> InputInvoiceUsageOaReverseService:
         query_service = InputInvoiceUsageQueryService(
             import_service=ImportNormalizationService(existing_invoices=invoices),
-            pair_relation_service=pair_service or WorkbenchPairRelationService(),
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=pair_service or WorkbenchPairRelationService(),
+                transactions=[],
+                invoices=invoices,
+                oa_projection=oa_projection,
+            ),
             oa_projection=oa_projection,
         )
         return InputInvoiceUsageOaReverseService(

@@ -575,7 +575,9 @@ class PendingInvoiceApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         pending_invoice_refreshes = [
-            refresh for refresh in queue_repository.enqueued if refresh[0] == "pending_invoice"
+            refresh
+            for refresh in queue_repository.enqueued
+            if refresh[0] == "pending_invoice" and refresh[2] == "pending_invoice_rules_update"
         ]
         self.assertEqual(
             pending_invoice_refreshes,
@@ -590,6 +592,88 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 ("pending_invoice", "income:cash_income", "pending_invoice_rules_update"),
             ],
         )
+
+    def test_pending_invoice_rules_put_runs_low_coupling_lifecycle_without_unrelated_domains(self) -> None:
+        class QueueRepository:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_rule_tags(app)
+            queue_repository = QueueRepository()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue_repository)
+            if hasattr(app, "_pending_invoice_api_routes"):
+                delattr(app, "_pending_invoice_api_routes")
+            current = app._app_settings_service.get_pending_invoice_settings_payload()
+            initial_bank_rules_version = current["bank_transaction_tags"]["version"]
+
+            response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/rules",
+                body=json.dumps({
+                    "version": current["pending_invoice_tag_groups"]["version"],
+                    "groups": {
+                        "bank_statement_as_invoice": {"tag_codes": []},
+                        "no_invoice_required": {"tag_codes": ["external_rule_borrow_out"]},
+                    },
+                }),
+            )
+            saved_settings = app._app_settings_service.get_settings_payload()
+
+        payload = json.loads(response.body)
+        scope_types = {scope_type for scope_type, _scope_key, _reason in queue_repository.enqueued}
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["derived_data_lifecycle"]["event"], "pending_invoice_rules_changed")
+        self.assertNotIn("invoice_lifecycle_read_model", payload["derived_data_lifecycle"]["skipped"])
+        self.assertNotIn("workbench_relation_read_model", payload["derived_data_lifecycle"]["skipped"])
+        self.assertEqual(saved_settings["bank_transaction_tags"]["version"], initial_bank_rules_version)
+        self.assertEqual(
+            saved_settings["pending_invoice_tag_groups"]["groups"]["no_invoice_required"]["tag_codes"],
+            ["external_rule_borrow_out"],
+        )
+        self.assertTrue(
+            {
+                "invoice_lifecycle",
+                "pending_invoice",
+                "workbench",
+                "workbench_relation",
+                "tax_offset",
+                "cost_statistics",
+                "input_invoice_usage",
+                "output_invoice_collection",
+                "oa_pending_payment",
+            }.issubset(scope_types)
+        )
+        self.assertNotIn("turnover_ledger", scope_types)
+        self.assertNotIn("no_oa_bank_batch", scope_types)
+        self.assertNotIn("bank_account_balance", scope_types)
+
+    def test_pending_invoice_rules_put_rejects_stale_rule_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._configure_rule_tags(app)
+            current = app._app_settings_service.get_pending_invoice_settings_payload()
+
+            response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/rules",
+                body=json.dumps({
+                    "version": current["pending_invoice_tag_groups"]["version"] - 1,
+                    "groups": {
+                        "bank_statement_as_invoice": {"tag_codes": []},
+                        "no_invoice_required": {"tag_codes": ["salary"]},
+                    },
+                }),
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(payload["error"], "pending_invoice_tag_groups_version_conflict")
 
     def test_pending_invoice_rules_put_rejects_duplicate_editable_group_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -797,6 +881,18 @@ class PendingInvoiceApiTests(unittest.TestCase):
                     "output_primary_label": "收入",
                     "output_sub_label": "现金收入",
                     "rules": {"match_fields": ["all_text"], "contains": ["现金"]},
+                },
+                {
+                    "code": "external_rule_borrow_out",
+                    "label": "借出款",
+                    "path": ["银行明细自动标签规则", "外部往来款付款", "借出款"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "外部往来款付款",
+                    "output_sub_label": "借出款",
+                    "turnover_role": "external_turnover",
+                    "turnover_action_type": "pending_collection",
+                    "rules": {"match_fields": ["all_text"], "contains": ["借出"]},
                 },
                 {
                     "code": "old_tag",

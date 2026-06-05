@@ -1414,6 +1414,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             actor_id="settings-owner",
         )
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        settings_before_archive = app._app_settings_service.get_settings_payload()
+        pending_version_before_archive = settings_before_archive["pending_invoice_tag_groups"]["version"]
+        bank_version_before_archive = settings_before_archive["bank_transaction_tags"]["version"]
         salary = next(rule for rule in current["active_rules"] if rule["code"] == "salary")
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
@@ -1438,8 +1441,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(pending_groups["requires_invoice"]["tag_codes"], [])
         self.assertEqual(
             updated_settings["pending_invoice_tag_groups"]["version"],
-            updated_settings["bank_transaction_tags"]["version"],
+            pending_version_before_archive + 1,
         )
+        self.assertEqual(updated_settings["bank_transaction_tags"]["version"], bank_version_before_archive + 1)
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(audit["action"], "bank_auto_tag_rules_updated")
         self.assertEqual(

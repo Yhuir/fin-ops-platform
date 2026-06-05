@@ -14,6 +14,7 @@ from fin_ops_platform.services.output_invoice_collection_service import OutputIn
 from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
 class RecordingRefreshQueue:
@@ -210,7 +211,11 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
                 existing_invoices=invoices,
                 existing_transactions=transactions or [],
             ),
-            pair_relation_service=pair_service or WorkbenchPairRelationService(),
+            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                pair_service=pair_service or WorkbenchPairRelationService(),
+                transactions=list(transactions or []),
+                invoices=invoices,
+            ),
             lifecycle_repository=repository,
         )
 

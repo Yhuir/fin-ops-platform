@@ -240,9 +240,10 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
 
             invalid_page = app.handle_request("GET", "/api/input-invoice-usage/rows?page=0")
             invalid_sort = app.handle_request("GET", "/api/input-invoice-usage/rows?sort_field=unknown")
+            invalid_filters = quote(json.dumps([{"field": "bad", "operator": "equals", "value": "x"}]))
             invalid_filter = app.handle_request(
                 "GET",
-                f"/api/input-invoice-usage/rows?filters={quote('[{\"field\":\"bad\",\"operator\":\"equals\",\"value\":\"x\"}]')}",
+                f"/api/input-invoice-usage/rows?filters={invalid_filters}",
             )
             missing_detail = app.handle_request("GET", "/api/input-invoice-usage/invoices/missing/detail")
 

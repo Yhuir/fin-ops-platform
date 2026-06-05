@@ -322,6 +322,8 @@ describe("pending invoices and tag settings API mapping", () => {
       if (url.pathname === "/api/pending-invoices/rules" && method === "PUT") {
         const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
         expect(body).toEqual({
+          version: 3,
+          direction: "expense",
           groups: {
             bank_statement_as_invoice: { tag_codes: ["internal_transfer"] },
             no_invoice_required: { tag_codes: ["salary"] },

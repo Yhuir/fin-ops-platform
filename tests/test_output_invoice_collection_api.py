@@ -174,9 +174,10 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
 
             invalid_page = app.handle_request("GET", "/api/output-invoice-collections/rows?page=0")
             invalid_sort = app.handle_request("GET", "/api/output-invoice-collections/rows?sort_field=unknown")
+            invalid_filters = quote(json.dumps([{"field": "bad", "operator": "equals", "value": "x"}]))
             invalid_filter = app.handle_request(
                 "GET",
-                f"/api/output-invoice-collections/rows?filters={quote('[{\"field\":\"bad\",\"operator\":\"equals\",\"value\":\"x\"}]')}",
+                f"/api/output-invoice-collections/rows?filters={invalid_filters}",
             )
             missing_detail = app.handle_request("GET", "/api/output-invoice-collections/invoices/missing/detail")
 
