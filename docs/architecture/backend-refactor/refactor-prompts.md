@@ -22592,6 +22592,77 @@ Post-Flight:
   - 下一条应补 tests，而不是直接改 backfill production code。
 - 下一条建议：`PF-P197 - Bankdetail Backfill CLI Characterization Tests`。
 
+## PF-P197 - Bankdetail Backfill CLI Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P197 - Bankdetail Backfill CLI Characterization Tests
+
+Role:
+你是一位负责 Bankdetail ops/backfill smoke tests 的 Python 后端工程师。你必须优先新增 tests；只有测试暴露真实小 bug 时，才允许做最小 production fix。
+
+Context:
+PF-P196 已确认 account balance read model 有核心测试，但 backfill CLI 缺少 dry-run、enqueue-only 和 worker-drain smoke tests。
+
+Goal:
+新增 Bankdetail backfill CLI characterization tests，锁定 dry-run 不访问真实 PostgreSQL、enqueue contract 和 worker-drain handler wiring。
+
+Allowed Scope:
+- tests/test_bankdetail_backfill_cli.py
+- backend/src/fin_ops_platform/app/bank_detail_backfill.py（仅允许修复 dry-run 过早打开 PostgreSQL 的小 bug）
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不得修改 schema。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo 或 MySQL。
+- 不得重构 worker/runtime registry。
+- 不得修改部署、Nginx、生产配置或 feature flag。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_backfill_cli -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model -v
+- python3 -m compileall backend/src/fin_ops_platform/app/bank_detail_backfill.py backend/src/fin_ops_platform/app/bank_account_balance_backfill.py
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 如果 PF-P196/PF-P197 已形成可合并 ops smoke 切片，下一条生成 cumulative MG。
+```
+
+### 审查结论
+
+- PF-P197 边界正确：以 tests 为主，只允许修复 dry-run 小 bug。
+- 它不访问真实外部服务，不改 schema，不扩大到 worker/runtime registry 重构。
+
+### PF-P197 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_bankdetail_backfill_cli.py`
+  - `backend/src/fin_ops_platform/app/bank_detail_backfill.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 backfill CLI smoke tests。
+  - 锁定 account balance dry-run 不打开 PostgreSQL。
+  - 锁定 bank detail explicit scope dry-run 不打开 PostgreSQL。
+  - 锁定 account balance enqueue contract。
+  - 锁定 bank detail enqueue-all / enqueue-missing contract。
+  - 锁定 account balance worker-drain event type / handler key。
+  - 最小修复 `bank_detail_backfill --dry-run --scope-key <month>` 过早读取 PostgreSQL 配置的问题。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_backfill_cli -v`：Pass，5 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model -v`：Pass，4 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/app/bank_detail_backfill.py backend/src/fin_ops_platform/app/bank_account_balance_backfill.py`：Pass。
+- 下一条建议：生成 `PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate`，统一覆盖 PF-P196/PF-P197。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`

@@ -326,3 +326,30 @@ PF-P197 禁止线：
 - 不访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
 - 不改 backfill production code，除非测试暴露真实 bug 且修复范围极小。
 - 不把 backfill smoke 扩大成 worker/runtime registry 重构。
+
+## PF-P197 Backfill CLI Characterization Update
+
+PF-P197 已新增 `tests/test_bankdetail_backfill_cli.py`，并做了一个最小 production fix：
+
+- `bank_detail_backfill --dry-run --scope-key <month>` 现在会在实例化 PostgreSQL connection 前输出 plan 并返回。
+- 该修复只影响显式 scope dry-run 路径，不改变 enqueue、worker-drain 或真实 backfill 行为。
+
+新增锁定：
+
+- `bank_account_balance_backfill --dry-run` 不打开 PostgreSQL。
+- `bank_detail_backfill --dry-run --scope-key <month>` 不打开 PostgreSQL。
+- `bank_account_balance_backfill --enqueue` enqueue：
+  - `scope_type="bank_account_balance"`
+  - `scope_key="all"`
+  - `reason="bank_account_balance_backfill"`
+- `bank_detail_backfill --enqueue-all --enqueue-missing` enqueue：
+  - `bank_detail/all/bank_detail_backfill_all`
+  - `bank_detail/<month>/bank_detail_backfill_missing`
+- `bank_account_balance_backfill --worker-drain` 使用 `bank-account-balance-read-model` worker kind 和 `bank_account_balance.read_model.refresh` handler key。
+
+PF-P197 后剩余目标：
+
+- Bankdetail / No OA 真正的事务内 facts/audit/dirty/outbox UoW 收敛。
+- Account balance backfill 不需要立即进入 UoW；当前更适合作为 ops smoke baseline 合入。
+
+当前 PF-P196/PF-P197 形成一个较小可合并切片，下一步适合生成 cumulative MG 合入 `dev`。

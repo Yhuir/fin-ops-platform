@@ -62,10 +62,10 @@
 | --- | --- |
 | 当前阶段 | Bankdetail / No OA account balance and backfill smoke planning |
 | 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P196 - Bankdetail / No OA Account Balance and Backfill Smoke Planning` |
+| 最近 verified prompt | `PF-P197 - Bankdetail Backfill CLI Characterization Tests` |
 | 当前分支 | `codex/bankdetail-account-balance-backfill-p196` |
-| 最近验证 | PF-P196 docs-only planning 验证通过；未修改 production code 或 tests |
-| 下一条允许任务 | 生成并审查 `PF-P197 - Bankdetail Backfill CLI Characterization Tests`，继续当前 Bankdetail / No OA 切片 |
+| 最近验证 | PF-P197 backfill CLI characterization tests 通过；包含一个显式 dry-run 不连库的小修复；未执行 Traffic Gate |
+| 下一条允许任务 | 生成并审查 `PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate`，统一覆盖 PF-P196/PF-P197 |
 
 ## Prompt 执行日志
 
@@ -464,6 +464,40 @@ MG 步骤：
 
 - 生成并审查 `PF-P197 - Bankdetail Backfill CLI Characterization Tests`。
 - PF-P197 只补 CLI tests，不访问真实 PostgreSQL 或外部服务。
+
+### PF-P197 - Bankdetail Backfill CLI Characterization Tests
+
+状态：`verified`
+
+范围：
+
+- 新增 Bankdetail backfill CLI smoke tests。
+- 允许且仅执行一个小 production fix：`bank_detail_backfill --dry-run --scope-key <month>` 不再过早打开 PostgreSQL。
+- 不修改 schema。
+- 不访问真实外部服务。
+- 不执行 MG、Traffic Gate 或部署。
+
+执行结果：
+
+- 新增 `tests/test_bankdetail_backfill_cli.py`。
+- 修复 `backend/src/fin_ops_platform/app/bank_detail_backfill.py` 显式 scope dry-run 过早读取 PostgreSQL 配置的问题。
+- 锁定：
+  - `bank_account_balance_backfill --dry-run` 不打开 PostgreSQL。
+  - `bank_detail_backfill --dry-run --scope-key <month>` 不打开 PostgreSQL。
+  - `bank_account_balance_backfill --enqueue` 的 `bank_account_balance/all/bank_account_balance_backfill` contract。
+  - `bank_detail_backfill --enqueue-all --enqueue-missing` 的 `bank_detail/all/bank_detail_backfill_all` 和 `bank_detail/<month>/bank_detail_backfill_missing` contract。
+  - `bank_account_balance_backfill --worker-drain` 的 worker kind、event type 和 handler key。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_backfill_cli -v`：Pass，5 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model -v`：Pass，4 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/bank_detail_backfill.py backend/src/fin_ops_platform/app/bank_account_balance_backfill.py`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate`。
+- 该 MG 必须统一覆盖 PF-P196/PF-P197，并只合入 `dev`。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
