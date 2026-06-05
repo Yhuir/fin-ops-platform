@@ -251,15 +251,18 @@ function AmountBlock({
   bankAccountLabels?: string[];
 }) {
   const tone = directionKey(direction);
+  const directionTag = tone === "income" ? "收" : tone === "expense" ? "支" : "";
   return (
     <Stack spacing={0.5} alignItems="flex-start">
       <Box
         data-testid={testId}
         className={`turnover-amount-${tone}`}
+        aria-label={directionTag ? `${directionTag} ${formatMoney(amount)}` : formatMoney(amount)}
         sx={{
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "flex-end",
+          gap: 0.5,
           minWidth: 78,
           px: 0.75,
           py: 0.25,
@@ -269,7 +272,23 @@ function AmountBlock({
           color: tone === "income" ? "success.dark" : tone === "expense" ? "warning.dark" : "text.primary",
         }}
       >
-        {formatMoney(amount)}
+        {directionTag ? (
+          <Box
+            component="span"
+            sx={{
+              px: 0.5,
+              py: 0.1,
+              borderRadius: 0.5,
+              fontSize: 11,
+              lineHeight: 1.2,
+              fontWeight: 900,
+              backgroundColor: tone === "income" ? "rgba(46, 125, 50, 0.16)" : "rgba(239, 108, 0, 0.18)",
+            }}
+          >
+            {directionTag}
+          </Box>
+        ) : null}
+        <Box component="span">{formatMoney(amount)}</Box>
       </Box>
       {showDate ? <Chip size="small" variant="outlined" label={formatNullable(date)} sx={{ height: 22 }} /> : null}
       {categoryLabels.length > 0 ? (
@@ -491,8 +510,8 @@ export default function TurnoverLedgerGroupedTable({
               对方户名
             </TableCell>
             <TableCell sx={{ width: 52, fontWeight: 900 }} padding="checkbox">选择</TableCell>
-            <TableCell sx={{ width: 150, fontWeight: 900 }}>收入</TableCell>
-            <TableCell sx={{ width: 150, fontWeight: 900 }}>支出</TableCell>
+            <TableCell sx={{ width: 150, fontWeight: 900 }}>往来发生</TableCell>
+            <TableCell sx={{ width: 150, fontWeight: 900 }}>结清发生</TableCell>
             <TableCell sx={{ width: 118, fontWeight: 900 }}>还款备注</TableCell>
             <TableCell sx={{ width: 122, fontWeight: 900 }}>利息额 / 年息或月息</TableCell>
             <TableCell sx={{ width: 76, fontWeight: 900 }}>借款天数</TableCell>

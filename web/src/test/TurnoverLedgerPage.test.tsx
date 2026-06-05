@@ -776,8 +776,10 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     expect(within(table).getByRole("columnheader", { name: "对方户名" })).toHaveClass("turnover-sticky-left-header");
     expect(within(table).queryByRole("columnheader", { name: "银行明细标签" })).not.toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: "收入" })).toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: "支出" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "往来发生" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "结清发生" })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "收入" })).not.toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "支出" })).not.toBeInTheDocument();
     expect(within(table).queryByRole("columnheader", { name: "借款金额 / 借款日" })).not.toBeInTheDocument();
     expect(within(table).queryByRole("columnheader", { name: "还款金额 / 还款日" })).not.toBeInTheDocument();
     expect(within(table).queryByRole("columnheader", { name: "开户机构" })).not.toBeInTheDocument();
@@ -808,8 +810,14 @@ describe("Turnover ledger page", () => {
     expect(within(table).queryByText("招商银行批次账户")).not.toBeInTheDocument();
     expect(within(table).queryByText("明细")).not.toBeInTheDocument();
 
-    expect(within(table).getByTestId("amount-income-rel-personal-1-borrow")).toHaveClass("turnover-amount-income");
-    expect(within(table).getByTestId("amount-expense-rel-personal-1-repayment")).toHaveClass("turnover-amount-expense");
+    const borrowAmountChip = within(table).getByTestId("amount-income-rel-personal-1-borrow");
+    expect(borrowAmountChip).toHaveClass("turnover-amount-income");
+    expect(within(borrowAmountChip).getByText("收")).toBeInTheDocument();
+    expect(within(borrowAmountChip).getByText("1,000.00")).toBeInTheDocument();
+    const repaymentAmountChip = within(table).getByTestId("amount-expense-rel-personal-1-repayment");
+    expect(repaymentAmountChip).toHaveClass("turnover-amount-expense");
+    expect(within(repaymentAmountChip).getByText("支")).toBeInTheDocument();
+    expect(within(repaymentAmountChip).getByText("200.00")).toBeInTheDocument();
     expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-summary-row");
     expect(within(table).queryByText("2026-05-01")).not.toBeInTheDocument();
     expect(within(table).queryByText("2026-05-03")).not.toBeInTheDocument();
