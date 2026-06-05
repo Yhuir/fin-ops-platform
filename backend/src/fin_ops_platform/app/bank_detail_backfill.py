@@ -24,6 +24,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.dry_run and args.scope_key:
+        scope_keys = _scope_keys(args.scope_key, projection_builder=None)
+        plan = {
+            "scope_keys": scope_keys,
+            "enqueue_missing": bool(args.enqueue_missing),
+            "enqueue_all": bool(args.enqueue_all),
+            "worker_drain": bool(args.worker_drain),
+            "dry_run": bool(args.dry_run),
+        }
+        print(json.dumps({"plan": plan, "enqueued_scope_keys": [], "drain_result": []}, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     connection = PostgresConnection(PostgresSettings.from_env())
     queue = RuntimeQueueRepository(connection)
     projection_builder = BankDetailSqlProjectionBuilder(connection=connection)
@@ -66,10 +77,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _scope_keys(raw_scope_keys: list[str], projection_builder: BankDetailSqlProjectionBuilder) -> list[str]:
+def _scope_keys(raw_scope_keys: list[str], projection_builder: BankDetailSqlProjectionBuilder | None) -> list[str]:
     explicit = [str(scope_key).strip() for scope_key in list(raw_scope_keys or []) if str(scope_key).strip()]
     if explicit:
         return explicit
+    if projection_builder is None:
+        return ["all"]
     return projection_builder.list_bank_detail_scope_shards("all")
 
 

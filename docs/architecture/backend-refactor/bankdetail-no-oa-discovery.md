@@ -274,3 +274,82 @@ PF-P195 后仍未覆盖的目标：
 - No OA/Bankdetail 真实 PostgreSQL 事务内 facts/audit/dirty/outbox UoW 收敛。
 
 当前切片已覆盖 discovery、route characterization、read model characterization、category/auto-tag side effects、No OA mutation side effects。下一步适合生成 cumulative MG，统一覆盖 PF-P190 到 PF-P195 的完整 diff 后合入 `dev`。
+
+## PF-P196 Account Balance / Backfill Smoke Planning
+
+PF-P196 从最新 `dev` 新建分支后执行，继续 Bankdetail / No OA 模块，只做 account balance 和 backfill smoke planning，不修改业务代码。
+
+当前事实：
+
+- `bank_account_balance.read_model.refresh` 已有独立 refresh service：`BankAccountBalanceReadModelRefreshService`。
+- `BankAccountBalanceProjectionBuilder` 直接从 `app.bank_transactions` 聚合账户余额，并通过 `PostgresReadModelRepository.save_bank_account_balances(...)` 发布 read model。
+- `tests/test_bank_account_balance_read_model.py` 已覆盖：
+  - 最新非空余额选择。
+  - 稳定 account identity。
+  - 人民币 currency alias normalize。
+  - repository 读取 `read_model.bank_account_balances`，不从 bank detail rows 取余额。
+  - empty projection 返回 fresh empty payload。
+- `app/bank_account_balance_backfill.py` 支持：
+  - `--dry-run`
+  - `--rebuild-now`
+  - `--enqueue`
+  - `--worker-drain`
+  - `--max-iterations`
+- `app/bank_detail_backfill.py` 支持：
+  - `--scope-key`
+  - `--enqueue-missing`
+  - `--enqueue-all`
+  - `--worker-drain`
+  - `--dry-run`
+
+缺口：
+
+- 缺少 CLI dry-run smoke tests，无法机械保证 backfill 命令不会在 dry-run 下连接 PostgreSQL 或 enqueue。
+- 缺少 enqueue-only smoke tests，无法锁定 `bank_account_balance_backfill` / `bank_detail_backfill` 的 scope_type、scope_key、reason contract。
+- 缺少 worker-drain 参数/handler wiring smoke tests，后续 refactor worker registry 时可能破坏 backfill CLI。
+
+PF-P196 后推荐下一条：
+
+- `PF-P197 - Bankdetail Backfill CLI Characterization Tests`
+  - 只新增 tests，不修改 production code。
+  - 使用 `unittest.mock.patch` 或等价 fake 替换 `PostgresConnection`、`RuntimeQueueRepository`、projection builder 和 worker。
+  - 锁定 dry-run 不实例化真实连接。
+  - 锁定 enqueue contract：
+    - `bank_account_balance` / `all` / `bank_account_balance_backfill`
+    - `bank_detail` / `all` / `bank_detail_backfill_all`
+    - `bank_detail` / `<month>` / `bank_detail_backfill_missing`
+  - 锁定 worker-drain 使用正确 event type 和 handler key。
+
+PF-P197 禁止线：
+
+- 不访问真实 PostgreSQL。
+- 不访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不改 backfill production code，除非测试暴露真实 bug 且修复范围极小。
+- 不把 backfill smoke 扩大成 worker/runtime registry 重构。
+
+## PF-P197 Backfill CLI Characterization Update
+
+PF-P197 已新增 `tests/test_bankdetail_backfill_cli.py`，并做了一个最小 production fix：
+
+- `bank_detail_backfill --dry-run --scope-key <month>` 现在会在实例化 PostgreSQL connection 前输出 plan 并返回。
+- 该修复只影响显式 scope dry-run 路径，不改变 enqueue、worker-drain 或真实 backfill 行为。
+
+新增锁定：
+
+- `bank_account_balance_backfill --dry-run` 不打开 PostgreSQL。
+- `bank_detail_backfill --dry-run --scope-key <month>` 不打开 PostgreSQL。
+- `bank_account_balance_backfill --enqueue` enqueue：
+  - `scope_type="bank_account_balance"`
+  - `scope_key="all"`
+  - `reason="bank_account_balance_backfill"`
+- `bank_detail_backfill --enqueue-all --enqueue-missing` enqueue：
+  - `bank_detail/all/bank_detail_backfill_all`
+  - `bank_detail/<month>/bank_detail_backfill_missing`
+- `bank_account_balance_backfill --worker-drain` 使用 `bank-account-balance-read-model` worker kind 和 `bank_account_balance.read_model.refresh` handler key。
+
+PF-P197 后剩余目标：
+
+- Bankdetail / No OA 真正的事务内 facts/audit/dirty/outbox UoW 收敛。
+- Account balance backfill 不需要立即进入 UoW；当前更适合作为 ops smoke baseline 合入。
+
+当前 PF-P196/PF-P197 形成一个较小可合并切片，下一步适合生成 cumulative MG 合入 `dev`。
