@@ -238,3 +238,21 @@ PF-P193 后仍未覆盖的测试目标：
 - Category / auto-tag write 的 dirty scope 与 outbox baseline。
 - No OA submit/withdraw service-level facts/audit/dirty/outbox。
 - Account balance read model refresh 与 backfill smoke checklist。
+
+## PF-P194 Category / Auto Tag Side-Effect Characterization Update
+
+PF-P194 已补强 Bankdetail auto-tag rules update 的 side-effect characterization。
+
+新增锁定：
+
+- `finalize_auto_tag_rules_update(...)` 必须清理 relation tag projection cache 和 Turnover Ledger read model cache。
+- Auto-tag rules 变更必须 enqueue `turnover_ledger` all-scope refresh，reason 为 `bank_auto_tag_rules_changed`。
+- 带 `bank_detail_priority_scope_keys` 的变更必须 enqueue 对应 Bankdetail priority scope refresh，reason 为 `bank_auto_tag_rules_changed_priority`。
+- Priority scope 不允许把 `"all"` 当作 Bankdetail priority month scope 直接 enqueue。
+- Auto-tag rules 变更必须发出 derived lifecycle event `bank_auto_tag_rules_changed`，并保留 `new_version` metadata。
+
+PF-P194 后仍未覆盖的测试目标：
+
+- No OA submit/withdraw service-level facts/audit/dirty/outbox。
+- Account balance read model refresh 与 backfill smoke checklist。
+- 真正的事务内 facts/audit/dirty/outbox UoW 收敛尚未实现。

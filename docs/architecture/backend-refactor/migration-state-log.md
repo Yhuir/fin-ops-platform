@@ -62,10 +62,10 @@
 | --- | --- |
 | 当前阶段 | Dev integration branch bootstrap complete; ready for next module |
 | 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests` |
+| 最近 verified prompt | `PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests` |
 | 当前分支 | `codex/bankdetail-no-oa-discovery-p190` |
-| 最近验证 | PF-P193 read model characterization tests 通过；未修改 production code；未执行 Traffic Gate |
-| 下一条允许任务 | 生成并审查 `PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests`，继续当前 Bankdetail / No OA 切片，不切换模块 |
+| 最近验证 | PF-P194 auto-tag side-effect characterization tests 通过；未修改 production code；未执行 Traffic Gate |
+| 下一条允许任务 | 生成并审查 `PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests`，继续当前 Bankdetail / No OA 切片，不切换模块 |
 
 ## Prompt 执行日志
 
@@ -302,6 +302,38 @@ MG 步骤：
 
 - 生成并审查 `PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests`。
 - PF-P194 只补写路径 characterization tests，不改 production code。
+
+### PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests
+
+状态：`verified`
+
+范围：
+
+- 只补强 Bankdetail category / auto-tag side-effect characterization tests。
+- 不修改 production code。
+- 不修改 schema。
+- 不访问真实外部服务。
+- 不执行 MG、Traffic Gate 或部署。
+
+执行结果：
+
+- `tests/test_bank_details_sql_runtime.py`
+  - 新增 `test_auto_tag_rules_update_refreshes_priority_bank_detail_and_turnover_all_scope`。
+  - 锁定 `finalize_auto_tag_rules_update(...)` 必须清理 relation tag projection cache 和 Turnover Ledger read model cache。
+  - 锁定 Turnover Ledger all-scope refresh。
+  - 锁定 Bankdetail priority month scope refresh。
+  - 锁定 priority scope 不把 `all` 作为 Bankdetail month scope enqueue。
+  - 锁定 derived lifecycle event `bank_auto_tag_rules_changed` 和 `new_version` metadata。
+- `bankdetail-no-oa-discovery.md` 已记录 PF-P194 覆盖和剩余目标。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，42 tests。
+
+下一步：
+
+- 生成并审查 `PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests`。
+- PF-P195 只补 No OA submit/withdraw service-level characterization，不改 production code。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 

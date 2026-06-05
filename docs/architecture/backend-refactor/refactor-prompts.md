@@ -22310,6 +22310,70 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v`：Pass，50 tests。
 - 下一条建议：`PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests`。
 
+## PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests
+
+Role:
+你是一位负责写路径 side-effect characterization 的 Python 后端工程师。你必须只补强 Bankdetail category / auto-tag 的测试，不修改 production code。
+
+Context:
+PF-P193 已锁定 Bankdetail read model missing scope 不同步 legacy scan。下一步必须锁定 category / auto-tag 写路径触发的 dirty/outbox/read model side effects。
+
+Goal:
+补强 Bankdetail auto-tag rules update 的 side-effect characterization，保护 cache clear、Turnover all-scope refresh、Bankdetail priority scope refresh 和 derived lifecycle event。
+
+Allowed Scope:
+- tests/test_bank_details_sql_runtime.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实外部服务。
+- 不得引入 UoW。
+- 不得删除或放宽既有 assertions。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 下一条建议继续当前模块，优先补 No OA submit/withdraw service-level facts/audit/dirty/outbox characterization。
+```
+
+### 审查结论
+
+- PF-P194 边界正确：只补 auto-tag side-effect tests，不修改 production code。
+- 该 prompt 保护后续写路径 cleanup/UoW 前的 dirty/outbox 类 side-effect 语义。
+
+### PF-P194 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_bank_details_sql_runtime.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 `test_auto_tag_rules_update_refreshes_priority_bank_detail_and_turnover_all_scope`。
+  - 锁定 relation tag projection cache / Turnover cache clear。
+  - 锁定 Turnover all-scope refresh。
+  - 锁定 Bankdetail priority month scope refresh，且不把 `all` 作为 priority scope。
+  - 锁定 derived lifecycle event metadata。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，42 tests。
+- 下一条建议：`PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests`。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`

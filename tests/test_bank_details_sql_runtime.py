@@ -955,6 +955,64 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertNotIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
 
+    def test_auto_tag_rules_update_refreshes_priority_bank_detail_and_turnover_all_scope(self) -> None:
+        class Queue:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        queue = Queue()
+        cleared: list[str] = []
+        lifecycle_events: list[dict[str, object]] = []
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(),
+            state_store=None,
+            bank_detail_sql_read_repository=None,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: [],
+            invalidate_after_category_mutation=lambda _affected_months: False,
+            execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
+                {"event_type": event_type, **kwargs}
+            ),
+            clear_turnover_ledger_read_model=lambda: cleared.append("turnover"),
+            clear_relation_tag_projection_cache=lambda: cleared.append("relation_tag_projection"),
+            available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+
+        service.finalize_auto_tag_rules_update(
+            {
+                "new_version": 12,
+                "bank_detail_priority_scope_keys": ["2026-05", "all", "", "2026-04"],
+            }
+        )
+
+        self.assertEqual(cleared, ["relation_tag_projection", "turnover"])
+        self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertIn(("bank_detail", "2026-04", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
+        self.assertIn(("bank_detail", "2026-05", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
+        self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
+        self.assertEqual(
+            lifecycle_events,
+            [
+                {
+                    "event_type": "bank_auto_tag_rules_changed",
+                    "scope_keys": ["all"],
+                    "include_all": True,
+                    "metadata": {"reason": "bank_auto_tag_rules_changed", "new_version": 12},
+                    "schedule_cost_warmup": False,
+                }
+            ],
+        )
+
     def test_accounts_serve_previous_schema_rows_while_refreshing(self) -> None:
         connection = FakeConnection(
             rows=[
