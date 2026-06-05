@@ -184,12 +184,16 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
     quoted_runtime_worker_ensure = shlex.quote(config.runtime_worker_ensure_path)
     commands = [
         "set -euo pipefail",
+        build_remote_failure_trap(),
+        mark_remote_deploy_step("initialize release variables"),
         f"RELEASE_NAME={quoted_release_name}",
         f"RELEASES_DIR={quoted_releases_dir}",
         f"RELEASE_DIR={quoted_release_dir}",
         f"DEPLOY_CONTROL={quoted_deploy_control}",
         f"KEEP_RELEASES={int(config.keep_releases)}",
+        mark_remote_deploy_step("validate release name"),
         'case "$RELEASE_NAME" in *[!A-Za-z0-9._-]*|"") echo "invalid release name: $RELEASE_NAME" >&2; exit 64 ;; esac',
+        mark_remote_deploy_step("prepare release directory"),
         'mkdir -p "$RELEASES_DIR"',
     ]
     if config.replace_release:
@@ -199,32 +203,62 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
     commands.extend(
         [
             'mkdir -p "$RELEASE_DIR"',
+            mark_remote_deploy_step("extract release archive"),
             'tar -xzf - -C "$RELEASE_DIR"',
+            mark_remote_deploy_step("validate release layout"),
             'test -d "$RELEASE_DIR/src/backend/src"',
             'test -f "$RELEASE_DIR/src/backend/requirements.txt"',
             'test -f "$RELEASE_DIR/src/web/dist/index.html"',
+            mark_remote_deploy_step("verify deploy-control contract"),
             build_deploy_control_contract_check(),
+            mark_remote_deploy_step("deploy-control check-release"),
             f"sudo -n {quoted_deploy_control} check-release {quoted_release_name}",
         ]
     )
     if config.activate:
         commands.extend(
             [
+                mark_remote_deploy_step("deploy-control activate"),
                 f"sudo -n {quoted_deploy_control} activate {quoted_release_name}",
+                mark_remote_deploy_step("backend readiness check"),
                 build_backend_readiness_check(),
+                mark_remote_deploy_step("deploy-control status"),
                 f"sudo -n {quoted_deploy_control} status",
+                mark_remote_deploy_step("runtime worker ensure"),
                 f'sudo -n {quoted_runtime_worker_ensure} "$RELEASE_DIR/src"',
+                mark_remote_deploy_step("frontend hash check"),
                 build_frontend_hash_check(config),
+                mark_remote_deploy_step("public session route check"),
                 build_public_api_route_check(config),
             ]
         )
         if config.keep_releases > 0:
+            commands.append(mark_remote_deploy_step("cleanup old releases"))
             commands.append(f"sudo -n {quoted_deploy_control} cleanup-releases --keep {int(config.keep_releases)}")
         if config.reload_nginx:
             commands.append('echo "release mode does not reload nginx; static files do not require nginx reload" >&2')
     else:
+        commands.append(mark_remote_deploy_step("release upload validated"))
         commands.append('echo "release uploaded and validated; activation skipped: $RELEASE_NAME"')
     return "\n".join(commands) + "\n"
+
+
+def build_remote_failure_trap() -> str:
+    return "\n".join(
+        [
+            "DEPLOY_STEP=bootstrap",
+            "trap 'status=$?; printf \"finops remote deploy failed at step: %s (exit=%s)\\n\" \"${DEPLOY_STEP:-unknown}\" \"$status\" >&2; exit \"$status\"' ERR",
+        ]
+    )
+
+
+def mark_remote_deploy_step(step: str) -> str:
+    return "\n".join(
+        [
+            f"DEPLOY_STEP={shlex.quote(step)}",
+            'printf "== finops deploy step: %s ==\\n" "$DEPLOY_STEP" >&2',
+        ]
+    )
 
 
 def build_deploy_control_contract_check() -> str:

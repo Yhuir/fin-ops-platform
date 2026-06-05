@@ -75,6 +75,11 @@ class DeployOAScriptTest(unittest.TestCase):
 
         remote_script = self.module.build_release_remote_deploy_script(config)
 
+        self.assertIn("finops remote deploy failed at step", remote_script)
+        self.assertIn("DEPLOY_STEP='deploy-control activate'", remote_script)
+        self.assertIn("DEPLOY_STEP='runtime worker ensure'", remote_script)
+        self.assertIn("DEPLOY_STEP='cleanup old releases'", remote_script)
+        self.assertIn('printf "== finops deploy step: %s ==\\n" "$DEPLOY_STEP" >&2', remote_script)
         self.assertIn("RELEASE_DIR=/opt/fin-ops/releases/main-abcdef1-20260524170000", remote_script)
         self.assertIn("tar -xzf - -C \"$RELEASE_DIR\"", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
