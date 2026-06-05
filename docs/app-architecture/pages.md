@@ -17,7 +17,7 @@
 | --- | --- | --- | --- | --- |
 | 银企核销 / 关联台 | `web/src/pages/ReconciliationPage.tsx`、workbench 页面组件 | reconciliation/workbench routes、workbench service、read model service | 银行流水、OA 单据、发票、确认关系、active generation | 关系确认/撤回、导入确认、read model refresh、domain event |
 | 银行明细 | `web/src/pages/BankDetailsPage.tsx` | bank detail routes、bank detail read model/query service | 银行流水、标签、业务对象关系、no-OA 状态 | 导入、标签规则、关系确认、no-OA 批处理 |
-| 往来款管理 | `web/src/pages/TurnoverManagementPage.tsx` | turnover routes/service | 外部往来对象、关系确认、利息、项目归因 | 银行明细、关联台、人工确认/撤回 |
+| 往来款管理 | `web/src/pages/TurnoverLedgerPage.tsx` | turnover ledger routes/service、workbench pair relation service | 外部往来候选、人工闭环、利息、项目归因、Workbench pair relation | 银行明细、关联台、人工闭环/撤回 |
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出流水、进项发票、规则建议、人工关系 | 进项导入、关系确认/撤回、规则变更 |
 | OA 待付款核对 | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending payments routes/query service | OA 待付款、付款流水、进项发票、SQL read model | OA 导入、银行流水导入、发票关系变化 |
 | 税金抵扣 / 发票使用 | tax offset / invoice usage pages | invoice usage/read model routes | 已认证发票、使用状态、销项收款、ETC 发票 | 发票导入、认证状态、收款关系、backfill/refresh |
@@ -68,6 +68,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | 银行流水导入确认 | 新流水、标签和统计需要刷新 | 银行明细、关联台、往来款、成本统计、App Health |
 | OA/发票/ETC 导入确认 | 外部单据和候选关系变化 | 关联台、待找发票、OA 待付款、税金抵扣、ETC 批次 |
 | 关系确认 / 撤回 | 对象关系、流水状态、发票使用状态变化 | 关联台、银行明细、待找发票、税金抵扣、往来款 |
+| 外部往来手动闭环 | 同一往来组两条银行流水形成 Turnover 手动闭环和 Workbench pair relation | 往来款、关联台、成本统计、搜索 |
 | 标签/规则配置保存 | 标签判定和候选建议变化 | 银行明细、关联台、待找发票、成本统计 |
 | 数据重置 / backfill | read model 状态和缓存失效 | 所有列表页、App Health |
 

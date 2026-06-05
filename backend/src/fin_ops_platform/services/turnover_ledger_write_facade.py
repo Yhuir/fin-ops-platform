@@ -237,6 +237,110 @@ class TurnoverLedgerWriteFacade:
 
         return self._uow.run(command, handler)
 
+    def confirm_zero_difference_closure(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        affected_months: list[str],
+        expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        normalized_bank_row_ids = [
+            str(row_id).strip()
+            for row_id in list(bank_row_ids or [])
+            if str(row_id).strip()
+        ]
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip()
+        ]
+        normalized_expected_versions = dict(expected_versions or {})
+        normalized_idempotency_key = str(idempotency_key or "").strip()
+        action_name = "turnover_relation_zero_difference_closure"
+        command_payload = {
+            "bank_row_ids": list(normalized_bank_row_ids),
+            "affected_months": list(normalized_months),
+            "note": note,
+        }
+        request_fingerprint = ""
+        if normalized_idempotency_key:
+            request_fingerprint = workbench_request_fingerprint(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action_name=action_name,
+                payload={
+                    **dict(command_payload),
+                    "expected_versions": dict(normalized_expected_versions),
+                },
+            )
+        refresh_scope_keys = sorted({"all", *normalized_months})
+        command = TurnoverLedgerWriteCommand(
+            action_name=action_name,
+            scope_keys=["all"],
+            refresh_requests=[
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_keys": ["all"],
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "workbench",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "workbench_relation",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "search",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+            ],
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            expected_versions=dict(normalized_expected_versions),
+            idempotency_key=normalized_idempotency_key,
+            request_fingerprint=request_fingerprint,
+            payload=command_payload,
+        )
+
+        def handler(context: Any) -> dict[str, object]:
+            result = context.relation_repository.confirm_zero_difference_closure(
+                bank_row_ids=list(normalized_bank_row_ids),
+                actor_id=actor_id,
+                note=note,
+                transaction=context.transaction,
+            )
+            relation = dict(result.get("relation") if isinstance(result.get("relation"), dict) else result)
+            pair_relation = context.workbench_pair_port.create_turnover_manual_closure(
+                relation=relation,
+                bank_row_ids=list(normalized_bank_row_ids),
+                actor_id=actor_id,
+                note=note,
+                affected_months=list(normalized_months),
+                transaction=context.transaction,
+            )
+            return {
+                "turnover_relation": relation,
+                "relation": relation,
+                "workbench_pair_relation": dict(pair_relation or {}),
+                "affected_months": list(normalized_months),
+            }
+
+        return self._uow.run(command, handler)
+
     def withdraw_relation(
         self,
         *,

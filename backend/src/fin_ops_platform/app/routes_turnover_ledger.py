@@ -248,6 +248,19 @@ class TurnoverLedgerApiRoutes:
         row.update(self._row_extra_fields(extra))
         return {"extra": extra, "row": row}
 
+    def confirm_zero_difference_closure(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor: str,
+        note: str | None = None,
+    ) -> dict[str, object]:
+        return self._relation_service.confirm_zero_difference_closure(
+            list(bank_row_ids or []),
+            actor=actor,
+            note=note,
+        )
+
     def extras_snapshot(self) -> dict[str, object]:
         snapshot = getattr(self._extra_service, "snapshot", None)
         if not callable(snapshot):

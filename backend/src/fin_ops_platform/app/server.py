@@ -297,6 +297,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalWithdrawRelationAdapterSet,
     TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder,
     TurnoverLedgerTagSelectionRequestBoundaryFacade,
+    TurnoverLedgerClosureLegacyFallbackFacade,
     TurnoverLedgerConfirmLegacyFallbackAdapterSet,
     TurnoverLedgerConfirmLegacyFallbackFacade,
     TurnoverLedgerConfirmRequestBoundaryFacade,
@@ -1747,6 +1748,8 @@ class Application:
             return self._handle_api_turnover_ledger_relation(relation_id)
         if method == "POST" and route_path == "/api/turnover-ledger/relations/confirm":
             return self._handle_api_turnover_ledger_confirm(body, headers)
+        if method == "POST" and route_path == "/api/turnover-ledger/closures/confirm":
+            return self._handle_api_turnover_ledger_closure_confirm(body, headers)
         if method == "POST" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/withdraw"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_turnover_ledger_withdraw(relation_id, body, headers)
@@ -2912,6 +2915,52 @@ class Application:
     def _turnover_ledger_confirm_request_boundary_facade(self) -> TurnoverLedgerConfirmRequestBoundaryFacade:
         return TurnoverLedgerConfirmRequestBoundaryFacade(
             facade=self._turnover_ledger_confirm_write_facade(),
+            affected_months_resolver=self._bank_transaction_category_affected_months,
+        )
+
+    def _turnover_ledger_closure_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerClosureLegacyFallbackFacade:
+        state_store = getattr(self, "_state_store", None)
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if state_store is None or queue_repository is None:
+            return self._turnover_ledger_closure_legacy_fallback_facade()
+        support = self._turnover_ledger_local_runtime_support()
+        facade = TurnoverLedgerConfirmPrimaryWriteFacadeBuilder(
+            state_store=state_store,
+            queue_repository=queue_repository,
+            relation_service=self._turnover_relation_service,
+            routes=self._turnover_ledger_api_routes,
+            bank_rows_provider=self._turnover_bank_transaction_rows,
+            replace_snapshot=support.replace_turnover_relation_snapshot,
+            emit_persistence_warning=self._emit_workbench_persistence_warning,
+            tenant_id=self._workbench_reconciliation_tenant_id(),
+            persistence_repository_factory=lambda transaction: support.persistence_repository(
+                transaction,
+                state_store=state_store,
+            ),
+            postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
+            local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
+            pair_relation_service=self._workbench_pair_relation_service,
+            persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
+        ).build()
+        if facade is not None:
+            return facade
+        return self._turnover_ledger_closure_legacy_fallback_facade()
+
+    def _turnover_ledger_closure_legacy_fallback_facade(self) -> TurnoverLedgerClosureLegacyFallbackFacade:
+        invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
+        return TurnoverLedgerClosureLegacyFallbackFacade(
+            relation_rebuild=lambda: self._turnover_relation_service.rebuild_from_bank_rows(
+                self._turnover_bank_transaction_rows()
+            ),
+            routes=self._turnover_ledger_api_routes,
+            after_mutation=invalidation_adapter.after_relation_mutation,
+            pair_relation_service=self._workbench_pair_relation_service,
+            persist_pair_relations=self._persist_workbench_pair_relations,
+        )
+
+    def _turnover_ledger_closure_request_boundary_facade(self) -> TurnoverLedgerConfirmRequestBoundaryFacade:
+        return TurnoverLedgerConfirmRequestBoundaryFacade(
+            facade=self._turnover_ledger_closure_write_facade(),
             affected_months_resolver=self._bank_transaction_category_affected_months,
         )
 
@@ -12941,6 +12990,50 @@ class Application:
             return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
         return self._json_response(HTTPStatus.OK, result)
 
+    def _handle_api_turnover_ledger_closure_confirm(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session_response = self._turnover_mutation_session(headers)
+        if isinstance(session_response, Response):
+            return session_response
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        bank_row_ids = payload.get("bank_row_ids")
+        if not isinstance(bank_row_ids, list):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_bank_row_ids", "message": "bank_row_ids must be an array."},
+            )
+        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
+        facade = self._turnover_ledger_closure_request_boundary_facade()
+        expected_versions = payload.get("expected_versions") if isinstance(payload.get("expected_versions"), dict) else {}
+        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
+        try:
+            result = facade.confirm_zero_difference_closure_from_request(
+                bank_row_ids=bank_row_ids,
+                actor_id=actor,
+                tenant_id=tenant_id_for_session(session_response),
+                note=str(payload.get("note")) if payload.get("note") is not None else None,
+                expected_versions=expected_versions,
+                idempotency_key=idempotency_key,
+            )
+        except TurnoverRelationValidationError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except TurnoverLedgerWritePreconditionError as exc:
+            return self._json_response(
+                exc.status_code,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
+        return self._json_response(HTTPStatus.OK, result)
+
     def _handle_api_turnover_ledger_withdraw(
         self,
         relation_id: str,
@@ -15229,15 +15322,7 @@ class Application:
         }
 
     def _active_turnover_relations_for_workbench(self) -> list[dict[str, object]]:
-        relations = self._turnover_relation_service.rebuild_from_bank_rows(
-            self._turnover_bank_transaction_rows()
-        )
-        return [
-            relation
-            for relation in relations
-            if str(relation.get("status") or "").strip() in {"deterministic", "confirmed"}
-            and bool(relation.get("sync_to_workbench"))
-        ]
+        return []
 
     def _persist_workbench_candidate_matches_best_effort(
         self,
@@ -19576,6 +19661,8 @@ class Application:
             return {"code": "salary_personal_auto_match", "label": f"已匹配：{self._bank_transaction_tag_label_current('salary')}", "tone": "success"}
         if relation_mode == PERSONAL_ADVANCE_REPAYMENT_MODE:
             return {"code": PERSONAL_ADVANCE_REPAYMENT_MODE, "label": "已匹配：还清个人暂借款", "tone": "success"}
+        if relation_mode == "turnover_manual_closure":
+            return {"code": "fully_linked", "label": "已匹配：外部往来款闭环", "tone": "success"}
         if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
             if row_type == "invoice":
                 return {"code": OA_INVOICE_OFFSET_AUTO_MATCH_MODE, "label": "已关联OA", "tone": "success"}

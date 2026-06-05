@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  confirmTurnoverClosure,
   confirmTurnoverRelation,
   downloadTurnoverLedgerExport,
   fetchTurnoverLedgerTagSelection,
@@ -310,13 +311,52 @@ describe("turnover ledger API", () => {
     });
     expect(detail.auditHistory[0]).toEqual({ action: "generated", note: "system" });
 
-    await expect(confirmTurnoverRelation({ bankRowIds: ["bank-001"], note: "确认归并" })).resolves.toEqual({
+    await expect(confirmTurnoverRelation({ bankRowIds: ["bank-001"], note: "确认归并" })).resolves.toMatchObject({
       relationId: "rel-confirmed",
       status: "confirmed",
     });
-    await expect(withdrawTurnoverRelation({ relationId: "rel-001", note: "撤销原因" })).resolves.toEqual({
+    await expect(withdrawTurnoverRelation({ relationId: "rel-001", note: "撤销原因" })).resolves.toMatchObject({
       relationId: "rel-001",
       status: "withdrawn",
+    });
+  });
+
+  test("confirms manual turnover closure through the closure endpoint", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      expect(url.pathname).toBe("/api/turnover-ledger/closures/confirm");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        bank_row_ids: ["bank-income", "bank-expense"],
+        note: "外部往来手动闭环",
+        expected_versions: { "bank-income": 2 },
+        idempotency_key: "closure-001",
+      });
+      return Response.json({
+        turnover_relation: {
+          relation_id: "turnover_rel_001",
+          status: "confirmed",
+        },
+        workbench_pair_relation: {
+          case_id: "turnover:turnover_rel_001",
+          relation_mode: "turnover_manual_closure",
+        },
+        affected_months: ["2026-05"],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(confirmTurnoverClosure({
+      bankRowIds: ["bank-income", "bank-expense"],
+      note: "外部往来手动闭环",
+      expectedVersions: { "bank-income": 2 },
+      idempotencyKey: "closure-001",
+    })).resolves.toEqual({
+      relationId: "turnover_rel_001",
+      status: "confirmed",
+      affectedMonths: ["2026-05"],
+      workbenchPairRelationId: "turnover:turnover_rel_001",
+      workbenchRelationMode: "turnover_manual_closure",
     });
   });
 

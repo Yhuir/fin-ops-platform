@@ -3,6 +3,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
@@ -457,10 +458,14 @@ export default function TurnoverLedgerGroupedTable({
   groups,
   loading,
   onEdit,
+  selectedFlowRowIds = new Set<string>(),
+  onToggleFlowSelection,
 }: {
   groups: TurnoverLedgerGroup[];
   loading: boolean;
   onEdit: (row: TurnoverLedgerGroupedRow) => void;
+  selectedFlowRowIds?: Set<string>;
+  onToggleFlowSelection?: (group: TurnoverLedgerGroup, row: TurnoverLedgerGroupedRow) => void;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const hasRows = groups.some((group) => resolveRows(group).summaryRow !== null);
@@ -485,6 +490,7 @@ export default function TurnoverLedgerGroupedTable({
             >
               对方户名
             </TableCell>
+            <TableCell sx={{ width: 52, fontWeight: 900 }} padding="checkbox">选择</TableCell>
             <TableCell sx={{ width: 150, fontWeight: 900 }}>收入</TableCell>
             <TableCell sx={{ width: 150, fontWeight: 900 }}>支出</TableCell>
             <TableCell sx={{ width: 118, fontWeight: 900 }}>还款备注</TableCell>
@@ -499,14 +505,14 @@ export default function TurnoverLedgerGroupedTable({
         <TableBody>
           {loading ? (
             <TableRow>
-              <TableCell colSpan={10} align="center" sx={{ py: 8 }}>
+              <TableCell colSpan={11} align="center" sx={{ py: 8 }}>
                 正在加载往来款台账
               </TableCell>
             </TableRow>
           ) : null}
           {!loading && !hasRows ? (
             <TableRow>
-              <TableCell colSpan={10} align="center" sx={{ py: 8 }}>
+              <TableCell colSpan={11} align="center" sx={{ py: 8 }}>
                 暂无往来款台账
               </TableCell>
             </TableRow>
@@ -562,6 +568,9 @@ export default function TurnoverLedgerGroupedTable({
                         onToggle={toggleGroup}
                       />
                     </TableCell>
+                    <TableCell padding="checkbox">
+                      <Checkbox disabled aria-label={`${group.counterpartyName || "未命名对方"} 合计行不可选`} />
+                    </TableCell>
                     <RowCells
                       row={summaryRow}
                       rowKind="summary"
@@ -572,6 +581,7 @@ export default function TurnoverLedgerGroupedTable({
                 const flows = visibleFlowRows.map((row, index) => {
                   const rowTone = flowDirectionKey(row);
                   const rowId = runtimeRow(row).sourceBankRowId || runtimeRow(row).flowId || String(index);
+                  const checked = selectedFlowRowIds.has(rowId);
                   return (
                     <TableRow
                       key={`${group.groupId}:flow:${rowId}`}
@@ -582,6 +592,13 @@ export default function TurnoverLedgerGroupedTable({
                         "& td": { verticalAlign: "top" },
                       }}
                     >
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          checked={checked}
+                          onChange={() => onToggleFlowSelection?.(group, row)}
+                          inputProps={{ "aria-label": `选择流水 ${rowId}` }}
+                        />
+                      </TableCell>
                       <RowCells
                         row={row}
                         rowKind="flow"

@@ -51,7 +51,7 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(relation["status"], "deterministic")
         self.assertEqual(relation["category_family"], "personal")
         self.assertEqual(relation["business_type"], "borrow_in")
-        self.assertTrue(relation["sync_to_workbench"])
+        self.assertFalse(relation["sync_to_workbench"])
         self.assertEqual(relation["principal_amount"], "200000.00")
         self.assertEqual(relation["settled_amount"], "200000.00")
         self.assertEqual(relation["balance_amount"], "0.00")
@@ -87,7 +87,7 @@ class TurnoverRelationServiceTests(unittest.TestCase):
 
         self.assertEqual(len(relations), 1)
         self.assertEqual(relations[0]["status"], "deterministic")
-        self.assertTrue(relations[0]["sync_to_workbench"])
+        self.assertFalse(relations[0]["sync_to_workbench"])
         self.assertEqual(relations[0]["balance_amount"], "0.00")
         self.assertEqual(relations[0]["evidence"]["auto_confirm_reason"], "unique_exact_fifo_closed")
 
@@ -105,7 +105,7 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(len(relations), 1)
         self.assertEqual(relations[0]["status"], "deterministic")
         self.assertEqual(relations[0]["category_family"], "company")
-        self.assertTrue(relations[0]["sync_to_workbench"])
+        self.assertFalse(relations[0]["sync_to_workbench"])
         self.assertEqual(relations[0]["balance_amount"], "0.00")
         self.assertEqual(relations[0]["evidence"]["auto_confirm_reason"], "unique_exact_fifo_closed")
 
@@ -210,7 +210,7 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(len(relations), 1)
         self.assertEqual(relations[0]["status"], "deterministic")
         self.assertEqual(relations[0]["business_type"], "borrow_out")
-        self.assertTrue(relations[0]["sync_to_workbench"])
+        self.assertFalse(relations[0]["sync_to_workbench"])
 
     def test_business_unique_exact_closed_generates_deterministic_relation(self) -> None:
         service = TurnoverRelationService.from_snapshot(None)
@@ -231,7 +231,7 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(relations[0]["status"], "deterministic")
         self.assertEqual(relations[0]["category_family"], "business")
         self.assertEqual(relations[0]["business_type"], "business_receivable")
-        self.assertTrue(relations[0]["sync_to_workbench"])
+        self.assertFalse(relations[0]["sync_to_workbench"])
 
     def test_business_different_category_codes_do_not_mix_into_deterministic_relation(self) -> None:
         service = TurnoverRelationService.from_snapshot(None)
@@ -288,7 +288,7 @@ class TurnoverRelationServiceTests(unittest.TestCase):
 
         self.assertEqual(relation["status"], "confirmed")
         self.assertEqual(relation["source"], "manual")
-        self.assertTrue(relation["sync_to_workbench"])
+        self.assertFalse(relation["sync_to_workbench"])
         self.assertEqual(relation["bank_row_ids"], ["txn-in-1", "txn-out-1"])
         self.assertEqual(relation["balance_amount"], "100000.00")
         self.assertEqual(service.audit_log()[0]["action"], "confirm_relation")
@@ -317,19 +317,20 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(service.relations()[0]["source"], "manual")
         self.assertEqual(service.relations()[0]["status"], "confirmed")
 
-    def test_confirm_relation_rejects_rows_already_in_syncable_relation(self) -> None:
+    def test_confirm_relation_replaces_deterministic_candidate(self) -> None:
         service = TurnoverRelationService.from_snapshot(None)
-        service.rebuild_from_bank_rows(
+        deterministic = service.rebuild_from_bank_rows(
             [
                 bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
                 bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="200000.00"),
             ]
-        )
+        )[0]
 
-        with self.assertRaises(TurnoverRelationValidationError) as context:
-            service.confirm_relation(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
+        confirmed = service.confirm_relation(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
 
-        self.assertEqual(context.exception.error_code, "relation_row_conflict")
+        self.assertEqual(confirmed["relation_id"], deterministic["relation_id"])
+        self.assertEqual(confirmed["status"], "confirmed")
+        self.assertEqual(len(service.relations()), 1)
 
     def test_confirm_relation_rejects_duplicate_confirmed_relation(self) -> None:
         service = TurnoverRelationService.from_snapshot(
@@ -345,6 +346,109 @@ class TurnoverRelationServiceTests(unittest.TestCase):
             service.confirm_relation(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
 
         self.assertEqual(context.exception.error_code, "relation_row_conflict")
+
+    def test_confirm_zero_difference_closure_creates_manual_closure_audit_entry(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
+                bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="200000.00"),
+            ],
+        )
+
+        relation = service.confirm_zero_difference_closure(
+            ["txn-in-1", "txn-out-1"],
+            actor="YNSYLP005",
+            note="手动闭环",
+        )
+
+        self.assertEqual(relation["status"], "confirmed")
+        self.assertEqual(relation["source"], "manual")
+        self.assertFalse(relation["sync_to_workbench"])
+        self.assertEqual(relation["evidence"]["closure_mode"], "manual_zero_difference_pair")
+        self.assertEqual(relation["evidence"]["amount_delta"], "0.00")
+        self.assertEqual(service.audit_log()[0]["action"], "confirm_zero_difference_closure")
+        self.assertEqual(service.audit_log()[0]["actor"], "YNSYLP005")
+
+    def test_confirm_zero_difference_closure_rejects_duplicate_row_ids(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
+            ],
+        )
+
+        with self.assertRaises(TurnoverRelationValidationError) as context:
+            service.confirm_zero_difference_closure(["txn-in-1", "txn-in-1"], actor="YNSYLP005")
+
+        self.assertEqual(context.exception.error_code, "invalid_bank_row_ids")
+
+    def test_confirm_zero_difference_closure_rejects_cross_counterparty_rows(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row(
+                    "txn-in-1",
+                    category_code="borrow_in_personal_pending_repayment",
+                    counterparty_name="贾小花",
+                    credit_amount="200000.00",
+                ),
+                bank_row(
+                    "txn-out-1",
+                    category_code="borrow_in_personal_repaid",
+                    counterparty_name="梁希涛",
+                    debit_amount="200000.00",
+                ),
+            ],
+        )
+
+        with self.assertRaises(TurnoverRelationValidationError) as context:
+            service.confirm_zero_difference_closure(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
+
+        self.assertEqual(context.exception.error_code, "counterparty_conflict")
+
+    def test_confirm_zero_difference_closure_rejects_non_zero_difference(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
+                bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="100000.00"),
+            ],
+        )
+
+        with self.assertRaises(TurnoverRelationValidationError) as context:
+            service.confirm_zero_difference_closure(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
+
+        self.assertEqual(context.exception.error_code, "turnover_closure_amount_mismatch")
+
+    def test_confirm_zero_difference_closure_rejects_same_direction_pair(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-out-1", category_code="borrow_out_personal_lent", debit_amount="100000.00"),
+                bank_row("txn-out-2", category_code="borrow_out_personal_lent", debit_amount="100000.00"),
+            ],
+        )
+
+        with self.assertRaises(TurnoverRelationValidationError) as context:
+            service.confirm_zero_difference_closure(["txn-out-1", "txn-out-2"], actor="YNSYLP005")
+
+        self.assertEqual(context.exception.error_code, "single_sided_relation")
+
+    def test_confirm_zero_difference_closure_rejects_already_closed_rows(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
+                bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="200000.00"),
+            ],
+        )
+        service.confirm_zero_difference_closure(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
+
+        with self.assertRaises(TurnoverRelationValidationError) as context:
+            service.confirm_zero_difference_closure(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
+
+        self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
 
     def test_confirm_relation_rejects_single_sided_relation(self) -> None:
         service = TurnoverRelationService.from_snapshot(
@@ -530,7 +634,7 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(relations[1]["status"], "conflict")
         self.assertFalse(relations[1]["sync_to_workbench"])
         self.assertFalse(relations[2]["sync_to_workbench"])
-        self.assertTrue(relations[3]["sync_to_workbench"])
+        self.assertFalse(relations[3]["sync_to_workbench"])
 
     def test_snapshot_degrades_active_relation_without_both_sides(self) -> None:
         restored = TurnoverRelationService.from_snapshot(
@@ -578,10 +682,9 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         )
 
         relations = restored.relations()
-        self.assertTrue(relations[0]["sync_to_workbench"])
-        self.assertEqual(relations[1]["status"], "conflict")
+        self.assertFalse(relations[0]["sync_to_workbench"])
+        self.assertEqual(relations[1]["status"], "deterministic")
         self.assertFalse(relations[1]["sync_to_workbench"])
-        self.assertEqual(relations[1]["evidence"]["snapshot_degraded_reason"], "active_syncable_overlap")
 
     def test_relation_id_is_stable_across_status_and_source(self) -> None:
         service = TurnoverRelationService.from_snapshot(None)

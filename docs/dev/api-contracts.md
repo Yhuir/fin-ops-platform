@@ -265,6 +265,40 @@ read model readiness details 可以放入 `domains[*].details`，用于 hover �
 
 `view=grouped` 响应中的 `groups[*]` 还应稳定输出 `pending_repayment_amount`、`repaid_amount`、`pending_collection_amount`、`collected_amount`、`closed_amount`。`summary_row` 和 `flow_rows[*]` 应携带 `bank_account_labels`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path` 和 `repayment_remark`。金额列归属以 `turnover_action_type` 归一后的 `borrow_amount` / `repayment_amount` 为准，不得仅按现金流入/流出判断。
 
+外部往来款 `deterministic` 只表示系统识别到零差额候选，不表示已闭环，也不得作为关联台 open 分组或已配对事实。外部往来进入关联台已配对区的唯一入口是人工确认闭环后写入的 Workbench active pair relation。
+
+`POST /api/turnover-ledger/closures/confirm`
+
+人工确认两条外部往来流水闭环。请求示例：
+
+```json
+{
+  "bank_row_ids": ["bank-income-001", "bank-expense-001"],
+  "expected_versions": {"turnover_bank_row:bank-income-001": "v1"},
+  "idempotency_key": "closure-20260605-001",
+  "note": "人工确认零差额闭环"
+}
+```
+
+校验规则：
+
+- `bank_row_ids` 必须正好两条且不能重复。
+- 后端必须重新读取当前银行流水和分类事实；两条流水必须属于同一往来台账组、同一往来语义、同一对方，一收一支。
+- 收入金额与支出金额差额必须为 `0.00`；否则返回 `400 turnover_closure_amount_mismatch` 或方向/语义相关业务错误。
+- 两条流水不得已被其他 active Turnover confirmed relation 或 Workbench active pair relation 占用；占用返回 `409 turnover_relation_conflict`。
+- `expected_versions` 进入写 UoW 的 stale precondition；版本冲突必须在写 relation 和 pair relation 前失败。
+- `idempotency_key` 进入写 UoW 的幂等边界；相同 payload 重放返回第一次结果，不同 payload 返回 `409 idempotency_key_conflict`。
+
+成功响应至少包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `turnover_relation` / `relation` | Turnover 手动闭环关系，`status=confirmed`、`source=manual`、`evidence.closure_mode=manual_zero_difference_pair`。该 relation 自身不再依赖 `sync_to_workbench` 表示闭环。 |
+| `workbench_pair_relation` | 同一写事务内创建的 Workbench active pair relation，`relation_mode=turnover_manual_closure`，驱动关联台已配对区。 |
+| `affected_months` | 受影响月份，用于前端刷新外部往来、关联台和 relation read model。 |
+
+成功写入必须通过 dirty/outbox 标记 `turnover_ledger`、`workbench`、`workbench_relation` 相关 scope 刷新；不得在页面或 Workbench 查询层用 `turnover_relation` 重新拼 open 分组。
+
 ## 银行明细自动标签规则 API
 
 `GET /api/bank-details/accounts`

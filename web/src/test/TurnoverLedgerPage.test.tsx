@@ -352,7 +352,7 @@ function groupedPayload(family: string) {
       pending_direction: "collection",
       pending_direction_label: "待收款",
       pending_amount: "2000.00",
-      row_span: 1,
+      row_span: 3,
       group_tone: "success",
       rows: [
         {
@@ -377,6 +377,70 @@ function groupedPayload(family: string) {
           interest_payment_method: "",
           note: "项目保证金",
           bank_row_ids: ["bank-company-001", "bank-company-002"],
+        },
+      ],
+      flow_rows: [
+        {
+          row_kind: "flow",
+          flow_id: "bank:bank-company-expense-1000",
+          source_bank_row_id: "bank-company-expense-1000",
+          relation_id: "rel-company-1",
+          status: "suggested",
+          status_label: "流水",
+          row_tone: "warning",
+          category_label: "外部往来款付款 / 借出款 / 公司往来",
+          category_label_path: ["外部往来款付款", "借出款", "公司往来"],
+          flow_direction: "expense",
+          flow_amount: "1000.00",
+          borrow_amount: "0.00",
+          borrow_date: null,
+          borrow_direction: "income",
+          repayment_amount: "1000.00",
+          repayment_date: "2026-05-02 10:00:00",
+          repayment_direction: "expense",
+          counterparty_bank_name: "中国银行",
+          bank_account_labels: ["中行 0001"],
+          repayment_remark: "借出保证金",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: null,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "",
+          bank_row_ids: ["bank-company-expense-1000"],
+        },
+        {
+          row_kind: "flow",
+          flow_id: "bank:bank-company-income-1000",
+          source_bank_row_id: "bank-company-income-1000",
+          relation_id: "rel-company-1",
+          status: "suggested",
+          status_label: "流水",
+          row_tone: "success",
+          category_label: "外部往来款收款 / 收回借款 / 公司往来",
+          category_label_path: ["外部往来款收款", "收回借款", "公司往来"],
+          flow_direction: "income",
+          flow_amount: "1000.00",
+          borrow_amount: "1000.00",
+          borrow_date: "2026-05-04 10:00:00",
+          borrow_direction: "income",
+          repayment_amount: "0.00",
+          repayment_date: null,
+          repayment_direction: "expense",
+          counterparty_bank_name: "中国银行",
+          bank_account_labels: ["中行 0001"],
+          repayment_remark: "收回保证金",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: null,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "",
+          bank_row_ids: ["bank-company-income-1000"],
         },
       ],
     },
@@ -636,6 +700,19 @@ function installTurnoverLedgerFetch() {
     if (url.pathname === "/api/turnover-ledger/relations/confirm" && method === "POST") {
       return Response.json({ relation_id: "rel-personal-1", status: "confirmed" });
     }
+    if (url.pathname === "/api/turnover-ledger/closures/confirm" && method === "POST") {
+      return Response.json({
+        turnover_relation: {
+          relation_id: "turnover_rel_company_closure",
+          status: "confirmed",
+        },
+        workbench_pair_relation: {
+          case_id: "turnover:turnover_rel_company_closure",
+          relation_mode: "turnover_manual_closure",
+        },
+        affected_months: ["2026-05"],
+      });
+    }
     if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/withdraw" && method === "POST") {
       return Response.json({ relation_id: "rel-personal-1", status: "withdrawn" });
     }
@@ -805,6 +882,83 @@ describe("Turnover ledger page", () => {
     expect(within(table).queryByText("分摊批次二")).not.toBeInTheDocument();
     expect(within(table).queryByText("批次 200000")).not.toBeInTheDocument();
     expect(within(table).queryByText("批次 100000")).not.toBeInTheDocument();
+  });
+
+  test("confirms a manual zero-difference turnover closure from two selected same-group flow rows", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch();
+    const turnoverListener = vi.fn();
+    const workbenchListener = vi.fn();
+    window.addEventListener("turnoverRelationUpdated", turnoverListener);
+    window.addEventListener("workbenchRelationUpdated", workbenchListener);
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+    const openButton = within(page).getByRole("button", { name: "确认闭环" });
+    expect(openButton).toBeDisabled();
+
+    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    expect(openButton).toBeEnabled();
+    await user.click(openButton);
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    expect(within(drawer).getByRole("heading", { name: "确认外部往来闭环" })).toBeInTheDocument();
+    expect(within(drawer).getByText("bank-company-expense-1000")).toBeInTheDocument();
+    expect(within(drawer).getByText("bank-company-income-1000")).toBeInTheDocument();
+    expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("0.00");
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+      });
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+        bank_row_ids: ["bank-company-expense-1000", "bank-company-income-1000"],
+      });
+    });
+    await waitFor(() => {
+      expectCustomEventDetailContaining(turnoverListener, {
+        relationId: "turnover_rel_company_closure",
+        action: "manual_closure",
+      });
+      expectCustomEventDetailContaining(workbenchListener, {
+        relationId: "turnover:turnover_rel_company_closure",
+        action: "turnover_manual_closure",
+      });
+    });
+    await waitFor(() => {
+      expect(openButton).toBeDisabled();
+    });
+    window.removeEventListener("turnoverRelationUpdated", turnoverListener);
+    window.removeEventListener("workbenchRelationUpdated", workbenchListener);
+  });
+
+  test("blocks cross-group selection and disables drawer confirmation for non-zero difference", async () => {
+    const user = userEvent.setup();
+    installTurnoverLedgerFetch();
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+    await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    expect(await screen.findByText("一次只能选择同一往来组内的两条流水")).toBeInTheDocument();
+
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
+    await user.click(within(page).getByRole("button", { name: "确认闭环" }));
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("100,000.00");
+    expect(within(drawer).getByRole("button", { name: "确定" })).toBeDisabled();
   });
 
   test("opens the extra drawer, enables save when dirty, saves, refreshes, and keeps relation actions in the drawer", async () => {

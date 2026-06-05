@@ -1179,6 +1179,111 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(len(uow.commands), 1)
         self.assertEqual(len(uow.confirm_calls), 1)
 
+    def test_target_zero_difference_closure_facade_writes_turnover_and_workbench_pair_relation(self) -> None:
+        class _CommandCapturingUoW:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+                self.closure_calls: list[dict[str, object]] = []
+                self.pair_calls: list[dict[str, object]] = []
+
+            def run(self, command: object, handler: Callable[[object], object]) -> object:
+                self.commands.append(command)
+                assert getattr(command, "action_name") == "turnover_relation_zero_difference_closure"
+                assert getattr(command, "expected_versions") == {"turnover_bank_row:bank_txn_1": "v1"}
+                assert getattr(command, "idempotency_key") == "closure-idem-1"
+                assert getattr(command, "request_fingerprint")
+                assert [
+                    (request["scope_type"], request["scope_keys"], request["reason"])
+                    for request in getattr(command, "refresh_requests")
+                ] == [
+                    ("turnover_ledger", ["all"], "turnover_relation_changed"),
+                    ("workbench", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("workbench_relation", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("cost_statistics", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("search", ["2026-02", "all"], "turnover_relation_changed"),
+                ]
+                return handler(
+                    SimpleNamespace(
+                        transaction=object(),
+                        relation_repository=SimpleNamespace(
+                            confirm_zero_difference_closure=self.confirm_zero_difference_closure,
+                        ),
+                        workbench_pair_port=SimpleNamespace(
+                            create_turnover_manual_closure=self.create_turnover_manual_closure,
+                        ),
+                    )
+                )
+
+            def confirm_zero_difference_closure(
+                self,
+                *,
+                bank_row_ids: list[str],
+                actor_id: str,
+                note: str | None,
+                transaction: object,
+            ) -> dict[str, object]:
+                self.closure_calls.append(
+                    {
+                        "bank_row_ids": list(bank_row_ids),
+                        "actor_id": actor_id,
+                        "note": note,
+                        "transaction": transaction,
+                    }
+                )
+                return {
+                    "relation": {
+                        "relation_id": "turnover_rel_closure",
+                        "bank_row_ids": list(bank_row_ids),
+                        "principal_amount": "100.00",
+                        "settled_amount": "100.00",
+                    }
+                }
+
+            def create_turnover_manual_closure(
+                self,
+                *,
+                relation: dict[str, object],
+                bank_row_ids: list[str],
+                actor_id: str,
+                note: str | None,
+                affected_months: list[str],
+                transaction: object,
+            ) -> dict[str, object]:
+                self.pair_calls.append(
+                    {
+                        "relation_id": relation.get("relation_id"),
+                        "bank_row_ids": list(bank_row_ids),
+                        "actor_id": actor_id,
+                        "note": note,
+                        "affected_months": list(affected_months),
+                        "transaction": transaction,
+                    }
+                )
+                return {
+                    "case_id": "turnover:turnover_rel_closure",
+                    "relation_mode": "turnover_manual_closure",
+                }
+
+        uow = _CommandCapturingUoW()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.confirm_zero_difference_closure(
+            bank_row_ids=["bank_txn_1", "bank_txn_2"],
+            actor_id="finance-user",
+            tenant_id="default",
+            note="manual closure",
+            affected_months=["2026-02"],
+            expected_versions={"turnover_bank_row:bank_txn_1": "v1"},
+            idempotency_key="closure-idem-1",
+        )
+
+        self.assertEqual(result["turnover_relation"]["relation_id"], "turnover_rel_closure")
+        self.assertEqual(result["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
+        self.assertEqual(len(uow.commands), 1)
+        self.assertEqual(len(uow.closure_calls), 1)
+        self.assertEqual(len(uow.pair_calls), 1)
+        self.assertEqual(uow.pair_calls[0]["affected_months"], ["2026-02"])
+
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:
         uow, deps = self._build_uow(stale_precondition_port=_StalePreconditionPort(stale=True))
         handler_called = False

@@ -22,7 +22,7 @@ TURNOVER_RELATION_STATUSES = {
     "stale",
     "withdrawn",
 }
-SYNCABLE_TURNOVER_RELATION_STATUSES = {"deterministic", "confirmed"}
+SYNCABLE_TURNOVER_RELATION_STATUSES: set[str] = set()
 LEGACY_TURNOVER_CATEGORY_CODES = {
     "external_turnover",
     "internal_transfer",
@@ -207,12 +207,12 @@ class TurnoverRelationService:
                 if relation.get("source") == "manual"
                 or relation.get("status") in {"confirmed", "withdrawn"}
             ]
-            manual_syncable_row_ids = self._active_syncable_row_ids(manual_relations)
-            if manual_syncable_row_ids:
+            manual_active_row_ids = self._active_confirmed_row_ids(manual_relations)
+            if manual_active_row_ids:
                 relations = [
                     relation
                     for relation in relations
-                    if not manual_syncable_row_ids.intersection(
+                    if not manual_active_row_ids.intersection(
                         {str(row_id) for row_id in list(relation.get("bank_row_ids") or [])}
                     )
                 ]
@@ -231,7 +231,7 @@ class TurnoverRelationService:
         with self._lock:
             prepared_rows = [self._require_prepared_row(row_id) for row_id in row_ids]
             self._ensure_confirmable_relation(prepared_rows)
-            self._ensure_no_active_syncable_overlap(row_ids)
+            self._ensure_no_active_confirmed_overlap(row_ids)
             relation = self._build_relation_from_rows(
                 prepared_rows,
                 status="confirmed",
@@ -252,6 +252,57 @@ class TurnoverRelationService:
             self._append_audit(
                 relation_id=str(relation["relation_id"]),
                 action="confirm_relation",
+                old_status=None,
+                new_status="confirmed",
+                affected_row_ids=row_ids,
+                actor=normalized_actor,
+                note=note,
+                version=int(relation["version"]),
+            )
+            return deepcopy(relation)
+
+    def confirm_zero_difference_closure(
+        self,
+        bank_row_ids: list[str],
+        *,
+        actor: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_actor = self._require_actor(actor)
+        row_ids = self._normalize_row_ids(bank_row_ids)
+        if len(row_ids) != 2:
+            raise TurnoverRelationValidationError(
+                "invalid_turnover_closure_selection",
+                "turnover closure requires exactly two bank rows.",
+            )
+        with self._lock:
+            prepared_rows = [self._require_prepared_row(row_id) for row_id in row_ids]
+            self._ensure_confirmable_relation(prepared_rows)
+            self._ensure_zero_difference_closure(prepared_rows)
+            self._ensure_no_active_confirmed_overlap(row_ids, error_code="turnover_relation_conflict")
+            self._ensure_no_manual_closure_overlap(row_ids)
+            relation = self._build_relation_from_rows(
+                prepared_rows,
+                status="confirmed",
+                source="manual",
+                created_by=normalized_actor,
+                evidence={
+                    "matched_fields": ["category_code", "counterparty_name", "amount", "manual_selection"],
+                    "manual_reason": "zero_difference_closure",
+                    "closure_mode": "manual_zero_difference_pair",
+                    "amount_delta": "0.00",
+                    "note": note,
+                },
+            )
+            self._relations = [
+                existing_relation
+                for existing_relation in self._relations
+                if str(existing_relation.get("relation_id") or "") != str(relation["relation_id"])
+            ]
+            self._relations.append(relation)
+            self._append_audit(
+                relation_id=str(relation["relation_id"]),
+                action="confirm_zero_difference_closure",
                 old_status=None,
                 new_status="confirmed",
                 affected_row_ids=row_ids,
@@ -526,13 +577,47 @@ class TurnoverRelationService:
                 "confirmed turnover relation must contain principal and settlement rows.",
             )
 
-    def _ensure_no_active_syncable_overlap(self, row_ids: list[str]) -> None:
+    def _ensure_zero_difference_closure(self, rows: list[_PreparedRow]) -> None:
+        self._ensure_relation_semantics(rows)
+        directions = {row.direction for row in rows}
+        if directions != {"inflow", "outflow"}:
+            raise TurnoverRelationValidationError(
+                "turnover_closure_direction_mismatch",
+                "turnover closure requires one income row and one expense row.",
+            )
+        principal_amount = sum((row.amount for row in rows if self._resolved_side(row) == "principal"), ZERO)
+        settled_amount = sum((row.amount for row in rows if self._resolved_side(row) == "settlement"), ZERO)
+        if principal_amount - settled_amount != ZERO:
+            raise TurnoverRelationValidationError(
+                "turnover_closure_amount_mismatch",
+                "turnover closure amount difference must be 0.00.",
+            )
+
+    def _ensure_no_manual_closure_overlap(self, row_ids: list[str]) -> None:
+        requested_row_ids = set(row_ids)
+        for relation in self._relations:
+            if str(relation.get("status") or "") != "confirmed":
+                continue
+            evidence = relation.get("evidence")
+            closure_mode = str(evidence.get("closure_mode") or "") if isinstance(evidence, dict) else ""
+            if closure_mode != "manual_zero_difference_pair":
+                continue
+            existing_row_ids = {
+                str(row_id)
+                for row_id in list(relation.get("bank_row_ids") or [])
+                if str(row_id).strip()
+            }
+            if requested_row_ids.intersection(existing_row_ids):
+                raise TurnoverRelationValidationError(
+                    "turnover_relation_conflict",
+                    "Bank transaction already belongs to an active turnover closure.",
+                )
+
+    def _ensure_no_active_confirmed_overlap(self, row_ids: list[str], *, error_code: str = "relation_row_conflict") -> None:
         requested_row_ids = set(row_ids)
         for relation in self._relations:
             status = str(relation.get("status") or "")
-            if status not in SYNCABLE_TURNOVER_RELATION_STATUSES:
-                continue
-            if not bool(relation.get("sync_to_workbench")):
+            if status != "confirmed":
                 continue
             existing_row_ids = {
                 str(row_id)
@@ -542,18 +627,16 @@ class TurnoverRelationService:
             overlap = sorted(requested_row_ids.intersection(existing_row_ids))
             if overlap:
                 raise TurnoverRelationValidationError(
-                    "relation_row_conflict",
+                    error_code,
                     f"Bank transaction already belongs to an active turnover relation: {', '.join(overlap)}",
                 )
 
     @staticmethod
-    def _active_syncable_row_ids(relations: list[dict[str, Any]]) -> set[str]:
+    def _active_confirmed_row_ids(relations: list[dict[str, Any]]) -> set[str]:
         row_ids: set[str] = set()
         for relation in relations:
             status = str(relation.get("status") or "")
-            if status not in SYNCABLE_TURNOVER_RELATION_STATUSES:
-                continue
-            if not bool(relation.get("sync_to_workbench")):
+            if status != "confirmed":
                 continue
             row_ids.update(
                 str(row_id)
@@ -760,12 +843,12 @@ class TurnoverRelationService:
         cls,
         relations: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        seen_syncable_row_ids: set[str] = set()
+        seen_confirmed_row_ids: set[str] = set()
         normalized_relations: list[dict[str, Any]] = []
         for relation in relations:
             normalized = deepcopy(relation)
             status = str(normalized.get("status") or "")
-            if status not in SYNCABLE_TURNOVER_RELATION_STATUSES or not bool(normalized.get("sync_to_workbench")):
+            if status != "confirmed":
                 normalized_relations.append(normalized)
                 continue
             row_ids = {
@@ -786,13 +869,13 @@ class TurnoverRelationService:
             degrade_reason = ""
             if not principal_row_ids or not settlement_row_ids or not principal_row_ids.issubset(row_ids) or not settlement_row_ids.issubset(row_ids):
                 degrade_reason = "malformed_syncable_relation"
-            elif seen_syncable_row_ids.intersection(row_ids):
+            elif seen_confirmed_row_ids.intersection(row_ids):
                 degrade_reason = "active_syncable_overlap"
 
             if degrade_reason:
                 cls._degrade_snapshot_relation(normalized, reason=degrade_reason)
             else:
-                seen_syncable_row_ids.update(row_ids)
+                seen_confirmed_row_ids.update(row_ids)
             normalized_relations.append(normalized)
         return normalized_relations
 

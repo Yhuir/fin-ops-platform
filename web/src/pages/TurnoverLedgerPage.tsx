@@ -20,7 +20,7 @@ import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLedgerExportDialog";
 import TurnoverLedgerExtraDrawer from "../components/turnoverLedger/TurnoverLedgerExtraDrawer";
-import TurnoverLedgerGroupedTable, { formatMoney } from "../components/turnoverLedger/TurnoverLedgerGroupedTable";
+import TurnoverLedgerGroupedTable, { formatMoney, formatNullable } from "../components/turnoverLedger/TurnoverLedgerGroupedTable";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   FINANCE_DOMAIN_EVENTS,
@@ -28,6 +28,7 @@ import {
   subscribeFinanceDomainEvent,
 } from "../features/domainEvents";
 import {
+  confirmTurnoverClosure,
   confirmTurnoverRelation,
   downloadTurnoverLedgerExport,
   fetchTurnoverLedgerExportPreview,
@@ -169,6 +170,31 @@ function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function moneyNumber(value: string | null | undefined) {
+  const parsed = Number(String(value ?? "").replace(/,/g, "").trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function flowBankRowId(row: TurnoverLedgerGroupedRow) {
+  return cleanText(row.sourceBankRowId) || cleanText(row.bankRowIds[0]) || cleanText(row.flowId);
+}
+
+function flowAmountNumber(row: TurnoverLedgerGroupedRow) {
+  const flowAmount = moneyNumber(row.flowAmount);
+  if (flowAmount > 0) {
+    return flowAmount;
+  }
+  return Math.max(moneyNumber(row.borrowAmount), moneyNumber(row.repaymentAmount));
+}
+
+function isIncomeFlow(row: TurnoverLedgerGroupedRow) {
+  return row.flowDirection === "income" || moneyNumber(row.borrowAmount) > 0;
+}
+
+function isExpenseFlow(row: TurnoverLedgerGroupedRow) {
+  return row.flowDirection === "expense" || moneyNumber(row.repaymentAmount) > 0;
+}
+
 function tagPrimaryLabel(tag: TurnoverLedgerTagDefinition) {
   return cleanText(tag.outputPrimaryLabel) || cleanText(tag.label) || cleanText(tag.code);
 }
@@ -196,6 +222,13 @@ export default function TurnoverLedgerPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [savingExtra, setSavingExtra] = useState(false);
   const [mutatingRelation, setMutatingRelation] = useState(false);
+  const [closureDrawerOpen, setClosureDrawerOpen] = useState(false);
+  const [closureSubmitting, setClosureSubmitting] = useState(false);
+  const [closureSelection, setClosureSelection] = useState<{
+    groupId: string;
+    groupLabel: string;
+    rows: TurnoverLedgerGroupedRow[];
+  } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFamily, setExportFamily] = useState<TurnoverLedgerFamily>("all");
   const [exportPreview, setExportPreview] = useState<TurnoverLedgerExportPreview | null>(null);
@@ -215,6 +248,24 @@ export default function TurnoverLedgerPage() {
       value: familySummaryAmount(familySummaryMap.get(item.value), metric),
     }))
   ), [familySummaryMap]);
+  const selectedClosureRows = closureSelection?.rows ?? [];
+  const selectedFlowRowIds = useMemo(
+    () => new Set(selectedClosureRows.map(flowBankRowId).filter(Boolean)),
+    [selectedClosureRows],
+  );
+  const closurePreview = useMemo(() => {
+    const incomeRows = selectedClosureRows.filter(isIncomeFlow);
+    const expenseRows = selectedClosureRows.filter(isExpenseFlow);
+    const incomeAmount = incomeRows.reduce((sum, row) => sum + flowAmountNumber(row), 0);
+    const expenseAmount = expenseRows.reduce((sum, row) => sum + flowAmountNumber(row), 0);
+    const delta = Math.abs(incomeAmount - expenseAmount);
+    return {
+      incomeAmount,
+      expenseAmount,
+      delta,
+      canConfirm: selectedClosureRows.length === 2 && incomeRows.length === 1 && expenseRows.length === 1 && delta === 0,
+    };
+  }, [selectedClosureRows]);
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -294,7 +345,76 @@ export default function TurnoverLedgerPage() {
     if (!nextFamily) {
       return;
     }
+    setClosureSelection(null);
+    setClosureDrawerOpen(false);
     setFamily(nextFamily);
+  };
+
+  const handleToggleClosureRow = (group: { groupId: string; counterpartyName: string; familyLabel: string }, row: TurnoverLedgerGroupedRow) => {
+    const rowId = flowBankRowId(row);
+    if (!rowId) {
+      setSnackbar({ severity: "error", message: "这条流水缺少银行流水 ID，无法选择" });
+      return;
+    }
+    setClosureSelection((current) => {
+      if (!current) {
+        return {
+          groupId: group.groupId,
+          groupLabel: [group.counterpartyName, group.familyLabel].filter(Boolean).join(" / "),
+          rows: [row],
+        };
+      }
+      if (current.groupId !== group.groupId) {
+        setSnackbar({ severity: "error", message: "一次只能选择同一往来组内的两条流水" });
+        return current;
+      }
+      const exists = current.rows.some((item) => flowBankRowId(item) === rowId);
+      if (exists) {
+        const rows = current.rows.filter((item) => flowBankRowId(item) !== rowId);
+        return rows.length > 0 ? { ...current, rows } : null;
+      }
+      if (current.rows.length >= 2) {
+        setSnackbar({ severity: "error", message: "一次最多选择两条流水" });
+        return current;
+      }
+      return { ...current, rows: [...current.rows, row] };
+    });
+  };
+
+  const handleConfirmClosure = async () => {
+    if (!closurePreview.canConfirm || closureSubmitting) {
+      return;
+    }
+    const bankRowIds = selectedClosureRows.map(flowBankRowId).filter(Boolean);
+    if (bankRowIds.length !== 2) {
+      return;
+    }
+    setClosureSubmitting(true);
+    try {
+      const result = await confirmTurnoverClosure({ bankRowIds });
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
+        relationId: result.relationId,
+        affectedRowIds: bankRowIds,
+        affectedMonths: result.affectedMonths,
+        action: "manual_closure",
+        source: "turnover_manual_closure",
+      });
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+        relationId: result.workbenchPairRelationId,
+        affectedRowIds: bankRowIds,
+        affectedMonths: result.affectedMonths,
+        action: "turnover_manual_closure",
+        source: "turnover_manual_closure",
+      });
+      setClosureSelection(null);
+      setClosureDrawerOpen(false);
+      setSnackbar({ severity: "success", message: "外部往来闭环已确认" });
+      loadLedger();
+    } catch (caught) {
+      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来闭环确认失败" });
+    } finally {
+      setClosureSubmitting(false);
+    }
   };
 
   const drawerGroups = useMemo(() => {
@@ -499,6 +619,13 @@ export default function TurnoverLedgerPage() {
                 ))}
               </Tabs>
               <Stack direction="row" spacing={1}>
+                <Button
+                  disabled={!canMutateData || selectedClosureRows.length !== 2}
+                  onClick={() => setClosureDrawerOpen(true)}
+                  variant="outlined"
+                >
+                  确认闭环
+                </Button>
                 <Button variant="contained" startIcon={<DownloadOutlinedIcon />} onClick={handleOpenExport}>
                   下载表格
                 </Button>
@@ -509,6 +636,8 @@ export default function TurnoverLedgerPage() {
               groups={groups}
               loading={loading}
               onEdit={handleOpenEditor}
+              selectedFlowRowIds={selectedFlowRowIds}
+              onToggleFlowSelection={handleToggleClosureRow}
             />
           </Stack>
         </Paper>
@@ -602,6 +731,76 @@ export default function TurnoverLedgerPage() {
                 </Box>
               );
             }) : null}
+          </Stack>
+        </Stack>
+      </Drawer>
+
+      <Drawer
+        anchor="right"
+        open={closureDrawerOpen}
+        onClose={() => setClosureDrawerOpen(false)}
+        PaperProps={{ sx: { width: { xs: "100%", sm: "520px" }, maxWidth: "100vw" }, role: "dialog", "aria-label": "确认外部往来闭环" }}
+      >
+        <Stack spacing={0} sx={{ height: "100%" }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
+            <Box>
+              <Typography component="h2" variant="h6" fontWeight={900}>确认外部往来闭环</Typography>
+              <Typography color="text.secondary" variant="caption">{closureSelection?.groupLabel || "未选择往来组"}</Typography>
+            </Box>
+            <IconButton aria-label="关闭确认外部往来闭环" onClick={() => setClosureDrawerOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          </Stack>
+          <Divider />
+          <Stack spacing={1.5} sx={{ p: 2, overflow: "auto", flex: 1 }}>
+            {selectedClosureRows.map((row) => {
+              const rowId = flowBankRowId(row);
+              const directionLabel = isIncomeFlow(row) ? "收入" : isExpenseFlow(row) ? "支出" : "未知方向";
+              return (
+                <Paper key={rowId} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
+                  <Stack spacing={0.75}>
+                    <Stack direction="row" justifyContent="space-between" spacing={1}>
+                      <Typography fontWeight={900}>{directionLabel}</Typography>
+                      <Typography fontWeight={900}>{formatMoney(String(flowAmountNumber(row).toFixed(2)))}</Typography>
+                    </Stack>
+                    <Typography variant="body2">{formatNullable(row.transactionAt || row.borrowDate || row.repaymentDate)}</Typography>
+                    <Typography variant="body2" color="text.secondary">{rowId}</Typography>
+                    <Typography variant="body2" color="text.secondary">{formatNullable(row.repaymentRemark || row.summaryText)}</Typography>
+                  </Stack>
+                </Paper>
+              );
+            })}
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
+              <Stack spacing={0.75}>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography color="text.secondary">收入合计</Typography>
+                  <Typography fontWeight={800}>{formatMoney(closurePreview.incomeAmount.toFixed(2))}</Typography>
+                </Stack>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography color="text.secondary">支出合计</Typography>
+                  <Typography fontWeight={800}>{formatMoney(closurePreview.expenseAmount.toFixed(2))}</Typography>
+                </Stack>
+                <Divider />
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography fontWeight={900}>差额</Typography>
+                  <Typography data-testid="turnover-closure-delta" fontWeight={900}>{formatMoney(closurePreview.delta.toFixed(2))}</Typography>
+                </Stack>
+              </Stack>
+            </Paper>
+            {!closurePreview.canConfirm ? (
+              <Alert severity="info">只有一收一支且差额为 0.00 的两条流水可以确认闭环。</Alert>
+            ) : null}
+          </Stack>
+          <Divider />
+          <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ p: 2 }}>
+            <Button disabled={closureSubmitting} onClick={() => setClosureDrawerOpen(false)} variant="outlined">取消</Button>
+            <Button
+              disabled={!closurePreview.canConfirm || closureSubmitting}
+              onClick={() => void handleConfirmClosure()}
+              variant="contained"
+            >
+              确定
+            </Button>
           </Stack>
         </Stack>
       </Drawer>

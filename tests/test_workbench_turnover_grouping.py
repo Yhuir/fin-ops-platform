@@ -65,7 +65,7 @@ def _group_bank_ids(group: dict[str, object]) -> list[str]:
 
 
 class WorkbenchTurnoverGroupingTests(unittest.TestCase):
-    def test_deterministic_turnover_relation_groups_bank_rows_in_one_open_group(self) -> None:
+    def test_deterministic_turnover_relation_does_not_group_bank_rows_in_workbench(self) -> None:
         service = WorkbenchCandidateGroupingService()
 
         payload = service.group_payload(
@@ -85,21 +85,11 @@ class WorkbenchTurnoverGroupingTests(unittest.TestCase):
             ],
         )
 
-        turnover_group = payload["open"]["groups"][0]
-        self.assertEqual(turnover_group["group_id"], "turnover:turnover_rel_closed")
-        self.assertEqual(turnover_group["group_type"], "turnover_relation")
-        self.assertEqual(_group_bank_ids(turnover_group), ["bank-principal", "bank-settlement"])
-        self.assertEqual(
-            turnover_group["group_metadata"],
-            {
-                "group_source": "turnover_relation",
-                "relation_id": "turnover_rel_closed",
-                "relation_status": "deterministic",
-                "relation_family": "company",
-                "relation_business_type": "borrow_in",
-                "sync_to_workbench": True,
-            },
-        )
+        self.assertFalse([
+            group
+            for group in payload["open"]["groups"]
+            if group.get("group_id") == "turnover:turnover_rel_closed"
+        ])
         flattened_bank_ids = [
             bank_id
             for group in _open_bank_groups(payload)
@@ -108,7 +98,7 @@ class WorkbenchTurnoverGroupingTests(unittest.TestCase):
         self.assertEqual(flattened_bank_ids.count("bank-principal"), 1)
         self.assertEqual(flattened_bank_ids.count("bank-settlement"), 1)
 
-    def test_confirmed_turnover_relation_groups_bank_rows_in_one_open_group(self) -> None:
+    def test_confirmed_turnover_relation_does_not_group_bank_rows_in_workbench(self) -> None:
         service = WorkbenchCandidateGroupingService()
 
         payload = service.group_payload(
@@ -130,11 +120,15 @@ class WorkbenchTurnoverGroupingTests(unittest.TestCase):
             ],
         )
 
-        turnover_group = payload["open"]["groups"][0]
-        self.assertEqual(turnover_group["group_id"], "turnover:turnover_rel_confirmed")
-        self.assertEqual(_group_bank_ids(turnover_group), ["bank-lent", "bank-collected"])
-        self.assertEqual(turnover_group["group_metadata"]["relation_status"], "confirmed")
-        self.assertEqual(turnover_group["group_metadata"]["relation_family"], "personal")
+        self.assertFalse([
+            group
+            for group in payload["open"]["groups"]
+            if group.get("group_id") == "turnover:turnover_rel_confirmed"
+        ])
+        self.assertEqual(
+            sorted(len(group["bank_rows"]) for group in _open_bank_groups(payload)),
+            [1, 1],
+        )
 
     def test_non_syncable_turnover_relations_do_not_group_bank_rows(self) -> None:
         for status in ("suggested", "conflict", "stale", "withdrawn"):
@@ -194,7 +188,7 @@ class WorkbenchTurnoverGroupingTests(unittest.TestCase):
 
         self.assertEqual(sorted(len(group["bank_rows"]) for group in _open_bank_groups(payload)), [1, 1])
 
-    def test_deterministic_turnover_relation_extracts_bank_rows_from_candidate_group(self) -> None:
+    def test_deterministic_turnover_relation_does_not_extract_bank_rows_from_candidate_group(self) -> None:
         service = WorkbenchCandidateGroupingService()
 
         payload = service.group_payload(
@@ -215,19 +209,21 @@ class WorkbenchTurnoverGroupingTests(unittest.TestCase):
             ],
         )
 
-        turnover_group = next(
+        self.assertFalse([
             group
             for group in payload["open"]["groups"]
             if group.get("group_id") == "turnover:turnover_rel_from_candidate"
-        )
-        self.assertEqual(_group_bank_ids(turnover_group), ["bank-principal", "bank-settlement"])
+        ])
         candidate_groups = [
             group
             for group in payload["open"]["groups"]
             if group.get("group_id") == "case:candidate:old"
         ]
         self.assertEqual(len(candidate_groups), 1)
-        self.assertEqual(_group_bank_ids(candidate_groups[0]), ["bank-unrelated"])
+        self.assertEqual(
+            _group_bank_ids(candidate_groups[0]),
+            ["bank-principal", "bank-settlement", "bank-unrelated"],
+        )
 
     def test_turnover_relation_does_not_extract_from_real_open_exception_case(self) -> None:
         service = WorkbenchCandidateGroupingService()
@@ -412,7 +408,7 @@ class WorkbenchTurnoverReadModelCacheTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         group_ids = [group["group_id"] for group in payload["open"]["groups"]]
         self.assertNotIn("legacy-cache", group_ids)
-        self.assertTrue(any(group_id.startswith("turnover:") for group_id in group_ids))
+        self.assertFalse(any(group_id.startswith("turnover:") for group_id in group_ids))
 
     def test_read_model_missing_turnover_source_version_rebuilds(self) -> None:
         app = build_application()
@@ -444,7 +440,7 @@ class WorkbenchTurnoverReadModelCacheTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         group_ids = [group["group_id"] for group in payload["open"]["groups"]]
         self.assertNotIn("missing-turnover-version", group_ids)
-        self.assertTrue(any(group_id.startswith("turnover:") for group_id in group_ids))
+        self.assertFalse(any(group_id.startswith("turnover:") for group_id in group_ids))
 
     def test_turnover_relation_source_version_is_stable_for_unchanged_inputs(self) -> None:
         app = build_application()

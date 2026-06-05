@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,6 +26,18 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 yield app
             finally:
                 app.shutdown_background_jobs()
+
+    @contextmanager
+    def _without_default_test_auth(self):
+        previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
+        os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = "0"
+        try:
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
+            else:
+                os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
 
     def _import_bank_rows(
         self,
@@ -100,10 +113,16 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         return list(payload["open"]["groups"])
 
     @staticmethod
+    def _workbench_paired_groups(app: Application) -> list[dict[str, object]]:
+        response = app.handle_request("GET", "/api/workbench?month=2026-03")
+        payload = json.loads(response.body)
+        return list(payload["paired"]["groups"])
+
+    @staticmethod
     def _group_bank_ids(group: dict[str, object]) -> list[str]:
         return [str(row["id"]) for row in list(group.get("bank_rows") or [])]
 
-    def test_deterministic_turnover_relation_syncs_to_workbench_same_row(self) -> None:
+    def test_deterministic_turnover_relation_does_not_sync_to_workbench_without_manual_closure(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app)
             self._tag_borrow_in_rows(app, transaction_ids)
@@ -112,14 +131,12 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             groups = self._workbench_open_groups(app)
 
         self.assertEqual(ledger_payload["rows"][0]["status"], "deterministic")
-        turnover_groups = [
+        self.assertFalse([
             group
             for group in groups
             if group.get("group_type") == "turnover_relation"
-        ]
-        self.assertEqual(len(turnover_groups), 1)
-        self.assertEqual(self._group_bank_ids(turnover_groups[0]), transaction_ids)
-        self.assertEqual(turnover_groups[0]["group_metadata"]["relation_status"], "deterministic")
+            and set(self._group_bank_ids(group)) == set(transaction_ids)
+        ])
 
     def test_suggested_partial_turnover_relation_does_not_sync_to_workbench_same_row(self) -> None:
         with self._temporary_app() as app:
@@ -137,7 +154,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             if set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
 
-    def test_confirm_and_withdraw_relation_updates_workbench_grouping(self) -> None:
+    def test_legacy_confirm_and_withdraw_relation_do_not_sync_to_workbench_grouping(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app, settlement_amount="100000.00")
             self._tag_borrow_in_rows(app, transaction_ids)
@@ -159,12 +176,11 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
 
         self.assertEqual(confirmed.status_code, 200)
         self.assertEqual(withdrawn.status_code, 200)
-        self.assertTrue([
+        self.assertFalse([
             group
             for group in confirmed_groups
             if group.get("group_type") == "turnover_relation"
-            and self._group_bank_ids(group) == transaction_ids
-            and group["group_metadata"]["relation_status"] == "confirmed"
+            and set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
         self.assertFalse([
             group
@@ -172,6 +188,60 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             if group.get("group_type") == "turnover_relation"
             and set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
+
+    def test_manual_zero_difference_closure_pairs_turnover_rows_in_workbench(self) -> None:
+        with self._temporary_app() as app:
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_borrow_in_rows(app, transaction_ids)
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "外部往来手动闭环"}),
+            )
+            payload = json.loads(response.body)
+            paired_groups = self._workbench_paired_groups(app)
+            open_groups = self._workbench_open_groups(app)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
+        self.assertTrue([
+            group
+            for group in paired_groups
+            if set(self._group_bank_ids(group)) == set(transaction_ids)
+        ])
+        self.assertFalse([
+            group
+            for group in open_groups
+            if set(self._group_bank_ids(group)) == set(transaction_ids)
+        ])
+
+    def test_manual_closure_rejects_non_zero_difference(self) -> None:
+        with self._temporary_app() as app:
+            transaction_ids = self._import_bank_rows(app, settlement_amount="100000.00")
+            self._tag_borrow_in_rows(app, transaction_ids)
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "turnover_closure_amount_mismatch")
+
+    def test_manual_closure_requires_mutation_permission(self) -> None:
+        with self._without_default_test_auth():
+            with self._temporary_app() as app:
+                response = app.handle_request(
+                    "POST",
+                    "/api/turnover-ledger/closures/confirm",
+                    body=json.dumps({"bank_row_ids": ["bank-1", "bank-2"]}),
+                )
+
+        self.assertEqual(response.status_code, 401)
 
 
 if __name__ == "__main__":

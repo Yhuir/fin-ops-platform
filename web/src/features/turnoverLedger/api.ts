@@ -1,4 +1,5 @@
 import type {
+  ConfirmTurnoverClosureRequest,
   ConfirmTurnoverRelationRequest,
   FetchTurnoverLedgerRequest,
   SaveTurnoverBankRowTagsRequest,
@@ -280,6 +281,15 @@ type ApiTurnoverRelationMutationResponse = {
   relation_id?: string | null;
   status?: string | null;
   relation?: ApiTurnoverLedgerRow;
+  turnover_relation?: {
+    relation_id?: string | null;
+    status?: string | null;
+  } | null;
+  workbench_pair_relation?: {
+    case_id?: string | null;
+    relation_mode?: string | null;
+  } | null;
+  affected_months?: string[];
 };
 
 type ApiSaveTurnoverBankRowTagsResponse = {
@@ -685,9 +695,14 @@ function mapBankRow(row: ApiTurnoverBankRow): TurnoverBankRow {
 
 function mapMutation(payload: ApiTurnoverRelationMutationResponse): TurnoverRelationMutationResponse {
   const relation = payload.relation;
+  const turnoverRelation = payload.turnover_relation;
+  const pairRelation = payload.workbench_pair_relation;
   return {
-    relationId: text(payload.relation_id ?? relation?.relation_id),
-    status: text(payload.status ?? relation?.status),
+    relationId: text(payload.relation_id ?? relation?.relation_id ?? turnoverRelation?.relation_id),
+    status: text(payload.status ?? relation?.status ?? turnoverRelation?.status),
+    affectedMonths: stringList(payload.affected_months),
+    workbenchPairRelationId: text(pairRelation?.case_id),
+    workbenchRelationMode: text(pairRelation?.relation_mode),
   };
 }
 
@@ -939,6 +954,32 @@ export async function confirmTurnoverRelation({
       body: JSON.stringify({
         bank_row_ids: bankRowIds,
         ...(note ? { note } : {}),
+      }),
+      signal,
+    },
+  );
+  return mapMutation(payload);
+}
+
+export async function confirmTurnoverClosure({
+  bankRowIds,
+  note,
+  expectedVersions,
+  idempotencyKey,
+  signal,
+}: ConfirmTurnoverClosureRequest): Promise<TurnoverRelationMutationResponse> {
+  const payload = await requestJson<ApiTurnoverRelationMutationResponse>(
+    "/api/turnover-ledger/closures/confirm",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        bank_row_ids: bankRowIds,
+        ...(note ? { note } : {}),
+        ...(expectedVersions ? { expected_versions: expectedVersions } : {}),
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       }),
       signal,
     },

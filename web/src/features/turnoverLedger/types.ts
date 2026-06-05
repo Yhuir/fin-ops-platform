@@ -321,12 +321,20 @@ export type TurnoverRelationDetail = {
 export type TurnoverRelationMutationResponse = {
   relationId: string;
   status: string;
+  affectedMonths: string[];
+  workbenchPairRelationId: string;
+  workbenchRelationMode: string;
 };
 
 export type ConfirmTurnoverRelationRequest = {
   bankRowIds: string[];
   note?: string;
   signal?: AbortSignal;
+};
+
+export type ConfirmTurnoverClosureRequest = ConfirmTurnoverRelationRequest & {
+  expectedVersions?: Record<string, unknown>;
+  idempotencyKey?: string;
 };
 
 export type WithdrawTurnoverRelationRequest = {

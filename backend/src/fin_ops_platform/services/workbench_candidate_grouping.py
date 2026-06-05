@@ -21,6 +21,7 @@ MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 OA_BANK_SETTLEMENT_PAIRED_CODES = {"personal_advance_repayment_settlement"}
 NO_OA_BANK_BATCH_PAIRED_CODES = {NO_OA_BANK_BATCH_RELATION_MODE}
+TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
 AUTO_PAIRED_CODES = {
     *SINGLE_BANK_AUTO_PAIRED_CODES,
     *MULTI_BANK_AUTO_PAIRED_CODES,
@@ -146,81 +147,6 @@ class WorkbenchCandidateGroupingService:
             "open": {"groups": [self._serialize_group(group, section="open") for group in open_groups]},
         }
 
-    def _build_turnover_relation_groups(
-        self,
-        rows: list[dict[str, Any]],
-        *,
-        turnover_relations: list[dict[str, Any]] | None,
-    ) -> tuple[list[CandidateGroup], list[dict[str, Any]]]:
-        if not turnover_relations:
-            return [], rows
-
-        available_bank_rows_by_id: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
-        for row in rows:
-            if row.get("type") != "bank":
-                continue
-            row_id = self._string_value(row.get("id"))
-            if row_id:
-                available_bank_rows_by_id[row_id] = row
-
-        if not available_bank_rows_by_id:
-            return [], rows
-
-        groups: list[CandidateGroup] = []
-        consumed_bank_row_ids: set[str] = set()
-        for relation in turnover_relations:
-            if not self._is_syncable_turnover_relation(relation):
-                continue
-            relation_id = self._string_value(relation.get("relation_id"))
-            if not relation_id:
-                continue
-            bank_row_ids = [
-                row_id
-                for row_id in (
-                    self._string_value(row_id)
-                    for row_id in list(relation.get("bank_row_ids") or [])
-                )
-                if row_id
-            ]
-            if len(bank_row_ids) < 2:
-                continue
-            if any(row_id in consumed_bank_row_ids for row_id in bank_row_ids):
-                continue
-            relation_rows = [available_bank_rows_by_id.get(row_id) for row_id in bank_row_ids]
-            if any(row is None for row in relation_rows):
-                continue
-
-            group = CandidateGroup(
-                group_id=f"turnover:{relation_id}",
-                group_type="turnover_relation",
-                match_confidence="high",
-                reason="turnover_relation",
-                temp_key=None,
-                metadata={
-                    "group_source": "turnover_relation",
-                    "relation_id": relation_id,
-                    "relation_status": str(relation.get("status") or "").strip(),
-                    "relation_family": str(relation.get("category_family") or "").strip(),
-                    "relation_business_type": str(relation.get("business_type") or "").strip(),
-                    "sync_to_workbench": True,
-                },
-            )
-            for row in relation_rows:
-                if row is not None:
-                    group.append(row)
-            groups.append(group)
-            consumed_bank_row_ids.update(bank_row_ids)
-
-        if not consumed_bank_row_ids:
-            return [], rows
-        remaining_rows = [
-            row
-            for row in rows
-            if row.get("type") != "bank"
-            or self._string_value(row.get("id")) not in consumed_bank_row_ids
-        ]
-        return groups, remaining_rows
-
     def _extract_turnover_relation_groups_from_candidate_context(
         self,
         open_case_groups: "OrderedDict[str, CandidateGroup]",
@@ -228,74 +154,9 @@ class WorkbenchCandidateGroupingService:
         *,
         turnover_relations: list[dict[str, Any]] | None,
     ) -> tuple[list[CandidateGroup], "OrderedDict[str, CandidateGroup]", list[dict[str, Any]]]:
-        if not turnover_relations:
-            return [], open_case_groups, remaining_rows
-
-        source_candidate_rows = list(remaining_rows)
-        splittable_group_ids: set[str] = set()
-        for group_id, group in open_case_groups.items():
-            if not self._can_split_open_case_group_for_turnover_relation(group):
-                continue
-            splittable_group_ids.add(group_id)
-            source_candidate_rows.extend([*group.oa_rows, *group.bank_rows, *group.invoice_rows])
-
-        original_remaining_row_keys = {id(row) for row in remaining_rows}
-        turnover_groups, remaining_source_rows = self._build_turnover_relation_groups(
-            source_candidate_rows,
-            turnover_relations=turnover_relations,
-        )
-        if not turnover_groups:
-            return [], open_case_groups, remaining_rows
-
-        consumed_row_keys = {
-            id(row)
-            for group in turnover_groups
-            for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
-        }
-        rebuilt_open_case_groups: "OrderedDict[str, CandidateGroup]" = OrderedDict()
-        for group_id, group in open_case_groups.items():
-            if group_id not in splittable_group_ids:
-                rebuilt_open_case_groups[group_id] = group
-                continue
-            remaining_group_rows = [
-                row
-                for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
-                if id(row) not in consumed_row_keys
-            ]
-            if not remaining_group_rows:
-                continue
-            rebuilt_group = CandidateGroup(
-                group_id=group.group_id,
-                group_type=self._group_type_for_open_case_rows(remaining_group_rows),
-                match_confidence=group.match_confidence,
-                reason=group.reason,
-                temp_key=group.temp_key,
-                metadata=deepcopy(group.metadata),
-            )
-            for row in remaining_group_rows:
-                rebuilt_group.append(row)
-            if rebuilt_group.group_type != "candidate":
-                rebuilt_group.match_confidence = "high"
-                rebuilt_group.reason = self._open_case_group_reason(rebuilt_group.group_type)
-            rebuilt_open_case_groups[group_id] = rebuilt_group
-
-        rebuilt_remaining_rows = [
-            row
-            for row in remaining_source_rows
-            if id(row) in original_remaining_row_keys
-        ]
-        return turnover_groups, rebuilt_open_case_groups, rebuilt_remaining_rows
-
-    @staticmethod
-    def _is_syncable_turnover_relation(relation: dict[str, Any]) -> bool:
-        if not isinstance(relation, dict):
-            return False
-        if str(relation.get("status") or "").strip() not in {"deterministic", "confirmed"}:
-            return False
-        return bool(relation.get("sync_to_workbench"))
-
-    def _can_split_open_case_group_for_turnover_relation(self, group: CandidateGroup) -> bool:
-        return self._can_split_open_case_group_for_oa_attachment_source(group)
+        # Turnover relations are recommendation evidence only; paired state must come from active pair relations.
+        _ = turnover_relations
+        return [], open_case_groups, remaining_rows
 
     def _split_valid_and_incomplete_paired_groups(
         self,
@@ -1241,6 +1102,17 @@ class WorkbenchCandidateGroupingService:
             return True
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
         if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
+            relation_modes = {
+                str(row.get("relation_mode") or "").strip()
+                for row in group.bank_rows
+                if str(row.get("relation_mode") or "").strip()
+            }
+            if (
+                relation_modes
+                and relation_modes.issubset({TURNOVER_MANUAL_CLOSURE_RELATION_MODE})
+                and len(group.bank_rows) == 2
+            ):
+                return True
             relation_codes = {
                 str(row.get("invoice_relation", {}).get("code", ""))
                 for row in group.bank_rows

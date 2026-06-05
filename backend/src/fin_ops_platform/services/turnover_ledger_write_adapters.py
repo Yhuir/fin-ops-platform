@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any, Callable
 
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
+
+TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
 
 
 class TurnoverLedgerWritePreconditionError(ValueError):
@@ -522,6 +525,8 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         persistence_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
+        pair_relation_service: Any | None = None,
+        persist_pair_relations_in_transaction: Callable[..., None] | None = None,
     ) -> None:
         self._state_store = state_store
         self._queue_repository = queue_repository
@@ -534,6 +539,8 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self._persistence_repository_factory = persistence_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
+        self._pair_relation_service = pair_relation_service
+        self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
@@ -553,6 +560,14 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 tenant_id=self._tenant_id,
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
+            workbench_pair_port = (
+                TurnoverLedgerWorkbenchPairPort(
+                    pair_relation_service=self._pair_relation_service,
+                    persist_pair_relations=self._persist_pair_relations_in_transaction,
+                )
+                if self._pair_relation_service is not None
+                else None
+            )
         else:
             enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
             if not callable(enqueue):
@@ -565,12 +580,27 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 replace_snapshot=self._replace_snapshot,
                 emit_persistence_warning=self._emit_persistence_warning,
             )
-            connection = local_adapters.connection()
+            connection = (
+                TurnoverLedgerLocalClosureConnection(
+                    relation_snapshot_provider=local_adapters.relation_snapshot,
+                    replace_relation_snapshot=self._replace_snapshot,
+                    save_relation_snapshot=local_adapters.save_snapshot,
+                    pair_relation_service=self._pair_relation_service,
+                    save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
+                )
+                if self._pair_relation_service is not None
+                else local_adapters.connection()
+            )
             relation_repository = local_adapters.relation_repository()
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
                 queue_repository=self._queue_repository
             )
             idempotency_store = self._local_idempotency_store_provider()
+            workbench_pair_port = (
+                TurnoverLedgerWorkbenchPairPort(pair_relation_service=self._pair_relation_service)
+                if self._pair_relation_service is not None
+                else None
+            )
         stale_precondition_port = TurnoverLedgerBankRowStalePreconditionPort(
             bank_rows_provider=self._bank_rows_provider
         )
@@ -583,6 +613,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=stale_precondition_port,
             idempotency_store=idempotency_store,
+            workbench_pair_port=workbench_pair_port,
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
@@ -923,6 +954,64 @@ class TurnoverLedgerConfirmLegacyFallbackFacade:
         return dict(result or {})
 
 
+class TurnoverLedgerClosureLegacyFallbackFacade:
+    def __init__(
+        self,
+        *,
+        relation_rebuild: Callable[[], None],
+        routes: Any,
+        after_mutation: Callable[[list[str]], None],
+        pair_relation_service: Any,
+        persist_pair_relations: Callable[..., None],
+    ) -> None:
+        self._relation_rebuild = relation_rebuild
+        self._routes = routes
+        self._after_mutation = after_mutation
+        self._pair_port = TurnoverLedgerWorkbenchPairPort(
+            pair_relation_service=pair_relation_service,
+            persist_pair_relations=lambda *, transaction, changed_case_ids: persist_pair_relations(
+                changed_case_ids=changed_case_ids
+            ),
+        )
+
+    def confirm_zero_difference_closure(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        affected_months: list[str],
+        expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        _ = tenant_id, expected_versions, idempotency_key
+        self._relation_rebuild()
+        relation = dict(
+            self._routes.confirm_zero_difference_closure(
+                bank_row_ids=list(bank_row_ids or []),
+                actor=actor_id,
+                note=note,
+            )
+            or {}
+        )
+        pair_relation = self._pair_port.create_turnover_manual_closure(
+            relation=relation,
+            bank_row_ids=list(bank_row_ids or []),
+            actor_id=actor_id,
+            note=note,
+            affected_months=list(affected_months or []),
+            transaction=SimpleNamespace(),
+        )
+        self._after_mutation(list(affected_months or []))
+        return {
+            "turnover_relation": relation,
+            "relation": relation,
+            "workbench_pair_relation": dict(pair_relation or {}),
+            "affected_months": list(affected_months or []),
+        }
+
+
 class TurnoverLedgerConfirmRequestBoundaryFacade:
     def __init__(
         self,
@@ -961,6 +1050,39 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             confirm_kwargs["idempotency_key"] = idempotency_key
         result = self._facade.confirm_relation(**confirm_kwargs)
         payload = dict(result or {})
+        payload["affected_months"] = list(affected_months)
+        return payload
+
+    def confirm_zero_difference_closure_from_request(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        expected_versions: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        normalized_bank_row_ids = [
+            str(row_id).strip()
+            for row_id in list(bank_row_ids or [])
+            if str(row_id).strip()
+        ]
+        affected_months = self._affected_months_resolver(list(normalized_bank_row_ids))
+        closure_kwargs = {
+            "bank_row_ids": normalized_bank_row_ids,
+            "actor_id": actor_id,
+            "tenant_id": tenant_id,
+            "note": note,
+            "affected_months": affected_months,
+            "expected_versions": dict(expected_versions or {}),
+        }
+        if idempotency_key:
+            closure_kwargs["idempotency_key"] = idempotency_key
+        confirm = getattr(self._facade, "confirm_zero_difference_closure", None)
+        if not callable(confirm):
+            raise RuntimeError("turnover ledger closure facade is not configured.")
+        payload = dict(confirm(**closure_kwargs) or {})
         payload["affected_months"] = list(affected_months)
         return payload
 
@@ -1399,6 +1521,27 @@ class TurnoverLedgerRelationRepositoryAdapter:
             or {}
         )
 
+    def confirm_zero_difference_closure(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        repository = self._repository_factory(transaction)
+        confirm = getattr(repository, "confirm_zero_difference_closure", None)
+        if not callable(confirm):
+            raise RuntimeError("turnover relation repository must expose confirm_zero_difference_closure.")
+        return dict(
+            confirm(
+                bank_row_ids=list(bank_row_ids or []),
+                actor_id=actor_id,
+                note=note,
+            )
+            or {}
+        )
+
     def withdraw_relation(
         self,
         *,
@@ -1445,6 +1588,90 @@ class TurnoverLedgerBankdetailPortAdapter:
         )
 
 
+class TurnoverLedgerWorkbenchPairPort:
+    def __init__(
+        self,
+        *,
+        pair_relation_service: Any,
+        persist_pair_relations: Callable[..., None] | None = None,
+    ) -> None:
+        self._pair_relation_service = pair_relation_service
+        self._persist_pair_relations = persist_pair_relations
+
+    def create_turnover_manual_closure(
+        self,
+        *,
+        relation: dict[str, object],
+        bank_row_ids: list[str],
+        actor_id: str,
+        note: str | None,
+        affected_months: list[str],
+        transaction: Any,
+    ) -> dict[str, object]:
+        relation_id = str(relation.get("relation_id") or "").strip()
+        if not relation_id:
+            raise RuntimeError("turnover closure relation must include relation_id.")
+        normalized_row_ids = [
+            str(row_id).strip()
+            for row_id in list(bank_row_ids or [])
+            if str(row_id).strip()
+        ]
+        case_id = f"turnover:{relation_id}"
+        active_relations = list(self._pair_relation_service.active_relations_for_row_ids(normalized_row_ids) or [])
+        for active_relation in active_relations:
+            if str(active_relation.get("case_id") or "") != case_id:
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="银行流水已存在关联台闭环关系，请刷新后重试。",
+                )
+        principal_amount = str(relation.get("principal_amount") or "0.00")
+        settled_amount = str(relation.get("settled_amount") or "0.00")
+        amount_check = {
+            "status": "matched",
+            "direction": "turnover_manual_closure",
+            "principal_amount": principal_amount,
+            "settled_amount": settled_amount,
+            "amount_delta": "0.00",
+            "requires_note": False,
+        }
+        pair_relation, _history = self._pair_relation_service.replace_with_confirmed_relation(
+            case_id=case_id,
+            row_ids=list(normalized_row_ids),
+            row_types=["bank" for _ in normalized_row_ids],
+            relation_mode=TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+            created_by=actor_id,
+            month_scope=self._month_scope(affected_months),
+            note=note,
+            amount_check=amount_check,
+            special_metadata={
+                "source": "turnover_ledger",
+                "turnover_relation_id": relation_id,
+                "turnover_closure_mode": "manual_zero_difference_pair",
+            },
+            evidence={
+                "source": "turnover_ledger",
+                "turnover_relation_id": relation_id,
+                "bank_row_ids": list(normalized_row_ids),
+            },
+            display_tags=["外部往来款手动闭环"],
+        )
+        if self._persist_pair_relations is not None:
+            self._persist_pair_relations(
+                transaction=transaction,
+                changed_case_ids=[case_id],
+            )
+        return dict(pair_relation or {})
+
+    @staticmethod
+    def _month_scope(affected_months: list[str]) -> str:
+        months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip()
+        ]
+        return months[0] if len(months) == 1 else "all"
+
+
 class TurnoverLedgerRelationWritePort:
     def __init__(
         self,
@@ -1481,6 +1708,29 @@ class TurnoverLedgerRelationWritePort:
         )
         self._save_relation_snapshot(transaction)
         return result
+
+    def confirm_zero_difference_closure(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        self._rebuild_relation_snapshot()
+        confirm = getattr(self._relation_service, "confirm_zero_difference_closure", None)
+        if not callable(confirm):
+            raise RuntimeError("relation_service must expose confirm_zero_difference_closure.")
+        relation = dict(
+            confirm(
+                bank_row_ids=list(bank_row_ids or []),
+                actor=actor_id,
+                note=note,
+            )
+            or {}
+        )
+        self._save_relation_snapshot(transaction)
+        return {"relation": relation}
 
     def withdraw_relation(
         self,
@@ -1734,6 +1984,44 @@ class TurnoverLedgerLocalRelationConnection:
             self._save_snapshot(current_snapshot)
 
 
+class TurnoverLedgerLocalClosureConnection:
+    def __init__(
+        self,
+        *,
+        relation_snapshot_provider: Callable[[], dict[str, object]],
+        replace_relation_snapshot: Callable[[dict[str, object]], None],
+        save_relation_snapshot: Callable[[dict[str, object]], None],
+        pair_relation_service: Any,
+        save_pair_snapshot: Callable[[dict[str, object]], None],
+    ) -> None:
+        self._relation_snapshot_provider = relation_snapshot_provider
+        self._replace_relation_snapshot = replace_relation_snapshot
+        self._save_relation_snapshot = save_relation_snapshot
+        self._pair_relation_service = pair_relation_service
+        self._save_pair_snapshot = save_pair_snapshot
+
+    @contextmanager
+    def transaction(self) -> Any:
+        previous_relation_snapshot = dict(self._relation_snapshot_provider() or {})
+        previous_pair_snapshot = dict(self._pair_relation_service.snapshot() or {})
+        try:
+            yield SimpleNamespace()
+        except Exception:
+            self._replace_relation_snapshot(dict(previous_relation_snapshot))
+            self._save_relation_snapshot(dict(previous_relation_snapshot))
+            self._replace_pair_snapshot(previous_pair_snapshot)
+            self._save_pair_snapshot(dict(previous_pair_snapshot))
+            raise
+        else:
+            self._save_relation_snapshot(dict(self._relation_snapshot_provider() or {}))
+            self._save_pair_snapshot(dict(self._pair_relation_service.snapshot() or {}))
+
+    def _replace_pair_snapshot(self, snapshot: dict[str, object]) -> None:
+        restored = type(self._pair_relation_service).from_snapshot(snapshot)
+        self._pair_relation_service._pair_relations = deepcopy(restored._pair_relations)
+        self._pair_relation_service._pair_relation_history = deepcopy(restored._pair_relation_history)
+
+
 class TurnoverLedgerLocalRelationRepository:
     def __init__(
         self,
@@ -1763,6 +2051,29 @@ class TurnoverLedgerLocalRelationRepository:
             )
             or {}
         )
+
+    def confirm_zero_difference_closure(
+        self,
+        *,
+        bank_row_ids: list[str],
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        _ = transaction
+        if self._relation_rebuild is not None:
+            self._relation_rebuild()
+        confirm = getattr(self._routes, "confirm_zero_difference_closure", None)
+        if not callable(confirm):
+            raise RuntimeError("turnover relation routes must expose confirm_zero_difference_closure.")
+        return {"relation": dict(
+            confirm(
+                bank_row_ids=list(bank_row_ids),
+                actor=actor_id,
+                note=note,
+            )
+            or {}
+        )}
 
     def withdraw_relation(
         self,

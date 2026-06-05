@@ -27,6 +27,7 @@ class TurnoverLedgerWriteContext:
     extra_repository: Any
     settings_port: Any
     bankdetail_port: Any
+    workbench_pair_port: Any
 
 
 class TurnoverLedgerWriteUnitOfWork:
@@ -41,6 +42,7 @@ class TurnoverLedgerWriteUnitOfWork:
         dirty_outbox_writer: Any,
         stale_precondition_port: Any,
         idempotency_store: Any | None = None,
+        workbench_pair_port: Any | None = None,
     ) -> None:
         self._connection = connection
         self._relation_repository = relation_repository
@@ -50,6 +52,7 @@ class TurnoverLedgerWriteUnitOfWork:
         self._dirty_outbox_writer = dirty_outbox_writer
         self._stale_precondition_port = stale_precondition_port
         self._idempotency_store = idempotency_store
+        self._workbench_pair_port = workbench_pair_port
 
     def run(self, command: Any, handler: Callable[[TurnoverLedgerWriteContext], Any]) -> Any:
         idempotency = _idempotency_request_for(command) if self._idempotency_store is not None else None
@@ -95,6 +98,7 @@ class TurnoverLedgerWriteUnitOfWork:
                 extra_repository=self._extra_repository,
                 settings_port=self._settings_port,
                 bankdetail_port=self._bankdetail_port,
+                workbench_pair_port=self._workbench_pair_port,
             )
             result = handler(context)
             refresh_requests = list(getattr(command, "refresh_requests", []) or [])
