@@ -256,3 +256,21 @@ PF-P194 后仍未覆盖的测试目标：
 - No OA submit/withdraw service-level facts/audit/dirty/outbox。
 - Account balance read model refresh 与 backfill smoke checklist。
 - 真正的事务内 facts/audit/dirty/outbox UoW 收敛尚未实现。
+
+## PF-P195 No OA Mutation Side-Effect Characterization Update
+
+PF-P195 已新增 `tests/test_no_oa_bank_batch_application_service.py`，锁定 No OA application service 的 mutation side-effect 边界。
+
+新增锁定：
+
+- `after_mutation(...)` 必须过滤合法月份，只把 `YYYY-MM` 月份传给 derived lifecycle event。
+- `after_mutation(..., persist=True)` 必须通过 `save_no_oa_bank_batch_mutation(...)` 持久化 pair relation snapshot、No OA batch snapshot、Workbench read model snapshot、changed case ids 和 expanded workbench scope keys。
+- `after_mutation(..., persist=False)` 只发 lifecycle event，不保存 mutation snapshot。
+- `enqueue_background_refresh(...)` 必须只通过 durable queue boundary enqueue `no_oa_bank_batch` read model refresh，并过滤空 scope。
+
+PF-P195 后仍未覆盖的目标：
+
+- Account balance read model refresh 与 backfill smoke checklist。
+- No OA/Bankdetail 真实 PostgreSQL 事务内 facts/audit/dirty/outbox UoW 收敛。
+
+当前切片已覆盖 discovery、route characterization、read model characterization、category/auto-tag side effects、No OA mutation side effects。下一步适合生成 cumulative MG，统一覆盖 PF-P190 到 PF-P195 的完整 diff 后合入 `dev`。

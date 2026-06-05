@@ -22374,6 +22374,69 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，42 tests。
 - 下一条建议：`PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests`。
 
+## PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests
+
+Role:
+你是一位负责 No OA Batch 写路径 side-effect characterization 的 Python 后端工程师。你必须只补强 No OA application service 测试，不修改 production code。
+
+Context:
+PF-P190 到 PF-P194 已完成 Bankdetail / No OA discovery、route facade tests、read model tests 和 auto-tag side-effect tests。当前缺口是 No OA submit/withdraw mutation side-effect 边界。
+
+Goal:
+补强 No OA application service mutation boundary tests，锁定 after_mutation、persist mutation snapshot、durable queue enqueue 和 lifecycle event 行为。
+
+Allowed Scope:
+- tests/test_no_oa_bank_batch_application_service.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实外部服务。
+- 不得引入 UoW。
+- 不得删除或放宽既有 assertions。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 如果 PF-P190 到 PF-P195 已形成完整可合并测试锁定切片，下一条生成 cumulative MG。
+```
+
+### 审查结论
+
+- PF-P195 边界正确：只新增 No OA application service tests，不修改 production code。
+- 它补足当前切片中 No OA mutation side-effect 的最低安全网。
+
+### PF-P195 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_no_oa_bank_batch_application_service.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 No OA application service tests。
+  - 锁定 `after_mutation(..., persist=True)` 的 lifecycle event、search cache clear、mutation snapshot 和 expanded workbench scope keys。
+  - 锁定 `after_mutation(..., persist=False)` 不持久化 snapshot。
+  - 锁定 `enqueue_background_refresh(...)` 只走 durable queue boundary 并过滤空 scope。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v`：Pass，43 tests。
+- 下一条建议：生成 `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate`，统一覆盖 PF-P190 到 PF-P195 的完整 diff 并合入 `dev`。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`

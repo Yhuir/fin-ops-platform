@@ -62,10 +62,10 @@
 | --- | --- |
 | 当前阶段 | Dev integration branch bootstrap complete; ready for next module |
 | 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests` |
+| 最近 verified prompt | `PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests` |
 | 当前分支 | `codex/bankdetail-no-oa-discovery-p190` |
-| 最近验证 | PF-P194 auto-tag side-effect characterization tests 通过；未修改 production code；未执行 Traffic Gate |
-| 下一条允许任务 | 生成并审查 `PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests`，继续当前 Bankdetail / No OA 切片，不切换模块 |
+| 最近验证 | PF-P195 No OA mutation side-effect characterization tests 通过；未修改 production code；未执行 Traffic Gate |
+| 下一条允许任务 | 生成并审查 `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate`，统一覆盖 PF-P190 到 PF-P195 |
 
 ## Prompt 执行日志
 
@@ -334,6 +334,42 @@ MG 步骤：
 
 - 生成并审查 `PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests`。
 - PF-P195 只补 No OA submit/withdraw service-level characterization，不改 production code。
+
+### PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests
+
+状态：`verified`
+
+范围：
+
+- 只补强 No OA application service mutation side-effect characterization tests。
+- 不修改 production code。
+- 不修改 schema。
+- 不访问真实外部服务。
+- 不执行 MG、Traffic Gate 或部署。
+
+执行结果：
+
+- 新增 `tests/test_no_oa_bank_batch_application_service.py`。
+- 锁定 `after_mutation(..., persist=True)`：
+  - 过滤合法月份。
+  - 发出 `no_oa_bank_batch_changed` derived lifecycle event。
+  - 清理 search cache。
+  - 通过 `save_no_oa_bank_batch_mutation(...)` 保存 pair relation snapshot、No OA batch snapshot、Workbench read model snapshot、changed case ids 和 expanded workbench scope keys。
+- 锁定 `after_mutation(..., persist=False)`：
+  - 只发 lifecycle event，不保存 mutation snapshot。
+- 锁定 `enqueue_background_refresh(...)`：
+  - 只通过 durable queue boundary enqueue `no_oa_bank_batch` read model refresh。
+  - 过滤空 scope。
+- `bankdetail-no-oa-discovery.md` 已记录 PF-P195 覆盖和 MG 建议。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v`：Pass，43 tests。
+
+下一步：
+
+- 生成并审查 `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate`。
+- 该 MG 必须统一覆盖 PF-P190 到 PF-P195 的完整 diff，并只合入 `dev`。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
