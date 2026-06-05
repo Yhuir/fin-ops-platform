@@ -445,6 +445,37 @@ class WorkbenchConsistencySqlConnection:
         return []
 
 
+class WorkbenchDuplicateIdentityConsistencyConnection(WorkbenchConsistencySqlConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        return [
+            {
+                "scope_key": "2026-02",
+                "generation_id": "gen-identity-duplicate",
+                "row_count": 2,
+                "group_count": 2,
+                "summary_count": 1,
+                "build_metadata": {},
+                "actual_row_count": 2,
+                "actual_group_count": 2,
+                "actual_group_row_count": 2,
+                "actual_summary_count": 1,
+                "duplicate_invoice_identity_count": 1,
+                "duplicate_bank_identity_count": 0,
+                "duplicate_identity_samples": [
+                    {
+                        "object_kind": "invoice",
+                        "object_identity_key": "265320000000992",
+                        "object_identity_kind": "digital_invoice_no",
+                        "zones": ["open", "paired"],
+                        "row_ids": ["invoice-formal-project-1", "oa-att-inv-project-1"],
+                    }
+                ],
+            }
+        ]
+
+
 class FailedWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -1334,6 +1365,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "with row_counts as ( select generation_id, scope_key, count(distinct row_id)::bigint as actual_row_count from read_model.workbench_rows group by generation_id, scope_key",
             sql,
         )
+
+    def test_repository_generation_consistency_reports_cross_zone_invoice_identity_duplicates(self) -> None:
+        connection = WorkbenchDuplicateIdentityConsistencyConnection()
+
+        failures = PostgresReadModelRepository._workbench_generation_consistency_failures(
+            connection,
+            scope_key="2026-02",
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["duplicate_invoice_identity_count"], 1)
+        self.assertIn("duplicate_invoice_identity_cross_zone count=1", failures[0]["reasons"])
+        self.assertEqual(
+            failures[0]["duplicate_identity_samples"][0]["object_identity_key"],
+            "265320000000992",
+        )
+        sql = connection.fetch_all_calls[0][0]
+        self.assertIn("duplicate_identity_counts as", sql)
+        self.assertIn("object_identity_kind in ('digital_invoice_no', 'invoice_code_no')", sql)
 
     def test_workbench_refresh_status_api_maps_statement_timeout_to_retryable_unavailable(self) -> None:
         app = object.__new__(Application)
@@ -4659,6 +4709,95 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             {row["derived_from_oa_id"] for row in linked_groups[0]["invoice_rows"]},
             {"oa-left"},
         )
+
+    def test_sql_projection_prevents_same_invoice_identity_in_paired_and_open_zones(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-project-1": {
+                "id": "oa-project-1",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "300.00",
+                "counterparty_name": "云南元大工程咨询有限责任公司",
+                "project_name": "昆明卷烟厂动力设备控制系统升级改造项目",
+            },
+            "bank-project-1": {
+                "id": "bank-project-1",
+                "type": "bank",
+                "source_kind": "bank_transaction",
+                "status": "open",
+                "debit_amount": "300.00",
+                "amount": "300.00",
+                "counterparty_name": "云南元大工程咨询有限责任公司",
+                "txn_direction": "outflow",
+                "trade_time": "2026-02-12 15:08:35",
+                "account_no": "622200008106",
+                "summary": "招标文件费用",
+            },
+            "oa-att-inv-project-1": {
+                "id": "oa-att-inv-project-1",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "status": "open",
+                "derived_from_oa_id": "oa-project-1",
+                "digital_invoice_no": "265320000000992",
+                "invoice_no": "265320000000992",
+                "total_with_tax": "300.00",
+                "amount": "283.02",
+                "tax_amount": "16.98",
+                "tax_rate": "6%",
+                "seller_name": "溯源科技有限公司",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-01-20",
+            },
+            "invoice-formal-project-1": {
+                "id": "invoice-formal-project-1",
+                "type": "invoice",
+                "source_kind": "invoice",
+                "status": "open",
+                "digital_invoice_no": "265320000000992",
+                "invoice_no": "265320000000992",
+                "total_with_tax": "300.00",
+                "amount": "283.02",
+                "tax_amount": "16.98",
+                "tax_rate": "6%",
+                "seller_name": "溯源科技有限公司",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-01-20",
+            },
+        }
+        relation = {
+            "case_id": "CASE-PROJECT-1",
+            "relation_mode": "manual_confirmed",
+            "row_ids": ["oa-project-1", "bank-project-1"],
+            "row_types": ["oa", "bank"],
+        }
+
+        payload = builder._group_payload("2026-02", rows_by_id, [relation])
+
+        paired_invoice_ids = [
+            row["id"]
+            for group in payload["paired"]["groups"]
+            for row in group.get("invoice_rows", [])
+        ]
+        open_invoice_ids = [
+            row["id"]
+            for group in payload["open"]["groups"]
+            for row in group.get("invoice_rows", [])
+        ]
+        self.assertIn("oa-att-inv-project-1", paired_invoice_ids)
+        self.assertNotIn("invoice-formal-project-1", open_invoice_ids)
+        paired_invoice_rows = [
+            row
+            for group in payload["paired"]["groups"]
+            for row in group.get("invoice_rows", [])
+            if row["id"] == "oa-att-inv-project-1"
+        ]
+        self.assertEqual(paired_invoice_rows[0]["identity_alias_rows"]["invoice"][0]["id"], "invoice-formal-project-1")
 
     def test_sql_projection_projects_paired_reconciliation_decisions_without_candidate_write(self) -> None:
         recorder = CandidateSnapshotRecorder()

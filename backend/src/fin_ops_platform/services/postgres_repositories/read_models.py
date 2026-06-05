@@ -3192,6 +3192,54 @@ class PostgresReadModelRepository:
                   on target_generations.generation_id = s.generation_id
                  and target_generations.scope_key = s.scope_key
                 group by s.generation_id, s.scope_key
+            ),
+            duplicate_identity_counts as (
+                select
+                    duplicate_rows.generation_id,
+                    duplicate_rows.scope_key,
+                    count(*) filter (where duplicate_rows.object_kind = 'invoice')::bigint
+                        as duplicate_invoice_identity_count,
+                    count(*) filter (where duplicate_rows.object_kind = 'bank')::bigint
+                        as duplicate_bank_identity_count,
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'object_kind', duplicate_rows.object_kind,
+                            'object_identity_key', duplicate_rows.object_identity_key,
+                            'object_identity_kind', duplicate_rows.object_identity_kind,
+                            'zones', duplicate_rows.zones,
+                            'row_ids', duplicate_rows.row_ids
+                        )
+                        order by duplicate_rows.object_kind, duplicate_rows.object_identity_key
+                    ) as duplicate_identity_samples
+                from (
+                    select
+                        gr.generation_id,
+                        gr.scope_key,
+                        case
+                            when gr.pane = 'invoice'
+                             and gr.object_identity_kind in ('digital_invoice_no', 'invoice_code_no')
+                                then 'invoice'
+                            when gr.pane = 'bank'
+                             and gr.object_identity_kind = 'business_fields'
+                                then 'bank'
+                            else null
+                        end as object_kind,
+                        gr.object_identity_key,
+                        gr.object_identity_kind,
+                        array_agg(distinct gr.zone order by gr.zone) as zones,
+                        array_agg(distinct gr.row_id order by gr.row_id) as row_ids
+                    from read_model.workbench_group_rows gr
+                    join target_generations
+                      on target_generations.generation_id = gr.generation_id
+                     and target_generations.scope_key = gr.scope_key
+                    where gr.row_role <> 'summary'
+                      and gr.object_identity_key is not null
+                      and gr.zone in ('paired', 'open')
+                    group by gr.generation_id, gr.scope_key, gr.pane, gr.object_identity_key, gr.object_identity_kind
+                    having bool_or(gr.zone = 'paired') and bool_or(gr.zone = 'open')
+                ) duplicate_rows
+                where duplicate_rows.object_kind is not null
+                group by duplicate_rows.generation_id, duplicate_rows.scope_key
             )
             select
                 gen.scope_key,
@@ -3203,7 +3251,13 @@ class PostgresReadModelRepository:
                 coalesce(row_counts.actual_row_count, 0)::bigint as actual_row_count,
                 coalesce(group_counts.actual_group_count, 0)::bigint as actual_group_count,
                 coalesce(group_row_counts.actual_group_row_count, 0)::bigint as actual_group_row_count,
-                coalesce(summary_counts.actual_summary_count, 0)::bigint as actual_summary_count
+                coalesce(summary_counts.actual_summary_count, 0)::bigint as actual_summary_count,
+                coalesce(duplicate_identity_counts.duplicate_invoice_identity_count, 0)::bigint
+                    as duplicate_invoice_identity_count,
+                coalesce(duplicate_identity_counts.duplicate_bank_identity_count, 0)::bigint
+                    as duplicate_bank_identity_count,
+                coalesce(duplicate_identity_counts.duplicate_identity_samples, '[]'::jsonb)
+                    as duplicate_identity_samples
             from target_generations gen
             left join row_counts
               on row_counts.generation_id = gen.generation_id
@@ -3217,6 +3271,9 @@ class PostgresReadModelRepository:
             left join summary_counts
               on summary_counts.generation_id = gen.generation_id
              and summary_counts.scope_key = gen.scope_key
+            left join duplicate_identity_counts
+              on duplicate_identity_counts.generation_id = gen.generation_id
+             and duplicate_identity_counts.scope_key = gen.scope_key
             order by gen.scope_key
             """,
             tuple(params),
@@ -3233,6 +3290,8 @@ class PostgresReadModelRepository:
             actual_group_count = int_value(row.get("actual_group_count"), 0)
             actual_group_row_count = int_value(row.get("actual_group_row_count"), 0)
             actual_summary_count = int_value(row.get("actual_summary_count"), 0)
+            duplicate_invoice_identity_count = int_value(row.get("duplicate_invoice_identity_count"), 0)
+            duplicate_bank_identity_count = int_value(row.get("duplicate_bank_identity_count"), 0)
             reasons: list[str] = []
             if group_count != actual_group_count:
                 reasons.append(f"group_count metadata={group_count} actual={actual_group_count}")
@@ -3240,6 +3299,10 @@ class PostgresReadModelRepository:
                 reasons.append(f"row_count metadata={row_count} actual_group_rows={actual_group_row_count}")
             if summary_count > 0 and actual_summary_count == 0 and not is_tombstone:
                 reasons.append(f"summary_count metadata={summary_count} actual={actual_summary_count}")
+            if duplicate_invoice_identity_count:
+                reasons.append(f"duplicate_invoice_identity_cross_zone count={duplicate_invoice_identity_count}")
+            if duplicate_bank_identity_count:
+                reasons.append(f"duplicate_bank_identity_cross_zone count={duplicate_bank_identity_count}")
             if reasons:
                 failures.append(
                     {
@@ -3252,6 +3315,11 @@ class PostgresReadModelRepository:
                         "actual_group_count": actual_group_count,
                         "actual_group_row_count": actual_group_row_count,
                         "actual_summary_count": actual_summary_count,
+                        "duplicate_invoice_identity_count": duplicate_invoice_identity_count,
+                        "duplicate_bank_identity_count": duplicate_bank_identity_count,
+                        "duplicate_identity_samples": row.get("duplicate_identity_samples")
+                        if isinstance(row.get("duplicate_identity_samples"), list)
+                        else [],
                         "reasons": reasons,
                     }
                 )
@@ -4879,9 +4947,14 @@ class PostgresReadModelRepository:
                         """
                         insert into read_model.workbench_rows(
                             generation_id, row_id, scope_month, scope_key, source_kind, status, project_id, project_name,
-                            counterparty_name, amount, source_versions, generated_at, cache_status, payload, raw_payload
+                            counterparty_name, amount, object_identity_key, object_identity_kind,
+                            object_identity_source, object_identity_confidence,
+                            source_versions, generated_at, cache_status, payload, raw_payload
                         )
-                        values (%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s)
+                        values (
+                            %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+                        )
                         on conflict (generation_id, scope_key, row_id) do update set
                             scope_month = excluded.scope_month,
                             scope_key = excluded.scope_key,
@@ -4891,6 +4964,10 @@ class PostgresReadModelRepository:
                             project_name = excluded.project_name,
                             counterparty_name = excluded.counterparty_name,
                             amount = excluded.amount,
+                            object_identity_key = excluded.object_identity_key,
+                            object_identity_kind = excluded.object_identity_kind,
+                            object_identity_source = excluded.object_identity_source,
+                            object_identity_confidence = excluded.object_identity_confidence,
                             source_versions = excluded.source_versions,
                             generated_at = excluded.generated_at,
                             cache_status = excluded.cache_status,
@@ -4909,6 +4986,10 @@ class PostgresReadModelRepository:
                             text(row.get("project_name") or row.get("project")),
                             text(row.get("counterparty_name") or row.get("counterparty") or row.get("supplier_name")),
                             decimal_text(row.get("amount") or row.get("amount_with_tax") or row.get("invoice_amount")),
+                            text(row.get("object_identity_key")),
+                            text(row.get("object_identity_kind")),
+                            text(row.get("object_identity_source")),
+                            text(row.get("object_identity_confidence")),
                             jsonb(source_versions),
                             generated_at,
                             cache_status,
@@ -4982,11 +5063,12 @@ class PostgresReadModelRepository:
                             insert into read_model.workbench_group_rows(
                                 generation_id, scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
                                 source_kind, status, time_value, time_date, column_values, searchable_text,
+                                object_identity_key, object_identity_kind, object_identity_source, object_identity_confidence,
                                 source_versions, generated_at, cache_status, payload, raw_payload
                             )
                             values (
                                 %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
-                                %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+                                %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
                             )
                             on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id) do update set
                                 scope_month = excluded.scope_month,
@@ -4997,6 +5079,10 @@ class PostgresReadModelRepository:
                                 time_date = excluded.time_date,
                                 column_values = excluded.column_values,
                                 searchable_text = excluded.searchable_text,
+                                object_identity_key = excluded.object_identity_key,
+                                object_identity_kind = excluded.object_identity_kind,
+                                object_identity_source = excluded.object_identity_source,
+                                object_identity_confidence = excluded.object_identity_confidence,
                                 source_versions = excluded.source_versions,
                                 generated_at = excluded.generated_at,
                                 cache_status = excluded.cache_status,
@@ -5020,6 +5106,10 @@ class PostgresReadModelRepository:
                                 text(group_row.get("time_date")),
                                 jsonb(group_row.get("column_values") if isinstance(group_row.get("column_values"), dict) else {}),
                                 text(group_row.get("searchable_text")) or "",
+                                text(group_row.get("object_identity_key")),
+                                text(group_row.get("object_identity_kind")),
+                                text(group_row.get("object_identity_source")),
+                                text(group_row.get("object_identity_confidence")),
                                 jsonb(source_versions),
                                 generated_at,
                                 cache_status,
@@ -5248,9 +5338,14 @@ class PostgresReadModelRepository:
                 """
                 insert into read_model.workbench_rows(
                     generation_id, row_id, scope_month, scope_key, source_kind, status, project_id, project_name,
-                    counterparty_name, amount, source_versions, generated_at, cache_status, payload, raw_payload
+                    counterparty_name, amount, object_identity_key, object_identity_kind,
+                    object_identity_source, object_identity_confidence,
+                    source_versions, generated_at, cache_status, payload, raw_payload
                 )
-                values (%s, %s, %s::date, 'all', %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s)
+                values (
+                    %s, %s, %s::date, 'all', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
+                )
                 on conflict (generation_id, scope_key, row_id) do update set
                     scope_month = excluded.scope_month,
                     source_kind = excluded.source_kind,
@@ -5259,6 +5354,10 @@ class PostgresReadModelRepository:
                     project_name = excluded.project_name,
                     counterparty_name = excluded.counterparty_name,
                     amount = excluded.amount,
+                    object_identity_key = excluded.object_identity_key,
+                    object_identity_kind = excluded.object_identity_kind,
+                    object_identity_source = excluded.object_identity_source,
+                    object_identity_confidence = excluded.object_identity_confidence,
                     source_versions = excluded.source_versions,
                     generated_at = excluded.generated_at,
                     cache_status = excluded.cache_status,
@@ -5276,6 +5375,10 @@ class PostgresReadModelRepository:
                     text(row.get("project_name") or row.get("project")),
                     text(row.get("counterparty_name") or row.get("counterparty") or row.get("supplier_name")),
                     decimal_text(row.get("amount") or row.get("amount_with_tax") or row.get("invoice_amount")),
+                    text(row.get("object_identity_key")),
+                    text(row.get("object_identity_kind")),
+                    text(row.get("object_identity_source")),
+                    text(row.get("object_identity_confidence")),
                     jsonb(aggregate_source_versions),
                     generated_at,
                     jsonb(row),
@@ -5346,11 +5449,12 @@ class PostgresReadModelRepository:
                     insert into read_model.workbench_group_rows(
                         generation_id, scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
                         source_kind, status, time_value, time_date, column_values, searchable_text,
+                        object_identity_key, object_identity_kind, object_identity_source, object_identity_confidence,
                         source_versions, generated_at, cache_status, payload, raw_payload
                     )
                     values (
                         %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
-                        %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
+                        %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
                     )
                     on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id) do update set
                         scope_month = excluded.scope_month,
@@ -5361,6 +5465,10 @@ class PostgresReadModelRepository:
                         time_date = excluded.time_date,
                         column_values = excluded.column_values,
                         searchable_text = excluded.searchable_text,
+                        object_identity_key = excluded.object_identity_key,
+                        object_identity_kind = excluded.object_identity_kind,
+                        object_identity_source = excluded.object_identity_source,
+                        object_identity_confidence = excluded.object_identity_confidence,
                         source_versions = excluded.source_versions,
                         generated_at = excluded.generated_at,
                         cache_status = excluded.cache_status,
@@ -5382,6 +5490,10 @@ class PostgresReadModelRepository:
                         text(group_row.get("time_date")),
                         jsonb(group_row.get("column_values") if isinstance(group_row.get("column_values"), dict) else {}),
                         text(group_row.get("searchable_text")) or "",
+                        text(group_row.get("object_identity_key")),
+                        text(group_row.get("object_identity_kind")),
+                        text(group_row.get("object_identity_source")),
+                        text(group_row.get("object_identity_confidence")),
                         jsonb(aggregate_source_versions),
                         generated_at,
                         jsonb(group_row.get("payload") if isinstance(group_row.get("payload"), dict) else group_row),
@@ -8753,6 +8865,10 @@ def _workbench_group_row_records(group: dict[str, Any]) -> list[dict[str, Any]]:
                 "time_date": _workbench_date_from_text(time_value),
                 "column_values": column_values,
                 "searchable_text": _searchable_row_text(row, pane),
+                "object_identity_key": text(row.get("object_identity_key")),
+                "object_identity_kind": text(row.get("object_identity_kind")),
+                "object_identity_source": text(row.get("object_identity_source")),
+                "object_identity_confidence": text(row.get("object_identity_confidence")),
                 "payload": serialize_value(row),
             }
         )

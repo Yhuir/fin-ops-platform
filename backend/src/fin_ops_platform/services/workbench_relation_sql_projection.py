@@ -5,13 +5,16 @@ import re
 from typing import Any
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text, text_list
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-workbench-relation-distribution-v1"
+WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-workbench-relation-object-identity-v1"
+OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
+HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
 
 class WorkbenchRelationSqlProjectionBuilder:
@@ -142,7 +145,7 @@ class WorkbenchRelationSqlProjectionBuilder:
     def _formal_invoice_rows(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
         return self._connection.fetch_all(
             """
-            select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, digital_invoice_no,
+            select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_code, invoice_no, digital_invoice_no,
                    invoice_date, invoice_month, seller_name, seller_tax_no, buyer_name, buyer_tax_no,
                    amount, total_with_tax, raw_payload
             from app.invoices
@@ -256,10 +259,23 @@ class WorkbenchRelationSqlProjectionBuilder:
 
 def _bank_transaction_object(row: dict[str, Any], *, month: str) -> dict[str, Any]:
     row_id = text(row.get("row_id")) or ""
+    identity = OBJECT_IDENTITY_POLICY.identify_bank_transaction_mapping(
+        {
+            "account_no": row.get("account_no"),
+            "trade_time": row.get("trade_time") or row.get("txn_date"),
+            "txn_direction": row.get("txn_direction"),
+            "amount": row.get("amount"),
+            "counterparty_name": row.get("counterparty_name_raw"),
+            "bank_serial_no": row.get("bank_serial_no"),
+        },
+        source_kind="bank_transaction",
+        source_row_id=row_id,
+    )
     return {
         "row_id": row_id,
         "row_type": "bank_transaction",
         "scope_month": month,
+        **_object_identity_columns(identity),
         "summary": {
             "id": row_id,
             "amount": _decimal_text(row.get("amount")),
@@ -271,6 +287,7 @@ def _bank_transaction_object(row: dict[str, Any], *, month: str) -> dict[str, An
             "statement_serial_no": text(row.get("bank_serial_no")),
             "account_name": text(row.get("account_name")),
             "account_last4": text(row.get("account_no"))[-4:] if text(row.get("account_no")) else "",
+            **_object_identity_columns(identity),
         },
     }
 
@@ -281,6 +298,10 @@ def _oa_object(row: dict[str, Any], *, month: str) -> dict[str, Any]:
         "row_id": row_id,
         "row_type": "oa",
         "scope_month": month,
+        "object_identity_key": row_id,
+        "object_identity_kind": "oa_row_id",
+        "object_identity_source": "oa",
+        "object_identity_confidence": "canonical",
         "summary": {
             "id": row_id,
             "applicant": text(row.get("applicant")),
@@ -290,6 +311,10 @@ def _oa_object(row: dict[str, Any], *, month: str) -> dict[str, Any]:
             "form_no": text(row.get("form_id")),
             "amount": _decimal_text(row.get("amount")),
             "detail_available": True,
+            "object_identity_key": row_id,
+            "object_identity_kind": "oa_row_id",
+            "object_identity_source": "oa",
+            "object_identity_confidence": "canonical",
         },
     }
 
@@ -297,10 +322,27 @@ def _oa_object(row: dict[str, Any], *, month: str) -> dict[str, Any]:
 def _formal_invoice_object(row: dict[str, Any], *, month: str) -> dict[str, Any]:
     row_id = text(row.get("row_id")) or ""
     invoice_type = "output" if text(row.get("invoice_type")) == "output" else "input"
+    identity = OBJECT_IDENTITY_POLICY.identify_invoice_mapping(
+        {
+            "digital_invoice_no": row.get("digital_invoice_no"),
+            "invoice_code": row.get("invoice_code"),
+            "invoice_no": row.get("invoice_no"),
+            "seller_tax_no": row.get("seller_tax_no"),
+            "buyer_tax_no": row.get("buyer_tax_no"),
+            "seller_name": row.get("seller_name"),
+            "buyer_name": row.get("buyer_name"),
+            "invoice_date": row.get("invoice_date"),
+            "total_with_tax": row.get("total_with_tax") or row.get("amount"),
+        },
+        source_kind="formal_invoice",
+        source_row_id=row_id,
+        object_type="invoice",
+    )
     return {
         "row_id": row_id,
         "row_type": f"{invoice_type}_invoice",
         "scope_month": month,
+        **_object_identity_columns(identity),
         "summary": {
             "id": row_id,
             "invoice_no": text(row.get("invoice_no")),
@@ -314,6 +356,7 @@ def _formal_invoice_object(row: dict[str, Any], *, month: str) -> dict[str, Any]
             "buyer_tax_no": text(row.get("buyer_tax_no")),
             "invoice_type": invoice_type,
             "source_kind": "formal_invoice",
+            **_object_identity_columns(identity),
         },
     }
 
@@ -322,10 +365,16 @@ def _oa_attachment_invoice_object(row: dict[str, Any], *, month: str) -> dict[st
     payload = row_payload(row, "payload", "raw_payload")
     payload = payload if isinstance(payload, dict) else {}
     row_id = text(row.get("row_id") or payload.get("id") or payload.get("row_id")) or ""
+    identity = OBJECT_IDENTITY_POLICY.identify_oa_attachment_invoice(
+        payload,
+        source_kind="oa_attachment_invoice",
+        source_row_id=row_id,
+    )
     return {
         "row_id": row_id,
         "row_type": "input_invoice",
         "scope_month": month,
+        **_object_identity_columns(identity),
         "summary": {
             "id": row_id,
             "invoice_no": text(payload.get("invoice_no") or payload.get("invoiceNumber") or payload.get("seller_tax_no")),
@@ -339,6 +388,7 @@ def _oa_attachment_invoice_object(row: dict[str, Any], *, month: str) -> dict[st
             "buyer_tax_no": text(payload.get("buyer_tax_no")),
             "invoice_type": "input",
             "source_kind": "oa_attachment_invoice",
+            **_object_identity_columns(identity),
         },
     }
 
@@ -442,7 +492,26 @@ def _relation_typed_row_ids(relation: dict[str, Any], *, objects: dict[str, dict
         )
         if row_type in result:
             result[row_type].append(row_id)
-    return {key: _dedupe_preserve_order(value) for key, value in result.items()}
+    deduped = {key: _dedupe_preserve_order(value) for key, value in result.items()}
+    deduped["input_invoice"] = _dedupe_invoice_ids_by_identity(deduped["input_invoice"], objects)
+    deduped["output_invoice"] = _dedupe_invoice_ids_by_identity(deduped["output_invoice"], objects)
+    return deduped
+
+
+def _dedupe_invoice_ids_by_identity(row_ids: list[str], objects: dict[str, dict[str, Any]]) -> list[str]:
+    seen_identity_keys: set[str] = set()
+    result: list[str] = []
+    for row_id in row_ids:
+        object_payload = objects.get(row_id) if isinstance(objects.get(row_id), dict) else {}
+        identity_key = text(object_payload.get("object_identity_key"))
+        identity_kind = text(object_payload.get("object_identity_kind"))
+        if identity_key and identity_kind in HARD_INVOICE_IDENTITY_KINDS:
+            identity_marker = f"{identity_kind}:{identity_key}"
+            if identity_marker in seen_identity_keys:
+                continue
+            seen_identity_keys.add(identity_marker)
+        result.append(row_id)
+    return result
 
 
 def _normalize_relation_row_type(row_type: str, object_payload: dict[str, Any] | None) -> str:
@@ -492,6 +561,15 @@ def _put_object(objects: dict[str, dict[str, Any]], object_payload: dict[str, An
     row_id = text(object_payload.get("row_id")) or ""
     if row_id:
         objects[row_id] = object_payload
+
+
+def _object_identity_columns(identity: ObjectIdentity) -> dict[str, str | None]:
+    return {
+        "object_identity_key": text(identity.canonical_key),
+        "object_identity_kind": text(identity.canonical_key_kind),
+        "object_identity_source": text(identity.source_kind),
+        "object_identity_confidence": text(identity.confidence),
+    }
 
 
 def _dedupe_preserve_order(values: Any) -> list[str]:

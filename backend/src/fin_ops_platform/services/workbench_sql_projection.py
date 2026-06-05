@@ -27,6 +27,7 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
     DISPLAY_STATE_PAIRED,
 )
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
 from fin_ops_platform.services.workbench_query_service import (
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     WorkbenchQueryService,
@@ -39,7 +40,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-05-25-oa-attachment-source-groups"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-workbench-object-identity-v1"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -1067,6 +1068,9 @@ class WorkbenchSqlProjectionBuilder:
             working_rows_by_id,
             decisions or [],
             paired_row_ids,
+        )
+        WorkbenchObjectIdentityArbitrationService(identity_policy=OBJECT_IDENTITY_POLICY).arbitrate_rows(
+            working_rows_by_id
         )
 
         grouped = WorkbenchCandidateGroupingService().group_payload(

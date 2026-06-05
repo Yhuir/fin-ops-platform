@@ -69,6 +69,7 @@ EXPECTED_MIGRATION_FILES = [
     "0055_invoice_lifecycle_distribution.sql",
     "0056_app_status_readiness.sql",
     "0057_app_health_dashboard_metrics_indexes.sql",
+    "0058_workbench_object_identity.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

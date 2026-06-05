@@ -134,6 +134,60 @@ class WorkbenchRelationProjectionConnection:
         }
 
 
+class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.invoices" in normalized:
+            return [
+                {
+                    "row_id": "invoice-formal-project-1",
+                    "invoice_type": "input",
+                    "invoice_code": None,
+                    "invoice_no": "265320000000992",
+                    "digital_invoice_no": "265320000000992",
+                    "invoice_date": "2026-01-20",
+                    "invoice_month": "2026-01-01",
+                    "seller_name": "溯源科技有限公司",
+                    "seller_tax_no": "300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "buyer_tax_no": None,
+                    "amount": "283.02",
+                    "total_with_tax": "300.00",
+                    "raw_payload": {},
+                }
+            ]
+        if "from read_model.workbench_rows" in normalized and "oa_attachment_invoice" in normalized:
+            return [
+                {
+                    "row_id": "oa-att-inv-project-1",
+                    "scope_month": "2026-01-01",
+                    "payload": {
+                        "invoice_no": "265320000000992",
+                        "digital_invoice_no": "265320000000992",
+                        "issue_date": "2026-01-20",
+                        "seller_name": "溯源科技有限公司",
+                        "seller_tax_no": "300007194052520",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "total_with_tax": "300.00",
+                        "amount": "283.02",
+                    },
+                }
+            ]
+        if "from app.workbench_pair_relations" in normalized:
+            return [
+                {
+                    "case_id": "case-project-1",
+                    "relation_mode": "manual_confirmed",
+                    "month_scope": "2026-01-01",
+                    "row_ids": ["oa-tian-196", "txn-tian-196", "oa-att-inv-project-1", "invoice-formal-project-1"],
+                    "row_types": ["oa", "bank", "invoice", "invoice"],
+                    "source_versions": {},
+                    "raw_payload": {},
+                }
+            ]
+        return super().fetch_all(sql, params)
+
+
 class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
     def test_rebuild_writes_linked_and_unlinked_relation_rows(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -168,6 +222,29 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(rows_by_id["txn-unlinked"]["group_ids"], [])
         self.assertTrue(any("gen.generation_id = r.generation_id" in sql for sql in connection.sql_statements))
         self.assertFalse(any("gen.id = r.generation_id" in sql for sql in connection.sql_statements))
+
+    def test_rebuild_deduplicates_formal_and_oa_attachment_invoice_with_same_identity(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = DuplicateInvoiceIdentityRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        builder.rebuild_workbench_relation_read_model_scope("2026-01")
+
+        group = repository.saved[0]["groups"][0]
+        self.assertEqual(group["input_invoice_ids"], ["oa-att-inv-project-1"])
+        rows_by_id = {row["row_id"]: row for row in repository.saved[0]["rows"]}
+        linked = rows_by_id["txn-tian-196"]
+        self.assertEqual(
+            [invoice["digital_invoice_no"] for invoice in linked["linked_input_invoices"]],
+            ["265320000000992"],
+        )
+        self.assertEqual(
+            linked["linked_input_invoices"][0]["object_identity_key"],
+            "265320000000992",
+        )
 
 
 if __name__ == "__main__":
