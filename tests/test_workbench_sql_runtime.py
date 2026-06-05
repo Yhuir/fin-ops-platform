@@ -2263,6 +2263,71 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(aggregate_source_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
 
+    def test_repository_all_scope_suppresses_open_rows_claimed_by_paired_shards(self) -> None:
+        class AggregateAllCrossZoneDuplicateConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                invoice_row = {
+                    "id": "inv_imported_1609",
+                    "type": "invoice",
+                    "source_kind": "invoice",
+                    "object_identity_key": "26532000000099218731",
+                    "object_identity_kind": "digital_invoice_no",
+                    "object_identity_source": "invoice",
+                    "object_identity_confidence": "canonical",
+                }
+                return [
+                    {
+                        "scope_key": "2026-02",
+                        "scope_month": "2026-02-01",
+                        "zone": "paired",
+                        "group_id": "case:CASE-PAIRED",
+                        "generated_at": "2026-05-24T00:02:00+00:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": "case:CASE-PAIRED",
+                            "zone": "paired",
+                            "oa_rows": [{"id": "oa-1", "type": "oa", "source_kind": "oa"}],
+                            "bank_rows": [{"id": "bank-1", "type": "bank", "source_kind": "bank"}],
+                            "invoice_rows": [{**invoice_row, "status": "paired"}],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-01",
+                        "scope_month": "2026-01-01",
+                        "zone": "open",
+                        "group_id": "temp:OPEN-INVOICE-MONTH",
+                        "generated_at": "2026-05-24T00:01:00+00:00",
+                        "source_versions": {"source_version": 1},
+                        "payload": {
+                            "group_id": "temp:OPEN-INVOICE-MONTH",
+                            "zone": "open",
+                            "oa_rows": [{"id": "oa-open-context", "type": "oa", "source_kind": "oa"}],
+                            "bank_rows": [],
+                            "invoice_rows": [{**invoice_row, "status": "open"}],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllCrossZoneDuplicateConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        paired_group = next(group for group in aggregate_group_payloads if group["zone"] == "paired")
+        open_group = next(group for group in aggregate_group_payloads if group["zone"] == "open")
+        self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["inv_imported_1609"])
+        self.assertEqual(open_group["invoice_rows"], [])
+        self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-open-context"])
+
     def test_repository_persists_no_oa_collapsed_group_fact_and_display_counts(self) -> None:
         connection = WorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)

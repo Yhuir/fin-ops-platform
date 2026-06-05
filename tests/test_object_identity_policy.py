@@ -47,6 +47,19 @@ class FinancialObjectIdentityPolicyTests(unittest.TestCase):
         self.assertIsNone(suspected.canonical_key)
         self.assertEqual(suspected.suspected_key, "suspected:云南省交通投资建设集团有限公司:云南溯源科技有限公司:2026-03-21:100.00")
 
+    def test_invoice_placeholder_numbers_are_not_canonical_identity(self) -> None:
+        identity = self.policy.identify_invoice_mapping(
+            {
+                "digital_invoice_no": "—",
+                "invoice_code": "--",
+                "invoice_no": "-",
+            }
+        )
+
+        self.assertIsNone(identity.canonical_key)
+        self.assertIsNone(identity.canonical_key_kind)
+        self.assertEqual(identity.confidence, "missing")
+
     def test_invoice_import_counterparty_amount_fingerprint_is_centralized_weak_key(self) -> None:
         identity = self.policy.identify_invoice_mapping(
             {

@@ -7834,13 +7834,116 @@ def _aggregate_workbench_all_scope_payload(groups: list[dict[str, Any]]) -> dict
             continue
         _merge_all_scope_group(grouped[key], group)
 
+    finalized_by_zone: dict[str, list[dict[str, Any]]] = {"paired": [], "open": []}
     for (zone, _group_id), group in grouped.items():
         _finalize_all_scope_group(group, zone=zone)
-        aggregate[zone]["groups"].append(group)
+        finalized_by_zone[zone].append(group)
+    _suppress_all_scope_open_rows_claimed_by_paired(
+        finalized_by_zone["paired"],
+        finalized_by_zone["open"],
+    )
     for zone in ("paired", "open"):
+        aggregate[zone]["groups"] = [
+            group
+            for group in finalized_by_zone[zone]
+            if _workbench_group_fact_row_counts(group)["rows"] > 0
+        ]
         aggregate[zone]["groups"].sort(key=lambda item: text(item.get("group_id")) or "")
     aggregate["summary"] = _summarize_workbench_payload_groups(aggregate)
     return aggregate
+
+
+def _suppress_all_scope_open_rows_claimed_by_paired(
+    paired_groups: list[dict[str, Any]],
+    open_groups: list[dict[str, Any]],
+) -> None:
+    paired_row_keys: set[tuple[str, str]] = set()
+    paired_identity_keys: set[tuple[str, str, str]] = set()
+    for group in paired_groups:
+        for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
+            if row_role == "summary":
+                continue
+            row_id = _workbench_row_id(row)
+            if row_id is not None:
+                paired_row_keys.add((pane, row_id))
+            identity = _workbench_strong_object_identity(row, pane)
+            if identity is not None:
+                paired_identity_keys.add(identity)
+
+    if not paired_row_keys and not paired_identity_keys:
+        return
+
+    for group in open_groups:
+        _remove_workbench_rows_from_group(
+            group,
+            paired_row_keys=paired_row_keys,
+            paired_identity_keys=paired_identity_keys,
+        )
+        _finalize_all_scope_group(group, zone="open")
+
+
+def _remove_workbench_rows_from_group(
+    group: dict[str, Any],
+    *,
+    paired_row_keys: set[tuple[str, str]],
+    paired_identity_keys: set[tuple[str, str, str]],
+) -> None:
+    for pane, row_key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
+        rows = group.get(row_key)
+        if isinstance(rows, list):
+            group[row_key] = [
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and not _workbench_row_claimed_by_paired(
+                    row,
+                    pane,
+                    paired_row_keys=paired_row_keys,
+                    paired_identity_keys=paired_identity_keys,
+                )
+            ]
+    collapsed_rows = group.get("collapsed_rows")
+    if isinstance(collapsed_rows, dict):
+        for pane, rows in list(collapsed_rows.items()):
+            if not isinstance(rows, list):
+                continue
+            collapsed_rows[pane] = [
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and not _workbench_row_claimed_by_paired(
+                    row,
+                    str(pane),
+                    paired_row_keys=paired_row_keys,
+                    paired_identity_keys=paired_identity_keys,
+                )
+            ]
+
+
+def _workbench_row_claimed_by_paired(
+    row: dict[str, Any],
+    pane: str,
+    *,
+    paired_row_keys: set[tuple[str, str]],
+    paired_identity_keys: set[tuple[str, str, str]],
+) -> bool:
+    row_id = _workbench_row_id(row)
+    if row_id is not None and (pane, row_id) in paired_row_keys:
+        return True
+    identity = _workbench_strong_object_identity(row, pane)
+    return identity is not None and identity in paired_identity_keys
+
+
+def _workbench_strong_object_identity(row: dict[str, Any], pane: str) -> tuple[str, str, str] | None:
+    identity_key = text(row.get("object_identity_key"))
+    identity_kind = text(row.get("object_identity_kind"))
+    if identity_key is None or identity_kind is None:
+        return None
+    if pane == "invoice" and identity_kind in {"digital_invoice_no", "invoice_code_no"}:
+        return (pane, identity_kind, identity_key)
+    if pane == "bank" and identity_kind == "business_fields":
+        return (pane, identity_kind, identity_key)
+    return None
 
 
 def _normalize_all_scope_group(group: dict[str, Any], *, zone: str, group_id: str) -> dict[str, Any]:

@@ -6,6 +6,7 @@ from typing import Any
 
 
 CENT = Decimal("0.01")
+PLACEHOLDER_TEXTS = frozenset({"-", "--", "—", "无", "暂无", "null", "none", "n/a", "nan"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,8 @@ class InvoiceIdentityService:
         if value in (None, ""):
             return None
         text = str(value).strip()
+        if text.lower() in PLACEHOLDER_TEXTS:
+            return None
         return text or None
 
     @staticmethod
