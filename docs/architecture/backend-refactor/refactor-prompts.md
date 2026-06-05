@@ -22723,6 +22723,24 @@ Merge Rules:
 - PF-P197-MG 边界正确：只覆盖 backfill CLI smoke tests 和一个 dry-run 小修复。
 - MG 明确只合入 `dev`，不触碰 `main` 或生产配置。
 
+### PF-P197-MG 执行结果
+
+- 状态：`verified`
+- 合入目标：`dev`
+- Merge commit：`e6e164dd`
+- 合入范围：
+  - backfill CLI smoke tests；
+  - `bank_detail_backfill --dry-run --scope-key <month>` 不再过早读取 PostgreSQL 配置；
+  - PF-P196/PF-P197 文档回写。
+- `dev` 上验证：
+  - `git status --short --branch`：Pass，`dev...origin/dev [ahead 4]`
+  - `git ls-files --others --exclude-standard`：Pass，empty
+  - `git diff --check`：Pass
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_backfill_cli -v`：Pass，5 tests
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model -v`：Pass，4 tests
+  - `python3 -m compileall backend/src/fin_ops_platform/app/bank_detail_backfill.py backend/src/fin_ops_platform/app/bank_account_balance_backfill.py`：Pass
+- Traffic Gate：未执行；未部署、未切流、未访问生产。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`

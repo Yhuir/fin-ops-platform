@@ -60,12 +60,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Bankdetail / No OA account balance and backfill smoke planning |
-| 当前 active prompt | `PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate` |
-| 最近 verified prompt | `PF-P197 - Bankdetail Backfill CLI Characterization Tests` |
-| 当前分支 | `codex/bankdetail-account-balance-backfill-p196` |
-| 最近验证 | PF-P197 backfill CLI characterization tests 通过；包含一个显式 dry-run 不连库的小修复；未执行 Traffic Gate |
-| 下一条允许任务 | 执行 `PF-P197-MG`，合入目标为 `dev`，不得合入或 push `main` |
+| 当前阶段 | Bankdetail account balance / backfill smoke baseline merged to dev |
+| 当前 active prompt | 空 |
+| 最近 verified prompt | `PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate` |
+| 当前分支 | `dev` |
+| 最近验证 | PF-P197-MG 已合入 `dev`；merge commit `e6e164dd`；`dev` 上 targeted tests 通过；未执行 Traffic Gate |
+| 下一条允许任务 | push `origin/dev`；push 完成后从最新 `dev` 新建 `codex/` 分支，生成下一条 Bankdetail / No OA prompt |
 
 ## Prompt 执行日志
 
@@ -501,7 +501,7 @@ MG 步骤：
 
 ### PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 范围：
 
@@ -528,6 +528,28 @@ MG 步骤：
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_backfill_cli -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model -v`
 - `python3 -m compileall backend/src/fin_ops_platform/app/bank_detail_backfill.py backend/src/fin_ops_platform/app/bank_account_balance_backfill.py`
+
+执行结果：
+
+- PF-P197-MG 已合入 `dev`。
+- Merge commit：`e6e164dd`。
+- 合入范围只包含 backfill CLI smoke tests、`bank_detail_backfill` 显式 scope dry-run 小修复和文档回写。
+- 未执行 Traffic Gate、部署、Nginx 或生产配置变更。
+
+`dev` 上验证：
+
+- `git status --short --branch`：Pass，`dev...origin/dev [ahead 4]`。
+- `git ls-files --others --exclude-standard`：Pass，empty。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_backfill_cli -v`：Pass，5 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model -v`：Pass，4 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/app/bank_detail_backfill.py backend/src/fin_ops_platform/app/bank_account_balance_backfill.py`：Pass。
+
+下一步：
+
+- 提交本次 post-flight 文档更新并 push `origin/dev`。
+- push 后从最新 `dev` 创建下一条 `codex/` 分支。
+- 下一条建议：`PF-P198 - Bankdetail Write UoW Readiness / Category and No OA Transaction Boundary Planning`。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
