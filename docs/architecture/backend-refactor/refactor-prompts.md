@@ -139,7 +139,7 @@ Post-Flight:
 
 ## PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 ### 目标
 
@@ -214,6 +214,20 @@ Post-Flight:
 - push origin/dev 后，从最新 dev 新建下一条 codex/ 分支。
 - 下一条建议 prompt 是 PF-P190 - Bankdetail / No OA Batch Discovery and Planning。
 ```
+
+### 执行摘要
+
+- 已将 `codex/dev-branch-rebaseline-p189` merge 到 `dev`。
+- Merge commit：`d84575c5`。
+- `dev` 上 verification 通过：
+  - `git status --short --branch`
+  - `git ls-files --others --exclude-standard`
+  - `git diff --check`
+  - `git diff --name-only`
+  - `git branch --all --list '*dev*' '*develop*'`
+- 未合入 `main`，未 push `origin/main`。
+- 未修改业务代码、测试、schema、部署配置或生产配置。
+- 下一步：push `origin/dev`，然后从最新 `dev` 新建下一条 `codex/` 分支，生成 `PF-P190 - Bankdetail / No OA Batch Discovery and Planning`。
 
 ## PF-P000 - Fresh Documentation Baseline
 
