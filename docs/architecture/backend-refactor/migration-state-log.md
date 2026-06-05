@@ -60,12 +60,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Bankdetail write UoW skeleton merged to dev |
-| 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate` |
-| 当前分支 | `dev` |
-| 最近验证 | PF-P203-MG 已合入 `dev`；merge commit `2a8f45f1`；`dev` 上 targeted tests 通过；未执行 Traffic Gate |
-| 下一条允许任务 | push `origin/dev`；push 后从最新 `dev` 新建 `codex/` 分支，生成下一条 Bankdetail application integration 或下一个模块 prompt |
+| 当前阶段 | Bankdetail category UoW adapter planning/tests Merge Gate |
+| 当前 active prompt | `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate` |
+| 最近 verified prompt | `PF-P205 - Bankdetail Category UoW Adapter Characterization Tests` |
+| 当前分支 | `codex/bankdetail-write-uow-application-planning-p204` |
+| 最近验证 | PF-P205 targeted tests 通过；未执行 Traffic Gate |
+| 下一条允许任务 | 生成并执行 `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate` |
 
 ## Prompt 执行日志
 
@@ -797,6 +797,65 @@ MG 步骤：
 - 提交本次 post-flight 文档更新并 push `origin/dev`。
 - push 后从最新 `dev` 新建下一条 `codex/` 分支。
 - 下一条建议：`PF-P204 - Bankdetail Write UoW Application Integration Planning`，只规划真实 application-service 接入顺序，不直接迁移 production write path。
+
+### PF-P204 - Bankdetail Write UoW Application Integration Planning
+
+状态：`verified`
+
+范围：
+
+- 只规划 `BankdetailWriteUnitOfWork` 如何安全接入真实 application services。
+- 不修改 production code。
+- 不修改 tests。
+- 不迁移真实写路径。
+- 不执行 MG、Traffic Gate 或部署。
+
+执行结果：
+
+- Category 接入判断：最适合优先推进，但必须先补 adapter/callback characterization tests。
+- Auto-tag 接入判断：暂不应直接接入 UoW；settings facts ownership 属于 App Settings/Platform 边界，必须先设计 settings port transaction hook。
+- No OA 接入判断：暂不应直接替换；snapshot rollback、Workbench pair relation facts、Workbench read model snapshot 和 persistence failure 行为必须先补 tests。
+- 下一条建议：`PF-P205 - Bankdetail Category UoW Adapter Characterization Tests`。
+
+验证：
+
+- `git status --short --branch`：Pass；只包含 3 个文档文件。
+- `git ls-files --others --exclude-standard`：Pass，empty。
+- `git diff --check`：Pass。
+- `git diff --name-only`：Pass；只包含 `bankdetail-no-oa-discovery.md`、`migration-state-log.md`、`refactor-prompts.md`。
+
+下一步：
+
+- 生成并执行 `PF-P205 - Bankdetail Category UoW Adapter Characterization Tests`。
+
+### PF-P205 - Bankdetail Category UoW Adapter Characterization Tests
+
+状态：`verified`
+
+范围：
+
+- 只补 Bankdetail category callback/adapter characterization tests。
+- 不修改 production code。
+- 不接入真实 UoW。
+- 不处理 auto-tag 或 No OA。
+- 不执行 MG、Traffic Gate 或部署。
+
+执行结果：
+
+- 在 `tests/test_bank_details_sql_runtime.py` 新增：
+  - `test_category_mutation_callback_suppresses_fallback_enqueue_audit_and_invalidate`
+  - `test_category_mutation_callback_failure_does_not_run_fallback_side_effects`
+- 锁定 callback 成功时 `_persist_category_mutation(...)` 不走 fallback enqueue/audit/invalidate。
+- 锁定 callback failure 时异常向上传播，且不追加 fallback side effects。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，44 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`：Pass，6 tests。
+
+下一步：
+
+- 生成并执行 `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate`。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
