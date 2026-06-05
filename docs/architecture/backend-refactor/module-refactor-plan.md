@@ -41,6 +41,22 @@
 - Platform / Runtime 已新增 runtime worker registry、deploy worker env examples 和 RabbitMQ/staging preflight 强化；后续 worker 相关改动必须同步 registry、deploy env、tests 和 App Health 观测。
 - 当前没有证据需要推翻 Python-first 计划或创建新语言后端。
 
+`PF-P189` 执行后的 Dev 集成分支与 main delta 事实源：
+
+- 后续重构不再直接合入 `main`；`dev` 是 Python-first 后端重构的长期集成分支。
+- `dev` 已从当前最新 `origin/main` 创建，并推送为 `origin/dev`。
+- 后续重构功能分支必须从最新 `dev` 创建，MG 合入 `dev` 并在 `dev` 上复验；`main` 只在用户明确要求发布或整合重构成果时才接收 `dev`。
+- `PF-P188-MG` 后进入 `main` 的新增后端事实主要集中在 Workbench object identity/read model、Invoice lifecycle/runtime status、Cost statistics readiness、Pending invoice lifecycle、Runtime/Ops deploy control、Workbench relation distribution 和少量 Turnover Ledger/Workbench relation 修正。
+- `main` 后续继续承载产品功能和线上修复；每次继续重构前必须确认 `dev` 是否落后 `main`。如果落后，先执行 `main -> dev` 同步或 Main Delta Rebaseline，再生成下一条模块 prompt。
+
+PF-P189 后的模块计划调整：
+
+- Workbench 下一轮 Micro-JIT 必须纳入 object identity arbitration、relation distribution read model、all-scope identity arbitration、rehydrate dirty scope completion 和 deploy/ops helper 对 read model 的影响。
+- Invoices 下一轮 Micro-JIT 必须纳入 invoice lifecycle read facade/read model/sql projection、OA pending payments、output/input invoice collection source versions 和 App Status readiness。
+- Tax / Cost / ETC 下一轮 Micro-JIT 必须纳入 cost statistics all-scope readiness、runtime refresh、dashboard readiness 和 migration `0057_app_health_dashboard_metrics_indexes.sql`。
+- Platform / Ops 下一轮 Micro-JIT 必须纳入 deploy-control contract、release step tracing、read model readiness reporter/backfill、runtime queue dead-letter resolve 和 worker registry/env examples。
+- Turnover Ledger 当前模块已达到 PF-P188 的完成目标；PF-P189 后只有局部 API contract/Workbench relation 相关修正需要作为未来跨模块影响输入，不要求重新打开 Turnover Ledger 模块。
+
 后续 prompt 的低耦合硬规则：
 
 - 优先复用已有封装、service、repository、platform helper 和测试工具，不重复造轮子。
@@ -405,5 +421,5 @@
 6. Unit Tests：mock 外部服务，覆盖 happy path 和异常边界。
 7. Integration Tests：连接 PostgreSQL 或测试容器，覆盖 transaction/read model/outbox。
 8. Performance Gate：必要时跑 SQL explain、P95/P99、worker lag 和 cache 命中率。
-9. Merge Gate：当前分支验证通过后 merge 到 `main`，再在 `main` 重跑验证。
+9. Merge Gate：当前分支验证通过后 merge 到 `dev`，再在 `dev` 重跑验证。
 10. Traffic Gate：Python-only 模块重构默认不需要；只有改网关、auth/session、SSE、worker 消费方式或部署拓扑时才单独执行。

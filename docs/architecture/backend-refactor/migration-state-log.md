@@ -28,6 +28,10 @@
 - 不全量重写 Python 后端。
 - 不引入任何其他语言的新后端。
 - 不在 `main` 上直接做重构开发。
+- `dev` 是后续 Python-first 后端重构长期集成分支。
+- 后续重构功能分支从最新 `dev` 创建，Merge Gate 合入 `dev` 并在 `dev` 上复验。
+- `main` 继续承载产品功能、线上修复和正式主干基线；不得把 `dev` 反向合入 `main`，除非用户明确要求发布或整合重构成果。
+- 每次继续重构前必须确认 `dev` 是否落后 `main`；如落后，先执行 `main -> dev` 同步或 Main Delta Rebaseline。
 - 每个模块必须先梳理静态调用链和动态运行时序。
 - 外部服务必须通过 port/adapter 或稳定服务边界访问。
 - 写操作必须在同一 PostgreSQL transaction 中提交 facts、audit、dirty scope 和 outbox。
@@ -37,9 +41,9 @@
 - prompt 生成、prompt 审查、状态机更新、对应实现和该实现的 Merge Gate 必须在同一条 `codex/` 功能分支内完成。
 - Merge Gate 的粒度是一个可合并的模块任务、platform 边界任务或明确命名的模块切片，不是每个 prompt；同一任务可以由多个已确认 `verified` 的 prompt 组成。
 - 测试锁定 prompt、发现 prompt 和实现 prompt 可以在同一功能分支连续推进；只有该模块任务/切片达到可合并状态后，才生成对应的 `*-MG`。
-- 不得因为跳过单个 prompt 的 MG 而跳过最终 MG；最终 MG 必须覆盖该功能分支内尚未合入 `main` 的全部 prompt diff。
-- 未完成当前模块任务/切片的 MG 并合入 `main` 前，不得进入下一个模块或无关切片。
-- Merge Gate 合入并复验 `main` 后，下一条 prompt 必须从最新 `main` 新建分支再生成；不得在 `main` 或旧功能分支上继续生成下一个模块的 prompt。
+- 不得因为跳过单个 prompt 的 MG 而跳过最终 MG；最终 MG 必须覆盖该功能分支内尚未合入 `dev` 的全部 prompt diff。
+- 未完成当前模块任务/切片的 MG 并合入 `dev` 前，不得进入下一个模块或无关切片。
+- Merge Gate 合入并复验 `dev` 后，下一条 prompt 必须从最新 `dev` 新建分支再生成；不得在 `main`、`dev` 或旧功能分支上直接继续实现下一个模块的 prompt。
 - 每次 prompt 完成后，最终回复必须告诉用户下一步建议做什么。
 - 每次 prompt 执行后，必须精准回写本文档和受执行结果影响的架构文档；未完成回写前不得生成或执行下一条 prompt。
 - 后续所有新生成的执行 prompt 正文必须以 `/goal` 开头。
@@ -47,7 +51,7 @@
 - Macro-Inventory 只做全局文件级分拣和架构事实清单，不修改业务代码。
 - Micro-JIT-Planning 每次只深挖一个模块，不一次性生成所有模块详细设计。
 - Merge Gate 和 Traffic Gate 分离。
-- Merge Gate 是 merge 到 `main` 前后的验证流程，不等于上线。
+- Merge Gate 是 merge 到 `dev` 前后的验证流程，不等于上线。
 - Python-only 模块化重构通常不要求 staging；涉及网关切流、auth/session、SSE 或 worker 消费方式变更时才需要 Traffic Gate。
 - 没有 staging 环境时，不得默认执行高风险 Traffic Gate；如用户明确要求生产 canary，必须先记录风险、回滚方案和观测指标。
 - 不记录 DB password、JWT secret、OA token、cookie 实值或生产敏感 URL。
@@ -56,14 +60,51 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Turnover Ledger module completed; PF-P188-MG verified |
-| 当前 active prompt | 空 |
+| 当前阶段 | Dev integration branch bootstrap / Main Delta Rebaseline |
+| 当前 active prompt | `PF-P189 - Dev Branch Bootstrap / Main Delta Rebaseline` |
 | 最近 verified prompt | `PF-P188-MG - Turnover Ledger Module Completion Merge Gate` |
-| 当前分支 | `codex/turnover-ledger-completion-readiness-p188` |
-| 最近验证 | PF-P188-MG 已合入 main；merge commit `52dcd403`；main 文档验证 Pass；Turnover Ledger 模块达到当前 Python-first 模块化重构目标 |
-| 下一条允许任务 | push `origin/main`；push 完成后停止当前 Turnover Ledger 目标。后续如继续，应从最新 main 新建下一模块 `codex/` 分支并生成新的单条 prompt |
+| 当前分支 | `codex/dev-branch-rebaseline-p189` |
+| 最近验证 | 已从当前最新 `main` 创建并推送 `origin/dev`；PF-P189 文档 rebaseline 已执行，等待用户确认或后续 MG |
+| 下一条允许任务 | 确认 PF-P189 verified 后，生成并执行 `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate`，合入目标为 `dev`，不是 `main` |
 
 ## Prompt 执行日志
+
+### PF-P189 - Dev Branch Bootstrap / Main Delta Rebaseline
+
+状态：`implemented`
+
+范围：
+
+- 从当前最新 `main` 创建长期重构集成分支 `dev`，并推送 `origin/dev`。
+- 建立 `codex/dev-branch-rebaseline-p189` 功能分支。
+- 固化未来重构工作流：`dev -> codex/<module-slice> -> MG -> dev`。
+- 扫描 `PF-P188-MG` 后进入 `main` 的后端 delta，并回写模块事实。
+- 不修改 production code，不执行 Traffic Gate，不部署，不访问生产或真实外部服务。
+
+执行结果：
+
+- `dev` 已从当前 `main` 创建并推送到 `origin/dev`。
+- `ai-execution-rules.md` 已更新为未来 MG 合入 `dev`、在 `dev` 上复验、push `origin/dev`。
+- `migration-roadmap.md` 已更新为 `dev` 集成分支路线图。
+- `module-refactor-plan.md` 已加入 PF-P189 后的分支规则和 main delta 模块影响。
+- `architecture-inventory.md` 已加入 PF-P189 rebaseline：Workbench object identity/read model、Invoices lifecycle/runtime status、Tax/Cost readiness、Platform/Ops deploy control、Turnover Ledger handoff 和 Batch Accounting read optimization。
+- `refactor-prompts.md` 已追加 PF-P189 prompt 和执行摘要。
+
+验证：
+
+- `git status --short --branch`：Pass；当前分支 `codex/dev-branch-rebaseline-p189`，只包含 PF-P189 允许的 6 个文档变更。
+- `git branch --all --list '*dev*' '*develop*'`：Pass；存在本地 `dev` 和 `remotes/origin/dev`。
+- `git log --oneline --decorate -20`：Pass；`dev`、`origin/dev`、`main`、`origin/main` 当前均指向 `33bebb0d`。
+- `git diff --check`：Pass。
+- `git ls-files --others --exclude-standard`：Pass，empty。
+- `git diff --name-only`：Pass；只包含 `ai-execution-rules.md`、`architecture-inventory.md`、`migration-roadmap.md`、`migration-state-log.md`、`module-refactor-plan.md`、`refactor-prompts.md`。
+- 文档检查：Pass；未来执行规则已以 `dev` 为重构 MG 目标，历史 prompt 记录中的 `main` 作为历史事实保留。
+
+下一步：
+
+- 用户确认 PF-P189 后，将其标记为 `verified`。
+- 生成并执行 `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate`。
+- PF-P189-MG 只合入文档和状态机到 `dev`，不改业务代码，不合入 `main`。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 

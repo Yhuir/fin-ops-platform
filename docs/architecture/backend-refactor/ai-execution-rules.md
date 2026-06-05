@@ -2,7 +2,7 @@
 
 ## 目的
 
-本文件约束 Codex、Gemini 或其他 AI agent 执行后端架构重构时的行为。目标是避免旧语言替换方向复活，避免大范围无测试改动，避免在 `main` 上直接重构。
+本文件约束 Codex、Gemini 或其他 AI agent 执行后端架构重构时的行为。目标是避免旧语言替换方向复活，避免大范围无测试改动，避免在 `main` 上直接重构，并把后续重构集成收敛到 `dev`。
 
 ## 全局硬规则
 
@@ -11,8 +11,9 @@
 - 不全量重写 Python 后端。
 - 不引入任何其他语言的新后端。
 - 不在 `main` 上直接做重构开发。
+- 后续重构集成分支是 `dev`；`main` 继续作为产品功能、线上修复和正式主干基线。
 - 不跳过测试进入下一个模块。
-- 不把 merge 到 `main` 等同于生产切流。
+- 不把 merge 到 `dev` 或 `main` 等同于生产切流。
 - 不记录 DB password、JWT secret、OA token、cookie 实值或生产 URL。
 
 ## 低耦合架构硬规则
@@ -70,27 +71,30 @@ prompt 必须写明：
 
 每个重构循环必须遵守“prompt / 状态机 / 实现同分支”原则：
 
-1. Merge Gate 合入并在 `main` 上复验后，先同步最新 `origin/main`。
-2. 从最新 `main` 创建新的 `codex/` 功能分支。
-3. 在这条功能分支内生成并审查下一条 prompt，更新 `refactor-prompts.md` 和 `migration-state-log.md`。
-4. 用户确认后，在同一条功能分支内执行该 prompt 的代码、测试和文档回写。
-5. 同一模块或同一切片可以在同一分支内连续完成一个或多个实现型 prompt，但每个 prompt 都必须先 `implemented`、经用户确认 `verified`，再进入下一个 prompt 或 Merge Gate。
-6. Merge Gate 的粒度是一个可合并的模块任务、platform 边界任务或明确命名的模块切片，不是每个 prompt。测试锁定、发现、实现和文档回写 prompt 可以连续留在同一分支，最终由一个 `*-MG` 统一覆盖尚未合入 `main` 的完整 diff。
-7. 不得用“跳过中间 prompt 的 MG”来跳过最终 MG；最终 MG 必须列出它覆盖的全部 prompt、变更文件、验证命令、未关闭风险和 rollback 方式。
-8. 进入 Merge Gate 后，仍在同一功能分支内完成范围检查、上游同步、commit、合并前验证、合入 `main` 和 main 上复验。
-9. Merge Gate 完成并按用户确认推送 `origin/main` 后，下一轮必须重新从最新 `main` 创建新分支，再生成下一条 prompt。
+1. Merge Gate 合入并在 `dev` 上复验后，先确认 `dev` 是否落后 `main`。
+2. 如果 `main` 有新增功能、修复或后端事实变化，先执行 `main -> dev` 同步或 Main Delta Rebaseline，再继续重构。
+3. 从最新 `dev` 创建新的 `codex/` 功能分支。
+4. 在这条功能分支内生成并审查下一条 prompt，更新 `refactor-prompts.md` 和 `migration-state-log.md`。
+5. 用户确认后，在同一条功能分支内执行该 prompt 的代码、测试和文档回写。
+6. 同一模块或同一切片可以在同一分支内连续完成一个或多个实现型 prompt，但每个 prompt 都必须先 `implemented`、经用户确认 `verified`，再进入下一个 prompt 或 Merge Gate。
+7. Merge Gate 的粒度是一个可合并的模块任务、platform 边界任务或明确命名的模块切片，不是每个 prompt。测试锁定、发现、实现和文档回写 prompt 可以连续留在同一分支，最终由一个 `*-MG` 统一覆盖尚未合入 `dev` 的完整 diff。
+8. 不得用“跳过中间 prompt 的 MG”来跳过最终 MG；最终 MG 必须列出它覆盖的全部 prompt、变更文件、验证命令、未关闭风险和 rollback 方式。
+9. 进入 Merge Gate 后，仍在同一功能分支内完成范围检查、`dev` 同步、commit、合并前验证、合入 `dev` 和 `dev` 上复验。
+10. Merge Gate 完成并按用户确认推送 `origin/dev` 后，下一轮必须重新从最新 `dev` 创建新分支，再生成下一条 prompt。
 
 禁止工作流：
 
 - 不得在 `main` 上生成下一条执行 prompt 并直接实现。
+- 不得在 `dev` 上直接实现重构；`dev` 只接收经过 MG 的重构功能分支。
 - 不得把下一条 prompt 放在一个“prompt-only”分支，而把对应实现放在另一条分支。
 - 不得让状态机中的 active prompt 指向当前工作分支之外的未合入文档事实。
 - 不得在旧功能分支继续生成下一个模块的 prompt，除非它仍属于同一模块/切片且用户明确允许。
-- 不得在当前模块任务/切片尚未最终 MG 并合入 `main` 前，切换到下一个无关模块继续开发。
+- 不得在当前模块任务/切片尚未最终 MG 并合入 `dev` 前，切换到下一个无关模块继续开发。
+- 不得把 `dev` 反向合入 `main`，除非用户明确要求发布或整合重构成果。
 
 例外：
 
-- 纯全局流程文档修正可以使用独立文档分支；但如果该规则会约束某个尚未执行的实现 prompt，必须先合入 `main`，或在对应实现分支中同步这条规则后再执行。
+- 纯全局流程文档修正可以使用独立文档分支；但如果该规则会约束某个尚未执行的实现 prompt，必须先合入 `dev`，或在对应实现分支中同步这条规则后再执行。
 - 紧急热修复可以从 `main` 单独开分支，但不得夹带重构 prompt 或模块实现。
 
 ### Post-Flight 回写硬规则
@@ -155,11 +159,13 @@ Micro-JIT prompt 不得：
 ## 分支规则
 
 - 新工作使用 `codex/` 前缀分支。
-- 每个模块单独分支。
+- 每个模块或明确切片单独分支，并从最新 `dev` 创建。
 - 不在 `main` 上直接修改业务代码。
+- 不在 `dev` 上直接修改业务代码；`dev` 只接收经过 MG 的分支。
 - 不把多个业务模块堆在一个分支。
 - prompt 生成、prompt 审查、状态机更新、对应实现和该实现的 Merge Gate 必须共用同一条功能分支。
-- 一个功能分支完成 Merge Gate 并合入 `main` 后，下一条 prompt 必须从最新 `main` 的新分支开始。
+- 一个功能分支完成 Merge Gate 并合入 `dev` 后，下一条 prompt 必须从最新 `dev` 的新分支开始。
+- 如果 `main` 有新增提交，必须先把 `main` 的变化同步或 rebaseline 到 `dev`，再继续生成下一条重构 prompt。
 - 不使用 `git reset --hard`、`git clean`、`git checkout --` 清理用户改动，除非用户明确要求。
 
 ## 模块执行规则
@@ -224,13 +230,13 @@ Micro-JIT prompt 不得：
 
 ## Merge Gate 与 Traffic Gate
 
-Merge Gate 是代码或文档能否进入 `main` 的前后验证流程，不等于上线。
+Merge Gate 是代码或文档能否进入 `dev` 的前后验证流程，不等于上线。
 
 Merge Gate 至少包含：
 
 - 当前分支验证。
-- merge 或 PR 合并到 `main`。
-- 在 `main` 上重新运行同一套关键验证。
+- merge 或 PR 合并到 `dev`。
+- 在 `dev` 上重新运行同一套关键验证。
 - 失败时停止下一步，修复或回滚。
 
 Traffic Gate 是生产流量是否可以进入新路径的门禁。普通 Python-only 模块化重构通常不需要 Traffic Gate。
@@ -244,7 +250,7 @@ Traffic Gate 是生产流量是否可以进入新路径的门禁。普通 Python
 
 没有 staging 环境时：
 
-- Python-only 模块重构可以继续，但必须加强本地测试、contract tests、integration tests 和 main 上复验。
+- Python-only 模块重构可以继续，但必须加强本地测试、contract tests、integration tests 和 `dev` 上复验。
 - 高风险 Traffic Gate 默认不得执行。
 - 如果用户明确要求无 staging 生产 canary，prompt 必须写明风险、最小切流范围、回滚命令、观测指标和人工确认点。
 

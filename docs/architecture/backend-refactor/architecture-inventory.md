@@ -55,6 +55,36 @@ PF-P045 没有发现需要创建新模块的证据；但确认以下模块计划
 - Tax / Cost / ETC Micro-JIT 必须覆盖 cost statistics runtime、ETC business batch 和 tax offset plans。
 - Platform / Runtime Micro-JIT 必须覆盖 runtime worker registry 和 deploy env contract。
 
+## PF-P189 Dev Branch Bootstrap / Main Delta Rebaseline
+
+PF-P189 建立了后续重构的 `dev` 集成分支模型，并把 `PF-P188-MG` 后进入 `main` 的新增后端事实纳入当前 inventory。此次不是重做全量 inventory，也不修改业务代码。
+
+基线状态：
+
+- `dev` 已从当前最新 `origin/main` 创建，并推送为 `origin/dev`。
+- 后续重构功能分支从最新 `dev` 创建，MG 合入 `dev` 并在 `dev` 上复验。
+- `main` 继续承载产品功能、线上修复和正式主干基线；`dev` 不是生产发布分支。
+- `PF-P188-MG` 后的 main delta 范围为 `52dcd403..33bebb0d`。
+- 本轮只做文档和重构计划再校准；不改业务代码，不执行 Traffic Gate，不部署。
+
+PF-P188 后新增 / 强化的模块事实：
+
+| 模块 | 新增事实 | 重构影响 |
+| --- | --- | --- |
+| Workbench | 新增/强化 object identity arbitration、relation distribution read model、all-scope identity arbitration、read model rehydrate dirty scope completion、relation SQL projection 和相关 migrations/tests | Workbench 后续 Micro-JIT 必须把 identity arbitration、relation distribution、dirty scope completion 和 read model ops helper 纳入调用链与测试范围 |
+| Invoices | 新增 invoice lifecycle policy/read facade/read model refresh/sql projection、OA pending payment、invoice usage collection source versions、App Status readiness 关联 | Invoices 后续必须按 Pending Invoice、Output/Input Invoice Usage、OA Pending Payments、invoice lifecycle/status 子域拆 discovery，不得一次性机械重构 |
+| Tax / Cost / ETC | 新增/强化 cost statistics all-scope readiness、runtime refresh、App Health dashboard metrics indexes、readiness reporter 关联 | Tax / Cost / ETC 后续必须覆盖 readiness lifecycle、runtime refresh、SQL projection 和 App Health observability，不只看旧查询 service |
+| Platform / Ops / Runtime | 新增 deploy-control contract、release step tracing、worker readiness polling、runtime queue dead-letter resolve、read model readiness reporter/backfill、deploy worker env examples | Platform/Ops 后续必须把 deploy control、runtime worker registry、readiness reporter、dead-letter ops 和 release tracing 作为治理边界 |
+| Turnover Ledger | PF-P188 已标记模块完成；后续 main delta 中只有 amount column API contract rename、Workbench relation/read model 影响和少量 Turnover relation service 修正 | Turnover Ledger 不需要立即重开模块；这些变化作为未来 Workbench/Bankdetail/Platform 交叉影响输入 |
+| Batch Accounting | AppHealth/dashboard 和 batch accounting reads 有性能优化提交 | Batch Accounting 仍是独立模块；后续 discovery 必须覆盖新的 dashboard/read optimization 影响 |
+
+PF-P189 后推荐下一步：
+
+1. 先执行 `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate`，把新分支规则和 rebaseline 文档合入 `dev`。
+2. 再从最新 `dev` 新建下一条模块分支。
+3. 下一条业务模块建议优先选择 `PF-P190 - Bankdetail / No OA Batch Discovery and Planning`，因为 Turnover Ledger 完成后的 expected-version ownership 与 bank row tag/category 影响需要由 Bankdetail/No OA Batch 接住。
+4. 如果用户更关注运行稳定性，可以选择 `PF-P190 - Platform / Ops Runtime Delta Discovery and Planning`，优先收敛 deploy-control、readiness reporter、worker registry 和 runtime queue ops。
+
 模块遗漏 / 错归属审计：
 
 | 发现 | 判断 | 后续动作 |
