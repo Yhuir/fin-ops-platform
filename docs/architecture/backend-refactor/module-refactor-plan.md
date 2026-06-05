@@ -294,6 +294,35 @@ PF-P189 后的模块计划调整：
 - 标签和自动分类写操作只标记相关 read model dirty，不同步重算全量列表。
 - 与 Workbench 的关系通过 facts/read model/event 协作。
 
+### PF-P190 Bankdetail / No OA Batch Discovery Update
+
+PF-P190 已对 Bankdetail / No OA Batch 做 Micro-JIT discovery，专项文档见 `bankdetail-no-oa-discovery.md`。
+
+当前模块必须按以下子域推进，不能只围绕旧 `bank_details_service.py` 机械拆文件：
+
+1. Bankdetail read/query：账户、流水分页、导出、read model freshness、pagination/count 一致性。
+2. Category / auto-tag write：分类确认、手动分类、自动打标规则、expected-version conflict、Turnover/Workbench influence。
+3. No OA Batch lifecycle：批次列表/详情、tag selection、submit、withdraw、bulk submit、legacy migration/repair。
+4. Account balance：账户余额 projection、balance read model refresh、回填脚本 smoke checklist。
+5. Runtime / Ops：`bank_detail.read_model.refresh`、`bank_account_balance.read_model.refresh`、`no_oa_bank_batch.read_model.refresh`、durable queue、worker registry、backfill。
+
+高风险文件：
+
+- `services/bank_transaction_category_service.py`
+- `services/no_oa_bank_batch_service.py`
+- `services/bank_details_application_service.py`
+- `services/no_oa_bank_batch_application_service.py`
+- `app/routes_bank_details.py`
+- `app/routes_no_oa_bank_batches.py`
+- `app/bank_account_balance_backfill.py`
+- `app/bank_detail_backfill.py`
+
+下一步必须是 `PF-P191 - Bankdetail / No OA Batch Characterization Tests`：
+
+- 只补 characterization tests，不修改 production code。
+- 锁定 Bankdetail read freshness、category expected-version、dirty/outbox baseline、No OA tag selection/submit/withdraw、no synchronous refresh。
+- 不得跳过测试直接抽 service、引入 UoW 或调整 schema。
+
 ## Invoices
 
 范围：

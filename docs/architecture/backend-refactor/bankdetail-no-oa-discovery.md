@@ -1,0 +1,188 @@
+# Bankdetail / No OA Batch Discovery and Planning
+
+## PF-P190 Summary
+
+`PF-P190` 是 Bankdetail / No OA Batch 模块的 Micro-JIT discovery。它只做边界扫描、运行时链路整理、风险识别和下一步测试计划，不修改业务代码。
+
+结论：
+
+- Bankdetail 不能只按旧 `bank_details_service.py` 重构；当前边界已经扩展到 route facade、application service、SQL projection、category/auto-tag rules、account balance read model、No OA Batch lifecycle、runtime worker 和 Turnover/Workbench 影响链。
+- No OA Batch 必须作为 Bankdetail 模块内的高风险子域处理，而不是单独散落在 Workbench 或 Imports。
+- Turnover Ledger 已完成后的 bank row tags / category expected-version ownership，会反向要求 Bankdetail 明确分类 facts、tag versions、dirty/outbox 和 read model refresh 的责任边界。
+- 下一步必须先写 characterization tests，不能直接抽 service 或引入 UoW。
+
+## API Boundary Matrix
+
+| API | Owner | Current route boundary | Primary behavior | Next test focus |
+| --- | --- | --- | --- | --- |
+| `GET /api/bank-details/accounts` | Bankdetail | `app/routes_bank_details.py` | 银行账户列表 / 账户余额投影 | response shape、freshness、空数据 |
+| `GET /api/bank-details/transactions` | Bankdetail | `app/routes_bank_details.py` | 银行流水分页、筛选、排序、read model freshness | pagination/count 一致性、stale/refreshing 语义 |
+| `GET /api/bank-details/transactions/export` | Bankdetail | `app/routes_bank_details.py` | 导出流水 | export payload 与 filters |
+| `GET/PUT /api/bank-details/auto-tag-rules` | Bankdetail | `app/routes_bank_details.py` | 自动打标规则读取和更新 | validation、audit、read model dirty scope |
+| `POST /api/bank-details/auto-tag-rules/reapply` | Bankdetail | `app/routes_bank_details.py` | 重新应用自动分类 | idempotency baseline、dirty/outbox |
+| `POST /api/bank-details/auto-tag-rules/file-replacement` | Bankdetail | `app/routes_bank_details.py` | 从文件来源替换规则 | validation、partial failure |
+| `POST/DELETE /api/bank-details/transactions/{id}/category-confirmation` | Bankdetail | `app/routes_bank_details.py` | 分类确认 / 撤销 | expected_version、conflict、dirty/outbox |
+| `POST/DELETE /api/bank-details/transactions/{id}/category-assignment` | Bankdetail | `app/routes_bank_details.py` | 手动分类分配 / 清除 | expected_version、conflict、Turnover influence |
+| `GET /api/no-oa-bank-batches` | Bankdetail / No OA | `app/routes_no_oa_bank_batches.py` | 免 OA 批次列表 | read model 不同步刷新、freshness |
+| `GET /api/no-oa-bank-batches/{batch_id}` | Bankdetail / No OA | `app/routes_no_oa_bank_batches.py` | 批次详情 | response shape、stale category drift |
+| `GET/PUT /api/no-oa-bank-batches/tag-selection` | Bankdetail / No OA | `app/routes_no_oa_bank_batches.py` | tag selection read/write | expected_version conflict `no_oa_bank_batch_tag_selection_version_conflict` |
+| `POST /api/no-oa-bank-batches/submit-selection` | Bankdetail / No OA | `app/routes_no_oa_bank_batches.py` | 提交当前选择 | stale tag/category conflict |
+| `POST /api/no-oa-bank-batches/submit` | Bankdetail / No OA | `app/routes_no_oa_bank_batches.py` | bulk submit | partial result、idempotency baseline |
+| `POST /api/no-oa-bank-batches/{batch_id}/submit` | Bankdetail / No OA | `app/routes_no_oa_bank_batches.py` | 单批次 submit | facts/audit/dirty/outbox |
+| `POST /api/no-oa-bank-batches/{batch_id}/withdraw` | Bankdetail / No OA | `app/routes_no_oa_bank_batches.py` | 单批次 withdraw | facts rollback、dirty/outbox、Workbench influence |
+
+## File Ownership
+
+### Route / HTTP Boundary
+
+| File | Owner | Notes |
+| --- | --- | --- |
+| `backend/src/fin_ops_platform/app/routes_bank_details.py` | Bankdetail | Route facade。允许读取 `OARequestSession`，但只能做 HTTP mapping 和依赖组装。 |
+| `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py` | Bankdetail / No OA | Route facade。不得把 No OA service 逻辑回灌到 handler。 |
+| `backend/src/fin_ops_platform/app/bank_account_balance_backfill.py` | Platform / Ops, secondary Bankdetail | 回填入口，后续 Bankdetail read model 变更必须带 smoke checklist。 |
+| `backend/src/fin_ops_platform/app/bank_detail_backfill.py` | Platform / Ops, secondary Bankdetail | 银行流水 read model 回填入口。 |
+| `backend/src/fin_ops_platform/app/bank_detail_category_api.py` | Bankdetail legacy route boundary | 后续需确认是否仍被 server 注册。 |
+
+### Services / Application Boundary
+
+| File | Owner | Risk |
+| --- | --- | --- |
+| `services/bank_details_application_service.py` | Bankdetail | 高风险。聚合 read model freshness、cache、export、category mutation 和 enqueue。 |
+| `services/bank_details_service.py` | Bankdetail | legacy bank detail service。 |
+| `services/bank_detail_sql_projection.py` | Bankdetail repository/projection | SQL projection owner；业务 service 不应散落 SQL。 |
+| `services/bank_detail_read_model_refresh.py` | Bankdetail read model worker | `bank_detail.read_model.refresh` builder。 |
+| `services/bank_details_export_service.py` | Bankdetail | 导出 payload contract。 |
+| `services/bank_transaction_category_service.py` | Bankdetail | 高风险大文件；分类 facts、version、Turnover/Workbench influence。 |
+| `services/bank_transaction_auto_category_service.py` | Bankdetail | 自动分类规则执行。 |
+| `services/bank_detail_category_selection.py` | Bankdetail | 分类选择 / selection contract。 |
+| `services/bank_transaction_tag_read_facade.py` | Bankdetail | tag read facade。 |
+| `services/bank_transaction_effective_category_provider.py` | Bankdetail | effective category provider。 |
+| `services/bank_turnover_tag_semantics.py` | Bankdetail, secondary Turnover | Turnover bank row tags 和 Bankdetail 分类语义桥。 |
+| `services/bank_account_balance_projection.py` | Bankdetail | 账户余额 projection。 |
+| `services/bank_account_balance_read_model_refresh.py` | Bankdetail read model worker | balance refresh builder。 |
+| `services/bank_account_resolver.py` | Bankdetail | account identity helper。 |
+| `services/bank_internal_transfer_detector.py` | Bankdetail | 内部转账识别。 |
+| `services/bank_details_relation_tag_projection_service.py` | Bankdetail / Workbench influence | relation tag projection。 |
+| `services/no_oa_bank_batch_application_service.py` | Bankdetail / No OA | 高风险。No OA route application boundary。 |
+| `services/no_oa_bank_batch_service.py` | Bankdetail / No OA | 高风险大文件；submit/withdraw、legacy migration、relation consistency。 |
+| `services/no_oa_bank_batch_read_model_refresh.py` | Bankdetail / No OA read model worker | `no_oa_bank_batch.read_model.refresh` builder。 |
+| `services/no_oa_bank_batch_tag_selection_service.py` | Bankdetail / No OA | tag selection expected-version owner。 |
+| `services/no_oa_managed_rule_policy.py` | Bankdetail / No OA | managed rule policy。 |
+| `services/no_oa_legacy_relation_migration_service.py` | Bankdetail / No OA legacy/ops | legacy migration，不能进入高频 request path。 |
+
+## Runtime Sequence
+
+### Bank Detail Read
+
+```mermaid
+sequenceDiagram
+    participant HTTP as "HTTP route"
+    participant AppSvc as "BankDetailsApplicationService"
+    participant ReadModel as "bank_detail read model"
+    participant Queue as "RuntimeQueueRepository"
+    participant Worker as "read model worker"
+
+    HTTP->>AppSvc: query accounts/transactions/export
+    AppSvc->>ReadModel: read page/status/source_versions
+    alt fresh
+        AppSvc-->>HTTP: payload + freshness
+    else miss/stale
+        AppSvc->>Queue: enqueue bank_detail.read_model.refresh
+        AppSvc-->>HTTP: stale/refreshing payload
+        Worker->>ReadModel: rebuild and publish active generation
+    end
+```
+
+### Bank Category Write
+
+```mermaid
+sequenceDiagram
+    participant HTTP as "HTTP route"
+    participant Svc as "BankTransactionCategoryService"
+    participant PG as "PostgreSQL facts"
+    participant Queue as "Dirty Scope / Outbox"
+    participant Consumers as "Workbench / Turnover / Bankdetail read models"
+
+    HTTP->>Svc: confirm/assign/revoke category with expected_version
+    Svc->>PG: write category facts/version/audit
+    Svc->>Queue: mark dirty scopes and enqueue refresh
+    Queue-->>Consumers: async read model refresh
+```
+
+PF-P190 发现阶段未证明所有 write side effects 已在同一 transaction 中完成；PF-P191 必须先 characterization 当前行为，再进入 extraction/UoW。
+
+### No OA Submit / Withdraw
+
+```mermaid
+sequenceDiagram
+    participant HTTP as "No OA route"
+    participant AppSvc as "NoOaBankBatchApplicationService"
+    participant DomainSvc as "NoOaBankBatchService"
+    participant PG as "PostgreSQL facts"
+    participant Queue as "Dirty Scope / Outbox"
+    participant Worker as "No OA / Workbench read model workers"
+
+    HTTP->>AppSvc: submit/withdraw/bulk submit
+    AppSvc->>DomainSvc: validate selection/category/version
+    DomainSvc->>PG: write batch relation facts/audit
+    DomainSvc->>Queue: enqueue no_oa_bank_batch and influenced read models
+    Worker->>PG: rebuild active read models
+```
+
+## Cross-Module Contracts
+
+- Turnover Ledger：`/api/turnover-ledger/bank-row-tags/batch` 是 Turnover API，但写入 Bankdetail facts。后续 Bankdetail 必须明确 tag/category version ownership。
+- Workbench：No OA submit/withdraw 和 bank category 写入会影响 Workbench grouping/read model，不能同步调用 Workbench usecase。
+- Search / Pending Query：Bankdetail facts 和 source_versions 可能影响 pending/search projection。
+- App Settings：分类、标签、规则配置属于 settings/provider 边界，Bankdetail service 不应直接依赖整个 `Application`。
+- Runtime Worker：`runtime_worker_registry.py` 中存在 `no-oa-bank-batch-read-model` worker；RabbitMQ 只作为 wakeup/transport，PostgreSQL durable queue 是事实源。
+
+## High-Risk Findings
+
+1. `bank_transaction_category_service.py` 与 `no_oa_bank_batch_service.py` 体量极大，必须按行为切片测试后再抽 facade/UoW。
+2. `bank_details_application_service.py` 当前职责过宽，后续应拆成 query facade、category write facade、export facade 和 read model freshness boundary。
+3. `server.py` 仍包含 bank detail / no OA read model enqueue、source version、fallback/cache helper；后续要逐步移入明确 service/repository 边界。
+4. No OA read APIs 已有“不在 GET 同步刷新”的测试事实，后续必须继续保护。
+5. Category / tag selection 已有 expected-version conflict 契约，后续不能为了抽服务而丢失 `409` 语义。
+6. 回填脚本是生产运维入口，Bankdetail read model 改动必须附带 ops smoke checklist。
+
+## Recommended Next Prompts
+
+1. `PF-P191 - Bankdetail / No OA Batch Characterization Tests`
+   - 只新增或补强测试。
+   - 锁定 Bankdetail read freshness、pagination/count、category expected-version、dirty/outbox baseline、No OA list/detail/tag-selection/submit/withdraw、no synchronous refresh。
+   - 不修改 production code。
+2. `PF-P192 - Bankdetail Route/Application Facade Cleanup`
+   - 在测试保护下薄化 `server.py` / route helper。
+   - 只拆 HTTP mapping 与 service 调用，不引入 UoW。
+3. `PF-P193 - Bankdetail Category / Auto Tag Boundary Planning`
+   - 深挖 `bank_transaction_category_service.py`，输出写路径 UoW readiness。
+4. `PF-P194 - No OA Batch Write Boundary Planning`
+   - 深挖 submit/withdraw/bulk submit，明确 facts/audit/dirty/outbox 同事务目标。
+
+## PF-P191 Hard Constraints
+
+- 不得跳过 characterization tests 直接抽 service 或引入 UoW。
+- 不得访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得修改 schema、deploy、Nginx、生产配置或 feature flag。
+- 不得把 No OA Batch 机械拆成独立脱离 Bankdetail 的模块；它是 Bankdetail 模块内高风险子域。
+- Tests 不得通过放宽断言、删除旧字段或跳过 legacy compatibility 来转绿。
+
+## PF-P191 Characterization Test Update
+
+PF-P191 已补强第一批低成本 route facade characterization tests，作为后续 route/application cleanup 的安全网。
+
+新增锁定：
+
+- Bankdetail route facade 在 mutation permission denied 时必须直接返回 403，且不得调用 application service。
+- Bankdetail category validation/conflict payload 必须保留 `error` 和 `transaction_id`。
+- No OA tag selection expected-version conflict 必须返回 409 和 `no_oa_bank_batch_tag_selection_version_conflict`。
+- No OA submit 必须保留 expected_version string normalization、actor mapping 和 note trim。
+- No OA bulk submit 必须保留 partial failure aggregation、affected_months / changed_case_ids aggregation，并只通过一次 `after_mutation(..., persist=True)` 收口。
+
+PF-P191 仍未覆盖的后续测试目标：
+
+- Bankdetail SQL read model pagination/count/freshness。
+- Category / auto-tag dirty scope 与 outbox baseline。
+- No OA submit/withdraw service-level facts/audit/dirty/outbox。
+- Account balance read model refresh 与 backfill smoke checklist。

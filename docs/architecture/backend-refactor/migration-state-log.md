@@ -62,10 +62,10 @@
 | --- | --- |
 | 当前阶段 | Dev integration branch bootstrap complete; ready for next module |
 | 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate` |
-| 当前分支 | `dev` |
-| 最近验证 | PF-P189-MG 已合入 `dev`；merge commit `d84575c5`；`dev` 上 scope / clean tree / diff check 验证通过 |
-| 下一条允许任务 | push `origin/dev`；push 完成后从最新 `dev` 新建 `codex/` 分支，生成 `PF-P190 - Bankdetail / No OA Batch Discovery and Planning` |
+| 最近 verified prompt | `PF-P191 - Bankdetail / No OA Batch Characterization Tests` |
+| 当前分支 | `codex/bankdetail-no-oa-discovery-p190` |
+| 最近验证 | PF-P191 route facade characterization tests 通过；未修改 production code；未执行 Traffic Gate |
+| 下一条允许任务 | 生成并审查 `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning`，继续当前 Bankdetail / No OA 切片，不切换模块 |
 
 ## Prompt 执行日志
 
@@ -156,6 +156,83 @@ MG 步骤：
   - `git branch --all --list '*dev*' '*develop*'`：Pass
 - 下一步：push `origin/dev`；push 完成后从最新 `dev` 创建下一条 `codex/` 分支。
 - 下一条建议 prompt：`PF-P190 - Bankdetail / No OA Batch Discovery and Planning`。
+
+### PF-P190 - Bankdetail / No OA Batch Discovery and Planning
+
+状态：`verified`
+
+范围：
+
+- 只做 Bankdetail / No OA Batch discovery、边界规划和文档回写。
+- 不修改 production code。
+- 不修改 tests。
+- 不执行 Merge Gate、Traffic Gate、部署或真实外部服务访问。
+
+执行结果：
+
+- 新增 `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`。
+- 确认 Bankdetail 模块必须覆盖 `/api/bank-details/*`、`/api/no-oa-bank-batches/*`、category/auto-tag、account balance、No OA lifecycle、read model worker、backfill 和 Turnover/Workbench influence。
+- 确认高风险文件包括：
+  - `services/bank_transaction_category_service.py`
+  - `services/no_oa_bank_batch_service.py`
+  - `services/bank_details_application_service.py`
+  - `services/no_oa_bank_batch_application_service.py`
+  - `app/routes_bank_details.py`
+  - `app/routes_no_oa_bank_batches.py`
+- 确认 runtime/read model 事件包括 `bank_detail.read_model.refresh`、`bank_account_balance.read_model.refresh`、`no_oa_bank_batch.read_model.refresh`。
+- 更新 `architecture-inventory.md` 和 `module-refactor-plan.md` 中 Bankdetail / No OA Batch 边界。
+- 更新 `refactor-prompts.md`，记录 PF-P190 prompt、审查结论和执行结果。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `git diff --name-only`：Pass；只包含 PF-P190 允许的文档文件。
+- 本轮是 docs-only discovery，未修改业务代码或 tests，未运行 targeted unittest。
+
+下一步：
+
+- 生成并审查 `PF-P191 - Bankdetail / No OA Batch Characterization Tests`。
+- PF-P191 只能新增/补强 tests，锁定 read freshness、pagination/count、category expected-version conflict、No OA tag selection/submit/withdraw、no synchronous refresh、dirty/outbox baseline。
+- PF-P191 不得修改 production code，不得引入 UoW，不得修改 schema。
+
+### PF-P191 - Bankdetail / No OA Batch Characterization Tests
+
+状态：`verified`
+
+范围：
+
+- 只补强 Bankdetail / No OA Batch route facade characterization tests。
+- 不修改 production code。
+- 不修改 schema。
+- 不访问真实外部服务。
+- 不执行 Merge Gate、Traffic Gate 或部署。
+
+执行结果：
+
+- `tests/test_bank_details_routes.py`
+  - 锁定 mutation permission denied 必须在调用 application service 前返回 403。
+  - 锁定 category validation/conflict payload 保留 `error` 和 `transaction_id`。
+- `tests/test_no_oa_bank_batch_routes.py`
+  - 锁定 tag selection expected-version conflict 返回 409 和 `no_oa_bank_batch_tag_selection_version_conflict`。
+  - 锁定 submit expected_version string normalization、actor mapping 和 note trim。
+  - 锁定 bulk submit partial failure aggregation、affected_months/changed_case_ids aggregation 和单次 `after_mutation(..., persist=True)`。
+- `bankdetail-no-oa-discovery.md` 已记录 PF-P191 测试覆盖和剩余测试目标。
+- `refactor-prompts.md` 已追加 PF-P191 prompt、审查结论和执行结果。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v`：Pass。
+
+下一步：
+
+- 生成并审查 `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning`。
+- PF-P192 应继续当前分支与当前模块，不切换模块。
+- PF-P192 不得引入 UoW，不得修改 schema，不得访问真实外部服务。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
