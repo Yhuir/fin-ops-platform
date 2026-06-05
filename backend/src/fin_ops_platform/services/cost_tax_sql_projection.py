@@ -61,8 +61,6 @@ class CostStatisticsSqlProjectionBuilder:
 
     def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
         project_scope, month = _parse_cost_scope_key(scope_key)
-        if month == "all":
-            raise ValueError("cost statistics all-scope must be expanded into month shards before rebuild.")
         payload = self._build_explorer_payload(month, project_scope=project_scope)
         source_versions = self._source_versions(month)
         service = CostStatisticsReadModelService()

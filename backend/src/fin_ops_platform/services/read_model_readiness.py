@@ -40,7 +40,9 @@ class ReadModelReadinessReporter:
 
     def record_event_success(self, event: RuntimeQueueEvent, result: dict[str, Any] | None) -> None:
         payload = result if isinstance(result, dict) else {}
-        if payload.get("skipped") or payload.get("enqueued_scope_keys"):
+        if payload.get("skipped"):
+            return
+        if payload.get("enqueued_scope_keys") and not str(payload.get("readiness_status") or "").strip():
             return
         definition = self._definition_for_event(event)
         scope_key = str(payload.get("scope_key") or event.scope_key or event.payload.get("scope_key") or event.aggregate_id or "").strip()

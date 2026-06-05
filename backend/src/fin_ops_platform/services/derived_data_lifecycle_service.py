@@ -387,7 +387,7 @@ class DerivedDataLifecycleService:
         "pending_invoice_rules_changed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "no_oa_bank_batch_changed": (
             "cost_statistics_cache_warmup",

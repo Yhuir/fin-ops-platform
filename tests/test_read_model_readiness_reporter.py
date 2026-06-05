@@ -105,6 +105,33 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
 
         self.assertEqual(repository.records, [])
 
+    def test_all_scope_parent_rebuild_with_shard_fanout_records_parent_fresh(self) -> None:
+        repository = RecordingReadinessRepository()
+        reporter = ReadModelReadinessReporter(readiness_repository=repository)
+
+        reporter.record_event_success(
+            _event(
+                event_type="cost_statistics.read_model.refresh",
+                scope_type="cost_statistics",
+                scope_key="active:all",
+            ),
+            {
+                "scope_key": "active:all",
+                "entry_count": 2,
+                "enqueued_scope_keys": ["active:2026-05", "active:2026-04"],
+                "readiness_status": "fresh",
+                "source_versions": {"cost_statistics_read_model_schema_version": "v1"},
+            },
+        )
+
+        self.assertEqual(len(repository.records), 1)
+        record = repository.records[0]
+        self.assertEqual(record["read_model_key"], "cost_statistics")
+        self.assertEqual(record["scope_type"], "cost_statistics")
+        self.assertEqual(record["scope_key"], "active:all")
+        self.assertEqual(record["status"], "fresh")
+        self.assertEqual(record["row_count"], 2)
+
     def test_unknown_read_model_key_fails_fast(self) -> None:
         repository = RecordingReadinessRepository()
         reporter = ReadModelReadinessReporter(readiness_repository=repository)

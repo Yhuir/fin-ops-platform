@@ -629,6 +629,8 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["derived_data_lifecycle"]["event"], "pending_invoice_rules_changed")
+        self.assertIn("cost_statistics.read_model.refresh", payload["derived_data_lifecycle"]["enqueued_jobs"])
+        self.assertNotIn("cost_statistics_cache_warmup", payload["derived_data_lifecycle"]["enqueued_jobs"])
         self.assertNotIn("invoice_lifecycle_read_model", payload["derived_data_lifecycle"]["skipped"])
         self.assertNotIn("workbench_relation_read_model", payload["derived_data_lifecycle"]["skipped"])
         self.assertEqual(saved_settings["bank_transaction_tags"]["version"], initial_bank_rules_version)

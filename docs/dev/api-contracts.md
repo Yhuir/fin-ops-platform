@@ -72,6 +72,8 @@
 
 规则变更只通过 `pending_invoice_rules_changed` 进入派生数据生命周期。该事件刷新发票生命周期、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和搜索相关 read model；不得刷新 `turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。
 
+当 lifecycle 入队成本统计刷新时，`derived_data_lifecycle.enqueued_jobs` 必须报告真实 durable queue 事件 `cost_statistics.read_model.refresh`。`cost_statistics_cache_warmup` 只代表 legacy/background cache warmup，不能用于描述待找发票规则变更触发的 read model refresh。
+
 ## App Health 全局状态 API
 
 `GET /api/app-health` 保留既有字段，并新增 `app_status` 作为 Global Runtime Status Plane 的用户可见投影。SSE `/api/app-health/stream` 的 `app_health` 事件必须携带同样的 `app_status` shape。
