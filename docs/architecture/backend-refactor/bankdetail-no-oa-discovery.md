@@ -658,3 +658,34 @@ PF-P203 验证：
 - `PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate`
 
 MG 必须统一覆盖 PF-P198 到 PF-P203 的完整 diff，并只合入 `dev`。
+
+## PF-P203-MG Write UoW Skeleton Cumulative Merge Gate
+
+PF-P203-MG 已将 PF-P198 到 PF-P203 的 Bankdetail / No OA write UoW skeleton 切片合入 `dev`。
+
+合入内容：
+
+- UoW readiness planning。
+- `tests/test_bankdetail_write_uow_contract.py` 目标契约测试。
+- `BankdetailWriteUnitOfWork` skeleton。
+- Category transaction writer seam。
+- Auto-tag rules UoW seam。
+- No OA submit/withdraw UoW seam。
+
+当前边界：
+
+- 7 个 UoW target contracts 已全部普通通过。
+- Skeleton 尚未接入真实 `BankDetailsApplicationService`、`NoOaBankBatchApplicationService` 或 route。
+- 生产写路径行为未改变。
+
+`dev` 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+
+下一条建议：
+
+- `PF-P204 - Bankdetail Write UoW Application Integration Planning`
+
+PF-P204 应只规划真实 application-service 接入顺序和风险，不直接迁移 production write path。

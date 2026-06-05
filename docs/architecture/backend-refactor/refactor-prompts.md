@@ -12585,7 +12585,7 @@ PF-P044 应只处理 `failed` 状态的 retry/replay/error semantics，继续保
 
 ## PF-P044 - Workbench Durable Idempotency Failed Reservation Policy
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -22653,6 +22653,38 @@ Post-Flight:
 
 - PF-P203-MG 边界正确：只覆盖 UoW skeleton 和 target contract tests。
 - MG 明确合入 `dev`，不合入 `main`，不部署、不切流。
+
+### PF-P203-MG 执行结果
+
+- 状态：`verified`
+- 分支：`codex/bankdetail-write-uow-readiness-p198`
+- 功能分支 commit：`609d87c6 feat(bankdetail): add write uow skeleton contracts`
+- Merge target：`dev`
+- Merge commit：`2a8f45f1`
+- 合入范围：
+  - `backend/src/fin_ops_platform/services/bankdetail_write_uow.py`
+  - `tests/test_bankdetail_write_uow_contract.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- Branch verification：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+  - `git diff --name-only dev...HEAD`：Pass；只包含 allowed files。
+  - `git log --oneline dev..HEAD`：Pass；只包含 `609d87c6`。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+- Dev verification：
+  - `git status --short --branch`：Pass，`dev...origin/dev [ahead 2]`。
+  - `git ls-files --others --exclude-standard`：Pass，empty。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+- Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
+- 下一步：提交 post-flight 文档更新并 push `origin/dev`；push 后从最新 `dev` 新建分支，下一条建议 `PF-P204 - Bankdetail Write UoW Application Integration Planning`。
 
 ## PF-P190 - Bankdetail / No OA Batch Discovery and Planning
 

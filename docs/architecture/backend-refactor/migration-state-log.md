@@ -60,12 +60,12 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Bankdetail write UoW skeleton cumulative Merge Gate |
-| 当前 active prompt | `PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate` |
-| 最近 verified prompt | `PF-P203 - Bankdetail No OA Submit Withdraw UoW Seam` |
-| 当前分支 | `codex/bankdetail-write-uow-readiness-p198` |
-| 最近验证 | PF-P203 验证通过；PF-P199 的 7 个 target contracts 全部普通通过；未执行 Traffic Gate |
-| 下一条允许任务 | 生成并执行 `PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate` |
+| 当前阶段 | Bankdetail write UoW skeleton merged to dev |
+| 当前 active prompt | 空 |
+| 最近 verified prompt | `PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate` |
+| 当前分支 | `dev` |
+| 最近验证 | PF-P203-MG 已合入 `dev`；merge commit `2a8f45f1`；`dev` 上 targeted tests 通过；未执行 Traffic Gate |
+| 下一条允许任务 | push `origin/dev`；push 后从最新 `dev` 新建 `codex/` 分支，生成下一条 Bankdetail application integration 或下一个模块 prompt |
 
 ## Prompt 执行日志
 
@@ -755,6 +755,48 @@ MG 步骤：
 下一步：
 
 - 生成并执行 `PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate`，统一覆盖 PF-P198 到 PF-P203 的完整 diff。
+
+### PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate
+
+状态：`verified`
+
+范围：
+
+- 统一验证并合入 PF-P198 到 PF-P203 的完整 diff。
+- 覆盖 Bankdetail / No OA write UoW readiness、target contract tests、最小 UoW skeleton、category seam、auto-tag seam、No OA seam。
+- 合入目标是 `dev`，不是 `main`。
+- 不接入真实 production write path。
+- 不执行 Traffic Gate、部署、Nginx 或生产配置变更。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/services/bankdetail_write_uow.py`
+- `tests/test_bankdetail_write_uow_contract.py`
+- `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+执行结果：
+
+- 功能分支 commit：`609d87c6 feat(bankdetail): add write uow skeleton contracts`。
+- 已合入 `dev`。
+- Merge commit：`2a8f45f1`。
+- PF-P199 的 7 个 target contracts 在 `dev` 上全部普通通过。
+
+`dev` 上验证：
+
+- `git status --short --branch`：Pass，`dev...origin/dev [ahead 2]`。
+- `git ls-files --others --exclude-standard`：Pass，empty。
+- `git diff --check`：Pass。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+
+下一步：
+
+- 提交本次 post-flight 文档更新并 push `origin/dev`。
+- push 后从最新 `dev` 新建下一条 `codex/` 分支。
+- 下一条建议：`PF-P204 - Bankdetail Write UoW Application Integration Planning`，只规划真实 application-service 接入顺序，不直接迁移 production write path。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
