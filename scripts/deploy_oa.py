@@ -193,6 +193,8 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
         f"KEEP_RELEASES={int(config.keep_releases)}",
         mark_remote_deploy_step("validate release name"),
         'case "$RELEASE_NAME" in *[!A-Za-z0-9._-]*|"") echo "invalid release name: $RELEASE_NAME" >&2; exit 64 ;; esac',
+        mark_remote_deploy_step("verify deploy-control contract"),
+        build_deploy_control_contract_check(),
         mark_remote_deploy_step("prepare release directory"),
         'mkdir -p "$RELEASES_DIR"',
     ]
@@ -209,8 +211,6 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
             'test -d "$RELEASE_DIR/src/backend/src"',
             'test -f "$RELEASE_DIR/src/backend/requirements.txt"',
             'test -f "$RELEASE_DIR/src/web/dist/index.html"',
-            mark_remote_deploy_step("verify deploy-control contract"),
-            build_deploy_control_contract_check(),
             mark_remote_deploy_step("deploy-control check-release"),
             f"sudo -n {quoted_deploy_control} check-release {quoted_release_name}",
         ]

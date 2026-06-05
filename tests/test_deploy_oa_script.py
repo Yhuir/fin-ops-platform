@@ -101,6 +101,14 @@ class DeployOAScriptTest(unittest.TestCase):
             remote_script.index("wait_finops_backend_ready"),
             remote_script.index("check_finops_session_route /fin-ops-api/api/session/me"),
         )
+        self.assertLess(
+            remote_script.index("verify_finops_deploy_control_contract"),
+            remote_script.index('mkdir -p "$RELEASE_DIR"'),
+        )
+        self.assertLess(
+            remote_script.index("verify_finops_deploy_control_contract"),
+            remote_script.index('tar -xzf - -C "$RELEASE_DIR"'),
+        )
         self.assertNotIn("sudo -n /bin/bash", remote_script)
         self.assertIn("KEEP_RELEASES=8", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control cleanup-releases --keep 8", remote_script)
