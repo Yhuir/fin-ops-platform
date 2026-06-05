@@ -15,6 +15,7 @@ if str(BACKEND_SRC) not in sys.path:
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings  # noqa: E402
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository  # noqa: E402
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # noqa: E402
 from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder  # noqa: E402
 
 
@@ -38,6 +39,7 @@ def main() -> int:
     connection = PostgresConnection(PostgresSettings.from_env())
     connection.set_statement_timeout_ms(args.statement_timeout_seconds * 1000)
     repository = PostgresReadModelRepository(connection)
+    queue_repository = RuntimeQueueRepository(connection)
     builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=repository)
     scopes = _scope_keys(builder, args.scope)
     report: dict[str, Any] = {
@@ -45,6 +47,7 @@ def main() -> int:
         "dry_run": bool(args.dry_run),
         "scope_keys": scopes,
         "rebuilt": [],
+        "completed_dirty_scopes": [],
         "all": None,
         "status": None,
     }
@@ -57,14 +60,26 @@ def main() -> int:
         status = repository.get_workbench_refresh_status(scope_key=scope_key)
         if str(status.get("read_model_status") or "").strip() == "failed":
             raise RuntimeError(str(status.get("last_error") or f"Workbench scope {scope_key} failed consistency validation."))
+        if queue_repository.complete_read_model_refresh(
+            tenant_id="default",
+            scope_type="workbench",
+            scope_key=scope_key,
+        ):
+            report["completed_dirty_scopes"].append(scope_key)
         report["rebuilt"].append({"scope_key": scope_key, "result": result, "status": status})
 
     all_result = builder.refresh_workbench_all_scope_from_active_shards("all")
     all_status = repository.get_workbench_refresh_status(scope_key="all")
     if str(all_status.get("read_model_status") or "").strip() == "failed":
         raise RuntimeError(str(all_status.get("last_error") or "Workbench all-scope generation failed consistency validation."))
+    if queue_repository.complete_read_model_refresh(
+        tenant_id="default",
+        scope_type="workbench",
+        scope_key="all",
+    ):
+        report["completed_dirty_scopes"].append("all")
     report["all"] = all_result
-    report["status"] = all_status
+    report["status"] = repository.get_workbench_refresh_status(scope_key="all")
     return _print_report(report, json_output=args.json)
 
 
