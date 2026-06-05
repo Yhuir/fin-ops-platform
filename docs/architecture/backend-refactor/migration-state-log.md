@@ -62,10 +62,10 @@
 | --- | --- |
 | 当前阶段 | Dev integration branch bootstrap complete; ready for next module |
 | 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P191 - Bankdetail / No OA Batch Characterization Tests` |
+| 最近 verified prompt | `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning` |
 | 当前分支 | `codex/bankdetail-no-oa-discovery-p190` |
-| 最近验证 | PF-P191 route facade characterization tests 通过；未修改 production code；未执行 Traffic Gate |
-| 下一条允许任务 | 生成并审查 `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning`，继续当前 Bankdetail / No OA 切片，不切换模块 |
+| 最近验证 | PF-P192 docs-only planning 验证通过；确认下一步应先补 read model characterization tests |
+| 下一条允许任务 | 生成并审查 `PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests`，继续当前 Bankdetail / No OA 切片，不切换模块 |
 
 ## Prompt 执行日志
 
@@ -233,6 +233,41 @@ MG 步骤：
 - 生成并审查 `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning`。
 - PF-P192 应继续当前分支与当前模块，不切换模块。
 - PF-P192 不得引入 UoW，不得修改 schema，不得访问真实外部服务。
+
+### PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning
+
+状态：`verified`
+
+范围：
+
+- 只做 Bankdetail / No OA route/application cleanup planning。
+- 不修改 production code。
+- 不修改 tests。
+- 不执行 MG、Traffic Gate 或部署。
+
+执行结果：
+
+- 确认 `app/routes_bank_details.py` 和 `app/routes_no_oa_bank_batches.py` 已经是 route facade，不应新增平行 abstraction。
+- 确认 `server.py` 中 HTTP response 构造、session mapping、body parsing 和文件导出 response 仍属于允许的 HTTP mapping。
+- 确认下一步风险不在 route facade 本身，而在：
+  - Bankdetail SQL read model pagination/count/freshness。
+  - No OA read model missing/stale/no synchronous refresh。
+  - Category / auto-tag dirty scope 与 outbox baseline。
+  - No OA service-level submit/withdraw side effects。
+- `bankdetail-no-oa-discovery.md` 已记录 PF-P192 planning 结论和 cleanup 禁止线。
+
+验证：
+
+- `git status --short --branch`：Pass。
+- `git ls-files --others --exclude-standard`：Pass。
+- `git diff --check`：Pass。
+- `git diff --name-only`：Pass。
+- 本轮是 docs-only planning，未修改 production code 或 tests，未运行 targeted unittest。
+
+下一步：
+
+- 生成并审查 `PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests`。
+- PF-P193 只补 read model 相关 characterization tests，不改 production code。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 

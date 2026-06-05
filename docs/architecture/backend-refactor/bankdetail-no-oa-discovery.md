@@ -186,3 +186,33 @@ PF-P191 仍未覆盖的后续测试目标：
 - Category / auto-tag dirty scope 与 outbox baseline。
 - No OA submit/withdraw service-level facts/audit/dirty/outbox。
 - Account balance read model refresh 与 backfill smoke checklist。
+
+## PF-P192 Route / Application Cleanup Planning
+
+PF-P192 继续保持 planning-only，不修改 production code。当前扫描结论：
+
+- `app/routes_bank_details.py` 和 `app/routes_no_oa_bank_batches.py` 已经承担 route facade 角色，后续不应再新增平行 route abstraction。
+- `server.py` 中 Bankdetail / No OA path dispatch 仍负责 HTTP response 构造、文件导出 response、body parsing、session mapping 和 route facade 调用；这部分属于允许的 HTTP mapping。
+- `server.py` 中仍存在 Bankdetail / No OA read model source version、enqueue、fallback/cache helper。下一步 cleanup 不能机械移动函数，必须先判断每个 helper 属于：
+  - route-only HTTP mapping；
+  - Bankdetail application service；
+  - read model freshness boundary；
+  - runtime queue / repository adapter；
+  - ops/backfill。
+- `BankDetailsApplicationService` 当前依赖较宽，包括 `state_store`、`runtime_repositories`、SQL read repository、derived lifecycle、cache clearers 和多个 callback。后续 cleanup 目标应是减少隐式 callback/god dependency，而不是把 route handler 原样搬入 service。
+- `NoOaBankBatchApplicationService` 当前承担 read model fallback、tag selection、submit/withdraw、Workbench relation influence、derived lifecycle 和 queue enqueue。后续必须先用 tests 锁住 service-level side effects，再做 UoW 或 service 拆分。
+
+PF-P192 后推荐下一条：
+
+- `PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests`
+  - 先覆盖 Bankdetail SQL read model pagination/count/freshness、No OA read model missing/stale/no synchronous refresh。
+  - 不修改 production code。
+  - 先不做 route/application production cleanup，因为现有低成本 route facade tests 还不足以保护 SQL/read model 行为。
+
+Cleanup 禁止线：
+
+- 不新增平行 route abstraction。
+- 不把 `Application` god object 注入 service。
+- 不把 HTTP response、cookie/header/session 逻辑移入 service。
+- 不把 SQL 散落到业务 service。
+- 不在没有 read model characterization tests 前改 `_transactions_from_sql_read_model`、No OA read model fallback 或 runtime queue enqueue helper。

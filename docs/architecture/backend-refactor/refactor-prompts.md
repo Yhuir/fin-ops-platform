@@ -22163,6 +22163,80 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v`：Pass。
 - 下一条建议：生成 `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning`，继续只做 cleanup planning 或小范围 route/application boundary cleanup；不切换模块。
 
+## PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning
+
+状态：`verified`
+
+```text
+/goal
+PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构规划者。你必须只做 Bankdetail / No OA Batch route/application cleanup planning，不修改 production code。
+
+Context:
+PF-P190 和 PF-P191 已 verified。当前已有 route facade characterization tests，但 Bankdetail / No OA read model、category dirty/outbox、service-level side effects 仍未充分锁定。
+
+Goal:
+判断 Bankdetail / No OA 下一步是否适合直接做 route/application cleanup。如果测试覆盖不足，必须明确推迟 production cleanup，并生成下一条更合适的 characterization tests prompt。
+
+Required Reads:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- backend/src/fin_ops_platform/app/server.py 的 Bankdetail / No OA route dispatch/helper
+- backend/src/fin_ops_platform/app/routes_bank_details.py
+- backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py
+- backend/src/fin_ops_platform/services/bank_details_application_service.py
+- backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py
+- tests/test_bank_details_routes.py
+- tests/test_no_oa_bank_batch_routes.py
+
+Allowed Scope:
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Planning Work:
+1. 判断 route facade 是否已经存在，避免新增平行 abstraction。
+2. 区分 server.py 中哪些逻辑仍属于合法 HTTP mapping，哪些 helper 后续应下沉到 application service、read model freshness boundary 或 runtime queue/repository adapter。
+3. 评估 `BankDetailsApplicationService` 和 `NoOaBankBatchApplicationService` 的 god dependency / callback 风险。
+4. 如果当前测试不足以保护 SQL/read model 或 service side effects，必须推荐下一条 characterization tests，而不是直接 cleanup production code。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得引入 UoW。
+- 不得修改 schema。
+- 不得访问真实外部服务。
+- 不得执行 Traffic Gate、部署、修改 Nginx、生产配置或 feature flag。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only
+- 文档-only planning；不运行 targeted unittest 也可，但必须说明原因。
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 下一条建议必须继续当前 Bankdetail / No OA 模块。
+```
+
+### 审查结论
+
+- PF-P192 边界正确：只做 cleanup planning，不修改 production code 或 tests。
+- 它明确要求如果测试覆盖不足，先补 read model / service side-effect characterization，不直接抽生产代码。
+
+### PF-P192 执行结果
+
+- 状态：`verified`
+- 结论：
+  - Bankdetail / No OA route facade 已存在，不应新增平行 abstraction。
+  - 当前 `server.py` 的 HTTP response 构造、session mapping、文件导出 response 仍属于合法 route boundary。
+  - 当前更高风险在 application service/read model/dirty-outbox side effects，而不是 route facade 文件本身。
+  - PF-P191 的 route-level tests 不足以保护 SQL/read model 行为；下一步应先补 read model characterization。
+- 下一条建议：`PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests`。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`
