@@ -21977,6 +21977,540 @@ Post-Flight:
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。
 
+## PF-P190 - Bankdetail / No OA Batch Discovery and Planning
+
+状态：`verified`
+
+```text
+/goal
+PF-P190 - Bankdetail / No OA Batch Discovery and Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构侦察者。你必须只做 Bankdetail / No OA Batch 模块 discovery、边界规划和文档回写，不修改业务代码。
+
+Context:
+PF-P189-MG 已合入 `dev` 并 push `origin/dev`。后续重构集成分支是 `dev`，本 prompt 必须从最新 `dev` 创建 `codex/` 分支执行。
+
+Goal:
+扫描 Bankdetail / No OA Batch 的 API、service、repository/read model、worker、tests 和跨模块影响，输出生产级模块边界、运行时链路、风险清单和下一条 characterization tests prompt 的输入事实。
+
+Required Reads:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/architecture-inventory.md
+- docs/architecture/backend-refactor/module-refactor-plan.md
+- docs/architecture/backend-refactor/ai-execution-rules.md
+- docs/product-specs/bank-turnover-and-no-oa.md
+- docs/dev/api-contracts.md
+- backend/src/fin_ops_platform/app/routes_bank_details.py
+- backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py
+- backend/src/fin_ops_platform/app/server.py 的 Bankdetail / No OA path mapping 和 helper
+- backend/src/fin_ops_platform/services/bank_*.py
+- backend/src/fin_ops_platform/services/no_oa_bank_*.py
+- backend/src/fin_ops_platform/services/runtime_worker_registry.py
+- tests/test_bank*.py
+- tests/test_no_oa*.py
+
+Required Discovery Output:
+1. API Boundary Matrix：列出 Bankdetail / No OA Batch 读写 API、route owner、核心行为、测试焦点。
+2. File Ownership：把 route、service、projection、read model worker、backfill、tests 归入明确 owner。
+3. Runtime Sequence：至少整理 Bank Detail read、Bank category write、No OA submit/withdraw 三条运行时链路。
+4. Cross-Module Contracts：明确 Turnover Ledger、Workbench、Search/Pending、Settings、Runtime Worker 的影响边界。
+5. High-Risk Findings：标记大文件、God service、server.py helper、同步刷新、expected-version、回填脚本风险。
+6. Next Prompt Recommendation：给出 `PF-P191 - Bankdetail / No OA Batch Characterization Tests` 的边界和硬约束。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/architecture-inventory.md
+- docs/architecture/backend-refactor/module-refactor-plan.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 schema migration。
+- 不得开始 Bankdetail / No OA implementation。
+- 不得访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、修改 Nginx、生产配置或 feature flag。
+- 不得 merge/push main。
+- 不得 merge dev；本 prompt 不是 MG。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only
+- 文档-only discovery；如未运行 targeted tests，必须说明本轮未修改业务代码或测试。
+
+Post-Flight:
+- 更新 migration-state-log.md，记录 PF-P190 status、发现、验证和下一步。
+- 更新 refactor-prompts.md，记录本 prompt 和执行摘要。
+- 更新 architecture-inventory.md / module-refactor-plan.md 中 Bankdetail / No OA 事实。
+- 下一条 prompt 应为 `PF-P191 - Bankdetail / No OA Batch Characterization Tests`，但不得在 PF-P190 中执行。
+```
+
+### 审查结论
+
+- PF-P190 边界正确：只做 Bankdetail / No OA Batch discovery 和文档事实回写。
+- PF-P190 明确禁止修改业务代码、tests、schema、部署和真实外部服务。
+- PF-P190 正确基于 `dev` 分支工作流，不合入 `main`，也不在本 prompt 中执行 MG。
+
+### PF-P190 执行结果
+
+- 状态：`verified`
+- 分支：`codex/bankdetail-no-oa-discovery-p190`
+- 产物：
+  - 新增 `bankdetail-no-oa-discovery.md`，记录 API matrix、file ownership、runtime sequence、cross-module contracts、high-risk findings 和 PF-P191 约束。
+  - 更新 `architecture-inventory.md`，加入 PF-P190 Bankdetail / No OA Batch discovery update。
+  - 更新 `module-refactor-plan.md`，把 Bankdetail 当前模块边界细化为 read/query、category/auto-tag、No OA lifecycle、account balance、runtime/ops 子域。
+  - 更新 `migration-state-log.md`，标记 PF-P190 verified 并指向 PF-P191。
+- 验证：
+  - `git status --short --branch`：Pass，当前分支为 `codex/bankdetail-no-oa-discovery-p190`。
+  - `git ls-files --others --exclude-standard`：Pass，仅在提交前显示新文档，提交后为空。
+  - `git diff --check`：Pass。
+  - `git diff --name-only`：Pass，只包含 PF-P190 允许的文档文件。
+  - 本轮是 docs-only discovery，未修改 production code 或 tests；未运行 targeted unittest。
+- 下一条建议：生成并审查 `PF-P191 - Bankdetail / No OA Batch Characterization Tests`。
+
+## PF-P191 - Bankdetail / No OA Batch Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P191 - Bankdetail / No OA Batch Characterization Tests
+
+Role:
+你是一位负责遗留系统测试锁定的 Python 后端工程师。你必须只新增或补强 Bankdetail / No OA Batch characterization tests，不修改 production code。
+
+Context:
+PF-P190 已 verified，并确认 Bankdetail / No OA Batch 必须覆盖 bank detail read/query、category/auto-tag write、No OA lifecycle、account balance、runtime/ops 子域。本 prompt 是 PF-P190 后的测试锁定切片。
+
+Goal:
+用低成本、稳定、无真实外部服务的 characterization tests 锁住 Bankdetail / No OA Batch 当前 HTTP route facade 与关键写边界行为，为后续 facade cleanup / UoW planning 提供安全网。
+
+Required Reads:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- backend/src/fin_ops_platform/app/routes_bank_details.py
+- backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py
+- tests/test_bank_details_routes.py
+- tests/test_no_oa_bank_batch_routes.py
+
+Allowed Scope:
+- tests/test_bank_details_routes.py
+- tests/test_no_oa_bank_batch_routes.py
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+
+Required Test Work:
+1. Bankdetail route facade：
+   - 锁定 mutation permission denied 必须在调用 application service 前返回 403。
+   - 锁定 category validation/conflict payload 保留 `error` 和 `transaction_id`。
+   - 保留 stale/read_model_status route status contract。
+2. No OA route facade：
+   - 锁定 tag selection expected-version conflict 返回 409 和 `no_oa_bank_batch_tag_selection_version_conflict`。
+   - 锁定 submit expected_version string normalization、actor mapping 和 note trim。
+   - 锁定 bulk submit partial failure、affected_months aggregation、changed_case_ids aggregation 和 single `after_mutation(..., persist=True)` boundary。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得引入 UoW。
+- 不得放宽既有断言或删除 legacy compatibility 行为。
+- 不得执行 Traffic Gate、部署、修改 Nginx、生产配置或 feature flag。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 记录 changed files、verification commands/results。
+- 下一条建议应继续同一分支生成 `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning` 或在测试覆盖足够时生成 cumulative MG；不得切换模块。
+```
+
+### 审查结论
+
+- PF-P191 边界正确：只补 route facade characterization tests，不修改 production code。
+- PF-P191 覆盖 PF-P190 识别的 expected-version、权限、partial failure、after_mutation 和 route-to-service mapping 风险。
+- 该 prompt 不引入 UoW，不访问外部服务，适合作为 Bankdetail / No OA 后续 cleanup 前的安全网。
+
+### PF-P191 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_bank_details_routes.py`
+  - `tests/test_no_oa_bank_batch_routes.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - Bankdetail route facade 新增 permission denied 不调用 service 的 characterization。
+  - Bankdetail category validation/conflict payload 保留 `error` 和 `transaction_id`。
+  - No OA tag selection version conflict 返回 409 并保留错误码。
+  - No OA submit 锁定 expected_version normalization、actor mapping、note trim。
+  - No OA bulk submit 锁定 partial failure aggregation 和单次 `after_mutation(..., persist=True)`。
+- 验证：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v`：Pass。
+- 下一条建议：生成 `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning`，继续只做 cleanup planning 或小范围 route/application boundary cleanup；不切换模块。
+
+## PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning
+
+状态：`verified`
+
+```text
+/goal
+PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的架构规划者。你必须只做 Bankdetail / No OA Batch route/application cleanup planning，不修改 production code。
+
+Context:
+PF-P190 和 PF-P191 已 verified。当前已有 route facade characterization tests，但 Bankdetail / No OA read model、category dirty/outbox、service-level side effects 仍未充分锁定。
+
+Goal:
+判断 Bankdetail / No OA 下一步是否适合直接做 route/application cleanup。如果测试覆盖不足，必须明确推迟 production cleanup，并生成下一条更合适的 characterization tests prompt。
+
+Required Reads:
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- backend/src/fin_ops_platform/app/server.py 的 Bankdetail / No OA route dispatch/helper
+- backend/src/fin_ops_platform/app/routes_bank_details.py
+- backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py
+- backend/src/fin_ops_platform/services/bank_details_application_service.py
+- backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py
+- tests/test_bank_details_routes.py
+- tests/test_no_oa_bank_batch_routes.py
+
+Allowed Scope:
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Planning Work:
+1. 判断 route facade 是否已经存在，避免新增平行 abstraction。
+2. 区分 server.py 中哪些逻辑仍属于合法 HTTP mapping，哪些 helper 后续应下沉到 application service、read model freshness boundary 或 runtime queue/repository adapter。
+3. 评估 `BankDetailsApplicationService` 和 `NoOaBankBatchApplicationService` 的 god dependency / callback 风险。
+4. 如果当前测试不足以保护 SQL/read model 或 service side effects，必须推荐下一条 characterization tests，而不是直接 cleanup production code。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得引入 UoW。
+- 不得修改 schema。
+- 不得访问真实外部服务。
+- 不得执行 Traffic Gate、部署、修改 Nginx、生产配置或 feature flag。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only
+- 文档-only planning；不运行 targeted unittest 也可，但必须说明原因。
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 下一条建议必须继续当前 Bankdetail / No OA 模块。
+```
+
+### 审查结论
+
+- PF-P192 边界正确：只做 cleanup planning，不修改 production code 或 tests。
+- 它明确要求如果测试覆盖不足，先补 read model / service side-effect characterization，不直接抽生产代码。
+
+### PF-P192 执行结果
+
+- 状态：`verified`
+- 结论：
+  - Bankdetail / No OA route facade 已存在，不应新增平行 abstraction。
+  - 当前 `server.py` 的 HTTP response 构造、session mapping、文件导出 response 仍属于合法 route boundary。
+  - 当前更高风险在 application service/read model/dirty-outbox side effects，而不是 route facade 文件本身。
+  - PF-P191 的 route-level tests 不足以保护 SQL/read model 行为；下一步应先补 read model characterization。
+- 下一条建议：`PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests`。
+
+## PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests
+
+Role:
+你是一位负责 read model 安全网的 Python 后端工程师。你必须只新增或补强 Bankdetail / No OA read model characterization tests，不修改 production code。
+
+Context:
+PF-P190 到 PF-P192 已确认 Bankdetail / No OA 的下一步风险在 read model freshness、No OA no-sync-refresh 和 service side effects。PF-P193 必须先补 read model 测试，再考虑 production cleanup。
+
+Goal:
+锁定 Bankdetail SQL read model missing/stale 行为和 No OA read model missing/stale 行为，防止后续 cleanup 误改为同步扫描 facts 或伪装 fresh。
+
+Allowed Scope:
+- tests/test_bank_details_sql_runtime.py
+- tests/test_no_oa_bank_batch_workbench_integration.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Test Work:
+1. Bankdetail：
+   - missing SQL scope 返回 `read_model_status="refreshing"`。
+   - missing SQL scope enqueue `bank_detail` read model refresh。
+   - missing SQL scope 不得同步调用 legacy `BankDetailsService.list_transactions(...)`。
+   - pagination/page_size normalization 不得绕过 refreshing payload。
+2. No OA：
+   - 复验 missing SQL read model 不同步 rebuild batches。
+   - 复验 stale source versions 不伪装 fresh。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实外部服务。
+- 不得引入 UoW。
+- 不得删除或放宽既有 assertions。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 下一条建议继续当前模块，优先补 category/auto-tag dirty/outbox 和 No OA submit/withdraw side-effect characterization。
+```
+
+### 审查结论
+
+- PF-P193 边界正确：只补 read model characterization tests，不修改 production code。
+- 它补足 PF-P192 指出的 cleanup 前置测试缺口。
+
+### PF-P193 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_bank_details_sql_runtime.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 Bankdetail application service missing SQL scope test。
+  - 锁定 missing scope 返回 refreshing、enqueue `bank_detail` refresh、不调用 legacy `list_transactions`、page_size clamp 为 100。
+  - 复验 No OA read model integration tests，确认 missing/stale GET 路径不伪装 fresh、不同步 rebuild。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v`：Pass，50 tests。
+- 下一条建议：`PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests`。
+
+## PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests
+
+Role:
+你是一位负责写路径 side-effect characterization 的 Python 后端工程师。你必须只补强 Bankdetail category / auto-tag 的测试，不修改 production code。
+
+Context:
+PF-P193 已锁定 Bankdetail read model missing scope 不同步 legacy scan。下一步必须锁定 category / auto-tag 写路径触发的 dirty/outbox/read model side effects。
+
+Goal:
+补强 Bankdetail auto-tag rules update 的 side-effect characterization，保护 cache clear、Turnover all-scope refresh、Bankdetail priority scope refresh 和 derived lifecycle event。
+
+Allowed Scope:
+- tests/test_bank_details_sql_runtime.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实外部服务。
+- 不得引入 UoW。
+- 不得删除或放宽既有 assertions。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 下一条建议继续当前模块，优先补 No OA submit/withdraw service-level facts/audit/dirty/outbox characterization。
+```
+
+### 审查结论
+
+- PF-P194 边界正确：只补 auto-tag side-effect tests，不修改 production code。
+- 该 prompt 保护后续写路径 cleanup/UoW 前的 dirty/outbox 类 side-effect 语义。
+
+### PF-P194 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_bank_details_sql_runtime.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 `test_auto_tag_rules_update_refreshes_priority_bank_detail_and_turnover_all_scope`。
+  - 锁定 relation tag projection cache / Turnover cache clear。
+  - 锁定 Turnover all-scope refresh。
+  - 锁定 Bankdetail priority month scope refresh，且不把 `all` 作为 priority scope。
+  - 锁定 derived lifecycle event metadata。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，42 tests。
+- 下一条建议：`PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests`。
+
+## PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests
+
+Role:
+你是一位负责 No OA Batch 写路径 side-effect characterization 的 Python 后端工程师。你必须只补强 No OA application service 测试，不修改 production code。
+
+Context:
+PF-P190 到 PF-P194 已完成 Bankdetail / No OA discovery、route facade tests、read model tests 和 auto-tag side-effect tests。当前缺口是 No OA submit/withdraw mutation side-effect 边界。
+
+Goal:
+补强 No OA application service mutation boundary tests，锁定 after_mutation、persist mutation snapshot、durable queue enqueue 和 lifecycle event 行为。
+
+Allowed Scope:
+- tests/test_no_oa_bank_batch_application_service.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实外部服务。
+- 不得引入 UoW。
+- 不得删除或放宽既有 assertions。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 如果 PF-P190 到 PF-P195 已形成完整可合并测试锁定切片，下一条生成 cumulative MG。
+```
+
+### 审查结论
+
+- PF-P195 边界正确：只新增 No OA application service tests，不修改 production code。
+- 它补足当前切片中 No OA mutation side-effect 的最低安全网。
+
+### PF-P195 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_no_oa_bank_batch_application_service.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 No OA application service tests。
+  - 锁定 `after_mutation(..., persist=True)` 的 lifecycle event、search cache clear、mutation snapshot 和 expanded workbench scope keys。
+  - 锁定 `after_mutation(..., persist=False)` 不持久化 snapshot。
+  - 锁定 `enqueue_background_refresh(...)` 只走 durable queue boundary 并过滤空 scope。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v`：Pass，43 tests。
+- 下一条建议：生成 `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate`，统一覆盖 PF-P190 到 PF-P195 的完整 diff 并合入 `dev`。
+
+## PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate
+
+状态：`verified`
+
+```text
+/goal
+PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端重构的 Merge Gate 执行者。你必须只验证并合入 Bankdetail / No OA discovery + characterization 切片到 `dev`，不新增业务实现。
+
+Context:
+PF-P190 到 PF-P195 均已 verified。当前分支为 `codex/bankdetail-no-oa-discovery-p190`。合入目标是 `dev`，不是 `main`。
+
+Gate Scope:
+本 MG 统一覆盖：
+- PF-P190 Bankdetail / No OA discovery and planning。
+- PF-P191 route facade characterization tests。
+- PF-P192 route/application cleanup planning。
+- PF-P193 read model characterization tests。
+- PF-P194 category / auto-tag side-effect characterization tests。
+- PF-P195 No OA mutation side-effect characterization tests。
+
+Allowed Changed Files:
+- docs/architecture/backend-refactor/architecture-inventory.md
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/module-refactor-plan.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- tests/test_bank_details_routes.py
+- tests/test_bank_details_sql_runtime.py
+- tests/test_no_oa_bank_batch_application_service.py
+- tests/test_no_oa_bank_batch_routes.py
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、修改 Nginx、生产配置或 feature flag。
+- 不得合入或 push `main`。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only dev...HEAD
+- git log --oneline dev..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v
+
+Merge Rules:
+1. 如 MG prompt/status 文档有变更，精确 stage 并提交。
+2. 切换到 `dev`。
+3. 确认 `dev` 与 `origin/dev` 对齐，且 `dev` 未落后 `main`；如落后，停止并生成 sync/rebaseline 计划。
+4. merge 当前分支到 `dev`。
+5. 在 `dev` 上重跑完整 Verification。
+6. 通过后更新 migration-state-log.md 和 refactor-prompts.md，标记 PF-P195-MG verified。
+7. 精确 stage post-flight 文档，提交后 push `origin/dev`。
+8. 不 push `origin/main`。
+
+Post-Flight:
+- 记录 merge commit、`dev` 上验证结果、未执行 Traffic Gate。
+- push `origin/dev` 后，从最新 `dev` 新建下一条 `codex/` 分支。
+- 下一条建议：`PF-P196 - Bankdetail / No OA Account Balance and Backfill Smoke Planning` 或继续 Bankdetail write UoW readiness，必须根据状态机选择。
+```
+
+### 审查结论
+
+- PF-P195-MG 边界正确：只合入 Bankdetail / No OA discovery + characterization tests，不合入 production code。
+- 允许文件白名单与当前 `dev...HEAD` diff 一致。
+- MG 明确只合入 `dev`，不触碰 `main`。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`

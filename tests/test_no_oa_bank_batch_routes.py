@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import unittest
 from http import HTTPStatus
+from types import SimpleNamespace
 
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
+from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 
 
 class FakeNoOaApplicationService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
+        self.submit_failures: dict[str, Exception] = {}
 
     def list_batches_payload(self, query):
         self.calls.append(("list", query))
@@ -17,6 +20,51 @@ class FakeNoOaApplicationService:
     def tag_selection_payload(self):
         self.calls.append(("tag_selection", None))
         return {"version": 1, "selected_tag_codes": []}
+
+    def update_tag_selection(self, payload, *, actor_id):
+        self.calls.append(("update_tag_selection", {"payload": payload, "actor_id": actor_id}))
+        if payload.get("expected_version") == 0:
+            raise AppSettingsValidationError("no_oa_bank_batch_tag_selection_version_conflict", "version conflict")
+        return {"version": 2, "selected_tag_codes": list(payload.get("selected_tag_codes") or [])}
+
+    def submit_batch(self, batch_id, *, actor, expected_version, note, persist=True):
+        self.calls.append(
+            (
+                "submit_batch",
+                {
+                    "batch_id": batch_id,
+                    "actor": actor,
+                    "expected_version": expected_version,
+                    "note": note,
+                    "persist": persist,
+                },
+            )
+        )
+        failure = self.submit_failures.get(batch_id)
+        if failure is not None:
+            raise failure
+        return {
+            "batch": {"batch_id": batch_id, "version": 2},
+            "pair_relation": {"case_id": f"case-{batch_id}"},
+            "affected_months": ["2026-05"],
+        }
+
+    def after_mutation(self, affected_months, *, changed_case_ids, persist=True):
+        self.calls.append(
+            (
+                "after_mutation",
+                {
+                    "affected_months": list(affected_months),
+                    "changed_case_ids": list(changed_case_ids),
+                    "persist": persist,
+                },
+            )
+        )
+        return True
+
+
+def fake_session(username: str = "alice"):
+    return SimpleNamespace(identity=SimpleNamespace(username=username, user_id="oa-001"))
 
 
 class NoOaBankBatchRoutesTests(unittest.TestCase):
@@ -37,6 +85,97 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
                 ("list", {"bucket": ["unsubmitted"]}),
                 ("tag_selection", None),
             ],
+        )
+
+    def test_tag_selection_version_conflict_returns_409_and_error_code(self) -> None:
+        service = FakeNoOaApplicationService()
+        routes = NoOaBankBatchApiRoutes(application_service=service)
+
+        status, payload = routes.update_tag_selection(
+            {"expected_version": 0, "selected_tag_codes": ["fee"], "actor": "fin-user"},
+            session=fake_session(),
+        )
+
+        self.assertEqual(status, HTTPStatus.CONFLICT)
+        self.assertEqual(payload["error"], "no_oa_bank_batch_tag_selection_version_conflict")
+        self.assertEqual(
+            service.calls,
+            [
+                (
+                    "update_tag_selection",
+                    {
+                        "payload": {"expected_version": 0, "selected_tag_codes": ["fee"], "actor": "fin-user"},
+                        "actor_id": "fin-user",
+                    },
+                )
+            ],
+        )
+
+    def test_submit_batch_preserves_expected_version_and_actor_mapping(self) -> None:
+        service = FakeNoOaApplicationService()
+        routes = NoOaBankBatchApiRoutes(application_service=service)
+
+        status, payload = routes.submit_batch(
+            "batch-001",
+            {"expected_version": "7", "note": "  reviewed  "},
+            session=fake_session("finance-user"),
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload["batch"]["version"], 2)
+        self.assertEqual(
+            service.calls,
+            [
+                (
+                    "submit_batch",
+                    {
+                        "batch_id": "batch-001",
+                        "actor": "finance-user",
+                        "expected_version": 7,
+                        "note": "reviewed",
+                        "persist": True,
+                    },
+                )
+            ],
+        )
+
+    def test_bulk_submit_accumulates_partial_failures_and_persists_once(self) -> None:
+        service = FakeNoOaApplicationService()
+        service.submit_failures["missing"] = KeyError("missing")
+        service.submit_failures["conflict"] = ValueError("no_oa_bank_batch_version_conflict")
+        routes = NoOaBankBatchApiRoutes(application_service=service)
+
+        status, payload = routes.bulk_submit(
+            {
+                "batches": [
+                    {"batch_id": "batch-001", "expected_version": "3", "note": "ok"},
+                    {"batch_id": "missing"},
+                    {"batch_id": "conflict"},
+                    {"batch_id": ""},
+                    "invalid",
+                ],
+                "note": "fallback",
+            },
+            session=fake_session("bulk-user"),
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload["summary"], {"submitted": 1, "failed": 4})
+        self.assertEqual(payload["affected_months"], ["2026-05"])
+        self.assertTrue(payload["workbench_rebuild_queued"])
+        self.assertEqual(payload["results"][0]["status"], "submitted")
+        self.assertEqual(payload["results"][1]["error"], "unknown_no_oa_bank_batch")
+        self.assertEqual(payload["results"][2]["error"], "no_oa_bank_batch_version_conflict")
+        self.assertEqual(payload["results"][3]["error"], "invalid_no_oa_bank_batch_request")
+        self.assertEqual(payload["results"][4]["error"], "invalid_no_oa_bank_batch_request")
+        self.assertEqual(service.calls[-1][0], "after_mutation")
+        self.assertEqual(
+            service.calls[-1][1],
+            {
+                "affected_months": ["2026-05"],
+                "changed_case_ids": ["case-batch-001"],
+                "persist": True,
+            },
         )
 
 

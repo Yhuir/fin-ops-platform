@@ -837,6 +837,82 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         ).hexdigest()
         self.assertEqual(cache_key, f"bank_detail:transactions:{expected_digest}")
 
+    def test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan(self) -> None:
+        class SqlReadRepository:
+            def __init__(self) -> None:
+                self.scope_key_calls: list[dict[str, object]] = []
+                self.summary_calls: list[list[str]] = []
+
+            def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
+                self.scope_key_calls.append({"date_from": date_from, "date_to": date_to})
+                return ["2026-05"]
+
+            def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+                self.summary_calls.append(list(scope_keys))
+                return {
+                    "read_model_status": "missing",
+                    "read_model_scope_keys": list(scope_keys),
+                    "read_model_stale_reasons": ["read_model_scope_missing"],
+                }
+
+            def list_bank_detail_transactions(self, **_kwargs):
+                raise AssertionError("missing bank detail read model must not query rows before refresh")
+
+        class Queue:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        class LegacyBankDetailsService:
+            def list_transactions(self, **_kwargs):
+                raise AssertionError("missing SQL read model must not synchronously scan legacy transactions")
+
+            def _bank_transaction_tags_payload(self) -> dict[str, object]:
+                return {"version": 1, "definitions": []}
+
+        repository = SqlReadRepository()
+        queue = Queue()
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=LegacyBankDetailsService(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(),
+            state_store=None,
+            bank_detail_sql_read_repository=repository,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: [],
+            invalidate_after_category_mutation=lambda _affected_months: False,
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_turnover_ledger_read_model=lambda: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-05"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+
+        payload = service.transactions_payload(
+            account_key=None,
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            keyword=None,
+            page=1,
+            page_size=500,
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
+        self.assertEqual(payload["read_model_stale_reasons"], ["read_model_scope_missing"])
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["refresh_reason"], "api_missing")
+        self.assertEqual(queue.enqueued, [("bank_detail", "2026-05", "api_missing")])
+        self.assertEqual(repository.scope_key_calls, [{"date_from": "2026-05-01", "date_to": "2026-05-31"}])
+        self.assertEqual(repository.summary_calls, [["2026-05"]])
+
     def test_category_mutation_refreshes_turnover_ledger_all_scope(self) -> None:
         class Queue:
             def __init__(self) -> None:
@@ -878,6 +954,64 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn(("bank_detail", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertNotIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
+
+    def test_auto_tag_rules_update_refreshes_priority_bank_detail_and_turnover_all_scope(self) -> None:
+        class Queue:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        queue = Queue()
+        cleared: list[str] = []
+        lifecycle_events: list[dict[str, object]] = []
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(),
+            state_store=None,
+            bank_detail_sql_read_repository=None,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: [],
+            invalidate_after_category_mutation=lambda _affected_months: False,
+            execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
+                {"event_type": event_type, **kwargs}
+            ),
+            clear_turnover_ledger_read_model=lambda: cleared.append("turnover"),
+            clear_relation_tag_projection_cache=lambda: cleared.append("relation_tag_projection"),
+            available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+
+        service.finalize_auto_tag_rules_update(
+            {
+                "new_version": 12,
+                "bank_detail_priority_scope_keys": ["2026-05", "all", "", "2026-04"],
+            }
+        )
+
+        self.assertEqual(cleared, ["relation_tag_projection", "turnover"])
+        self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertIn(("bank_detail", "2026-04", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
+        self.assertIn(("bank_detail", "2026-05", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
+        self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
+        self.assertEqual(
+            lifecycle_events,
+            [
+                {
+                    "event_type": "bank_auto_tag_rules_changed",
+                    "scope_keys": ["all"],
+                    "include_all": True,
+                    "metadata": {"reason": "bank_auto_tag_rules_changed", "new_version": 12},
+                    "schedule_cost_warmup": False,
+                }
+            ],
+        )
 
     def test_accounts_serve_previous_schema_rows_while_refreshing(self) -> None:
         connection = FakeConnection(

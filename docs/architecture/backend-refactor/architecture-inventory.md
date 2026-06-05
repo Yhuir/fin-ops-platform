@@ -83,6 +83,25 @@ PF-P189 后推荐下一步：
 1. 先执行 `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate`，把新分支规则和 rebaseline 文档合入 `dev`。
 2. 再从最新 `dev` 新建下一条模块分支。
 3. 下一条业务模块建议优先选择 `PF-P190 - Bankdetail / No OA Batch Discovery and Planning`，因为 Turnover Ledger 完成后的 expected-version ownership 与 bank row tag/category 影响需要由 Bankdetail/No OA Batch 接住。
+
+### PF-P190 Bankdetail / No OA Batch Discovery Update
+
+PF-P190 已在 `codex/bankdetail-no-oa-discovery-p190` 分支对 Bankdetail / No OA Batch 做 Micro-JIT discovery。专项文档见 `bankdetail-no-oa-discovery.md`。
+
+本次确认：
+
+- Bankdetail 模块必须覆盖 `/api/bank-details/*` 与 `/api/no-oa-bank-batches/*`，不能只按旧 `bank_details_service.py` 分析。
+- Route 边界主要在 `app/routes_bank_details.py` 和 `app/routes_no_oa_bank_batches.py`；它们可以处理 HTTP/session mapping，但业务 service 不得读取 cookie/header 或 import `app.auth`。
+- 高风险 service 包括 `bank_transaction_category_service.py`、`no_oa_bank_batch_service.py`、`bank_details_application_service.py`、`no_oa_bank_batch_application_service.py`。
+- Read model / worker 边界包括 `bank_detail.read_model.refresh`、`bank_account_balance.read_model.refresh`、`no_oa_bank_batch.read_model.refresh`；PostgreSQL durable queue 仍是事实源。
+- No OA Batch 是 Bankdetail 模块内高风险子域，涉及 tag selection expected-version、submit/withdraw、bulk submit、legacy migration 和 Workbench read model influence。
+- Turnover Ledger 已完成后的 bank row tags/category ownership 会反向依赖 Bankdetail 对分类 facts、tag versions、dirty/outbox 的明确边界。
+
+PF-P190 后推荐下一步：
+
+1. 生成 `PF-P191 - Bankdetail / No OA Batch Characterization Tests`。
+2. PF-P191 只允许新增/补强测试，不修改 production code。
+3. 测试必须锁定 read freshness、pagination/count、category expected-version conflict、No OA tag selection/submit/withdraw、no synchronous refresh、dirty/outbox baseline。
 4. 如果用户更关注运行稳定性，可以选择 `PF-P190 - Platform / Ops Runtime Delta Discovery and Planning`，优先收敛 deploy-control、readiness reporter、worker registry 和 runtime queue ops。
 
 模块遗漏 / 错归属审计：

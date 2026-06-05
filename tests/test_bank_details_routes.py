@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from http import HTTPStatus
+from types import SimpleNamespace
 import unittest
 
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
+from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryValidationError
 
 
 @dataclass(slots=True)
@@ -18,6 +20,7 @@ class FakeBankDetailsExportResult:
 class FakeBankDetailsApplicationService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
+        self.confirm_category_error: BankTransactionCategoryValidationError | None = None
         self.accounts_result: dict[str, object] = {
             "accounts": [],
             "read_model_status": "fresh",
@@ -45,6 +48,8 @@ class FakeBankDetailsApplicationService:
 
     def confirm_category(self, transaction_id: str, payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
         self.calls.append(("confirm_category", {"transaction_id": transaction_id, "payload": payload, "actor_id": actor_id}))
+        if self.confirm_category_error is not None:
+            raise self.confirm_category_error
         return {"transaction_id": transaction_id, "affected_months": ["2026-05"]}
 
     def export_transactions(self, **kwargs) -> FakeBankDetailsExportResult:
@@ -53,6 +58,13 @@ class FakeBankDetailsApplicationService:
 
 
 class BankDetailsRoutesTests(unittest.TestCase):
+    @staticmethod
+    def _session(*, username: str = "finance-user", can_mutate_data: bool = True):
+        return SimpleNamespace(
+            identity=SimpleNamespace(username=username, user_id="oa-001"),
+            can_mutate_data=can_mutate_data,
+        )
+
     def test_routes_facade_delegates_reads_and_preserves_stale_rows_as_200(self) -> None:
         service = FakeBankDetailsApplicationService()
         service.accounts_result = {
@@ -124,6 +136,48 @@ class BankDetailsRoutesTests(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_routes_facade_denies_mutations_before_calling_application_service(self) -> None:
+        service = FakeBankDetailsApplicationService()
+        routes = BankDetailsApiRoutes(application_service=service)
+
+        update_status, update_payload = routes.update_auto_tag_rules(
+            {"version": 1},
+            session=self._session(can_mutate_data=False),
+        )
+        confirm_status, confirm_payload = routes.confirm_category(
+            "bank-row-001",
+            {"category_code": "fee"},
+            session=self._session(can_mutate_data=False),
+        )
+
+        self.assertEqual(update_status, HTTPStatus.FORBIDDEN)
+        self.assertEqual(update_payload["error"], "permission_denied")
+        self.assertEqual(confirm_status, HTTPStatus.FORBIDDEN)
+        self.assertEqual(confirm_payload["error"], "permission_denied")
+        self.assertEqual(service.calls, [])
+
+    def test_routes_facade_maps_category_validation_error_without_hiding_transaction_id(self) -> None:
+        service = FakeBankDetailsApplicationService()
+        service.confirm_category_error = BankTransactionCategoryValidationError(
+            "bank_transaction_tags_version_conflict",
+            "version conflict",
+            transaction_id="bank-row-001",
+            expected_version=2,
+            actual_version=3,
+        )
+        routes = BankDetailsApiRoutes(application_service=service)
+
+        status, payload = routes.confirm_category(
+            "bank-row-001",
+            {"category_code": "fee", "expected_version": 2},
+            session=self._session(username="alice"),
+        )
+
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(payload["error"], "bank_transaction_tags_version_conflict")
+        self.assertEqual(payload["transaction_id"], "bank-row-001")
+        self.assertEqual(service.calls[0][1]["actor_id"], "alice")
 
     def test_routes_facade_delegates_export_to_application_service(self) -> None:
         service = FakeBankDetailsApplicationService()
