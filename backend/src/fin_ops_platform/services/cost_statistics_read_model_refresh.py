@@ -24,23 +24,25 @@ class CostStatisticsReadModelRefreshService:
         if scope_type != "cost_statistics" or not scope_key:
             raise ValueError("Cost statistics refresh requires scope_type='cost_statistics' and scope_key.")
 
-        if scope_key.endswith(":all"):
-            shard_result = self._enqueue_all_scope_shards(event, scope_key)
-            if shard_result is not None:
-                return shard_result
-
         rebuild = getattr(self._projection_builder, "rebuild_cost_statistics_read_model_scope", None)
         if not callable(rebuild):
             raise RuntimeError("Application does not expose rebuild_cost_statistics_read_model_scope.")
         result = rebuild(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
+        payload.setdefault("scope_key", scope_key)
+
+        if scope_key.endswith(":all"):
+            shard_keys = self._enqueue_all_scope_shards(scope_key)
+            if shard_keys is not None:
+                payload["enqueued_scope_keys"] = shard_keys
+                payload["readiness_status"] = "fresh"
 
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type=scope_type, scope_key=scope_key)
         return payload
 
-    def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
+    def _enqueue_all_scope_shards(self, scope_key: str) -> list[str] | None:
         list_shards = getattr(self._projection_builder, "list_cost_statistics_scope_shards", None)
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
         if not callable(list_shards) or not callable(enqueue):
@@ -48,7 +50,4 @@ class CostStatisticsReadModelRefreshService:
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
         for shard_key in shard_keys:
             enqueue(scope_type="cost_statistics", scope_key=shard_key, reason="cost_statistics_all_shard")
-        complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
-        if callable(complete_dirty_scope):
-            complete_dirty_scope(tenant_id=event.tenant_id, scope_type="cost_statistics", scope_key=scope_key)
-        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "entry_count": 0}
+        return shard_keys

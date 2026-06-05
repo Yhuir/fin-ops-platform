@@ -53,6 +53,15 @@ flowchart LR
 
 该事件的影响域必须保持低耦合：刷新 `invoice_lifecycle`、`pending_invoice`、workbench、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和 search；不刷新 `turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。App Health 只根据这些 read model 的 readiness/dirty/outbox/worker 事实判定页面 busy 或 blocked，不能因为规则版本变化把无关页面标红。
 
+### 成本统计全期间 read model
+
+成本统计的 `all` scope 是真实物化视图，不是只负责 fan-out 的队列父 scope：
+
+1. `active:all` / `all:all` 由 `CostStatisticsSqlProjectionBuilder` 基于 `read_model.workbench_groups.scope_key='all'` 直接重建。
+2. `CostStatisticsReadModelRefreshService` 收到 `active:all` 或 `all:all` 时，先重建并完成该父 scope，再入队对应月份 shard。
+3. `ReadModelReadinessReporter` 对 fan-out-only 事件继续不写 `fresh`；如果事件已经完成父 scope rebuild 且带有显式 `readiness_status=fresh`，则必须记录父 scope readiness。
+4. 成本统计 domain 只在真实 failed/unavailable readiness、dirty scope 失败或 worker/依赖失败时 blocked；只有 shard pending/refreshing 时应显示 busy。
+
 ## Worker 与队列
 
 - durable truth：PostgreSQL 的 `job.outbox_events` 与 `job.read_model_dirty_scopes`。

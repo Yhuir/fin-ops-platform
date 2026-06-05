@@ -18020,7 +18020,13 @@ class Application:
             if not deleted_scope_keys:
                 deleted_scope_keys = list(target_scope_keys or ["all"])
         elif schedule_warmup:
-            enqueued_jobs.append("cost_statistics_cache_warmup")
+            queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+            enqueued_jobs.append(
+                "cost_statistics.read_model.refresh"
+                if callable(enqueue)
+                else "cost_statistics_cache_warmup"
+            )
         return {
             "deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,

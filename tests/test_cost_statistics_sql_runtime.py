@@ -6,6 +6,7 @@ import unittest
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
+from fin_ops_platform.services.cost_tax_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
@@ -65,6 +66,67 @@ class CostStatisticsReadConnection:
         if "from read_model.cost_statistics_rows" in normalized:
             return self.cost_rows
         return []
+
+
+class CostStatisticsProjectionConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.workbench_groups" in normalized:
+            return [
+                {
+                    "group_id": "group-1",
+                    "payload": {
+                        "group_id": "group-1",
+                        "oa_rows": [
+                            {
+                                "project_name": "项目A",
+                                "project_id": "P-A",
+                                "expense_type": "材料",
+                                "expense_content": "钢材",
+                                "applicant": "张三",
+                            }
+                        ],
+                        "bank_rows": [
+                            {
+                                "id": "bank-1",
+                                "trade_time": "2026-05-02 10:00:00",
+                                "counterparty_name": "供应商A",
+                                "payment_account_label": "建行",
+                                "direction": "支出",
+                                "remark": "采购",
+                                "amount": "10.00",
+                            }
+                        ],
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "projects": [{"name": "项目A", "active": True}],
+                    "bank_transaction_tags": {"version": 7},
+                }
+            }
+        return None
+
+
+class CostStatisticsSaveRecorder:
+    def __init__(self) -> None:
+        self.saved: list[tuple[dict, set[str] | None]] = []
+
+    def save_cost_statistics_read_models(self, snapshot: dict, *, changed_scope_keys: set[str] | None = None) -> None:
+        self.saved.append((snapshot, changed_scope_keys))
 
 
 class CostStatisticsSqlRuntimeTests(unittest.TestCase):
@@ -355,16 +417,53 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:2026-05")])
         self.assertEqual(result["entry_count"], 1)
 
-    def test_cost_statistics_refresh_handler_expands_all_into_month_shards(self) -> None:
+    def test_cost_statistics_sql_projection_rebuilds_active_all_as_first_class_read_model(self) -> None:
+        repository = CostStatisticsSaveRecorder()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=CostStatisticsProjectionConnection(),
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_cost_statistics_read_model_scope("active:all")
+
+        self.assertEqual(result["scope_key"], "active:all")
+        self.assertEqual(result["month"], "all")
+        self.assertEqual(result["project_scope"], "active")
+        self.assertEqual(result["entry_count"], 1)
+        snapshot, changed_scope_keys = repository.saved[0]
+        self.assertEqual(changed_scope_keys, {"active:all"})
+        self.assertIn("active:all", snapshot["read_models"])
+        self.assertEqual(snapshot["read_models"]["active:all"]["payload"]["month"], "all")
+
+    def test_cost_statistics_sql_projection_rebuilds_all_all_as_first_class_read_model(self) -> None:
+        repository = CostStatisticsSaveRecorder()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=CostStatisticsProjectionConnection(),
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_cost_statistics_read_model_scope("all:all")
+
+        self.assertEqual(result["scope_key"], "all:all")
+        self.assertEqual(result["month"], "all")
+        self.assertEqual(result["project_scope"], "all")
+        self.assertEqual(repository.saved[0][1], {"all:all"})
+
+    def test_cost_statistics_refresh_handler_rebuilds_all_scope_before_enqueuing_month_shards(self) -> None:
         class FakeBuilder:
+            def __init__(self) -> None:
+                self.rebuilt: list[str] = []
+
             def list_cost_statistics_scope_shards(self, scope_key: str) -> list[str]:
                 return ["active:2026-05", "active:2026-04"]
 
             def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
-                raise AssertionError(scope_key)
+                self.rebuilt.append(scope_key)
+                return {"scope_key": scope_key, "entry_count": 2}
 
         queue = QueueRecorder()
-        service = CostStatisticsReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        builder = FakeBuilder()
+        service = CostStatisticsReadModelRefreshService(projection_builder=builder, queue_repository=queue)
         event = RuntimeQueueEvent(
             event_id="event-all",
             tenant_id="tenant-a",
@@ -381,6 +480,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         result = service.handle_runtime_event(event)
 
+        self.assertEqual(builder.rebuilt, ["active:all"])
         self.assertEqual(
             queue.refreshes,
             [
@@ -389,7 +489,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:all")])
-        self.assertEqual(result["entry_count"], 0)
+        self.assertEqual(result["scope_key"], "active:all")
+        self.assertEqual(result["entry_count"], 2)
+        self.assertEqual(result["enqueued_scope_keys"], ["active:2026-05", "active:2026-04"])
 
     def test_cost_statistics_invalidation_marks_dirty_even_when_no_cached_model_exists(self) -> None:
         class EmptyCostReadModelService:

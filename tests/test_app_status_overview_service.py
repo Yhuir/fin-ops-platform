@@ -209,6 +209,96 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(bank_domain["status"], "missing")
         self.assertEqual(payload["overall"]["color"], "yellow")
 
+    def test_cost_statistics_fresh_readiness_restores_domain_after_previous_failure(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            attention_jobs=[],
+            read_model_statuses={
+                "cost_statistics": {
+                    "status": "fresh",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "updated_at": "2026-06-04T10:05:00+00:00",
+                },
+            },
+            worker_statuses={"cost-tax": {"status": "ready"}},
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:05:00+00:00",
+                "status": "ok",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
+        self.assertEqual(cost_domain["level"], "ok")
+        self.assertEqual(cost_domain["status"], "ready")
+        self.assertEqual(cost_domain["reason"], "成本统计已同步")
+        self.assertEqual(payload["overall"]["level"], "ok")
+
+    def test_cost_statistics_refreshing_readiness_is_busy_not_blocked(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            attention_jobs=[],
+            read_model_statuses={
+                "cost_statistics": {
+                    "status": "refreshing",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-05",
+                },
+            },
+            worker_statuses={"cost-tax": {"status": "ready"}},
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:05:00+00:00",
+                "status": "busy",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
+        self.assertEqual(cost_domain["level"], "busy")
+        self.assertEqual(cost_domain["status"], "refreshing")
+        self.assertEqual(cost_domain["reason"], "成本统计正在同步")
+        self.assertEqual(payload["overall"]["level"], "busy")
+
+    def test_cost_statistics_failed_readiness_blocks_cost_domain(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            attention_jobs=[],
+            read_model_statuses={
+                "cost_statistics": {
+                    "status": "failed",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "last_error": "all scope projection failed",
+                },
+            },
+            worker_statuses={"cost-tax": {"status": "ready"}},
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:05:00+00:00",
+                "status": "blocked",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
+        self.assertEqual(cost_domain["level"], "blocked")
+        self.assertEqual(cost_domain["status"], "failed")
+        self.assertEqual(cost_domain["reason"], "成本统计不可用")
+        self.assertIn("all scope projection failed", cost_domain["details"])
+        self.assertEqual(payload["overall"]["level"], "blocked")
+
     def test_missing_critical_dependency_key_is_blocked_not_available(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
         dependencies = healthy_dependencies()

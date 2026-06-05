@@ -132,7 +132,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertNotIn("bank_account_balance_read_model", domains)
         self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
         self.assertIn("tax_offset_cache_warmup", plan["will_enqueue_jobs"])
-        self.assertIn("cost_statistics_cache_warmup", plan["will_enqueue_jobs"])
+        self.assertIn("cost_statistics.read_model.refresh", plan["will_enqueue_jobs"])
+        self.assertNotIn("cost_statistics_cache_warmup", plan["will_enqueue_jobs"])
 
     def test_pair_and_exception_changes_mark_workbench_matching_dirty_scopes(self) -> None:
         service = DerivedDataLifecycleService()
