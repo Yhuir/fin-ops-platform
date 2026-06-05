@@ -22437,6 +22437,80 @@ Post-Flight:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v`：Pass，43 tests。
 - 下一条建议：生成 `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate`，统一覆盖 PF-P190 到 PF-P195 的完整 diff 并合入 `dev`。
 
+## PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate
+
+状态：`verified`
+
+```text
+/goal
+PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端重构的 Merge Gate 执行者。你必须只验证并合入 Bankdetail / No OA discovery + characterization 切片到 `dev`，不新增业务实现。
+
+Context:
+PF-P190 到 PF-P195 均已 verified。当前分支为 `codex/bankdetail-no-oa-discovery-p190`。合入目标是 `dev`，不是 `main`。
+
+Gate Scope:
+本 MG 统一覆盖：
+- PF-P190 Bankdetail / No OA discovery and planning。
+- PF-P191 route facade characterization tests。
+- PF-P192 route/application cleanup planning。
+- PF-P193 read model characterization tests。
+- PF-P194 category / auto-tag side-effect characterization tests。
+- PF-P195 No OA mutation side-effect characterization tests。
+
+Allowed Changed Files:
+- docs/architecture/backend-refactor/architecture-inventory.md
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/module-refactor-plan.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- tests/test_bank_details_routes.py
+- tests/test_bank_details_sql_runtime.py
+- tests/test_no_oa_bank_batch_application_service.py
+- tests/test_no_oa_bank_batch_routes.py
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不得执行 Traffic Gate、部署、修改 Nginx、生产配置或 feature flag。
+- 不得合入或 push `main`。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only dev...HEAD
+- git log --oneline dev..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v
+
+Merge Rules:
+1. 如 MG prompt/status 文档有变更，精确 stage 并提交。
+2. 切换到 `dev`。
+3. 确认 `dev` 与 `origin/dev` 对齐，且 `dev` 未落后 `main`；如落后，停止并生成 sync/rebaseline 计划。
+4. merge 当前分支到 `dev`。
+5. 在 `dev` 上重跑完整 Verification。
+6. 通过后更新 migration-state-log.md 和 refactor-prompts.md，标记 PF-P195-MG verified。
+7. 精确 stage post-flight 文档，提交后 push `origin/dev`。
+8. 不 push `origin/main`。
+
+Post-Flight:
+- 记录 merge commit、`dev` 上验证结果、未执行 Traffic Gate。
+- push `origin/dev` 后，从最新 `dev` 新建下一条 `codex/` 分支。
+- 下一条建议：`PF-P196 - Bankdetail / No OA Account Balance and Backfill Smoke Planning` 或继续 Bankdetail write UoW readiness，必须根据状态机选择。
+```
+
+### 审查结论
+
+- PF-P195-MG 边界正确：只合入 Bankdetail / No OA discovery + characterization tests，不合入 production code。
+- 允许文件白名单与当前 `dev...HEAD` diff 一致。
+- MG 明确只合入 `dev`，不触碰 `main`。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`

@@ -61,11 +61,11 @@
 | 字段 | 当前值 |
 | --- | --- |
 | 当前阶段 | Dev integration branch bootstrap complete; ready for next module |
-| 当前 active prompt | 空 |
+| 当前 active prompt | `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate` |
 | 最近 verified prompt | `PF-P195 - No OA Batch Submit Withdraw Side-Effect Characterization Tests` |
 | 当前分支 | `codex/bankdetail-no-oa-discovery-p190` |
 | 最近验证 | PF-P195 No OA mutation side-effect characterization tests 通过；未修改 production code；未执行 Traffic Gate |
-| 下一条允许任务 | 生成并审查 `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate`，统一覆盖 PF-P190 到 PF-P195 |
+| 下一条允许任务 | 执行 `PF-P195-MG`，合入目标为 `dev`，不得合入或 push `main` |
 
 ## Prompt 执行日志
 
@@ -370,6 +370,40 @@ MG 步骤：
 
 - 生成并审查 `PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate`。
 - 该 MG 必须统一覆盖 PF-P190 到 PF-P195 的完整 diff，并只合入 `dev`。
+
+### PF-P195-MG - Bankdetail / No OA Discovery and Characterization Cumulative Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一验证并合入 PF-P190 到 PF-P195 的完整 diff。
+- 合入目标是 `dev`，不是 `main`。
+- 只允许 Bankdetail / No OA discovery 文档和 characterization tests。
+- 不修改 production code，不修改 schema，不执行 Traffic Gate 或部署。
+
+允许文件：
+
+- `docs/architecture/backend-refactor/architecture-inventory.md`
+- `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/module-refactor-plan.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+- `tests/test_bank_details_routes.py`
+- `tests/test_bank_details_sql_runtime.py`
+- `tests/test_no_oa_bank_batch_application_service.py`
+- `tests/test_no_oa_bank_batch_routes.py`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only dev...HEAD`
+- `git log --oneline dev..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_no_oa_bank_batch_routes -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_api tests.test_no_oa_bank_batch_service -v`
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
