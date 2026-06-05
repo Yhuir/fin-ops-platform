@@ -61,11 +61,11 @@
 | 字段 | 当前值 |
 | --- | --- |
 | 当前阶段 | Bankdetail / No OA account balance and backfill smoke planning |
-| 当前 active prompt | 空 |
+| 当前 active prompt | `PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate` |
 | 最近 verified prompt | `PF-P197 - Bankdetail Backfill CLI Characterization Tests` |
 | 当前分支 | `codex/bankdetail-account-balance-backfill-p196` |
 | 最近验证 | PF-P197 backfill CLI characterization tests 通过；包含一个显式 dry-run 不连库的小修复；未执行 Traffic Gate |
-| 下一条允许任务 | 生成并审查 `PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate`，统一覆盖 PF-P196/PF-P197 |
+| 下一条允许任务 | 执行 `PF-P197-MG`，合入目标为 `dev`，不得合入或 push `main` |
 
 ## Prompt 执行日志
 
@@ -498,6 +498,36 @@ MG 步骤：
 
 - 生成并审查 `PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate`。
 - 该 MG 必须统一覆盖 PF-P196/PF-P197，并只合入 `dev`。
+
+### PF-P197-MG - Bankdetail Account Balance Backfill Smoke Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一验证并合入 PF-P196/PF-P197 的完整 diff。
+- 合入目标是 `dev`，不是 `main`。
+- 允许 backfill CLI smoke tests 和 `bank_detail_backfill` 显式 scope dry-run 小修复。
+- 不修改 schema，不访问真实外部服务，不执行 Traffic Gate 或部署。
+
+允许文件：
+
+- `backend/src/fin_ops_platform/app/bank_detail_backfill.py`
+- `tests/test_bankdetail_backfill_cli.py`
+- `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only dev...HEAD`
+- `git log --oneline dev..HEAD`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_backfill_cli -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model -v`
+- `python3 -m compileall backend/src/fin_ops_platform/app/bank_detail_backfill.py backend/src/fin_ops_platform/app/bank_account_balance_backfill.py`
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
