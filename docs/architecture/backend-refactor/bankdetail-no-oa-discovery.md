@@ -216,3 +216,25 @@ Cleanup 禁止线：
 - 不把 HTTP response、cookie/header/session 逻辑移入 service。
 - 不把 SQL 散落到业务 service。
 - 不在没有 read model characterization tests 前改 `_transactions_from_sql_read_model`、No OA read model fallback 或 runtime queue enqueue helper。
+
+## PF-P193 Read Model Characterization Test Update
+
+PF-P193 已补强 Bankdetail read model missing-scope characterization，并复验 No OA read model integration tests。
+
+新增锁定：
+
+- 当 Bankdetail SQL read model scope missing 时，`BankDetailsApplicationService.transactions_payload(...)` 必须返回 `read_model_status="refreshing"`。
+- missing scope 必须通过 `RuntimeQueueRepository.enqueue_read_model_refresh(scope_type="bank_detail", scope_key=<month>, reason="api_missing")` enqueue durable refresh。
+- missing SQL read model 不得同步调用 legacy `BankDetailsService.list_transactions(...)` 扫描事实表。
+- page_size 继续在 application boundary clamp 到 100，避免大页请求绕过 read model missing gate。
+
+复验确认：
+
+- No OA missing SQL read model GET 路径不会同步 rebuild batches，只 enqueue `no_oa_bank_batch` refresh。
+- No OA stale SQL source versions 不会伪装 fresh。
+
+PF-P193 后仍未覆盖的测试目标：
+
+- Category / auto-tag write 的 dirty scope 与 outbox baseline。
+- No OA submit/withdraw service-level facts/audit/dirty/outbox。
+- Account balance read model refresh 与 backfill smoke checklist。

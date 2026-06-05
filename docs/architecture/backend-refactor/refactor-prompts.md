@@ -22237,6 +22237,79 @@ Post-Flight:
   - PF-P191 的 route-level tests 不足以保护 SQL/read model 行为；下一步应先补 read model characterization。
 - 下一条建议：`PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests`。
 
+## PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests
+
+状态：`verified`
+
+```text
+/goal
+PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests
+
+Role:
+你是一位负责 read model 安全网的 Python 后端工程师。你必须只新增或补强 Bankdetail / No OA read model characterization tests，不修改 production code。
+
+Context:
+PF-P190 到 PF-P192 已确认 Bankdetail / No OA 的下一步风险在 read model freshness、No OA no-sync-refresh 和 service side effects。PF-P193 必须先补 read model 测试，再考虑 production cleanup。
+
+Goal:
+锁定 Bankdetail SQL read model missing/stale 行为和 No OA read model missing/stale 行为，防止后续 cleanup 误改为同步扫描 facts 或伪装 fresh。
+
+Allowed Scope:
+- tests/test_bank_details_sql_runtime.py
+- tests/test_no_oa_bank_batch_workbench_integration.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Test Work:
+1. Bankdetail：
+   - missing SQL scope 返回 `read_model_status="refreshing"`。
+   - missing SQL scope enqueue `bank_detail` read model refresh。
+   - missing SQL scope 不得同步调用 legacy `BankDetailsService.list_transactions(...)`。
+   - pagination/page_size normalization 不得绕过 refreshing payload。
+2. No OA：
+   - 复验 missing SQL read model 不同步 rebuild batches。
+   - 复验 stale source versions 不伪装 fresh。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 schema。
+- 不得访问真实外部服务。
+- 不得引入 UoW。
+- 不得删除或放宽既有 assertions。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v
+
+Post-Flight:
+- 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+- 下一条建议继续当前模块，优先补 category/auto-tag dirty/outbox 和 No OA submit/withdraw side-effect characterization。
+```
+
+### 审查结论
+
+- PF-P193 边界正确：只补 read model characterization tests，不修改 production code。
+- 它补足 PF-P192 指出的 cleanup 前置测试缺口。
+
+### PF-P193 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_bank_details_sql_runtime.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 Bankdetail application service missing SQL scope test。
+  - 锁定 missing scope 返回 refreshing、enqueue `bank_detail` refresh、不调用 legacy `list_transactions`、page_size clamp 为 100。
+  - 复验 No OA read model integration tests，确认 missing/stale GET 路径不伪装 fresh、不同步 rebuild。
+- 验证：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v`：Pass，50 tests。
+- 下一条建议：`PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests`。
+
 ## PF-P181 - Turnover Ledger Bank Row Tags Durable Idempotency Contract Tests
 
 状态：`planned`

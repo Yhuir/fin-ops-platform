@@ -837,6 +837,82 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         ).hexdigest()
         self.assertEqual(cache_key, f"bank_detail:transactions:{expected_digest}")
 
+    def test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan(self) -> None:
+        class SqlReadRepository:
+            def __init__(self) -> None:
+                self.scope_key_calls: list[dict[str, object]] = []
+                self.summary_calls: list[list[str]] = []
+
+            def bank_detail_scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
+                self.scope_key_calls.append({"date_from": date_from, "date_to": date_to})
+                return ["2026-05"]
+
+            def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+                self.summary_calls.append(list(scope_keys))
+                return {
+                    "read_model_status": "missing",
+                    "read_model_scope_keys": list(scope_keys),
+                    "read_model_stale_reasons": ["read_model_scope_missing"],
+                }
+
+            def list_bank_detail_transactions(self, **_kwargs):
+                raise AssertionError("missing bank detail read model must not query rows before refresh")
+
+        class Queue:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        class LegacyBankDetailsService:
+            def list_transactions(self, **_kwargs):
+                raise AssertionError("missing SQL read model must not synchronously scan legacy transactions")
+
+            def _bank_transaction_tags_payload(self) -> dict[str, object]:
+                return {"version": 1, "definitions": []}
+
+        repository = SqlReadRepository()
+        queue = Queue()
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=LegacyBankDetailsService(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(),
+            state_store=None,
+            bank_detail_sql_read_repository=repository,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: [],
+            invalidate_after_category_mutation=lambda _affected_months: False,
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_turnover_ledger_read_model=lambda: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-05"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+
+        payload = service.transactions_payload(
+            account_key=None,
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            keyword=None,
+            page=1,
+            page_size=500,
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
+        self.assertEqual(payload["read_model_stale_reasons"], ["read_model_scope_missing"])
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["refresh_reason"], "api_missing")
+        self.assertEqual(queue.enqueued, [("bank_detail", "2026-05", "api_missing")])
+        self.assertEqual(repository.scope_key_calls, [{"date_from": "2026-05-01", "date_to": "2026-05-31"}])
+        self.assertEqual(repository.summary_calls, [["2026-05"]])
+
     def test_category_mutation_refreshes_turnover_ledger_all_scope(self) -> None:
         class Queue:
             def __init__(self) -> None:

@@ -62,10 +62,10 @@
 | --- | --- |
 | 当前阶段 | Dev integration branch bootstrap complete; ready for next module |
 | 当前 active prompt | 空 |
-| 最近 verified prompt | `PF-P192 - Bankdetail / No OA Batch Route/Application Facade Cleanup Planning` |
+| 最近 verified prompt | `PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests` |
 | 当前分支 | `codex/bankdetail-no-oa-discovery-p190` |
-| 最近验证 | PF-P192 docs-only planning 验证通过；确认下一步应先补 read model characterization tests |
-| 下一条允许任务 | 生成并审查 `PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests`，继续当前 Bankdetail / No OA 切片，不切换模块 |
+| 最近验证 | PF-P193 read model characterization tests 通过；未修改 production code；未执行 Traffic Gate |
+| 下一条允许任务 | 生成并审查 `PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests`，继续当前 Bankdetail / No OA 切片，不切换模块 |
 
 ## Prompt 执行日志
 
@@ -268,6 +268,40 @@ MG 步骤：
 
 - 生成并审查 `PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests`。
 - PF-P193 只补 read model 相关 characterization tests，不改 production code。
+
+### PF-P193 - Bankdetail / No OA Batch Read Model Characterization Tests
+
+状态：`verified`
+
+范围：
+
+- 只补强 Bankdetail / No OA read model characterization tests。
+- 不修改 production code。
+- 不修改 schema。
+- 不访问真实外部服务。
+- 不执行 MG、Traffic Gate 或部署。
+
+执行结果：
+
+- `tests/test_bank_details_sql_runtime.py`
+  - 新增 `test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan`。
+  - 锁定 Bankdetail SQL scope missing 时返回 refreshing payload。
+  - 锁定 enqueue `bank_detail` durable refresh。
+  - 锁定 missing scope 不同步调用 legacy `BankDetailsService.list_transactions(...)`。
+  - 锁定 page_size clamp 到 100。
+- 复验 `tests/test_no_oa_bank_batch_workbench_integration.py`：
+  - No OA missing SQL read model GET 路径不触发同步 rebuild。
+  - No OA stale SQL source versions 不伪装 fresh。
+- `bankdetail-no-oa-discovery.md` 已记录 PF-P193 测试覆盖和剩余目标。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_no_oa_bank_batch_workbench_integration -v`：Pass，50 tests。
+
+下一步：
+
+- 生成并审查 `PF-P194 - Bankdetail Category / Auto Tag Dirty Outbox Characterization Tests`。
+- PF-P194 只补写路径 characterization tests，不改 production code。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
