@@ -353,3 +353,308 @@ PF-P197 后剩余目标：
 - Account balance backfill 不需要立即进入 UoW；当前更适合作为 ops smoke baseline 合入。
 
 当前 PF-P196/PF-P197 形成一个较小可合并切片，下一步适合生成 cumulative MG 合入 `dev`。
+
+## PF-P198 Write UoW Readiness / Category and No OA Transaction Boundary Planning
+
+PF-P198 从最新 `dev` 新建分支后执行，继续 Bankdetail / No OA 模块，只做写路径 UoW readiness planning，不修改 production code。
+
+扫描范围：
+
+- `services/bank_details_application_service.py`
+- `services/bank_transaction_category_service.py`
+- `services/no_oa_bank_batch_application_service.py`
+- `services/no_oa_bank_batch_service.py`
+- 已有 Bankdetail / No OA characterization tests
+
+### Category / Auto Tag Write Readiness
+
+当前 Bankdetail category 写路径：
+
+```mermaid
+sequenceDiagram
+    participant Route as "routes_bank_details.py"
+    participant AppSvc as "BankDetailsApplicationService"
+    participant CategorySvc as "BankTransactionCategoryService"
+    participant Store as "state_store / snapshot"
+    participant Queue as "RuntimeQueueRepository"
+    participant Lifecycle as "DerivedDataLifecycle"
+
+    Route->>AppSvc: confirm/revoke/assign/clear category
+    AppSvc->>CategorySvc: apply category update with expected_version
+    CategorySvc->>CategorySvc: update in-memory facts and audit entries
+    AppSvc->>Store: save_bank_transaction_categories(snapshot)
+    AppSvc->>Queue: enqueue bank_detail and turnover_ledger refresh
+    AppSvc->>Lifecycle: invalidate derived/read model state
+```
+
+关键事实：
+
+- `BankTransactionCategoryService._apply_updates(...)` 已具备 actor validation、duplicate transaction guard、transaction existence guard 和 `expected_version` conflict。
+- `BankDetailsApplicationService._persist_category_mutation(...)` 是当前 category side-effect 收口点。
+- 当前 side effects 包括 category snapshot persistence、Bankdetail refresh enqueue、Turnover Ledger all-scope refresh、cache invalidation 和 audit record。
+- Auto-tag rules update 当前通过 `finalize_auto_tag_rules_update(...)` 清 cache、enqueue Turnover all-scope、enqueue Bankdetail priority month scopes，并发出 `bank_auto_tag_rules_changed` derived lifecycle event。
+- 当前没有显式 PostgreSQL UoW seam 能保证 category facts、audit、dirty scope、outbox/read model refresh request 同一 transaction 提交。
+
+### No OA Submit / Withdraw Readiness
+
+当前 No OA 写路径：
+
+```mermaid
+sequenceDiagram
+    participant Route as "routes_no_oa_bank_batches.py"
+    participant AppSvc as "NoOaBankBatchApplicationService"
+    participant DomainSvc as "NoOaBankBatchService"
+    participant Pair as "WorkbenchPairRelationService"
+    participant Store as "state_store / mutation snapshot"
+    participant Lifecycle as "DerivedDataLifecycle"
+
+    Route->>AppSvc: submit/withdraw/bulk submit
+    AppSvc->>DomainSvc: validate expected_version and mutate batch
+    DomainSvc->>Pair: create/cancel active relation
+    DomainSvc->>DomainSvc: append audit log
+    AppSvc->>AppSvc: after_mutation(months, case ids, persist=true)
+    AppSvc->>Lifecycle: no_oa_bank_batch_changed
+    AppSvc->>Store: save_no_oa_bank_batch_mutation(...)
+```
+
+关键事实：
+
+- `NoOaBankBatchApplicationService.submit_batch(...)`、`submit_selected_rows(...)` 和 `withdraw_batch(...)` 在异常时通过 `_restore_snapshots(...)` 恢复 in-memory batch/pair relation snapshot。
+- `NoOaBankBatchService.submit_batch(...)` / `withdraw_batch(...)` 已具备 idempotent-ish status short circuit 和 `expected_version` stale guard。
+- `NoOaBankBatchApplicationService.after_mutation(...)` 是当前 No OA mutation side-effect 收口点。
+- `persist_mutation(...)` 当前保存 pair relation snapshot、No OA batch snapshot、Workbench read model snapshot、changed case ids 和 expanded workbench scope keys。
+- 当前 rollback 是应用内 snapshot rollback，不是 PostgreSQL transaction boundary；dirty/outbox/read model refresh 仍没有显式纳入同一 transaction。
+
+### UoW Readiness Blockers
+
+1. Bankdetail category facts 仍主要由 service snapshot/state_store 持久化，缺少明确 repository port。
+2. `BankDetailsApplicationService` 仍通过 `runtime_repositories.queue_repository` 和 callback 触发 refresh/invalidation，side effects 不是 transaction-bound writer。
+3. Auto-tag rules update 通过 app settings lifecycle + callback 触发多模块 refresh，未来 UoW 必须把 settings facts、audit、dirty scope/outbox 和 lifecycle event 的 ownership 拆清。
+4. No OA submit/withdraw 同时修改 No OA batch facts、Workbench pair relation facts、Workbench read model snapshot 和 derived lifecycle；必须先定义 transaction envelope，不能只把现有函数搬进一个 service。
+5. No OA 当前 `persist_mutation(...)` 依赖 `state_store.save_no_oa_bank_batch_mutation(...)` 兼容快照；未来 PostgreSQL UoW 需要 repository port 来替代 snapshot persistence。
+6. Cross-module influence 包括 Bankdetail、Turnover Ledger、Workbench、Search/Pending；UoW 只能写本模块 facts 和 outbox/dirty scope，不能同步调用其它模块 usecase。
+
+### PF-P199 Recommendation
+
+下一条建议：
+
+- `PF-P199 - Bankdetail Write UoW Contract Tests`
+
+PF-P199 边界：
+
+- 先新增目标契约测试，不实现 UoW。
+- 测试应覆盖 category mutation 和 No OA submit/withdraw 的 transaction-bound target：
+  - facts/audit/dirty scope/outbox 必须同一 transaction。
+  - category expected_version conflict 不得产生 dirty/outbox。
+  - No OA submit/withdraw stale expected_version 不得保存 mutation snapshot 或 enqueue refresh。
+  - side-effect writer 失败时不得留下半写事实。
+- 尚未实现的目标契约可以使用 `unittest.expectedFailure`，但必须保留为默认测试套件中的可见目标。
+- 不得修改 schema，不得访问真实 PostgreSQL/Redis/RabbitMQ/OA/Mongo/MySQL。
+
+PF-P198 验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only`
+- 本轮为 planning-only，未运行 targeted unittest。
+
+## PF-P199 Write UoW Contract Tests
+
+PF-P199 在同一分支继续 Bankdetail / No OA 写一致性切片，只新增目标契约测试，不实现 UoW，不修改 production code。
+
+新增文件：
+
+- `tests/test_bankdetail_write_uow_contract.py`
+
+新增目标契约：
+
+- `test_target_category_expected_version_conflict_does_not_write_dirty_or_outbox`
+- `test_target_category_mutation_commits_facts_audit_and_dirty_outbox_in_one_transaction`
+- `test_target_category_side_effect_failure_rolls_back_facts_and_refresh_requests`
+- `test_target_auto_tag_rules_update_commits_settings_audit_bankdetail_and_turnover_dirty_scopes`
+- `test_target_no_oa_stale_expected_version_does_not_persist_lifecycle_or_refresh`
+- `test_target_no_oa_submit_commits_batch_relation_audit_dirty_and_outbox_in_one_transaction`
+- `test_target_no_oa_side_effect_failure_rolls_back_batch_and_pair_relation_facts`
+
+当前 7 个目标测试均为 `unittest.expectedFailure`，原因是目标 `fin_ops_platform.services.bankdetail_write_uow.BankdetailWriteUnitOfWork` 尚未实现。它们不是跳过测试，而是默认套件内可见的 future contract；后续实现切片必须逐步移除 expectedFailure 并转绿。
+
+PF-P199 验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests，expected failures=7。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+
+下一条建议：
+
+- `PF-P200 - Bankdetail Minimal Write UoW Skeleton`
+
+PF-P200 边界：
+
+- 只建立 `services/bankdetail_write_uow.py` 最小 skeleton 和 fake/in-memory target seam。
+- 先转绿最小 contract，如 UoW 类存在、constructor 接收细粒度 port、不依赖 Application。
+- 不迁移真实 category/auto-tag/No OA 写路径。
+- 不修改 schema，不访问真实外部服务。
+
+## PF-P200 Minimal Write UoW Skeleton
+
+PF-P200 新增最小 `BankdetailWriteUnitOfWork` skeleton，不接入真实 route 或 application service。
+
+新增文件：
+
+- `backend/src/fin_ops_platform/services/bankdetail_write_uow.py`
+
+当前能力：
+
+- `BankdetailWriteUnitOfWork.__init__` 只接收明确细粒度依赖：
+  - `category_port`
+  - `settings_port`
+  - `no_oa_port`
+  - `side_effect_writer`
+- `confirm_category(...)` 只调用 `category_port.confirm_category(...)`。
+- category conflict 会在 side-effect writer 前抛出，因此不会写 dirty/outbox。
+
+测试结果：
+
+- `test_target_category_expected_version_conflict_does_not_write_dirty_or_outbox` 已从 expectedFailure 转为普通通过。
+- 其余 6 个 UoW target tests 仍保留 expectedFailure。
+
+PF-P200 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests，expected failures=6。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+
+下一条建议：
+
+- `PF-P201 - Bankdetail Category UoW Transaction Writer Contract`
+
+PF-P201 边界：
+
+- 只处理 category mutation success / side-effect failure 的 UoW target tests。
+- 不接入真实 `BankDetailsApplicationService` 或 route。
+- 不处理 auto-tag rules 或 No OA submit/withdraw。
+
+## PF-P201 Category UoW Transaction Writer Contract
+
+PF-P201 只增强 `BankdetailWriteUnitOfWork.confirm_category(...)` 的 category transaction writer seam，不接入真实 production path。
+
+当前能力：
+
+- category conflict 仍在 side-effect writer 前发生。
+- category success 后写入 transaction-bound side-effect record：
+  - facts: `bank_transaction_category`
+  - audit: `bank_detail_category_confirmed`
+  - dirty scopes: `bank_detail/<affected_month>`、`turnover_ledger/all`
+  - outbox: `bank_detail.read_model.refresh`、`turnover_ledger.read_model.refresh`
+- side-effect writer 成功后才调用 category port commit seam。
+- side-effect writer 失败时调用 category port rollback seam。
+
+测试结果：
+
+- 以下目标已从 expectedFailure 转为普通通过：
+  - category expected_version conflict no-side-effect
+  - category mutation 同事务 facts/audit/dirty/outbox
+  - category side-effect failure rollback
+- 剩余 4 个 expectedFailure：
+  - auto-tag rules update UoW
+  - No OA stale expected_version no-side-effect
+  - No OA submit transaction-bound UoW
+  - No OA side-effect failure rollback
+
+PF-P201 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests，expected failures=4。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+
+下一条建议：
+
+- `PF-P202 - Bankdetail Auto Tag Rules UoW Seam`
+
+PF-P202 边界：
+
+- 只处理 auto-tag rules update 的 UoW target。
+- 不接入真实 app settings route/application service。
+- 不处理 No OA submit/withdraw。
+
+## PF-P202 Auto Tag Rules UoW Seam
+
+PF-P202 只增强 `BankdetailWriteUnitOfWork.update_auto_tag_rules(...)`，不接入真实 app settings 或 route。
+
+当前能力：
+
+- 通过 `settings_port.update_auto_tag_rules(...)` 获得 `new_version` 和 priority scope keys。
+- Bankdetail priority scope 会过滤 `"all"`，只保留明确 month scope。
+- 写入 transaction-bound side-effect record：
+  - facts: `bank_auto_tag_rules`
+  - audit: `bank_auto_tag_rules_changed`
+  - dirty scopes: `bank_detail/<priority_month>`、`turnover_ledger/all`
+  - outbox: `bank_detail.read_model.refresh`、`turnover_ledger.read_model.refresh`
+  - lifecycle event: `bank_auto_tag_rules_changed`
+
+测试结果：
+
+- `test_target_auto_tag_rules_update_commits_settings_audit_bankdetail_and_turnover_dirty_scopes` 已从 expectedFailure 转为普通通过。
+- 剩余 3 个 expectedFailure 均为 No OA submit/withdraw 目标。
+
+PF-P202 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests，expected failures=3。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+
+下一条建议：
+
+- `PF-P203 - Bankdetail No OA Submit Withdraw UoW Seam`
+
+PF-P203 边界：
+
+- 只处理 No OA stale no-side-effect、submit transaction-bound UoW 和 side-effect rollback 目标测试。
+- 不接入真实 No OA application service 或 route。
+
+## PF-P203 No OA Submit / Withdraw UoW Seam
+
+PF-P203 只增强 `BankdetailWriteUnitOfWork` 的 No OA submit/withdraw seam，不接入真实 No OA application service 或 route。
+
+当前能力：
+
+- `submit_no_oa_batch(...)` 通过 `no_oa_port.submit_no_oa_batch(...)` 先执行 stale expected-version 检查和目标 mutation seam。
+- `withdraw_no_oa_batch(...)` 通过 `no_oa_port.withdraw_no_oa_batch(...)` 执行目标 mutation seam。
+- stale expected-version 会在 side-effect writer 前抛出，因此不会保存 mutation snapshot、不会 enqueue refresh、不会发 lifecycle。
+- submit success 后写入 transaction-bound side-effect record：
+  - facts: `no_oa_bank_batch`、`workbench_pair_relation`
+  - audit: `no_oa_bank_batch_submit`
+  - dirty scopes: `no_oa_bank_batch/all`、`no_oa_bank_batch/<month>`、`workbench/<case_id>`
+  - outbox: `no_oa_bank_batch.read_model.refresh`、`workbench.read_model.refresh`
+  - lifecycle event: `no_oa_bank_batch_changed`
+- side-effect writer 成功后才调用 no-OA port commit seam。
+- side-effect writer 失败时调用 no-OA port rollback seam。
+
+测试结果：
+
+- PF-P199 的 7 个 target contracts 已全部从 expectedFailure 转为普通通过。
+- 当前 UoW skeleton 仍未接入真实 Bankdetail / No OA production 写路径。
+
+PF-P203 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+- `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+
+当前切片已形成可合并边界：
+
+- PF-P198：写路径 UoW readiness planning。
+- PF-P199：目标契约测试。
+- PF-P200：最小 UoW skeleton。
+- PF-P201：category transaction writer seam。
+- PF-P202：auto-tag rules UoW seam。
+- PF-P203：No OA submit/withdraw UoW seam。
+
+下一条建议：
+
+- `PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate`
+
+MG 必须统一覆盖 PF-P198 到 PF-P203 的完整 diff，并只合入 `dev`。

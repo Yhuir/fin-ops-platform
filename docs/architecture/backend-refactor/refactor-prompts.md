@@ -11369,7 +11369,7 @@ PF-P038 已执行：
 
 ## PF-P039 - Workbench Durable Idempotency Repository Integration
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -11572,7 +11572,7 @@ PF-P039 已执行并由用户确认 `verified`：
 
 ## PF-P039-MG - Workbench Durable Idempotency Cumulative Merge Gate
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -11782,7 +11782,7 @@ Main 复验：
 
 ## PF-P040 - Workbench Durable Idempotency Rollout Readiness and Integration Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -11971,7 +11971,7 @@ PF-P040-MG 应覆盖 PF-P040 的完整 diff，并继续禁止打开 `FIN_OPS_WOR
 
 ## PF-P041 - Workbench Durable Idempotency Actor/Tenant Context Contract
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -12151,7 +12151,7 @@ PF-P042 应继续留在 PF-P040 起的 cumulative MG 范围内，且只处理 re
 
 ## PF-P042 - Workbench Durable Idempotency Reserved/In-Progress Policy
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -12369,7 +12369,7 @@ PF-P043 应只处理 expired reserved takeover 策略，继续保持 feature fla
 
 ## PF-P043 - Workbench Durable Idempotency Expired Reserved Takeover Policy
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -21976,6 +21976,683 @@ Post-Flight:
   - `python3 -m compileall backend/src/fin_ops_platform/services/turnover_ledger_write_facade.py`：Pass
 - Traffic Gate：未执行；未部署、未切流、未访问生产。
 - 下一步：提交本次 post-flight 文档更新并 `git push origin main`；push 完成后从最新 `main` 新建下一条 `codex/` 分支。
+
+## PF-P198 - Bankdetail Write UoW Readiness / Category and No OA Transaction Boundary Planning
+
+状态：`planned`
+
+```text
+/goal
+PF-P198 - Bankdetail Write UoW Readiness / Category and No OA Transaction Boundary Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须先做 Bankdetail / No OA 写路径 UoW readiness 规划，不直接实现 UoW。
+
+Context:
+PF-P197-MG 已合入并 push `origin/dev`。当前从最新 `dev` 新建分支 `codex/bankdetail-write-uow-readiness-p198`。Bankdetail / No OA 模块已完成 discovery、route characterization、read model characterization、category/auto-tag side-effect characterization、No OA mutation side-effect characterization 和 backfill smoke baseline。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+   - backend/src/fin_ops_platform/services/bank_details_application_service.py
+   - backend/src/fin_ops_platform/services/bank_transaction_category_service.py
+   - backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py
+   - backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py
+   - tests/test_bank_details_sql_runtime.py
+   - tests/test_no_oa_bank_batch_application_service.py
+   - tests/test_no_oa_bank_batch_api.py
+   - tests/test_no_oa_bank_batch_service.py
+2. 必须确认当前分支不是 `main` 或 `dev`。
+3. 必须确认本轮目标是 planning-only，不修改业务代码。
+
+Goal:
+梳理 Bankdetail category/auto-tag 和 No OA submit/withdraw 写路径的当前事务、audit、dirty/outbox、snapshot persistence 和 read model invalidation 边界，输出未来 UoW contract tests 的精确范围。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Planning Work:
+1. Category / Auto Tag write sequence:
+   - 梳理 `confirm_category`、`revoke_category_confirmation`、`assign_manual_category`、`clear_manual_category`、`_persist_category_mutation`、`finalize_auto_tag_rules_update`。
+   - 明确 current facts、audit、snapshot persistence、dirty/read model enqueue、Turnover influence 是否在同一 transaction。
+2. No OA submit / withdraw sequence:
+   - 梳理 `submit_batch`、`submit_selected_rows`、`withdraw_batch`、`after_mutation`、`persist_mutation`、`NoOaBankBatchService.submit_batch/withdraw_batch`。
+   - 明确 snapshot rollback、expected_version、derived lifecycle、Workbench relation influence、read model scope expansion。
+3. UoW Readiness:
+   - 输出当前 blocker。
+   - 输出未来 repository/port/transaction-bound writer 需要覆盖哪些 facts、audit、dirty scope、outbox。
+4. Next Prompt:
+   - 生成下一条建议 `PF-P199 - Bankdetail Write UoW Contract Tests`。
+   - PF-P199 只新增目标契约测试，不实现 UoW。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests。
+- 不得新增 schema migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 MG、Traffic Gate、部署或修改生产配置。
+- 不得把 No OA 或 Bankdetail 写路径机械搬文件。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+2. 记录 PF-P198 status、changed files、verification commands/results。
+3. 如果本轮验证通过，将 PF-P198 标记为 verified。
+4. 下一条建议为 `PF-P199 - Bankdetail Write UoW Contract Tests`。
+```
+
+### 审查结论
+
+- PF-P198 边界正确：只做 Bankdetail / No OA 写路径 UoW readiness planning。
+- PF-P198 明确禁止修改 production code、tests、schema、部署和真实外部服务。
+- PF-P198 不进入 MG；它为下一条 contract tests prompt 提供事实源。
+
+### PF-P198 执行结果
+
+- 状态：`verified`
+- 当前分支：`codex/bankdetail-write-uow-readiness-p198`
+- 变更文件：
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 梳理 category/auto-tag 写路径：`BankTransactionCategoryService._apply_updates(...)` 提供 category fact/version/audit in-memory 边界，`BankDetailsApplicationService._persist_category_mutation(...)` 负责 snapshot persistence、refresh enqueue、cache invalidation 和 audit action。
+  - 梳理 No OA submit/withdraw 写路径：`NoOaBankBatchApplicationService` 通过 snapshot rollback 包裹 `NoOaBankBatchService` mutation，`after_mutation(...)` 和 `persist_mutation(...)` 负责 derived lifecycle 和 mutation snapshot persistence。
+  - 明确当前缺口：category facts/audit/dirty/outbox、No OA batch facts、Workbench relation facts、read model dirty scopes 和 lifecycle/outbox 尚无统一 PostgreSQL transaction-bound UoW。
+  - 下一条建议：`PF-P199 - Bankdetail Write UoW Contract Tests`，先写目标契约测试，不实现 UoW。
+- Verification：
+  - `git status --short --branch`：Pass，只包含 PF-P198 允许的 3 个文档文件。
+  - `git ls-files --others --exclude-standard`：Pass，empty。
+  - `git diff --check`：Pass。
+  - `git diff --name-only`：Pass，只包含 `bankdetail-no-oa-discovery.md`、`migration-state-log.md`、`refactor-prompts.md`。
+  - 本轮为 planning-only，未运行 targeted unittest。
+
+## PF-P199 - Bankdetail Write UoW Contract Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P199 - Bankdetail Write UoW Contract Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须先用目标契约测试锁定 Bankdetail / No OA 写路径 UoW 目标，不直接实现 UoW。
+
+Context:
+PF-P198 已 verified。PF-P198 确认当前 category/auto-tag 和 No OA submit/withdraw 已有 side-effect 收口点，但尚未收敛到 PostgreSQL transaction-bound UoW。当前分支为 `codex/bankdetail-write-uow-readiness-p198`，本轮继续同一 Bankdetail / No OA 写一致性切片。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+   - backend/src/fin_ops_platform/services/bank_details_application_service.py
+   - backend/src/fin_ops_platform/services/bank_transaction_category_service.py
+   - backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py
+   - backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py
+   - tests/test_bank_details_sql_runtime.py
+   - tests/test_no_oa_bank_batch_application_service.py
+   - tests/test_no_oa_bank_batch_service.py
+2. 必须确认 PF-P198 已 verified。
+3. 必须确认当前分支不是 `main` 或 `dev`。
+
+Goal:
+新增 Bankdetail / No OA 写路径 UoW 目标契约测试，作为后续 transaction-bound writer / UoW 实现的机械门禁。尚未实现的目标契约必须以 `unittest.expectedFailure` 进入默认测试套件，不能跳过或删除。
+
+Allowed Scope:
+- 新增或修改 tests：
+  - tests/test_bankdetail_write_uow_contract.py
+  - 必要时小幅补充 tests/test_no_oa_bank_batch_application_service.py
+  - 必要时小幅补充 tests/test_bank_details_sql_runtime.py
+- 文档：
+  - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Test Work:
+1. Category mutation target contracts:
+   - category expected_version conflict 不得产生 dirty/outbox/read model refresh。
+   - category mutation 的目标 UoW 必须能在同一 transaction 中提交 category facts、audit、Bankdetail dirty scope 和 Turnover Ledger dirty scope。
+   - side-effect writer 失败时不得留下半写 facts 或已 enqueue refresh。
+2. Auto-tag rules target contracts:
+   - auto-tag rules update 的目标 UoW 必须明确 settings facts/audit、Bankdetail priority dirty scope、Turnover all-scope dirty scope 和 lifecycle/outbox 的边界。
+   - priority scope 中 `"all"` 不得作为 Bankdetail month priority scope。
+3. No OA submit/withdraw target contracts:
+   - stale expected_version 不得保存 mutation snapshot、不得 enqueue refresh、不得发出 derived lifecycle side effect。
+   - submit/withdraw 目标 UoW 必须覆盖 No OA batch facts、Workbench pair relation facts、audit、dirty scopes 和 outbox/read model refresh request。
+   - side-effect writer 失败时不得留下半写 relation/batch state。
+4. Test strategy:
+   - 允许使用 lightweight fake UoW recorder / writer contract。
+   - 尚未实现的目标契约用 `@unittest.expectedFailure`，并在 test name 中包含 `target`。
+   - 不允许通过放宽现有 characterization 断言来制造通过。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得实现 UoW。
+- 不得新增 schema migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 MG、Traffic Gate、部署或修改生产配置。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+2. 记录 PF-P199 status、changed files、verification commands/results、expectedFailure 数量。
+3. 如果 PF-P198/PF-P199 已形成可合并规划+目标测试切片，下一条生成 cumulative MG；如果测试暴露需要先补 characterization，则继续同一分支生成下一条 prompt。
+```
+
+### 审查结论
+
+- PF-P199 边界正确：只补目标契约测试，不实现 UoW，不改 production code。
+- expectedFailure 策略合理：目标契约进入默认套件，后续实现时必须逐步转绿。
+- PF-P199 继续当前 Bankdetail / No OA 写一致性切片，不进入 MG。
+
+### PF-P199 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_bankdetail_write_uow_contract.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 7 个 Bankdetail / No OA 写路径 UoW target contract tests。
+  - 7 个目标测试均以 `unittest.expectedFailure` 进入默认测试套件，锁定未来 UoW 目标。
+  - 未修改 production code，未实现 UoW。
+- Verification：
+  - `git status --short --branch`：Pass，包含 PF-P198/PF-P199 允许文件。
+  - `git ls-files --others --exclude-standard`：Pass，仅新增 `tests/test_bankdetail_write_uow_contract.py`。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests，expected failures=7。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+- 下一条建议：`PF-P200 - Bankdetail Minimal Write UoW Skeleton`，只建立最小 skeleton，不迁移真实写路径。
+
+## PF-P200 - Bankdetail Minimal Write UoW Skeleton
+
+状态：`planned`
+
+```text
+/goal
+PF-P200 - Bankdetail Minimal Write UoW Skeleton
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须实现 Bankdetail / No OA 写路径的最小 UoW skeleton，只让部分 PF-P199 target contracts 从 expectedFailure 转为普通通过，不迁移真实写 API。
+
+Context:
+PF-P198 和 PF-P199 已 verified。PF-P199 新增了 7 个 expectedFailure 目标契约，当前目标 `fin_ops_platform.services.bankdetail_write_uow.BankdetailWriteUnitOfWork` 尚不存在。本轮只建立最小 UoW skeleton 和可测试 seam，不能接入真实 category/auto-tag/No OA production path。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+   - tests/test_bankdetail_write_uow_contract.py
+2. 必须确认 PF-P199 已 verified。
+3. 必须确认当前分支不是 `main` 或 `dev`。
+
+Goal:
+创建最小 `BankdetailWriteUnitOfWork` skeleton，使 UoW class 存在、constructor 接收明确细粒度 port，并实现 category expected-version conflict precondition 的 no-side-effect seam。只转绿 PF-P199 中最小安全目标，不扩大到真实写路径。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+- tests/test_bankdetail_write_uow_contract.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Implementation Work:
+1. 新增 `BankdetailWriteUnitOfWork`。
+2. Constructor 只能接收明确依赖：
+   - `category_port`
+   - `settings_port`
+   - `no_oa_port`
+   - `side_effect_writer`
+3. 不允许依赖 Application god object。
+4. 实现 `confirm_category(...)` 最小 skeleton：
+   - category port conflict 必须在 side_effect_writer 前发生。
+   - conflict 时不得写 dirty/outbox。
+5. 只移除与最小 skeleton 已实现目标对应的 `expectedFailure`。
+
+Forbidden Scope:
+- 不得接入 `BankDetailsApplicationService`、routes 或 `NoOaBankBatchApplicationService`。
+- 不得迁移真实 category、auto-tag 或 No OA 写 API。
+- 不得新增 schema migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得实现完整 transaction-bound writer。
+- 不得执行 MG、Traffic Gate、部署或修改生产配置。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v
+- python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+2. 记录转绿的 target contract、仍保留的 expectedFailure 数量和原因。
+3. 如果本轮后还未形成可合并边界，下一条继续同一分支生成 `PF-P201 - Bankdetail Category UoW Transaction Writer Contract` 或更精确的下一步。
+```
+
+### 审查结论
+
+- PF-P200 边界正确：只建立最小 UoW skeleton，不接入真实写路径。
+- 只允许转绿最小 precondition/no-side-effect 契约，避免一次性迁移 category/auto-tag/No OA。
+- 本 prompt 继续当前分支，不进入 MG。
+
+### PF-P200 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/services/bankdetail_write_uow.py`
+  - `tests/test_bankdetail_write_uow_contract.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 `BankdetailWriteUnitOfWork` 最小 skeleton。
+  - Constructor 只接收 `category_port`、`settings_port`、`no_oa_port`、`side_effect_writer`。
+  - `confirm_category(...)` 当前只调用 `category_port.confirm_category(...)`。
+  - `test_target_category_expected_version_conflict_does_not_write_dirty_or_outbox` 已从 expectedFailure 转为普通通过。
+  - 其余 6 个 target contracts 仍为 expectedFailure。
+- Verification：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass；新增 `bankdetail_write_uow.py` 和 `test_bankdetail_write_uow_contract.py`。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests，expected failures=6。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+- 下一条建议：`PF-P201 - Bankdetail Category UoW Transaction Writer Contract`。
+
+## PF-P201 - Bankdetail Category UoW Transaction Writer Contract
+
+状态：`planned`
+
+```text
+/goal
+PF-P201 - Bankdetail Category UoW Transaction Writer Contract
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只增强 BankdetailWriteUnitOfWork 的 category transaction writer seam，不接入真实 production write path。
+
+Context:
+PF-P200 已 verified。当前已有 `BankdetailWriteUnitOfWork` 最小 skeleton，1 个 target contract 已转绿，6 个 expectedFailure 保留。当前分支继续同一 Bankdetail / No OA 写一致性切片。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+   - backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+   - tests/test_bankdetail_write_uow_contract.py
+2. 必须确认 PF-P200 已 verified。
+3. 必须确认当前分支不是 `main` 或 `dev`。
+
+Goal:
+只转绿 category mutation success 和 category side-effect failure rollback 两个 target contracts。UoW 仍不接入真实 routes/application service。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+- tests/test_bankdetail_write_uow_contract.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Implementation Work:
+1. `confirm_category(...)` 在 category_port 成功后构造 transaction-bound side-effect record：
+   - facts: `bank_transaction_category`
+   - audit: `bank_detail_category_confirmed`
+   - dirty scopes: `bank_detail/<month>` 和 `turnover_ledger/all`
+   - outbox: `bank_detail.read_model.refresh` 和 `turnover_ledger.read_model.refresh`
+2. side_effect_writer 写成功后再调用 category_port commit seam（如果存在）。
+3. side_effect_writer 失败时调用 category_port rollback seam（如果存在），不得留下 committed category facts。
+4. 只移除这两个已实现 target tests 的 `expectedFailure`。
+
+Forbidden Scope:
+- 不得接入 `BankDetailsApplicationService`、routes 或真实 category service。
+- 不得处理 auto-tag rules 或 No OA submit/withdraw。
+- 不得新增 schema migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 MG、Traffic Gate、部署或修改生产配置。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v
+- python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+2. 记录转绿的 target contracts 和剩余 expectedFailure 数量。
+3. 如果 category UoW skeleton 已形成可合并边界，可生成 cumulative MG；否则继续同一分支生成下一条精确 prompt。
+```
+
+### 审查结论
+
+- PF-P201 边界正确：只处理 category success/rollback target contracts，不接入真实写路径。
+- 本 prompt 不触碰 auto-tag 和 No OA，避免扩大到跨子域 UoW。
+
+### PF-P201 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/services/bankdetail_write_uow.py`
+  - `tests/test_bankdetail_write_uow_contract.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - `confirm_category(...)` 成功后写入 transaction-bound side-effect record。
+  - side-effect writer 成功后才 commit category port。
+  - side-effect writer 失败时 rollback category port。
+  - category mutation success 和 category failure rollback 两个 target contracts 已转为普通通过。
+  - 剩余 4 个 expectedFailure。
+- Verification：
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests，expected failures=4。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+- 下一条建议：`PF-P202 - Bankdetail Auto Tag Rules UoW Seam`。
+
+## PF-P202 - Bankdetail Auto Tag Rules UoW Seam
+
+状态：`planned`
+
+```text
+/goal
+PF-P202 - Bankdetail Auto Tag Rules UoW Seam
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只增强 BankdetailWriteUnitOfWork 的 auto-tag rules UoW seam，不接入真实 app settings 或 route。
+
+Context:
+PF-P201 已 verified。当前 category 相关 target contracts 已转绿，剩余 expectedFailure 包括 auto-tag rules 和 No OA。当前分支继续同一 Bankdetail / No OA 写一致性切片。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+   - backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+   - tests/test_bankdetail_write_uow_contract.py
+2. 必须确认 PF-P201 已 verified。
+3. 必须确认当前分支不是 `main` 或 `dev`。
+
+Goal:
+只转绿 auto-tag rules update UoW target contract。UoW 仍不接入真实 app settings route/application service。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+- tests/test_bankdetail_write_uow_contract.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Implementation Work:
+1. 新增/实现 `update_auto_tag_rules(...)` skeleton。
+2. 通过 `settings_port.update_auto_tag_rules(...)` 取得 `new_version` 和 priority scope keys。
+3. 构造 transaction-bound side-effect record：
+   - facts: `bank_auto_tag_rules`
+   - audit: `bank_auto_tag_rules_changed`
+   - dirty scopes: Bankdetail priority month scopes，过滤 `"all"`；Turnover Ledger all-scope。
+   - outbox: Bankdetail 和 Turnover Ledger read model refresh。
+   - lifecycle event: `bank_auto_tag_rules_changed`
+4. 只移除 auto-tag rules target test 的 `expectedFailure`。
+
+Forbidden Scope:
+- 不得接入真实 app settings、routes 或 application service。
+- 不得处理 No OA submit/withdraw。
+- 不得新增 schema migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 MG、Traffic Gate、部署或修改生产配置。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v
+- python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+2. 记录转绿的 target contract 和剩余 expectedFailure 数量。
+3. 下一条建议应继续 No OA UoW seam 或生成 cumulative MG，取决于 diff 大小和验证情况。
+```
+
+### 审查结论
+
+- PF-P202 边界正确：只处理 auto-tag rules UoW seam，不接入真实 settings path。
+- 本 prompt 不触碰 No OA，避免跨子域一次性扩大。
+
+### PF-P202 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/services/bankdetail_write_uow.py`
+  - `tests/test_bankdetail_write_uow_contract.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 `update_auto_tag_rules(...)` skeleton。
+  - 写入 settings facts、audit、Bankdetail priority dirty scope、Turnover all-scope dirty scope、outbox 和 lifecycle event 的 target side-effect record。
+  - priority scope 过滤 `"all"`。
+  - auto-tag target contract 已转为普通通过。
+  - 剩余 3 个 expectedFailure 均为 No OA submit/withdraw。
+- Verification：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass。
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests，expected failures=3。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+- 下一条建议：`PF-P203 - Bankdetail No OA Submit Withdraw UoW Seam`。
+
+## PF-P203 - Bankdetail No OA Submit Withdraw UoW Seam
+
+状态：`planned`
+
+```text
+/goal
+PF-P203 - Bankdetail No OA Submit Withdraw UoW Seam
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只增强 BankdetailWriteUnitOfWork 的 No OA submit/withdraw UoW seam，不接入真实 No OA application service 或 route。
+
+Context:
+PF-P202 已 verified。当前 category 与 auto-tag target contracts 已转绿，剩余 3 个 expectedFailure 都属于 No OA submit/withdraw。当前分支继续同一 Bankdetail / No OA 写一致性切片。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+   - backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+   - tests/test_bankdetail_write_uow_contract.py
+2. 必须确认 PF-P202 已 verified。
+3. 必须确认当前分支不是 `main` 或 `dev`。
+
+Goal:
+转绿 No OA stale no-side-effect、submit transaction-bound UoW 和 side-effect failure rollback 三个 target contracts。仍不接入真实 No OA application service。
+
+Allowed Scope:
+- backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+- tests/test_bankdetail_write_uow_contract.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Implementation Work:
+1. 新增/实现 `submit_no_oa_batch(...)` skeleton。
+2. 新增/实现 `withdraw_no_oa_batch(...)` skeleton。
+3. stale expected_version 必须在 side-effect writer 前被 `no_oa_port` 拒绝。
+4. submit success 后写入 transaction-bound side-effect record：
+   - facts: `no_oa_bank_batch`, `workbench_pair_relation`
+   - audit: `no_oa_bank_batch_submit`
+   - dirty scopes: `no_oa_bank_batch/all`, `no_oa_bank_batch/<month>`, `workbench/<case_id>`
+   - outbox: `no_oa_bank_batch.read_model.refresh`, `workbench.read_model.refresh`
+   - lifecycle event: `no_oa_bank_batch_changed`
+5. side-effect writer 成功后再调用 no_oa_port commit seam（如果存在）。
+6. side-effect writer 失败时调用 no_oa_port rollback seam（如果存在）。
+7. 只移除这 3 个 No OA target tests 的 `expectedFailure`。
+
+Forbidden Scope:
+- 不得接入 `NoOaBankBatchApplicationService`、routes 或真实 No OA service。
+- 不得修改 category/auto-tag 已转绿行为。
+- 不得新增 schema migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 MG、Traffic Gate、部署或修改生产配置。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v
+- python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+2. 记录 7 个 target contracts 是否全部转绿。
+3. 如果 PF-P198 到 PF-P203 已形成可合并 UoW skeleton 切片，下一条生成 cumulative MG 合入 `dev`。
+```
+
+### 审查结论
+
+- PF-P203 边界正确：只处理 No OA submit/withdraw UoW seam，不接入真实 No OA 路径。
+- PF-P203 完成后，PF-P198 到 PF-P203 将形成一个可合并的 Bankdetail write UoW skeleton 切片，适合生成 cumulative MG。
+
+### PF-P203 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `backend/src/fin_ops_platform/services/bankdetail_write_uow.py`
+  - `tests/test_bankdetail_write_uow_contract.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 `submit_no_oa_batch(...)` 和 `withdraw_no_oa_batch(...)` skeleton。
+  - stale expected-version 在 side-effect writer 前拒绝。
+  - No OA submit success 写入 target transaction-bound side-effect record。
+  - side-effect writer 成功后 commit no-OA port，失败时 rollback no-OA port。
+  - PF-P199 的 7 个 target contracts 已全部转为普通通过。
+- Verification：
+  - `git diff --check`：Pass。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v`：Pass，7 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v`：Pass，3 tests。
+  - `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
+- 下一条建议：`PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate`。
+
+## PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P203-MG - Bankdetail Write UoW Skeleton Cumulative Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 Bankdetail / No OA write UoW skeleton 切片，不新增业务实现。
+
+Context:
+PF-P198 到 PF-P203 均已 verified。当前分支为 `codex/bankdetail-write-uow-readiness-p198`。合入目标是 `dev`，不是 `main`。
+
+Gate Scope:
+本 MG 统一覆盖 PF-P198 到 PF-P203 的完整 diff：
+- Bankdetail / No OA write UoW readiness planning。
+- Bankdetail write UoW target contract tests。
+- 最小 `BankdetailWriteUnitOfWork` skeleton。
+- Category transaction writer seam。
+- Auto-tag rules UoW seam。
+- No OA submit/withdraw UoW seam。
+- 文档和状态机回写。
+
+Allowed Changed Files:
+- backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+- tests/test_bankdetail_write_uow_contract.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得接入真实 Bankdetail / No OA routes 或 application service。
+- 不得修改 existing production write path。
+- 不得新增 schema migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得 merge/push `main`。
+- 不得执行 Traffic Gate、部署、修改 Nginx 或生产配置。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+2. 必须确认 PF-P198、PF-P199、PF-P200、PF-P201、PF-P202、PF-P203 均为 verified。
+3. 必须确认当前分支不是 `main` 或 `dev`。
+4. 必须确认 `git diff --name-only dev...HEAD` 只包含 Allowed Changed Files。
+5. 必须确认 `git ls-files --others --exclude-standard` 为空或只包含 Allowed Changed Files 中的新增文件。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only dev...HEAD
+- git log --oneline dev..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bankdetail_write_uow_contract -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service -v
+- python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+
+Commit / Merge Rules:
+1. 精确 stage Allowed Changed Files；禁止 `git add .` 和 `git add -A`。
+2. 提交 feature branch，commit message 建议：
+   - `feat(bankdetail): add write uow skeleton contracts`
+3. 切换 `dev`。
+4. 确认 `dev` 与 `origin/dev` 对齐；如果落后，`git pull --ff-only origin dev`。
+5. merge 当前分支到 `dev`。
+6. 在 `dev` 上重跑完整 Verification。
+7. 如果 dev 上验证失败，停止，不得 push。
+8. 如果 dev 上验证通过，更新 migration-state-log.md 和 refactor-prompts.md，标记 PF-P203-MG verified。
+9. 精确 stage post-flight docs，提交后 push `origin/dev`。
+10. 不 push `origin/main`。
+
+Post-Flight:
+1. 记录 merge commit、dev 验证结果、未执行 Traffic Gate。
+2. push `origin/dev` 后，从最新 `dev` 新建下一条 `codex/` 分支。
+3. 下一条建议根据状态机选择 Bankdetail 后续真实 application-service integration 或转入下一个模块。
+```
+
+### 审查结论
+
+- PF-P203-MG 边界正确：只覆盖 UoW skeleton 和 target contract tests。
+- MG 明确合入 `dev`，不合入 `main`，不部署、不切流。
 
 ## PF-P190 - Bankdetail / No OA Batch Discovery and Planning
 
