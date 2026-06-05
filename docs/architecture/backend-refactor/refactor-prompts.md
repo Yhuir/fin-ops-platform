@@ -14600,7 +14600,7 @@ Stop Conditions:
 
 ## PF-P052 - Turnover Ledger Write Path Characterization Tests
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -14732,7 +14732,7 @@ Post-Flight:
 
 ## PF-P053 - Turnover Ledger Write UoW Contract Tests
 
-状态：`planned`
+状态：`verified`
 
 ### Prompt
 
@@ -22685,6 +22685,265 @@ Post-Flight:
   - `python3 -m compileall backend/src/fin_ops_platform/services/bankdetail_write_uow.py`：Pass。
 - Traffic Gate：未执行；未部署、未切流、未访问生产或真实外部服务。
 - 下一步：提交 post-flight 文档更新并 push `origin/dev`；push 后从最新 `dev` 新建分支，下一条建议 `PF-P204 - Bankdetail Write UoW Application Integration Planning`。
+
+## PF-P204 - Bankdetail Write UoW Application Integration Planning
+
+状态：`planned`
+
+```text
+/goal
+PF-P204 - Bankdetail Write UoW Application Integration Planning
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只规划 BankdetailWriteUnitOfWork 如何安全接入真实 application services，不直接迁移 production write path。
+
+Context:
+PF-P203-MG 已 verified，并已合入并 push `origin/dev`。当前从最新 `dev` 新建分支 `codex/bankdetail-write-uow-application-planning-p204`。当前 `BankdetailWriteUnitOfWork` skeleton 和 `tests/test_bankdetail_write_uow_contract.py` 已存在，7 个 target contracts 均通过，但 skeleton 尚未接入真实 `BankDetailsApplicationService` 或 `NoOaBankBatchApplicationService`。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+   - backend/src/fin_ops_platform/services/bankdetail_write_uow.py
+   - backend/src/fin_ops_platform/services/bank_details_application_service.py
+   - backend/src/fin_ops_platform/services/bank_transaction_category_service.py
+   - backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py
+   - backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py
+   - tests/test_bankdetail_write_uow_contract.py
+   - tests/test_bank_details_routes.py
+   - tests/test_bank_details_sql_runtime.py
+   - tests/test_no_oa_bank_batch_application_service.py
+   - tests/test_no_oa_bank_batch_routes.py
+2. 必须确认当前分支不是 `main` 或 `dev`。
+3. 必须确认 PF-P203-MG 已 verified。
+
+Goal:
+输出真实 application-service 接入计划，明确 category/auto-tag/No OA 哪些路径可以先接入 UoW，哪些 blocker 必须先补 tests 或 ports。不得修改 production code。
+
+Allowed Scope:
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Planning Work:
+1. Category integration scan:
+   - 确认 `BankDetailsApplicationService.confirm_category/revoke/assign/clear` 与 `_persist_category_mutation` 的真实接入顺序。
+   - 输出需要的 category port / writer adapter / rollback contract。
+   - 明确哪些 existing tests 必须先补或复验。
+2. Auto-tag integration scan:
+   - 确认 `finalize_auto_tag_rules_update(...)` 和 app settings callback 是否适合先接入 UoW。
+   - 如果 settings facts ownership 不清晰，必须标记 blocker，不得强行实现。
+3. No OA integration scan:
+   - 确认 `NoOaBankBatchApplicationService.submit_batch/submit_selected_rows/withdraw_batch` 与 snapshot rollback / `persist_mutation` 的替换顺序。
+   - 输出真实接入前必须新增的 characterization tests。
+4. Next prompt recommendation:
+   - 如果接入条件不足，下一条应是 targeted characterization tests。
+   - 如果接入条件充分，下一条应是最小 adapter/skeleton integration，不直接全量迁移。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得修改 tests，除非只是文档提及。
+- 不得实现真实 application-service 接入。
+- 不得新增 schema migration。
+- 不得访问真实 PostgreSQL、Redis、RabbitMQ、OA、Mongo、MySQL。
+- 不得执行 MG、Traffic Gate、部署或修改生产配置。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+2. 记录 PF-P204 status、changed files、verification commands/results。
+3. 下一条 prompt 必须根据 PF-P204 的真实发现生成。
+```
+
+### 审查结论
+
+- PF-P204 边界正确：只规划真实 application-service 接入，不修改 production code。
+- PF-P204 避免从 skeleton 直接跳到真实写路径迁移，符合 Micro-JIT。
+
+### PF-P204 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - Category 适合优先接入，但必须先补 callback/adapter characterization tests。
+  - Auto-tag 暂不直接接入 UoW，原因是 settings facts ownership 属于 App Settings/Platform 边界。
+  - No OA 暂不直接接入 UoW，原因是 snapshot rollback、Workbench pair relation facts 和 persistence failure 行为还需要先锁定。
+- Verification：
+  - `git status --short --branch`：Pass。
+  - `git ls-files --others --exclude-standard`：Pass，empty。
+  - `git diff --check`：Pass。
+  - `git diff --name-only`：Pass，只包含 3 个文档文件。
+- 下一条建议：`PF-P205 - Bankdetail Category UoW Adapter Characterization Tests`。
+
+## PF-P205 - Bankdetail Category UoW Adapter Characterization Tests
+
+状态：`planned`
+
+```text
+/goal
+PF-P205 - Bankdetail Category UoW Adapter Characterization Tests
+
+Role:
+你是一位负责 Python-first 后端模块化重构的资深后端工程师。你必须只补 Bankdetail category callback/adapter characterization tests，不接入真实 UoW。
+
+Context:
+PF-P204 已 verified。PF-P204 确认 category 是最适合优先接入 UoW skeleton 的真实路径，但接入前必须先锁定 `BankDetailsApplicationService._persist_category_mutation(...)` 的 callback seam 和 failure behavior。
+
+Pre-Flight:
+1. 必须读取：
+   - docs/architecture/backend-refactor/migration-state-log.md
+   - docs/architecture/backend-refactor/refactor-prompts.md
+   - docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+   - backend/src/fin_ops_platform/services/bank_details_application_service.py
+   - tests/test_bank_details_sql_runtime.py
+   - tests/test_bank_details_routes.py
+2. 必须确认 PF-P204 已 verified。
+3. 必须确认当前分支不是 `main` 或 `dev`。
+
+Goal:
+补强 category callback/adapter characterization tests，确保后续真实接入 UoW 时不会改变当前 fallback/callback 行为。
+
+Allowed Scope:
+- tests/test_bank_details_sql_runtime.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Required Test Work:
+1. Callback suppresses fallback side effects:
+   - 当 `after_category_mutation` callback 存在且成功时，`_persist_category_mutation(...)` 必须调用 callback。
+   - 同时不得走 fallback enqueue、fallback audit、fallback invalidate。
+2. Callback failure behavior:
+   - 当 callback 抛错时，异常必须向上传播。
+   - 不得在 callback failure 后追加 fallback enqueue/audit/invalidate。
+   - 当前 category service mutation 是否已发生属于现状，不在本轮伪造 rollback。
+3. Existing behavior preservation:
+   - 保留现有 `test_category_mutation_refreshes_turnover_ledger_all_scope`。
+   - 不放宽任何现有断言。
+
+Forbidden Scope:
+- 不得修改 production code。
+- 不得接入 `BankdetailWriteUnitOfWork` 到真实 service。
+- 不得处理 auto-tag 或 No OA。
+- 不得新增 schema migration。
+- 不得访问真实外部服务。
+- 不得执行 MG、Traffic Gate、部署或修改生产配置。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v
+
+Post-Flight:
+1. 更新 migration-state-log.md、refactor-prompts.md 和 bankdetail-no-oa-discovery.md。
+2. 记录新增测试、验证结果和下一条建议。
+3. 如果测试锁定完成，下一条可生成最小 category UoW adapter integration prompt；否则继续补测试。
+```
+
+### 审查结论
+
+- PF-P205 边界正确：只补 category callback/adapter characterization tests，不修改 production code。
+- PF-P205 是真实接入 UoW 前必要安全网。
+
+### PF-P205 执行结果
+
+- 状态：`verified`
+- 变更文件：
+  - `tests/test_bank_details_sql_runtime.py`
+  - `docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md`
+  - `docs/architecture/backend-refactor/migration-state-log.md`
+  - `docs/architecture/backend-refactor/refactor-prompts.md`
+- 关键结果：
+  - 新增 category callback success characterization test。
+  - 新增 category callback failure no-fallback-side-effects characterization test。
+  - 未修改 production code。
+- Verification：
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，44 tests。
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`：Pass，6 tests。
+- 下一条建议：`PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate`。
+
+## PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate
+
+状态：`planned`
+
+```text
+/goal
+PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 PF-P204/PF-P205 的 planning + tests 切片，不新增业务实现。
+
+Context:
+PF-P204 和 PF-P205 均已 verified。当前分支为 `codex/bankdetail-write-uow-application-planning-p204`。合入目标是 `dev`，不是 `main`。
+
+Gate Scope:
+本 MG 统一覆盖：
+- PF-P204 Bankdetail write UoW application integration planning。
+- PF-P205 Bankdetail category callback/adapter characterization tests。
+- 文档和状态机回写。
+
+Allowed Changed Files:
+- tests/test_bank_details_sql_runtime.py
+- docs/architecture/backend-refactor/bankdetail-no-oa-discovery.md
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不得新增业务实现。
+- 不得修改 production code。
+- 不得接入真实 UoW。
+- 不得处理 auto-tag 或 No OA production paths。
+- 不得新增 schema migration。
+- 不得访问真实外部服务。
+- 不得 merge/push `main`。
+- 不得执行 Traffic Gate、部署、Nginx 或生产配置变更。
+- 不得使用 `git add .` 或 `git add -A`。
+
+Verification:
+必须执行：
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only dev...HEAD
+- git log --oneline dev..HEAD
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v
+- PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v
+
+Commit / Merge Rules:
+1. 精确 stage Allowed Changed Files。
+2. 提交 feature branch，commit message 建议：
+   - `test(bankdetail): lock category uow adapter seam`
+3. 切换 `dev`，确认 `dev` 与 `origin/dev` 对齐。
+4. merge 当前分支到 `dev`。
+5. 在 `dev` 上重跑完整 Verification。
+6. 如果 dev 上验证失败，停止，不得 push。
+7. 如果 dev 上验证通过，更新 migration-state-log.md 和 refactor-prompts.md，标记 PF-P205-MG verified。
+8. 精确 stage post-flight docs，提交后 push `origin/dev`。
+9. 不 push `origin/main`。
+
+Post-Flight:
+1. 记录 merge commit、dev 验证结果、未执行 Traffic Gate。
+2. push `origin/dev` 后，从最新 `dev` 新建下一条 `codex/` 分支。
+3. 下一条建议：`PF-P206 - Bankdetail Category UoW Adapter Integration`，但必须先由新分支生成并审查。
+```
+
+### 审查结论
+
+- PF-P205-MG 边界正确：只覆盖 planning + tests，不含 production code。
+- MG 合入 `dev`，不合入 `main`，不部署、不切流。
 
 ## PF-P190 - Bankdetail / No OA Batch Discovery and Planning
 

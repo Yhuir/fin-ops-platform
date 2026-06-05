@@ -955,6 +955,113 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertNotIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
 
+    def test_category_mutation_callback_suppresses_fallback_enqueue_audit_and_invalidate(self) -> None:
+        class Queue:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        queue = Queue()
+        audit_records: list[dict[str, object]] = []
+        invalidated: list[list[str]] = []
+        callback_calls: list[dict[str, object]] = []
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(record_action=lambda **kwargs: audit_records.append(dict(kwargs))),
+            state_store=None,
+            bank_detail_sql_read_repository=None,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: ["2026-04"],
+            invalidate_after_category_mutation=lambda affected_months: invalidated.append(list(affected_months)),
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_turnover_ledger_read_model=lambda: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-04"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+            after_category_mutation=lambda **kwargs: callback_calls.append(dict(kwargs)),
+        )
+
+        affected_months = service._persist_category_mutation(
+            ["txn-apr"],
+            transaction_id="txn-apr",
+            actor_id="TESTFULL001",
+            action="bank_detail_category_manually_assigned",
+            metadata={"source": "unit"},
+        )
+
+        self.assertEqual(affected_months, ["2026-04"])
+        self.assertEqual(
+            callback_calls,
+            [
+                {
+                    "transaction_id": "txn-apr",
+                    "actor_id": "TESTFULL001",
+                    "action": "bank_detail_category_manually_assigned",
+                    "affected_months": ["2026-04"],
+                    "metadata": {"source": "unit"},
+                }
+            ],
+        )
+        self.assertEqual(queue.enqueued, [])
+        self.assertEqual(audit_records, [])
+        self.assertEqual(invalidated, [])
+
+    def test_category_mutation_callback_failure_does_not_run_fallback_side_effects(self) -> None:
+        class Queue:
+            def __init__(self) -> None:
+                self.enqueued: list[tuple[str, str, str]] = []
+
+            def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+                self.enqueued.append((scope_type, scope_key, reason))
+
+        queue = Queue()
+        audit_records: list[dict[str, object]] = []
+        invalidated: list[list[str]] = []
+
+        def failing_callback(**_kwargs: object) -> None:
+            raise RuntimeError("category_uow_adapter_failed")
+
+        service = BankDetailsApplicationService(
+            import_service=SimpleNamespace(),
+            bank_details_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(record_action=lambda **kwargs: audit_records.append(dict(kwargs))),
+            state_store=None,
+            bank_detail_sql_read_repository=None,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            requires_sql_read_model_runtime=lambda: True,
+            affected_months_provider=lambda _transaction_ids: ["2026-04"],
+            invalidate_after_category_mutation=lambda affected_months: invalidated.append(list(affected_months)),
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_turnover_ledger_read_model=lambda: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-04"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+            after_category_mutation=failing_callback,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "category_uow_adapter_failed"):
+            service._persist_category_mutation(
+                ["txn-apr"],
+                transaction_id="txn-apr",
+                actor_id="TESTFULL001",
+                action="bank_detail_category_manually_assigned",
+                metadata={"source": "unit"},
+            )
+
+        self.assertEqual(queue.enqueued, [])
+        self.assertEqual(audit_records, [])
+        self.assertEqual(invalidated, [])
+
     def test_auto_tag_rules_update_refreshes_priority_bank_detail_and_turnover_all_scope(self) -> None:
         class Queue:
             def __init__(self) -> None:

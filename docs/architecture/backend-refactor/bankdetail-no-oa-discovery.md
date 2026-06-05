@@ -689,3 +689,142 @@ PF-P203-MG 已将 PF-P198 到 PF-P203 的 Bankdetail / No OA write UoW skeleton 
 - `PF-P204 - Bankdetail Write UoW Application Integration Planning`
 
 PF-P204 应只规划真实 application-service 接入顺序和风险，不直接迁移 production write path。
+
+## PF-P204 Application Integration Planning
+
+状态：`planned`
+
+PF-P204 必须只规划真实 application-service 接入顺序，不直接迁移 production write path。
+
+重点问题：
+
+- Category：`BankDetailsApplicationService._persist_category_mutation(...)` 如何被 UoW port/writer 逐步替换。
+- Auto-tag：`finalize_auto_tag_rules_update(...)` 与 app settings facts ownership 是否适合立即接入 UoW。
+- No OA：`submit_batch` / `submit_selected_rows` / `withdraw_batch` 的 snapshot rollback 与 `persist_mutation(...)` 如何被 transaction-bound writer 替换。
+
+PF-P204 输出后，下一条 prompt 必须基于真实发现生成，不能直接默认进入实现。
+
+### PF-P204 Execution Findings
+
+状态：`implemented`
+
+PF-P204 只做 planning，不修改 production code。
+
+#### Category Integration
+
+当前真实路径：
+
+```mermaid
+sequenceDiagram
+    participant Route as "BankDetailsApiRoutes"
+    participant AppSvc as "BankDetailsApplicationService"
+    participant CategorySvc as "BankTransactionCategoryService"
+    participant Callback as "after_category_mutation callback"
+    participant Queue as "runtime queue / read model refresh"
+
+    Route->>AppSvc: confirm/revoke/assign/clear
+    AppSvc->>CategorySvc: apply category update with expected_version
+    AppSvc->>Callback: optional after_category_mutation(...)
+    alt no callback
+        AppSvc->>Queue: enqueue bank_detail and turnover_ledger refresh
+        AppSvc->>AppSvc: invalidate cache and audit action
+    end
+```
+
+接入判断：
+
+- Category 是最适合优先接入 UoW skeleton 的真实路径，但不能直接替换 `_persist_category_mutation(...)`。
+- 原因：`BankDetailsApplicationService` 目前已经有 `after_category_mutation` callback seam；可以先增加 adapter / port，将 category side effects 封装为细粒度 dependency，而不是让 service 直接知道 UoW internals。
+- 必须先补测试：
+  - Route 层 category conflict 仍返回原有 payload。
+  - `_persist_category_mutation(...)` 调用 callback 时不得走 fallback enqueue/audit。
+  - callback adapter 失败时 category mutation 是否 rollback 的当前行为必须先被 characterization 锁定，不能假设已经原子。
+
+下一步建议：
+
+- `PF-P205 - Bankdetail Category UoW Adapter Characterization Tests`
+  - 只补测试，不接入 UoW。
+  - 重点锁定 callback seam、conflict no-side-effect、adapter failure behavior。
+
+#### Auto Tag Integration
+
+当前真实路径：
+
+- Route 调用 `BankDetailsApplicationService.update_auto_tag_rules(...)`。
+- App service 通过 app settings service 保存规则。
+- `finalize_auto_tag_rules_update(...)` 作为 callback/收口点清 cache、enqueue Bankdetail priority scopes、enqueue Turnover all-scope、发 derived lifecycle event。
+
+接入判断：
+
+- 暂不应直接接入 UoW。
+- Blocker：settings facts ownership 在 `AppSettingsService`，不是 Bankdetail UoW 自己的 repository；如果强行把 settings facts 放进 Bankdetail UoW，会模糊 Platform/App Settings 边界。
+- 正确顺序：
+  1. 先补 `finalize_auto_tag_rules_update(...)` callback adapter tests。
+  2. 再设计 settings port 是否由 App Settings 模块提供 transaction hook。
+  3. 最后再考虑 Bankdetail UoW 只接管 read model dirty/outbox side effects。
+
+#### No OA Integration
+
+当前真实路径：
+
+- Route 调用 `NoOaBankBatchApplicationService.submit_batch(...)` / `submit_selected_rows(...)` / `withdraw_batch(...)`。
+- Application service 使用 snapshot rollback 包住 `NoOaBankBatchService` mutation。
+- `after_mutation(...)` 发 derived lifecycle event。
+- `persist_mutation(...)` 保存 pair relation snapshot、No OA batch snapshot、Workbench read model snapshot。
+
+接入判断：
+
+- 不应直接替换为 UoW。
+- Blocker：当前 rollback 语义是应用内 snapshot rollback，而不是 DB transaction rollback；真实接入前必须先锁定 persistence failure、stale expected_version、bulk partial failure 的 route + application 行为。
+- No OA 还涉及 Workbench pair relation facts 和 Workbench read model snapshot，必须明确 Workbench dirty scope/port ownership 后才能迁移。
+
+#### PF-P204 Recommendation
+
+下一条推荐：
+
+- `PF-P205 - Bankdetail Category UoW Adapter Characterization Tests`
+
+PF-P205 边界：
+
+- 只补 category callback/adapter characterization tests。
+- 不接入 UoW。
+- 不修改 production code，除非测试暴露极小且明确的测试辅助缺口。
+- 不处理 auto-tag 或 No OA。
+
+PF-P204 验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only`
+
+## PF-P205 Category UoW Adapter Characterization Tests
+
+PF-P205 只补 category callback/adapter characterization tests，不修改 production code。
+
+新增测试位于 `tests/test_bank_details_sql_runtime.py`：
+
+- `test_category_mutation_callback_suppresses_fallback_enqueue_audit_and_invalidate`
+- `test_category_mutation_callback_failure_does_not_run_fallback_side_effects`
+
+锁定行为：
+
+- 当 `after_category_mutation` callback 存在且成功时，`_persist_category_mutation(...)` 必须调用 callback。
+- callback 成功时不得走 fallback enqueue、fallback audit、fallback invalidate。
+- callback 抛错时异常必须向上传播。
+- callback failure 后不得追加 fallback enqueue/audit/invalidate。
+- 当前 category service mutation 是否已发生属于现状，本轮不伪造 rollback。
+
+PF-P205 验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime -v`：Pass，44 tests。
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes -v`：Pass，6 tests。
+
+当前分支可合并边界：
+
+- PF-P204：真实 application-service 接入 planning。
+- PF-P205：category callback/adapter characterization tests。
+
+下一条建议：
+
+- `PF-P205-MG - Bankdetail Category UoW Adapter Planning and Tests Merge Gate`
