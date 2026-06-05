@@ -60,18 +60,18 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| 当前阶段 | Dev integration branch bootstrap / Main Delta Rebaseline |
-| 当前 active prompt | `PF-P189 - Dev Branch Bootstrap / Main Delta Rebaseline` |
-| 最近 verified prompt | `PF-P188-MG - Turnover Ledger Module Completion Merge Gate` |
+| 当前阶段 | Dev integration branch bootstrap / Main Delta Rebaseline Merge Gate |
+| 当前 active prompt | `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate` |
+| 最近 verified prompt | `PF-P189 - Dev Branch Bootstrap / Main Delta Rebaseline` |
 | 当前分支 | `codex/dev-branch-rebaseline-p189` |
-| 最近验证 | 已从当前最新 `main` 创建并推送 `origin/dev`；PF-P189 文档 rebaseline 已执行，等待用户确认或后续 MG |
-| 下一条允许任务 | 确认 PF-P189 verified 后，生成并执行 `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate`，合入目标为 `dev`，不是 `main` |
+| 最近验证 | PF-P189 自动 verified 条件已满足；分支干净、无 untracked、`dev/origin/dev` 存在、diff check 通过 |
+| 下一条允许任务 | 执行 `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate`，合入目标为 `dev`，不是 `main` |
 
 ## Prompt 执行日志
 
 ### PF-P189 - Dev Branch Bootstrap / Main Delta Rebaseline
 
-状态：`implemented`
+状态：`verified`
 
 范围：
 
@@ -102,9 +102,53 @@
 
 下一步：
 
-- 用户确认 PF-P189 后，将其标记为 `verified`。
 - 生成并执行 `PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate`。
 - PF-P189-MG 只合入文档和状态机到 `dev`，不改业务代码，不合入 `main`。
+
+### PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate
+
+状态：`planned`
+
+范围：
+
+- 统一验证并合入 PF-P189 的完整文档 diff。
+- 合入目标是 `dev`，不是 `main`。
+- 只允许重构文档和状态机变更。
+- 不修改 production code，不修改 tests，不执行 Traffic Gate，不部署，不访问生产或真实外部服务。
+
+允许文件：
+
+- `docs/architecture/backend-refactor/ai-execution-rules.md`
+- `docs/architecture/backend-refactor/architecture-inventory.md`
+- `docs/architecture/backend-refactor/migration-roadmap.md`
+- `docs/architecture/backend-refactor/migration-state-log.md`
+- `docs/architecture/backend-refactor/module-refactor-plan.md`
+- `docs/architecture/backend-refactor/refactor-prompts.md`
+
+验证：
+
+- `git status --short --branch`
+- `git ls-files --others --exclude-standard`
+- `git diff --check`
+- `git diff --name-only dev...HEAD`
+- `git log --oneline dev..HEAD`
+- `git branch --all --list '*dev*' '*develop*'`
+
+MG 步骤：
+
+- 在当前功能分支完成 scope 和 verification。
+- 精确 stage 允许文件并提交 MG 状态更新。
+- 切换到 `dev`。
+- 确认 `dev` 与 `origin/dev` 对齐，且工作树干净。
+- merge `codex/dev-branch-rebaseline-p189` 到 `dev`。
+- 在 `dev` 上重跑同组 verification。
+- verification 通过后 push `origin/dev`。
+- 不 push `origin/main`。
+
+下一步：
+
+- PF-P189-MG verified 并 push `origin/dev` 后，从最新 `dev` 创建下一条 `codex/` 分支。
+- 下一条建议 prompt：`PF-P190 - Bankdetail / No OA Batch Discovery and Planning`。
 
 ### PF-P185 - Turnover Ledger Remaining Write Boundary Rebaseline After Idempotency
 
