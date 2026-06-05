@@ -218,13 +218,14 @@ restart_services() {
 }
 
 wait_required_workers_ready() {
-  local timeout deadline health status_json
+  local timeout deadline health status_json readiness_status
   timeout="${FINOPS_WORKER_READY_TIMEOUT_SECONDS:-90}"
   [[ "$timeout" =~ ^[0-9]+$ ]] || die "invalid FINOPS_WORKER_READY_TIMEOUT_SECONDS: $timeout"
   deadline=$((SECONDS + timeout))
   health=""
   while [ "$SECONDS" -lt "$deadline" ]; do
     health="$(curl -fsS --max-time 5 http://127.0.0.1:18001/health 2>&1 || true)"
+    readiness_status=0
     status_json="$(printf '%s' "$health" | python3 -c '
 import json
 import sys
@@ -256,13 +257,15 @@ payload = {
 }
 print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 sys.exit(0 if missing == 0 and stale == 0 and mismatched == 0 and not bad_workers else 2)
-' 2>/dev/null)"
-    case "$?" in
+' 2>/dev/null)" || readiness_status="$?"
+    case "$readiness_status" in
       0)
         return 0
         ;;
       2)
         health="$status_json"
+        ;;
+      *)
         ;;
     esac
     sleep 2
