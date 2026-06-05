@@ -15,6 +15,7 @@ from fin_ops_platform.services.read_model_freshness import normalize_source_vers
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 PROJECT_SCOPES = {"active", "all"}
+PROJECT_SCOPE_ORDER = ("active", "all")
 
 
 class CostStatisticsRuntimeService:
@@ -539,6 +540,39 @@ class CostStatisticsRuntimeService:
             if resolved_scope_key not in normalized:
                 normalized.append(resolved_scope_key)
         return normalized
+
+    @classmethod
+    def refresh_scope_keys_from_scope_keys(cls, scope_keys: list[str]) -> list[str]:
+        raw_scope_keys = [
+            str(scope_key or "").strip()
+            for scope_key in list(scope_keys or [])
+            if str(scope_key or "").strip()
+        ]
+        if not raw_scope_keys:
+            return []
+        parsed_scope_keys: list[str] = []
+        all_parseable = True
+        for scope_key in raw_scope_keys:
+            parsed = cls.parse_scope_key(scope_key)
+            if parsed is None:
+                all_parseable = False
+                break
+            project_scope, month = parsed
+            resolved_scope_key = cls.request_scope_key(month, project_scope)
+            if resolved_scope_key not in parsed_scope_keys:
+                parsed_scope_keys.append(resolved_scope_key)
+        if all_parseable:
+            return parsed_scope_keys
+
+        months = cls.months_from_workbench_scope_keys(raw_scope_keys)
+        target_months = sorted(month for month in months if month != "all")
+        if "all" in months:
+            target_months.append("all")
+        return [
+            cls.request_scope_key(month, project_scope)
+            for month in target_months
+            for project_scope in PROJECT_SCOPE_ORDER
+        ]
 
     @staticmethod
     def parse_scope_key(scope_key: str) -> tuple[str, str] | None:

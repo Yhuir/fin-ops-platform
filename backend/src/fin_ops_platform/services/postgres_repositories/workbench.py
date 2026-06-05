@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
     event_uuid,
@@ -972,6 +973,33 @@ def _workbench_relation_dirty_scope_keys(connection: Any, relation: dict[str, An
 
 
 def _enqueue_read_model_refresh_in_transaction(
+    connection: Any,
+    *,
+    scope_type: str,
+    scope_key: str,
+    reason: str,
+    tenant_id: str = "default",
+) -> None:
+    if scope_type == "cost_statistics":
+        for target_scope_key in CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys([scope_key]):
+            _enqueue_single_read_model_refresh_in_transaction(
+                connection,
+                scope_type=scope_type,
+                scope_key=target_scope_key,
+                reason=reason,
+                tenant_id=tenant_id,
+            )
+        return
+    _enqueue_single_read_model_refresh_in_transaction(
+        connection,
+        scope_type=scope_type,
+        scope_key=scope_key,
+        reason=reason,
+        tenant_id=tenant_id,
+    )
+
+
+def _enqueue_single_read_model_refresh_in_transaction(
     connection: Any,
     *,
     scope_type: str,

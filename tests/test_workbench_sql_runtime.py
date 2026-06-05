@@ -84,6 +84,21 @@ class WorkbenchSqlReadConnection:
         return []
 
 
+class ReadModelRefreshTransactionConnection:
+    def __init__(self) -> None:
+        self.fetch_one_params: list[tuple] = []
+        self.execute_params: list[tuple] = []
+        self._source_version = 0
+
+    def fetch_one(self, _sql: str, params: tuple = ()) -> dict:
+        self.fetch_one_params.append(params)
+        self._source_version += 1
+        return {"source_version": self._source_version}
+
+    def execute(self, _sql: str, params: tuple = ()) -> None:
+        self.execute_params.append(params)
+
+
 class WorkbenchAllRowsPageConnection(WorkbenchSqlReadConnection):
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
@@ -716,6 +731,23 @@ class FakeWorkbenchReadModelService:
 
 
 class WorkbenchSqlRuntimeTests(unittest.TestCase):
+    def test_transactional_cost_statistics_enqueue_expands_workbench_month_scope(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.workbench import _enqueue_read_model_refresh_in_transaction
+
+        connection = ReadModelRefreshTransactionConnection()
+
+        _enqueue_read_model_refresh_in_transaction(
+            connection,
+            scope_type="cost_statistics",
+            scope_key="2026-05",
+            reason="workbench_relation_changed",
+        )
+
+        dirty_scope_keys = [params[2] for params in connection.fetch_one_params]
+        outbox_scope_keys = [params[4] for params in connection.execute_params]
+        self.assertEqual(dirty_scope_keys, ["active:2026-05", "all:2026-05"])
+        self.assertEqual(outbox_scope_keys, ["active:2026-05", "all:2026-05"])
+
     def test_workbench_api_queues_oa_sync_when_sql_snapshot_parser_version_is_stale(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()

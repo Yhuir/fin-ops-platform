@@ -534,6 +534,33 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertIn("cost_statistics:month:all:2026-05", redis.deletes)
         self.assertTrue(any(":schema:2026-05-cost-statistics-explorer-v1:sources:" in key for key in redis.deletes))
 
+    def test_generic_cost_statistics_enqueue_expands_month_scopes(self) -> None:
+        class EmptyCostReadModelService:
+            def scope_key(self, month: str, project_scope: str) -> str:
+                return f"{project_scope}:{month}"
+
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._cost_statistics_read_model_service = EmptyCostReadModelService()
+
+        enqueued = app._enqueue_generic_read_model_refreshes(
+            "cost_statistics",
+            ["2026-05", "all"],
+            reason="unit_test",
+        )
+
+        self.assertTrue(enqueued)
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("cost_statistics", "active:2026-05", "unit_test"),
+                ("cost_statistics", "all:2026-05", "unit_test"),
+                ("cost_statistics", "active:all", "unit_test"),
+                ("cost_statistics", "all:all", "unit_test"),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

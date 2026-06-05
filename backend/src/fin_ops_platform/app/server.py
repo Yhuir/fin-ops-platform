@@ -17938,8 +17938,13 @@ class Application:
         enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
         if not callable(enqueue):
             return False
+        target_scope_keys = (
+            CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys(scope_keys)
+            if scope_type == "cost_statistics"
+            else scope_keys
+        )
         enqueued = False
-        for scope_key in scope_keys:
+        for scope_key in target_scope_keys:
             normalized_scope_key = str(scope_key or "").strip()
             if not normalized_scope_key:
                 continue
