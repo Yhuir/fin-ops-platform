@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
+from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -388,6 +389,14 @@ PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
 WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-25-oa-attachment-source-groups"
 PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
+APP_HEALTH_DASHBOARD_STALE_WARNING_CODES = {
+    "bank_inventory_unknown",
+    "invoice_inventory_unknown",
+    "oa_inventory_unknown",
+    "outbox_metrics_unavailable",
+    "read_model_metrics_unavailable",
+    "worker_metrics_unavailable",
+}
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
 }
@@ -480,6 +489,8 @@ class Application:
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
         self._data_reset_jobs: dict[str, DataResetJob] = {}
         self._data_reset_jobs_lock = Lock()
+        self._app_health_dashboard_cache_lock = Lock()
+        self._app_health_dashboard_cache: tuple[float, dict[str, object]] | None = None
         persisted_oa_sync_state = self._state_store.load_oa_sync_state() if self._state_store is not None else {}
         self._oa_sync_service = OASyncService()
         persisted_poll_fingerprints = persisted_oa_sync_state.get("poll_fingerprints", {})
@@ -3693,6 +3704,14 @@ class Application:
         except ValueError:
             return 2.0
 
+    @staticmethod
+    def _app_health_dashboard_cache_ttl_seconds() -> float:
+        raw_value = os.getenv("FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS", "30").strip()
+        try:
+            return min(120.0, max(0.0, float(raw_value)))
+        except ValueError:
+            return 30.0
+
     def _enqueue_workbench_read_model_refresh(self, scope_key: str, *, reason: str) -> None:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
@@ -3759,7 +3778,58 @@ class Application:
             connection,
             api_performance_recorder=self._api_performance_recorder,
         )
-        return self._json_response(HTTPStatus.OK, service.build_payload())
+        return self._json_response(HTTPStatus.OK, self._cached_operations_app_health_dashboard_payload(service))
+
+    def _cached_operations_app_health_dashboard_payload(self, service: OperationsDashboardService) -> dict[str, object]:
+        ttl_seconds = self._app_health_dashboard_cache_ttl_seconds()
+        if ttl_seconds <= 0:
+            return service.build_payload()
+        cached_entry = self._app_health_dashboard_cache_entry()
+        cached_payload = cached_entry[0] if cached_entry is not None else None
+        if cached_entry is not None and cached_entry[1]:
+            return cached_payload
+        try:
+            payload = service.build_payload()
+        except Exception:
+            if cached_payload is not None:
+                return self._app_health_dashboard_stale_payload(cached_payload)
+            raise
+        if cached_payload is not None and self._app_health_dashboard_refresh_failed(payload):
+            return self._app_health_dashboard_stale_payload(cached_payload)
+        expires_at = monotonic() + ttl_seconds
+        with self._app_health_dashboard_cache_lock:
+            self._app_health_dashboard_cache = (expires_at, deepcopy(payload))
+        return payload
+
+    def _app_health_dashboard_cache_entry(self) -> tuple[dict[str, object], bool] | None:
+        now = monotonic()
+        with self._app_health_dashboard_cache_lock:
+            cached = self._app_health_dashboard_cache
+        if not isinstance(cached, tuple) or len(cached) != 2:
+            return None
+        expires_at, payload = cached
+        if not isinstance(expires_at, (int, float)) or not isinstance(payload, dict):
+            return None
+        return deepcopy(payload), now < float(expires_at)
+
+    @staticmethod
+    def _app_health_dashboard_refresh_failed(payload: dict[str, object]) -> bool:
+        freshness = payload.get("freshness") if isinstance(payload.get("freshness"), dict) else {}
+        warnings = freshness.get("warnings") if isinstance(freshness, dict) else []
+        warning_codes = {str(item) for item in list(warnings or [])}
+        return bool(warning_codes & APP_HEALTH_DASHBOARD_STALE_WARNING_CODES)
+
+    @staticmethod
+    def _app_health_dashboard_stale_payload(payload: dict[str, object]) -> dict[str, object]:
+        stale_payload = deepcopy(payload)
+        freshness = stale_payload.get("freshness") if isinstance(stale_payload.get("freshness"), dict) else {}
+        freshness = dict(freshness)
+        warnings = [str(item) for item in list(freshness.get("warnings") or [])]
+        if "dashboard_cache_stale_after_error" not in warnings:
+            warnings.append("dashboard_cache_stale_after_error")
+        freshness["warnings"] = sorted(set(warnings))
+        stale_payload["freshness"] = freshness
+        return stale_payload
 
     def _resolve_app_health_session(
         self,
@@ -12248,7 +12318,6 @@ class Application:
         bank_year = query.get("bank_year", [year])[0]
         oa_year = query.get("oa_year", [year])[0]
         bucket = query.get("bucket", ["unsubmitted"])[0] or "unsubmitted"
-        repair_result = self._repair_batch_accounting_relation_case_ids()
         try:
             payload = self._batch_accounting_service(use_sql_read_model=True).build_payload(
                 year=year,
@@ -12258,8 +12327,6 @@ class Application:
             )
         except BatchAccountingError as exc:
             return self._batch_accounting_error_response(exc)
-        if repair_result.get("changed"):
-            payload["repair_result"] = repair_result
         return self._json_response(HTTPStatus.OK, payload)
 
     def _repair_batch_accounting_relation_case_ids(self) -> dict[str, object]:

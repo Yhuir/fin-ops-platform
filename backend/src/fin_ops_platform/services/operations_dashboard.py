@@ -180,10 +180,14 @@ class OperationsDashboardService:
             row = self._connection.fetch_one(
                 """
                 select
-                  count(distinct row_id)::bigint as count,
-                  max(generated_at) as latest_synced_at
-                from read_model.workbench_rows
-                where source_kind = 'oa_attachment_invoice'
+                  coalesce(sum(jsonb_array_length(
+                    case
+                      when jsonb_typeof(invoices) = 'array' then invoices
+                      else '[]'::jsonb
+                    end
+                  )), 0)::bigint as count,
+                  max(parsed_at) as latest_synced_at
+                from app.oa_attachment_invoice_cache
                 """
             ) or {}
             return {
@@ -197,14 +201,10 @@ class OperationsDashboardService:
             row = self._connection.fetch_one(
                 """
                 select
-                  coalesce(sum(jsonb_array_length(
-                    case
-                      when jsonb_typeof(invoices) = 'array' then invoices
-                      else '[]'::jsonb
-                    end
-                  )), 0)::bigint as count,
-                  max(parsed_at) as latest_synced_at
-                from app.oa_attachment_invoice_cache
+                  count(distinct row_id)::bigint as count,
+                  max(generated_at) as latest_synced_at
+                from read_model.workbench_rows
+                where source_kind = 'oa_attachment_invoice'
                 """
             ) or {}
             return {

@@ -9,8 +9,14 @@ from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringReposi
 
 
 class FakeDashboardConnection:
-    def __init__(self, *, fail_oa_attachment_inventory: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_oa_attachment_inventory: bool = False,
+        fail_oa_attachment_cache_inventory: bool = False,
+    ) -> None:
         self.fail_oa_attachment_inventory = fail_oa_attachment_inventory
+        self.fail_oa_attachment_cache_inventory = fail_oa_attachment_cache_inventory
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
@@ -38,7 +44,7 @@ class FakeDashboardConnection:
                 raise RuntimeError("read model missing")
             return {"count": 3, "latest_synced_at": datetime(2026, 5, 22, 9, 0, tzinfo=UTC)}
         if "from app.oa_attachment_invoice_cache" in normalized:
-            if self.fail_oa_attachment_inventory:
+            if self.fail_oa_attachment_inventory or self.fail_oa_attachment_cache_inventory:
                 raise RuntimeError("cache missing")
             return {"count": 3, "latest_synced_at": datetime(2026, 5, 22, 9, 0, tzinfo=UTC)}
         if "from app.oa_applications" in normalized and "oa_records_count" in normalized:
@@ -143,6 +149,37 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertIsNone(invoice_sources["oa_attachment"]["count"])
         self.assertEqual(invoice_sources["oa_attachment"]["status"], "unknown")
         self.assertIn("invoice_oa_attachment_inventory_unknown", payload["freshness"]["warnings"])
+
+    def test_oa_attachment_inventory_uses_cache_before_workbench_rows(self) -> None:
+        connection = FakeDashboardConnection()
+        service = OperationsDashboardService(
+            connection,
+            api_performance_recorder=ApiPerformanceRecorder(),
+            runtime_repository=FakeRuntimeRepository(),
+        )
+
+        payload = service.build_payload()
+
+        normalized_calls = [" ".join(sql.lower().split()) for sql, _params in connection.calls]
+        invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
+        self.assertEqual(invoice_sources["oa_attachment"]["count"], 3)
+        self.assertTrue(any("from app.oa_attachment_invoice_cache" in sql for sql in normalized_calls))
+        self.assertFalse(any("from read_model.workbench_rows" in sql for sql in normalized_calls))
+
+    def test_oa_attachment_inventory_falls_back_to_workbench_rows_when_cache_missing(self) -> None:
+        connection = FakeDashboardConnection(fail_oa_attachment_cache_inventory=True)
+        service = OperationsDashboardService(
+            connection,
+            api_performance_recorder=ApiPerformanceRecorder(),
+            runtime_repository=FakeRuntimeRepository(),
+        )
+
+        payload = service.build_payload()
+
+        normalized_calls = [" ".join(sql.lower().split()) for sql, _params in connection.calls]
+        invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
+        self.assertEqual(invoice_sources["oa_attachment"]["count"], 3)
+        self.assertTrue(any("from read_model.workbench_rows" in sql for sql in normalized_calls))
 
     def test_runtime_repository_outputs_unknown_queue_rows_when_rabbitmq_metrics_unavailable(self) -> None:
         class EmptyConnection:
@@ -251,6 +288,40 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(workbench["historical_refresh_duration_ms"]["p95"], 24000.0)
         self.assertEqual(workbench["refresh_duration_windows"]["recent_15m"]["sample_count"], 2)
         self.assertIn("full", workbench["refresh_duration_by_kind"])
+
+    def test_runtime_repository_bounds_read_model_duration_history_query(self) -> None:
+        class CapturingConnection:
+            def __init__(self) -> None:
+                self.duration_sql = ""
+                self.duration_params: tuple[object, ...] = ()
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "workbench_generation_consistency" in normalized:
+                    return {"inconsistent_count": 0}
+                raise AssertionError(sql)
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "metric_windows(window_name" in normalized:
+                    self.duration_sql = sql
+                    self.duration_params = params
+                    return []
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                raise AssertionError(sql)
+
+        connection = CapturingConnection()
+        repository = RuntimeMonitoringRepository(connection)
+
+        repository.dashboard_read_model_metrics()
+
+        normalized_sql = " ".join(connection.duration_sql.lower().split())
+        self.assertIn("row_number() over", normalized_sql)
+        self.assertIn("runtime_metric_rank", normalized_sql)
+        self.assertIn("runtime_metric_rank <= %s", normalized_sql)
+        self.assertNotIn("'-infinity'::timestamptz", normalized_sql)
+        self.assertGreaterEqual(len(connection.duration_params), 2)
 
 
 if __name__ == "__main__":

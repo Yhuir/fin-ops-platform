@@ -104,12 +104,16 @@ Dashboard 三个区域：
 - `请求`：当前 API 进程内 rolling window 的 p95/p99，包括完整请求耗时、DB 总耗时、连接获取、SQL execute/fetch 和 SQL 次数。
 - `后台`：`job.outbox_events`、RabbitMQ queue/DLQ、`job.runtime_worker_heartbeats`、read model refresh duration 和 dirty scope 计数。
 
+Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS` 调整。缓存过期后刷新失败时，接口返回上一份 payload，并在 `freshness.warnings` 中加入 `dashboard_cache_stale_after_error`；权限校验和 PostgreSQL runtime 缺失不走缓存兜底。
+
 判读原则：
 
 - `--` 表示 unknown 或当前无可靠样本，不等于 0。
 - RabbitMQ 指标缺失时仍以 PostgreSQL outbox/dirty scopes 为准。
 - API/DB p95 同时升高，优先看 PostgreSQL、连接池和 top SQL。
 - API p95 升高但 DB 指标不高，优先看 Python 对象构造、JSON 序列化、前端请求量和网络。
+- OA 附件发票 inventory 优先读取 `app.oa_attachment_invoice_cache`；`read_model.workbench_rows` 仅作为 fallback，并依赖 `workbench_rows_oa_attachment_inventory_idx` 覆盖索引。
+- Read model refresh 的“历史”指标是 bounded history：最近 7 天或每个 event type 最近 512 条完成事件，不是全库永久历史扫描。
 - outbox pending 和 RabbitMQ queue 同时增长，优先看 worker/consumer。
 - RabbitMQ queue 增长但 outbox 不增长，优先看 broker consumer、prefetch、DLQ 和 ack/nack。
 

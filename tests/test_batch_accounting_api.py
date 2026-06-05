@@ -321,6 +321,22 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
         self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-2025", "oa-exp-ba-2025b"])
 
+    def test_unsubmitted_list_does_not_run_legacy_relation_repair(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        repair_patcher = patch.object(
+            app,
+            "_repair_batch_accounting_relation_case_ids",
+            side_effect=AssertionError("GET /api/batch-accounting must be read-only"),
+        )
+        repair_patcher.start()
+        self.addCleanup(repair_patcher.stop)
+
+        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
+
     def _submit_batch_mismatch_with_note(self, app: Application, *, note: str) -> dict[str, object]:
         response = app.handle_request(
             "POST",

@@ -673,7 +673,7 @@ class RuntimeMonitoringRepository:
         event_types = tuple(READ_MODEL_EVENT_TYPES.keys())
         duration_rows = self._connection.fetch_all(
             """
-            with refresh_events as (
+            with raw_refresh_events as (
               select
                 event_type,
                 updated_at,
@@ -684,17 +684,27 @@ class RuntimeMonitoringRepository:
                     then 'incremental'
                   else 'unknown'
                 end as refresh_kind,
-                ((raw_payload->'runtime_result'->>'duration_ms')::numeric) as duration_ms
+                ((raw_payload->'runtime_result'->>'duration_ms')::numeric) as duration_ms,
+                row_number() over (
+                  partition by event_type
+                  order by updated_at desc
+                ) as runtime_metric_rank
               from job.outbox_events
               where event_type = any(%s)
                 and status = 'done'
                 and raw_payload->'runtime_result' ? 'duration_ms'
             ),
+            refresh_events as (
+              select *
+              from raw_refresh_events
+              where updated_at >= now() - (%s * interval '1 day')
+                 or runtime_metric_rank <= %s
+            ),
             metric_windows(window_name, started_at) as (
               values
                 ('recent_15m', now() - interval '15 minutes'),
                 ('recent_1h', now() - interval '1 hour'),
-                ('all_time', '-infinity'::timestamptz)
+                ('all_time', now())
             )
             select
               event_type,
@@ -712,10 +722,12 @@ class RuntimeMonitoringRepository:
                 order by duration_ms
               )::float as p99_ms
             from refresh_events
-            join metric_windows on refresh_events.updated_at >= metric_windows.started_at
+            join metric_windows
+              on metric_windows.window_name = 'all_time'
+              or refresh_events.updated_at >= metric_windows.started_at
             group by event_type, window_name, refresh_kind
             """,
-            (list(event_types),),
+            (list(event_types), 7, 512),
         )
         dirty_rows = self._connection.fetch_all(
             """

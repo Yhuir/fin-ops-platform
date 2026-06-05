@@ -7,12 +7,18 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 
 
 class FakeOperationsDashboardConnection:
+    def __init__(self) -> None:
+        self.fail = False
+
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
+        if self.fail:
+            raise RuntimeError("dashboard database timeout")
         normalized = " ".join(sql.lower().split())
         if "from app.bank_transactions" in normalized:
             return {"total_count": 1, "latest_synced_at": "2026-05-20T10:00:00+00:00"}
@@ -51,6 +57,8 @@ class FakeOperationsDashboardConnection:
         raise AssertionError(sql)
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+        if self.fail:
+            raise RuntimeError("dashboard database timeout")
         normalized = " ".join(sql.lower().split())
         if "from job.outbox_events" in normalized:
             return []
@@ -429,6 +437,35 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIn("runtime_performance", payload)
         self.assertNotIn("status", payload)
         self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 1)
+
+    def test_operations_app_health_dashboard_returns_stale_cached_payload_after_refresh_error(self) -> None:
+        current_time = {"value": 100.0}
+
+        def fake_monotonic() -> float:
+            return current_time["value"]
+
+        with (
+            self._temporary_env(
+                FIN_OPS_ADMIN_USERNAMES="test_finops_user",
+                FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS="30",
+            ),
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch("fin_ops_platform.app.server.monotonic", side_effect=fake_monotonic),
+        ):
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakeOperationsDashboardConnection()
+            setattr(app._state_store, "_connection", connection)
+
+            first_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
+            connection.fail = True
+            current_time["value"] = 140.0
+            second_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
+            second_payload = json.loads(second_response.body)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_payload["data_inventory"]["bank"]["total_count"], 1)
+        self.assertIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
 
 
 if __name__ == "__main__":
