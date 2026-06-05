@@ -5,11 +5,14 @@
 重构采用小步、可验证、可回滚的方式推进：
 
 - 不在 `main` 上直接开发。
+- 不在 `dev` 上直接开发；`dev` 只接收经过 Merge Gate 的重构分支。
 - 不一次性重写后端。
 - 不引入任何其他语言的新后端。
 - 不一次性生成所有 prompt；每次只生成一个，执行、验证、更新状态机后，再生成下一条。
 - 每个模块先完成 discovery、调用链、契约测试，再重构。
-- 每个模块 merge 到 `main` 后必须在 `main` 重跑验证。
+- 每个模块或明确切片 merge 到 `dev` 后必须在 `dev` 重跑验证。
+- `main` 继续承载产品功能、线上修复和正式主干基线；后续重构不直接合入 `main`。
+- 如果 `main` 有新增功能或后端事实变化，必须先同步或 rebaseline 到 `dev`，再继续重构。
 - 生产流量不因 merge 自动变化。
 
 ## 两阶段规划模型
@@ -189,13 +192,21 @@ Macro-Inventory verified 后，每次只选择一个模块做微观计划和重�
 - Python 全仓相关回归通过。
 - 文档和调用链记录已更新。
 
-merge 到 `main` 后：
+merge 到 `dev` 后：
 
 - 重新运行同一套验证。
 - 如果失败，修复或回滚该 merge。
-- 不开始下一个模块，直到 `main` 验证通过。
+- 不开始下一个模块，直到 `dev` 验证通过。
 
-Merge Gate 是 merge 到 `main` 前后的完整验证流程，不是单纯的 `git merge` 命令，也不代表生产流量已经切换。
+Merge Gate 是 merge 到 `dev` 前后的完整验证流程，不是单纯的 `git merge` 命令，也不代表生产流量已经切换。
+
+`main` 与 `dev` 的关系：
+
+- `main` 是产品功能、线上修复和正式主干基线。
+- `dev` 是 Python-first 后端重构的长期集成分支。
+- 后续重构 feature branch 从最新 `dev` 创建，并通过 MG 合入 `dev`。
+- `dev` 不自动进入生产；只有用户明确要求发布或整合重构成果时，才单独规划 `dev -> main` 的发布/合并门禁。
+- `main` 新增提交后，先执行 `main -> dev` 同步或 Main Delta Rebaseline，再继续生成下一条重构 prompt。
 
 ## Traffic Gate
 
@@ -219,7 +230,7 @@ Traffic Gate 必须包含：
 当前没有 staging 环境时：
 
 - Python-only 模块化重构可以继续。
-- 必须加强本地验证、contract tests、integration tests、main 上复验和生产发布前备份。
+- 必须加强本地验证、contract tests、integration tests、`dev` 上复验和生产发布前备份。
 - 不得默认执行网关切流、auth/session、SSE 或 worker 消费方式变更的 Traffic Gate。
 - 如果用户明确批准生产 canary，必须把切流范围限制到最小 path，写明回滚步骤和观察指标，并在执行前再次确认。
 

@@ -24,9 +24,11 @@
 - Merge Gate 的单位是可合并的模块任务、platform 边界任务或明确命名的模块切片，不是单个 prompt；同一任务可以包含多个 prompt。
 - 测试锁定、发现、实现和文档回写 prompt 可以在同一功能分支连续完成；每个 prompt 仍必须先由用户确认 `verified`，再进入下一个 prompt 或最终 Merge Gate。
 - 如果选择不为某个中间 prompt 单独生成 MG，后续 MG 必须明确写明它统一覆盖哪些已 verified prompt 和完整 diff。
-- 当前模块任务/切片尚未经过最终 MG 并合入 `main` 前，不得生成下一个无关模块的执行 prompt。
-- Merge Gate 合入并复验 `main` 后，下一条 prompt 必须从最新 `main` 新建分支再生成；不得在 `main` 或旧功能分支上继续生成下一个模块的 prompt。
-- 不得把下一条 prompt 放在 prompt-only 分支，同时把对应实现放到另一条分支。纯流程文档分支若会约束后续实现，必须先合入 `main` 或同步到对应实现分支。
+- 当前模块任务/切片尚未经过最终 MG 并合入 `dev` 前，不得生成下一个无关模块的执行 prompt。
+- Merge Gate 合入并复验 `dev` 后，下一条 prompt 必须从最新 `dev` 新建分支再生成；不得在 `main`、`dev` 或旧功能分支上继续实现下一个模块的 prompt。
+- 后续重构功能分支从最新 `dev` 创建，MG 合入 `dev` 并 push `origin/dev`；不得在 MG 中自动 merge/push `main`。
+- 每次继续重构前必须确认 `dev` 是否落后 `main`。如果 `main` 有新增功能或后端事实变化，必须先执行 `main -> dev` 同步或 Main Delta Rebaseline。
+- 不得把下一条 prompt 放在 prompt-only 分支，同时把对应实现放到另一条分支。纯流程文档分支若会约束后续实现，必须先合入 `dev` 或同步到对应实现分支。
 
 Post-Flight 必须写明：
 
@@ -36,6 +38,182 @@ Post-Flight 必须写明：
 - 新发现的架构事实、风险和阻断。
 - 已更新哪些长期文档。
 - 下一条 prompt 生成或执行前必须读取的上下文。
+
+## PF-P189 - Dev Branch Bootstrap / Main Delta Rebaseline
+
+状态：`verified`
+
+### 目标
+
+建立 `dev` 作为后续 Python-first 后端重构长期集成分支，并把 `PF-P188-MG` 后进入 `main` 的新增后端事实纳入当前重构文档。PF-P189 只做文档与状态机同步，不修改业务代码。
+
+### Prompt
+
+```text
+/goal
+继续 Python-first 后端架构重构，但先完成 Dev Branch Bootstrap / Main Delta Rebaseline，不进入任何业务模块实现。
+
+Role:
+你是一位负责 Python-first 后端模块化重构治理、Git 分支策略和架构状态机维护的资深工程师。
+
+Context:
+Turnover Ledger 模块已在 PF-P188-MG 达到当前目标架构。用户要求后续重构不再直接合入 main，而是建立长期 dev 集成分支。main 继续作为产品功能、线上修复和正式主干基线；dev 承载重构集成基线。
+
+Pre-Flight:
+必须读取：
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/architecture-inventory.md
+- docs/architecture/backend-refactor/module-refactor-plan.md
+- docs/architecture/backend-refactor/ai-execution-rules.md
+- docs/architecture/backend-refactor/migration-roadmap.md
+
+必须执行只读检查：
+- git status --short --branch
+- git branch --all --list '*dev*' '*develop*'
+- git log --oneline --decorate -20
+- git diff --name-only 52dcd403..HEAD -- backend/src/fin_ops_platform backend tests docs deploy scripts
+- git log --oneline 52dcd403..HEAD --decorate
+
+Allowed Scope:
+- 从当前最新 main 创建 dev，并推送 origin/dev。
+- 从 dev 创建 codex/dev-branch-rebaseline-p189。
+- 更新 docs/architecture/backend-refactor/ai-execution-rules.md。
+- 更新 docs/architecture/backend-refactor/migration-roadmap.md。
+- 更新 docs/architecture/backend-refactor/module-refactor-plan.md。
+- 更新 docs/architecture/backend-refactor/architecture-inventory.md。
+- 更新 docs/architecture/backend-refactor/migration-state-log.md。
+- 更新 docs/architecture/backend-refactor/refactor-prompts.md。
+
+Forbidden Scope:
+- 不修改 production code。
+- 不修改 tests。
+- 不修改 schema/migration。
+- 不执行 Traffic Gate。
+- 不部署，不访问生产，不修改 Nginx、feature flag 或生产配置。
+- 不把历史 prompt 日志里的 main 机械改成 dev；历史记录必须保留为当时事实。
+- 不把 dev 反向合入 main。
+
+Required Work:
+1. 建立 dev 集成分支：
+   - dev 来源为当前最新 origin/main。
+   - 推送 origin/dev。
+2. 固化未来工作流：
+   - main 用于产品功能、线上修复和正式主干基线。
+   - 重构工作流为 dev -> codex/<module-slice> -> MG -> dev。
+   - 后续 MG 合入 dev，并在 dev 上复验。
+   - 后续 MG 不自动 push origin/main。
+   - 只有用户明确要求发布或整合重构成果时，才规划 dev -> main。
+3. 执行 Main Delta Rebaseline：
+   - 扫描 PF-P188-MG 后进入 main 的后端 delta。
+   - 识别新增 API、service、repository、worker、migration、tests 的模块归属。
+   - 特别检查 Workbench object identity/read model、Invoices lifecycle/runtime status、Tax/Cost readiness、Platform/Ops deploy control、Turnover Ledger handoff 和 Batch Accounting read optimization。
+4. 更新状态机：
+   - 当前 active prompt 设置为 PF-P189 implemented。
+   - 下一条允许任务设置为 PF-P189-MG，合入目标为 dev。
+
+Tests:
+- git status --short --branch
+- git branch --all --list '*dev*' '*develop*'
+- git log --oneline --decorate -20
+- git diff --check
+- git ls-files --others --exclude-standard
+- 文档检查：未来执行规则以 dev 为重构 MG 目标。
+- 历史检查：旧 prompt 历史中的 main 只作为历史事实保留，不做机械替换。
+
+Post-Flight:
+- 更新 migration-state-log.md，记录 dev 创建、origin/dev 推送、PF-P189 状态、变更文件、验证命令和下一步。
+- 更新 refactor-prompts.md，记录 PF-P189 prompt 和执行摘要。
+- 不标记 verified，等待用户确认。
+- 下一步必须生成 PF-P189-MG，合入目标为 dev，不是 main。
+```
+
+### 执行摘要
+
+- 已从当前最新 `main` 创建 `dev`，并推送 `origin/dev`。
+- 已从 `dev` 创建 `codex/dev-branch-rebaseline-p189`。
+- 已将未来重构集成规则切换为 `dev -> codex/<module-slice> -> MG -> dev`。
+- 已把 `PF-P188-MG` 后的 main delta 归入 Workbench、Invoices、Tax/Cost/ETC、Platform/Ops、Turnover Ledger handoff 和 Batch Accounting 后续模块事实。
+- 未修改业务代码、测试、schema、部署配置或生产配置。
+- 验证已通过：`git status --short --branch`、`git branch --all --list '*dev*' '*develop*'`、`git log --oneline --decorate -20`、`git diff --check`、`git ls-files --others --exclude-standard`、`git diff --name-only`。
+
+## PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate
+
+状态：`planned`
+
+### 目标
+
+将 PF-P189 的 dev 集成分支工作流和 Main Delta Rebaseline 文档合入 `dev`。本 MG 只处理文档与状态机，不修改业务代码，不合入 `main`。
+
+### Prompt
+
+```text
+/goal
+执行 PF-P189-MG - Dev Branch Bootstrap / Main Delta Rebaseline Merge Gate。
+
+Role:
+你是一位负责 Python-first 后端模块化重构的 Merge Gate 执行者。你必须只验证并合入 PF-P189 的 dev branch bootstrap / main delta rebaseline 文档，不新增业务实现。
+
+Pre-Flight:
+必须读取：
+- docs/architecture/backend-refactor/migration-state-log.md
+- docs/architecture/backend-refactor/refactor-prompts.md
+- docs/architecture/backend-refactor/architecture-inventory.md
+- docs/architecture/backend-refactor/module-refactor-plan.md
+- docs/architecture/backend-refactor/ai-execution-rules.md
+- docs/architecture/backend-refactor/migration-roadmap.md
+
+必须确认：
+- 当前分支是 codex/dev-branch-rebaseline-p189。
+- PF-P189 状态是 verified。
+- 本次 MG 合入目标是 dev，不是 main。
+- 不执行 Traffic Gate，不部署，不访问生产，不修改生产配置。
+
+Allowed Scope:
+- 只允许合入 PF-P189 的文档和状态机变更。
+- 允许文件：
+  - docs/architecture/backend-refactor/ai-execution-rules.md
+  - docs/architecture/backend-refactor/architecture-inventory.md
+  - docs/architecture/backend-refactor/migration-roadmap.md
+  - docs/architecture/backend-refactor/migration-state-log.md
+  - docs/architecture/backend-refactor/module-refactor-plan.md
+  - docs/architecture/backend-refactor/refactor-prompts.md
+
+Forbidden Scope:
+- 不修改 production code。
+- 不修改 tests。
+- 不修改 schema/migration。
+- 不执行业务模块 discovery 或 implementation。
+- 不 merge/push main。
+- 不访问生产、staging、真实 Redis/RabbitMQ/OA/Mongo/MySQL。
+- 不使用 git add . 或 git add -A。
+
+Verification:
+- git status --short --branch
+- git ls-files --others --exclude-standard
+- git diff --check
+- git diff --name-only dev...HEAD
+- git log --oneline dev..HEAD
+- git branch --all --list '*dev*' '*develop*'
+
+Merge Gate Steps:
+1. 在当前分支执行 Verification。
+2. 确认 diff 只包含 Allowed Scope 文件。
+3. 精确 stage 允许文件并提交 MG 状态更新。
+4. checkout dev。
+5. 确认 dev 与 origin/dev 对齐，工作树干净。
+6. merge codex/dev-branch-rebaseline-p189 到 dev。
+7. 在 dev 上重跑同组 Verification。
+8. 如果 dev verification 失败，停止，不得 push。
+9. 如果 verification 通过，push origin dev。
+10. 不 push origin/main。
+
+Post-Flight:
+- 更新 migration-state-log.md，将 PF-P189-MG 标记为 verified，记录 merge commit、dev verification、push origin/dev。
+- 更新 refactor-prompts.md，记录 PF-P189-MG 执行摘要。
+- push origin/dev 后，从最新 dev 新建下一条 codex/ 分支。
+- 下一条建议 prompt 是 PF-P190 - Bankdetail / No OA Batch Discovery and Planning。
+```
 
 ## PF-P000 - Fresh Documentation Baseline
 
