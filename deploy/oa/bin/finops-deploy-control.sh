@@ -26,6 +26,10 @@ usage: finops-deploy-control <command> [args]
 commands:
   check-release <release-name>         validate a release under /opt/fin-ops/releases
   activate <release-name>              point API/workers/dispatcher at release and restart active services
+  workbench-rehydrate <release-name> [args]
+                                      rebuild Workbench SQL read models using runtime env
+  workbench-audit-identity <release-name> [args]
+                                      run Workbench object identity audit using runtime env
   restart                              restart API, active workers, and active dispatcher
   status                               print service state and active release paths
   cleanup-dropins                      remove historical release drop-ins, preserving 99-deploy-release.conf
@@ -94,6 +98,22 @@ run_schema_migrations() {
   source "$MIGRATOR_ENV"
   set +a
   PYTHONPATH="$src/backend/src" "$API_PYTHON" -m fin_ops_platform.postgres.migrate apply
+}
+
+run_with_runtime_env() {
+  local src="$1"
+  shift
+  [[ -f "$COMMON_ENV" ]] || die "missing common runtime env: $COMMON_ENV"
+  [[ -f "$SECRETS_ENV" ]] || die "missing secret runtime env: $SECRETS_ENV"
+  set -a
+  # shellcheck disable=SC1090
+  source "$COMMON_ENV"
+  # shellcheck disable=SC1090
+  source "$SECRETS_ENV"
+  set +a
+  export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+  export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
+  (cd "$src" && "$API_PYTHON" "$@")
 }
 
 archive_legacy_current() {
@@ -328,6 +348,26 @@ cleanup_releases() {
       done
 }
 
+workbench_rehydrate() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "workbench-rehydrate requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" "$src/scripts/rehydrate-workbench-read-models.py" "$@"
+}
+
+workbench_audit_identity() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "workbench-audit-identity requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.audit_object_identity "$@"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   check-release)
@@ -349,6 +389,14 @@ case "$cmd" in
     restart_services
     wait_required_workers_ready
     status
+    ;;
+  workbench-rehydrate)
+    shift
+    workbench_rehydrate "$@"
+    ;;
+  workbench-audit-identity)
+    shift
+    workbench_audit_identity "$@"
     ;;
   restart)
     assert_runtime_env_contract

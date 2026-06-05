@@ -279,6 +279,28 @@ python -m fin_ops_platform.app.worker \
 ./scripts/deploy-oa.sh --keep-releases 12
 ```
 
+Workbench read model 生产修复需要读取 `/etc/fin-ops` runtime env 时，不要把 DB secret 暴露给
+`finops-deploy`，也不要手写 SQL 改 `job.read_model_dirty_scopes`。先确认 active release 名称：
+
+```bash
+sudo /usr/local/sbin/finops-deploy-control status
+```
+
+然后通过 root-owned helper 运行受控命令：
+
+```bash
+sudo /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> --json
+sudo /usr/local/sbin/finops-deploy-control workbench-audit-identity <release-name> \
+  --json \
+  --workbench-scope all \
+  --limit 20
+```
+
+`workbench-rehydrate` 会调用 release 内的 `scripts/rehydrate-workbench-read-models.py`，
+按月份 shard 重建 Workbench SQL read model，再发布 `all` 聚合；`workbench-audit-identity`
+只运行 `fin_ops_platform.tools.audit_object_identity`，用于查看强身份跨区重复、OA alias 和孤儿关系样本。
+两个命令都只接受固定脚本/模块参数，由 helper 加载 runtime env，不提供任意 shell 执行能力。
+
 说明：
 
 - 这套脚本只发布 `fin-ops` 自己的前后端
