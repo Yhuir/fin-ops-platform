@@ -110,12 +110,6 @@ select
     coalesce(group_counts.actual_group_count, 0)::bigint as actual_group_count,
     coalesce(group_row_counts.actual_group_row_count, 0)::bigint as actual_group_row_count,
     coalesce(summary_counts.actual_summary_count, 0)::bigint as actual_summary_count,
-    coalesce(duplicate_identity_counts.duplicate_invoice_identity_count, 0)::bigint
-        as duplicate_invoice_identity_count,
-    coalesce(duplicate_identity_counts.duplicate_bank_identity_count, 0)::bigint
-        as duplicate_bank_identity_count,
-    coalesce(duplicate_identity_counts.duplicate_identity_samples, '[]'::jsonb)
-        as duplicate_identity_samples,
     case
         when gen.status <> 'active' then 'inactive'
         when coalesce(gen.build_metadata->>'tombstone', 'false') = 'true'
@@ -135,7 +129,13 @@ select
     gen.last_error,
     gen.error_reason,
     gen.activated_at,
-    gen.updated_at
+    gen.updated_at,
+    coalesce(duplicate_identity_counts.duplicate_invoice_identity_count, 0)::bigint
+        as duplicate_invoice_identity_count,
+    coalesce(duplicate_identity_counts.duplicate_bank_identity_count, 0)::bigint
+        as duplicate_bank_identity_count,
+    coalesce(duplicate_identity_counts.duplicate_identity_samples, '[]'::jsonb)
+        as duplicate_identity_samples
 from read_model.workbench_generations gen
 left join row_counts
   on row_counts.generation_id = gen.generation_id
