@@ -100,6 +100,7 @@ Recommended Micro-JIT sequence:
 - `P028-phase-6-app-health-discovery`: AppHealth page-level MUI inventory、已迁 `FinanceTable` surfaces、用户可见入口和迁移切片已记录。
 - `P029-phase-6-app-health-characterization-tests`: updated `AppHealthOperationsPage.test.tsx` to lock AppHealth page shell, refresh button, section and notice primitive contracts away from MUI classes. Targeted test expected-failed with 3 failures because current implementation still lacks `data-testid="app-health-page"` and still renders MUI Alert roots for permission/error notices。
 - `P030-phase-6-app-health-page-shell`: migrated AppHealth page shell, header, refresh button, notices, sections, inventory cards and responsive grids from MUI to HeroUI/native token classes. All AppHealth `FinanceTable` grid surfaces and API/permission/refresh behavior are preserved。
+- `MG-P030-phase-6-app-health`: pushed `814ad25c` to `refactor-ui`。
 
 ## Verification
 

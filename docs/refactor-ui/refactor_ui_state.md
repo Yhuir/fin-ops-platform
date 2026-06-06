@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P030-phase-6-app-health-page-shell`
-- Current MG ID: `MG-P030-phase-6-app-health`
+- Current Prompt ID: `P031-phase-6-import-pages-discovery`
+- Current MG ID: `not_drafted`
 
 ## Global Invariants
 
@@ -54,17 +54,13 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 AppHealth cumulative MG。
+- Scope: phase 6 import pages discovery。
 - Files touched:
-  - `docs/refactor-ui/modules/phase_6_app_health.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `web/src/test/AppHealthOperationsPage.test.tsx`
-  - `web/src/pages/AppHealthOperationsPage.tsx`
-  - `web/src/app/styles.css`
-- Verification run: P030 targeted tests, focused regression, build, MUI grep and diff check passed
+- Verification run: MG-P030 push verified
 - Failures: none
-- Next action: 执行 `MG-P030-phase-6-app-health`。
+- Next action: 执行 `P031-phase-6-import-pages-discovery`。
 
 ## Prompt Lifecycle
 
@@ -96,7 +92,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `MG-P030-phase-6-app-health` | AppHealth P030 verified；next cumulative MG |
+| page batches | `in_progress` | `P031-phase-6-import-pages-discovery` | AppHealth MG verified；next import pages discovery |
 
 ## Verification Log
 
@@ -227,6 +223,7 @@
 | 2026-06-07 | `P030-phase-6-app-health-page-shell` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P030-phase-6-app-health-page-shell` | `if rg -n '@mui/' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi` | passed | AppHealth page has no MUI imports |
 | 2026-06-07 | `P030-phase-6-app-health-page-shell` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P030-phase-6-app-health` | `git push origin refactor-ui` | passed | `814ad25c` pushed |
 
 ## Push Log
 
@@ -254,3 +251,4 @@
 | 2026-06-07 | `MG-P022-phase-6-tax-offset-discovery` | `refactor-ui` | `c9b64d4d` | pushed |
 | 2026-06-07 | `MG-P027-phase-6-tax-offset` | `refactor-ui` | `4c7a99f5` | pushed |
 | 2026-06-07 | `MG-P028-phase-6-app-health-discovery` | `refactor-ui` | `1a806eeb` | pushed |
+| 2026-06-07 | `MG-P030-phase-6-app-health` | `refactor-ui` | `814ad25c` | pushed |
