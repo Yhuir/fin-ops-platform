@@ -868,7 +868,7 @@
 
 ### MG-P014-phase-4-sidebar-topbar
 
-- Status: `drafted`
+- Status: `verified`
 - Scope:
   - `web/src/components/shell/AppSidebar.tsx`
   - `web/src/components/shell/AppTopBar.tsx`
@@ -893,7 +893,37 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: drafted。
+- Status: verified。
+
+#### Execution
+
+- Commit: `3b124246`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
+
+### P015-phase-4-status-indicator
+
+- Phase: `phase_4_shell`
+- Status: `reviewed`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: 迁移 `AppStatusIndicator` 的状态点、popover、domain chips、progress 和任务链接展示，从 MUI Popper/Paper/ClickAway/Chip/LinearProgress/Stack/Typography/SvgIcon/Box 迁到 HeroUI/Tailwind/native markup。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md、DESIGN.md、web/src/components/shell/AppStatusIndicator.tsx、web/src/contexts/AppHealthStatusContext.tsx、web/src/app/pageRegistry.tsx、web/src/app/styles.css、web/src/test/AppStatusIndicator.test.tsx、web/src/test/App.test.tsx 和相关 API mock。使用 HeroUI MCP Popover、Chip、ProgressBar、Link、Tooltip docs 核对 API。每次只处理 AppStatusIndicator，不迁移业务页面、AppSidebar/AppTopBar、后端/API/read model/worker 或 workbench 内部。先把 AppStatusIndicator tests 补强为用户可观察行为断言：正常/异常/刷新中状态、popover 打开关闭、admin operations link、route change stability、task/domain link 可访问、progress 展示。然后迁移 AppStatusIndicator 实现到 HeroUI/Tailwind/native markup，保留 role=status、aria-label、data-status-reason、popover hover/focus/click 行为、admin 权限入口、domain/task 链接和现有状态文本。运行 targeted shell tests、build、shell MUI import grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- AppSidebar/AppTopBar untouched: yes。
+- User-visible behavior preserved: yes，same status indicator role/name, popover content, admin operations link and health domain links。
+- Characterization tests required: yes，P015 touches global status behavior and permission-based operations link。
+- Verification defined: targeted Vitest、build、shell MUI import grep、`git diff --check`、`git status --short --branch`。
+- Status: reviewed。
 
 ### P000-docs-bootstrap
 
@@ -990,13 +1020,14 @@
 | `P012-phase-4-shell-icon-dependency` | `phase_4_shell` | shell icons | `verified` | passed | lucide-react sidebar icon dependency 已迁移 |
 | `P013-phase-4-shell-provider-runtime` | `phase_4_shell` | shell runtime provider | `verified` | passed | App.tsx 移出完整 MuiProviders，保留临时 MUI X date picker compat |
 | `P014-phase-4-sidebar-topbar` | `phase_4_shell` | sidebar/topbar | `verified` | passed | AppSidebar/AppTopBar 已迁出 MUI，AppStatusIndicator 留到 P015 |
+| `P015-phase-4-status-indicator` | `phase_4_shell` | status indicator | `reviewed` | pending | 下一条执行 prompt，迁移 shell 剩余 MUI usage |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `MG-P014-phase-4-sidebar-topbar`。
+下一条 prompt 应执行 `P015-phase-4-status-indicator`。
 
 ```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查 scope 只包含 P014 sidebar/topbar 文件。运行 shell targeted Vitest、build、AppSidebar/AppTopBar MUI import grep、git diff --check、git status。精确 git add，不使用 git add . 或 git add -A。提交信息使用 feat: migrate shell sidebar topbar。push 到 refactor-ui，并更新 state/prompt Push Log。
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md、web/src/components/shell/AppStatusIndicator.tsx、web/src/app/styles.css 和 AppStatusIndicator/App shell tests。先补强状态指示器用户可观察行为断言，再迁移 AppStatusIndicator 到 HeroUI/Tailwind/native markup。运行 targeted shell tests、build、shell MUI import grep、git diff --check、git status，并更新 state/prompt/module docs。
 ```
 
 ## Cumulative MG Prompts

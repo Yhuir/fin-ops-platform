@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P014-phase-4-sidebar-topbar`
-- Current MG ID: `MG-P014-phase-4-sidebar-topbar`
+- Current Prompt ID: `P015-phase-4-status-indicator`
+- Current MG ID: `MG-P015-phase-4-status-indicator`
 
 ## Global Invariants
 
@@ -34,7 +34,7 @@
 | `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
-| `phase_4_shell` | `in_progress` | 2026-06-07 |  | `partial-passed` | P011 discovery verified，P012 shell icons verified，P013 shell provider runtime verified，MG-P013 已 push；P014 sidebar/topbar 已生成并审查 |
+| `phase_4_shell` | `in_progress` | 2026-06-07 |  | `partial-passed` | P011 discovery verified，P012 shell icons verified，P013 shell provider runtime verified，P014 sidebar/topbar verified，MG-P014 已 push；P015 status indicator 已生成并审查 |
 | `phase_5_table_system` | `pending` |  |  |  | HeroUI Table 和表格排版 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
@@ -54,18 +54,13 @@
 
 ## Active Checkpoint
 
-- Scope: phase 4 sidebar/topbar。
+- Scope: phase 4 status indicator。
 - Files touched:
-  - `web/src/components/shell/AppSidebar.tsx`
-  - `web/src/components/shell/AppTopBar.tsx`
-  - `web/src/app/styles.css`
-  - `web/src/test/App.test.tsx`
-  - `docs/refactor-ui/modules/phase_4_shell.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: passed
+- Verification run: pending
 - Failures: none
-- Next action: 执行 `MG-P014-phase-4-sidebar-topbar`，精确 staging、commit、push。
+- Next action: 执行 `P015-phase-4-status-indicator`。
 
 ## Prompt Lifecycle
 
@@ -95,7 +90,7 @@
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
-| app shell | `in_progress` | `P014-phase-4-sidebar-topbar` | sidebar/topbar verified，MG-P014 待执行；AppStatusIndicator remains P015 |
+| app shell | `in_progress` | `P015-phase-4-status-indicator` | sidebar/topbar verified，MG-P014 已 push；status indicator prompt ready |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
 
@@ -171,6 +166,7 @@
 | 2026-06-07 | `P014-phase-4-sidebar-topbar` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P014-phase-4-sidebar-topbar` | `if rg -n '@mui/' web/src/components/shell/AppSidebar.tsx web/src/components/shell/AppTopBar.tsx; then exit 1; else exit 0; fi` | passed | AppSidebar/AppTopBar have no MUI imports; AppStatusIndicator still contains MUI for P015 |
 | 2026-06-07 | `P014-phase-4-sidebar-topbar` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P014-phase-4-sidebar-topbar` | `git push origin refactor-ui` | passed | `3b124246` pushed |
 
 ## Push Log
 
@@ -188,3 +184,4 @@
 | 2026-06-07 | `MG-P011-phase-4-shell-discovery` | `refactor-ui` | `0c0e6b01` | pushed |
 | 2026-06-07 | `MG-P012-phase-4-shell-icon-dependency` | `refactor-ui` | `a96087fc` | pushed |
 | 2026-06-07 | `MG-P013-phase-4-shell-provider-runtime` | `refactor-ui` | `b26db303` | pushed |
+| 2026-06-07 | `MG-P014-phase-4-sidebar-topbar` | `refactor-ui` | `3b124246` | pushed |
